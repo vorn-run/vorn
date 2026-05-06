@@ -11,7 +11,6 @@ import { PromptLauncher } from './PromptLauncher'
 import { GridContextMenu } from './GridContextMenu'
 import { AgentIcon } from './AgentIcon'
 import { useVisibleTerminals } from '../hooks/useVisibleTerminals'
-import { useFilteredHeadless } from '../hooks/useFilteredHeadless'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { resolveActiveProject } from '../lib/session-utils'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
@@ -82,8 +81,6 @@ export const GridView = memo(function GridView() {
       rowHeight: s.rowHeight
     }))
   )
-  const filteredHeadless = useFilteredHeadless()
-
   const [dragState, setDragState] = useState<DragState | null>(null)
   const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null)
   const [gridContextMenu, setGridContextMenu] = useState<{ x: number; y: number } | null>(null)
@@ -91,7 +88,7 @@ export const GridView = memo(function GridView() {
   const { size: wrapperSize, setNode: setGridWrapperNode } = useContainerSize()
 
   const terminals = useAppStore((s) => s.terminals)
-  const { orderedIds, minimizedIds } = useVisibleTerminals()
+  const { orderedIds } = useVisibleTerminals()
 
   const isMobile = useIsMobile()
 
@@ -254,7 +251,7 @@ export const GridView = memo(function GridView() {
       onDoubleClick={handleGridDoubleClick}
       onContextMenu={handleGridContextMenu}
     >
-      {orderedIds.length === 0 && filteredHeadless.length === 0 && minimizedIds.length === 0 ? (
+      {orderedIds.length === 0 ? (
         isFiltered ? (
           <div className="flex flex-col items-center justify-center h-full">
             <svg
@@ -276,37 +273,35 @@ export const GridView = memo(function GridView() {
         ) : (
           <PromptLauncher mode="inline" />
         )
-      ) : orderedIds.length > 0 ? (
-        gridColumns === -1 ? (
-          <FlexibleGrid
-            orderedIds={orderedIds}
-            onCreateSession={createNewSession}
-            onShowContextMenu={setGridContextMenu}
-          />
-        ) : (
-          <div
-            ref={attachWrapperRef}
-            className={`grid gap-0 ${isSmartAuto ? 'flex-1 min-h-0' : ''}`}
-            style={gridStyle}
-            onDoubleClick={handleGridDoubleClick}
-            onContextMenu={handleGridContextMenu}
-          >
-            {orderedIds.map((id, index) => (
-              <AgentCard
-                key={id}
-                ref={(el) => {
-                  if (el) cardRefs.current.set(id, el)
-                  else cardRefs.current.delete(id)
-                }}
-                terminalId={id}
-                index={index}
-                isDragTarget={dragState?.isDragging === true && dropTargetIndex === index}
-                onDragStart={sortMode === 'manual' ? handleDragStart : undefined}
-              />
-            ))}
-          </div>
-        )
-      ) : null}
+      ) : gridColumns === -1 ? (
+        <FlexibleGrid
+          orderedIds={orderedIds}
+          onCreateSession={createNewSession}
+          onShowContextMenu={setGridContextMenu}
+        />
+      ) : (
+        <div
+          ref={attachWrapperRef}
+          className={`grid gap-0 ${isSmartAuto ? 'flex-1 min-h-0' : ''}`}
+          style={gridStyle}
+          onDoubleClick={handleGridDoubleClick}
+          onContextMenu={handleGridContextMenu}
+        >
+          {orderedIds.map((id, index) => (
+            <AgentCard
+              key={id}
+              ref={(el) => {
+                if (el) cardRefs.current.set(id, el)
+                else cardRefs.current.delete(id)
+              }}
+              terminalId={id}
+              index={index}
+              isDragTarget={dragState?.isDragging === true && dropTargetIndex === index}
+              onDragStart={sortMode === 'manual' ? handleDragStart : undefined}
+            />
+          ))}
+        </div>
+      )}
       {gridContextMenu && (
         <GridContextMenu position={gridContextMenu} onClose={() => setGridContextMenu(null)} />
       )}
