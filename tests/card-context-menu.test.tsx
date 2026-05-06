@@ -260,7 +260,15 @@ describe('CardContextMenu', () => {
           name: 'Deploy Staging',
           icon: 'Rocket',
           iconColor: '#ff6600',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger-1',
+              type: 'trigger',
+              config: { triggerType: 'manual', contextual: true },
+              position: { x: 0, y: 0 },
+              label: 'Manual'
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -270,7 +278,15 @@ describe('CardContextMenu', () => {
           name: 'Run Tests',
           icon: 'Play',
           iconColor: '#00ff00',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger-2',
+              type: 'trigger',
+              config: { triggerType: 'manual', contextual: true },
+              position: { x: 0, y: 0 },
+              label: 'Manual'
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -298,7 +314,15 @@ describe('CardContextMenu', () => {
           name: 'Deploy Staging',
           icon: 'Rocket',
           iconColor: '#ff6600',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger-1',
+              type: 'trigger',
+              config: { triggerType: 'manual', contextual: true },
+              position: { x: 0, y: 0 },
+              label: 'Manual'
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -320,12 +344,23 @@ describe('CardContextMenu', () => {
     expect(onClose).toHaveBeenCalled()
     expect(mockExecuteWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'wf-1', name: 'Deploy Staging' }),
-      undefined,
+      expect.objectContaining({
+        source: expect.objectContaining({ projectName: expect.any(String) })
+      }),
       { source: 'manual' }
     )
   })
 
   it('only shows workflows from the active workspace', () => {
+    const contextualTrigger = [
+      {
+        id: 'trigger-x',
+        type: 'trigger',
+        config: { triggerType: 'manual', contextual: true },
+        position: { x: 0, y: 0 },
+        label: 'Manual'
+      }
+    ]
     const configWithWorkflows = {
       ...mockConfig,
       workflows: [
@@ -334,7 +369,7 @@ describe('CardContextMenu', () => {
           name: 'Personal WF',
           icon: 'Zap',
           iconColor: '#fff',
-          nodes: [],
+          nodes: contextualTrigger,
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -344,7 +379,7 @@ describe('CardContextMenu', () => {
           name: 'Work WF',
           icon: 'Zap',
           iconColor: '#fff',
-          nodes: [],
+          nodes: contextualTrigger,
           edges: [],
           enabled: true,
           workspaceId: 'work'
@@ -372,7 +407,15 @@ describe('CardContextMenu', () => {
           name: 'Manual Deploy',
           icon: 'Zap',
           iconColor: '#fff',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger-manual',
+              type: 'trigger',
+              config: { triggerType: 'manual', contextual: true },
+              position: { x: 0, y: 0 },
+              label: 'Manual'
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
