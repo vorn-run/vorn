@@ -15,12 +15,35 @@ import {
   TaskConfig,
   getProjectRemoteHostId
 } from '../../shared/types'
-import { resolveTemplateVars, StepOutputs } from './template-vars'
+import { resolveContextField, resolveTemplateVars, StepOutputs } from './template-vars'
+import { getWorktreeMode } from './workflow-helpers'
 import { buildTaskPrompt, buildWorkflowPrompt } from '../../shared/prompt-builder'
 import { useAppStore } from '../stores'
 import { sendWorkflowGateNotification } from './notifications'
 
 const runningWorkflows = new Set<string>()
+
+const LOG_BUFFER_MAX = 100_000
+const LOG_BUFFER_KEEP = 80_000
+
+/** Cap renderer-resident log buffers so a chatty agent can't exhaust memory. */
+function appendBoundedLog(buffer: string, chunk: string): string {
+  const next = buffer + chunk
+  return next.length > LOG_BUFFER_MAX ? next.slice(-LOG_BUFFER_KEEP) : next
+}
+
+/** Tag worktree provenance for cleanup. `undefined` when no worktree is in
+ *  play; `'inherited'` when the contextual source supplied one (don't delete);
+ *  `'created'` when this node spun one up itself. */
+function resolveWorktreeOrigin(
+  worktreePath: string | undefined,
+  inherited: boolean
+): 'created' | 'inherited' | undefined {
+  if (!worktreePath) return undefined
+  return inherited ? 'inherited' : 'created'
+}
+
+const PERSIST_INTERVAL_MS = 3000
 
 /** Cleared on approve/reject so a late timer can't reject an already-resolved gate. */
 const gateTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -46,6 +69,98 @@ function scheduleGateTimeout(
     void rejectWorkflowGate(execution, nodeId, `Approval timed out after ${timeoutMs}ms`)
   }, remaining)
   gateTimers.set(key, timer)
+}
+
+/**
+ * Resolve workflow runs that were left `running` when the renderer last
+ * unloaded. The main process keeps headless sessions alive past a renderer
+ * reload, so a node that was `running` may already have an `exited` event in
+ * `session_events` even though the in-renderer exit-promise was lost.
+ *
+ * For each `running` node with a session id we look up its lifecycle log; if
+ * it exited we mark the node success/error and persist. We do NOT auto-resume
+ * the rest of the DAG — quietly continuing a stale run hours later is
+ * surprising. Instead, the run is closed as `error` with a clear message so
+ * the user can re-run.
+ */
+export async function reconcileRunningExecutions(
+  executions: Iterable<WorkflowExecution>
+): Promise<void> {
+  for (const execution of executions) {
+    if (execution.completedAt && execution.status !== 'running') continue
+
+    let dirty = false
+    let anyStillRunning = false
+    let anyResolvedHere = false
+
+    const runningNodes = execution.nodeStates.filter((ns) => ns.status === 'running')
+    const probes = await Promise.all(
+      runningNodes.map(async (ns) => {
+        if (!ns.sessionId) return { ns, kind: 'no-session' as const }
+        try {
+          const events = await window.api.listSessionEventsBySession(ns.sessionId, 50)
+          const exitEvent = events.find((e) => e.eventType === 'exited')
+          return exitEvent
+            ? { ns, kind: 'exited' as const, exitEvent }
+            : { ns, kind: 'still-running' as const }
+        } catch (err) {
+          console.warn(
+            `[workflow] reconcile: failed to query session_events for ${ns.sessionId}`,
+            err
+          )
+          return { ns, kind: 'error' as const }
+        }
+      })
+    )
+
+    for (const probe of probes) {
+      const { ns } = probe
+      if (probe.kind === 'no-session') {
+        ns.status = 'error'
+        ns.error = 'Run abandoned (no session id recorded)'
+        ns.completedAt = new Date().toISOString()
+        dirty = true
+      } else if (probe.kind === 'exited') {
+        const meta = (probe.exitEvent.metadata as { exitCode?: number } | undefined) ?? {}
+        const exitCode = typeof meta.exitCode === 'number' ? meta.exitCode : 0
+        ns.status = exitCode === 0 ? 'success' : 'error'
+        ns.completedAt = probe.exitEvent.timestamp
+        if (exitCode !== 0 && !ns.error) ns.error = `Exit code ${exitCode}`
+        dirty = true
+        anyResolvedHere = true
+      } else {
+        // 'still-running' or 'error' — leave the node untouched.
+        anyStillRunning = true
+      }
+    }
+
+    // If we resolved at least one node, the rest of the DAG never advanced
+    // (the in-memory exit promise died with the previous renderer). Close the
+    // run rather than auto-resuming a stale execution.
+    if (anyResolvedHere && !anyStillRunning) {
+      const hasPending = execution.nodeStates.some((ns) => ns.status === 'pending')
+      if (hasPending) {
+        for (const ns of execution.nodeStates) {
+          if (ns.status === 'pending') {
+            ns.status = 'skipped'
+            ns.error = 'Renderer reload abandoned this run; re-run to continue'
+          }
+        }
+        execution.status = 'error'
+      } else {
+        execution.status = execution.nodeStates.some((ns) => ns.status === 'error')
+          ? 'error'
+          : 'success'
+      }
+      execution.completedAt = new Date().toISOString()
+      dirty = true
+    }
+
+    if (dirty) {
+      useAppStore.getState().setWorkflowExecution(execution.workflowId, { ...execution })
+      await window.api.saveWorkflowRun(execution)
+    }
+  }
 }
 
 /**
@@ -259,10 +374,7 @@ async function executeNode(
     const removeScriptDataListener = window.api.onScriptData(
       ({ runId: id, data }: { runId: string; data: string }) => {
         if (id !== runId) return
-        streamedLogs += data
-        if (streamedLogs.length > 100000) {
-          streamedLogs = streamedLogs.slice(-80000)
-        }
+        streamedLogs = appendBoundedLog(streamedLogs, data)
         updateNodeState(execution, node.id, { logs: streamedLogs })
         useAppStore.getState().setWorkflowExecution(workflow.id, { ...execution })
       }
@@ -384,13 +496,21 @@ async function executeNode(
 
   let initialPrompt = config.prompt
   let resolvedTaskId: string | undefined
-  let branch = config.branch
-  let useWorktree = config.useWorktree
+  let branch = config.branch ? resolveTemplateVars(config.branch, context) || undefined : undefined
+  // When 'fromContext' but no context is available (SourcePromptDialog
+  // cancelled mid-flight), fall through with undefined so session creation
+  // uses its own default.
+  let useWorktree: boolean | undefined =
+    config.useWorktree === 'fromContext'
+      ? context
+        ? ((resolveContextField('useWorktree', context) as boolean | undefined) ?? undefined)
+        : undefined
+      : config.useWorktree
+  const inheritedWorktree = config.useWorktree === 'fromContext'
   let existingWorktreePath: string | undefined
   const currentState = useAppStore.getState()
 
-  // Resolve worktreeMode for cross-step worktree passing
-  const worktreeMode = config.worktreeMode ?? (useWorktree ? 'new' : 'none')
+  const worktreeMode = getWorktreeMode(config)
   if (worktreeMode === 'fromStep') {
     if (!config.worktreeFromStepSlug) {
       throw new Error('Worktree mode "fromStep" requires a source step slug')
@@ -414,9 +534,6 @@ async function executeNode(
     useWorktree = undefined
   }
 
-  // Track the task we resolved so we can pass it to resolveEffectiveAgent later
-  // — covers the taskId / taskFromQueue paths. The trigger-driven path uses
-  // context.task instead.
   let resolvedTask: TaskConfig | undefined
 
   // Fall back to the trigger's task id when the node doesn't bind to one
@@ -466,8 +583,8 @@ async function executeNode(
   // project at run time. Without this fallback, createHeadlessSession /
   // createTerminal would receive `cwd: ''` and silently spawn in an
   // undefined directory.
-  let effectiveProjectName = config.projectName
-  let effectiveProjectPath = config.projectPath
+  let effectiveProjectName = resolveTemplateVars(config.projectName ?? '', context) || ''
+  let effectiveProjectPath = resolveTemplateVars(config.projectPath ?? '', context) || ''
   if (!effectiveProjectName || !effectiveProjectPath) {
     const taskForProject = context?.task ?? resolvedTask
     if (taskForProject) {
@@ -478,12 +595,18 @@ async function executeNode(
       }
     }
   }
+  // If we resolved projectName from context but couldn't pull a path
+  // (template-only case), still walk the projects store one more time so
+  // contextual workflows launched without a `source` object still work.
+  if (effectiveProjectName && !effectiveProjectPath) {
+    const proj = currentState.config?.projects.find((p) => p.name === effectiveProjectName)
+    if (proj) effectiveProjectPath = proj.path
+  }
 
   if (initialPrompt) {
     initialPrompt = resolveTemplateVars(initialPrompt, context, stepOutputs)
   }
 
-  // Wrap with workflow context so the agent knows which workflow/step it belongs to
   if (initialPrompt) {
     initialPrompt = buildWorkflowPrompt({
       workflow,
@@ -500,15 +623,31 @@ async function executeNode(
     let sessionId: string | null = null
     let logs = ''
 
+    // Logs only live in renderer memory until the node finishes — if the
+    // window reloads (HMR, devtools refresh, crash) mid-run they vanish even
+    // though the headless agent in the main process keeps going. Throttle a
+    // background save to disk so accumulated output survives a reload.
+    let persistTimer: ReturnType<typeof setTimeout> | null = null
+    let lastPersistedBytes = 0
+    const schedulePersistLogs = () => {
+      if (persistTimer) return
+      persistTimer = setTimeout(() => {
+        persistTimer = null
+        if (logs.length === lastPersistedBytes) return
+        lastPersistedBytes = logs.length
+        // Only persist; the in-memory store was already updated by the
+        // listener so the editor UI is up to date already.
+        void window.api.saveWorkflowRun(execution)
+      }, PERSIST_INTERVAL_MS)
+    }
+
     const removeDataListener = window.api.onHeadlessData(
       ({ id, data }: { id: string; data: string }) => {
         if (sessionId && id === sessionId) {
-          logs += data
-          if (logs.length > 100000) {
-            logs = logs.slice(-80000)
-          }
+          logs = appendBoundedLog(logs, data)
           updateNodeState(execution, node.id, { logs })
           useAppStore.getState().setWorkflowExecution(workflow.id, { ...execution })
+          schedulePersistLogs()
         }
       }
     )
@@ -545,8 +684,6 @@ async function executeNode(
       })
 
       sessionId = headlessSession.id
-
-      // Make headless session visible in the UI immediately
       useAppStore.getState().addHeadlessSession(headlessSession)
 
       updateNodeState(execution, node.id, {
@@ -554,6 +691,7 @@ async function executeNode(
         taskId: resolvedTaskId,
         worktreePath: headlessSession.worktreePath,
         worktreeName: headlessSession.worktreeName,
+        worktreeOrigin: resolveWorktreeOrigin(headlessSession.worktreePath, inheritedWorktree),
         agentType: effectiveAgent,
         projectName: effectiveProjectName,
         projectPath: effectiveProjectPath,
@@ -589,6 +727,10 @@ async function executeNode(
     } finally {
       removeDataListener()
       removeExitListener()
+      if (persistTimer) {
+        clearTimeout(persistTimer)
+        persistTimer = null
+      }
     }
   } else {
     const cfg = useAppStore.getState().config
@@ -622,6 +764,7 @@ async function executeNode(
       taskId: resolvedTaskId,
       worktreePath: session.worktreePath,
       worktreeName: session.worktreeName,
+      worktreeOrigin: resolveWorktreeOrigin(session.worktreePath, inheritedWorktree),
       agentType: effectiveAgent,
       projectName: effectiveProjectName,
       projectPath: effectiveProjectPath
@@ -911,16 +1054,18 @@ async function runExecution(
   persistExecution(workflow.id, execution)
 
   if (workflow.autoCleanupWorktrees) {
-    // Only clean up worktrees created during this run (mode 'new'), not pre-existing ones
+    // Skip 'inherited' worktrees: a contextual workflow reused the parent
+    // card/terminal's worktree, so deleting it would nuke work the user is
+    // actively in.
     const worktreeMap = new Map<string, string>()
     for (const ns of execution.nodeStates) {
       if (!ns.worktreePath || worktreeMap.has(ns.worktreePath)) continue
+      if (ns.worktreeOrigin === 'inherited') continue
       const node = workflow.nodes.find((n) => n.id === ns.nodeId)
       if (!node || node.type !== 'launchAgent') continue
       const cfg = node.config as LaunchAgentConfig
-      const mode = cfg.worktreeMode ?? (cfg.useWorktree ? 'new' : 'none')
-      if (mode === 'new') {
-        worktreeMap.set(ns.worktreePath, cfg.projectPath)
+      if (getWorktreeMode(cfg) === 'new') {
+        worktreeMap.set(ns.worktreePath, ns.projectPath || cfg.projectPath)
       }
     }
 

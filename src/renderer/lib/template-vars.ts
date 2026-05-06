@@ -1,5 +1,6 @@
 import {
   TaskConfig,
+  TriggerConfig,
   WorkflowExecutionContext,
   WorkflowNode,
   WorkflowEdge,
@@ -58,7 +59,7 @@ export interface StepVariableGroup {
 export interface TemplateVariable {
   key: string
   label: string
-  category: 'task' | 'trigger' | 'connectorItem'
+  category: 'task' | 'trigger' | 'connectorItem' | 'context'
 }
 
 export const TEMPLATE_VARIABLES: TemplateVariable[] = [
@@ -74,8 +75,59 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
   { key: '{{connectorItem.title}}', label: 'Item Title', category: 'connectorItem' },
   { key: '{{connectorItem.externalUrl}}', label: 'Item URL', category: 'connectorItem' },
   { key: '{{connectorItem.body}}', label: 'Item Body', category: 'connectorItem' },
-  { key: '{{connectorItem.connectorId}}', label: 'Connector', category: 'connectorItem' }
+  { key: '{{connectorItem.connectorId}}', label: 'Connector', category: 'connectorItem' },
+  { key: '{{context.cwd}}', label: 'Working Directory', category: 'context' },
+  { key: '{{context.projectPath}}', label: 'Project Path', category: 'context' },
+  { key: '{{context.projectName}}', label: 'Project Name', category: 'context' },
+  { key: '{{context.branch}}', label: 'Branch', category: 'context' },
+  { key: '{{context.worktreePath}}', label: 'Worktree Path', category: 'context' }
 ]
+
+/**
+ * Sentinels written into LaunchAgent / Script string fields when the user
+ * picks "From Context" in the editor. The runtime template resolver expands
+ * these against `WorkflowExecutionContext.task` (card) or `.source` (terminal).
+ */
+export const CONTEXT_REF = {
+  cwd: '{{context.cwd}}',
+  projectPath: '{{context.projectPath}}',
+  projectName: '{{context.projectName}}',
+  branch: '{{context.branch}}',
+  worktreePath: '{{context.worktreePath}}'
+} as const
+
+export function isContextRef(value: string | undefined): boolean {
+  return typeof value === 'string' && /^\s*\{\{\s*context\.[\w]+\s*\}\}\s*$/.test(value)
+}
+
+/**
+ * Variables available in autocomplete given the current trigger flags. Used
+ * by both LaunchAgentConfigForm and ScriptConfigForm.
+ */
+export function getAvailableContextVars(opts: {
+  triggerType: TriggerConfig['triggerType'] | undefined
+  isContextualTrigger: boolean
+}): TemplateVariable[] {
+  const isTaskTrigger =
+    opts.triggerType === 'taskCreated' || opts.triggerType === 'taskStatusChanged'
+  return TEMPLATE_VARIABLES.filter((v) => {
+    if (isTaskTrigger && v.category === 'task') return true
+    if (isTaskTrigger && v.category === 'trigger' && opts.triggerType === 'taskStatusChanged') {
+      return true
+    }
+    if (opts.isContextualTrigger && v.category === 'context') return true
+    return false
+  })
+}
+
+/** Whether `value` contains a `{{context.<field>}}` reference anywhere. */
+export function containsContextRef(value: string | undefined, field?: string): boolean {
+  if (typeof value !== 'string') return false
+  const pattern = field
+    ? new RegExp(`\\{\\{\\s*context\\.${field}\\s*\\}\\}`)
+    : /\{\{\s*context\.[\w]+\s*\}\}/
+  return pattern.test(value)
+}
 
 // --- DAG Ancestor Computation ---
 
@@ -236,7 +288,47 @@ export function resolveTemplateVars(
     if (ns === 'connectorItem' && context?.connectorItem) {
       return stringifyResolved(walkPath(context.connectorItem, rest))
     }
+    if (ns === 'context' && rest.length === 1 && context) {
+      const resolved = resolveContextField(rest[0], context)
+      return resolved != null ? String(resolved) : ''
+    }
 
     return match
   })
+}
+
+/**
+ * Resolve a `{{context.*}}` field. The workflow runtime synthesizes a
+ * `context.source` (TerminalSession-shaped) for card launches by looking up
+ * the task's project, so all path-like fields read from `source`. `task`
+ * remains the primary source for branch / projectName / worktree.
+ *
+ * Returns `undefined` (rather than throwing) when neither `task` nor `source`
+ * is present so callers can detect missing context and route through
+ * SourcePromptDialog.
+ */
+export function resolveContextField(
+  field: string,
+  context: WorkflowExecutionContext
+): string | boolean | undefined {
+  const task = context.task
+  const source = context.source
+  switch (field) {
+    case 'cwd':
+      return task?.worktreePath ?? source?.worktreePath ?? source?.projectPath
+    case 'projectPath':
+      return source?.projectPath
+    case 'projectName':
+      return task?.projectName ?? source?.projectName
+    case 'branch':
+      return task?.branch ?? source?.branch
+    case 'worktreePath':
+      return task?.worktreePath ?? source?.worktreePath
+    case 'useWorktree':
+      if (task) return task.useWorktree ?? !!task.worktreePath
+      if (source) return source.isWorktree ?? !!source.worktreePath
+      return undefined
+    default:
+      return undefined
+  }
 }

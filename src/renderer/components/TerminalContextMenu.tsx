@@ -8,6 +8,7 @@ import {
   pasteToTerminal,
   focusTerminal
 } from '../lib/terminal-registry'
+import { useAppStore } from '../stores'
 import { useWorkspaceWorkflows } from '../hooks/useWorkspaceWorkflows'
 import { buildWorkflowMenuItems } from '../lib/workflow-menu-items'
 
@@ -23,6 +24,7 @@ export function TerminalContextMenu({ terminalId, position, onClose }: Props) {
   const hideTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selection = getTerminalSelection(terminalId)
   const workspaceWorkflows = useWorkspaceWorkflows()
+  const sourceSession = useAppStore((s) => s.terminals.get(terminalId)?.session)
 
   const [showWorkflowSubmenu, setShowWorkflowSubmenu] = useState(false)
   const [workflowBtnTop, setWorkflowBtnTop] = useState(0)
@@ -77,14 +79,18 @@ export function TerminalContextMenu({ terminalId, position, onClose }: Props) {
     close()
   }
 
-  const hasWorkflows = workspaceWorkflows.length > 0
+  const workflowSubmenuItems = buildWorkflowMenuItems(
+    workspaceWorkflows,
+    close,
+    sourceSession ? { source: sourceSession } : undefined
+  )
+
+  const hasWorkflows = workflowSubmenuItems.length > 0
   const itemCount = 2 + (hasWorkflows ? 1 : 0)
   const menuWidth = 180
   const menuHeight = itemCount * 32 + (hasWorkflows ? 9 : 0) + 16
   const left = Math.max(8, Math.min(position.x, window.innerWidth - menuWidth - 8))
   const top = Math.max(8, Math.min(position.y, window.innerHeight - menuHeight - 8))
-
-  const workflowSubmenuItems = buildWorkflowMenuItems(workspaceWorkflows, close)
 
   const submenuWidth = 200
   let submenuLeft = left + menuWidth + 4

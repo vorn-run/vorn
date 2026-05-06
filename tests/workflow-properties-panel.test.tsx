@@ -171,4 +171,41 @@ describe('WorkflowPropertiesPanel', () => {
     if (switchButton) fireEvent.click(switchButton)
     expect(onEnabledChange).toHaveBeenCalled()
   })
+
+  it('renders the cleanup toggle as off and ignores clicks when cleanupDisabled is true', () => {
+    const onCleanupChange = vi.fn()
+    const { container } = render(
+      <WorkflowPropertiesPanel
+        {...baseProps}
+        autoCleanupWorktrees={true}
+        cleanupDisabled
+        onCleanupChange={onCleanupChange}
+      />
+    )
+    // The cleanup row sits after Status / Stagger — find its switch by its parent row label.
+    const cleanupRow = Array.from(container.querySelectorAll('div')).find((d) =>
+      d.textContent?.startsWith('Cleanup worktrees')
+    )!
+    const cleanupSwitch = cleanupRow.querySelector('button[role="switch"]') as HTMLButtonElement
+    expect(cleanupSwitch.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(cleanupSwitch)
+    expect(onCleanupChange).not.toHaveBeenCalled()
+  })
+
+  it('calls onCleanupChange when the cleanup toggle is enabled and clicked', () => {
+    const onCleanupChange = vi.fn()
+    const { container } = render(
+      <WorkflowPropertiesPanel
+        {...baseProps}
+        autoCleanupWorktrees={false}
+        onCleanupChange={onCleanupChange}
+      />
+    )
+    const cleanupRow = Array.from(container.querySelectorAll('div')).find((d) =>
+      d.textContent?.startsWith('Cleanup worktrees')
+    )!
+    const cleanupSwitch = cleanupRow.querySelector('button[role="switch"]') as HTMLButtonElement
+    fireEvent.click(cleanupSwitch)
+    expect(onCleanupChange).toHaveBeenCalled()
+  })
 })

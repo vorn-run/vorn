@@ -4,9 +4,19 @@ import {
   ensureUniqueSlug,
   getAncestorNodes,
   buildStepGroups,
-  resolveTemplateVars
+  resolveTemplateVars,
+  resolveContextField,
+  isContextRef,
+  containsContextRef,
+  getAvailableContextVars,
+  CONTEXT_REF
 } from '../src/renderer/lib/template-vars'
-import type { WorkflowNode, WorkflowEdge, WorkflowExecutionContext } from '../src/shared/types'
+import type {
+  TerminalSession,
+  WorkflowNode,
+  WorkflowEdge,
+  WorkflowExecutionContext
+} from '../src/shared/types'
 import type { StepOutputs } from '../src/renderer/lib/template-vars'
 
 function makeNode(id: string, type: string, slug?: string): WorkflowNode {
@@ -230,5 +240,150 @@ describe('resolveTemplateVars', () => {
   it('returns empty when a nested path segment is missing', () => {
     const outputs: StepOutputs = { x: { a: { b: 1 } } }
     expect(resolveTemplateVars('{{steps.x.a.missing}}', context, outputs)).toBe('')
+  })
+})
+
+describe('isContextRef', () => {
+  it('matches every CONTEXT_REF sentinel', () => {
+    for (const ref of Object.values(CONTEXT_REF)) {
+      expect(isContextRef(ref)).toBe(true)
+    }
+  })
+  it('tolerates surrounding whitespace and inner spaces', () => {
+    expect(isContextRef('  {{ context.cwd }}  ')).toBe(true)
+  })
+  it('rejects non-context templates and plain strings', () => {
+    expect(isContextRef('{{task.title}}')).toBe(false)
+    expect(isContextRef('plain folder')).toBe(false)
+    expect(isContextRef(undefined)).toBe(false)
+    expect(isContextRef('')).toBe(false)
+  })
+  it('rejects strings that contain but are not equal to a context ref', () => {
+    expect(isContextRef('Run in {{context.cwd}}')).toBe(false)
+  })
+})
+
+describe('containsContextRef', () => {
+  it('matches an embedded context ref anywhere in the value', () => {
+    expect(containsContextRef('Run in {{context.cwd}} now')).toBe(true)
+  })
+  it('honors the field filter', () => {
+    expect(containsContextRef('cd {{context.cwd}}', 'cwd')).toBe(true)
+    expect(containsContextRef('cd {{context.cwd}}', 'branch')).toBe(false)
+  })
+  it('returns false for non-string and empty input', () => {
+    expect(containsContextRef(undefined)).toBe(false)
+    expect(containsContextRef('')).toBe(false)
+  })
+})
+
+describe('resolveContextField', () => {
+  const task = {
+    id: 't1',
+    projectName: 'Vorn',
+    title: 'card',
+    description: '',
+    status: 'in_progress' as const,
+    order: 0,
+    branch: 'feature/x',
+    useWorktree: true,
+    worktreePath: '/wt/feature-x',
+    createdAt: '',
+    updatedAt: ''
+  }
+  const source: TerminalSession = {
+    id: 's1',
+    agentType: 'shell',
+    projectName: 'Other',
+    projectPath: '/repo/other',
+    status: 'idle',
+    createdAt: 0,
+    pid: 0,
+    branch: 'main',
+    isWorktree: false
+  }
+
+  it('reads cwd from task worktree first', () => {
+    expect(resolveContextField('cwd', { task })).toBe('/wt/feature-x')
+  })
+  it('reads cwd from source projectPath when task has no worktree', () => {
+    const ctx: WorkflowExecutionContext = { source }
+    expect(resolveContextField('cwd', ctx)).toBe('/repo/other')
+  })
+  it('prefers source.worktreePath over source.projectPath for cwd', () => {
+    const wtSource = { ...source, worktreePath: '/wt/other-feat', isWorktree: true }
+    expect(resolveContextField('cwd', { source: wtSource })).toBe('/wt/other-feat')
+  })
+  it('reads projectName from task before source', () => {
+    expect(resolveContextField('projectName', { task, source })).toBe('Vorn')
+  })
+  it('reads projectName from source when task has none', () => {
+    expect(resolveContextField('projectName', { source })).toBe('Other')
+  })
+  it('reads branch with task taking precedence', () => {
+    expect(resolveContextField('branch', { task, source })).toBe('feature/x')
+    expect(resolveContextField('branch', { source })).toBe('main')
+  })
+  it('reads useWorktree as boolean from either side', () => {
+    expect(resolveContextField('useWorktree', { task })).toBe(true)
+    const sourceWt = { ...source, isWorktree: true }
+    expect(resolveContextField('useWorktree', { source: sourceWt })).toBe(true)
+    expect(resolveContextField('useWorktree', { source })).toBe(false)
+  })
+  it('returns undefined for unknown fields', () => {
+    expect(resolveContextField('bogus', { task })).toBeUndefined()
+  })
+  it('returns undefined when context has neither task nor source', () => {
+    expect(resolveContextField('cwd', {})).toBeUndefined()
+  })
+})
+
+describe('resolveTemplateVars — context namespace', () => {
+  const task = {
+    id: 't1',
+    projectName: 'Vorn',
+    title: '',
+    description: '',
+    status: 'in_progress' as const,
+    order: 0,
+    branch: 'feat/a',
+    worktreePath: '/wt/a',
+    createdAt: '',
+    updatedAt: ''
+  }
+  it('expands {{context.cwd}} from task', () => {
+    expect(resolveTemplateVars('cd {{context.cwd}}', { task })).toBe('cd /wt/a')
+  })
+  it('expands {{context.branch}}', () => {
+    expect(resolveTemplateVars('on {{context.branch}}', { task })).toBe('on feat/a')
+  })
+  it('returns empty for {{context.*}} when no source available', () => {
+    expect(resolveTemplateVars('cd {{context.cwd}}', {})).toBe('cd ')
+  })
+})
+
+describe('getAvailableContextVars', () => {
+  it('returns context vars only when trigger is contextual', () => {
+    const vars = getAvailableContextVars({ triggerType: 'manual', isContextualTrigger: true })
+    expect(vars.every((v) => v.category === 'context')).toBe(true)
+    expect(vars.length).toBeGreaterThan(0)
+  })
+  it('returns task vars for taskCreated trigger', () => {
+    const vars = getAvailableContextVars({ triggerType: 'taskCreated', isContextualTrigger: false })
+    expect(vars.some((v) => v.category === 'task')).toBe(true)
+  })
+  it('returns task + trigger + context vars for a contextual taskStatusChanged', () => {
+    const vars = getAvailableContextVars({
+      triggerType: 'taskStatusChanged',
+      isContextualTrigger: true
+    })
+    const cats = new Set(vars.map((v) => v.category))
+    expect(cats.has('task')).toBe(true)
+    expect(cats.has('trigger')).toBe(true)
+    expect(cats.has('context')).toBe(true)
+  })
+  it('returns empty list for plain manual non-contextual trigger', () => {
+    const vars = getAvailableContextVars({ triggerType: 'manual', isContextualTrigger: false })
+    expect(vars).toEqual([])
   })
 })

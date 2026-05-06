@@ -13,7 +13,7 @@ import {
   createSessionFromProject,
   createShellInProject
 } from '../lib/session-utils'
-import { executeWorkflow } from '../lib/workflow-execution'
+import { runWorkflowFromGlobalSurface } from '../lib/workflow-menu-items'
 import { useAgentInstallStatus } from '../hooks/useAgentInstallStatus'
 import {
   Search,
@@ -337,8 +337,8 @@ function useCommands(
         keywords: actionNodes
           .map((n) => (n.config as unknown as Record<string, unknown>)?.projectName as string)
           .filter(Boolean),
-        onExecute: async () => {
-          await executeWorkflow(wf)
+        onExecute: () => {
+          runWorkflowFromGlobalSurface(wf)
         }
       })
     }

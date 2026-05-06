@@ -149,11 +149,14 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
     })
   }
 
-  if (workspaceWorkflows.length > 0) {
+  const workflowMenuItems = buildWorkflowMenuItems(workspaceWorkflows, onClose, {
+    source: terminal.session
+  })
+  if (workflowMenuItems.length > 0) {
     items.push({
       iconElement: <Zap size={14} className="text-gray-500" />,
       label: 'Run workflow',
-      submenu: buildWorkflowMenuItems(workspaceWorkflows, onClose)
+      submenu: workflowMenuItems
     })
   }
 

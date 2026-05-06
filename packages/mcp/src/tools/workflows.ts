@@ -28,7 +28,9 @@ const launchAgentConfigSchema = z.object({
   args: z.array(V.shortText).optional(),
   displayName: V.shortText.optional(),
   branch: V.shortText.optional(),
-  useWorktree: z.boolean().optional(),
+  // boolean | 'fromContext' — `'fromContext'` only valid when the workflow's
+  // manual trigger is contextual (validated at runtime, not here).
+  useWorktree: z.union([z.boolean(), z.literal('fromContext')]).optional(),
   remoteHostId: V.id.optional(),
   prompt: V.prompt.optional(),
   promptDelayMs: z.number().optional(),
@@ -37,7 +39,10 @@ const launchAgentConfigSchema = z.object({
 })
 
 const triggerConfigSchema = z.union([
-  z.object({ triggerType: z.literal('manual') }),
+  z.object({
+    triggerType: z.literal('manual'),
+    contextual: z.boolean().optional()
+  }),
   z.object({ triggerType: z.literal('once'), runAt: V.shortText }),
   z.object({
     triggerType: z.literal('recurring'),

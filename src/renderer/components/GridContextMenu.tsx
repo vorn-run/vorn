@@ -238,7 +238,12 @@ export function GridContextMenu({ position, onClose }: Props) {
     separator: workspaceProjects.length > 0
   })
 
-  if (workspaceWorkflows.length > 0) {
+  // Empty grid space has no card / session under cursor — show only
+  // non-contextual workflows (contextual ones are listed in card and
+  // terminal right-click menus). buildWorkflowMenuItems handles the filter
+  // when called without a context argument.
+  const gridWorkflowItems = buildWorkflowMenuItems(workspaceWorkflows, onClose)
+  if (gridWorkflowItems.length > 0) {
     items.push({
       iconElement: <Zap size={14} className="text-gray-500" />,
       label: 'Run workflow',
@@ -255,13 +260,14 @@ export function GridContextMenu({ position, onClose }: Props) {
   const hoveredItem = hoveredSubmenu !== null ? items[hoveredSubmenu] : null
   const activeSubmenu = hoveredItem?.submenuKey
     ? hoveredItem.submenuKey === 'run-workflow'
-      ? buildWorkflowMenuItems(workspaceWorkflows, onClose)
+      ? gridWorkflowItems
       : buildScopedSubmenu(hoveredItem.submenuKey === 'session-in' ? 'session' : 'terminal')
     : null
 
   let submenuLeft = left + MENU_WIDTH + 4
   let submenuTop = top
   if (hoveredSubmenu !== null) {
+    // eslint-disable-next-line react-hooks/refs
     const itemEl = itemRefs.current.get(hoveredSubmenu)
     if (itemEl) submenuTop = itemEl.getBoundingClientRect().top
     if (submenuLeft + SUBMENU_WIDTH > window.innerWidth - 8) {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, Settings2, GitBranch, EyeOff } from 'lucide-react'
+import { ChevronRight, Settings2, GitBranch, EyeOff, Zap } from 'lucide-react'
 import {
   LaunchAgentConfig,
   TriggerConfig,
@@ -8,18 +8,26 @@ import {
   getProjectRemoteHostId
 } from '../../../../shared/types'
 import { useAppStore } from '../../../stores'
-import { TEMPLATE_VARIABLES, StepVariableGroup } from '../../../lib/template-vars'
+import {
+  StepVariableGroup,
+  CONTEXT_REF,
+  getAvailableContextVars,
+  isContextRef
+} from '../../../lib/template-vars'
+import { getWorktreeMode } from '../../../lib/workflow-helpers'
 import { useAgentInstallStatus } from '../../../hooks/useAgentInstallStatus'
 import { VariableAutocomplete } from './VariableAutocomplete'
 import { ProjectPicker } from '../../ProjectPicker'
 import { AgentPicker } from '../../AgentPicker'
 import { SelectPicker } from '../../SelectPicker'
+import { Tooltip } from '../../Tooltip'
 import { RichMarkdownEditor } from '../../rich-editor/RichMarkdownEditor'
 
 interface Props {
   config: LaunchAgentConfig
   onChange: (config: LaunchAgentConfig) => void
   triggerType?: TriggerConfig['triggerType']
+  isContextualTrigger?: boolean
   stepGroups?: StepVariableGroup[]
   currentNodeId?: string
   allNodes?: WorkflowNode[]
@@ -38,6 +46,7 @@ export function LaunchAgentConfigForm({
   config,
   onChange,
   triggerType,
+  isContextualTrigger = false,
   stepGroups = [],
   currentNodeId,
   allNodes
@@ -60,18 +69,31 @@ export function LaunchAgentConfigForm({
 
   useEffect(() => {
     if (!config.projectPath || isRemote) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setExistingWorktrees([])
       setIsGitRepo(true)
       return
     }
+    let cancelled = false
     window.api
       .isGitRepo(config.projectPath)
-      .then(setIsGitRepo)
-      .catch(() => setIsGitRepo(false))
+      .then((v) => {
+        if (!cancelled) setIsGitRepo(v)
+      })
+      .catch(() => {
+        if (!cancelled) setIsGitRepo(false)
+      })
     window.api
       .listWorktrees(config.projectPath)
-      .then((wts) => setExistingWorktrees(wts.filter((w) => !w.isMain)))
-      .catch(() => setExistingWorktrees([]))
+      .then((wts) => {
+        if (!cancelled) setExistingWorktrees(wts.filter((w) => !w.isMain))
+      })
+      .catch(() => {
+        if (!cancelled) setExistingWorktrees([])
+      })
+    return () => {
+      cancelled = true
+    }
   }, [config.projectPath, isRemote])
 
   const priorWorktreeSteps = useMemo(
@@ -79,17 +101,19 @@ export function LaunchAgentConfigForm({
       (allNodes ?? []).filter((n) => {
         if (n.id === currentNodeId) return false
         if (n.type !== 'launchAgent') return false
-        const c = n.config as LaunchAgentConfig
-        const mode = c.worktreeMode ?? (c.useWorktree ? 'new' : 'none')
+        const mode = getWorktreeMode(n.config as LaunchAgentConfig)
         return mode === 'new' || mode === 'fromStep'
       }),
     [allNodes, currentNodeId]
   )
 
-  const worktreeMode = config.worktreeMode ?? (config.useWorktree ? 'new' : 'none')
+  const projectIsFromContext = isContextRef(config.projectName) || isContextRef(config.projectPath)
+  const branchIsFromContext = isContextRef(config.branch)
+  const worktreeIsFromContext = config.useWorktree === 'fromContext'
+  const worktreeMode = getWorktreeMode(config)
   const promptSource = config.taskId ? 'task' : config.taskFromQueue ? 'queue' : 'inline'
   const isTaskTrigger = triggerType === 'taskCreated' || triggerType === 'taskStatusChanged'
-  const hasTemplateVars = stepGroups.length > 0 || isTaskTrigger
+  const hasTemplateVars = stepGroups.length > 0 || isTaskTrigger || isContextualTrigger
   const hasBranch = !isRemote && !!(config.branch && config.branch.trim())
   const isHeadless = !!config.headless
   const canUseFromTask = isTaskTrigger || promptSource === 'task' || promptSource === 'queue'
@@ -102,12 +126,28 @@ export function LaunchAgentConfigForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUseFromTask])
 
-  const contextVars = isTaskTrigger
-    ? TEMPLATE_VARIABLES.filter(
-        (v) =>
-          v.category === 'task' || (v.category === 'trigger' && triggerType === 'taskStatusChanged')
-      )
-    : []
+  // Reset any "From Context" fields if the trigger is no longer contextual.
+  // The runtime resolver returns empty strings for `{{context.*}}` without a
+  // source — silently leaving these in place after toggling off would mean
+  // the workflow runs with empty cwd / branch.
+  useEffect(() => {
+    if (isContextualTrigger) return
+    if (!projectIsFromContext && !branchIsFromContext && !worktreeIsFromContext) return
+    const updates: Partial<LaunchAgentConfig> = {}
+    if (projectIsFromContext) {
+      updates.projectName = ''
+      updates.projectPath = ''
+    }
+    if (branchIsFromContext) updates.branch = undefined
+    if (worktreeIsFromContext) {
+      updates.useWorktree = undefined
+      updates.worktreeMode = 'none'
+    }
+    onChange({ ...config, ...updates })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isContextualTrigger])
+
+  const contextVars = getAvailableContextVars({ triggerType, isContextualTrigger })
 
   return (
     <div className="space-y-5">
@@ -125,13 +165,22 @@ export function LaunchAgentConfigForm({
       <div>
         <label className="text-[13px] text-gray-400 font-medium block mb-2">Project</label>
         <ProjectPicker
-          currentProject={config.projectName}
+          currentProject={projectIsFromContext ? '' : config.projectName}
           projects={projects}
           onChange={(name) => {
             const proj = projects.find((p) => p.name === name)
             if (proj) onChange({ ...config, projectName: proj.name, projectPath: proj.path })
           }}
           variant="form"
+          allowFromContext={isContextualTrigger}
+          isFromContext={projectIsFromContext}
+          onSelectFromContext={() =>
+            onChange({
+              ...config,
+              projectName: CONTEXT_REF.projectName,
+              projectPath: CONTEXT_REF.projectPath
+            })
+          }
         />
       </div>
 
@@ -210,20 +259,49 @@ export function LaunchAgentConfigForm({
 
           <div>
             <div className="flex items-center gap-1.5 px-3 py-2 bg-white/[0.06] border border-white/[0.1] rounded-md">
-              <GitBranch size={12} strokeWidth={2} className="text-gray-500 shrink-0" />
-              <input
-                type="text"
-                value={config.branch || ''}
-                onChange={(e) => {
-                  const branch = e.target.value || undefined
-                  const updates: Partial<LaunchAgentConfig> = { branch }
-                  if (!branch) updates.useWorktree = undefined
-                  onChange({ ...config, ...updates })
-                }}
-                placeholder="feature/my-branch"
-                className="flex-1 min-w-0 bg-transparent text-[13px] text-white placeholder-gray-600
-                           focus:outline-none border-none px-0"
-              />
+              {branchIsFromContext ? (
+                <Zap size={12} color="#60a5fa" className="shrink-0" />
+              ) : (
+                <GitBranch size={12} strokeWidth={2} className="text-gray-500 shrink-0" />
+              )}
+              {branchIsFromContext ? (
+                <span className="flex-1 text-[13px] text-gray-200">From Context</span>
+              ) : (
+                <input
+                  type="text"
+                  value={config.branch || ''}
+                  onChange={(e) => {
+                    const branch = e.target.value || undefined
+                    const updates: Partial<LaunchAgentConfig> = { branch }
+                    if (!branch) updates.useWorktree = undefined
+                    onChange({ ...config, ...updates })
+                  }}
+                  placeholder="feature/my-branch"
+                  className="flex-1 min-w-0 bg-transparent text-[13px] text-white placeholder-gray-600
+                             focus:outline-none border-none px-0"
+                />
+              )}
+              {isContextualTrigger && (
+                <Tooltip
+                  label={branchIsFromContext ? 'Use a specific branch' : 'Use From Context'}
+                  position="top"
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onChange({
+                        ...config,
+                        branch: branchIsFromContext ? undefined : CONTEXT_REF.branch
+                      })
+                    }
+                    className={`shrink-0 p-0.5 rounded hover:bg-white/[0.08] transition-colors ${
+                      branchIsFromContext ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'
+                    }`}
+                  >
+                    <Zap size={11} />
+                  </button>
+                </Tooltip>
+              )}
             </div>
             <p className="text-[11px] text-gray-500 mt-1">
               Checks out this branch before launching
@@ -246,12 +324,23 @@ export function LaunchAgentConfigForm({
                   label: 'From step',
                   hint: priorWorktreeSteps.length === 0 ? 'no steps' : undefined
                 },
-                { value: 'existing', label: 'Existing worktree' }
+                { value: 'existing', label: 'Existing worktree' },
+                ...(isContextualTrigger ? [{ value: 'fromContext', label: 'From Context' }] : [])
               ]}
               onChange={(v) => {
-                const key = v as 'none' | 'new' | 'fromStep' | 'existing'
+                const key = v as 'none' | 'new' | 'fromStep' | 'existing' | 'fromContext'
                 if (key === 'new' && !hasBranch) return
                 if (key === 'fromStep' && priorWorktreeSteps.length === 0) return
+                if (key === 'fromContext') {
+                  onChange({
+                    ...config,
+                    useWorktree: 'fromContext',
+                    worktreeMode: undefined,
+                    worktreeFromStepSlug: undefined,
+                    existingWorktreePath: undefined
+                  })
+                  return
+                }
                 const updates: Partial<LaunchAgentConfig> = {
                   worktreeMode: key,
                   useWorktree: key === 'new' ? true : undefined,
@@ -271,6 +360,8 @@ export function LaunchAgentConfigForm({
               {worktreeMode === 'new' && "Isolated directory — won't affect the main working tree"}
               {worktreeMode === 'fromStep' && 'Reuses the worktree created by a previous step'}
               {worktreeMode === 'existing' && 'Launches into an existing worktree on disk'}
+              {worktreeMode === 'fromContext' &&
+                "Inherits the launching card or terminal's worktree (won't be auto-cleaned)"}
             </p>
           </div>
 

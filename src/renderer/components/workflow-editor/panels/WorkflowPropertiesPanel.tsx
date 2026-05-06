@@ -31,6 +31,9 @@ interface Props {
   onStaggerChange: (v: number | undefined) => void
   autoCleanupWorktrees: boolean
   onCleanupChange: (v: boolean) => void
+  /** True when every LaunchAgent inherits its worktree from context, so
+   *  there's no created worktree for cleanup to act on. */
+  cleanupDisabled?: boolean
   triggerNode: WorkflowNode | null
   onSelectTrigger: () => void
   lastRun: WorkflowExecution | null
@@ -44,6 +47,7 @@ export function WorkflowPropertiesPanel({
   onStaggerChange,
   autoCleanupWorktrees,
   onCleanupChange,
+  cleanupDisabled = false,
   triggerNode,
   onSelectTrigger,
   lastRun,
@@ -89,7 +93,19 @@ export function WorkflowPropertiesPanel({
         </PropertyRow>
 
         <PropertyRow label="Cleanup worktrees">
-          <ToggleSwitch checked={autoCleanupWorktrees} onChange={onCleanupChange} />
+          <span
+            title={
+              cleanupDisabled
+                ? 'Cleanup applies only to worktrees this workflow creates. All agents inherit their worktree from context, so there is nothing to clean up.'
+                : undefined
+            }
+            className={cleanupDisabled ? 'opacity-50' : undefined}
+          >
+            <ToggleSwitch
+              checked={cleanupDisabled ? false : autoCleanupWorktrees}
+              onChange={cleanupDisabled ? () => {} : onCleanupChange}
+            />
+          </span>
         </PropertyRow>
 
         <div className="pt-2" />

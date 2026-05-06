@@ -84,3 +84,44 @@ describe('TriggerConfigForm', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ triggerType: 'recurring' }))
   })
 })
+
+describe('TriggerConfigForm — contextual toggle', () => {
+  it('renders the Contextual switch only for manual triggers', () => {
+    const { container, rerender } = render(
+      <TriggerConfigForm config={{ triggerType: 'manual' }} onChange={vi.fn()} />
+    )
+    expect(container.textContent).toContain('Contextual')
+
+    rerender(
+      <TriggerConfigForm
+        config={{ triggerType: 'recurring', cron: '0 9 * * *' }}
+        onChange={vi.fn()}
+      />
+    )
+    expect(container.textContent).not.toContain('Contextual')
+  })
+
+  it('reflects the current contextual flag on the switch', () => {
+    render(
+      <TriggerConfigForm config={{ triggerType: 'manual', contextual: true }} onChange={vi.fn()} />
+    )
+    const sw = screen.getAllByRole('switch')[0]
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('sets contextual: true when toggled from off', () => {
+    const onChange = vi.fn()
+    render(<TriggerConfigForm config={{ triggerType: 'manual' }} onChange={onChange} />)
+    fireEvent.click(screen.getAllByRole('switch')[0])
+    expect(onChange).toHaveBeenCalledWith({ triggerType: 'manual', contextual: true })
+  })
+
+  it('drops the contextual flag when toggled from on', () => {
+    const onChange = vi.fn()
+    render(
+      <TriggerConfigForm config={{ triggerType: 'manual', contextual: true }} onChange={onChange} />
+    )
+    fireEvent.click(screen.getAllByRole('switch')[0])
+    expect(onChange).toHaveBeenCalledWith({ triggerType: 'manual', contextual: undefined })
+  })
+})

@@ -407,6 +407,11 @@ export interface ConnectorItemContext {
 // Execution context passed from triggers to the execution engine
 export interface WorkflowExecutionContext {
   task?: TaskConfig
+  /**
+   * Terminal session that launched a contextual workflow (right-click on a
+   * card or terminal). Drives the `{{context.*}}` namespace alongside `task`.
+   */
+  source?: TerminalSession
   trigger?: {
     type: TriggerConfig['triggerType']
     fromStatus?: TaskStatus
@@ -432,6 +437,13 @@ export interface WorkflowNodePosition {
 // Trigger configs (discriminated union)
 export interface ManualTriggerConfig {
   triggerType: 'manual'
+  /**
+   * Contextual workflows inherit folder/branch/worktree from the source that
+   * launched them (a card or terminal right-click). They appear only in the
+   * card and terminal context menus; from the sidebar/palette the user is
+   * prompted for the source via SourcePromptDialog.
+   */
+  contextual?: boolean
 }
 export interface OnceTriggerConfig {
   triggerType: 'once'
@@ -479,6 +491,13 @@ export type TriggerConfig =
  */
 export type LaunchAgentType = AiAgentType | 'fromTask'
 
+/**
+ * `'fromContext'` defers the boolean to runtime, reading worktree state from
+ * the source that launched a contextual workflow (a card or terminal).
+ * Editor only allows this sentinel when the trigger is contextual.
+ */
+export type UseWorktreeOption = boolean | 'fromContext'
+
 // Launch Agent action config
 export interface LaunchAgentConfig {
   agentType: LaunchAgentType
@@ -487,7 +506,7 @@ export interface LaunchAgentConfig {
   args?: string[]
   displayName?: string
   branch?: string
-  useWorktree?: boolean
+  useWorktree?: UseWorktreeOption
   worktreeMode?: 'none' | 'new' | 'fromStep' | 'existing'
   worktreeFromStepSlug?: string
   existingWorktreePath?: string
@@ -623,6 +642,13 @@ export interface NodeExecutionState {
   projectPath?: string
   worktreePath?: string
   worktreeName?: string
+  /**
+   * Whether the worktree at `worktreePath` was created by this node
+   * (`'created'`) or inherited from a contextual source like a card / terminal
+   * (`'inherited'`). Cleanup pass only removes `'created'` worktrees so a
+   * contextual workflow never deletes the parent card's worktree.
+   */
+  worktreeOrigin?: 'created' | 'inherited'
   /** Timestamp when an approval gate was approved. */
   approvedAt?: string
 }
@@ -909,6 +935,7 @@ export const IPC = {
   WORKFLOW_RUN_LIST: 'workflowRun:list',
   WORKFLOW_RUN_LIST_BY_TASK: 'workflowRun:listByTask',
   WORKFLOW_RUN_LIST_WAITING: 'workflowRun:listWaiting',
+  WORKFLOW_RUN_LIST_RUNNING: 'workflowRun:listRunning',
   WORKFLOW_RUN_LIST_ALL: 'workflowRun:listAll',
   SESSION_LOG_LIST: 'sessionLog:list',
   SESSION_LOG_UPDATE: 'sessionLog:update',

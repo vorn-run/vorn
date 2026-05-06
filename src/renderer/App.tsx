@@ -20,7 +20,8 @@ const WorkflowsLandingView = lazy(() =>
 )
 import {
   executeWorkflow as runWorkflow,
-  rescheduleWaitingGateTimers
+  rescheduleWaitingGateTimers,
+  reconcileRunningExecutions
 } from './lib/workflow-execution'
 import type { WorkflowExecution } from '../shared/types'
 import { CommandPalette } from './components/CommandPalette'
@@ -53,6 +54,7 @@ import { TaskBoardView } from './components/TaskBoardView'
 import { TaskDetailPanel } from './components/TaskDetailPanel'
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { MissedScheduleDialog } from './components/MissedScheduleDialog'
+import { SourcePromptDialog } from './components/SourcePromptDialog'
 import { OnboardingModal } from './components/OnboardingModal'
 import { UpdateBanner } from './components/UpdateBanner'
 import { ToastContainer } from './components/Toast'
@@ -358,6 +360,23 @@ export function App() {
       })
       .catch((err) => console.error('[App] failed to hydrate waiting gates:', err))
 
+    // Resolve runs the previous renderer left in `running`. The main process
+    // keeps headless agents alive past a renderer reload, but the in-memory
+    // exit-promise dies — the run wedges. Reconcile against session_events
+    // and close out anything that already exited.
+    window.api
+      .listRunningWorkflowRuns()
+      .then((runs) => {
+        const store = useAppStore.getState()
+        for (const run of runs) {
+          if (!store.workflowExecutions.has(run.workflowId)) {
+            store.setWorkflowExecution(run.workflowId, run)
+          }
+        }
+        return reconcileRunningExecutions(runs)
+      })
+      .catch((err) => console.error('[App] failed to reconcile running runs:', err))
+
     // Auto-prune exited headless sessions
     const pruneInterval = setInterval(() => {
       const retentionMinutes =
@@ -586,6 +605,7 @@ export function App() {
       <WorktreeCleanupDialog />
       <WorktreeCleanupToastBridge />
       <MissedScheduleDialog />
+      <SourcePromptDialog />
       <AnimatePresence>{isShortcutsPanelOpen && <KeyboardShortcutsPanel />}</AnimatePresence>
 
       <AnimatePresence>{isSettingsOpen && <SettingsPage />}</AnimatePresence>

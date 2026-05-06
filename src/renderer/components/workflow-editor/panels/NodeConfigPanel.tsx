@@ -68,6 +68,7 @@ interface Props {
   onDelete: (nodeId: string) => void
   onClose: () => void
   triggerType?: TriggerConfig['triggerType']
+  isContextualTrigger?: boolean
   stepGroups?: StepVariableGroup[]
 }
 
@@ -79,6 +80,7 @@ export function NodeConfigPanel({
   onDelete,
   onClose,
   triggerType,
+  isContextualTrigger,
   stepGroups
 }: Props) {
   const [showMenu, setShowMenu] = useState(false)
@@ -188,6 +190,7 @@ export function NodeConfigPanel({
             config={node.config as LaunchAgentConfig}
             onChange={(config) => onChange(node.id, config)}
             triggerType={triggerType}
+            isContextualTrigger={isContextualTrigger}
             stepGroups={stepGroups}
             currentNodeId={node.id}
             allNodes={allNodes}
@@ -199,6 +202,7 @@ export function NodeConfigPanel({
             config={node.config as ScriptConfig}
             onChange={(config) => onChange(node.id, config)}
             triggerType={triggerType}
+            isContextualTrigger={isContextualTrigger}
             stepGroups={stepGroups}
           />
         )}

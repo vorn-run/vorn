@@ -36,7 +36,8 @@ import {
   insertBeforeFork,
   insertConditionBetween,
   addParallelBranch,
-  removeNode
+  removeNode,
+  getWorktreeMode
 } from '../../lib/workflow-helpers'
 import { executeWorkflow } from '../../lib/workflow-execution'
 import { toast } from '../Toast'
@@ -96,6 +97,28 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     const triggerNode = nodes.find((n) => n.type === 'trigger')
     if (!triggerNode) return undefined
     return (triggerNode.config as TriggerConfig).triggerType
+  }, [nodes])
+
+  const isContextualTrigger = useMemo(() => {
+    const triggerNode = nodes.find((n) => n.type === 'trigger')
+    if (!triggerNode) return false
+    const cfg = triggerNode.config as TriggerConfig
+    return cfg.triggerType === 'manual' && cfg.contextual === true
+  }, [nodes])
+
+  // Disabled state for the cleanup toggle: when every LaunchAgent inherits
+  // its worktree from context, there's nothing for autoCleanupWorktrees to
+  // act on, so toggling has no effect.
+  const allWorktreesInherited = useMemo(() => {
+    let anyCreates = false
+    let anyInherits = false
+    for (const node of nodes) {
+      if (node.type !== 'launchAgent') continue
+      const mode = getWorktreeMode(node.config as import('../../../shared/types').LaunchAgentConfig)
+      if (mode === 'fromContext') anyInherits = true
+      else if (mode === 'new') anyCreates = true
+    }
+    return anyInherits && !anyCreates
   }, [nodes])
 
   // Map of connectionId → action defs. Populated for every connection the
@@ -718,6 +741,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             onDelete={handleDeleteNode}
             onClose={() => setSelectedNodeId(null)}
             triggerType={triggerType}
+            isContextualTrigger={isContextualTrigger}
             stepGroups={stepGroups}
           />
         )}
@@ -730,6 +754,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             onStaggerChange={setStaggerDelayMs}
             autoCleanupWorktrees={autoCleanupWorktrees}
             onCleanupChange={setAutoCleanupWorktrees}
+            cleanupDisabled={allWorktreesInherited}
             triggerNode={nodes.find((n) => n.type === 'trigger') ?? null}
             onSelectTrigger={() => {
               const t = nodes.find((n) => n.type === 'trigger')

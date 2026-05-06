@@ -165,11 +165,12 @@ export function RunStepsList({
                   </span>
                 )}
               </div>
-              {(ns.logs || ns.error) && (
-                <span className="text-[10px] text-gray-600">
-                  {expandedNodeId === ns.nodeId ? 'hide' : 'logs'}
-                </span>
-              )}
+              <ChevronDown
+                size={12}
+                className={`text-gray-600 shrink-0 transition-transform ${
+                  expandedNodeId === ns.nodeId ? '' : '-rotate-90'
+                }`}
+              />
             </button>
 
             {isWaitingGate && (
@@ -254,6 +255,20 @@ export function RunStepsList({
                     </Tooltip>
                   </div>
                 )}
+              </div>
+            )}
+
+            {expandedNodeId === ns.nodeId && !ns.logs && !ns.error && (
+              <div className="px-4 pb-2">
+                <p className="text-[11px] text-gray-600 italic">
+                  {ns.status === 'running'
+                    ? 'No output captured yet…'
+                    : ns.status === 'pending'
+                      ? "Step hasn't started yet."
+                      : ns.status === 'skipped'
+                        ? 'Step was skipped.'
+                        : 'No output recorded.'}
+                </p>
               </div>
             )}
           </div>

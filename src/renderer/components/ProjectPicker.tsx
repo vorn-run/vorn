@@ -71,13 +71,23 @@ export function ProjectPicker({
   projects,
   onChange,
   variant = 'compact',
-  allowNone = false
+  allowNone = false,
+  allowFromContext = false,
+  isFromContext = false,
+  onSelectFromContext
 }: {
   currentProject: string
   projects: ProjectConfig[]
   onChange: (projectName: string) => void
   variant?: 'compact' | 'form'
   allowNone?: boolean
+  /** When true, shows a "From Context" entry at the top of the dropdown. */
+  allowFromContext?: boolean
+  /** When true, the trigger renders the "From Context" chip instead of a project name. */
+  isFromContext?: boolean
+  /** Called when the user picks "From Context". The caller writes the
+   *  appropriate sentinel into its config. */
+  onSelectFromContext?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -135,10 +145,25 @@ export function ProjectPicker({
             : 'flex items-center gap-1.5 hover:bg-white/[0.04] rounded px-1.5 py-0.5 -mx-1.5 transition-colors text-[12px] text-gray-300'
         }
       >
-        <ProjectIcon icon={current?.icon} color={current?.iconColor} />
-        <span className={`flex-1 text-left ${currentProject ? '' : 'text-gray-600'}`}>
-          {currentProject || 'Select project...'}
-        </span>
+        {(() => {
+          if (isFromContext) {
+            return (
+              <>
+                <Zap size={13} color="#60a5fa" strokeWidth={1.5} />
+                <span className="flex-1 text-left text-gray-200">From Context</span>
+              </>
+            )
+          }
+          const labelClass = currentProject ? '' : 'text-gray-600'
+          return (
+            <>
+              <ProjectIcon icon={current?.icon} color={current?.iconColor} />
+              <span className={`flex-1 text-left ${labelClass}`}>
+                {currentProject || 'Select project...'}
+              </span>
+            </>
+          )
+        })()}
         <ChevronDown size={11} className="text-gray-500" />
       </button>
 
@@ -159,6 +184,20 @@ export function ProjectPicker({
                 minWidth: Math.max(180, position.width)
               }}
             >
+              {allowFromContext && onSelectFromContext && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setOpen(false)
+                    onSelectFromContext()
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-gray-300 hover:bg-white/[0.06] transition-colors border-b border-white/[0.06]"
+                >
+                  <Zap size={13} color="#60a5fa" strokeWidth={1.5} />
+                  <span className="flex-1 text-left">From Context</span>
+                  {isFromContext && <Check size={13} className="text-gray-400" />}
+                </button>
+              )}
               {allowNone && (
                 <button
                   onClick={(e) => {
@@ -169,7 +208,9 @@ export function ProjectPicker({
                 >
                   <Folder size={13} className="text-gray-600" />
                   <span className="flex-1 text-left italic">None</span>
-                  {!currentProject && <Check size={13} className="text-gray-400" />}
+                  {!currentProject && !isFromContext && (
+                    <Check size={13} className="text-gray-400" />
+                  )}
                 </button>
               )}
               {projects.map((p) => (
@@ -183,7 +224,9 @@ export function ProjectPicker({
                 >
                   <ProjectIcon icon={p.icon} color={p.iconColor} />
                   <span className="flex-1 text-left">{p.name}</span>
-                  {p.name === currentProject && <Check size={13} className="text-gray-400" />}
+                  {!isFromContext && p.name === currentProject && (
+                    <Check size={13} className="text-gray-400" />
+                  )}
                 </button>
               ))}
             </motion.div>

@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Terminal, FileCode, Braces, ChevronRight, Settings2 } from 'lucide-react'
 import { ScriptConfig, TriggerConfig } from '../../../../shared/types'
 import { useAppStore } from '../../../stores'
-import { TEMPLATE_VARIABLES, StepVariableGroup } from '../../../lib/template-vars'
+import {
+  StepVariableGroup,
+  CONTEXT_REF,
+  getAvailableContextVars,
+  isContextRef
+} from '../../../lib/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 import { ProjectPicker } from '../../ProjectPicker'
 import { SelectPicker } from '../../SelectPicker'
@@ -12,6 +17,7 @@ interface Props {
   config: ScriptConfig
   onChange: (config: ScriptConfig) => void
   triggerType?: TriggerConfig['triggerType']
+  isContextualTrigger?: boolean
   stepGroups?: StepVariableGroup[]
 }
 
@@ -28,17 +34,29 @@ const SCRIPT_TYPES = [
   { value: 'node', label: 'Node', icon: <Braces size={12} className="text-gray-400" /> }
 ]
 
-export function ScriptConfigForm({ config, onChange, triggerType, stepGroups = [] }: Props) {
+export function ScriptConfigForm({
+  config,
+  onChange,
+  triggerType,
+  isContextualTrigger = false,
+  stepGroups = []
+}: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(!!config.args?.length)
   const projects = useAppStore((s) => s.config?.projects ?? EMPTY_PROJECTS)
   const isTaskTrigger = triggerType === 'taskCreated' || triggerType === 'taskStatusChanged'
-  const hasTemplateVars = stepGroups.length > 0 || isTaskTrigger
-  const contextVars = isTaskTrigger
-    ? TEMPLATE_VARIABLES.filter(
-        (v) =>
-          v.category === 'task' || (v.category === 'trigger' && triggerType === 'taskStatusChanged')
-      )
-    : []
+  const hasTemplateVars = stepGroups.length > 0 || isTaskTrigger || isContextualTrigger
+  const contextVars = getAvailableContextVars({ triggerType, isContextualTrigger })
+  const cwdIsFromContext =
+    isContextRef(config.cwd) || isContextRef(config.projectName) || isContextRef(config.projectPath)
+
+  // The runtime resolver returns empty strings for `{{context.*}}` when
+  // there's no source, so leaving sentinels in place after toggling off
+  // would silently launch with empty cwd.
+  useEffect(() => {
+    if (isContextualTrigger || !cwdIsFromContext) return
+    onChange({ ...config, cwd: undefined, projectName: undefined, projectPath: undefined })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isContextualTrigger])
 
   return (
     <div className="space-y-5">
@@ -57,7 +75,7 @@ export function ScriptConfigForm({ config, onChange, triggerType, stepGroups = [
           Working Directory
         </label>
         <ProjectPicker
-          currentProject={config.projectName || ''}
+          currentProject={cwdIsFromContext ? '' : config.projectName || ''}
           projects={projects}
           onChange={(name) => {
             if (!name) {
@@ -77,6 +95,16 @@ export function ScriptConfigForm({ config, onChange, triggerType, stepGroups = [
           }}
           variant="form"
           allowNone
+          allowFromContext={isContextualTrigger}
+          isFromContext={cwdIsFromContext}
+          onSelectFromContext={() =>
+            onChange({
+              ...config,
+              projectName: CONTEXT_REF.projectName,
+              projectPath: CONTEXT_REF.projectPath,
+              cwd: CONTEXT_REF.cwd
+            })
+          }
         />
       </div>
 

@@ -127,6 +127,18 @@ export function isScheduledWorkflow(wf: WorkflowDefinition): boolean {
   return trigger != null && trigger.triggerType !== 'manual'
 }
 
+export function isContextualWorkflow(wf: WorkflowDefinition): boolean {
+  const trigger = getTriggerConfig(wf)
+  return trigger?.triggerType === 'manual' && trigger.contextual === true
+}
+
+export type WorktreeMode = 'none' | 'new' | 'fromStep' | 'existing' | 'fromContext'
+
+export function getWorktreeMode(cfg: LaunchAgentConfig): WorktreeMode {
+  if (cfg.useWorktree === 'fromContext') return 'fromContext'
+  return cfg.worktreeMode ?? (cfg.useWorktree === true ? 'new' : 'none')
+}
+
 export function getTriggerLabel(wf: WorkflowDefinition): string | undefined {
   const trigger = getTriggerConfig(wf)
   if (!trigger) return undefined

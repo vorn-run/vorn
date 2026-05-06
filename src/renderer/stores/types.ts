@@ -126,6 +126,13 @@ export interface UISlice {
   isAddProjectDialogOpen: boolean
   isWorkflowEditorOpen: boolean
   editingWorkflowId: string | null
+  /**
+   * A contextual workflow whose run was triggered from a non-contextual
+   * surface (sidebar, command palette). The SourcePromptDialog renders when
+   * this is set and asks the user to pick a folder/branch before launching.
+   * Cleared when the user submits or cancels.
+   */
+  pendingContextualWorkflowId: string | null
   editingProject: ProjectConfig | null
   isCommandPaletteOpen: boolean
   isShortcutsPanelOpen: boolean
@@ -173,6 +180,7 @@ export interface UISlice {
   setNewAgentDialogOpen: (open: boolean) => void
   setAddProjectDialogOpen: (open: boolean) => void
   setWorkflowEditorOpen: (open: boolean) => void
+  setPendingContextualWorkflowId: (id: string | null) => void
   setEditingWorkflowId: (id: string | null) => void
   setEditingProject: (project: ProjectConfig | null) => void
   setCommandPaletteOpen: (open: boolean) => void

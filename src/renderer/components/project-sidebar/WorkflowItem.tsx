@@ -4,7 +4,7 @@ import { parseConnectorWorkflowId } from '../../../shared/types'
 import { ICON_MAP } from './icon-map'
 import { useAppStore } from '../../stores'
 import { isScheduledWorkflow } from '../../lib/workflow-helpers'
-import { executeWorkflow } from '../../lib/workflow-execution'
+import { runWorkflowFromGlobalSurface } from '../../lib/workflow-menu-items'
 import { useConnectorIdFor } from '../../lib/use-connections'
 import { Zap, Play, MoreHorizontal } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
@@ -117,7 +117,7 @@ export function WorkflowItem({
               aria-label={`Run workflow ${workflow.name}`}
               onClick={(e) => {
                 e.stopPropagation()
-                executeWorkflow(workflow)
+                runWorkflowFromGlobalSurface(workflow)
               }}
               className="opacity-0 group-hover/wf:opacity-100 focus:opacity-100 text-gray-500 hover:text-white p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0"
             >

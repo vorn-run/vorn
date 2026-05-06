@@ -88,6 +88,17 @@ export function VariableAutocomplete({
       })
     }
 
+    for (const v of contextVars.filter((v) => v.category === 'context')) {
+      items.push({
+        group: 'Context',
+        groupId: 'context',
+        key: v.key,
+        label: v.label,
+        description: 'Resolved from the launching card or terminal',
+        pattern: v.key
+      })
+    }
+
     return items
   }, [stepGroups, contextVars])
 

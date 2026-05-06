@@ -198,4 +198,46 @@ describe('RunEntry', () => {
     fireEvent.click(getByLabelText('Resume session'))
     expect(onResume).toHaveBeenCalled()
   })
+
+  it('shows the running empty state when an expanded step has no output yet', () => {
+    const exec = makeExec({
+      status: 'running',
+      completedAt: undefined,
+      nodeStates: [makeState({ status: 'running', logs: undefined })]
+    })
+    const { getByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
+    fireEvent.click(getByText(/ago|just now|seconds/i).closest('button')!)
+    fireEvent.click(getByText('Run Claude').closest('button')!)
+    expect(getByText(/No output captured yet/)).toBeInTheDocument()
+  })
+
+  it("shows the pending empty state for a step that hasn't started", () => {
+    const exec = makeExec({
+      status: 'running',
+      completedAt: undefined,
+      nodeStates: [
+        makeState({
+          status: 'pending',
+          logs: undefined,
+          startedAt: undefined,
+          completedAt: undefined
+        })
+      ]
+    })
+    const { getByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
+    fireEvent.click(getByText(/ago|just now|seconds/i).closest('button')!)
+    fireEvent.click(getByText('Run Claude').closest('button')!)
+    expect(getByText(/Step hasn't started yet/)).toBeInTheDocument()
+  })
+
+  it('shows the skipped empty state for a skipped step', () => {
+    const exec = makeExec({
+      status: 'error',
+      nodeStates: [makeState({ status: 'skipped', logs: undefined })]
+    })
+    const { getByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
+    fireEvent.click(getByText(/ago|just now|seconds/i).closest('button')!)
+    fireEvent.click(getByText('Run Claude').closest('button')!)
+    expect(getByText(/Step was skipped/)).toBeInTheDocument()
+  })
 })

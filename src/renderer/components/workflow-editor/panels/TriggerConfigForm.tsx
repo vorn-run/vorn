@@ -102,6 +102,54 @@ export function TriggerConfigForm({ config, onChange }: Props) {
         </p>
       </div>
 
+      {config.triggerType === 'manual' &&
+        (() => {
+          const isContextual = config.contextual === true
+          return (
+            <button
+              role="switch"
+              aria-checked={isContextual}
+              onClick={() =>
+                onChange({
+                  triggerType: 'manual',
+                  contextual: isContextual ? undefined : true
+                })
+              }
+              className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg border transition-all ${
+                isContextual
+                  ? 'border-white/[0.1] bg-white/[0.04]'
+                  : 'border-white/[0.04] bg-white/[0.02] hover:border-white/[0.1]'
+              }`}
+            >
+              <div
+                className={`w-7 h-[16px] rounded-full transition-colors relative shrink-0 ${
+                  isContextual ? 'bg-gray-400' : 'bg-white/[0.1]'
+                }`}
+              >
+                <div
+                  className={`absolute top-[2px] w-[12px] h-[12px] rounded-full bg-white transition-transform ${
+                    isContextual ? 'translate-x-[13px]' : 'translate-x-[2px]'
+                  }`}
+                />
+              </div>
+              <div className="text-left min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <Zap size={12} className={isContextual ? 'text-gray-300' : 'text-gray-500'} />
+                  <span
+                    className={`text-[12px] ${isContextual ? 'text-gray-200' : 'text-gray-400'}`}
+                  >
+                    Contextual
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Run this workflow directly from any card or terminal, against that session's
+                  folder and branch.
+                </p>
+              </div>
+            </button>
+          )
+        })()}
+
       {config.triggerType === 'once' && (
         <div>
           <label className="text-[13px] text-gray-400 font-medium block mb-2">Run At</label>
