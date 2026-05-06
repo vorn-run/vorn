@@ -29,9 +29,14 @@ vi.mock('../src/renderer/components/AgentPicker', () => ({
   }
 }))
 
-// Stub the heavier unrelated children so we don't need to mount them.
+// Capture props each render so tests can read allowFromContext / isFromContext
+// without mounting the real picker.
+const projectPickerProps: Array<Record<string, unknown>> = []
 vi.mock('../src/renderer/components/ProjectPicker', () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />
+  ProjectPicker: (props: Record<string, unknown>) => {
+    projectPickerProps.push(props)
+    return <div data-testid="project-picker" />
+  }
 }))
 vi.mock('../src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
   RichMarkdownEditor: () => <div data-testid="rich-md" />
@@ -72,6 +77,7 @@ vi.mock('../src/renderer/stores', () => ({
 // in an effect that's harmless if we stub them as resolved empty arrays.
 beforeEach(() => {
   agentPickerProps.length = 0
+  projectPickerProps.length = 0
   ;(globalThis as unknown as { window: { api: Record<string, unknown> } }).window = {
     api: {
       isGitRepo: vi.fn().mockResolvedValue(true),
@@ -321,5 +327,119 @@ describe('LaunchAgentConfigForm — UI sections', () => {
       <LaunchAgentConfigForm config={baseConfig({ headless: true })} onChange={vi.fn()} />
     )
     expect(container.textContent).toContain('Headless')
+  })
+})
+
+describe('LaunchAgentConfigForm — contextual workflow surface', () => {
+  it('passes allowFromContext=true to ProjectPicker when trigger is contextual', () => {
+    render(
+      <LaunchAgentConfigForm
+        config={baseConfig()}
+        onChange={vi.fn()}
+        triggerType="manual"
+        isContextualTrigger
+      />
+    )
+    expect(projectPickerProps.at(-1)!.allowFromContext).toBe(true)
+  })
+
+  it('passes allowFromContext=false when the trigger is not contextual', () => {
+    render(<LaunchAgentConfigForm config={baseConfig()} onChange={vi.fn()} triggerType="manual" />)
+    expect(projectPickerProps.at(-1)!.allowFromContext).toBe(false)
+  })
+
+  it('flags isFromContext on the ProjectPicker when projectName holds the sentinel', () => {
+    render(
+      <LaunchAgentConfigForm
+        config={baseConfig({
+          projectName: '{{context.projectName}}',
+          projectPath: '{{context.projectPath}}'
+        })}
+        onChange={vi.fn()}
+        triggerType="manual"
+        isContextualTrigger
+      />
+    )
+    expect(projectPickerProps.at(-1)!.isFromContext).toBe(true)
+  })
+
+  it('renders the From Context branch chip when branch holds the sentinel', () => {
+    const { container } = render(
+      <LaunchAgentConfigForm
+        config={baseConfig({ branch: '{{context.branch}}' })}
+        onChange={vi.fn()}
+        triggerType="manual"
+        isContextualTrigger
+      />
+    )
+    expect(container.textContent).toContain('From Context')
+  })
+
+  it("describes 'From Context' worktree mode in the helper text", () => {
+    const { container } = render(
+      <LaunchAgentConfigForm
+        config={baseConfig({ branch: 'feature/x', useWorktree: 'fromContext' })}
+        onChange={vi.fn()}
+        triggerType="manual"
+        isContextualTrigger
+      />
+    )
+    expect(container.textContent).toContain("won't be auto-cleaned")
+  })
+
+  it('clears From Context fields when the trigger flips off contextual', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <LaunchAgentConfigForm
+        config={baseConfig({
+          projectName: '{{context.projectName}}',
+          projectPath: '{{context.projectPath}}',
+          branch: '{{context.branch}}',
+          useWorktree: 'fromContext'
+        })}
+        onChange={onChange}
+        triggerType="manual"
+        isContextualTrigger
+      />
+    )
+
+    rerender(
+      <LaunchAgentConfigForm
+        config={baseConfig({
+          projectName: '{{context.projectName}}',
+          projectPath: '{{context.projectPath}}',
+          branch: '{{context.branch}}',
+          useWorktree: 'fromContext'
+        })}
+        onChange={onChange}
+        triggerType="manual"
+        isContextualTrigger={false}
+      />
+    )
+
+    const reset = onChange.mock.calls.find(([c]: [LaunchAgentConfig]) => {
+      return (
+        c.projectName === '' &&
+        c.projectPath === '' &&
+        c.branch === undefined &&
+        c.useWorktree === undefined
+      )
+    })
+    expect(reset).toBeDefined()
+  })
+
+  it('exposes context vars to the prompt autocomplete when contextual', () => {
+    // hasTemplateVars becomes true via isContextualTrigger which switches the
+    // prompt slot to VariableAutocomplete (mocked) — the absence of a crash is
+    // enough; the prior path renders RichMarkdownEditor.
+    const { container } = render(
+      <LaunchAgentConfigForm
+        config={baseConfig()}
+        onChange={vi.fn()}
+        triggerType="manual"
+        isContextualTrigger
+      />
+    )
+    expect(container.querySelector('[data-testid="variable-autocomplete"]')).toBeTruthy()
   })
 })

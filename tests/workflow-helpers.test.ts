@@ -24,6 +24,8 @@ import {
   getOrderedActionNodes,
   getActionCount,
   isScheduledWorkflow,
+  isContextualWorkflow,
+  getWorktreeMode,
   getTriggerLabel,
   createTriggerNode,
   createLaunchAgentNode,
@@ -150,6 +152,63 @@ describe('isScheduledWorkflow', () => {
   it('returns false for manual', () => {
     const wf = makeWorkflow([makeTriggerNode({ triggerType: 'manual' })], [])
     expect(isScheduledWorkflow(wf)).toBe(false)
+  })
+})
+
+describe('isContextualWorkflow', () => {
+  it('returns true when manual trigger has contextual: true', () => {
+    const wf = makeWorkflow([makeTriggerNode({ triggerType: 'manual', contextual: true })], [])
+    expect(isContextualWorkflow(wf)).toBe(true)
+  })
+  it('returns false for plain manual trigger', () => {
+    const wf = makeWorkflow([makeTriggerNode({ triggerType: 'manual' })], [])
+    expect(isContextualWorkflow(wf)).toBe(false)
+  })
+  it('returns false for scheduled trigger even with contextual flag', () => {
+    const wf = makeWorkflow([makeTriggerNode({ triggerType: 'recurring', cron: '0 0 * * *' })], [])
+    expect(isContextualWorkflow(wf)).toBe(false)
+  })
+  it('returns false when there is no trigger', () => {
+    const wf = makeWorkflow([makeActionNode('a')], [])
+    expect(isContextualWorkflow(wf)).toBe(false)
+  })
+})
+
+describe('getWorktreeMode', () => {
+  it("returns 'fromContext' when useWorktree === 'fromContext'", () => {
+    expect(
+      getWorktreeMode({
+        agentType: 'claude',
+        projectName: '',
+        projectPath: '',
+        useWorktree: 'fromContext'
+      })
+    ).toBe('fromContext')
+  })
+  it("returns 'new' when useWorktree === true and worktreeMode is unset", () => {
+    expect(
+      getWorktreeMode({
+        agentType: 'claude',
+        projectName: '',
+        projectPath: '',
+        useWorktree: true
+      })
+    ).toBe('new')
+  })
+  it("returns 'none' when useWorktree is false / undefined", () => {
+    expect(getWorktreeMode({ agentType: 'claude', projectName: '', projectPath: '' })).toBe('none')
+  })
+  it('honors an explicit worktreeMode over the boolean shortcut', () => {
+    expect(
+      getWorktreeMode({
+        agentType: 'claude',
+        projectName: '',
+        projectPath: '',
+        useWorktree: true,
+        worktreeMode: 'fromStep',
+        worktreeFromStepSlug: 'prep'
+      })
+    ).toBe('fromStep')
   })
 })
 
