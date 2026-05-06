@@ -74,14 +74,26 @@ export function LaunchAgentConfigForm({
       setIsGitRepo(true)
       return
     }
+    let cancelled = false
     window.api
       .isGitRepo(config.projectPath)
-      .then(setIsGitRepo)
-      .catch(() => setIsGitRepo(false))
+      .then((v) => {
+        if (!cancelled) setIsGitRepo(v)
+      })
+      .catch(() => {
+        if (!cancelled) setIsGitRepo(false)
+      })
     window.api
       .listWorktrees(config.projectPath)
-      .then((wts) => setExistingWorktrees(wts.filter((w) => !w.isMain)))
-      .catch(() => setExistingWorktrees([]))
+      .then((wts) => {
+        if (!cancelled) setExistingWorktrees(wts.filter((w) => !w.isMain))
+      })
+      .catch(() => {
+        if (!cancelled) setExistingWorktrees([])
+      })
+    return () => {
+      cancelled = true
+    }
   }, [config.projectPath, isRemote])
 
   const priorWorktreeSteps = useMemo(

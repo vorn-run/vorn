@@ -145,18 +145,25 @@ export function ProjectPicker({
             : 'flex items-center gap-1.5 hover:bg-white/[0.04] rounded px-1.5 py-0.5 -mx-1.5 transition-colors text-[12px] text-gray-300'
         }
       >
-        {isFromContext ? (
-          <Zap size={13} color="#60a5fa" strokeWidth={1.5} />
-        ) : (
-          <ProjectIcon icon={current?.icon} color={current?.iconColor} />
-        )}
-        <span
-          className={`flex-1 text-left ${
-            isFromContext ? 'text-gray-200' : currentProject ? '' : 'text-gray-600'
-          }`}
-        >
-          {isFromContext ? 'From Context' : currentProject || 'Select project...'}
-        </span>
+        {(() => {
+          if (isFromContext) {
+            return (
+              <>
+                <Zap size={13} color="#60a5fa" strokeWidth={1.5} />
+                <span className="flex-1 text-left text-gray-200">From Context</span>
+              </>
+            )
+          }
+          const labelClass = currentProject ? '' : 'text-gray-600'
+          return (
+            <>
+              <ProjectIcon icon={current?.icon} color={current?.iconColor} />
+              <span className={`flex-1 text-left ${labelClass}`}>
+                {currentProject || 'Select project...'}
+              </span>
+            </>
+          )
+        })()}
         <ChevronDown size={11} className="text-gray-500" />
       </button>
 

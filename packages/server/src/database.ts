@@ -2208,68 +2208,20 @@ function fetchNodesByRunIds(
   return out
 }
 
-export function listWorkflowRuns(workflowId: string, limit = 20): WorkflowExecution[] {
-  const d = getDb()
-
-  type RunRow = {
-    id: string
-    workflow_id: string
-    started_at: string
-    completed_at: string | null
-    status: string
-    trigger_task_id: string | null
-  }
-  const rows = d
-    .prepare('SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT ?')
-    .all(workflowId, limit) as RunRow[]
-
-  const nodesByRun = fetchNodesByRunIds(
-    d,
-    rows.map((r) => r.id)
-  )
-
-  return rows.map((r) => ({
-    workflowId: r.workflow_id,
-    startedAt: r.started_at,
-    ...(r.completed_at != null && { completedAt: r.completed_at }),
-    status: r.status as WorkflowExecution['status'],
-    ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
-    nodeStates: nodesByRun.get(r.id) ?? []
-  }))
+type RunRow = {
+  id: string
+  workflow_id: string
+  started_at: string
+  completed_at: string | null
+  status: string
+  trigger_task_id: string | null
+  workflow_name?: string | null
 }
 
-export function listWorkflowRunsByTask(
-  taskId: string,
-  limit = 20
+function mapRunRows(
+  rows: RunRow[],
+  nodesByRun: Map<string, NodeExecutionState[]>
 ): (WorkflowExecution & { workflowName?: string })[] {
-  const d = getDb()
-
-  type RunRow = {
-    id: string
-    workflow_id: string
-    started_at: string
-    completed_at: string | null
-    status: string
-    trigger_task_id: string | null
-    workflow_name: string | null
-  }
-  const rows = d
-    .prepare(
-      `SELECT DISTINCT wr.*, w.name as workflow_name
-       FROM workflow_runs wr
-       LEFT JOIN workflows w ON w.id = wr.workflow_id
-       WHERE wr.trigger_task_id = ?
-          OR wr.id IN (SELECT run_id FROM workflow_run_nodes WHERE task_id = ?)
-       ORDER BY wr.started_at DESC
-       LIMIT ?`
-    )
-    .all(taskId, taskId, limit) as RunRow[]
-
-  const nodesByRun = fetchNodesByRunIds(
-    d,
-    rows.map((r) => r.id)
-  )
-
   return rows.map((r) => ({
     workflowId: r.workflow_id,
     startedAt: r.started_at,
@@ -2281,6 +2233,45 @@ export function listWorkflowRunsByTask(
   }))
 }
 
+export function listWorkflowRuns(workflowId: string, limit = 20): WorkflowExecution[] {
+  const d = getDb()
+  const rows = d
+    .prepare('SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT ?')
+    .all(workflowId, limit) as RunRow[]
+  return mapRunRows(
+    rows,
+    fetchNodesByRunIds(
+      d,
+      rows.map((r) => r.id)
+    )
+  )
+}
+
+export function listWorkflowRunsByTask(
+  taskId: string,
+  limit = 20
+): (WorkflowExecution & { workflowName?: string })[] {
+  const d = getDb()
+  const rows = d
+    .prepare(
+      `SELECT DISTINCT wr.*, w.name as workflow_name
+       FROM workflow_runs wr
+       LEFT JOIN workflows w ON w.id = wr.workflow_id
+       WHERE wr.trigger_task_id = ?
+          OR wr.id IN (SELECT run_id FROM workflow_run_nodes WHERE task_id = ?)
+       ORDER BY wr.started_at DESC
+       LIMIT ?`
+    )
+    .all(taskId, taskId, limit) as RunRow[]
+  return mapRunRows(
+    rows,
+    fetchNodesByRunIds(
+      d,
+      rows.map((r) => r.id)
+    )
+  )
+}
+
 /**
  * Runs in `running` state. Used at renderer startup to reconcile orphaned
  * runs: when the renderer reloads mid-execution, headless agents in the main
@@ -2289,15 +2280,6 @@ export function listWorkflowRunsByTask(
  */
 export function listRunningRuns(): WorkflowExecution[] {
   const d = getDb()
-
-  type RunRow = {
-    id: string
-    workflow_id: string
-    started_at: string
-    completed_at: string | null
-    status: string
-    trigger_task_id: string | null
-  }
   const rows = d
     .prepare(
       `SELECT * FROM workflow_runs
@@ -2305,20 +2287,13 @@ export function listRunningRuns(): WorkflowExecution[] {
        ORDER BY started_at DESC`
     )
     .all() as RunRow[]
-
-  const nodesByRun = fetchNodesByRunIds(
-    d,
-    rows.map((r) => r.id)
+  return mapRunRows(
+    rows,
+    fetchNodesByRunIds(
+      d,
+      rows.map((r) => r.id)
+    )
   )
-
-  return rows.map((r) => ({
-    workflowId: r.workflow_id,
-    startedAt: r.started_at,
-    ...(r.completed_at != null && { completedAt: r.completed_at }),
-    status: r.status as WorkflowExecution['status'],
-    ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
-    nodeStates: nodesByRun.get(r.id) ?? []
-  }))
 }
 
 // Surfaces every run that has at least one waiting node — small in practice
@@ -2327,15 +2302,6 @@ export function listRunningRuns(): WorkflowExecution[] {
 // chunk `fetchNodesByRunIds` to stay under SQLite's IN-clause variable cap.
 export function listRunsWithWaitingGates(): WorkflowExecution[] {
   const d = getDb()
-
-  type RunRow = {
-    id: string
-    workflow_id: string
-    started_at: string
-    completed_at: string | null
-    status: string
-    trigger_task_id: string | null
-  }
   const rows = d
     .prepare(
       `SELECT DISTINCT wr.*
@@ -2345,20 +2311,13 @@ export function listRunsWithWaitingGates(): WorkflowExecution[] {
        ORDER BY wr.started_at DESC`
     )
     .all() as RunRow[]
-
-  const nodesByRun = fetchNodesByRunIds(
-    d,
-    rows.map((r) => r.id)
+  return mapRunRows(
+    rows,
+    fetchNodesByRunIds(
+      d,
+      rows.map((r) => r.id)
+    )
   )
-
-  return rows.map((r) => ({
-    workflowId: r.workflow_id,
-    startedAt: r.started_at,
-    ...(r.completed_at != null && { completedAt: r.completed_at }),
-    status: r.status as WorkflowExecution['status'],
-    ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
-    nodeStates: nodesByRun.get(r.id) ?? []
-  }))
 }
 
 /**
@@ -2376,15 +2335,6 @@ export function listAllWorkflowRuns(
   // when fetching node rows for each run.
   const cappedLimit = Math.max(1, Math.min(limit, 500))
 
-  type RunRow = {
-    id: string
-    workflow_id: string
-    started_at: string
-    completed_at: string | null
-    status: string
-    trigger_task_id: string | null
-    workflow_name: string | null
-  }
   // When filtering by workspace, exclude orphaned runs (workflow deleted, the
   // LEFT JOIN nulls everything on `w`). Without `w.id IS NOT NULL`, the
   // COALESCE would silently bucket every orphan into 'personal'.
@@ -2399,21 +2349,13 @@ export function listAllWorkflowRuns(
                LIMIT ?`
   const params = workspaceId ? [workspaceId, cappedLimit] : [cappedLimit]
   const rows = d.prepare(sql).all(...params) as RunRow[]
-
-  const nodesByRun = fetchNodesByRunIds(
-    d,
-    rows.map((r) => r.id)
+  return mapRunRows(
+    rows,
+    fetchNodesByRunIds(
+      d,
+      rows.map((r) => r.id)
+    )
   )
-
-  return rows.map((r) => ({
-    workflowId: r.workflow_id,
-    startedAt: r.started_at,
-    ...(r.completed_at != null && { completedAt: r.completed_at }),
-    status: r.status as WorkflowExecution['status'],
-    ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
-    ...(r.workflow_name != null && { workflowName: r.workflow_name }),
-    nodeStates: nodesByRun.get(r.id) ?? []
-  }))
 }
 
 // ─── Session Logs ─────────────────────────────────────────────────

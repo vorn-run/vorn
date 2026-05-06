@@ -23,6 +23,28 @@ import { sendWorkflowGateNotification } from './notifications'
 
 const runningWorkflows = new Set<string>()
 
+const LOG_BUFFER_MAX = 100_000
+const LOG_BUFFER_KEEP = 80_000
+
+/** Cap renderer-resident log buffers so a chatty agent can't exhaust memory. */
+function appendBoundedLog(buffer: string, chunk: string): string {
+  const next = buffer + chunk
+  return next.length > LOG_BUFFER_MAX ? next.slice(-LOG_BUFFER_KEEP) : next
+}
+
+/** Tag worktree provenance for cleanup. `undefined` when no worktree is in
+ *  play; `'inherited'` when the contextual source supplied one (don't delete);
+ *  `'created'` when this node spun one up itself. */
+function resolveWorktreeOrigin(
+  worktreePath: string | undefined,
+  inherited: boolean
+): 'created' | 'inherited' | undefined {
+  if (!worktreePath) return undefined
+  return inherited ? 'inherited' : 'created'
+}
+
+const PERSIST_INTERVAL_MS = 3000
+
 /** Cleared on approve/reject so a late timer can't reject an already-resolved gate. */
 const gateTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -71,37 +93,43 @@ export async function reconcileRunningExecutions(
     let anyStillRunning = false
     let anyResolvedHere = false
 
-    for (const ns of execution.nodeStates) {
-      if (ns.status !== 'running') continue
-      if (!ns.sessionId) {
+    const runningNodes = execution.nodeStates.filter((ns) => ns.status === 'running')
+    const probes = await Promise.all(
+      runningNodes.map(async (ns) => {
+        if (!ns.sessionId) return { ns, kind: 'no-session' as const }
+        try {
+          const events = await window.api.listSessionEventsBySession(ns.sessionId, 50)
+          const exitEvent = events.find((e) => e.eventType === 'exited')
+          return exitEvent
+            ? { ns, kind: 'exited' as const, exitEvent }
+            : { ns, kind: 'still-running' as const }
+        } catch (err) {
+          console.warn(
+            `[workflow] reconcile: failed to query session_events for ${ns.sessionId}`,
+            err
+          )
+          return { ns, kind: 'error' as const }
+        }
+      })
+    )
+
+    for (const probe of probes) {
+      const { ns } = probe
+      if (probe.kind === 'no-session') {
         ns.status = 'error'
         ns.error = 'Run abandoned (no session id recorded)'
         ns.completedAt = new Date().toISOString()
         dirty = true
-        continue
-      }
-      try {
-        const events = await window.api.listSessionEventsBySession(ns.sessionId, 50)
-        const exitEvent = events.find((e) => e.eventType === 'exited')
-        if (exitEvent) {
-          const meta = (exitEvent.metadata as { exitCode?: number } | undefined) ?? {}
-          const exitCode = typeof meta.exitCode === 'number' ? meta.exitCode : 0
-          ns.status = exitCode === 0 ? 'success' : 'error'
-          ns.completedAt = exitEvent.timestamp
-          if (exitCode !== 0 && !ns.error) ns.error = `Exit code ${exitCode}`
-          dirty = true
-          anyResolvedHere = true
-        } else {
-          // Session row exists but no exit yet — assume still alive somewhere
-          // and leave the node untouched. The user can manually rerun if it's
-          // truly stuck.
-          anyStillRunning = true
-        }
-      } catch (err) {
-        console.warn(
-          `[workflow] reconcile: failed to query session_events for ${ns.sessionId}`,
-          err
-        )
+      } else if (probe.kind === 'exited') {
+        const meta = (probe.exitEvent.metadata as { exitCode?: number } | undefined) ?? {}
+        const exitCode = typeof meta.exitCode === 'number' ? meta.exitCode : 0
+        ns.status = exitCode === 0 ? 'success' : 'error'
+        ns.completedAt = probe.exitEvent.timestamp
+        if (exitCode !== 0 && !ns.error) ns.error = `Exit code ${exitCode}`
+        dirty = true
+        anyResolvedHere = true
+      } else {
+        // 'still-running' or 'error' — leave the node untouched.
         anyStillRunning = true
       }
     }
@@ -346,10 +374,7 @@ async function executeNode(
     const removeScriptDataListener = window.api.onScriptData(
       ({ runId: id, data }: { runId: string; data: string }) => {
         if (id !== runId) return
-        streamedLogs += data
-        if (streamedLogs.length > 100000) {
-          streamedLogs = streamedLogs.slice(-80000)
-        }
+        streamedLogs = appendBoundedLog(streamedLogs, data)
         updateNodeState(execution, node.id, { logs: streamedLogs })
         useAppStore.getState().setWorkflowExecution(workflow.id, { ...execution })
       }
@@ -509,9 +534,6 @@ async function executeNode(
     useWorktree = undefined
   }
 
-  // Track the task we resolved so we can pass it to resolveEffectiveAgent later
-  // — covers the taskId / taskFromQueue paths. The trigger-driven path uses
-  // context.task instead.
   let resolvedTask: TaskConfig | undefined
 
   // Fall back to the trigger's task id when the node doesn't bind to one
@@ -585,7 +607,6 @@ async function executeNode(
     initialPrompt = resolveTemplateVars(initialPrompt, context, stepOutputs)
   }
 
-  // Wrap with workflow context so the agent knows which workflow/step it belongs to
   if (initialPrompt) {
     initialPrompt = buildWorkflowPrompt({
       workflow,
@@ -606,7 +627,6 @@ async function executeNode(
     // window reloads (HMR, devtools refresh, crash) mid-run they vanish even
     // though the headless agent in the main process keeps going. Throttle a
     // background save to disk so accumulated output survives a reload.
-    const PERSIST_INTERVAL_MS = 3000
     let persistTimer: ReturnType<typeof setTimeout> | null = null
     let lastPersistedBytes = 0
     const schedulePersistLogs = () => {
@@ -624,10 +644,7 @@ async function executeNode(
     const removeDataListener = window.api.onHeadlessData(
       ({ id, data }: { id: string; data: string }) => {
         if (sessionId && id === sessionId) {
-          logs += data
-          if (logs.length > 100000) {
-            logs = logs.slice(-80000)
-          }
+          logs = appendBoundedLog(logs, data)
           updateNodeState(execution, node.id, { logs })
           useAppStore.getState().setWorkflowExecution(workflow.id, { ...execution })
           schedulePersistLogs()
@@ -667,8 +684,6 @@ async function executeNode(
       })
 
       sessionId = headlessSession.id
-
-      // Make headless session visible in the UI immediately
       useAppStore.getState().addHeadlessSession(headlessSession)
 
       updateNodeState(execution, node.id, {
@@ -676,11 +691,7 @@ async function executeNode(
         taskId: resolvedTaskId,
         worktreePath: headlessSession.worktreePath,
         worktreeName: headlessSession.worktreeName,
-        worktreeOrigin: headlessSession.worktreePath
-          ? inheritedWorktree
-            ? 'inherited'
-            : 'created'
-          : undefined,
+        worktreeOrigin: resolveWorktreeOrigin(headlessSession.worktreePath, inheritedWorktree),
         agentType: effectiveAgent,
         projectName: effectiveProjectName,
         projectPath: effectiveProjectPath,
@@ -753,11 +764,7 @@ async function executeNode(
       taskId: resolvedTaskId,
       worktreePath: session.worktreePath,
       worktreeName: session.worktreeName,
-      worktreeOrigin: session.worktreePath
-        ? inheritedWorktree
-          ? 'inherited'
-          : 'created'
-        : undefined,
+      worktreeOrigin: resolveWorktreeOrigin(session.worktreePath, inheritedWorktree),
       agentType: effectiveAgent,
       projectName: effectiveProjectName,
       projectPath: effectiveProjectPath
