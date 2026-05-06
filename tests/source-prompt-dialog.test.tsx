@@ -220,4 +220,67 @@ describe('SourcePromptDialog', () => {
     )
     expect(useAppStore.getState().pendingContextualWorkflowId).toBeNull()
   })
+
+  it('detects context references in script nodes (cwd / projectName / projectPath)', () => {
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: 't',
+          type: 'trigger',
+          config: { triggerType: 'manual', contextual: true },
+          position: { x: 0, y: 0 },
+          label: 'Manual'
+        },
+        {
+          id: 's',
+          type: 'script',
+          config: {
+            scriptType: 'bash',
+            scriptContent: 'cd {{context.cwd}} && pwd',
+            cwd: '{{context.cwd}}',
+            projectName: '{{context.projectName}}',
+            projectPath: '{{context.projectPath}}'
+          },
+          position: { x: 0, y: 0 },
+          label: 'Run'
+        }
+      ]
+    })
+    useAppStore.setState({
+      pendingContextualWorkflowId: wf.id,
+      config: { ...useAppStore.getState().config!, workflows: [wf] }
+    })
+    render(<SourcePromptDialog />)
+    expect(screen.getByText('Project')).toBeInTheDocument()
+  })
+
+  it('detects branch references inside a script body', () => {
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: 't',
+          type: 'trigger',
+          config: { triggerType: 'manual', contextual: true },
+          position: { x: 0, y: 0 },
+          label: 'Manual'
+        },
+        {
+          id: 's',
+          type: 'script',
+          config: {
+            scriptType: 'bash',
+            scriptContent: 'git checkout {{context.branch}}'
+          },
+          position: { x: 0, y: 0 },
+          label: 'Run'
+        }
+      ]
+    })
+    useAppStore.setState({
+      pendingContextualWorkflowId: wf.id,
+      config: { ...useAppStore.getState().config!, workflows: [wf] }
+    })
+    render(<SourcePromptDialog />)
+    expect(screen.getByText('Branch')).toBeInTheDocument()
+  })
 })
