@@ -2281,6 +2281,46 @@ export function listWorkflowRunsByTask(
   }))
 }
 
+/**
+ * Runs in `running` state. Used at renderer startup to reconcile orphaned
+ * runs: when the renderer reloads mid-execution, headless agents in the main
+ * process keep going but the in-memory exit-promise dies, leaving the run
+ * stuck. The reconciler closes these out against `session_events`.
+ */
+export function listRunningRuns(): WorkflowExecution[] {
+  const d = getDb()
+
+  type RunRow = {
+    id: string
+    workflow_id: string
+    started_at: string
+    completed_at: string | null
+    status: string
+    trigger_task_id: string | null
+  }
+  const rows = d
+    .prepare(
+      `SELECT * FROM workflow_runs
+       WHERE status = 'running'
+       ORDER BY started_at DESC`
+    )
+    .all() as RunRow[]
+
+  const nodesByRun = fetchNodesByRunIds(
+    d,
+    rows.map((r) => r.id)
+  )
+
+  return rows.map((r) => ({
+    workflowId: r.workflow_id,
+    startedAt: r.started_at,
+    ...(r.completed_at != null && { completedAt: r.completed_at }),
+    status: r.status as WorkflowExecution['status'],
+    ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
+    nodeStates: nodesByRun.get(r.id) ?? []
+  }))
+}
+
 // Surfaces every run that has at least one waiting node — small in practice
 // because gates pause execution. No LIMIT is intentional so the badge count
 // matches the real backlog. If this ever grows, cap with a LIMIT here and

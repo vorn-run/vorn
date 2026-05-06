@@ -347,6 +347,13 @@ const api = {
     }
   },
 
+  // Session events (lifecycle log: created / exited / task_linked)
+  listSessionEventsBySession: (
+    sessionId: string,
+    limit?: number
+  ): Promise<import('../shared/types').SessionEvent[]> =>
+    ipcRenderer.invoke(IPC.SESSION_EVENT_LIST_BY_SESSION, sessionId, limit),
+
   // Workflow runs
   saveWorkflowRun: (execution: WorkflowExecution): Promise<void> =>
     ipcRenderer.invoke(IPC.WORKFLOW_RUN_SAVE, execution),
@@ -362,6 +369,9 @@ const api = {
 
   listRunsWithWaitingGates: (): Promise<WorkflowExecution[]> =>
     ipcRenderer.invoke(IPC.WORKFLOW_RUN_LIST_WAITING),
+
+  listRunningWorkflowRuns: (): Promise<WorkflowExecution[]> =>
+    ipcRenderer.invoke(IPC.WORKFLOW_RUN_LIST_RUNNING),
 
   listAllWorkflowRuns: (
     workspaceId?: string,

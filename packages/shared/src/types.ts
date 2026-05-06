@@ -935,6 +935,7 @@ export const IPC = {
   WORKFLOW_RUN_LIST: 'workflowRun:list',
   WORKFLOW_RUN_LIST_BY_TASK: 'workflowRun:listByTask',
   WORKFLOW_RUN_LIST_WAITING: 'workflowRun:listWaiting',
+  WORKFLOW_RUN_LIST_RUNNING: 'workflowRun:listRunning',
   WORKFLOW_RUN_LIST_ALL: 'workflowRun:listAll',
   SESSION_LOG_LIST: 'sessionLog:list',
   SESSION_LOG_UPDATE: 'sessionLog:update',

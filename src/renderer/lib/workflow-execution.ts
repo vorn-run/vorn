@@ -50,6 +50,92 @@ function scheduleGateTimeout(
 }
 
 /**
+ * Resolve workflow runs that were left `running` when the renderer last
+ * unloaded. The main process keeps headless sessions alive past a renderer
+ * reload, so a node that was `running` may already have an `exited` event in
+ * `session_events` even though the in-renderer exit-promise was lost.
+ *
+ * For each `running` node with a session id we look up its lifecycle log; if
+ * it exited we mark the node success/error and persist. We do NOT auto-resume
+ * the rest of the DAG — quietly continuing a stale run hours later is
+ * surprising. Instead, the run is closed as `error` with a clear message so
+ * the user can re-run.
+ */
+export async function reconcileRunningExecutions(
+  executions: Iterable<WorkflowExecution>
+): Promise<void> {
+  for (const execution of executions) {
+    if (execution.completedAt && execution.status !== 'running') continue
+
+    let dirty = false
+    let anyStillRunning = false
+    let anyResolvedHere = false
+
+    for (const ns of execution.nodeStates) {
+      if (ns.status !== 'running') continue
+      if (!ns.sessionId) {
+        ns.status = 'error'
+        ns.error = 'Run abandoned (no session id recorded)'
+        ns.completedAt = new Date().toISOString()
+        dirty = true
+        continue
+      }
+      try {
+        const events = await window.api.listSessionEventsBySession(ns.sessionId, 50)
+        const exitEvent = events.find((e) => e.eventType === 'exited')
+        if (exitEvent) {
+          const meta = (exitEvent.metadata as { exitCode?: number } | undefined) ?? {}
+          const exitCode = typeof meta.exitCode === 'number' ? meta.exitCode : 0
+          ns.status = exitCode === 0 ? 'success' : 'error'
+          ns.completedAt = exitEvent.timestamp
+          if (exitCode !== 0 && !ns.error) ns.error = `Exit code ${exitCode}`
+          dirty = true
+          anyResolvedHere = true
+        } else {
+          // Session row exists but no exit yet — assume still alive somewhere
+          // and leave the node untouched. The user can manually rerun if it's
+          // truly stuck.
+          anyStillRunning = true
+        }
+      } catch (err) {
+        console.warn(
+          `[workflow] reconcile: failed to query session_events for ${ns.sessionId}`,
+          err
+        )
+        anyStillRunning = true
+      }
+    }
+
+    // If we resolved at least one node, the rest of the DAG never advanced
+    // (the in-memory exit promise died with the previous renderer). Close the
+    // run rather than auto-resuming a stale execution.
+    if (anyResolvedHere && !anyStillRunning) {
+      const hasPending = execution.nodeStates.some((ns) => ns.status === 'pending')
+      if (hasPending) {
+        for (const ns of execution.nodeStates) {
+          if (ns.status === 'pending') {
+            ns.status = 'skipped'
+            ns.error = 'Renderer reload abandoned this run; re-run to continue'
+          }
+        }
+        execution.status = 'error'
+      } else {
+        execution.status = execution.nodeStates.some((ns) => ns.status === 'error')
+          ? 'error'
+          : 'success'
+      }
+      execution.completedAt = new Date().toISOString()
+      dirty = true
+    }
+
+    if (dirty) {
+      useAppStore.getState().setWorkflowExecution(execution.workflowId, { ...execution })
+      await window.api.saveWorkflowRun(execution)
+    }
+  }
+}
+
+/**
  * Re-arm timeout timers for any approval gates that were `waiting` before the
  * app restarted. Called once after startup hydration; timers elsewhere are set
  * as gates enter `waiting` for the first time.
@@ -516,6 +602,25 @@ async function executeNode(
     let sessionId: string | null = null
     let logs = ''
 
+    // Logs only live in renderer memory until the node finishes — if the
+    // window reloads (HMR, devtools refresh, crash) mid-run they vanish even
+    // though the headless agent in the main process keeps going. Throttle a
+    // background save to disk so accumulated output survives a reload.
+    const PERSIST_INTERVAL_MS = 3000
+    let persistTimer: ReturnType<typeof setTimeout> | null = null
+    let lastPersistedBytes = 0
+    const schedulePersistLogs = () => {
+      if (persistTimer) return
+      persistTimer = setTimeout(() => {
+        persistTimer = null
+        if (logs.length === lastPersistedBytes) return
+        lastPersistedBytes = logs.length
+        // Only persist; the in-memory store was already updated by the
+        // listener so the editor UI is up to date already.
+        void window.api.saveWorkflowRun(execution)
+      }, PERSIST_INTERVAL_MS)
+    }
+
     const removeDataListener = window.api.onHeadlessData(
       ({ id, data }: { id: string; data: string }) => {
         if (sessionId && id === sessionId) {
@@ -525,6 +630,7 @@ async function executeNode(
           }
           updateNodeState(execution, node.id, { logs })
           useAppStore.getState().setWorkflowExecution(workflow.id, { ...execution })
+          schedulePersistLogs()
         }
       }
     )
@@ -610,6 +716,10 @@ async function executeNode(
     } finally {
       removeDataListener()
       removeExitListener()
+      if (persistTimer) {
+        clearTimeout(persistTimer)
+        persistTimer = null
+      }
     }
   } else {
     const cfg = useAppStore.getState().config

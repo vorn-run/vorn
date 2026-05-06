@@ -20,7 +20,8 @@ const WorkflowsLandingView = lazy(() =>
 )
 import {
   executeWorkflow as runWorkflow,
-  rescheduleWaitingGateTimers
+  rescheduleWaitingGateTimers,
+  reconcileRunningExecutions
 } from './lib/workflow-execution'
 import type { WorkflowExecution } from '../shared/types'
 import { CommandPalette } from './components/CommandPalette'
@@ -358,6 +359,23 @@ export function App() {
         rescheduleWaitingGateTimers(hydrated, store.config?.workflows ?? [])
       })
       .catch((err) => console.error('[App] failed to hydrate waiting gates:', err))
+
+    // Resolve runs the previous renderer left in `running`. The main process
+    // keeps headless agents alive past a renderer reload, but the in-memory
+    // exit-promise dies — the run wedges. Reconcile against session_events
+    // and close out anything that already exited.
+    window.api
+      .listRunningWorkflowRuns()
+      .then((runs) => {
+        const store = useAppStore.getState()
+        for (const run of runs) {
+          if (!store.workflowExecutions.has(run.workflowId)) {
+            store.setWorkflowExecution(run.workflowId, run)
+          }
+        }
+        return reconcileRunningExecutions(runs)
+      })
+      .catch((err) => console.error('[App] failed to reconcile running runs:', err))
 
     // Auto-prune exited headless sessions
     const pruneInterval = setInterval(() => {
