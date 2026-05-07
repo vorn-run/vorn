@@ -4532,7 +4532,7 @@ __metadata:
     "@vitejs/plugin-react": "npm:^5.2.0"
     "@vornrun/shared": "workspace:*"
     postcss: "npm:^8.5.10"
-    tailwindcss: "npm:^4.2.2"
+    tailwindcss: "npm:^4.2.4"
     typescript: "npm:^6.0.3"
     vite: "npm:^7.3.2"
     vite-plugin-pwa: "npm:^1.2.0"
@@ -11689,17 +11689,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tailwindcss@npm:4.2.4":
+"tailwindcss@npm:4.2.4, tailwindcss@npm:^4.2.4":
   version: 4.2.4
   resolution: "tailwindcss@npm:4.2.4"
   checksum: 10c0/1069304b6bf2855daa029ac4af382abb95ed26ae4d05bc09ea01a56e6af3de8b6fb1b4d508d8bbb39abf30a69766e6f2f75835e112ac6fc39ed94ae5d4901048
-  languageName: node
-  linkType: hard
-
-"tailwindcss@npm:^4.2.2":
-  version: 4.2.2
-  resolution: "tailwindcss@npm:4.2.2"
-  checksum: 10c0/6eae8a125c35d504ba6c518d26ec64fba694ff4a9ab9b9cd9883050128e0b7afdf491388c472d9bed2624664c1c7d4a133d19b653151a6b52e6ce6953168a857
   languageName: node
   linkType: hard
 
@@ -12704,7 +12697,7 @@ __metadata:
     react-grid-layout: "npm:^2.2.3"
     shiki: "npm:^4.0.2"
     simple-git-hooks: "npm:^2.13.1"
-    tailwindcss: "npm:^4.2.2"
+    tailwindcss: "npm:^4.2.4"
     typescript: "npm:^6.0.3"
     typescript-eslint: "npm:^8.58.2"
     vite: "npm:^7.3.2"
