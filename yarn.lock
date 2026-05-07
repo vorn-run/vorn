@@ -8888,12 +8888,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lucide-react@npm:1.8.0":
-  version: 1.8.0
-  resolution: "lucide-react@npm:1.8.0"
+"lucide-react@npm:1.14.0":
+  version: 1.14.0
+  resolution: "lucide-react@npm:1.14.0"
   peerDependencies:
     react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-  checksum: 10c0/f7398f89a0f5b2cbfd1b7a7f6b2f00b0abd05d4b21d948bbd281ab141c42cdff9f1d2aed4e32b78b4bbdfa78308b6577705698af8bf9945bad23ed7d56e255b4
+  checksum: 10c0/25c5dd878945842ffb519532f1a66f59f2d461e7be7bd322091b0ecd3cd32561c1ae3d9b50161432d39a72bf8c8f1a039268f2f20a035e520dd3f49dd46ffaf2
   languageName: node
   linkType: hard
 
@@ -12768,7 +12768,7 @@ __metadata:
     libsql: "npm:^0.5.29"
     lint-staged: "npm:^16.4.0"
     lowlight: "npm:^3.3.0"
-    lucide-react: "npm:1.8.0"
+    lucide-react: "npm:1.14.0"
     node-cron: "npm:^4.2.1"
     node-gyp: "npm:^12.3.0"
     node-pty: "npm:1.2.0-beta.12"
