@@ -72,7 +72,7 @@
     "react-grid-layout": "^2.2.3",
     "shiki": "^4.0.2",
     "ws": "^8.20.0",
-    "zod": "^4.3.6",
+    "zod": "^4.4.3",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
