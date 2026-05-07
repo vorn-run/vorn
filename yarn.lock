@@ -4614,7 +4614,7 @@ __metadata:
     "@types/react-dom": "npm:^19"
     "@vitejs/plugin-react": "npm:^5.2.0"
     "@vornrun/shared": "workspace:*"
-    postcss: "npm:^8.5.10"
+    postcss: "npm:^8.5.11"
     tailwindcss: "npm:^4.2.4"
     typescript: "npm:^6.0.3"
     vite: "npm:^7.3.2"
@@ -7682,10 +7682,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.12.14":
-  version: 4.12.14
-  resolution: "hono@npm:4.12.14"
-  checksum: 10c0/78de4c98a9a3da0f067e38dcc4bd27f0d82b45d146ac39f5ca688515ee482c0a2e704d2ac6c1ee91ad17596b7c52b3e4b9483acd9c238d42f6ebcb43414a71b6
+"hono@npm:^4.12.18":
+  version: 4.12.18
+  resolution: "hono@npm:4.12.18"
+  checksum: 10c0/b0b9688fd9e41a1847b077d579dc0e92a28b67c247c6ee7d1e751c0bae269824c30c7773feff1a2874e40ea36a3d2f9d1fc5ba618a28ecdf2ca1b33ed2473864
   languageName: node
   linkType: hard
 
@@ -9956,14 +9956,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"postcss@npm:^8.5.10":
-  version: 8.5.10
-  resolution: "postcss@npm:8.5.10"
+"postcss@npm:^8.5.11":
+  version: 8.5.14
+  resolution: "postcss@npm:8.5.14"
   dependencies:
     nanoid: "npm:^3.3.11"
     picocolors: "npm:^1.1.1"
     source-map-js: "npm:^1.2.1"
-  checksum: 10c0/c592dffa0c4873b401f01955b265538d9942f425040df5e2b8f0ad34c83773a792ea0fa5859ccc99cfb5b955b4ebff118ab7056315388dc83b107b0fa8313576
+  checksum: 10c0/48138207cf5ef5581be1bfe2cb65ccfe0ac75e43888ba045afc8ed6043d7b56aeb3b9a9fe5b353ff554be943cd0cc15d826ccb991525159175971e5ee8ab0237
   languageName: node
   linkType: hard
 
@@ -12772,7 +12772,7 @@ __metadata:
     node-cron: "npm:^4.2.1"
     node-gyp: "npm:^12.3.0"
     node-pty: "npm:1.2.0-beta.12"
-    postcss: "npm:^8.5.10"
+    postcss: "npm:^8.5.11"
     prettier: "npm:^3.8.2"
     qrcode: "npm:^1.5.4"
     react: "npm:^19.2.6"
