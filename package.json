@@ -93,7 +93,7 @@
     "electron": "^41.2.0",
     "electron-builder": "^26.9.0",
     "electron-vite": "^5.0.0",
-    "eslint": "^10.2.0",
+    "eslint": "^10.3.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
