@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$Repo = "jcanizalez/vorn"
+$Repo = "vorn-run/vorn"
 $AppName = "Vorn"
 
 function Get-LatestVersion {

@@ -11,9 +11,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jcanizalez/vorn/releases"><img src="https://img.shields.io/github/v/release/jcanizalez/vorn?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/jcanizalez/vorn/blob/main/LICENSE"><img src="https://img.shields.io/github/license/jcanizalez/vorn?style=flat-square" alt="License"></a>
-  <a href="https://github.com/jcanizalez/vorn/stargazers"><img src="https://img.shields.io/github/stars/jcanizalez/vorn?style=flat-square" alt="Stars"></a>
+  <a href="https://github.com/vorn-run/vorn/releases"><img src="https://img.shields.io/github/v/release/vorn-run/vorn?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/vorn-run/vorn/blob/main/LICENSE"><img src="https://img.shields.io/github/license/vorn-run/vorn?style=flat-square" alt="License"></a>
+  <a href="https://github.com/vorn-run/vorn/stargazers"><img src="https://img.shields.io/github/stars/vorn-run/vorn?style=flat-square" alt="Stars"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/status-alpha-orange?style=flat-square" alt="Alpha">
 </p>
@@ -50,22 +50,22 @@ Vorn is the agent command center. How you work is up to you.
 **macOS / Linux:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jcanizalez/vorn/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/vorn-run/vorn/main/install.sh | sh
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/jcanizalez/vorn/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/vorn-run/vorn/main/install.ps1 | iex
 ```
 
 **Homebrew (macOS):**
 
 ```bash
-brew tap jcanizalez/tap && brew install --cask vorn
+brew tap vorn-run/tap && brew install --cask vorn
 ```
 
-Or download directly from [GitHub Releases](https://github.com/jcanizalez/vorn/releases).
+Or download directly from [GitHub Releases](https://github.com/vorn-run/vorn/releases).
 
 ## Features
 

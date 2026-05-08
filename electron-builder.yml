@@ -1,6 +1,6 @@
 publish:
   provider: github
-  owner: jcanizalez
+  owner: vorn-run
   repo: vorn
   releaseType: release
 

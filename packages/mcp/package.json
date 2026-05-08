@@ -7,7 +7,7 @@
   "author": "Javier Canizalez <javier-canizalez@outlook.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jcanizalez/vorn.git",
+    "url": "git+https://github.com/vorn-run/vorn.git",
     "directory": "packages/mcp"
   },
   "keywords": [

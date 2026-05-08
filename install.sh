@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="jcanizalez/vorn"
+REPO="vorn-run/vorn"
 APP_NAME="Vorn"
 
 # Detect OS and architecture
