@@ -532,6 +532,13 @@ async function executeNode(
     }
     existingWorktreePath = config.existingWorktreePath
     useWorktree = undefined
+  } else if (worktreeMode === 'fromContext' && context) {
+    // Without this, createTerminal spawns a fresh worktree off project root instead of reusing the source's.
+    const ctxWorktree = resolveContextField('worktreePath', context) as string | undefined
+    if (ctxWorktree) {
+      existingWorktreePath = ctxWorktree
+      useWorktree = undefined
+    }
   }
 
   let resolvedTask: TaskConfig | undefined
