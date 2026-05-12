@@ -53,12 +53,18 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
       const now = new Date().toISOString()
       let oldStatus: TaskStatus | undefined
       let newTask: TaskConfig | undefined
+      const clearArchived = updates.status !== undefined && !isTerminalTaskStatus(updates.status)
       const updated = {
         ...state.config,
         tasks: (state.config.tasks || []).map((t) => {
           if (t.id !== id) return t
           oldStatus = t.status
-          const mapped = { ...t, ...updates, updatedAt: now }
+          const mapped: TaskConfig = {
+            ...t,
+            ...updates,
+            updatedAt: now,
+            ...(clearArchived && { archivedAt: undefined })
+          }
           newTask = mapped
           return mapped
         })
@@ -115,7 +121,8 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
             assignedSessionId: sessionId,
             assignedAgent: agentType,
             worktreePath: worktreePath || t.worktreePath,
-            updatedAt: now
+            updatedAt: now,
+            archivedAt: undefined
           }
           newTask = mapped
           return mapped
@@ -172,6 +179,7 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
             ...t,
             status: 'in_review' as const,
             updatedAt: now,
+            archivedAt: undefined,
             assignedSessionId: undefined
           }
           newTask = mapped

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, Suspense, lazy } from 'react'
 import { useAppStore } from '../stores'
 import {
   AiAgentType,
@@ -210,7 +210,8 @@ export function TaskDetailPanel() {
     if (relevant) {
       window.api.listWorkflowRunsByTask(taskId, 20).then(setRelatedRuns)
     }
-  }, [task?.id, task, workflowExecutions])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id, workflowExecutions])
 
   useEffect(() => {
     if (!task || isCreateMode) return
@@ -238,14 +239,17 @@ export function TaskDetailPanel() {
       return () => clearInterval(interval)
     }
     return undefined
-  }, [task?.id, task?.status, isCreateMode, task])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id, task?.status, isCreateMode])
 
   useEffect(() => {
     if (!task || !task.images?.length) return
+    const taskId = task.id
+    const images = task.images
     let cancelled = false
     Promise.all(
-      task.images.map(async (f) => {
-        const p = await window.api.getTaskImagePath(task.id, f)
+      images.map(async (f) => {
+        const p = await window.api.getTaskImagePath(taskId, f)
         return [f, p] as [string, string]
       })
     ).then((pairs) => {
@@ -254,7 +258,8 @@ export function TaskDetailPanel() {
     return () => {
       cancelled = true
     }
-  }, [task?.id, task?.images, task])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id, task?.images])
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -304,7 +309,7 @@ export function TaskDetailPanel() {
     formAssignedAgent,
     formImages
   })
-  useEffect(() => {
+  useLayoutEffect(() => {
     formRef.current = {
       formTitle,
       formProjectName,

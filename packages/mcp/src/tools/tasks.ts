@@ -168,11 +168,14 @@ export function registerTaskTools(server: McpServer): void {
 
       if (args.status !== undefined) {
         const newStatus = args.status as TaskStatus
-        const wasDone = task.status === 'done' || task.status === 'cancelled'
-        const isDone = newStatus === 'done' || newStatus === 'cancelled'
+        const wasDone = isTerminalTaskStatus(task.status)
+        const isDone = isTerminalTaskStatus(newStatus)
         updates.status = newStatus
         if (isDone && !wasDone) updates.completedAt = new Date().toISOString()
-        if (!isDone && wasDone) updates.completedAt = undefined
+        if (!isDone && wasDone) {
+          updates.completedAt = undefined
+          updates.archivedAt = undefined
+        }
       }
 
       dbUpdateTask(args.id, updates)
