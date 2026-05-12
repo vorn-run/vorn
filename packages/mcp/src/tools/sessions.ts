@@ -361,11 +361,11 @@ export function registerSessionTools(server: McpServer): void {
 
   server.tool(
     'list_session_events',
-    'List session lifecycle events (created, exited, task_linked, renamed). Use for post-mortem analysis and multi-agent coordination.',
+    'List session lifecycle events (created, exited, renamed). Use for post-mortem analysis and multi-agent coordination.',
     {
       session_id: V.id.optional().describe('Filter by session ID'),
       event_type: z
-        .enum(['created', 'exited', 'task_linked', 'renamed'])
+        .enum(['created', 'exited', 'renamed'])
         .optional()
         .describe('Filter by event type'),
       limit: z

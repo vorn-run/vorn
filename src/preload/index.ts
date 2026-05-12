@@ -18,7 +18,6 @@ import {
   SSHKeyMeta,
   RemoteHost,
   TailscaleStatus,
-  SessionLog,
   FileEntry,
   SourceConnection,
   TaskSourceLink,
@@ -347,7 +346,7 @@ const api = {
     }
   },
 
-  // Session events (lifecycle log: created / exited / task_linked)
+  // Session events (lifecycle log: created / exited / renamed)
   listSessionEventsBySession: (
     sessionId: string,
     limit?: number
@@ -378,9 +377,6 @@ const api = {
     limit?: number
   ): Promise<(WorkflowExecution & { workflowName?: string })[]> =>
     ipcRenderer.invoke(IPC.WORKFLOW_RUN_LIST_ALL, workspaceId, limit),
-
-  listSessionLogs: (taskId: string): Promise<SessionLog[]> =>
-    ipcRenderer.invoke(IPC.SESSION_LOG_LIST, taskId),
 
   reportWorkflowComplete: (data: {
     workflowId: string

@@ -684,7 +684,6 @@ async function executeNode(
         initialPrompt,
         promptDelayMs: config.promptDelayMs,
         headless: true,
-        taskId: resolvedTaskId,
         workflowId: workflow.id,
         workflowName: workflow.name,
         args: config.args
@@ -753,7 +752,6 @@ async function executeNode(
       existingWorktreePath,
       initialPrompt,
       promptDelayMs: config.promptDelayMs,
-      taskId: resolvedTaskId,
       args: config.args,
       remoteHostId
     })

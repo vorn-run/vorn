@@ -361,7 +361,7 @@ export interface TaskSourceLink {
 }
 
 // Session event types (lifecycle activity log)
-export type SessionEventType = 'created' | 'exited' | 'task_linked' | 'renamed'
+export type SessionEventType = 'created' | 'exited' | 'renamed'
 
 export interface SessionEvent {
   id?: number
@@ -369,23 +369,6 @@ export interface SessionEvent {
   eventType: SessionEventType
   timestamp: string
   metadata?: Record<string, unknown>
-}
-
-// Session activity log types
-export type SessionLogStatus = 'running' | 'success' | 'error'
-
-export interface SessionLog {
-  id?: number
-  taskId: string
-  sessionId: string
-  agentType?: AiAgentType
-  branch?: string
-  status: SessionLogStatus
-  startedAt: string
-  completedAt?: string
-  exitCode?: number
-  logs?: string
-  projectName?: string
 }
 
 // --- Workflow engine types (Logic Apps-style) ---
@@ -775,8 +758,6 @@ export interface CreateTerminalPayload {
   initialPrompt?: string
   promptDelayMs?: number
   headless?: boolean
-  /** Task ID — when set, the main process writes a .vorn/context.md file before agent spawn */
-  taskId?: string
   /** Workflow metadata — for tagging headless sessions launched by workflows */
   workflowId?: string
   workflowName?: string
@@ -806,8 +787,6 @@ export interface HeadlessSession {
   /** Workflow that launched this session */
   workflowId?: string
   workflowName?: string
-  /** Task this session is working on */
-  taskId?: string
   /** The agent's own session id (pinned via --session-id for claude/copilot),
    *  enabling later --resume. Only set for agents that support pinning. */
   agentSessionId?: string
@@ -937,8 +916,6 @@ export const IPC = {
   WORKFLOW_RUN_LIST_WAITING: 'workflowRun:listWaiting',
   WORKFLOW_RUN_LIST_RUNNING: 'workflowRun:listRunning',
   WORKFLOW_RUN_LIST_ALL: 'workflowRun:listAll',
-  SESSION_LOG_LIST: 'sessionLog:list',
-  SESSION_LOG_UPDATE: 'sessionLog:update',
   SESSION_EVENT_LIST: 'sessionEvent:list',
   SESSION_EVENT_LIST_BY_SESSION: 'sessionEvent:listBySession',
   AGENT_DETECT_INSTALLED: 'agent:detectInstalled',

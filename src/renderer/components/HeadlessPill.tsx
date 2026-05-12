@@ -4,7 +4,7 @@ import { HeadlessSession } from '../../shared/types'
 import { AgentIcon } from './AgentIcon'
 import { useAppStore } from '../stores'
 import { ICON_MAP } from './project-sidebar/icon-map'
-import { GitBranch, X, Square, Workflow, Circle, Clock, Eye, CheckCircle2 } from 'lucide-react'
+import { GitBranch, X, Square, Workflow } from 'lucide-react'
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000)
@@ -14,20 +14,6 @@ function formatDuration(ms: number): string {
   if (m < 60) return rs > 0 ? `${m}m${rs}s` : `${m}m`
   const h = Math.floor(m / 60)
   return `${h}h${m % 60}m`
-}
-
-const TASK_STATUS_META: Record<
-  string,
-  {
-    Icon: React.FC<{ size?: number; className?: string; strokeWidth?: number }>
-    color: string
-    label: string
-  }
-> = {
-  todo: { Icon: Circle, color: 'text-gray-400', label: 'Todo' },
-  in_progress: { Icon: Clock, color: 'text-yellow-500', label: 'In Progress' },
-  in_review: { Icon: Eye, color: 'text-purple-400', label: 'In Review' },
-  done: { Icon: CheckCircle2, color: 'text-green-500', label: 'Done' }
 }
 
 interface Props {
@@ -41,32 +27,18 @@ export function HeadlessPill({ session }: Props) {
   const [duration, setDuration] = useState('')
   const logsRef = useRef<HTMLDivElement>(null)
   const lastOutput = useAppStore((s) => s.headlessLastOutput.get(session.id))
-  const {
-    dismissHeadless,
-    setEditingWorkflowId,
-    setWorkflowEditorOpen,
-    setSelectedTaskId,
-    workflows,
-    tasks
-  } = useAppStore(
+  const { dismissHeadless, setEditingWorkflowId, setWorkflowEditorOpen, workflows } = useAppStore(
     useShallow((s) => ({
       dismissHeadless: s.dismissHeadlessSession,
       setEditingWorkflowId: s.setEditingWorkflowId,
       setWorkflowEditorOpen: s.setWorkflowEditorOpen,
-      setSelectedTaskId: s.setSelectedTaskId,
-      workflows: s.config?.workflows,
-      tasks: s.config?.tasks
+      workflows: s.config?.workflows
     }))
   )
 
   const workflow = useMemo(
     () => (session.workflowId ? workflows?.find((w) => w.id === session.workflowId) : undefined),
     [session.workflowId, workflows]
-  )
-
-  const task = useMemo(
-    () => (session.taskId ? tasks?.find((t) => t.id === session.taskId) : undefined),
-    [session.taskId, tasks]
   )
 
   // Tick duration for running sessions
@@ -137,13 +109,9 @@ export function HeadlessPill({ session }: Props) {
 
   const opacityClass = !isRunning ? 'opacity-[0.65]' : ''
 
-  // Resolve workflow icon
   const WfIcon = workflow ? ICON_MAP[workflow.icon] || Workflow : null
   const wfIconColor = workflow?.iconColor
-
-  // Resolve task status
-  const taskMeta = task ? TASK_STATUS_META[task.status] : null
-  const hasTag = !!(WfIcon && session.workflowName) || !!(!session.workflowId && taskMeta && task)
+  const showWorkflowTag = !!(WfIcon && session.workflowName)
 
   return (
     <div
@@ -151,7 +119,7 @@ export function HeadlessPill({ session }: Props) {
                    cursor-pointer transition-[border-color,box-shadow,opacity] select-none
                    hover:border-white/[0.12]
                    ${borderClass} ${opacityClass}
-                   ${hasTag || expanded ? 'flex-col !items-stretch' : 'items-center gap-1.5'}
+                   ${showWorkflowTag || expanded ? 'flex-col !items-stretch' : 'items-center gap-1.5'}
                    ${expanded ? 'w-[320px]' : ''}`}
       onClick={() => setExpanded(!expanded)}
       onMouseEnter={() => setHovered(true)}
@@ -242,8 +210,7 @@ export function HeadlessPill({ session }: Props) {
         )}
       </div>
 
-      {/* Tag row: workflow or task */}
-      {WfIcon && session.workflowName && (
+      {showWorkflowTag && (
         <button
           className="flex items-center gap-1 -mt-0.5 ml-5 hover:text-gray-300 transition-colors"
           onClick={(e) => {
@@ -258,18 +225,6 @@ export function HeadlessPill({ session }: Props) {
           <span className="text-[10px] text-gray-500 truncate max-w-[120px] hover:text-gray-300">
             {session.workflowName}
           </span>
-        </button>
-      )}
-      {!session.workflowId && taskMeta && task && (
-        <button
-          className="flex items-center gap-1 -mt-0.5 ml-5 hover:text-gray-300 transition-colors"
-          onClick={(e) => {
-            e.stopPropagation()
-            setSelectedTaskId(task.id)
-          }}
-        >
-          <taskMeta.Icon size={9} strokeWidth={1.5} className={taskMeta.color} />
-          <span className="text-[10px] text-gray-500 hover:text-gray-300">{task.title}</span>
         </button>
       )}
 

@@ -139,7 +139,6 @@ class HeadlessManager extends EventEmitter {
       startedAt: Date.now(),
       ...(payload.workflowId != null && { workflowId: payload.workflowId }),
       ...(payload.workflowName != null && { workflowName: payload.workflowName }),
-      ...(payload.taskId != null && { taskId: payload.taskId }),
       ...(agentSessionId ? { agentSessionId } : {})
     }
     this.sessions.set(id, session)

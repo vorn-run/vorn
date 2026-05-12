@@ -4,7 +4,6 @@ import {
   AiAgentType,
   GitDiffResult,
   WorkflowExecution,
-  SessionLog,
   supportsExactSessionResume,
   getProjectRemoteHostId
 } from '../../shared/types'
@@ -40,13 +39,11 @@ import {
   ChevronRight,
   FolderGit2,
   Save,
-  Workflow,
-  Activity
+  Workflow
 } from 'lucide-react'
 import { ConnectorIcon } from './ConnectorIcon'
 import { RunEntry } from './workflow-editor/RunEntry'
 import { LogReplayModal } from './LogReplayModal'
-import { SessionActivityLog } from './SessionActivityLog'
 import { ConfirmPopover } from './ConfirmPopover'
 
 interface DiffComment {
@@ -112,8 +109,6 @@ export function TaskDetailPanel() {
   } | null>(null)
   const [showDiffSection, setShowDiffSection] = useState(true)
   const [showWorkflowRuns, setShowWorkflowRuns] = useState(true)
-  const [showSessionActivity, setShowSessionActivity] = useState(true)
-  const [sessionLogs, setSessionLogs] = useState<SessionLog[]>([])
   const [fullOutputLogs, setFullOutputLogs] = useState<string | null>(null)
 
   // Form state (always active for existing tasks + create mode)
@@ -126,11 +121,11 @@ export function TaskDetailPanel() {
   const [formImages, setFormImages] = useState<string[]>([])
   const [formImagePaths, setFormImagePaths] = useState<Map<string, string>>(new Map())
   const { status: agentInstallStatus } = useAgentInstallStatus()
-  const newTaskIdRef = useRef<string>(crypto.randomUUID())
+  const [newTaskId, setNewTaskId] = useState(() => crypto.randomUUID())
   const initializedRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const taskId = isCreateMode ? newTaskIdRef.current : task?.id
+  const taskId = isCreateMode ? newTaskId : task?.id
 
   const project = config?.projects.find((p) => p.name === formProjectName)
   const cwd = task?.worktreePath || project?.path || ''
@@ -148,12 +143,22 @@ export function TaskDetailPanel() {
     []
   )
   const workflowExecutions = useAppStore((s) => s.workflowExecutions)
+
+  const [prevRelatedRunsTaskId, setPrevRelatedRunsTaskId] = useState<string | undefined>(task?.id)
+  if (task?.id !== prevRelatedRunsTaskId) {
+    setPrevRelatedRunsTaskId(task?.id)
+    setRelatedRuns([])
+  }
+
   useEffect(() => {
-    if (!task) {
-      setRelatedRuns([])
-      return
+    if (!task) return
+    let cancelled = false
+    window.api.listWorkflowRunsByTask(task.id, 20).then((rows) => {
+      if (!cancelled) setRelatedRuns(rows)
+    })
+    return () => {
+      cancelled = true
     }
-    window.api.listWorkflowRunsByTask(task.id, 20).then(setRelatedRuns)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task?.id])
 
@@ -168,77 +173,25 @@ export function TaskDetailPanel() {
         break
       }
     }
-    if (relevant) {
-      window.api.listWorkflowRunsByTask(taskId, 20).then(setRelatedRuns)
+    if (!relevant) return
+    let cancelled = false
+    window.api.listWorkflowRunsByTask(taskId, 20).then((rows) => {
+      if (!cancelled) setRelatedRuns(rows)
+    })
+    return () => {
+      cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task?.id, workflowExecutions])
 
-  // Load session logs for this task + poll while in_progress
-  useEffect(() => {
-    if (!task || isCreateMode) {
-      setSessionLogs([])
-      return
-    }
-    const fetchLogs = () =>
-      window.api.listSessionLogs(task.id).then((next) => {
-        setSessionLogs((prev) => {
-          if (prev.length !== next.length) return next
-          for (let i = 0; i < next.length; i++) {
-            if (
-              prev[i].sessionId !== next[i].sessionId ||
-              prev[i].status !== next[i].status ||
-              prev[i].completedAt !== next[i].completedAt ||
-              prev[i].exitCode !== next[i].exitCode ||
-              (prev[i].logs?.length ?? 0) !== (next[i].logs?.length ?? 0)
-            )
-              return next
-          }
-          return prev
-        })
-      })
-    fetchLogs()
-    if (task.status === 'in_progress') {
-      const interval = setInterval(fetchLogs, 5_000)
-      return () => clearInterval(interval)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id, task?.status, isCreateMode])
-
-  // Initialize form from task when switching tasks
-  useEffect(() => {
-    initializedRef.current = false
-    if (task) {
-      setFormTitle(task.title)
-      setFormProjectName(task.projectName)
-      setFormDescription(task.description)
-      setFormBranch(task.branch || '')
-      setFormUseWorktree(task.useWorktree || false)
-      setFormAssignedAgent(task.assignedAgent || null)
-      setFormImages(task.images || [])
-      if (task.images?.length) {
-        Promise.all(
-          task.images.map(async (f) => {
-            const p = await window.api.getTaskImagePath(task.id, f)
-            return [f, p] as [string, string]
-          })
-        ).then((pairs) => setFormImagePaths(new Map(pairs)))
-      } else {
-        setFormImagePaths(new Map())
-      }
-    }
-    // Mark initialized after a tick so the save effect doesn't fire for initial population
-    requestAnimationFrame(() => {
-      initializedRef.current = true
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTaskId])
-
-  // Initialize form for create mode
-  useEffect(() => {
+  // Initialize form when switching task (or entering create mode) — reset during
+  // render via the `prev` pattern so we don't call setState inside an effect.
+  const [prevFormKey, setPrevFormKey] = useState<string | null>(null)
+  const formKey = isCreateMode ? 'new' : (selectedTaskId ?? null)
+  if (formKey !== prevFormKey) {
+    setPrevFormKey(formKey)
     if (isCreateMode) {
-      initializedRef.current = false
-      newTaskIdRef.current = crypto.randomUUID()
+      setNewTaskId(crypto.randomUUID())
       setFormTitle('')
       setFormProjectName(activeProject || config?.projects[0]?.name || '')
       setFormDescription(TASK_TEMPLATE)
@@ -247,11 +200,46 @@ export function TaskDetailPanel() {
       setFormAssignedAgent(null)
       setFormImages([])
       setFormImagePaths(new Map())
-      requestAnimationFrame(() => {
-        initializedRef.current = true
-      })
+    } else if (task) {
+      setFormTitle(task.title)
+      setFormProjectName(task.projectName)
+      setFormDescription(task.description)
+      setFormBranch(task.branch || '')
+      setFormUseWorktree(task.useWorktree || false)
+      setFormAssignedAgent(task.assignedAgent || null)
+      setFormImages(task.images || [])
+      setFormImagePaths(new Map())
     }
-  }, [isCreateMode, activeProject, config])
+  }
+
+  // Async image-path resolution for existing tasks; kept in an effect because
+  // it touches the filesystem.
+  useEffect(() => {
+    if (isCreateMode || !task?.images?.length) return
+    let cancelled = false
+    Promise.all(
+      task.images.map(async (f) => {
+        const p = await window.api.getTaskImagePath(task.id, f)
+        return [f, p] as [string, string]
+      })
+    ).then((pairs) => {
+      if (!cancelled) setFormImagePaths(new Map(pairs))
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id])
+
+  // Reset the init gate before the form-state commits, then re-arm after rAF
+  // so the debounced auto-save effect skips the initial population pass.
+  useEffect(() => {
+    initializedRef.current = false
+    const raf = requestAnimationFrame(() => {
+      initializedRef.current = true
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [formKey])
 
   // Auto-save for existing tasks (debounced)
   useEffect(() => {
@@ -284,7 +272,7 @@ export function TaskDetailPanel() {
     formImages
   ])
 
-  // Flush pending save on unmount or task switch
+  // Latest-value ref for the flush-on-unmount/switch effect below.
   const formRef = useRef({
     formTitle,
     formProjectName,
@@ -294,15 +282,17 @@ export function TaskDetailPanel() {
     formAssignedAgent,
     formImages
   })
-  formRef.current = {
-    formTitle,
-    formProjectName,
-    formDescription,
-    formBranch,
-    formUseWorktree,
-    formAssignedAgent,
-    formImages
-  }
+  useEffect(() => {
+    formRef.current = {
+      formTitle,
+      formProjectName,
+      formDescription,
+      formBranch,
+      formUseWorktree,
+      formAssignedAgent,
+      formImages
+    }
+  })
 
   useEffect(() => {
     const taskIdForCleanup = selectedTaskId
@@ -342,16 +332,27 @@ export function TaskDetailPanel() {
     }
   }, [cwd, showDiff])
 
-  useEffect(() => {
-    if (selectedTaskId && selectedTaskId !== 'new' && cwd && showDiff) {
-      fetchDiff()
-    } else {
+  const diffEligible = !!(selectedTaskId && selectedTaskId !== 'new' && cwd && showDiff)
+  const [prevDiffKey, setPrevDiffKey] = useState<string | null>(null)
+  const diffKey = diffEligible ? `${selectedTaskId}|${cwd}` : null
+  if (diffKey !== prevDiffKey) {
+    setPrevDiffKey(diffKey)
+    if (!diffEligible) {
       setDiffResult(null)
       setSelectedFile(null)
       setComments([])
       setCommentingLine(null)
     }
-  }, [selectedTaskId, cwd, showDiff, fetchDiff])
+  }
+
+  // fetchDiff is also called from event handlers (commit dialog, refresh
+  // buttons); the synchronous setDiffLoading(true) is the intentional
+  // spinner trigger, not a cascading-render hazard.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (diffEligible) fetchDiff()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diffKey])
 
   if (!task && !isCreateMode) return null
 
@@ -462,7 +463,6 @@ export function TaskDetailPanel() {
         useWorktree: task.useWorktree,
         resumeSessionId: task.agentSessionId,
         initialPrompt: buildFeedbackPrompt(feedback, task, project),
-        taskId: task.id,
         remoteHostId
       })
       addTerminal(session)
@@ -539,7 +539,7 @@ export function TaskDetailPanel() {
     const now = new Date().toISOString()
     const existingTasks =
       config?.tasks?.filter((t) => t.projectName === formProjectName && t.status === 'todo') || []
-    const newId = newTaskIdRef.current
+    const newId = newTaskId
     addTask({
       id: newId,
       projectName: formProjectName,
@@ -833,33 +833,6 @@ export function TaskDetailPanel() {
                 <Play size={12} strokeWidth={2} />
                 Resume Session
               </button>
-            )}
-          </div>
-        )}
-
-        {/* Session Activity section */}
-        {!isCreateMode && sessionLogs.length > 0 && (
-          <div className="border-t border-white/[0.06]">
-            <button
-              onClick={() => setShowSessionActivity(!showSessionActivity)}
-              className="w-full px-4 py-2.5 flex items-center gap-2 text-[11px] font-medium text-gray-500
-                         uppercase tracking-wider hover:text-gray-300 transition-colors"
-            >
-              {showSessionActivity ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-              <Activity size={12} strokeWidth={2} />
-              Session Activity ({sessionLogs.length})
-            </button>
-
-            {showSessionActivity && (
-              <div className="px-3 pb-3">
-                <SessionActivityLog
-                  logs={sessionLogs}
-                  onViewFullOutput={setFullOutputLogs}
-                  onResumeSession={handleRunResumeSession}
-                  agentSessionId={task?.agentSessionId}
-                  projectPath={project?.path}
-                />
-              </div>
             )}
           </div>
         )}

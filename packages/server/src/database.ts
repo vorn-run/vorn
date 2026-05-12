@@ -21,7 +21,6 @@ import {
   AiAgentType,
   WorkspaceConfig,
   DEFAULT_WORKSPACE,
-  SessionLog,
   SessionEvent,
   SessionEventType,
   SourceConnection,
@@ -368,23 +367,6 @@ function createSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_workflow_run_nodes_run ON workflow_run_nodes(run_id);
     CREATE INDEX IF NOT EXISTS idx_workflow_run_nodes_task ON workflow_run_nodes(task_id);
 
-    CREATE TABLE IF NOT EXISTS session_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      agent_type TEXT,
-      branch TEXT,
-      status TEXT NOT NULL DEFAULT 'running',
-      started_at TEXT NOT NULL,
-      completed_at TEXT,
-      exit_code INTEGER,
-      logs TEXT,
-      project_name TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_session_logs_task ON session_logs(task_id);
-    CREATE INDEX IF NOT EXISTS idx_session_logs_session ON session_logs(session_id);
-
     CREATE TABLE IF NOT EXISTS session_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
@@ -640,6 +622,16 @@ function migrateSchema(d: Database.Database): void {
       ).run()
     })()
     log.info('[database] migrated schema to version 9 (connector source connections)')
+  }
+
+  if (version < 10) {
+    d.transaction(() => {
+      d.exec('DROP TABLE IF EXISTS session_logs')
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '10')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 10 (drop session_logs)')
   }
 }
 
@@ -2356,107 +2348,6 @@ export function listAllWorkflowRuns(
       rows.map((r) => r.id)
     )
   )
-}
-
-// ─── Session Logs ─────────────────────────────────────────────────
-
-const MAX_SESSION_LOGS_PER_TASK = 10
-const MAX_SESSION_OUTPUT_CHARS = 100_000
-
-export function createSessionLog(entry: SessionLog): void {
-  const d = getDb()
-  d.prepare(
-    `INSERT INTO session_logs (task_id, session_id, agent_type, branch, status, started_at, completed_at, exit_code, logs, project_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    entry.taskId,
-    entry.sessionId,
-    entry.agentType ?? null,
-    entry.branch ?? null,
-    entry.status,
-    entry.startedAt,
-    entry.completedAt ?? null,
-    entry.exitCode ?? null,
-    entry.logs ?? null,
-    entry.projectName ?? null
-  )
-
-  // Prune old runs — keep only the most recent N per task
-  d.prepare(
-    `DELETE FROM session_logs WHERE task_id = ? AND id NOT IN (
-       SELECT id FROM session_logs WHERE task_id = ? ORDER BY started_at DESC LIMIT ?
-     )`
-  ).run(entry.taskId, entry.taskId, MAX_SESSION_LOGS_PER_TASK)
-}
-
-export function updateSessionLog(
-  sessionId: string,
-  updates: Partial<Pick<SessionLog, 'status' | 'completedAt' | 'exitCode' | 'logs'>>
-): void {
-  const d = getDb()
-  const sets: string[] = []
-  const vals: unknown[] = []
-
-  if (updates.status !== undefined) {
-    sets.push('status = ?')
-    vals.push(updates.status)
-  }
-  if (updates.completedAt !== undefined) {
-    sets.push('completed_at = ?')
-    vals.push(updates.completedAt)
-  }
-  if (updates.exitCode !== undefined) {
-    sets.push('exit_code = ?')
-    vals.push(updates.exitCode)
-  }
-  if (updates.logs !== undefined) {
-    sets.push('logs = ?')
-    vals.push(updates.logs)
-  }
-
-  if (sets.length === 0) return
-  vals.push(sessionId)
-  d.prepare(`UPDATE session_logs SET ${sets.join(', ')} WHERE session_id = ?`).run(...vals)
-}
-
-export function appendSessionOutput(sessionId: string, data: string): void {
-  const d = getDb()
-  d.prepare(
-    `UPDATE session_logs SET logs = CASE
-       WHEN length(COALESCE(logs, '') || ?) > ?
-       THEN substr(COALESCE(logs, '') || ?, -?)
-       ELSE COALESCE(logs, '') || ?
-     END
-     WHERE session_id = ?`
-  ).run(
-    data,
-    MAX_SESSION_OUTPUT_CHARS,
-    data,
-    Math.floor(MAX_SESSION_OUTPUT_CHARS * 0.8),
-    data,
-    sessionId
-  )
-}
-
-export function listSessionLogs(taskId: string): SessionLog[] {
-  const d = getDb()
-  const rows = d
-    .prepare('SELECT * FROM session_logs WHERE task_id = ? ORDER BY started_at DESC')
-    .all(taskId) as Array<Record<string, unknown>>
-
-  return rows.map((r) => ({
-    id: r.id as number,
-    taskId: r.task_id as string,
-    sessionId: r.session_id as string,
-    agentType: (r.agent_type as string | null) ?? undefined,
-    branch: (r.branch as string | null) ?? undefined,
-    status: r.status as SessionLog['status'],
-    startedAt: r.started_at as string,
-    completedAt: (r.completed_at as string | null) ?? undefined,
-    exitCode: (r.exit_code as number | null) ?? undefined,
-    logs: (r.logs as string | null) ?? undefined,
-    projectName: (r.project_name as string | null) ?? undefined
-  }))
 }
 
 // ─── Session Events ───────────────────────────────────────────────

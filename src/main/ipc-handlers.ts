@@ -136,14 +136,6 @@ export function registerIpcHandlers(): void {
     requireBridge().request(IPC.WORKFLOW_RUN_LIST_RUNNING, {})
   )
 
-  // Session logs
-  safeHandle(IPC.SESSION_LOG_LIST, (_, taskId) =>
-    requireBridge().request(IPC.SESSION_LOG_LIST, { taskId })
-  )
-  safeHandle(IPC.SESSION_LOG_UPDATE, (_, entry) =>
-    requireBridge().request(IPC.SESSION_LOG_UPDATE, entry)
-  )
-
   // Session events
   safeHandle(IPC.SESSION_EVENT_LIST_BY_SESSION, (_, sessionId, limit) =>
     requireBridge().request(IPC.SESSION_EVENT_LIST_BY_SESSION, { sessionId, limit })

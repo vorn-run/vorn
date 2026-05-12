@@ -16,7 +16,6 @@ import type {
   WorkflowDefinition,
   SSHKey,
   SSHKeyMeta,
-  SessionLog,
   SessionEvent,
   SessionEventType,
   SourceConnection,
@@ -132,14 +131,6 @@ export interface RequestMethods {
   'workflowRun:listByTask': {
     params: { taskId: string; limit?: number }
     result: WorkflowExecution[]
-  }
-  'sessionLog:list': {
-    params: { taskId: string }
-    result: SessionLog[]
-  }
-  'sessionLog:update': {
-    params: SessionLog
-    result: void
   }
   'sessionEvent:list': {
     params: { eventType?: SessionEventType; limit?: number }

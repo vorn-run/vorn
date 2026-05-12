@@ -86,19 +86,17 @@ describe('headlessManager.createHeadless', () => {
     headlessManager.killHeadless(session.id)
   })
 
-  it('propagates taskId / workflowId onto the session', () => {
+  it('propagates workflowId / workflowName onto the session', () => {
     const session = headlessManager.createHeadless({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/p',
       initialPrompt: 'go',
       headless: true,
-      taskId: 'task-1',
       workflowId: 'wf-1',
       workflowName: 'wf'
     })
 
-    expect(session.taskId).toBe('task-1')
     expect(session.workflowId).toBe('wf-1')
     expect(session.workflowName).toBe('wf')
 
