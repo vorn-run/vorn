@@ -744,8 +744,8 @@ __metadata:
   linkType: hard
 
 "@babel/plugin-transform-modules-systemjs@npm:^7.29.0":
-  version: 7.29.4
-  resolution: "@babel/plugin-transform-modules-systemjs@npm:7.29.4"
+  version: 7.29.0
+  resolution: "@babel/plugin-transform-modules-systemjs@npm:7.29.0"
   dependencies:
     "@babel/helper-module-transforms": "npm:^7.28.6"
     "@babel/helper-plugin-utils": "npm:^7.28.6"
@@ -753,7 +753,7 @@ __metadata:
     "@babel/traverse": "npm:^7.29.0"
   peerDependencies:
     "@babel/core": ^7.0.0-0
-  checksum: 10c0/1da94f89ef8ba1aa1501136a80eb4c010c6a19f5550e10db84677b3ccb7a4934c8098f2b5134def87cf513bf05747ffa523d33722a1ea5a5c8ef956e9136c4c2
+  checksum: 10c0/44ea502f2c990398b7d9adc5b44d9e1810a0a5e86eebc05c92d039458f0b3994fe243efa9353b90f8a648d8a91b79845fb353d8679d7324cc9de0162d732771d
   languageName: node
   linkType: hard
 
@@ -4620,7 +4620,7 @@ __metadata:
     fastify: "npm:^5.8.5"
     libsql: "npm:^0.5.29"
     node-cron: "npm:^4.2.1"
-    node-pty: "npm:1.2.0-beta.12"
+    node-pty: "npm:1.2.0-beta.13"
     pino: "npm:^10.3.1"
     tsup: "npm:^8.5.1"
     tsx: "npm:^4.21.0"
@@ -9557,13 +9557,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"node-pty@npm:1.2.0-beta.12":
-  version: 1.2.0-beta.12
-  resolution: "node-pty@npm:1.2.0-beta.12"
+"node-pty@npm:1.2.0-beta.13":
+  version: 1.2.0-beta.13
+  resolution: "node-pty@npm:1.2.0-beta.13"
   dependencies:
     node-addon-api: "npm:^7.1.0"
     node-gyp: "npm:latest"
-  checksum: 10c0/1659455e07c0d37842216f6692f8f9410f46e20e06e4aa51cbd7e1bf237e5f20812ba278e1ccbaeda037afdcc0e524da0498a02c9ed44c1526bf470ea7d34aed
+  checksum: 10c0/56ad1661013f1fdbe3eb1675854e657d8a9c1834aa5a7e51fc5132858c528ca63a3edff6568ed4f90f174de716cd9378a40d5c3fad80182210f0006020a06458
   languageName: node
   linkType: hard
 
@@ -12901,7 +12901,7 @@ __metadata:
     lucide-react: "npm:1.14.0"
     node-cron: "npm:^4.2.1"
     node-gyp: "npm:^12.3.0"
-    node-pty: "npm:1.2.0-beta.12"
+    node-pty: "npm:1.2.0-beta.13"
     postcss: "npm:^8.5.11"
     prettier: "npm:^3.8.3"
     qrcode: "npm:^1.5.4"
