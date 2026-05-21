@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
@@ -70,6 +70,14 @@ function makeState(overrides: Partial<NodeExecutionState> = {}): NodeExecutionSt
 }
 
 describe('RunEntry', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-20T10:00:10Z'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('expands and shows the Resume button when agentSessionId is present', () => {
     const onResume = vi.fn()
     const exec = makeExec({ nodeStates: [makeState({ agentSessionId: 'agent-abc' })] })
