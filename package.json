@@ -73,7 +73,7 @@
     "shiki": "^4.0.2",
     "ws": "^8.20.0",
     "zod": "^4.4.3",
-    "zustand": "^5.0.12"
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
