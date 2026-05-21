@@ -3672,6 +3672,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tiptap/extension-link@npm:^3.23.5":
+  version: 3.23.5
+  resolution: "@tiptap/extension-link@npm:3.23.5"
+  dependencies:
+    linkifyjs: "npm:^4.3.3"
+  peerDependencies:
+    "@tiptap/core": 3.23.5
+    "@tiptap/pm": 3.23.5
+  checksum: 10c0/ae444d2bf837a2386ab18d088f529981daecc2677aaa67f7215674231a196765020e4d61a92216e59f2c6585e4f453ea5564818869ef4da3d54aa251e4c7929f
+  languageName: node
+  linkType: hard
+
 "@tiptap/extension-list-item@npm:^3.22.5":
   version: 3.22.5
   resolution: "@tiptap/extension-list-item@npm:3.22.5"
@@ -8771,6 +8783,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"linkifyjs@npm:^4.3.3":
+  version: 4.3.3
+  resolution: "linkifyjs@npm:4.3.3"
+  checksum: 10c0/0eac293927f1465d13625c8c67c83c50d7fda9137c255a4a2ff5970ea4e9ba57de4846b170326e54b9e4e82be24f3705572bc50773737be9b13af5f1e4577798
+  languageName: node
+  linkType: hard
+
 "lint-staged@npm:^16.4.0":
   version: 16.4.0
   resolution: "lint-staged@npm:16.4.0"
@@ -12881,7 +12900,7 @@ __metadata:
     "@tiptap/core": "npm:^3.22.5"
     "@tiptap/extension-code-block": "npm:^3.22.5"
     "@tiptap/extension-code-block-lowlight": "npm:^3.22.5"
-    "@tiptap/extension-link": "npm:^3.22.5"
+    "@tiptap/extension-link": "npm:^3.23.5"
     "@tiptap/extension-list": "npm:^3.23.4"
     "@tiptap/extension-placeholder": "npm:^3.22.5"
     "@tiptap/extension-task-item": "npm:^3.23.4"
