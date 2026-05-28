@@ -3899,13 +3899,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tiptap/suggestion@npm:^3.23.5":
-  version: 3.23.5
-  resolution: "@tiptap/suggestion@npm:3.23.5"
+"@tiptap/suggestion@npm:^3.23.6":
+  version: 3.23.6
+  resolution: "@tiptap/suggestion@npm:3.23.6"
   peerDependencies:
-    "@tiptap/core": 3.23.5
-    "@tiptap/pm": 3.23.5
-  checksum: 10c0/18102ca24d6217021a558cf299e39554a11fda77fd8904676f92cfeb5658a9f86dc178b0671f8fba656971432202f52c97f1fd79166f23e6cd6d45a4c9d3d6d2
+    "@tiptap/core": 3.23.6
+    "@tiptap/pm": 3.23.6
+  checksum: 10c0/ad01ef86665f4fc3d62c5606adbab0119c8cd0c593215047c92e6dcc7eb73f97125e0641bf76208c706a9c93890df4bdf3c93a288054777308fedd88b5bff5a8
   languageName: node
   linkType: hard
 
@@ -12948,7 +12948,7 @@ __metadata:
     "@tiptap/pm": "npm:^3.22.5"
     "@tiptap/react": "npm:^3.22.5"
     "@tiptap/starter-kit": "npm:^3.22.5"
-    "@tiptap/suggestion": "npm:^3.23.5"
+    "@tiptap/suggestion": "npm:^3.23.6"
     "@types/d3-hierarchy": "npm:^3.1.7"
     "@types/qrcode": "npm:^1.5.6"
     "@types/react": "npm:^19.2.14"
