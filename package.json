@@ -71,7 +71,7 @@
     "react-dom": "^19.2.6",
     "react-grid-layout": "^2.2.3",
     "shiki": "^4.0.2",
-    "ws": "^8.20.1",
+    "ws": "^8.21.0",
     "zod": "^4.4.3",
     "zustand": "^5.0.13"
   },
@@ -100,7 +100,7 @@
     "jsdom": "^29.1.1",
     "lint-staged": "^16.4.0",
     "node-gyp": "^12.3.0",
-    "postcss": "^8.5.11",
+    "postcss": "^8.5.15",
     "prettier": "^3.8.3",
     "simple-git-hooks": "^2.13.1",
     "tailwindcss": "^4.3.0",
