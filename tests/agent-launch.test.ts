@@ -241,6 +241,7 @@ describe('buildHeadlessSpawnArgs', () => {
     const idx = result.args.indexOf('--session-id')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(result.args[idx + 1]).toBe('uuid-head')
+    expect(result.args).not.toContain('--resume')
   })
 
   it('resumes claude headless via --resume', () => {
