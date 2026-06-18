@@ -29,7 +29,7 @@ export function getSessionIdPinningFlag(agentType: AgentType): string {
     case 'claude':
       return '--session-id'
     case 'copilot':
-      return '--resume'
+      return '--session-id'
     default:
       throw new Error(`getSessionIdPinningFlag: ${agentType} does not support session ID pinning`)
   }

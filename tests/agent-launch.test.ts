@@ -99,14 +99,14 @@ describe('buildAgentLaunchLine', () => {
     expect(result).not.toContain('--session-id')
   })
 
-  it('pins fresh copilot session via --resume', () => {
+  it('pins fresh copilot session via --session-id', () => {
     const result = buildAgentLaunchLine(
       makePayload({ agentType: 'copilot', sessionId: 'uuid-123' }),
       cmds,
       env
     )
-    expect(result).toBe('copilot --resume uuid-123')
-    expect(result).not.toContain('--session-id')
+    expect(result).toBe('copilot --session-id uuid-123')
+    expect(result).not.toContain('--resume')
   })
 
   it('prefers resumeSessionId over pinned sessionId for copilot', () => {
@@ -232,13 +232,13 @@ describe('buildHeadlessSpawnArgs', () => {
     expect(result.args[idx + 1]).toBe('uuid-head')
   })
 
-  it('pins copilot headless session via --resume (pinning flag is --resume for copilot)', () => {
+  it('pins copilot headless session via --session-id', () => {
     const result = buildHeadlessSpawnArgs(
       makePayload({ agentType: 'copilot', sessionId: 'uuid-head', initialPrompt: 'go' }),
       cmds,
       env
     )
-    const idx = result.args.indexOf('--resume')
+    const idx = result.args.indexOf('--session-id')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(result.args[idx + 1]).toBe('uuid-head')
   })
