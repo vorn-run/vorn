@@ -3532,6 +3532,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tiptap/core@npm:^3.27.1":
+  version: 3.27.1
+  resolution: "@tiptap/core@npm:3.27.1"
+  peerDependencies:
+    "@tiptap/pm": 3.27.1
+  checksum: 10c0/222a3adbc31f5ea2d439e59b87aa108b886d8e4703d83e2f22c4df474869abeac84e7c02004881bc87f3317f656f830a85125aa35a3597d3b8dd3c68c427064c
+  languageName: node
+  linkType: hard
+
 "@tiptap/extension-blockquote@npm:^3.22.5":
   version: 3.22.5
   resolution: "@tiptap/extension-blockquote@npm:3.22.5"
@@ -12908,7 +12917,7 @@ __metadata:
     "@testing-library/jest-dom": "npm:^6.9.1"
     "@testing-library/react": "npm:^16.3.2"
     "@testing-library/user-event": "npm:^14.6.1"
-    "@tiptap/core": "npm:^3.22.5"
+    "@tiptap/core": "npm:^3.27.1"
     "@tiptap/extension-code-block": "npm:^3.22.5"
     "@tiptap/extension-code-block-lowlight": "npm:^3.22.5"
     "@tiptap/extension-link": "npm:^3.23.6"
