@@ -11,7 +11,7 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
-    "electron": "^42.2.0",
+    "electron": "^43.1.0",
     "electron-vite": "^5.0.0",
     "typescript": "^6.0.3"
   }
