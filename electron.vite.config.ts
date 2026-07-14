@@ -27,15 +27,13 @@ export default defineConfig({
           widget: resolve(__dirname, 'src/renderer/widget.html')
         },
         output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
-            'vendor-xterm': [
-              '@xterm/xterm',
-              '@xterm/addon-fit',
-              '@xterm/addon-webgl',
-              '@xterm/addon-canvas'
-            ],
-            'vendor-motion': ['framer-motion']
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) {
+              return 'vendor-react'
+            }
+            if (id.includes('@xterm/')) return 'vendor-xterm'
+            if (id.includes('framer-motion')) return 'vendor-motion'
           }
         }
       }
