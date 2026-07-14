@@ -4769,7 +4769,7 @@ __metadata:
     fastify: "npm:^5.8.5"
     libsql: "npm:^0.5.29"
     node-cron: "npm:^4.2.1"
-    node-pty: "npm:1.2.0-beta.13"
+    node-pty: "npm:1.2.0-beta.14"
     pino: "npm:^10.3.1"
     tsup: "npm:^8.5.1"
     tsx: "npm:^4.22.4"
@@ -9737,6 +9737,16 @@ __metadata:
     node-addon-api: "npm:^7.1.0"
     node-gyp: "npm:latest"
   checksum: 10c0/56ad1661013f1fdbe3eb1675854e657d8a9c1834aa5a7e51fc5132858c528ca63a3edff6568ed4f90f174de716cd9378a40d5c3fad80182210f0006020a06458
+  languageName: node
+  linkType: hard
+
+"node-pty@npm:1.2.0-beta.14":
+  version: 1.2.0-beta.14
+  resolution: "node-pty@npm:1.2.0-beta.14"
+  dependencies:
+    node-addon-api: "npm:^7.1.0"
+    node-gyp: "npm:latest"
+  checksum: 10c0/4ba300fadf4fa6917eccbd25de1ab5ee1adca05cfd47ec2b9a09049d5b34407b0f7f9977d01acd32e44ca78c08928548da8be7e352a5a91d5a57569f8265bda5
   languageName: node
   linkType: hard
 
