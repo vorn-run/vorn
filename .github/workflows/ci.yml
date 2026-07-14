@@ -77,3 +77,11 @@ jobs:
             }
             setTimeout(() => process.exit(0), 2000);
           "
+
+      - name: Verify production build
+        # Catches renderer/main/preload build regressions (e.g. Vite 8 rolldown
+        # rejecting object-form manualChunks) that the unit tests don't exercise.
+        # The server bundle is already built in the step above.
+        run: |
+          yarn build:web
+          yarn electron-vite build
