@@ -1,34 +1,57 @@
 version: 2
 updates:
+  # TypeScript 7 is the native (Go port) rewrite: its main entry no longer
+  # exposes the classic compiler API (breaks typescript-eslint) and Yarn's
+  # bundled compat/typescript patch fails to install it. Hold the major bump
+  # in every npm package until the toolchain supports the native port.
+  # TS 6.x minor/patch updates still flow.
   - package-ecosystem: 'npm'
     directory: '/'
     schedule:
       interval: 'weekly'
+    ignore:
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: 'npm'
     directory: '/packages/web'
     schedule:
       interval: 'weekly'
+    ignore:
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: 'npm'
     directory: '/packages/desktop'
     schedule:
       interval: 'weekly'
+    ignore:
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: 'npm'
     directory: '/packages/server'
     schedule:
       interval: 'weekly'
+    ignore:
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: 'npm'
     directory: '/packages/shared'
     schedule:
       interval: 'weekly'
+    ignore:
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: 'npm'
     directory: '/packages/mcp'
     schedule:
       interval: 'weekly'
+    ignore:
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: 'github-actions'
     directory: '/'
