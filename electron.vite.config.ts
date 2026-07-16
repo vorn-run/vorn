@@ -15,6 +15,12 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/preload/index.ts'),
           'widget-preload': resolve(__dirname, 'src/preload/widget-preload.ts')
+        },
+        external: ['electron'],
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].js',
+          chunkFileNames: 'chunks/[name]-[hash].js'
         }
       }
     }
