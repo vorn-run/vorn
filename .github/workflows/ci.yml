@@ -85,3 +85,23 @@ jobs:
         run: |
           yarn build:web
           yarn electron-vite build
+
+      - name: Verify preload artifacts
+        # The main process hard-codes out/preload/index.js and widget-preload.js.
+        # Vite 8 rolldown once emitted .mjs instead and bundled the npm electron
+        # shim into the preload, leaving window.api undefined in the packaged app.
+        run: |
+          for f in out/main/index.js out/preload/index.js out/preload/widget-preload.js; do
+            if [ ! -f "$f" ]; then
+              echo "ERROR: $f missing — main process loads this exact path"
+              exit 1
+            fi
+          done
+          if grep -rq 'Electron failed to install correctly' out/main out/preload; then
+            echo "ERROR: npm electron shim bundled into build output — 'electron' was not externalized"
+            exit 1
+          fi
+          if ! grep -q 'require("electron")' out/preload/index.js; then
+            echo "ERROR: out/preload/index.js does not require('electron') externally"
+            exit 1
+          fi
