@@ -61,7 +61,7 @@ jobs:
       - name: Install Python setuptools
         run: pip install setuptools
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
 
@@ -147,7 +147,7 @@ jobs:
       - name: Install Python setuptools
         run: pip install setuptools
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
 
@@ -208,7 +208,7 @@ jobs:
       - name: Install Python setuptools
         run: pip install setuptools
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
 
@@ -269,7 +269,7 @@ jobs:
       - name: Install Python setuptools
         run: pip install setuptools
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
 
