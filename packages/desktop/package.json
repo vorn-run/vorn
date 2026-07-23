@@ -7,7 +7,7 @@
     "@vornrun/shared": "workspace:*",
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.3",
-    "ws": "^8.21.0"
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
