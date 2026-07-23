@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 // Mocks must be hoisted before imports that use them
@@ -327,6 +327,103 @@ describe('LaunchAgentConfigForm — UI sections', () => {
       <LaunchAgentConfigForm config={baseConfig({ headless: true })} onChange={vi.fn()} />
     )
     expect(container.textContent).toContain('Headless')
+  })
+})
+
+describe('LaunchAgentConfigForm — Output Schema (typed outputs)', () => {
+  it('shows the Output Schema field only when headless', () => {
+    const interactive = render(
+      <LaunchAgentConfigForm config={baseConfig({ headless: false })} onChange={vi.fn()} />
+    )
+    expect(interactive.container.textContent).not.toContain('Output Schema')
+
+    const headless = render(
+      <LaunchAgentConfigForm config={baseConfig({ headless: true })} onChange={vi.fn()} />
+    )
+    expect(headless.container.textContent).toContain('Output Schema')
+    expect(headless.container.querySelector('textarea')).toBeTruthy()
+  })
+
+  it('pre-fills the textarea from an existing schema', () => {
+    const { container } = render(
+      <LaunchAgentConfigForm
+        config={baseConfig({
+          headless: true,
+          outputSchema: { type: 'object', properties: { verdict: { type: 'string' } } }
+        })}
+        onChange={vi.fn()}
+      />
+    )
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(ta.value).toContain('"verdict"')
+  })
+
+  it('commits a parsed object when valid JSON is entered', () => {
+    const onChange = vi.fn()
+    const { container } = render(
+      <LaunchAgentConfigForm config={baseConfig({ headless: true })} onChange={onChange} />
+    )
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: '{ "type": "object" }' } })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ outputSchema: { type: 'object' } })
+    )
+  })
+
+  it('shows an error and does not commit when JSON is invalid', () => {
+    const onChange = vi.fn()
+    const { container } = render(
+      <LaunchAgentConfigForm config={baseConfig({ headless: true })} onChange={onChange} />
+    )
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: '{ not json' } })
+    expect(container.textContent).toContain('Not valid JSON')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-object schema (array)', () => {
+    const onChange = vi.fn()
+    const { container } = render(
+      <LaunchAgentConfigForm config={baseConfig({ headless: true })} onChange={onChange} />
+    )
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: '[1, 2, 3]' } })
+    expect(container.textContent).toContain('Schema must be a JSON object')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('clears the schema (onChange undefined) when the field is emptied', () => {
+    const onChange = vi.fn()
+    const { container } = render(
+      <LaunchAgentConfigForm
+        config={baseConfig({ headless: true, outputSchema: { type: 'object' } })}
+        onChange={onChange}
+      />
+    )
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: '   ' } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ outputSchema: undefined }))
+  })
+
+  it('resyncs the textarea when the incoming schema changes (node switch)', () => {
+    const { container, rerender } = render(
+      <LaunchAgentConfigForm
+        config={baseConfig({ headless: true, outputSchema: { first: true } })}
+        onChange={vi.fn()}
+      />
+    )
+    let ta = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(ta.value).toContain('"first"')
+
+    rerender(
+      <LaunchAgentConfigForm
+        config={baseConfig({ headless: true, outputSchema: { second: true } })}
+        onChange={vi.fn()}
+      />
+    )
+    ta = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(ta.value).toContain('"second"')
+    expect(ta.value).not.toContain('"first"')
   })
 })
 

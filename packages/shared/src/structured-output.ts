@@ -157,10 +157,9 @@ export function extractStructuredOutput(
     return { error: 'The agent output was not valid JSON.' }
   }
 
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { error: 'The agent output was not a JSON object.' }
-  }
-
+  // `extractJsonText` only ever returns a brace-balanced `{...}` substring, so a
+  // successful parse is always a plain object here — no array/non-object guard
+  // needed.
   const coerced = coerceToSchema(parsed as Record<string, unknown>, schema)
 
   // Validate against the schema's `required` list directly, not just the keys

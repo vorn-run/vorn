@@ -58,6 +58,13 @@ describe('extractStructuredOutput', () => {
     expect(output).toEqual({ verdict: 'APPROVE', tests_passed: true, coverage: 82 })
   })
 
+  it('coerces stringified "false" and leaves non-numeric strings alone', () => {
+    const logs = wrap('{ "verdict": "APPROVE", "tests_passed": "false", "coverage": "n/a" }')
+    const { output } = extractStructuredOutput(logs, schema)
+    // "false" → false; "n/a" isn't a number so `coverage` stays a string.
+    expect(output).toEqual({ verdict: 'APPROVE', tests_passed: false, coverage: 'n/a' })
+  })
+
   it('errors when no JSON is present', () => {
     const { output, error } = extractStructuredOutput('the agent said nothing useful', schema)
     expect(output).toBeUndefined()
