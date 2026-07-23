@@ -281,13 +281,37 @@ describe('mcpConnector.describe', () => {
     const { mcpConnector } = await importMcp()
     const manifest = mcpConnector.describe()
     const keys = manifest.auth.map((f) => f.key)
-    expect(keys).toEqual(['command', 'args', 'env', 'secretEnv'])
+    // The connection form leads with the server/credential fields (optional
+    // poll-config fields follow — asserted separately).
+    expect(keys.slice(0, 4)).toEqual(['command', 'args', 'env', 'secretEnv'])
     expect(manifest.auth.find((f) => f.key === 'secretEnv')?.type).toBe('password')
   })
 
-  it('is an actions-only connector with an empty static action list', async () => {
+  it('exposes actions and triggers, with an empty static action list', async () => {
     const { mcpConnector } = await importMcp()
-    expect(mcpConnector.capabilities).toEqual(['actions'])
+    expect(mcpConnector.capabilities).toEqual(['actions', 'triggers'])
+    // Actions are per-connection (discovered via tools/list), so the static
+    // list stays empty.
     expect(mcpConnector.describe().actions).toEqual([])
+  })
+
+  it('exposes a single mcpPoll trigger driven by the connection poll config', async () => {
+    const { mcpConnector, MCP_POLL_EVENT } = await importMcp()
+    const triggers = mcpConnector.describe().triggers ?? []
+    expect(triggers).toHaveLength(1)
+    expect(triggers[0].type).toBe(MCP_POLL_EVENT)
+    // The poll mapping lives on the connection (auth/config form), not the
+    // trigger, so the trigger itself declares no config fields.
+    expect(triggers[0].configFields).toEqual([])
+  })
+
+  it('advertises the optional poll-config fields on the connection form', async () => {
+    const { mcpConnector } = await importMcp()
+    const keys = mcpConnector.describe().auth.map((f) => f.key)
+    for (const k of ['pollTool', 'itemsPath', 'idField', 'timestampField']) {
+      expect(keys).toContain(k)
+    }
+    // Poll fields are optional so action-only connections aren't forced to set them.
+    expect(mcpConnector.describe().auth.find((f) => f.key === 'pollTool')?.required).toBeFalsy()
   })
 })
