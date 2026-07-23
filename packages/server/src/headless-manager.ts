@@ -18,7 +18,7 @@ import {
   extractWorktreeName,
   isGitRepo
 } from './git-utils'
-import { getSafeEnv } from './process-utils'
+import { getSafeEnv, shellEscape } from './process-utils'
 import { buildHeadlessSpawnArgs } from './agent-launch'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
@@ -99,20 +99,43 @@ class HeadlessManager extends EventEmitter {
 
     const env = getSafeEnv()
     const spawnArgs = buildHeadlessSpawnArgs(payload, this.agentCommands, env)
+
+    // Windows needs `shell: true` to run the `.cmd`/`.ps1` shims that
+    // npm-installed agents ship as. Under `shell: true`, Node concatenates argv
+    // into a single cmd.exe command line WITHOUT quoting, so a multi-word prompt
+    // passed as an argument (copilot/codex/gemini/opencode) gets word-split —
+    // the agent's `-p` then sees only the first token. Quote each arg so it
+    // survives as one argument. On POSIX we spawn without a shell, so args reach
+    // execve verbatim and must NOT be quoted. (claude sidesteps this entirely by
+    // taking its prompt on stdin — see buildHeadlessSpawnArgs.)
+    // `shell: true` on Windows always runs `comspec || cmd.exe`, so quote with
+    // the 'cmd' flavor rather than the user's default shell — otherwise a
+    // PowerShell default (or unset COMSPEC) would single-quote args that cmd.exe
+    // doesn't treat as quoting, re-introducing the word-split.
+    const useShell = process.platform === 'win32'
+    const spawnArgList = useShell
+      ? spawnArgs.args.map((a) => shellEscape(a, 'cmd'))
+      : spawnArgs.args
     log.info(
-      `[headless] launching: ${spawnArgs.command} ${spawnArgs.args.join(' ').slice(0, 100)}...`
+      `[headless] launching: ${spawnArgs.command} ${spawnArgList.join(' ').slice(0, 100)}...`
     )
 
-    const child = spawn(spawnArgs.command, spawnArgs.args, {
+    const child = spawn(spawnArgs.command, spawnArgList, {
       cwd: effectivePath,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
-      shell: process.platform === 'win32'
+      shell: useShell
     })
 
-    // Close stdin immediately so the process doesn't hang waiting for input
+    // Some agents (claude) receive their prompt on stdin rather than as an argv
+    // element, so a multi-line workflow prompt isn't mangled by the Windows
+    // `shell: true` command line. Write it, then close stdin. When there's no
+    // stdin payload, close immediately so the process doesn't hang on input.
     child.stdin?.on('error', () => {}) // prevent EPIPE if process exits early
+    if (spawnArgs.stdin != null) {
+      child.stdin?.write(spawnArgs.stdin)
+    }
     child.stdin?.end()
 
     this.processes.set(id, child)

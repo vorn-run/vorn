@@ -34,14 +34,26 @@ export function getDefaultShell(): string {
   return process.env.SHELL || '/bin/zsh'
 }
 
-export function shellEscape(s: string, flavor: 'auto' | 'posix' = 'auto'): string {
-  const isWin = flavor === 'auto' && process.platform === 'win32'
+/**
+ * Quote an argument for a shell.
+ *  - `'auto'`  — pick by platform, and on Windows by `getDefaultShell()`
+ *    (PowerShell vs cmd.exe). Use for a PTY running the user's shell.
+ *  - `'cmd'`   — force cmd.exe quoting. Use when the command runs through
+ *    Node's `spawn(..., { shell: true })` on Windows, which always invokes
+ *    `comspec || cmd.exe` regardless of the user's default shell — so quoting
+ *    by `getDefaultShell()` (which falls back to PowerShell when COMSPEC is
+ *    unset) would mismatch and leave args un-quoted / mangled.
+ *  - `'posix'` — force POSIX single-quote quoting.
+ */
+export function shellEscape(s: string, flavor: 'auto' | 'posix' | 'cmd' = 'auto'): string {
+  const isWin = flavor === 'cmd' || (flavor === 'auto' && process.platform === 'win32')
   // Skip quoting for simple safe strings (flags, paths without spaces, etc.)
   // On Windows, exclude % from safe chars to prevent env var expansion in cmd.exe.
   const safePattern = isWin ? /^[a-zA-Z0-9_./:=@+,-]+$/ : /^[a-zA-Z0-9_./:=@%+,-]+$/
   if (safePattern.test(s)) return s
   if (isWin) {
-    const shell = getDefaultShell().toLowerCase()
+    // 'cmd' pins cmd.exe; 'auto' honors the user's PowerShell default.
+    const shell = flavor === 'cmd' ? 'cmd.exe' : getDefaultShell().toLowerCase()
     if (shell.includes('powershell') || shell.includes('pwsh')) {
       return "'" + s.replace(/'/g, "''") + "'"
     }

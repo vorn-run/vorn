@@ -189,12 +189,23 @@ describe('buildHeadlessLaunchLine', () => {
 })
 
 describe('buildHeadlessSpawnArgs', () => {
-  it('returns { command, args } for claude', () => {
+  it('returns { command, args } for claude with the prompt on stdin', () => {
     const result = buildHeadlessSpawnArgs(makePayload({ initialPrompt: 'hello' }), cmds, env)
     expect(result.command).toBe('claude')
     expect(result.args).toContain('-p')
-    expect(result.args).toContain('hello')
     expect(result.args).toContain('--dangerously-skip-permissions')
+    // Prompt goes to stdin, not argv, so the Windows shell command line can't
+    // word-split or line-break it.
+    expect(result.stdin).toBe('hello')
+    expect(result.args).not.toContain('hello')
+  })
+
+  it('keeps a multi-line claude prompt intact on stdin', () => {
+    const prompt = '# Workflow: Demo\n\n**Step:** one\n\nDo the thing.'
+    const result = buildHeadlessSpawnArgs(makePayload({ initialPrompt: prompt }), cmds, env)
+    expect(result.stdin).toBe(prompt)
+    // `-p` is a bare flag here; the last argv element must not be the prompt.
+    expect(result.args[result.args.length - 1]).toBe('-p')
   })
 
   it('returns exec for codex', () => {
@@ -219,6 +230,7 @@ describe('buildHeadlessSpawnArgs', () => {
   it('uses empty string for missing prompt', () => {
     const result = buildHeadlessSpawnArgs(makePayload(), cmds, env)
     expect(result.args).toContain('')
+    expect(result.stdin).toBeUndefined()
   })
 
   it('pins claude headless session via --session-id', () => {
@@ -276,6 +288,52 @@ describe('buildHeadlessSpawnArgs', () => {
       expect(result.args).not.toContain('--session-id')
       expect(result.args).not.toContain('--resume')
     }
+  })
+})
+
+// A workflow prompt (buildWorkflowPrompt) is multi-word and multi-line. On
+// Windows the headless spawn runs through `shell: true`, which word-splits
+// unquoted argv — the trigger for issue #374 (claude got only `#`) and the
+// equivalent copilot "extra words were treated as separate arguments" failure.
+// Every supported agent must therefore deliver the ENTIRE prompt as one unit:
+// claude on stdin (bare `-p`), everyone else as a single argv element that the
+// spawn site can quote. These tests lock that contract in per agent.
+describe('buildHeadlessSpawnArgs — every agent delivers the whole prompt as one unit', () => {
+  const PROMPT = '# Workflow: Demo\n\n**Step:** one\n\nDo the thing with spaces.'
+
+  it('claude delivers the prompt on stdin, never on argv', () => {
+    const result = buildHeadlessSpawnArgs(
+      makePayload({ agentType: 'claude', initialPrompt: PROMPT }),
+      cmds,
+      env
+    )
+    expect(result.command).toBe('claude')
+    expect(result.stdin).toBe(PROMPT)
+    expect(result.args).not.toContain(PROMPT)
+    // `-p` present with no positional prompt following it.
+    expect(result.args).toContain('-p')
+    expect(result.args[result.args.length - 1]).toBe('-p')
+  })
+
+  // For the arg-based agents the prompt must be exactly one array element so
+  // it can be quoted as a single token — never spread across several.
+  it.each([
+    { agentType: 'copilot' as const, command: 'copilot', flag: '--allow-all' },
+    { agentType: 'codex' as const, command: 'codex', flag: 'exec' },
+    { agentType: 'opencode' as const, command: 'opencode', flag: 'run' },
+    { agentType: 'gemini' as const, command: 'gemini', flag: '-y' }
+  ])('$agentType delivers the prompt as a single argv element', ({ agentType, command, flag }) => {
+    const result = buildHeadlessSpawnArgs(
+      makePayload({ agentType, initialPrompt: PROMPT }),
+      cmds,
+      env
+    )
+    expect(result.command).toBe(command)
+    expect(result.stdin).toBeUndefined()
+    expect(result.args).toContain(flag)
+    // The full multi-word/multi-line prompt is a single element, not split.
+    expect(result.args).toContain(PROMPT)
+    expect(result.args.filter((a) => a === PROMPT)).toHaveLength(1)
   })
 })
 
