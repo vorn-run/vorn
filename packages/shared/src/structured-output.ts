@@ -9,7 +9,7 @@
  * which surfaces as `{{steps.<slug>.<field>}}` step vars via the same path the
  * connector actions already use.
  */
-import { schemaProperties, schemaTypeHint, schemaRequired } from './json-schema-utils'
+import { schemaProperties, schemaTypeHint } from './json-schema-utils'
 
 /** Markers the agent wraps its JSON answer in. Deliberately unlikely to appear
  *  in normal prose so the extractor can find the block even amid other output. */
@@ -163,9 +163,13 @@ export function extractStructuredOutput(
 
   const coerced = coerceToSchema(parsed as Record<string, unknown>, schema)
 
-  const missing = Object.keys(schemaProperties(schema)).filter(
-    (key) => schemaRequired(schema, key) && !(key in coerced)
-  )
+  // Validate against the schema's `required` list directly, not just the keys
+  // that happen to appear under `properties` — a schema may require a field it
+  // doesn't otherwise describe, and that must still be enforced.
+  const required = (schema as { required?: unknown }).required
+  const missing = Array.isArray(required)
+    ? required.filter((key): key is string => typeof key === 'string' && !(key in coerced))
+    : []
   if (missing.length > 0) {
     return { error: `Agent output is missing required field(s): ${missing.join(', ')}.` }
   }

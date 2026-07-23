@@ -202,6 +202,21 @@ describe('buildStepGroups', () => {
     const groups = buildStepGroups([node])
     expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error'])
   })
+
+  it('does not surface schema keys for a non-headless launchAgent', () => {
+    // The engine only parses typed output for headless runs, so a schema on an
+    // interactive node must not advertise vars that never get populated.
+    const node = makeNode('a', 'launchAgent', 'review')
+    node.config = {
+      agentType: 'claude',
+      projectName: 'p',
+      projectPath: '/p',
+      headless: false,
+      outputSchema: { type: 'object', properties: { verdict: { type: 'string' } } }
+    } as WorkflowNode['config']
+    const groups = buildStepGroups([node])
+    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error'])
+  })
 })
 
 describe('resolveTemplateVars', () => {

@@ -21,29 +21,36 @@ import {
 } from '@vornrun/server/database'
 import { rpcCall } from '../ws-client'
 
-const launchAgentConfigSchema = z.object({
-  agentType: z.enum(['claude', 'copilot', 'codex', 'opencode', 'gemini']),
-  projectName: V.name,
-  projectPath: V.absolutePath,
-  args: z.array(V.shortText).optional(),
-  displayName: V.shortText.optional(),
-  branch: V.shortText.optional(),
-  // boolean | 'fromContext' — `'fromContext'` only valid when the workflow's
-  // manual trigger is contextual (validated at runtime, not here).
-  useWorktree: z.union([z.boolean(), z.literal('fromContext')]).optional(),
-  remoteHostId: V.id.optional(),
-  prompt: V.prompt.optional(),
-  promptDelayMs: z.number().optional(),
-  taskId: V.id.optional(),
-  taskFromQueue: z.boolean().optional(),
-  // Runs the agent in the background and waits for it to finish (required for
-  // typed output). Opens a terminal tab when false/omitted.
-  headless: z.boolean().optional(),
-  // JSON Schema the agent's final answer must satisfy (headless only). When set,
-  // the engine parses a matching object from the run and exposes its fields as
-  // `{{steps.<slug>.<field>}}` for downstream condition nodes.
-  outputSchema: z.record(z.string(), z.unknown()).optional()
-})
+const launchAgentConfigSchema = z
+  .object({
+    agentType: z.enum(['claude', 'copilot', 'codex', 'opencode', 'gemini']),
+    projectName: V.name,
+    projectPath: V.absolutePath,
+    args: z.array(V.shortText).optional(),
+    displayName: V.shortText.optional(),
+    branch: V.shortText.optional(),
+    // boolean | 'fromContext' — `'fromContext'` only valid when the workflow's
+    // manual trigger is contextual (validated at runtime, not here).
+    useWorktree: z.union([z.boolean(), z.literal('fromContext')]).optional(),
+    remoteHostId: V.id.optional(),
+    prompt: V.prompt.optional(),
+    promptDelayMs: z.number().optional(),
+    taskId: V.id.optional(),
+    taskFromQueue: z.boolean().optional(),
+    // Runs the agent in the background and waits for it to finish (required for
+    // typed output). Opens a terminal tab when false/omitted.
+    headless: z.boolean().optional(),
+    // JSON Schema the agent's final answer must satisfy (headless only). When set,
+    // the engine parses a matching object from the run and exposes its fields as
+    // `{{steps.<slug>.<field>}}` for downstream condition nodes.
+    outputSchema: z.record(z.string(), z.unknown()).optional()
+  })
+  .refine((c) => !c.outputSchema || c.headless === true, {
+    // The engine only parses typed output for headless runs; reject a config that
+    // declares a schema it would silently ignore instead of accepting a lie.
+    message: 'outputSchema requires headless: true',
+    path: ['outputSchema']
+  })
 
 const triggerConfigSchema = z.union([
   z.object({

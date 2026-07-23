@@ -91,6 +91,16 @@ describe('extractStructuredOutput', () => {
     expect(error).toBeUndefined()
     expect(output).toEqual({ verdict: 'APPROVE' })
   })
+
+  it('enforces required keys even when absent from properties', () => {
+    // A schema can require a field it doesn't otherwise describe under
+    // properties; that must still be validated.
+    const sparse = { type: 'object', properties: {}, required: ['verdict'] }
+    const { output, error } = extractStructuredOutput(wrap('{ "other": 1 }'), sparse)
+    expect(output).toBeUndefined()
+    expect(error).toMatch(/missing required field/i)
+    expect(error).toMatch(/verdict/)
+  })
 })
 
 describe('buildStructuredOutputInstructions', () => {

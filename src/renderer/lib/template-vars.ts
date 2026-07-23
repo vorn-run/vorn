@@ -210,11 +210,13 @@ export function buildStepGroups(
           }
         }
       } else if (n.type === 'launchAgent') {
-        // A launchAgent node with a declared outputSchema surfaces its typed
+        // A headless launchAgent with a declared outputSchema surfaces its typed
         // fields the same way — `{{steps.<slug>.<field>}}` — populated at run
-        // time from the agent's parsed structuredOutput.
+        // time from the agent's parsed structuredOutput. Gated on `headless`
+        // because the engine only parses typed output for headless runs, so
+        // advertising these vars for an interactive node would be misleading.
         const cfg = n.config as LaunchAgentConfig
-        const schemaKeys = schemaTopLevelKeys(cfg.outputSchema)
+        const schemaKeys = cfg.headless ? schemaTopLevelKeys(cfg.outputSchema) : []
         if (schemaKeys.length > 0) {
           keys = [...schemaKeys, ...defaultKeys]
         }

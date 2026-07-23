@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, Settings2, GitBranch, EyeOff, Zap } from 'lucide-react'
 import {
@@ -531,12 +531,26 @@ function OutputSchemaField({
 }) {
   const [text, setText] = useState(() => (value ? JSON.stringify(value, null, 2) : ''))
   const [error, setError] = useState<string | null>(null)
+  // Track the last value we emitted (compact form) so we can tell our own edits
+  // apart from an external change — e.g. the config panel switching to a
+  // different node. Only the latter should reset the textarea.
+  const lastEmitted = useRef<string | undefined>(value ? JSON.stringify(value) : undefined)
+
+  useEffect(() => {
+    const incoming = value ? JSON.stringify(value) : undefined
+    if (incoming !== lastEmitted.current) {
+      setText(value ? JSON.stringify(value, null, 2) : '')
+      setError(null)
+      lastEmitted.current = incoming
+    }
+  }, [value])
 
   const handleChange = (raw: string) => {
     setText(raw)
     const trimmed = raw.trim()
     if (!trimmed) {
       setError(null)
+      lastEmitted.current = undefined
       onChange(undefined)
       return
     }
@@ -552,6 +566,7 @@ function OutputSchemaField({
       return
     }
     setError(null)
+    lastEmitted.current = JSON.stringify(parsed)
     onChange(parsed as Record<string, unknown>)
   }
 
