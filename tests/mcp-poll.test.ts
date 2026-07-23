@@ -82,6 +82,23 @@ describe('pollMcpConnection', () => {
     expect(result.nextCursor).toBe('2026-07-03')
   })
 
+  it('skips items missing the timestampField when ordering is configured', async () => {
+    toolReturns({
+      items: [
+        { id: 'a', ts: '2026-07-03' },
+        { id: 'b' }, // no ts — can't be ordered, must not fire every poll
+        { id: 'c', ts: '2026-07-01' }
+      ]
+    })
+    const result = await pollMcpConnection(
+      makeConn({ pollTool: 'list', itemsPath: 'items', idField: 'id', timestampField: 'ts' }),
+      '2026-07-02'
+    )
+    // Only 'a' (ts > cursor) fires; 'b' (no ts) and 'c' (<= cursor) are skipped.
+    expect(result.events.map((e) => e.id)).toEqual(['a'])
+    expect(result.nextCursor).toBe('2026-07-03')
+  })
+
   it('emits every item and sets no cursor when no timestampField is configured', async () => {
     toolReturns({ items: [{ id: 'a' }, { id: 'b' }] })
     const result = await pollMcpConnection(

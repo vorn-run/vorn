@@ -315,8 +315,14 @@ export async function pollMcpConnection(
   let newest = cursor
   for (const item of items) {
     const ts = fieldString(item, cfg.timestampField)
-    // Skip items at or before the cursor when we can order by timestamp.
-    if (cfg.timestampField && cursor && ts !== undefined && ts <= cursor) continue
+    if (cfg.timestampField) {
+      // With ordering configured, an item that lacks the timestamp field can't
+      // be placed relative to the cursor — emit it and it would re-fire every
+      // poll. Skip it rather than churn.
+      if (ts === undefined) continue
+      // Skip items at or before the cursor.
+      if (cursor && ts <= cursor) continue
+    }
     if (ts !== undefined && (newest === undefined || ts > newest)) newest = ts
 
     const idVal = fieldString(item, cfg.idField)
