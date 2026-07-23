@@ -35,7 +35,14 @@ const launchAgentConfigSchema = z.object({
   prompt: V.prompt.optional(),
   promptDelayMs: z.number().optional(),
   taskId: V.id.optional(),
-  taskFromQueue: z.boolean().optional()
+  taskFromQueue: z.boolean().optional(),
+  // Runs the agent in the background and waits for it to finish (required for
+  // typed output). Opens a terminal tab when false/omitted.
+  headless: z.boolean().optional(),
+  // JSON Schema the agent's final answer must satisfy (headless only). When set,
+  // the engine parses a matching object from the run and exposes its fields as
+  // `{{steps.<slug>.<field>}}` for downstream condition nodes.
+  outputSchema: z.record(z.string(), z.unknown()).optional()
 })
 
 const triggerConfigSchema = z.union([
@@ -60,8 +67,21 @@ const triggerConfigSchema = z.union([
 
 const nodeSchema = z.object({
   id: V.id,
-  type: z.enum(['trigger', 'launchAgent']),
+  // Full node palette — parity with the editor. `config` is a passthrough so
+  // each type carries its own shape (ConditionConfig, ApprovalConfig, etc.).
+  type: z.enum([
+    'trigger',
+    'launchAgent',
+    'script',
+    'condition',
+    'approval',
+    'createTaskFromItem',
+    'callConnectorAction'
+  ]),
   label: V.shortText,
+  // Referenced by typed step vars as `{{steps.<slug>.<field>}}`. Set one on any
+  // node whose output a later node consumes.
+  slug: V.shortText.optional(),
   config: z.record(z.string(), z.unknown()),
   position: z.object({ x: z.number(), y: z.number() })
 })
@@ -69,7 +89,10 @@ const nodeSchema = z.object({
 const edgeSchema = z.object({
   id: V.id,
   source: V.id,
-  target: V.id
+  target: V.id,
+  // Which branch of a `condition` node this edge represents. Omit for normal
+  // edges; required to wire both outcomes of a condition.
+  conditionBranch: z.enum(['true', 'false']).optional()
 })
 
 /**
@@ -144,7 +167,12 @@ export function registerWorkflowTools(server: McpServer): void {
 
   server.tool(
     'create_workflow',
-    'Create a new workflow. Accepts either full nodes/edges or a convenience flat format (trigger + actions array).',
+    'Create a new workflow. Accepts either full nodes/edges (advanced mode — every node ' +
+      'type is supported: trigger, launchAgent, script, condition, approval, ' +
+      'createTaskFromItem, callConnectorAction; wire condition outcomes with edge ' +
+      'conditionBranch "true"/"false") or a convenience flat format (trigger + actions ' +
+      'array). Give a node a slug to reference its output downstream as {{steps.<slug>.<field>}}. ' +
+      'A headless launchAgent with an outputSchema returns typed fields for condition nodes.',
     {
       name: V.title.describe('Workflow name'),
       trigger: triggerConfigSchema

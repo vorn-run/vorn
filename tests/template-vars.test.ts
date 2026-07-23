@@ -163,6 +163,45 @@ describe('buildStepGroups', () => {
     expect(keys.slice(0, 2)).toEqual(['html_url', 'number'])
     expect(keys.slice(-3)).toEqual(['output', 'status', 'error'])
   })
+
+  it('prepends outputSchema keys for launchAgent nodes', () => {
+    const node: WorkflowNode = {
+      id: 'n1',
+      type: 'launchAgent',
+      label: 'Review',
+      slug: 'review',
+      config: {
+        agentType: 'claude',
+        projectName: 'p',
+        projectPath: '/p',
+        headless: true,
+        outputSchema: {
+          type: 'object',
+          properties: {
+            verdict: { type: 'string', description: 'APPROVE or REQUEST_CHANGES' },
+            tests_passed: { type: 'boolean' }
+          },
+          required: ['verdict']
+        }
+      },
+      position: { x: 0, y: 0 }
+    }
+    const groups = buildStepGroups([node])
+    const keys = groups[0].keys.map((k) => k.key)
+    expect(keys.slice(0, 2)).toEqual(['verdict', 'tests_passed'])
+    expect(keys.slice(-3)).toEqual(['output', 'status', 'error'])
+  })
+
+  it('keeps only default keys for a launchAgent node without a schema', () => {
+    const node = makeNode('a', 'launchAgent', 'plain')
+    node.config = {
+      agentType: 'claude',
+      projectName: 'p',
+      projectPath: '/p'
+    } as WorkflowNode['config']
+    const groups = buildStepGroups([node])
+    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error'])
+  })
 })
 
 describe('resolveTemplateVars', () => {

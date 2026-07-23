@@ -5,6 +5,7 @@ import {
   WorkflowNode,
   WorkflowEdge,
   CallConnectorActionConfig,
+  LaunchAgentConfig,
   ConnectorActionDef
 } from '../../shared/types'
 import { schemaProperties, schemaTypeHint } from '../../shared/json-schema-utils'
@@ -207,6 +208,15 @@ export function buildStepGroups(
             // reach for. The three defaults stay at the bottom as fallbacks.
             keys = [...schemaKeys, ...defaultKeys]
           }
+        }
+      } else if (n.type === 'launchAgent') {
+        // A launchAgent node with a declared outputSchema surfaces its typed
+        // fields the same way — `{{steps.<slug>.<field>}}` — populated at run
+        // time from the agent's parsed structuredOutput.
+        const cfg = n.config as LaunchAgentConfig
+        const schemaKeys = schemaTopLevelKeys(cfg.outputSchema)
+        if (schemaKeys.length > 0) {
+          keys = [...schemaKeys, ...defaultKeys]
         }
       }
       return {

@@ -504,6 +504,15 @@ export interface LaunchAgentConfig {
   taskId?: string
   taskFromQueue?: boolean
   headless?: boolean
+  /**
+   * JSON Schema the agent's final answer must satisfy. When set (headless only),
+   * the engine instructs the agent to emit a matching JSON object, parses it out
+   * of the run logs, and stores it as the node's `structuredOutput` — surfaced as
+   * typed step vars (`{{steps.<slug>.<field>}}`) that downstream `condition`
+   * nodes can gate on instead of substring-matching the model's prose. A run
+   * whose output can't be parsed/validated is marked `error`.
+   */
+  outputSchema?: Record<string, unknown>
 }
 
 export interface ScriptConfig {
