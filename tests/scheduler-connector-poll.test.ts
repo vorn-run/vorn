@@ -13,12 +13,14 @@ const {
   loadConfigMock,
   dbGetSourceConnectionMock,
   dbUpdateSourceConnectionMock,
-  connectorGetMock
+  connectorGetMock,
+  pollMcpConnectionMock
 } = vi.hoisted(() => ({
   loadConfigMock: vi.fn(),
   dbGetSourceConnectionMock: vi.fn(),
   dbUpdateSourceConnectionMock: vi.fn(),
-  connectorGetMock: vi.fn()
+  connectorGetMock: vi.fn(),
+  pollMcpConnectionMock: vi.fn()
 }))
 
 vi.mock('../packages/server/src/logger', () => ({
@@ -48,6 +50,11 @@ vi.mock('../packages/server/src/connectors', async (importOriginal) => {
     connectorRegistry: { get: connectorGetMock },
     applyDecryptedCreds: (conn: { filters: Record<string, unknown> }) => ({ ...conn.filters })
   }
+})
+// Keep the real MCP_CONNECTOR_ID / MCP_POLL_EVENT constants; stub only the poll.
+vi.mock('../packages/server/src/connectors/mcp', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return { ...actual, pollMcpConnection: pollMcpConnectionMock }
 })
 
 // Import after mocks are set up.
@@ -103,6 +110,7 @@ beforeEach(() => {
   dbGetSourceConnectionMock.mockReset()
   dbUpdateSourceConnectionMock.mockReset()
   connectorGetMock.mockReset()
+  pollMcpConnectionMock.mockReset()
   // Clean up any stale lock files from previous tests to avoid the minute-key
   // dedup blocking subsequent triggerWorkflow() calls in the same minute.
   try {
@@ -234,6 +242,71 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     scheduler.triggerWorkflow('wf-nopoll')
     await new Promise((r) => setImmediate(r))
 
+    expect(dbUpdateSourceConnectionMock).not.toHaveBeenCalled()
+  })
+
+  // --- MCP connections are routed through pollMcpConnection, not connector.poll ---
+
+  function makeMcpPollWorkflow(id: string, event: string): WorkflowDefinition {
+    const trigger: ConnectorPollTriggerConfig = {
+      triggerType: 'connectorPoll',
+      connectionId: 'conn-1',
+      event,
+      cron: '*/5 * * * *'
+    }
+    return {
+      id,
+      name: 'MCP Poll',
+      icon: 'Plug',
+      iconColor: '#64748b',
+      enabled: true,
+      nodes: [
+        { id: 'trigger-1', type: 'trigger', label: 't', config: trigger, position: { x: 0, y: 0 } }
+      ],
+      edges: []
+    }
+  }
+
+  it('routes an mcpPoll event through pollMcpConnection and advances the cursor', async () => {
+    const wf = makeMcpPollWorkflow('wf-mcp', 'mcpPoll')
+    loadConfigMock.mockReturnValue({ workflows: [wf] })
+    dbGetSourceConnectionMock.mockReturnValue(
+      makeConn({ connectorId: 'mcp', filters: { pollTool: 'list' }, syncCursor: 'c0' })
+    )
+    connectorGetMock.mockReturnValue({}) // MCP has no generic poll()
+    pollMcpConnectionMock.mockResolvedValue({
+      events: [
+        { id: '1', type: 'mcpPoll', data: { externalId: '1', title: 'X' }, timestamp: 't1' }
+      ],
+      nextCursor: 't1'
+    })
+
+    scheduler.triggerWorkflow('wf-mcp')
+    await new Promise((r) => setImmediate(r))
+
+    // pollMcpConnection called with the full connection + cursor.
+    expect(pollMcpConnectionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'conn-1', connectorId: 'mcp' }),
+      'c0'
+    )
+    expect(dbUpdateSourceConnectionMock).toHaveBeenCalledWith(
+      'conn-1',
+      expect.objectContaining({ syncCursor: 't1' })
+    )
+  })
+
+  it('skips an MCP connection whose event is not mcpPoll', async () => {
+    const wf = makeMcpPollWorkflow('wf-mcp-bad', 'issueCreated')
+    loadConfigMock.mockReturnValue({ workflows: [wf] })
+    dbGetSourceConnectionMock.mockReturnValue(
+      makeConn({ connectorId: 'mcp', filters: { pollTool: 'list' } })
+    )
+    connectorGetMock.mockReturnValue({})
+
+    scheduler.triggerWorkflow('wf-mcp-bad')
+    await new Promise((r) => setImmediate(r))
+
+    expect(pollMcpConnectionMock).not.toHaveBeenCalled()
     expect(dbUpdateSourceConnectionMock).not.toHaveBeenCalled()
   })
 })

@@ -13,6 +13,7 @@ import {
 import { configManager } from './config-manager'
 import { dbGetSourceConnection, dbUpdateSourceConnection } from './database'
 import { connectorRegistry, applyDecryptedCreds } from './connectors'
+import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, pollMcpConnection } from './connectors/mcp'
 import log from './logger'
 
 const LOCK_DIR = path.join(os.homedir(), '.vorn')
@@ -207,8 +208,23 @@ class Scheduler extends EventEmitter {
       return
     }
     const connector = connectorRegistry.get(conn.connectorId)
-    if (!connector?.poll) {
+    // MCP is polymorphic: its poll needs the full SourceConnection to spawn the
+    // per-connection stdio client, so it's routed through pollMcpConnection
+    // rather than the generic connector.poll (which only gets flattened
+    // filters) — mirroring how MCP execute is special-cased. Decrypted secrets
+    // don't need overlaying here: getOrStartClient pulls secretEnv from the
+    // decrypted-creds store keyed by conn.id.
+    const isMcp = conn.connectorId === MCP_CONNECTOR_ID
+    if (!isMcp && !connector?.poll) {
       log.warn(`[scheduler] connectorPoll: connector ${conn.connectorId} has no poll() — skipping`)
+      return
+    }
+    // MCP defines exactly one event; reject a misconfigured trigger rather than
+    // fan out on an event the connector never emits.
+    if (isMcp && trigger.event !== MCP_POLL_EVENT) {
+      log.warn(
+        `[scheduler] connectorPoll: MCP connection ${conn.id} got unexpected event "${trigger.event}" — skipping`
+      )
       return
     }
 
@@ -216,7 +232,9 @@ class Scheduler extends EventEmitter {
     const now = new Date().toISOString()
     let result
     try {
-      result = await connector.poll(trigger.event, applyDecryptedCreds(conn), cursor)
+      result = isMcp
+        ? await pollMcpConnection(conn, cursor)
+        : await connector!.poll!(trigger.event, applyDecryptedCreds(conn), cursor)
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
       log.error(
