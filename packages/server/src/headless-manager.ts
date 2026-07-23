@@ -108,8 +108,14 @@ class HeadlessManager extends EventEmitter {
     // survives as one argument. On POSIX we spawn without a shell, so args reach
     // execve verbatim and must NOT be quoted. (claude sidesteps this entirely by
     // taking its prompt on stdin — see buildHeadlessSpawnArgs.)
+    // `shell: true` on Windows always runs `comspec || cmd.exe`, so quote with
+    // the 'cmd' flavor rather than the user's default shell — otherwise a
+    // PowerShell default (or unset COMSPEC) would single-quote args that cmd.exe
+    // doesn't treat as quoting, re-introducing the word-split.
     const useShell = process.platform === 'win32'
-    const spawnArgList = useShell ? spawnArgs.args.map((a) => shellEscape(a)) : spawnArgs.args
+    const spawnArgList = useShell
+      ? spawnArgs.args.map((a) => shellEscape(a, 'cmd'))
+      : spawnArgs.args
     log.info(
       `[headless] launching: ${spawnArgs.command} ${spawnArgList.join(' ').slice(0, 100)}...`
     )

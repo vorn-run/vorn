@@ -152,7 +152,11 @@ describe('headlessManager.createHeadless', () => {
       expect(args).not.toContain(prompt)
       const promptArgs = args.filter((a) => a.includes('Do the thing with spaces.'))
       expect(promptArgs).toHaveLength(1)
-      expect(promptArgs[0]).not.toBe(prompt) // i.e. it was quoted/escaped
+      // cmd.exe quoting (double quotes) is used regardless of the machine's
+      // default shell, since Node's shell:true always runs cmd.exe — not
+      // PowerShell single-quotes, which cmd.exe wouldn't treat as quoting.
+      expect(promptArgs[0].startsWith('"')).toBe(true)
+      expect(promptArgs[0].endsWith('"')).toBe(true)
 
       headlessManager.killHeadless(session.id)
     })

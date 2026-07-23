@@ -68,6 +68,19 @@ describe('process-utils (server package)', () => {
     expect(shellEscape('')).toBe("''")
   })
 
+  it('shellEscape cmd flavor uses cmd.exe quoting on any platform', async () => {
+    const { shellEscape } = await import('../packages/server/src/process-utils')
+    // Multi-word → cmd.exe double quotes (not POSIX/PowerShell single quotes),
+    // matching Node's shell:true which always runs cmd.exe on Windows.
+    expect(shellEscape('# Workflow: Demo', 'cmd')).toBe('"# Workflow: Demo"')
+    // Safe tokens still skip quoting.
+    expect(shellEscape('-p', 'cmd')).toBe('-p')
+    // cmd metacharacters are caret-escaped inside the quotes.
+    expect(shellEscape('a "b" %PATH%', 'cmd')).toBe('"a ^"b^" ^%PATH^%"')
+    // Empty → empty quoted arg.
+    expect(shellEscape('', 'cmd')).toBe('""')
+  })
+
   it('getSafeEnv filters sensitive vars', async () => {
     const { getSafeEnv } = await import('../packages/server/src/process-utils')
     const env = getSafeEnv()
