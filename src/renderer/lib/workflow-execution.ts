@@ -18,6 +18,7 @@ import {
 import { resolveContextField, resolveTemplateVars, StepOutputs } from './template-vars'
 import { getWorktreeMode } from './workflow-helpers'
 import { buildTaskPrompt, buildWorkflowPrompt } from '../../shared/prompt-builder'
+import { extractStructuredOutput } from '../../shared/structured-output'
 import { useAppStore } from '../stores'
 import { sendWorkflowGateNotification } from './notifications'
 
@@ -614,11 +615,16 @@ async function executeNode(
     initialPrompt = resolveTemplateVars(initialPrompt, context, stepOutputs)
   }
 
+  // Typed output only makes sense headless: the engine parses the finished
+  // run's logs, which an interactive terminal session never produces on exit.
+  const outputSchema = config.headless ? config.outputSchema : undefined
+
   if (initialPrompt) {
     initialPrompt = buildWorkflowPrompt({
       workflow,
       stepName: config.displayName || node.label,
-      userPrompt: initialPrompt
+      userPrompt: initialPrompt,
+      outputSchema
     })
   }
 
@@ -717,17 +723,32 @@ async function executeNode(
         logs += `\nProcess exited with code ${exitCode}`
       }
 
+      // Typed output: a clean exit still fails the node if the agent didn't
+      // return a parseable object matching the declared schema, so downstream
+      // branches never gate on garbage. On success the parsed object becomes the
+      // node's structuredOutput → `{{steps.<slug>.<field>}}`.
+      let structured: Record<string, unknown> | undefined
+      let schemaError: string | undefined
+      if (exitCode === 0 && outputSchema) {
+        const result = extractStructuredOutput(logs, outputSchema)
+        if (result.output) structured = result.output
+        else schemaError = result.error || 'Agent output did not match the declared schema.'
+      }
+
+      const failed = exitCode !== 0 || !!schemaError
       updateNodeState(execution, node.id, {
-        status: exitCode === 0 ? 'success' : 'error',
+        status: failed ? 'error' : 'success',
         completedAt: new Date().toISOString(),
         output: logs,
         logs,
-        ...(exitCode !== 0 && { error: `Exit code ${exitCode}` })
+        ...(structured && { structuredOutput: structured }),
+        ...(exitCode !== 0 && { error: `Exit code ${exitCode}` }),
+        ...(schemaError && exitCode === 0 && { error: schemaError })
       })
       persistExecution(workflow.id, execution)
 
       // Reset task back to todo on failure so it can be retried
-      if (exitCode !== 0 && resolvedTaskId) {
+      if (failed && resolvedTaskId) {
         useAppStore.getState().reopenTask(resolvedTaskId)
       }
     } finally {

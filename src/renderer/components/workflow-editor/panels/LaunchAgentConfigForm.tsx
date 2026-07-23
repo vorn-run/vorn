@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, Settings2, GitBranch, EyeOff, Zap } from 'lucide-react'
 import {
@@ -455,6 +455,13 @@ export function LaunchAgentConfigForm({
             />
           </div>
         )}
+
+        {isHeadless && (
+          <OutputSchemaField
+            value={config.outputSchema}
+            onChange={(schema) => onChange({ ...config, outputSchema: schema })}
+          />
+        )}
       </div>
 
       <div>
@@ -504,6 +511,92 @@ export function LaunchAgentConfigForm({
           )}
         </AnimatePresence>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Editor for a node's typed-output JSON Schema. Keeps the raw text locally so a
+ * half-typed schema doesn't clobber config; commits the parsed object only when
+ * it's valid JSON (an object), clears it when emptied, and surfaces a parse
+ * error otherwise. When set, the agent is required to return a matching object
+ * and its fields become `{{steps.<slug>.<field>}}` for downstream nodes.
+ */
+function OutputSchemaField({
+  value,
+  onChange
+}: {
+  value?: Record<string, unknown>
+  onChange: (schema: Record<string, unknown> | undefined) => void
+}) {
+  const [text, setText] = useState(() => (value ? JSON.stringify(value, null, 2) : ''))
+  const [error, setError] = useState<string | null>(null)
+  // Track the last value we emitted (compact form) so we can tell our own edits
+  // apart from an external change — e.g. the config panel switching to a
+  // different node. Only the latter should reset the textarea.
+  const lastEmitted = useRef<string | undefined>(value ? JSON.stringify(value) : undefined)
+
+  useEffect(() => {
+    const incoming = value ? JSON.stringify(value) : undefined
+    if (incoming !== lastEmitted.current) {
+      setText(value ? JSON.stringify(value, null, 2) : '')
+      setError(null)
+      lastEmitted.current = incoming
+    }
+  }, [value])
+
+  const handleChange = (raw: string) => {
+    setText(raw)
+    const trimmed = raw.trim()
+    if (!trimmed) {
+      setError(null)
+      lastEmitted.current = undefined
+      onChange(undefined)
+      return
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      setError('Not valid JSON')
+      return
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      setError('Schema must be a JSON object')
+      return
+    }
+    setError(null)
+    lastEmitted.current = JSON.stringify(parsed)
+    onChange(parsed as Record<string, unknown>)
+  }
+
+  return (
+    <div>
+      <label className="text-[13px] text-gray-400 font-medium block mb-2">Output Schema</label>
+      <textarea
+        value={text}
+        onChange={(e) => handleChange(e.target.value)}
+        placeholder={
+          '{\n  "type": "object",\n  "properties": { "verdict": { "type": "string" } },\n  "required": ["verdict"]\n}'
+        }
+        spellCheck={false}
+        rows={6}
+        className={`w-full px-3 py-2 text-[12px] bg-white/[0.06] border rounded-md text-white
+                    placeholder:text-gray-600 focus:outline-none font-mono resize-y ${
+                      error
+                        ? 'border-red-500/50 focus:border-red-500/70'
+                        : 'border-white/[0.1] focus:border-white/[0.2]'
+                    }`}
+      />
+      {error ? (
+        <p className="text-[11px] text-red-400 mt-1">{error}</p>
+      ) : (
+        <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+          Agent must return a JSON object matching this schema. Its fields become{' '}
+          <span className="text-gray-400 font-mono">{'{{steps.<step>.<field>}}'}</span> for later
+          nodes. A run that doesn&apos;t match is marked failed.
+        </p>
+      )}
     </div>
   )
 }

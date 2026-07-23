@@ -1,5 +1,6 @@
 export * from './types'
 export * from './agent-defaults'
 export * from './prompt-builder'
+export * from './structured-output'
 export * from './protocol'
 export * from './string-utils'

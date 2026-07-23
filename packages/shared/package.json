@@ -12,6 +12,7 @@
     "./prompt-builder": "./src/prompt-builder.ts",
     "./protocol": "./src/protocol.ts",
     "./string-utils": "./src/string-utils.ts",
-    "./json-schema-utils": "./src/json-schema-utils.ts"
+    "./json-schema-utils": "./src/json-schema-utils.ts",
+    "./structured-output": "./src/structured-output.ts"
   }
 }

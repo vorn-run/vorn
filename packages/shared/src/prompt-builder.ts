@@ -1,4 +1,5 @@
 import { TaskConfig, ProjectConfig, TaskStatus, WorkflowDefinition } from './types'
+import { buildStructuredOutputInstructions } from './structured-output'
 
 export interface TaskPromptContext {
   task: TaskConfig
@@ -13,6 +14,9 @@ export interface WorkflowPromptContext {
   workflow: WorkflowDefinition
   stepName: string
   userPrompt: string
+  /** When set, the agent is asked to end its run with a JSON object matching
+   *  this schema so the engine can capture typed step output. */
+  outputSchema?: Record<string, unknown>
 }
 
 /**
@@ -117,7 +121,7 @@ export function buildTaskPrompt(ctx: TaskPromptContext): string {
  * previous run logs.
  */
 export function buildWorkflowPrompt(ctx: WorkflowPromptContext): string {
-  const { workflow, stepName, userPrompt } = ctx
+  const { workflow, stepName, userPrompt, outputSchema } = ctx
   const lines: string[] = []
 
   lines.push(`# Workflow: ${workflow.name}`)
@@ -141,6 +145,10 @@ export function buildWorkflowPrompt(ctx: WorkflowPromptContext): string {
   lines.push('- `list_tasks` — List tasks in this project')
   lines.push('- `update_task` — Update task status when done')
   lines.push('')
+
+  if (outputSchema) {
+    lines.push(buildStructuredOutputInstructions(outputSchema))
+  }
 
   return lines.join('\n')
 }
