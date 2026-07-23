@@ -1,13 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('node:child_process', async () => {
   const { EventEmitter } = await import('node:events')
   class FakeChild extends EventEmitter {
     pid = 4242
-    stdin = { on: vi.fn(), end: vi.fn() }
+    stdin = { on: vi.fn(), end: vi.fn(), write: vi.fn() }
     stdout = new EventEmitter()
     stderr = new EventEmitter()
     kill = vi.fn()
+    unref = vi.fn()
   }
   return {
     spawn: vi.fn(() => new FakeChild()),
@@ -72,6 +73,29 @@ describe('headlessManager.createHeadless', () => {
     headlessManager.killHeadless(session.id)
   })
 
+  it('writes a multi-line claude prompt to stdin instead of argv', () => {
+    const prompt = '# Workflow: Demo\n\n**Step:** one\n\nDo the thing.'
+    const session = headlessManager.createHeadless({
+      agentType: 'claude',
+      projectName: 'p',
+      projectPath: '/p',
+      initialPrompt: prompt,
+      headless: true
+    })
+
+    const child = spawnMock.mock.results[0].value as {
+      stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
+    }
+    expect(child.stdin.write).toHaveBeenCalledWith(prompt)
+    expect(child.stdin.end).toHaveBeenCalled()
+
+    // The prompt must not leak onto argv, where the Windows shell would split it.
+    const args = spawnMock.mock.calls[0][1] as string[]
+    expect(args).not.toContain(prompt)
+
+    headlessManager.killHeadless(session.id)
+  })
+
   it('does not populate agentSessionId for non-pinning agents', () => {
     const session = headlessManager.createHeadless({
       agentType: 'codex',
@@ -101,5 +125,55 @@ describe('headlessManager.createHeadless', () => {
     expect(session.workflowName).toBe('wf')
 
     headlessManager.killHeadless(session.id)
+  })
+
+  describe('Windows shell spawn', () => {
+    const realPlatform = process.platform
+    const setPlatform = (value: string) =>
+      Object.defineProperty(process, 'platform', { value, configurable: true })
+
+    afterEach(() => setPlatform(realPlatform))
+
+    it('spawns through the shell with the prompt quoted so it is not word-split', () => {
+      setPlatform('win32')
+      const prompt = '# Workflow: Demo\n\n**Step:** one\n\nDo the thing with spaces.'
+      const session = headlessManager.createHeadless({
+        agentType: 'codex', // arg-based agent — the prompt rides on argv
+        projectName: 'p',
+        projectPath: '/p',
+        initialPrompt: prompt,
+        headless: true
+      })
+
+      const [, args, options] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }]
+      expect(options.shell).toBe(true)
+      // The raw prompt must NOT appear as a bare element (that word-splits under
+      // cmd.exe); it must be a single quoted token that still contains the text.
+      expect(args).not.toContain(prompt)
+      const promptArgs = args.filter((a) => a.includes('Do the thing with spaces.'))
+      expect(promptArgs).toHaveLength(1)
+      expect(promptArgs[0]).not.toBe(prompt) // i.e. it was quoted/escaped
+
+      headlessManager.killHeadless(session.id)
+    })
+
+    it('does not quote args on POSIX (no shell wrapper)', () => {
+      setPlatform('linux')
+      const prompt = 'do a thing with spaces'
+      const session = headlessManager.createHeadless({
+        agentType: 'codex',
+        projectName: 'p',
+        projectPath: '/p',
+        initialPrompt: prompt,
+        headless: true
+      })
+
+      const [, args, options] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }]
+      expect(options.shell).toBe(false)
+      // Passed to execve verbatim — one unquoted element.
+      expect(args).toContain(prompt)
+
+      headlessManager.killHeadless(session.id)
+    })
   })
 })

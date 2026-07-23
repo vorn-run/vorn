@@ -160,15 +160,36 @@ export function buildHeadlessLaunchLine(
   }
 }
 
+export interface HeadlessSpawnArgs {
+  command: string
+  args: string[]
+  /**
+   * When set, the prompt should be written to the child's stdin rather than
+   * passed as a command-line argument. Used for agents that read their prompt
+   * from stdin (claude) so a multi-line prompt survives intact on Windows,
+   * where `spawn(..., { shell: true })` word-splits and line-breaks unquoted
+   * argv on the cmd.exe command line. See buildHeadlessSpawnArgs.
+   */
+  stdin?: string
+}
+
 /**
  * Returns { command, args } for direct spawn (no shell wrapper).
  * Avoids TTY/stdin issues that occur when spawning through sh -c in Node.js.
+ *
+ * On Windows the headless spawn uses `shell: true` (required to run the
+ * `.cmd`/`.ps1` shims that npm-installed agents ship as). Under `shell: true`,
+ * Node concatenates argv into a single cmd.exe command line with no quoting,
+ * so a workflow prompt — which is multi-word and multi-line — gets word-split
+ * (claude's `-p` then sees only the first token, e.g. `#`) and truncated at the
+ * first newline. To avoid this entirely, agents that can read their prompt from
+ * stdin return it via `stdin` instead of on the command line.
  */
 export function buildHeadlessSpawnArgs(
   payload: CreateTerminalPayload,
   agentCommands: Record<AiAgentType, AgentCommandConfig>,
   env: Record<string, string>
-): { command: string; args: string[] } {
+): HeadlessSpawnArgs {
   if (payload.agentType === 'shell') {
     throw new Error('buildHeadlessSpawnArgs called for shell session')
   }
@@ -189,7 +210,11 @@ export function buildHeadlessSpawnArgs(
 
   switch (payload.agentType) {
     case 'claude':
-      return { command: cmd.command, args: [...extraArgs, '-p', prompt] }
+      // `claude -p` (print mode) reads the prompt from stdin when no positional
+      // prompt is given. Deliver it there so the shell never sees it.
+      return prompt
+        ? { command: cmd.command, args: [...extraArgs, '-p'], stdin: prompt }
+        : { command: cmd.command, args: [...extraArgs, '-p', ''] }
     case 'copilot':
       return { command: cmd.command, args: [...extraArgs, '-p', prompt] }
     case 'codex':
