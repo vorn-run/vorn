@@ -1,0 +1,1 @@
+{"detail":"Maintain crontab file for individual users","flags":[{"flag":"-e","detail":"Edit the current crontab"},{"flag":"-l","detail":"Display the current crontab"},{"flag":"-r","detail":"Remove the current crontab"},{"flag":"-u","detail":"Specify the name of the user whose crontab is t…"}],"arg":"none"}

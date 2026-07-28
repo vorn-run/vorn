@@ -1,0 +1,438 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type { Terminal } from '@xterm/xterm'
+import {
+  attachCommandBlocks,
+  CommandBlockTracker,
+  formatDuration,
+  onCommandBlocksChange,
+  shortenCwd,
+  type CommandBlock,
+  type MarkerLike,
+  type TrackerHost
+} from '../src/renderer/lib/command-blocks'
+
+class FakeMarker implements MarkerLike {
+  isDisposed = false
+  private disposeCbs: Array<() => void> = []
+  constructor(public line: number) {}
+  dispose(): void {
+    if (this.isDisposed) return
+    this.isDisposed = true
+    this.disposeCbs.forEach((cb) => cb())
+  }
+  onDispose(cb: () => void): void {
+    this.disposeCbs.push(cb)
+  }
+}
+
+function b64(text: string): string {
+  return Buffer.from(text, 'utf-8').toString('base64')
+}
+
+describe('CommandBlockTracker', () => {
+  let tracker: CommandBlockTracker
+  let finished: CommandBlock[]
+  let now: number
+  let alternate: boolean
+  let nextLine: number
+
+  beforeEach(() => {
+    finished = []
+    now = 1000
+    alternate = false
+    nextLine = 0
+    const host: TrackerHost = {
+      registerMarker: () => new FakeMarker(nextLine++),
+      onBlockFinished: (block) => finished.push(block),
+      isAlternateBuffer: () => alternate,
+      now: () => now
+    }
+    tracker = new CommandBlockTracker(host)
+  })
+
+  function runCommand(text: string, exitCode: number, durationMs: number): void {
+    tracker.handleSequence('A')
+    tracker.handleCommandText(`cmd;${b64(text)}`)
+    tracker.handleSequence('C')
+    now += durationMs
+    tracker.handleSequence(`D;${exitCode}`)
+  }
+
+  it('records a finished command with text, exit code, and duration', () => {
+    runCommand('git status', 0, 420)
+    expect(finished).toHaveLength(1)
+    expect(finished[0].command).toBe('git status')
+    expect(finished[0].exitCode).toBe(0)
+    expect(finished[0].durationMs).toBe(420)
+    expect(tracker.blocks).toHaveLength(1)
+  })
+
+  it('records failing exit codes', () => {
+    runCommand('false', 1, 10)
+    expect(finished[0].exitCode).toBe(1)
+  })
+
+  it('anchors the block to the prompt line, not the output line', () => {
+    tracker.handleSequence('A') // prompt at line 0
+    tracker.handleSequence('C')
+    tracker.handleSequence('D;0')
+    expect(tracker.blocks[0].marker.line).toBe(0)
+  })
+
+  it('ignores D without a preceding C', () => {
+    tracker.handleSequence('D;0')
+    expect(finished).toHaveLength(0)
+  })
+
+  it('drops the prompt marker for empty prompts (Enter on empty line)', () => {
+    tracker.handleSequence('A')
+    const first = tracker.jumpLines()
+    tracker.handleSequence('A')
+    expect(first).toHaveLength(1)
+    // old marker disposed, replaced by the new prompt's marker
+    expect(tracker.jumpLines()).toHaveLength(1)
+  })
+
+  it('handles a command without command text (base64 unavailable)', () => {
+    tracker.handleSequence('A')
+    tracker.handleSequence('C')
+    tracker.handleSequence('D;0')
+    expect(finished[0].command).toBeNull()
+  })
+
+  it('decodes multiline and non-ascii command text', () => {
+    runCommand('echo "línea uno\nlínea dos"', 0, 5)
+    expect(finished[0].command).toBe('echo "línea uno\nlínea dos"')
+  })
+
+  it('ignores sequences while the alternate buffer is active', () => {
+    alternate = true
+    runCommand('vim', 0, 5)
+    expect(finished).toHaveLength(0)
+    expect(tracker.blocks).toHaveLength(0)
+  })
+
+  it('command text does not leak into the next command', () => {
+    runCommand('git status', 0, 10)
+    tracker.handleSequence('A')
+    tracker.handleSequence('C') // no cmd OSC this time
+    tracker.handleSequence('D;0')
+    expect(finished[1].command).toBeNull()
+  })
+
+  it('removes blocks whose markers are disposed (scrollback trim)', () => {
+    runCommand('one', 0, 5)
+    runCommand('two', 0, 5)
+    expect(tracker.blocks).toHaveLength(2)
+    tracker.blocks[0].marker.dispose()
+    expect(tracker.blocks).toHaveLength(1)
+    expect(tracker.blocks[0].command).toBe('two')
+  })
+
+  it('caps stored blocks and prunes the oldest', () => {
+    for (let i = 0; i < 210; i++) runCommand(`cmd ${i}`, 0, 1)
+    expect(tracker.blocks.length).toBe(200)
+    expect(tracker.blocks[0].command).toBe('cmd 10')
+  })
+
+  it('jumpLines includes finished blocks and the current prompt, sorted', () => {
+    runCommand('one', 0, 5) // prompt line 0
+    runCommand('two', 0, 5) // prompt line 1
+    tracker.handleSequence('A') // current prompt line 2
+    expect(tracker.jumpLines()).toEqual([0, 1, 2])
+  })
+
+  it('malformed base64 clears the pending command instead of throwing', () => {
+    tracker.handleSequence('A')
+    tracker.handleCommandText('cmd;%%%not-base64%%%')
+    tracker.handleSequence('C')
+    tracker.handleSequence('D;0')
+    expect(finished[0].command).toBeNull()
+  })
+})
+
+describe('CommandBlockTracker.inputState', () => {
+  let tracker: CommandBlockTracker
+  let alternate: boolean
+
+  beforeEach(() => {
+    alternate = false
+    let line = 0
+    tracker = new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(line++),
+      onBlockFinished: () => {},
+      isAlternateBuffer: () => alternate,
+      now: () => 0
+    })
+  })
+
+  it('is unknown before any prompt marker arrives (no shell integration)', () => {
+    expect(tracker.inputState()).toBe('unknown')
+  })
+
+  it('is prompt at the prompt and running during a command', () => {
+    tracker.handleSequence('A')
+    expect(tracker.inputState()).toBe('prompt')
+    tracker.handleSequence('C')
+    expect(tracker.inputState()).toBe('running')
+    tracker.handleSequence('D;0')
+    tracker.handleSequence('A')
+    expect(tracker.inputState()).toBe('prompt')
+  })
+
+  it('is running while the alternate buffer is active', () => {
+    tracker.handleSequence('A')
+    alternate = true
+    expect(tracker.inputState()).toBe('running')
+    alternate = false
+    expect(tracker.inputState()).toBe('prompt')
+  })
+})
+
+describe('output measurement', () => {
+  it('records the rows a command’s output occupied', () => {
+    let line = 0
+    const finished: CommandBlock[] = []
+    const tracker = new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(line),
+      onBlockFinished: (block) => finished.push(block),
+      isAlternateBuffer: () => false,
+      now: () => 1000,
+      currentLine: () => line
+    })
+    tracker.handleSequence('A')
+    tracker.handleSequence('C')
+    line = 12 // twelve rows of output scrolled past
+    tracker.handleSequence('D;0')
+    expect(finished[0].outputLines).toBe(12)
+  })
+
+  it('reports zero when the host cannot measure', () => {
+    // Hosts without currentLine (older callers, tests) must still produce a
+    // usable block rather than NaN.
+    const finished: CommandBlock[] = []
+    const tracker = new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(0),
+      onBlockFinished: (block) => finished.push(block),
+      isAlternateBuffer: () => false,
+      now: () => 1000
+    })
+    tracker.handleSequence('A')
+    tracker.handleSequence('C')
+    tracker.handleSequence('D;0')
+    expect(finished[0].outputLines).toBe(0)
+  })
+})
+
+describe('block pruning', () => {
+  it('notifies the host when scrollback disposes a marker', () => {
+    let pruned = 0
+    const markers: FakeMarker[] = []
+    let line = 0
+    const tracker = new CommandBlockTracker({
+      registerMarker: () => {
+        const m = new FakeMarker(line++)
+        markers.push(m)
+        return m
+      },
+      onBlockFinished: () => {},
+      onBlocksPruned: () => pruned++,
+      isAlternateBuffer: () => false,
+      now: () => 1000
+    })
+    tracker.handleSequence('A')
+    tracker.handleSequence('C')
+    tracker.handleSequence('D;0')
+    expect(tracker.blocks).toHaveLength(1)
+    markers[0].dispose()
+    expect(tracker.blocks).toHaveLength(0)
+    expect(pruned).toBe(1)
+  })
+})
+
+describe('runningBlock', () => {
+  let tracker: CommandBlockTracker
+
+  beforeEach(() => {
+    let line = 0
+    tracker = new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(line++),
+      onBlockFinished: () => {},
+      isAlternateBuffer: () => false,
+      now: () => 1000
+    })
+  })
+
+  it('exposes the in-flight command and clears once it finishes', () => {
+    tracker.handleSequence('A')
+    tracker.handleCommandText(`cmd;${b64('yarn build')}`)
+    tracker.handleSequence('C')
+    expect(tracker.runningBlock()?.command).toBe('yarn build')
+    tracker.handleSequence('D;0')
+    expect(tracker.runningBlock()).toBeNull()
+  })
+
+  it('is null while sitting at the prompt', () => {
+    tracker.handleSequence('A')
+    expect(tracker.runningBlock()).toBeNull()
+  })
+})
+
+describe('formatDuration', () => {
+  it('formats sub-second, seconds, and minutes', () => {
+    expect(formatDuration(80)).toBe('0.1s')
+    expect(formatDuration(950)).toBe('1s')
+    expect(formatDuration(1234)).toBe('1.2s')
+    expect(formatDuration(9800)).toBe('9.8s')
+    expect(formatDuration(42_000)).toBe('42s')
+    expect(formatDuration(83_000)).toBe('1m 23s')
+  })
+})
+
+describe('attachCommandBlocks', () => {
+  interface FakeTerm {
+    registerDecoration: ReturnType<typeof vi.fn>
+    handlers: Map<number, (data: string) => boolean>
+  }
+
+  function fakeTerminal(): { term: FakeTerm; asTerminal: Terminal } {
+    const handlers = new Map<number, (data: string) => boolean>()
+    const term = {
+      registerDecoration: vi.fn(() => undefined),
+      handlers,
+      options: { theme: { background: '#141416', cursor: '#d4d4d8' } },
+      cols: 80,
+      buffer: { active: { type: 'normal', baseY: 0, cursorY: 0 } },
+      registerMarker: (offset: number) => new FakeMarker(offset),
+      parser: {
+        registerOscHandler: (id: number, cb: (data: string) => boolean) => {
+          handlers.set(id, cb)
+          return { dispose: () => handlers.delete(id) }
+        }
+      }
+    }
+    return { term: term as unknown as FakeTerm, asTerminal: term as unknown as Terminal }
+  }
+
+  it('draws only the duration and the closing rule, and only once done', () => {
+    // Nothing is painted until a command finishes. The command's heading role
+    // comes from the shell rendering it bold and the dim directory line above
+    // it — not from a background band, which reads as a selection.
+    const { term, asTerminal } = fakeTerminal()
+    const dispose = attachCommandBlocks('t-1', asTerminal)
+    const osc133 = term.handlers.get(133)!
+
+    osc133('A')
+    osc133('C')
+    expect(term.registerDecoration).not.toHaveBeenCalled()
+
+    osc133('D;0')
+    expect(term.registerDecoration).toHaveBeenCalledTimes(2)
+    // Both span the row. The meta is pushed right with flexbox rather than
+    // the decoration's own right anchor, which lands at column 0 — on top of
+    // the command it annotates.
+    expect(term.registerDecoration).toHaveBeenCalledWith({ marker: expect.anything(), width: 80 })
+    // The rule that closes the block.
+    expect(term.registerDecoration).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 80, layer: 'bottom' })
+    )
+    dispose()
+  })
+
+  it('marks each executed command', () => {
+    const { term, asTerminal } = fakeTerminal()
+    const dispose = attachCommandBlocks('t-4', asTerminal)
+    const osc133 = term.handlers.get(133)!
+    osc133('A')
+    osc133('C')
+    osc133('D;0')
+    osc133('A')
+    osc133('C')
+    osc133('D;0')
+    // Two durations, two closing rules.
+    expect(term.registerDecoration).toHaveBeenCalledTimes(4)
+    dispose()
+  })
+
+  it('draws nothing for a prompt that never ran a command', () => {
+    // Enter on an empty prompt produces no command and so no block.
+    const { term, asTerminal } = fakeTerminal()
+    const dispose = attachCommandBlocks('t-5', asTerminal)
+    const osc133 = term.handlers.get(133)!
+    osc133('A')
+    osc133('A')
+    expect(term.registerDecoration).not.toHaveBeenCalled()
+    dispose()
+  })
+
+  it('notifies listeners on prompt, execution and completion', () => {
+    const { term, asTerminal } = fakeTerminal()
+    const dispose = attachCommandBlocks('t-2', asTerminal)
+    let calls = 0
+    const unsubscribe = onCommandBlocksChange('t-2', () => calls++)
+    const osc133 = term.handlers.get(133)!
+    osc133('A')
+    osc133('C')
+    osc133('D;0')
+    expect(calls).toBeGreaterThanOrEqual(3)
+    unsubscribe()
+    const before = calls
+    osc133('A')
+    expect(calls).toBe(before)
+    dispose()
+  })
+
+  it('stops notifying once the terminal is torn down', () => {
+    const { term, asTerminal } = fakeTerminal()
+    const dispose = attachCommandBlocks('t-3', asTerminal)
+    let calls = 0
+    onCommandBlocksChange('t-3', () => calls++)
+    dispose()
+    const osc133 = term.handlers.get(133)
+    expect(osc133).toBeUndefined()
+    expect(calls).toBe(0)
+  })
+})
+
+describe('shortenCwd', () => {
+  it('keeps the last two segments', () => {
+    expect(shortenCwd('/Users/j/dev/vorn')).toBe('dev/vorn')
+    expect(shortenCwd('/Users/j/dev/vorn/packages/server')).toBe('packages/server')
+  })
+
+  it('keeps short paths whole', () => {
+    expect(shortenCwd('/tmp')).toBe('/tmp')
+    expect(shortenCwd('/usr/local')).toBe('/usr/local')
+    expect(shortenCwd('/')).toBe('/')
+  })
+
+  it('returns null when the shell never reported one', () => {
+    expect(shortenCwd(null)).toBeNull()
+  })
+})
+
+describe('block cwd', () => {
+  it('records the directory reported at the prompt before the command', () => {
+    let line = 0
+    const finished: CommandBlock[] = []
+    const tracker = new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(line++),
+      onBlockFinished: (b) => finished.push(b),
+      isAlternateBuffer: () => false,
+      now: () => 1000
+    })
+    tracker.handleSequence('A')
+    tracker.handleCommandText('cwd;/Users/j/dev/vorn')
+    tracker.handleSequence('C')
+    tracker.handleSequence('D;0')
+    expect(finished[0].cwd).toBe('/Users/j/dev/vorn')
+
+    // A `cd` reports the new directory at the next prompt, and the command
+    // that follows belongs to it.
+    tracker.handleSequence('A')
+    tracker.handleCommandText('cwd;/Users/j/dev/vorn/docs')
+    tracker.handleSequence('C')
+    tracker.handleSequence('D;0')
+    expect(finished[1].cwd).toBe('/Users/j/dev/vorn/docs')
+  })
+})

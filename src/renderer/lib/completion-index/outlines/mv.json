@@ -1,0 +1,1 @@
+{"detail":"Move & rename files and folders","arg":"dir","flags":[{"flag":"-f","detail":"Do not prompt for confirmation before overwriti…"},{"flag":"-i","detail":"Cause mv to write a prompt to standard error be…"},{"flag":"-n","detail":"Do not overwrite existing file"},{"flag":"-v","detail":"Cause mv to be verbose, showing files after the…"}]}

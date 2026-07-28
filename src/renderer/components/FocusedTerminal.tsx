@@ -1,11 +1,12 @@
 import { useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
-import { TerminalSlot } from './TerminalSlot'
+import { TerminalPane, terminalTextIndentPx } from './TerminalPane'
 import { AgentStatusIcon } from './AgentStatusIcon'
 import { InlineRename } from './InlineRename'
 import { CardHeader } from './card/CardHeader'
 import { CardStatusBar } from './card/CardStatusBar'
+import { IntentBar } from './IntentBar'
 import { MobileFontSizeControl } from './MobileFontSizeControl'
 import { MobileTerminalKeybar } from './MobileTerminalKeybar'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
@@ -166,10 +167,10 @@ export function FocusedTerminal() {
           className="relative flex-1 p-1 min-h-0"
           style={{ background: 'rgba(0, 0, 0, 0.3)' }}
         >
-          <TerminalSlot
+          <TerminalPane
             terminalId={effectiveId}
+            agentType={terminal.session.agentType}
             isFocused={!isRenaming && !isPreview}
-            className="w-full h-full"
           />
           {/* Mobile: floating controls (font size + scroll) */}
           <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2 z-50">
@@ -187,6 +188,15 @@ export function FocusedTerminal() {
             )}
           </div>
         </div>
+
+        {/* +4 for this pane's own container padding, so the caret lands in
+            the terminal's text column. */}
+        {!isMobile && (
+          <IntentBar
+            terminalId={effectiveId}
+            indentPx={terminalTextIndentPx(terminal.session.agentType) + 4}
+          />
+        )}
 
         {!isMobile && <CardStatusBar terminalId={effectiveId} />}
 

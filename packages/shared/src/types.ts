@@ -13,6 +13,15 @@ export function isAiAgent(agentType: AgentType | undefined): agentType is AiAgen
   return agentType !== undefined && agentType !== 'shell'
 }
 
+/**
+ * True for sessions Vorn renders itself — a plain pty whose output is ordinary
+ * scrollback, so command boundaries, the spine and the input bar all apply.
+ * Agent sessions paint their own full-screen interface and are excluded.
+ */
+export function isShellSession(agentType: AgentType | undefined): boolean {
+  return agentType === 'shell'
+}
+
 export function supportsExactSessionResume(agentType: AgentType): boolean {
   return agentType !== 'gemini' && agentType !== 'shell'
 }
@@ -720,6 +729,13 @@ export interface AppConfig {
     headlessRetentionMinutes?: number
     enableHoverPreview?: boolean
     /**
+     * Shell sessions only. Replaces the shell's own prompt with a single
+     * glyph, so each command reads as a heading above its output instead of
+     * repeating your username, host and path on every line. Defaults to on;
+     * turn it off to keep your own prompt exactly as your shell renders it.
+     */
+    minimalShellPrompt?: boolean
+    /**
      * Set to `true` after the seeded "Default Task Workflow" has been inserted
      * once. Ensures deleting the workflow sticks — we don't resurrect it on
      * the next launch.
@@ -937,6 +953,7 @@ export const IPC = {
   FILE_LIST_DIR: 'file:listDir',
   FILE_READ_CONTENT: 'file:readContent',
   FILE_WRITE_CONTENT: 'file:writeContent',
+  SHELL_LIST_EXECUTABLES: 'shell:listExecutables',
   CONNECTOR_LIST: 'connector:list',
   CONNECTOR_GET: 'connector:get',
   CONNECTION_LIST: 'connection:list',

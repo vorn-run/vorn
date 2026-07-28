@@ -78,6 +78,15 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       return { terminals: next }
     }),
 
+  updateSessionCwd: (id, shellCwd) =>
+    set((state) => {
+      const term = state.terminals.get(id)
+      if (!term || term.session.shellCwd === shellCwd) return state
+      const next = new Map(state.terminals)
+      next.set(id, { ...term, session: { ...term.session, shellCwd } })
+      return { terminals: next }
+    }),
+
   setBranchForCwd: (cwd, branch) =>
     set((state) => {
       let next: Map<string, TerminalState> | null = null

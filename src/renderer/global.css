@@ -145,6 +145,17 @@ select:focus:not(:focus-visible) {
   outline: none;
 }
 
+/*
+ * Opt out of the ring above. It exists so keyboard users can see which
+ * control they are on, which a surface that is focused nearly all the time
+ * does not need — on the terminal's input the ring reads as a box drawn
+ * around it, and it appears on Enter because that reclassifies the focus as
+ * keyboard-driven.
+ */
+[data-no-focus-ring]:focus-visible {
+  outline: none;
+}
+
 /* Draggable titlebar region */
 .titlebar-drag {
   -webkit-app-region: drag;

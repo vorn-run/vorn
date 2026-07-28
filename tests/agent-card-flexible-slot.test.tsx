@@ -38,13 +38,13 @@ vi.mock('../src/renderer/hooks/useTerminalScrollButton', () => ({
 import { useAppStore } from '../src/renderer/stores'
 import { AgentCard } from '../src/renderer/components/AgentCard'
 
-function seedTerminal(id: string) {
+function seedTerminal(id: string, agentType: 'claude' | 'shell' = 'claude') {
   const terminals = new Map()
   terminals.set(id, {
     id,
     session: {
       id,
-      agentType: 'claude' as const,
+      agentType,
       projectName: 'Vorn',
       projectPath: '/tmp/vorn',
       isWorktree: false,
@@ -81,5 +81,21 @@ describe('AgentCard TerminalSlot sizing', () => {
     render(<AgentCard terminalId="t1" flexible />)
     const call = slotCalls.find((c) => c.terminalId === 't1')
     expect(call?.className).toBe('absolute inset-0 right-4 bottom-4')
+  })
+
+  it('leaves room for the spine on a shell session', () => {
+    seedTerminal('t1', 'shell')
+    render(<AgentCard terminalId="t1" />)
+    const call = slotCalls.find((c) => c.terminalId === 't1')
+    expect(call?.className).toBe('flex-1 min-w-0 h-full')
+  })
+
+  it('keeps the SE reservation alongside the spine in flexible mode', () => {
+    // left-4 clears the 8px spine plus its 8px gap; right-6 keeps the block
+    // rules off the edge while preserving the 16px resize-handle corner.
+    seedTerminal('t1', 'shell')
+    render(<AgentCard terminalId="t1" flexible />)
+    const call = slotCalls.find((c) => c.terminalId === 't1')
+    expect(call?.className).toBe('absolute inset-0 left-4 right-6 bottom-4')
   })
 })

@@ -13,6 +13,13 @@ step() {
 step "Typecheck"
 yarn typecheck
 
+step "Completion index is up to date"
+# The index is committed so builds need neither the corpus nor the network.
+# Regenerating must be a no-op; if it is not, someone edited it by hand or
+# changed the allowlist without running the generator.
+yarn gen:completions >/dev/null
+git diff --exit-code src/renderer/lib/completion-index
+
 step "Lint"
 yarn lint
 
