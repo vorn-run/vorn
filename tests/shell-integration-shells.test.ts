@@ -81,6 +81,10 @@ describe('bash', () => {
   })
 })
 
+function readConf(dataDirs: string): string {
+  return fs.readFileSync(path.join(dataDirs.split(':')[0], 'fish/vendor_conf.d/vorn.fish'), 'utf-8')
+}
+
 describe('fish', () => {
   it('installs as a vendor conf.d snippet found through XDG_DATA_DIRS', () => {
     const { env } = fishSetup(OPTS, '')
@@ -98,6 +102,28 @@ describe('fish', () => {
     // completion fish would otherwise find.
     const { env } = fishSetup(OPTS, '')
     expect(env.XDG_DATA_DIRS).toContain('/usr/share')
+  })
+
+  it('defers to fish 4, which marks prompts itself', () => {
+    // Emitting our own alongside fish's reports every boundary twice, which
+    // leaves the renderer with two prompts and two finishes per command and no
+    // usable blocks at all.
+    const { env } = fishSetup(OPTS, '')
+    const conf = readConf(env.XDG_DATA_DIRS)
+    expect(conf).toContain("string split '.' -- $version)[1] -ge 4")
+    expect(conf).toContain('no-mark-prompt')
+    expect(conf).toContain('test $__vorn_own_marks -eq 1')
+  })
+
+  it('still reports the working directory, which fish markers omit', () => {
+    expect(readConf(fishSetup(OPTS, '').env.XDG_DATA_DIRS)).toContain(']5522;cwd;')
+  })
+
+  it('does not pass -- to printf, which fish prints literally', () => {
+    // fish's printf has no end-of-options marker, so a leading -- prefixed
+    // every captured command with it.
+    const conf = readConf(fishSetup(OPTS, '').env.XDG_DATA_DIRS)
+    expect(conf).not.toContain("printf '%s' --")
   })
 
   it('captures the exit status before anything else can overwrite it', () => {

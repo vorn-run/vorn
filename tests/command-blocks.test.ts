@@ -670,3 +670,40 @@ describe('working directory reporting', () => {
     expect(finished[0].cwd).toBeNull()
   })
 })
+
+describe('shells that carry the command in their own marker', () => {
+  /**
+   * fish 4 marks prompts itself and percent-encodes the command line inside
+   * its C marker. That marker arrives before anything we could emit, so it is
+   * the only place a fish block's title can come from.
+   */
+  it('reads the command line out of a fish C marker', () => {
+    let line = 0
+    const finished: CommandBlock[] = []
+    const t = new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(line++),
+      onBlockFinished: (b) => finished.push(b),
+      isAlternateBuffer: () => false,
+      now: () => 1000
+    })
+    t.handleSequence('A;click_events=1')
+    t.handleSequence('C;cmdline_url=git%20status%20--short')
+    t.handleSequence('D;0')
+    expect(finished[0].command).toBe('git status --short')
+  })
+
+  it('leaves the block untitled rather than guessing at bad encoding', () => {
+    let line = 0
+    const finished: CommandBlock[] = []
+    const t = new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(line++),
+      onBlockFinished: (b) => finished.push(b),
+      isAlternateBuffer: () => false,
+      now: () => 1000
+    })
+    t.handleSequence('A')
+    t.handleSequence('C;cmdline_url=%E0%A4%A')
+    t.handleSequence('D;0')
+    expect(finished[0].command).toBeNull()
+  })
+})

@@ -110,6 +110,17 @@ export class CommandBlockTracker {
       return
     }
     if (kind === 'C') {
+      // fish carries the command line in its own marker, percent-encoded. It
+      // arrives before any sequence we could emit, so reading it here is the
+      // only way to title a fish block.
+      const url = /cmdline_url=([^;]*)/.exec(payload)
+      if (url) {
+        try {
+          this.pendingCommand = decodeURIComponent(url[1])
+        } catch {
+          // malformed encoding — leave the block untitled rather than guessing
+        }
+      }
       this.beginRunning()
       return
     }
