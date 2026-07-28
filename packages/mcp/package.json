@@ -1,6 +1,6 @@
 {
   "name": "@vornrun/mcp",
-  "version": "0.2.0",
+  "version": "0.4.1",
   "description": "Vorn MCP server — task management, git, and workflow tools for AI coding agents",
   "type": "module",
   "license": "MIT",
