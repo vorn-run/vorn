@@ -12,9 +12,10 @@
  * by first letter would mean loading gcloud to complete git.
  */
 
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   assertBudget,
   extractSpec,
@@ -74,7 +75,7 @@ async function main() {
     }
     let spec
     try {
-      spec = (await import(`file://${specPath}`)).default
+      spec = (await import(pathToFileURL(specPath).href)).default
     } catch (err) {
       missing.push(`${command} (import failed: ${err.message})`)
       continue
@@ -122,6 +123,12 @@ async function main() {
         spdx: 'MIT',
         url: 'https://github.com/withfig/autocomplete',
         commandCount: Object.keys(names).length,
+        // Lets CI detect an allowlist edited without regenerating, even on a
+        // machine where the corpus is not installed.
+        allowlistSha256: crypto
+          .createHash('sha256')
+          .update(fs.readFileSync(ALLOWLIST))
+          .digest('hex'),
         commands: Object.keys(names).sort()
       },
       null,

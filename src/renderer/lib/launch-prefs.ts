@@ -16,7 +16,13 @@ export interface SavedLaunchSettings {
 export function loadLaunchSettings(): SavedLaunchSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : {}
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    // Valid JSON is not necessarily the shape we wrote — a corrupted or
+    // older value could be a string or number, which would otherwise be
+    // spread back into storage as indexed characters.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+    return parsed as SavedLaunchSettings
   } catch {
     return {}
   }

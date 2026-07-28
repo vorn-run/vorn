@@ -4,6 +4,7 @@
   "spdx": "MIT",
   "url": "https://github.com/withfig/autocomplete",
   "commandCount": 154,
+  "allowlistSha256": "818552ad396a462443f245c243e6a1e320d894a9a435a2f1553b57ac644b4344",
   "commands": [
     "ag",
     "apt",
