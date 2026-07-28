@@ -18,5 +18,9 @@ subcommands, flags, and whether an argument is a file or a directory. The
 dynamic generators are dropped; Vorn resolves branches, paths, and package
 scripts from the live session instead.
 
-Regenerate with `yarn gen:completions` after editing
-`scripts/completion-allowlist.txt`.
+The corpus is **not** a dependency of this project — it is large and needed
+only to regenerate. `yarn gen:completions` is a no-op unless it is present in
+`node_modules`, so builds and CI need neither the corpus nor network access.
+
+To regenerate after editing `scripts/completion-allowlist.txt`, install the
+corpus into `node_modules` locally and run `yarn gen:completions`.

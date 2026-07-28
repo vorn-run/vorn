@@ -91,7 +91,6 @@
     "@vitejs/plugin-react": "^5.2.0",
     "@vitest/coverage-v8": "4.1.6",
     "@vitest/eslint-plugin": "^1.6.16",
-    "@withfig/autocomplete": "^2.692.3",
     "electron": "^41.2.0",
     "electron-builder": "^26.10.0",
     "electron-vite": "^5.0.0",

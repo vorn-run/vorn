@@ -49,11 +49,14 @@ function readAllowlist() {
 async function main() {
   resetTruncations()
   if (!fs.existsSync(CORPUS)) {
-    console.error(
-      'Completion-spec corpus is not installed. Run `yarn install` first.\n' +
-        `Expected it at ${CORPUS}`
+    // The corpus is not a dependency: it is large, build-time only, and the
+    // index it produces is committed. Regenerating is a deliberate local act.
+    console.log(
+      'Completion-spec corpus not installed — leaving the committed index as is.\n' +
+        'To regenerate: yarn dlx --package @withfig/autocomplete ... or install it\n' +
+        `into node_modules and re-run. Expected at ${CORPUS}`
     )
-    process.exit(1)
+    return
   }
 
   const corpusPkg = JSON.parse(fs.readFileSync(path.join(CORPUS, 'package.json'), 'utf8'))

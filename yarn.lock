@@ -2418,23 +2418,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@fig/autocomplete-generators@npm:^2.4.0":
-  version: 2.4.0
-  resolution: "@fig/autocomplete-generators@npm:2.4.0::__archiveUrl=https%3A%2F%2Fms-feed-2.pkgs.visualstudio.com%2F1es-public%2F_packaging%2Fnpm-public%2Fnpm%2Fregistry%2F%40fig%2Fautocomplete-generators%2F-%2Fautocomplete-generators-2.4.0.tgz"
-  checksum: 10c0/34436e8ce20e9dfe703b3e1d41a5c8685d591e5c685849bf5d296a0667bd93127e11e8680204f3752a25ea667c5b27251a128b73737fea0f104ba378597cee88
-  languageName: node
-  linkType: hard
-
-"@fig/autocomplete-helpers@npm:^1.0.7":
-  version: 1.0.7
-  resolution: "@fig/autocomplete-helpers@npm:1.0.7::__archiveUrl=https%3A%2F%2Fms-feed-2.pkgs.visualstudio.com%2F1es-public%2F_packaging%2Fnpm-public%2Fnpm%2Fregistry%2F%40fig%2Fautocomplete-helpers%2F-%2Fautocomplete-helpers-1.0.7.tgz"
-  dependencies:
-    semver: "npm:^7.3.5"
-    typescript: "npm:^4.6.3"
-  checksum: 10c0/2372399d34d5da849057afdfcbcd0423ee896a8d5e75cb3fc1c1f1e818db146b622c3685af107e601a432af3ed3428f22c5faf5e555871602b9d2b25a5d5041d
-  languageName: node
-  linkType: hard
-
 "@floating-ui/core@npm:^1.7.5":
   version: 1.7.5
   resolution: "@floating-ui/core@npm:1.7.5"
@@ -4835,19 +4818,6 @@ __metadata:
     vite-plugin-pwa: "npm:^1.2.0"
   languageName: unknown
   linkType: soft
-
-"@withfig/autocomplete@npm:^2.692.3":
-  version: 2.692.3
-  resolution: "@withfig/autocomplete@npm:2.692.3::__archiveUrl=https%3A%2F%2Fms-feed-2.pkgs.visualstudio.com%2F1es-public%2F_packaging%2Fnpm-public%2Fnpm%2Fregistry%2F%40withfig%2Fautocomplete%2F-%2Fautocomplete-2.692.3.tgz"
-  dependencies:
-    "@fig/autocomplete-generators": "npm:^2.4.0"
-    "@fig/autocomplete-helpers": "npm:^1.0.7"
-    semver: "npm:^7.6.3"
-    strip-json-comments: "npm:^5.0.1"
-    yaml: "npm:^2.7.0"
-  checksum: 10c0/1d9a9b0f89c89c6b929b893fb0075988826ac8c3886a17f37e25854b50b697966bb316072383b1eb03391b7a618008dc8a3be7312295877700896fb8b10e8e10
-  languageName: node
-  linkType: hard
 
 "@xmldom/xmldom@npm:^0.8.10":
   version: 0.8.12
@@ -12070,13 +12040,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"strip-json-comments@npm:^5.0.1":
-  version: 5.0.3
-  resolution: "strip-json-comments@npm:5.0.3::__archiveUrl=https%3A%2F%2Fms-feed-25.pkgs.visualstudio.com%2F1es-public%2F_packaging%2Fnpm-public%2Fnpm%2Fregistry%2Fstrip-json-comments%2F-%2Fstrip-json-comments-5.0.3.tgz"
-  checksum: 10c0/daaf20b29f69fb51112698f4a9a662490dbb78d5baf6127c75a0a83c2ac6c078a8c0f74b389ad5e0519d6fc359c4a57cb9971b1ae201aef62ce45a13247791e0
-  languageName: node
-  linkType: hard
-
 "sucrase@npm:^3.35.0":
   version: 3.35.1
   resolution: "sucrase@npm:3.35.1"
@@ -12584,16 +12547,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"typescript@npm:^4.6.3":
-  version: 4.9.5
-  resolution: "typescript@npm:4.9.5::__archiveUrl=https%3A%2F%2Fms-feed-2.pkgs.visualstudio.com%2F1es-public%2F_packaging%2Fnpm-public%2Fnpm%2Fregistry%2Ftypescript%2F-%2Ftypescript-4.9.5.tgz"
-  bin:
-    tsc: ./bin/tsc
-    tsserver: ./bin/tsserver
-  checksum: 10c0/5f6cad2e728a8a063521328e612d7876e12f0d8a8390d3b3aaa452a6a65e24e9ac8ea22beb72a924fd96ea0a49ea63bb4e251fb922b12eedfb7f7a26475e5c56
-  languageName: node
-  linkType: hard
-
 "typescript@npm:^6.0.3":
   version: 6.0.3
   resolution: "typescript@npm:6.0.3"
@@ -12601,16 +12554,6 @@ __metadata:
     tsc: bin/tsc
     tsserver: bin/tsserver
   checksum: 10c0/4a25ff5045b984370f48f196b3a0120779b1b343d40b9a68d114ea5e5fff099809b2bb777576991a63a5cd59cf7bffd96ff6fe10afcefbcb8bd6fb96ad4b6606
-  languageName: node
-  linkType: hard
-
-"typescript@patch:typescript@npm%3A^4.6.3#optional!builtin<compat/typescript>":
-  version: 4.9.5
-  resolution: "typescript@patch:typescript@npm%3A4.9.5%3A%3A__archiveUrl=https%253A%252F%252Fms-feed-2.pkgs.visualstudio.com%252F1es-public%252F_packaging%252Fnpm-public%252Fnpm%252Fregistry%252Ftypescript%252F-%252Ftypescript-4.9.5.tgz#optional!builtin<compat/typescript>::version=4.9.5&hash=289587"
-  bin:
-    tsc: ./bin/tsc
-    tsserver: ./bin/tsserver
-  checksum: 10c0/e3333f887c6829dfe0ab6c1dbe0dd1e3e2aeb56c66460cb85c5440c566f900c833d370ca34eb47558c0c69e78ced4bfe09b8f4f98b6de7afed9b84b8d1dd06a1
   languageName: node
   linkType: hard
 
@@ -13155,7 +13098,6 @@ __metadata:
     "@vitejs/plugin-react": "npm:^5.2.0"
     "@vitest/coverage-v8": "npm:4.1.6"
     "@vitest/eslint-plugin": "npm:^1.6.16"
-    "@withfig/autocomplete": "npm:^2.692.3"
     "@xterm/addon-canvas": "npm:^0.7.0"
     "@xterm/addon-fit": "npm:^0.11.0"
     "@xterm/addon-web-links": "npm:0.12.0"
@@ -13721,15 +13663,6 @@ __metadata:
   version: 5.0.0
   resolution: "yallist@npm:5.0.0"
   checksum: 10c0/a499c81ce6d4a1d260d4ea0f6d49ab4da09681e32c3f0472dee16667ed69d01dae63a3b81745a24bd78476ec4fcf856114cb4896ace738e01da34b2c42235416
-  languageName: node
-  linkType: hard
-
-"yaml@npm:^2.7.0":
-  version: 2.9.0
-  resolution: "yaml@npm:2.9.0::__archiveUrl=https%3A%2F%2Fms-feed-25.pkgs.visualstudio.com%2F1es-public%2F_packaging%2Fnpm-public%2Fnpm%2Fregistry%2Fyaml%2F-%2Fyaml-2.9.0.tgz"
-  bin:
-    yaml: ./bin.mjs
-  checksum: 10c0/f340718df45e97a9551b9bf9dac61c80050bc464513b710debfb5067c380c8472e3b67809cffacb4ab5ffb5e66ef9310816c88b05f371cec60abfedd8c88e0a2
   languageName: node
   linkType: hard
 
