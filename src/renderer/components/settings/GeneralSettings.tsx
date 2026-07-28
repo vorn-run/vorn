@@ -83,6 +83,28 @@ export function GeneralSettings() {
           />
         </SettingRow>
 
+        {/* Block rendering */}
+        <SettingRow
+          label="Command Blocks"
+          description="Draw finished commands as blocks with their own padding, boundary and copy button, instead of leaving them in the terminal grid"
+        >
+          <ToggleSwitch
+            checked={config.defaults.domBlockRendering ?? true}
+            onChange={(domBlockRendering) => updateDefaults({ domBlockRendering })}
+          />
+        </SettingRow>
+
+        {/* Minimal shell prompt */}
+        <SettingRow
+          label="Minimal Shell Prompt"
+          description="Replace your shell prompt in terminal sessions so each command reads as a heading. Turn off to keep your own prompt exactly as your shell renders it"
+        >
+          <ToggleSwitch
+            checked={config.defaults.minimalShellPrompt ?? true}
+            onChange={(minimalShellPrompt) => updateDefaults({ minimalShellPrompt })}
+          />
+        </SettingRow>
+
         {/* Hover Preview */}
         <SettingRow
           label="Hover Preview"

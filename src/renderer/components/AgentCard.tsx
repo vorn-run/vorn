@@ -1,7 +1,8 @@
 import { memo, forwardRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { TerminalPane, terminalTextIndentPx } from './TerminalPane'
+import { TerminalPane } from './TerminalPane'
+import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { CardHeader } from './card/CardHeader'
 import { CardStatusBar } from './card/CardStatusBar'
 import { IntentBar } from './IntentBar'
@@ -63,6 +64,7 @@ export const AgentCard = memo(
       }))
     )
     const { showScrollBtn, handleScrollToBottom } = useTerminalScrollButton(terminalId)
+    const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
 
     if (!terminal) return null
 
@@ -120,6 +122,7 @@ export const AgentCard = memo(
               agentType={terminal.session.agentType}
               isFocused={isSelected}
               flexible={flexible}
+              domBlocks={domBlocks}
             />
           )}
           {isFocused && (
@@ -172,7 +175,7 @@ export const AgentCard = memo(
           <IntentBar
             terminalId={terminalId}
             compact
-            indentPx={terminalTextIndentPx(terminal.session.agentType)}
+            indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks)}
           />
         )}
 

@@ -782,6 +782,10 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
       hasSeenOnboarding: map.hasSeenOnboarding as boolean | number
     }),
     ...(map.reopenSessions !== undefined && { reopenSessions: map.reopenSessions as boolean }),
+    // Terminal block rendering. Default on; the key only appears once the
+    // user has toggled it, so absence means "not yet decided", not "off".
+    domBlockRendering: (map.domBlockRendering as boolean) ?? true,
+    minimalShellPrompt: (map.minimalShellPrompt as boolean) ?? true,
     ...(map.widgetEnabled !== undefined && { widgetEnabled: map.widgetEnabled as boolean }),
     ...(map.taskViewMode !== undefined && {
       taskViewMode: map.taskViewMode as AppConfig['defaults']['taskViewMode']

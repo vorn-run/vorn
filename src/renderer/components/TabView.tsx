@@ -4,7 +4,8 @@ import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
 import { AgentStatusIcon } from './AgentStatusIcon'
-import { TerminalPane, terminalTextIndentPx } from './TerminalPane'
+import { TerminalPane } from './TerminalPane'
+import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { PromptLauncher } from './PromptLauncher'
 import { InlineRename } from './InlineRename'
 import { CardContextMenu } from './CardContextMenu'
@@ -133,6 +134,7 @@ export function TabView() {
   const setDiffSidebar = useAppStore((s) => s.setDiffSidebarTerminalId)
   const tasks = useAppStore((s) => s.config?.tasks)
   const isSidebarOpen = useAppStore((s) => s.isSidebarOpen)
+  const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
 
   const [contextMenu, setContextMenu] = useState<{
     terminalId: string
@@ -518,6 +520,7 @@ export function TabView() {
                 terminalId={activeTabId}
                 agentType={activeTerminal.session.agentType}
                 isFocused={true}
+                domBlocks={domBlocks}
               />
             )}
             {activeTabId && activeTerminal && activeTerminal.lastOutputTimestamp === 0 && (
@@ -544,7 +547,7 @@ export function TabView() {
           {activeTabId && activeTerminal && (
             <IntentBar
               terminalId={activeTabId}
-              indentPx={terminalTextIndentPx(activeTerminal.session.agentType)}
+              indentPx={terminalTextIndentPx(activeTerminal.session.agentType, domBlocks)}
             />
           )}
           {activeTabId && activeTerminal && <CardStatusBar terminalId={activeTabId} />}

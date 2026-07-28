@@ -1,4 +1,6 @@
 import type { IMarker, Terminal } from '@xterm/xterm'
+import { captureBlock, clearBlockLog, hasBlockLogView } from './block-log'
+import type { BufferLike, LineLike } from './block-render'
 
 /**
  * Command blocks: structured command boundaries inside the raw terminal.
@@ -191,7 +193,52 @@ export function formatDuration(ms: number): string {
 
 // --- xterm wiring ---
 
+/** Terminals seen emitting OSC 133; see hasShellIntegration. */
+const integrated = new Set<string>()
 const trackers = new Map<string, CommandBlockTracker>()
+
+/**
+ * When on, a finished command's rows are lifted out of the buffer and drawn
+ * as DOM instead. The terminal is then reset so it only ever holds the live
+ * command, which is what lets a block be a real container rather than an
+ * approximation painted over the grid.
+ */
+let domBlocksEnabled = false
+
+export function setDomBlockRendering(enabled: boolean): void {
+  domBlocksEnabled = enabled
+}
+
+export function isDomBlockRendering(): boolean {
+  return domBlocksEnabled
+}
+
+function bufferOf(term: Terminal): BufferLike {
+  return { getLine: (y) => term.buffer.active.getLine(y) as unknown as LineLike | undefined }
+}
+
+/**
+ * Hand a finished command to the DOM log and clear the terminal.
+ *
+ * term.clear() keeps the current prompt line and drops everything above it,
+ * so the terminal is left holding only what comes next. The rows just
+ * captured are the authoritative copy from here on.
+ */
+function liftBlockToDom(term: Terminal, terminalId: string, block: CommandBlock): void {
+  const start = (block.marker as IMarker).line
+  const end = term.buffer.active.baseY + term.buffer.active.cursorY
+  captureBlock({
+    terminalId,
+    buffer: bufferOf(term),
+    startLine: start,
+    endLine: Math.max(start, end),
+    command: block.command,
+    exitCode: block.exitCode,
+    durationMs: block.durationMs,
+    cwd: block.cwd
+  })
+  term.clear()
+}
 
 // Shell-reported working directory per terminal. The store wiring (App
 // startup) registers a reporter so session state can follow `cd`.
@@ -318,9 +365,15 @@ export function attachCommandBlocks(terminalId: string, term: Terminal): () => v
     registerMarker: () => term.registerMarker(0) ?? undefined,
     onBlockFinished: (block) => {
       // Fired from the OSC handler, so the cursor is still sitting just past
-      // the command's last line of output — exactly where the rule goes.
-      drawCommandMeta(term, block.marker as IMarker, block)
-      drawBlockEnd(term)
+      // the command's last line of output.
+      // Only where a view is drawing the log — clearing the terminal with
+      // nothing rendering the captured rows would just erase the output.
+      if (domBlocksEnabled && hasBlockLogView(terminalId)) {
+        liftBlockToDom(term, terminalId, block)
+      } else {
+        drawCommandMeta(term, block.marker as IMarker, block)
+        drawBlockEnd(term)
+      }
       emitBlocksChanged(terminalId)
     },
     onBlocksPruned: () => emitBlocksChanged(terminalId),
@@ -346,6 +399,11 @@ export function attachCommandBlocks(terminalId: string, term: Terminal): () => v
   }
 
   const d1 = term.parser.registerOscHandler(133, (data) => {
+    // The first marker of the session is the proof that the shell is emitting
+    // command boundaries at all. Nothing else can tell us: the shim is only
+    // installed for zsh, and a user's shell may be bash, fish, PowerShell or
+    // cmd, where these sequences never arrive.
+    integrated.add(terminalId)
     tracker.handleSequence(data)
     applyCursorVisibility()
     // Emit on A, C and D so the spine shows the running mark as soon as a
@@ -357,13 +415,37 @@ export function attachCommandBlocks(terminalId: string, term: Terminal): () => v
     tracker.handleCommandText(data)
     return true
   })
+  // `clear` erases the scrollback with CSI 3 J before clearing the screen.
+  // Finished commands live in the log rather than the buffer, so that is what
+  // the sequence has to reach for the command to do anything at all. Matching
+  // on 3 specifically leaves CSI 2 J alone, which full-screen programs send to
+  // repaint and do not mean as "discard history".
+  const d3 = term.parser.registerCsiHandler({ final: 'J' }, (params) => {
+    if (params[0] === 3) clearBlockLog(terminalId)
+    // xterm still runs its own handler; this one only observes.
+    return false
+  })
 
   return () => {
     d1.dispose()
     d2.dispose()
+    d3.dispose()
     trackers.delete(terminalId)
     blockListeners.delete(terminalId)
+    integrated.delete(terminalId)
   }
+}
+
+/**
+ * Whether this terminal's shell reports command boundaries.
+ *
+ * Block rendering replaces the terminal's own layout, so it must only engage
+ * where the boundaries exist. Detecting a marker rather than consulting a table
+ * of supported shells means an unsupported one degrades to a plain terminal on
+ * its own, and a newly supported one needs no change here.
+ */
+export function hasShellIntegration(terminalId: string): boolean {
+  return integrated.has(terminalId)
 }
 
 export function getCommandBlocks(terminalId: string): CommandBlock[] {

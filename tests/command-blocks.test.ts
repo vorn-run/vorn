@@ -4,12 +4,14 @@ import {
   attachCommandBlocks,
   CommandBlockTracker,
   formatDuration,
+  hasShellIntegration,
   onCommandBlocksChange,
   shortenCwd,
   type CommandBlock,
   type MarkerLike,
   type TrackerHost
 } from '../src/renderer/lib/command-blocks'
+import { captureBlock, clearBlockLog, getBlockLog } from '../src/renderer/lib/block-log'
 
 class FakeMarker implements MarkerLike {
   isDisposed = false
@@ -293,13 +295,16 @@ describe('attachCommandBlocks', () => {
   interface FakeTerm {
     registerDecoration: ReturnType<typeof vi.fn>
     handlers: Map<number, (data: string) => boolean>
+    csiHandlers: Map<string, (params: number[]) => boolean>
   }
 
   function fakeTerminal(): { term: FakeTerm; asTerminal: Terminal } {
     const handlers = new Map<number, (data: string) => boolean>()
+    const csiHandlers = new Map<string, (params: number[]) => boolean>()
     const term = {
       registerDecoration: vi.fn(() => undefined),
       handlers,
+      csiHandlers,
       options: { theme: { background: '#141416', cursor: '#d4d4d8' } },
       cols: 80,
       buffer: { active: { type: 'normal', baseY: 0, cursorY: 0 } },
@@ -308,6 +313,10 @@ describe('attachCommandBlocks', () => {
         registerOscHandler: (id: number, cb: (data: string) => boolean) => {
           handlers.set(id, cb)
           return { dispose: () => handlers.delete(id) }
+        },
+        registerCsiHandler: (id: { final: string }, cb: (params: number[]) => boolean) => {
+          csiHandlers.set(id.final, cb)
+          return { dispose: () => csiHandlers.delete(id.final) }
         }
       }
     }
@@ -434,5 +443,131 @@ describe('block cwd', () => {
     tracker.handleSequence('C')
     tracker.handleSequence('D;0')
     expect(finished[1].cwd).toBe('/Users/j/dev/vorn/docs')
+  })
+})
+
+describe('clear', () => {
+  /**
+   * `clear` emits CSI 3 J (erase scrollback) before clearing the screen.
+   * Finished commands are lifted out of the buffer into the log, so the log is
+   * the scrollback — if the sequence does not reach it, `clear` visibly does
+   * nothing.
+   */
+  function attachWithLog(): {
+    csiHandlers: Map<string, (params: number[]) => boolean>
+  } {
+    const handlers = new Map<number, (data: string) => boolean>()
+    const csiHandlers = new Map<string, (params: number[]) => boolean>()
+    const term = {
+      registerDecoration: vi.fn(() => undefined),
+      options: { theme: {} },
+      cols: 80,
+      clear: vi.fn(),
+      buffer: { active: { type: 'normal', baseY: 0, cursorY: 0, length: 1 } },
+      registerMarker: (offset: number) => new FakeMarker(offset),
+      parser: {
+        registerOscHandler: (id: number, cb: (data: string) => boolean) => {
+          handlers.set(id, cb)
+          return { dispose: () => handlers.delete(id) }
+        },
+        registerCsiHandler: (id: { final: string }, cb: (params: number[]) => boolean) => {
+          csiHandlers.set(id.final, cb)
+          return { dispose: () => csiHandlers.delete(id.final) }
+        }
+      }
+    }
+    attachCommandBlocks('clear-term', term as unknown as Terminal)
+    return { csiHandlers }
+  }
+
+  beforeEach(() => {
+    clearBlockLog('clear-term')
+  })
+
+  function seedBlock(): void {
+    captureBlock({
+      terminalId: 'clear-term',
+      buffer: { length: 1, getLine: () => undefined } as never,
+      startLine: 0,
+      endLine: 0,
+      command: 'ls',
+      exitCode: 0,
+      durationMs: 10,
+      cwd: null
+    })
+  }
+
+  it('erases the log so the command has a visible effect', () => {
+    const { csiHandlers } = attachWithLog()
+    seedBlock()
+    expect(getBlockLog('clear-term')).toHaveLength(1)
+
+    csiHandlers.get('J')?.([3])
+    expect(getBlockLog('clear-term')).toHaveLength(0)
+  })
+
+  it('leaves the log alone on a plain screen erase', () => {
+    // Full-screen programs send CSI 2 J to repaint. Treating that as "discard
+    // history" would wipe the log every time one redrew.
+    const { csiHandlers } = attachWithLog()
+    seedBlock()
+
+    csiHandlers.get('J')?.([2])
+    expect(getBlockLog('clear-term')).toHaveLength(1)
+  })
+
+  it('lets xterm run its own erase handler', () => {
+    const { csiHandlers } = attachWithLog()
+    // Returning true would swallow the sequence and the screen would never
+    // clear.
+    expect(csiHandlers.get('J')?.([3])).toBe(false)
+  })
+})
+
+describe('shell integration detection', () => {
+  /**
+   * The shim is only installed for zsh. Every other shell — bash, fish,
+   * PowerShell, cmd — runs without it, and the marker itself is the only
+   * evidence of which kind this is.
+   */
+  function fake(): { term: Terminal; handlers: Map<number, (d: string) => boolean> } {
+    const handlers = new Map<number, (d: string) => boolean>()
+    const term = {
+      registerDecoration: vi.fn(() => undefined),
+      options: { theme: {} },
+      cols: 80,
+      clear: vi.fn(),
+      buffer: { active: { type: 'normal', baseY: 0, cursorY: 0, length: 1 } },
+      registerMarker: (offset: number) => new FakeMarker(offset),
+      parser: {
+        registerOscHandler: (id: number, cb: (d: string) => boolean) => {
+          handlers.set(id, cb)
+          return { dispose: () => handlers.delete(id) }
+        },
+        registerCsiHandler: () => ({ dispose: () => {} })
+      }
+    }
+    return { term: term as unknown as Terminal, handlers }
+  }
+
+  it('reports nothing until a boundary actually arrives', () => {
+    const { term } = fake()
+    attachCommandBlocks('unmarked', term)
+    expect(hasShellIntegration('unmarked')).toBe(false)
+  })
+
+  it('reports integration from the first prompt marker', () => {
+    const { term, handlers } = fake()
+    attachCommandBlocks('marked', term)
+    handlers.get(133)?.('A')
+    expect(hasShellIntegration('marked')).toBe(true)
+  })
+
+  it('forgets the terminal when it is torn down', () => {
+    const { term, handlers } = fake()
+    const dispose = attachCommandBlocks('gone', term)
+    handlers.get(133)?.('A')
+    dispose()
+    expect(hasShellIntegration('gone')).toBe(false)
   })
 })

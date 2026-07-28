@@ -1,7 +1,8 @@
 import { useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
-import { TerminalPane, terminalTextIndentPx } from './TerminalPane'
+import { TerminalPane } from './TerminalPane'
+import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { AgentStatusIcon } from './AgentStatusIcon'
 import { InlineRename } from './InlineRename'
 import { CardHeader } from './card/CardHeader'
@@ -30,6 +31,7 @@ export function FocusedTerminal() {
   const { showScrollBtn, handleScrollToBottom } = useTerminalScrollButton(effectiveId)
   const terminalContainerRef = useRef<HTMLDivElement>(null)
   const isMobile = useIsMobile()
+  const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
   useTerminalPinchZoom(terminalContainerRef)
 
   if (!effectiveId || !terminal) return null
@@ -171,6 +173,7 @@ export function FocusedTerminal() {
             terminalId={effectiveId}
             agentType={terminal.session.agentType}
             isFocused={!isRenaming && !isPreview}
+            domBlocks={domBlocks}
           />
           {/* Mobile: floating controls (font size + scroll) */}
           <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2 z-50">
@@ -194,7 +197,7 @@ export function FocusedTerminal() {
         {!isMobile && (
           <IntentBar
             terminalId={effectiveId}
-            indentPx={terminalTextIndentPx(terminal.session.agentType) + 4}
+            indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks) + 4}
           />
         )}
 

@@ -745,6 +745,13 @@ export interface AppConfig {
      */
     minimalShellPrompt?: boolean
     /**
+     * Draw finished commands as real elements instead of leaving them in the
+     * terminal grid. The live command stays in the terminal; everything
+     * already finished becomes a container that can have padding, a boundary
+     * and its own copy button without anything being printed into the shell.
+     */
+    domBlockRendering?: boolean
+    /**
      * Set to `true` after the seeded "Default Task Workflow" has been inserted
      * once. Ensures deleting the workflow sticks — we don't resurrect it on
      * the next launch.

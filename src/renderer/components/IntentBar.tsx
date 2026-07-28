@@ -495,8 +495,14 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   // Agent sessions keep their own TUI input; the composer is shell-only.
   if (!session || !isShell) return null
 
-  // Kept verbatim in shell mode: it is the accessible name for the input.
-  const placeholder = isPrompt ? 'Describe a task' : 'Type a command'
+  // The accessible name always states the mode the input is actually in, so
+  // it is unambiguous once there is something to classify.
+  const label = isPrompt ? 'Describe a task' : 'Type a command'
+  // An empty, unpinned input has nothing to classify yet — it resolves to
+  // command mode by default, but either kind of input is accepted, and the
+  // hint is the only place that says so. Once a mode is pinned the hint names
+  // just that one, because the choice has been made.
+  const placeholder = pinnedMode || value ? label : 'Type a command or send a prompt for the agent'
   const ghostRemainder = ghost && !value.includes('\n') ? ghost.slice(value.length) : ''
   // The status bar below already shows the branch; surface the working
   // directory here instead — that's what a prompt would tell you.
@@ -615,7 +621,7 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
               autoCapitalize="off"
               autoCorrect="off"
               placeholder={placeholder}
-              aria-label={placeholder}
+              aria-label={label}
               onChange={(e) => handleChange(e.target.value)}
               onKeyDown={handleKeyDown}
               onFocus={() => setIsFocused(true)}

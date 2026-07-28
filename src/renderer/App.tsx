@@ -49,7 +49,7 @@ import {
   disposeGlobalDataListener,
   setKeyRedirectHandler
 } from './lib/terminal-registry'
-import { setCwdReporter, getShellInputState } from './lib/command-blocks'
+import { setCwdReporter, getShellInputState, setDomBlockRendering } from './lib/command-blocks'
 import { focusIntentBar } from './lib/intent-bar-focus'
 import { WorktreeCleanupDialog } from './components/WorktreeCleanupDialog'
 import { WorktreeCleanupToastBridge } from './components/WorktreeCleanupToastBridge'
@@ -129,8 +129,16 @@ export function App() {
   useGitDiffPolling()
 
   // Load config and previous sessions on mount
+  const domBlockSetting = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
+  useEffect(() => {
+    setDomBlockRendering(domBlockSetting)
+  }, [domBlockSetting])
+
   useEffect(() => {
     initGlobalDataListener()
+    // The capture path has to know before any command finishes, so it is read
+    // from config rather than passed down through the view tree.
+    setDomBlockRendering(useAppStore.getState().config?.defaults.domBlockRendering ?? true)
     setCwdReporter((terminalId, cwd) => {
       useAppStore.getState().updateSessionCwd(terminalId, cwd)
     })
