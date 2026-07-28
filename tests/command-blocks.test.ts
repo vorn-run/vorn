@@ -571,3 +571,102 @@ describe('shell integration detection', () => {
     expect(hasShellIntegration('gone')).toBe(false)
   })
 })
+
+describe('shells that cannot report execution start', () => {
+  /**
+   * PowerShell's prompt function runs between commands and cmd.exe can only
+   * decorate PROMPT, so neither emits C. Everything arrives at the next prompt:
+   * the command text, how long it took, then D.
+   */
+  function tracker(finished: CommandBlock[]): CommandBlockTracker {
+    let line = 0
+    return new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(line++),
+      onBlockFinished: (b) => finished.push(b),
+      isAlternateBuffer: () => false,
+      now: () => 1000
+    })
+  }
+
+  it('still produces a block when only A and D arrive', () => {
+    const finished: CommandBlock[] = []
+    const t = tracker(finished)
+    t.handleSequence('A')
+    t.handleCommandText(`cmd;${btoa('Get-ChildItem')}`)
+    t.handleSequence('D;0')
+    expect(finished).toHaveLength(1)
+    expect(finished[0].command).toBe('Get-ChildItem')
+  })
+
+  it('keeps the exit code reported alongside the missing marker', () => {
+    const finished: CommandBlock[] = []
+    const t = tracker(finished)
+    t.handleSequence('A')
+    t.handleSequence('D;127')
+    expect(finished[0].exitCode).toBe(127)
+  })
+
+  it('uses the reported duration rather than measuring from the marker', () => {
+    // Measured here it would be zero, because the block starts and ends in the
+    // same instant — every command would claim to be instant.
+    const finished: CommandBlock[] = []
+    const t = tracker(finished)
+    t.handleSequence('A')
+    t.handleCommandText('dur;2500')
+    t.handleSequence('D;0')
+    expect(finished[0].durationMs).toBe(2500)
+  })
+
+  it('does not carry a duration over to the next command', () => {
+    const finished: CommandBlock[] = []
+    const t = tracker(finished)
+    t.handleSequence('A')
+    t.handleCommandText('dur;2500')
+    t.handleSequence('D;0')
+    t.handleSequence('A')
+    t.handleSequence('D;0')
+    expect(finished[1].durationMs).toBe(0)
+  })
+
+  it('still prefers C when the shell does emit it', () => {
+    const finished: CommandBlock[] = []
+    const t = tracker(finished)
+    t.handleSequence('A')
+    t.handleSequence('C')
+    t.handleSequence('D;0')
+    expect(finished).toHaveLength(1)
+  })
+})
+
+describe('working directory reporting', () => {
+  function trackerWithCwd(): { t: CommandBlockTracker; finished: CommandBlock[] } {
+    let line = 0
+    const finished: CommandBlock[] = []
+    const t = new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(line++),
+      onBlockFinished: (b) => finished.push(b),
+      isAlternateBuffer: () => false,
+      now: () => 1000
+    })
+    return { t, finished }
+  }
+
+  it('accepts a Windows drive path', () => {
+    // Requiring a leading slash silently dropped every directory on Windows.
+    const { t, finished } = trackerWithCwd()
+    t.handleSequence('A')
+    t.handleCommandText('cwd;C:\\Users\\j\\dev')
+    t.handleSequence('C')
+    t.handleSequence('D;0')
+    expect(finished[0].cwd).toBe('C:\\Users\\j\\dev')
+  })
+
+  it('ignores something that is not a path at all', () => {
+    const { t, finished } = trackerWithCwd()
+    t.handleSequence('A')
+    t.handleCommandText('cwd;not-a-path')
+    t.handleSequence('C')
+    t.handleSequence('D;0')
+    expect(finished[0].cwd).toBeNull()
+  })
+})

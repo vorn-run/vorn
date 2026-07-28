@@ -33,7 +33,7 @@ import {
   normalizePath
 } from './process-utils'
 
-import { getShellIntegrationEnv } from './shell-integration'
+import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
@@ -437,16 +437,19 @@ class PtyManager extends EventEmitter {
     const id = crypto.randomUUID()
     const shell = getDefaultShell()
     const workingDir = cwd || os.homedir()
-    const ptyProcess = pty.spawn(shell, getShellArgs(), {
+    const integration = getShellIntegration({
+      minimalPrompt: configManager.loadConfig().defaults.minimalShellPrompt
+    })
+    // bash and PowerShell have no environment variable that injects
+    // initialisation, so integration for them replaces the launch arguments.
+    const ptyProcess = pty.spawn(shell, integration.args ?? getShellArgs(), {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: workingDir,
       env: {
         ...getSafeEnv(),
-        ...getShellIntegrationEnv({
-          minimalPrompt: configManager.loadConfig().defaults.minimalShellPrompt
-        })
+        ...integration.env
       }
     })
     this.setupPtyEvents(id, ptyProcess)

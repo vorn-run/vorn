@@ -99,7 +99,14 @@ function Block({ block }: { block: LoggedBlock }) {
 
       {/* Right padding keeps a long command clear of the metadata above it. */}
       <div className="pr-40 font-mono text-[13px] leading-[19px] font-semibold text-gray-100 whitespace-pre-wrap break-words">
-        {block.command ?? '(command)'}
+        {block.command !== null ? (
+          block.command
+        ) : (
+          // cmd.exe cannot report the command text, so it stays where the user
+          // typed it — the block's first row. Titling these "(command)" would
+          // print a placeholder above the real thing.
+          <Row row={block.rows[0]} />
+        )}
       </div>
 
       {block.rows.length > 1 && (

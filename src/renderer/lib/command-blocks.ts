@@ -64,6 +64,8 @@ export class CommandBlockTracker {
   private runningCwd: string | null = null
   private lastCwd: string | null = null
   private pendingCommand: string | null = null
+  /** Duration reported by a shell that can only describe a command afterwards. */
+  private pendingDuration: number | null = null
   private sawPrompt = false
 
   constructor(private host: TrackerHost) {}
@@ -79,7 +81,23 @@ export class CommandBlockTracker {
     return this.promptMarker && !this.promptMarker.isDisposed ? 'prompt' : 'running'
   }
 
-  /** OSC 133 payload: "A" | "C" | "D;<code>" (B is unused by the shim). */
+  /**
+   * Begin the running command. Normally driven by C; shells with no
+   * pre-execution hook reach it from D instead.
+   */
+  private beginRunning(): void {
+    this.runningMarker = this.promptMarker
+    this.promptMarker = null
+    this.runningCommand = this.pendingCommand
+    this.pendingCommand = null
+    this.runningSince = this.host.now()
+    this.runningStartLine = this.host.currentLine?.() ?? 0
+    // The prompt that preceded this command reported the directory it will
+    // run in.
+    this.runningCwd = this.lastCwd
+  }
+
+  /** OSC 133 payload: "A" | "B" | "C" | "D;<code>". */
   handleSequence(payload: string): void {
     if (this.host.isAlternateBuffer()) return
     const kind = payload[0]
@@ -92,18 +110,17 @@ export class CommandBlockTracker {
       return
     }
     if (kind === 'C') {
-      this.runningMarker = this.promptMarker
-      this.promptMarker = null
-      this.runningCommand = this.pendingCommand
-      this.pendingCommand = null
-      this.runningSince = this.host.now()
-      this.runningStartLine = this.host.currentLine?.() ?? 0
-      // The prompt that preceded this command reported the directory it will
-      // run in.
-      this.runningCwd = this.lastCwd
+      this.beginRunning()
       return
     }
     if (kind === 'D') {
+      // PowerShell and cmd have no pre-execution hook, so nothing marked the
+      // command as started — the prompt it was typed at is where the block
+      // begins. Without this those shells report every command as unstarted
+      // and produce no blocks at all.
+      if (!this.runningMarker && this.promptMarker && !this.promptMarker.isDisposed) {
+        this.beginRunning()
+      }
       if (!this.runningMarker || this.runningMarker.isDisposed) {
         this.resetRunning()
         return
@@ -113,7 +130,9 @@ export class CommandBlockTracker {
       const block: CommandBlock = {
         command: this.runningCommand,
         exitCode: Number.isNaN(exitCode) ? 0 : exitCode,
-        durationMs: Math.max(0, this.host.now() - this.runningSince),
+        // A shell that only learns of a command once it is over reports how
+        // long it took, since measuring from here would call every one instant.
+        durationMs: this.pendingDuration ?? Math.max(0, this.host.now() - this.runningSince),
         cwd: this.runningCwd,
         outputLines: Math.max(0, endLine - this.runningStartLine),
         marker: this.runningMarker
@@ -136,9 +155,16 @@ export class CommandBlockTracker {
   /** OSC 5522 payload: "cmd;<base64 of the command text>" or "cwd;<path>". */
   handleCommandText(payload: string): void {
     if (this.host.isAlternateBuffer()) return
+    if (payload.startsWith('dur;')) {
+      const ms = Number.parseInt(payload.slice(4), 10)
+      this.pendingDuration = Number.isNaN(ms) ? null : Math.max(0, ms)
+      return
+    }
     if (payload.startsWith('cwd;')) {
       const cwd = payload.slice(4)
-      if (cwd.startsWith('/')) {
+      // POSIX absolute, or a Windows drive path — anything else is not a
+      // directory we can trust enough to show.
+      if (cwd.startsWith('/') || /^[A-Za-z]:[\\/]/.test(cwd)) {
         this.lastCwd = cwd
         this.host.onCwdChanged?.(cwd)
       }
@@ -179,6 +205,7 @@ export class CommandBlockTracker {
     this.runningSince = 0
     this.runningStartLine = 0
     this.runningCwd = null
+    this.pendingDuration = null
   }
 }
 
