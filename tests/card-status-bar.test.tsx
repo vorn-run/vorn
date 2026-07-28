@@ -68,7 +68,9 @@ vi.mock('../src/renderer/lib/terminal-close', () => ({
   closeTerminalSession: vi.fn()
 }))
 vi.mock('../src/renderer/lib/session-utils', () => ({
-  resolveActiveProject: () => null
+  resolveActiveProject: () => null,
+  getDisplayPathBasename: (p: string) => p.split('/').filter(Boolean).pop(),
+  launchAgentFromShell: vi.fn()
 }))
 vi.mock('../src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
@@ -341,7 +343,8 @@ describe('FocusedTerminal uses CardStatusBar on desktop', () => {
     })
     render(<FocusedTerminal />)
     expect(screen.getByRole('button', { name: /Switch branch/ })).toBeInTheDocument()
-    expect(screen.getByText('main')).toBeInTheDocument()
+    // Branch renders in the status-bar chip and in the intent bar's context row.
+    expect(screen.getAllByText('main').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByTestId('git-changes')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Browse files/ })).toBeInTheDocument()
   })
@@ -600,7 +603,9 @@ describe('TabView merged toolbar controls', () => {
     })
     render(<TabView />)
     // InlineRename is not mocked, it renders an input
-    const input = screen.getByRole('textbox')
+    // Two textboxes render here (InlineRename input + intent bar textarea);
+    // the rename field is the <input>.
+    const input = screen.getAllByRole('textbox').find((el) => el.tagName === 'INPUT')!
     expect(input).toBeInTheDocument()
   })
 
@@ -654,7 +659,9 @@ describe('TabView merged toolbar controls', () => {
       })
     })
     render(<TabView />)
-    const input = screen.getByRole('textbox')
+    // Two textboxes render here (InlineRename input + intent bar textarea);
+    // the rename field is the <input>.
+    const input = screen.getAllByRole('textbox').find((el) => el.tagName === 'INPUT')!
     fireEvent.change(input, { target: { value: 'New Name' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => {
@@ -669,7 +676,9 @@ describe('TabView merged toolbar controls', () => {
       useAppStore.setState({ renamingTerminalId: 'term-1', setRenamingTerminalId })
     })
     render(<TabView />)
-    const input = screen.getByRole('textbox')
+    // Two textboxes render here (InlineRename input + intent bar textarea);
+    // the rename field is the <input>.
+    const input = screen.getAllByRole('textbox').find((el) => el.tagName === 'INPUT')!
     fireEvent.keyDown(input, { key: 'Escape' })
     expect(setRenamingTerminalId).toHaveBeenCalledWith(null)
   })

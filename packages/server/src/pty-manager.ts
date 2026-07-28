@@ -33,6 +33,8 @@ import {
   normalizePath
 } from './process-utils'
 
+import { getShellIntegrationEnv } from './shell-integration'
+import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 
@@ -210,6 +212,10 @@ class PtyManager extends EventEmitter {
       cols: 80,
       rows: 24,
       cwd: effectivePath,
+      // No shell integration: an agent paints its own full-screen interface
+      // and is never drawn as command blocks. Installing the shim anyway made
+      // the wrapper shell emit boundaries, which hid the terminal cursor and
+      // drew block decorations into a card with no spine or input bar.
       env: getSafeEnv()
     })
 
@@ -436,7 +442,12 @@ class PtyManager extends EventEmitter {
       cols: 80,
       rows: 24,
       cwd: workingDir,
-      env: getSafeEnv()
+      env: {
+        ...getSafeEnv(),
+        ...getShellIntegrationEnv({
+          minimalPrompt: configManager.loadConfig().defaults.minimalShellPrompt
+        })
+      }
     })
     this.setupPtyEvents(id, ptyProcess)
     this.ptys.set(id, ptyProcess)

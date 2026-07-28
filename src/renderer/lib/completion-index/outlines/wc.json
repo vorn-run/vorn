@@ -1,0 +1,1 @@
+{"detail":"World, line, character, and byte count","arg":"path","flags":[{"flag":"-c","detail":"Output the number of bytes to the standard input"},{"flag":"-l","detail":"Output the number of lines to the standard input"},{"flag":"-m","detail":"Output the number of characters to the standard…"},{"flag":"-w","detail":"Output the number of words to the standard input"}]}

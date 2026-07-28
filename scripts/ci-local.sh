@@ -13,6 +13,18 @@ step() {
 step "Typecheck"
 yarn typecheck
 
+step "Completion index is up to date"
+# The index is committed so builds need neither the corpus nor the network.
+# Regenerating must be a no-op; if it is not, someone edited it by hand.
+# Output is not silenced: without the corpus the generator skips, and that
+# needs to be visible rather than looking like a passing check.
+yarn gen:completions
+git diff --exit-code src/renderer/lib/completion-index
+# The generator cannot run without the corpus, so verify the committed index
+# was built from the committed allowlist. This is what actually catches an
+# allowlist edited without regenerating.
+node scripts/check-completion-allowlist.mjs
+
 step "Lint"
 yarn lint
 

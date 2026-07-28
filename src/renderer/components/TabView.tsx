@@ -4,11 +4,12 @@ import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
 import { AgentStatusIcon } from './AgentStatusIcon'
-import { TerminalSlot } from './TerminalSlot'
+import { TerminalPane, terminalTextIndentPx } from './TerminalPane'
 import { PromptLauncher } from './PromptLauncher'
 import { InlineRename } from './InlineRename'
 import { CardContextMenu } from './CardContextMenu'
 import { CardStatusBar } from './card/CardStatusBar'
+import { IntentBar } from './IntentBar'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { closeTerminalSession } from '../lib/terminal-close'
 import { buildTooltip } from '../lib/tab-tooltip'
@@ -512,11 +513,11 @@ export function TabView() {
         <div className="flex-1 min-h-0 flex flex-col" style={{ background: '#141416' }}>
           <div className="relative flex-1 min-h-0">
             {activeTabId && activeTerminal && (
-              <TerminalSlot
+              <TerminalPane
                 key={activeTabId}
                 terminalId={activeTabId}
+                agentType={activeTerminal.session.agentType}
                 isFocused={true}
-                className="w-full h-full"
               />
             )}
             {activeTabId && activeTerminal && activeTerminal.lastOutputTimestamp === 0 && (
@@ -540,6 +541,12 @@ export function TabView() {
               </div>
             )}
           </div>
+          {activeTabId && activeTerminal && (
+            <IntentBar
+              terminalId={activeTabId}
+              indentPx={terminalTextIndentPx(activeTerminal.session.agentType)}
+            />
+          )}
           {activeTabId && activeTerminal && <CardStatusBar terminalId={activeTabId} />}
         </div>
       )}

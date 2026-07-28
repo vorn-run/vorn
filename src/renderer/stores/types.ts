@@ -65,6 +65,7 @@ export interface TerminalsSlice {
   updateLastOutput: (id: string, timestamp: number) => void
   renameTerminal: (id: string, displayName: string) => void
   updateSessionBranch: (id: string, branch: string) => void
+  updateSessionCwd: (id: string, shellCwd: string) => void
   setBranchForCwd: (cwd: string, branch: string) => void
   updateSessionWorktree: (
     id: string,

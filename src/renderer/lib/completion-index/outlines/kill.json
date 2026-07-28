@@ -1,0 +1,1 @@
+{"detail":"Terminate or signal a process","flags":[{"flag":"-s","detail":"A symbolic signal name specifying the signal to…"},{"flag":"-l","detail":"If no operand is given, list the signal names;…"}],"arg":"none"}

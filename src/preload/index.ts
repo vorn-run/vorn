@@ -178,6 +178,7 @@ const api = {
   // File explorer
   listDir: (dirPath: string, remoteHostId?: string): Promise<FileEntry[]> =>
     ipcRenderer.invoke(IPC.FILE_LIST_DIR, { dirPath, remoteHostId }),
+  listShellExecutables: (): Promise<string[]> => ipcRenderer.invoke(IPC.SHELL_LIST_EXECUTABLES),
   readFileContent: (
     filePath: string,
     maxBytes?: number,

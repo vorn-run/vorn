@@ -24,6 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "gen:completions": "node scripts/generate-completion-index.mjs",
     "ci:local": "bash scripts/ci-local.sh",
     "prepare": "simple-git-hooks"
   },

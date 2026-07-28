@@ -156,6 +156,7 @@ export function registerIpcHandlers(): void {
 
   // File explorer
   safeHandle(IPC.FILE_LIST_DIR, (_, dirPath) => requireBridge().request(IPC.FILE_LIST_DIR, dirPath))
+  safeHandle(IPC.SHELL_LIST_EXECUTABLES, () => requireBridge().request(IPC.SHELL_LIST_EXECUTABLES))
   safeHandle(IPC.FILE_READ_CONTENT, (_, params) =>
     requireBridge().request(IPC.FILE_READ_CONTENT, params)
   )

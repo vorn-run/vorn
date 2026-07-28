@@ -46,8 +46,11 @@ import { consumePendingTerminalClose } from './lib/terminal-close'
 import {
   setDefaultFontSize,
   initGlobalDataListener,
-  disposeGlobalDataListener
+  disposeGlobalDataListener,
+  setKeyRedirectHandler
 } from './lib/terminal-registry'
+import { setCwdReporter, getShellInputState } from './lib/command-blocks'
+import { focusIntentBar } from './lib/intent-bar-focus'
 import { WorktreeCleanupDialog } from './components/WorktreeCleanupDialog'
 import { WorktreeCleanupToastBridge } from './components/WorktreeCleanupToastBridge'
 import { RightPanel } from './components/RightPanel'
@@ -128,6 +131,21 @@ export function App() {
   // Load config and previous sessions on mount
   useEffect(() => {
     initGlobalDataListener()
+    setCwdReporter((terminalId, cwd) => {
+      useAppStore.getState().updateSessionCwd(terminalId, cwd)
+    })
+    // Shell sessions: while the shell waits at its prompt, plain typing in
+    // the raw terminal belongs to the intent bar — focus it so the character
+    // lands there. Running commands, TUIs, and sessions without integration
+    // markers keep raw input.
+    setKeyRedirectHandler((terminalId, e) => {
+      if (e.metaKey || e.ctrlKey) return false
+      if (e.key.length !== 1) return false
+      const session = useAppStore.getState().terminals.get(terminalId)?.session
+      if (session?.agentType !== 'shell') return false
+      if (getShellInputState(terminalId) !== 'prompt') return false
+      return focusIntentBar(terminalId)
+    })
     ;(async () => {
       try {
         const [config, prev] = await Promise.all([

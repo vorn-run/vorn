@@ -1,0 +1,1 @@
+{"detail":"Display the last part of a file","arg":"path","flags":[{"flag":"-f","detail":"Wait for additional data to be appended"},{"flag":"-r","detail":"Display in reverse order"}]}

@@ -1,0 +1,1 @@
+{"detail":"Extract compressed files in a ZIP archive","arg":"path","flags":[{"flag":"-l","detail":"List the contents of a zip file without extract…"},{"flag":"-c"},{"flag":"-0","detail":"Extract a zip file created in windows, containi…"},{"flag":"-d"}]}
