@@ -10,11 +10,17 @@ import type { WorkflowDefinition, WorkflowExecution } from '../src/shared/types'
  */
 
 type ExitListener = (p: { id: string; exitCode: number }) => void
+type DataListener = (p: { id: string; data: string }) => void
 
 const exitListeners = new Set<ExitListener>()
+const dataListeners = new Set<DataListener>()
 
 function emitExit(id: string, exitCode: number): void {
   for (const l of [...exitListeners]) l({ id, exitCode })
+}
+
+function emitData(id: string, data: string): void {
+  for (const l of [...dataListeners]) l({ id, data })
 }
 
 const claims = new Map<string, string>()
@@ -49,7 +55,13 @@ let onSessionCreated: ((id: string) => void) | null = null
 const createHeadlessSession = vi.fn(() => {
   const id = `sess-${++sessionSeq}`
   queueMicrotask(() => onSessionCreated?.(id))
-  return Promise.resolve({ id, agentSessionId: undefined, worktreePath: undefined })
+  return Promise.resolve({
+    id,
+    pid: 4242,
+    launchCommand: 'claude --dangerously-skip-permissions -p',
+    agentSessionId: undefined,
+    worktreePath: undefined
+  })
 })
 
 const mockState = {
@@ -126,6 +138,7 @@ beforeEach(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(globalThis as any).Notification = { permission: 'denied' }
   exitListeners.clear()
+  dataListeners.clear()
   claims.clear()
   runSeq = 0
   sessionSeq = 0
@@ -150,7 +163,10 @@ beforeEach(() => {
     getWorktreeActiveSessions: vi.fn(() => Promise.resolve({ count: 0 })),
     isWorktreeDirty: vi.fn(() => Promise.resolve(false)),
     removeWorktree: vi.fn(() => Promise.resolve()),
-    onHeadlessData: () => () => {},
+    onHeadlessData: (fn: DataListener) => {
+      dataListeners.add(fn)
+      return () => dataListeners.delete(fn)
+    },
     onHeadlessExit: (fn: ExitListener) => {
       exitListeners.add(fn)
       return () => exitListeners.delete(fn)
@@ -305,5 +321,97 @@ describe('stopping a run', () => {
     const sessionId = await nextSession()
     emitExit(sessionId, 0)
     expect((await second).status).toBe('success')
+  })
+})
+
+describe('step diagnostics', () => {
+  /** The engine's own account of the step, distinct from the agent's output. */
+  function diagnosticsOf(execution: WorkflowExecution): string {
+    return execution.nodeStates.find((n) => n.nodeId === 'agent')?.diagnostics ?? ''
+  }
+
+  it('records what was launched, including the exact command', async () => {
+    const wf = makeWorkflow()
+    const runPromise = executeWorkflow(wf)
+    const sessionId = await nextSession()
+    emitExit(sessionId, 0)
+
+    const diag = diagnosticsOf(await runPromise)
+    expect(diag).toContain('Launching claude')
+    expect(diag).toContain(sessionId)
+    expect(diag).toContain('pid 4242')
+    // Without the command line there is no way to tell a bad flag from a bad agent.
+    expect(diag).toContain('claude --dangerously-skip-permissions -p')
+  })
+
+  it('distinguishes a silent timeout from a slow one', async () => {
+    const wf = makeWorkflow()
+    mockState.config.defaults.headlessStepTimeoutMinutes = 1
+    const runPromise = executeWorkflow(wf)
+    await nextSession()
+    await vi.advanceTimersByTimeAsync(60_000 + 10)
+
+    const execution = await runPromise
+    const agent = execution.nodeStates.find((n) => n.nodeId === 'agent')
+    // Silence is the diagnostic: it means the agent never really ran.
+    expect(agent?.error).toMatch(/never produced any output/i)
+    expect(diagnosticsOf(execution)).toMatch(/never produced any output/i)
+  })
+
+  it('reports how much the agent said when a timeout follows real output', async () => {
+    const wf = makeWorkflow()
+    mockState.config.defaults.headlessStepTimeoutMinutes = 1
+    const runPromise = executeWorkflow(wf)
+    const sessionId = await nextSession()
+    await vi.advanceTimersByTimeAsync(0)
+    emitData(sessionId, 'thinking hard\n')
+    await vi.advanceTimersByTimeAsync(60_000 + 10)
+
+    const execution = await runPromise
+    const agent = execution.nodeStates.find((n) => n.nodeId === 'agent')
+    expect(agent?.error).toContain('14 bytes of output')
+    expect(agent?.error).not.toMatch(/never produced any output/i)
+    expect(diagnosticsOf(execution)).toContain('First output from the agent')
+  })
+
+  it('keeps the timeline out of the agent log', async () => {
+    const wf = makeWorkflow()
+    const runPromise = executeWorkflow(wf)
+    const sessionId = await nextSession()
+    await vi.advanceTimersByTimeAsync(0)
+    emitData(sessionId, '{"ok":true}')
+    emitExit(sessionId, 0)
+
+    const execution = await runPromise
+    const agent = execution.nodeStates.find((n) => n.nodeId === 'agent')
+    // A typed step parses `logs` for its declared payload, so engine notes must
+    // never land there.
+    expect(agent?.logs).toBe('{"ok":true}')
+    expect(agent?.logs).not.toContain('Launching')
+    expect(agent?.diagnostics).toContain('Launching')
+  })
+
+  it('notes the exit code and that nothing was produced', async () => {
+    const wf = makeWorkflow()
+    const runPromise = executeWorkflow(wf)
+    const sessionId = await nextSession()
+    emitExit(sessionId, 1)
+
+    const diag = diagnosticsOf(await runPromise)
+    expect(diag).toContain('exited with code 1')
+    expect(diag).toContain('produced nothing at all')
+  })
+
+  it('explains a step that never got as far as launching', async () => {
+    const wf = makeWorkflow()
+    createHeadlessSession.mockImplementationOnce(() =>
+      Promise.reject(new Error('git worktree add failed'))
+    )
+
+    const execution = await executeWorkflow(wf)
+    const agent = execution.nodeStates.find((n) => n.nodeId === 'agent')
+    expect(agent?.status).toBe('error')
+    // The timeline survives the throw path, so it still says how far it got.
+    expect(agent?.diagnostics).toContain('Could not start: git worktree add failed')
   })
 })

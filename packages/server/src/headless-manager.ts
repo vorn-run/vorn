@@ -116,8 +116,13 @@ class HeadlessManager extends EventEmitter {
     const spawnArgList = useShell
       ? spawnArgs.args.map((a) => shellEscape(a, 'cmd'))
       : spawnArgs.args
+    // Not truncated: this line is the first thing anyone reads when a session
+    // produces no output, and the flag that explains it is as likely to be at
+    // the end as the start. The prompt isn't here — it goes to stdin.
+    const launchCommand = [spawnArgs.command, ...spawnArgList].join(' ')
     log.info(
-      `[headless] launching: ${spawnArgs.command} ${spawnArgList.join(' ').slice(0, 100)}...`
+      `[headless] launching in ${effectivePath}: ${launchCommand}` +
+        (spawnArgs.stdin != null ? ` (prompt on stdin, ${spawnArgs.stdin.length} chars)` : '')
     )
 
     const child = spawn(spawnArgs.command, spawnArgList, {
@@ -162,7 +167,8 @@ class HeadlessManager extends EventEmitter {
       startedAt: Date.now(),
       ...(payload.workflowId != null && { workflowId: payload.workflowId }),
       ...(payload.workflowName != null && { workflowName: payload.workflowName }),
-      ...(agentSessionId ? { agentSessionId } : {})
+      ...(agentSessionId ? { agentSessionId } : {}),
+      launchCommand
     }
     this.sessions.set(id, session)
 

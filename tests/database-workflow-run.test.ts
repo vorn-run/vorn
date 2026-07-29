@@ -58,6 +58,25 @@ describe('workflow run persistence', () => {
     expect(state.approvedAt).toBe('2026-04-20T10:00:04Z')
   })
 
+  it('round-trips step diagnostics, which outlive the window that made them', () => {
+    // The timeline matters most for a run you come back to later, so it has to
+    // survive the reload rather than living only in renderer memory.
+    const timeline =
+      '[+0.0s] Launching claude in /abs/proj\n' +
+      '[+0.4s] Session sess-1 started (pid 4242): claude --dangerously-skip-permissions -p\n' +
+      '[+3600.0s] Step timed out. The agent was started but never produced any output.'
+    const exec: WorkflowExecution = {
+      workflowId: 'wf-diag',
+      startedAt: '2026-04-20T10:00:00Z',
+      status: 'error',
+      nodeStates: [{ nodeId: 'node-1', status: 'error', diagnostics: timeline }]
+    }
+
+    saveWorkflowRun(exec)
+    const runs = listWorkflowRuns('wf-diag')
+    expect(runs[0].nodeStates[0].diagnostics).toBe(timeline)
+  })
+
   it('omits fields that were not set', () => {
     const exec: WorkflowExecution = {
       workflowId: 'wf-2',

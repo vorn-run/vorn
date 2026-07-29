@@ -362,6 +362,7 @@ function createSchema(): void {
       project_name TEXT,
       project_path TEXT,
       approved_at TEXT,
+      diagnostics TEXT,
       FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
     );
 
@@ -691,7 +692,11 @@ function verifySchema(d: Database.Database): void {
         column: 'project_path',
         ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN project_path TEXT'
       },
-      { column: 'approved_at', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN approved_at TEXT' }
+      { column: 'approved_at', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN approved_at TEXT' },
+      {
+        column: 'diagnostics',
+        ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN diagnostics TEXT'
+      }
     ],
     tasks: [
       {
@@ -2128,8 +2133,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     d.prepare('DELETE FROM workflow_run_nodes WHERE run_id = ?').run(runId)
 
     const insertNode = d.prepare(
-      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const ns of execution.nodeStates) {
       insertNode.run(
@@ -2146,7 +2151,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
         ns.agentType ?? null,
         ns.projectName ?? null,
         ns.projectPath ?? null,
-        ns.approvedAt ?? null
+        ns.approvedAt ?? null,
+        ns.diagnostics ?? null
       )
     }
 
@@ -2183,6 +2189,7 @@ type WorkflowRunNodeRow = {
   project_name: string | null
   project_path: string | null
   approved_at: string | null
+  diagnostics: string | null
 }
 
 function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
@@ -2199,7 +2206,8 @@ function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
     ...(n.agent_type != null && { agentType: n.agent_type as NodeExecutionState['agentType'] }),
     ...(n.project_name != null && { projectName: n.project_name }),
     ...(n.project_path != null && { projectPath: n.project_path }),
-    ...(n.approved_at != null && { approvedAt: n.approved_at })
+    ...(n.approved_at != null && { approvedAt: n.approved_at }),
+    ...(n.diagnostics != null && { diagnostics: n.diagnostics })
   }
 }
 

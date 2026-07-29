@@ -221,6 +221,49 @@ describe('RunEntry', () => {
     expect(getByText(/No output captured yet/)).toBeInTheDocument()
   })
 
+  it('shows diagnostics instead of a dead end when the step produced no output', () => {
+    // The failure this exists for: an agent that hung and wrote nothing. The
+    // log is empty, so the timeline is the only thing left to read.
+    const exec = makeExec({
+      status: 'error',
+      nodeStates: [
+        makeState({
+          status: 'error',
+          logs: undefined,
+          error:
+            'Step timed out after 60 minutes. The agent was started but never produced any output.',
+          diagnostics:
+            '[+0.0s] Launching claude in /p\n[+0.4s] Session sess-1 started (pid 4242): claude --dangerously-skip-permissions -p'
+        })
+      ]
+    })
+    const { getByText, queryByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
+    fireEvent.click(getByText(/ago|just now|seconds/i).closest('button')!)
+    fireEvent.click(getByText('Run Claude').closest('button')!)
+
+    expect(getByText('Diagnostics')).toBeInTheDocument()
+    expect(getByText(/Session sess-1 started \(pid 4242\)/)).toBeInTheDocument()
+    expect(queryByText(/No output recorded/)).not.toBeInTheDocument()
+  })
+
+  it('shows diagnostics alongside the log when the agent did produce output', () => {
+    const exec = makeExec({
+      nodeStates: [
+        makeState({
+          status: 'success',
+          logs: 'agent said this',
+          diagnostics: '[+0.0s] Launching claude in /p'
+        })
+      ]
+    })
+    const { getByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
+    fireEvent.click(getByText(/ago|just now|seconds/i).closest('button')!)
+    fireEvent.click(getByText('Run Claude').closest('button')!)
+
+    expect(getByText('agent said this')).toBeInTheDocument()
+    expect(getByText('Diagnostics')).toBeInTheDocument()
+  })
+
   it("shows the pending empty state for a step that hasn't started", () => {
     const exec = makeExec({
       status: 'running',

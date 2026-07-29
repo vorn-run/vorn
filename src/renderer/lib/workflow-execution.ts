@@ -296,6 +296,26 @@ function resolveStepTimeoutMs(config: LaunchAgentConfig): number {
   return minutes > 0 ? minutes * 60_000 : 0
 }
 
+/**
+ * Records what the engine did on a step's behalf, so a step that produced no
+ * output still accounts for itself. Times are relative to the step starting,
+ * because "the agent was spawned but had written nothing 60 minutes later" is
+ * the shape of the answer, not the wall-clock time it happened at.
+ */
+class StepDiagnostics {
+  private readonly lines: string[] = []
+  private readonly startedAt = Date.now()
+
+  note(message: string): void {
+    const seconds = ((Date.now() - this.startedAt) / 1000).toFixed(1)
+    this.lines.push(`[+${seconds}s] ${message}`)
+  }
+
+  toString(): string {
+    return this.lines.join('\n')
+  }
+}
+
 function updateNodeState(
   execution: WorkflowExecution,
   nodeId: string,
@@ -693,6 +713,21 @@ async function executeNode(
 
     let sessionId: string | null = null
     let logs = ''
+    let bytesFromAgent = 0
+
+    const diag = new StepDiagnostics()
+    diag.note(
+      `Launching ${effectiveAgent} in ${existingWorktreePath || effectiveProjectPath || '(no path)'}` +
+        (initialPrompt
+          ? ` with a ${initialPrompt.split('\n').length}-line prompt`
+          : ' with no prompt')
+    )
+    /** Publishes the timeline immediately, so it is readable while the step is still running. */
+    const publishDiagnostics = (): void => {
+      updateNodeState(execution, node.id, { diagnostics: diag.toString() })
+      useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
+    }
+    publishDiagnostics()
 
     // Logs only live in renderer memory until the node finishes — if the
     // window reloads (HMR, devtools refresh, crash) mid-run they vanish even
@@ -715,6 +750,13 @@ async function executeNode(
     const removeDataListener = window.api.onHeadlessData(
       ({ id, data }: { id: string; data: string }) => {
         if (sessionId && id === sessionId) {
+          if (bytesFromAgent === 0) {
+            // Whether the agent ever spoke at all is the single most useful
+            // fact when a step stalls, so mark the first byte specifically.
+            diag.note(`First output from the agent (${data.length} bytes)`)
+            updateNodeState(execution, node.id, { diagnostics: diag.toString() })
+          }
+          bytesFromAgent += data.length
           logs = appendBoundedLog(logs, data)
           updateNodeState(execution, node.id, { logs })
           useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
@@ -787,9 +829,20 @@ async function executeNode(
       active?.sessionIds.add(headlessSession.id)
       useAppStore.getState().addHeadlessSession(headlessSession)
 
+      diag.note(
+        `Session ${headlessSession.id} started (pid ${headlessSession.pid || 'unknown'})` +
+          (headlessSession.launchCommand ? `: ${headlessSession.launchCommand}` : '')
+      )
+      if (timeoutMs > 0) {
+        diag.note(`Will give up after ${Math.round(timeoutMs / 60_000)} min without an exit`)
+      }
+
       // Claim any exit that landed while we were still learning our id.
       const raced = exitsBeforeIdKnown.get(headlessSession.id)
-      if (raced !== undefined) settle({ kind: 'exit', code: raced })
+      if (raced !== undefined) {
+        diag.note(`Agent had already exited (code ${raced}) before its id reached us`)
+        settle({ kind: 'exit', code: raced })
+      }
       exitsBeforeIdKnown.clear()
 
       updateNodeState(execution, node.id, {
@@ -815,26 +868,38 @@ async function executeNode(
 
       // Stopped: stopWorkflowRun owns the node's terminal state and has already
       // killed the agent. Writing a status here would just fight it.
-      if (outcome.kind === 'stopped') return
+      if (outcome.kind === 'stopped') {
+        diag.note('Stopped by user')
+        updateNodeState(execution, node.id, { diagnostics: diag.toString() })
+        return
+      }
 
       if (outcome.kind === 'timeout') {
         const minutes = Math.round(outcome.afterMs / 60_000)
-        const reason = `Step timed out after ${minutes} minute${minutes === 1 ? '' : 's'} without the agent exiting`
+        // Silence and slowness are different failures with different fixes, and
+        // the log alone can't tell them apart when it's empty either way.
+        const reason =
+          bytesFromAgent === 0
+            ? `Step timed out after ${minutes} minute${minutes === 1 ? '' : 's'}. The agent was started but never produced any output, which usually means it never really ran or is waiting on input it will never get.`
+            : `Step timed out after ${minutes} minute${minutes === 1 ? '' : 's'} without the agent exiting, after ${bytesFromAgent} bytes of output.`
         console.warn(
           `[workflow] "${node.label}": ${reason} — killing session ${headlessSession.id}`
         )
-        logs += `\n${reason}`
+        diag.note(reason)
         try {
           await window.api.killHeadlessSession(headlessSession.id)
+          diag.note('Agent killed')
         } catch (err) {
           console.warn(`[workflow] failed to kill timed-out session ${headlessSession.id}`, err)
+          diag.note(`Could not kill the agent: ${err instanceof Error ? err.message : String(err)}`)
         }
         updateNodeState(execution, node.id, {
           status: 'error',
           completedAt: new Date().toISOString(),
           output: logs,
           logs,
-          error: reason
+          error: reason,
+          diagnostics: diag.toString()
         })
         persistExecution(execution)
         if (resolvedTaskId) useAppStore.getState().reopenTask(resolvedTaskId)
@@ -842,6 +907,10 @@ async function executeNode(
       }
 
       const exitCode = outcome.code
+      diag.note(
+        `Agent exited with code ${exitCode} after ${bytesFromAgent} bytes of output` +
+          (bytesFromAgent === 0 ? ' — it produced nothing at all' : '')
+      )
 
       if (exitCode !== 0) {
         logs += `\nProcess exited with code ${exitCode}`
@@ -859,8 +928,11 @@ async function executeNode(
         else schemaError = result.error || 'Agent output did not match the declared schema.'
       }
 
+      if (schemaError) diag.note(`Output did not match the declared schema: ${schemaError}`)
+
       const failed = exitCode !== 0 || !!schemaError
       updateNodeState(execution, node.id, {
+        diagnostics: diag.toString(),
         status: failed ? 'error' : 'success',
         completedAt: new Date().toISOString(),
         output: logs,
@@ -875,7 +947,16 @@ async function executeNode(
       if (failed && resolvedTaskId) {
         useAppStore.getState().reopenTask(resolvedTaskId)
       }
+    } catch (err) {
+      // The step never got as far as running — most often the worktree or the
+      // agent binary. Without this the timeline stops at "Launching…" and the
+      // reason lives only in the error string.
+      diag.note(`Could not start: ${err instanceof Error ? err.message : String(err)}`)
+      throw err
     } finally {
+      // In the finally so it survives the throw path too; the caller's error
+      // handler assigns over the node state and leaves this field intact.
+      updateNodeState(execution, node.id, { diagnostics: diag.toString() })
       removeDataListener()
       removeExitListener()
       active?.abort.signal.removeEventListener('abort', onAbort)
