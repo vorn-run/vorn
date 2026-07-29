@@ -1,4 +1,5 @@
 import { useAppStore } from '../../stores'
+import { ShellPicker } from './ShellPicker'
 import { AGENT_LIST } from '../../lib/agent-definitions'
 import { AgentIcon } from '../AgentIcon'
 import { AiAgentType } from '../../../shared/types'
@@ -62,13 +63,13 @@ export function GeneralSettings() {
         </SettingRow>
 
         {/* Default Shell */}
-        <SettingRow label="Default Shell" description="Shell used for terminal sessions">
-          <input
-            type="text"
+        <SettingRow
+          label="Default Shell"
+          description="Shell used for terminal sessions. Shells differ in how much they can report about each command."
+        >
+          <ShellPicker
             value={config.defaults.shell}
-            onChange={(e) => updateDefaults({ shell: e.target.value })}
-            className="w-48 px-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm
-                       text-gray-200 focus:border-white/[0.15] focus:outline-none"
+            onChange={(shell) => updateDefaults({ shell })}
           />
         </SettingRow>
 
