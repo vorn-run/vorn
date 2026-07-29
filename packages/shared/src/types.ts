@@ -13,6 +13,15 @@ export function isAiAgent(agentType: AgentType | undefined): agentType is AiAgen
   return agentType !== undefined && agentType !== 'shell'
 }
 
+/**
+ * True for sessions Vorn renders itself — a plain pty whose output is ordinary
+ * scrollback, so command boundaries, the spine and the input bar all apply.
+ * Agent sessions paint their own full-screen interface and are excluded.
+ */
+export function isShellSession(agentType: AgentType | undefined): boolean {
+  return agentType === 'shell'
+}
+
 export function supportsExactSessionResume(agentType: AgentType): boolean {
   return agentType !== 'gemini' && agentType !== 'shell'
 }
@@ -504,6 +513,22 @@ export interface LaunchAgentConfig {
   taskId?: string
   taskFromQueue?: boolean
   headless?: boolean
+  /**
+   * JSON Schema the agent's final answer must satisfy. When set (headless only),
+   * the engine instructs the agent to emit a matching JSON object, parses it out
+   * of the run logs, and stores it as the node's `structuredOutput` — surfaced as
+   * typed step vars (`{{steps.<slug>.<field>}}`) that downstream `condition`
+   * nodes can gate on instead of substring-matching the model's prose. A run
+   * whose output can't be parsed/validated is marked `error`.
+   */
+  outputSchema?: Record<string, unknown>
+  /**
+   * How long a headless step may run before the engine gives up on it, in
+   * milliseconds. On expiry the agent is killed, the node is marked `error`,
+   * and the run finishes — so one agent that never exits can't hold its run
+   * open forever. Unset falls back to `defaults.headlessStepTimeoutMinutes`.
+   */
+  timeoutMs?: number
 }
 
 export interface ScriptConfig {
@@ -657,12 +682,37 @@ export interface WorkflowDefinition {
 }
 
 export interface WorkflowExecution {
+  /**
+   * Identity of this run, unique across every run of every workflow. A workflow
+   * can have several runs in flight at once (connector fan-out gives one run per
+   * item), so `workflowId` alone does not identify a run.
+   *
+   * Runs written before this field existed are keyed `<workflowId>:<startedAt>`;
+   * that remains the fallback when reading them back, so old history still loads.
+   */
+  runId: string
   workflowId: string
   startedAt: string
   completedAt?: string
-  status: 'running' | 'success' | 'error'
+  status: 'running' | 'success' | 'error' | 'cancelled'
   nodeStates: NodeExecutionState[]
   triggerTaskId?: string
+  /**
+   * What this run was triggered *with* — a connector item id, a task id, or
+   * `'manual'`. Two runs of one workflow are duplicates only when this matches
+   * as well, which is what lets fan-out run in parallel while a double-fire
+   * (two app instances, one scheduler tick) collapses to a single run.
+   */
+  dedupeParams?: string
+}
+
+/** Stable identity for a run row, tolerating history written before `runId`. */
+export function workflowRunId(execution: {
+  runId?: string
+  workflowId: string
+  startedAt: string
+}): string {
+  return execution.runId || `${execution.workflowId}:${execution.startedAt}`
 }
 
 // ─── Tailscale Network Access ────────────────────────────────────
@@ -718,7 +768,27 @@ export interface AppConfig {
     networkAccessEnabled?: boolean
     showHeadlessAgents?: boolean
     headlessRetentionMinutes?: number
+    /**
+     * Ceiling on a headless workflow step, in minutes, for steps that don't set
+     * their own timeout. Guards against an agent that starts but never exits —
+     * without it the step waits forever and its run never closes. 0 disables it.
+     */
+    headlessStepTimeoutMinutes?: number
     enableHoverPreview?: boolean
+    /**
+     * Shell sessions only. Replaces the shell's own prompt with a single
+     * glyph, so each command reads as a heading above its output instead of
+     * repeating your username, host and path on every line. Defaults to on;
+     * turn it off to keep your own prompt exactly as your shell renders it.
+     */
+    minimalShellPrompt?: boolean
+    /**
+     * Draw finished commands as real elements instead of leaving them in the
+     * terminal grid. The live command stays in the terminal; everything
+     * already finished becomes a container that can have padding, a boundary
+     * and its own copy button without anything being printed into the shell.
+     */
+    domBlockRendering?: boolean
     /**
      * Set to `true` after the seeded "Default Task Workflow" has been inserted
      * once. Ensures deleting the workflow sticks — we don't resurrect it on
@@ -839,6 +909,26 @@ export interface GitCommitResult {
   error?: string
 }
 
+/** A shell found on this machine, and what it can report about commands. */
+export interface InstalledShell {
+  family: 'zsh' | 'bash' | 'fish' | 'powershell' | 'cmd'
+  /** Display name, e.g. "PowerShell 7". */
+  name: string
+  path: string
+  version: string | null
+  blocks: {
+    /**
+     * How completely this shell can describe a command.
+     *  full    — boundaries, exit status and command text
+     *  partial — all of it, but only once the command has finished
+     *  limited — boundaries only
+     */
+    level: 'full' | 'partial' | 'limited'
+    /** What it cannot do, phrased for a person rather than a protocol. */
+    limitation: string | null
+  }
+}
+
 export const IPC = {
   TERMINAL_CREATE: 'terminal:create',
   TERMINAL_WRITE: 'terminal:write',
@@ -921,6 +1011,8 @@ export const IPC = {
   WORKFLOW_RUN_LIST_WAITING: 'workflowRun:listWaiting',
   WORKFLOW_RUN_LIST_RUNNING: 'workflowRun:listRunning',
   WORKFLOW_RUN_LIST_ALL: 'workflowRun:listAll',
+  WORKFLOW_RUN_CLAIM: 'workflowRun:claim',
+  WORKFLOW_RUN_RELEASE: 'workflowRun:release',
   SESSION_EVENT_LIST: 'sessionEvent:list',
   SESSION_EVENT_LIST_BY_SESSION: 'sessionEvent:listBySession',
   AGENT_DETECT_INSTALLED: 'agent:detectInstalled',
@@ -937,6 +1029,8 @@ export const IPC = {
   FILE_LIST_DIR: 'file:listDir',
   FILE_READ_CONTENT: 'file:readContent',
   FILE_WRITE_CONTENT: 'file:writeContent',
+  SHELL_LIST_EXECUTABLES: 'shell:listExecutables',
+  SHELL_LIST_INSTALLED: 'shell:listInstalled',
   CONNECTOR_LIST: 'connector:list',
   CONNECTOR_GET: 'connector:get',
   CONNECTION_LIST: 'connection:list',

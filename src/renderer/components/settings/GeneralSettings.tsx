@@ -1,4 +1,5 @@
 import { useAppStore } from '../../stores'
+import { ShellPicker } from './ShellPicker'
 import { AGENT_LIST } from '../../lib/agent-definitions'
 import { AgentIcon } from '../AgentIcon'
 import { AiAgentType } from '../../../shared/types'
@@ -7,6 +8,7 @@ import { isElectron } from '../../lib/platform'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
+import { DEFAULT_STEP_TIMEOUT_MINUTES } from '../../lib/workflow-execution'
 
 export function GeneralSettings() {
   const config = useAppStore((s) => s.config)
@@ -62,13 +64,13 @@ export function GeneralSettings() {
         </SettingRow>
 
         {/* Default Shell */}
-        <SettingRow label="Default Shell" description="Shell used for terminal sessions">
-          <input
-            type="text"
+        <SettingRow
+          label="Default Shell"
+          description="Shell used for terminal sessions. Shells differ in how much they can report about each command."
+        >
+          <ShellPicker
             value={config.defaults.shell}
-            onChange={(e) => updateDefaults({ shell: e.target.value })}
-            className="w-48 px-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm
-                       text-gray-200 focus:border-white/[0.15] focus:outline-none"
+            onChange={(shell) => updateDefaults({ shell })}
           />
         </SettingRow>
 
@@ -80,6 +82,28 @@ export function GeneralSettings() {
           <ToggleSwitch
             checked={config.defaults.reopenSessions ?? false}
             onChange={(reopenSessions) => updateDefaults({ reopenSessions })}
+          />
+        </SettingRow>
+
+        {/* Block rendering */}
+        <SettingRow
+          label="Command Blocks"
+          description="Draw finished commands as blocks with their own padding, boundary and copy button, instead of leaving them in the terminal grid"
+        >
+          <ToggleSwitch
+            checked={config.defaults.domBlockRendering ?? true}
+            onChange={(domBlockRendering) => updateDefaults({ domBlockRendering })}
+          />
+        </SettingRow>
+
+        {/* Minimal shell prompt */}
+        <SettingRow
+          label="Minimal Shell Prompt"
+          description="Replace your shell prompt in terminal sessions so each command reads as a heading. Turn off to keep your own prompt exactly as your shell renders it"
+        >
+          <ToggleSwitch
+            checked={config.defaults.minimalShellPrompt ?? true}
+            onChange={(minimalShellPrompt) => updateDefaults({ minimalShellPrompt })}
           />
         </SettingRow>
 
@@ -141,6 +165,26 @@ export function GeneralSettings() {
             </select>
           </SettingRow>
         )}
+
+        {/* Workflow Step Timeout */}
+        <SettingRow
+          label="Workflow Step Timeout"
+          description="How long a headless workflow step may run before its agent is killed and the step fails. Individual steps can override this."
+        >
+          <select
+            value={config.defaults.headlessStepTimeoutMinutes ?? DEFAULT_STEP_TIMEOUT_MINUTES}
+            onChange={(e) => updateDefaults({ headlessStepTimeoutMinutes: +e.target.value })}
+            className="w-32 px-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm
+                       text-gray-200 focus:border-white/[0.15] focus:outline-none"
+          >
+            <option value={15}>15 minutes</option>
+            <option value={30}>30 minutes</option>
+            <option value={60}>1 hour</option>
+            <option value={120}>2 hours</option>
+            <option value={360}>6 hours</option>
+            <option value={0}>No limit</option>
+          </select>
+        </SettingRow>
 
         {/* Update Channel — Electron only */}
         {isElectron && (

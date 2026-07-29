@@ -1,0 +1,1 @@
+{"detail":"Package and compress (archive) files into zip f…","arg":"dir","flags":[{"flag":"-r","detail":"Package and compress a directory and its conten…"},{"flag":"-e"},{"flag":"-s"},{"flag":"-d"},{"flag":"-9","detail":"Archive a directory and its contents with the h…"}]}

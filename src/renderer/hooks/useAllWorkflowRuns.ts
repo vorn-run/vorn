@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useAppStore } from '../stores'
-import type { WorkflowExecution } from '../../shared/types'
+import { workflowRunId, type WorkflowExecution } from '../../shared/types'
 
 export type RunListEntry = WorkflowExecution & { workflowName?: string }
 
@@ -43,6 +43,7 @@ export function useAllWorkflowRuns(limit = 50): {
   }, [activeWorkspace, limit, beginLoad, endLoad])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: fetches the run snapshot on mount and whenever the workspace or reload token changes
     void reload()
   }, [reload, reloadToken])
 
@@ -67,20 +68,23 @@ export function useAllWorkflowRuns(limit = 50): {
 
   const runs = useMemo<RunListEntry[]>(() => {
     const out: RunListEntry[] = []
-    const live = new Map<string, WorkflowExecution>()
-    for (const [wfId, exec] of workflowExecutions) live.set(wfId, exec)
+    // Keyed by run: several runs of one workflow can be in flight at once, so
+    // matching a snapshot row to "the" live run by workflow id would collapse
+    // them onto each other.
+    const live = new Map<string, WorkflowExecution>(workflowExecutions)
 
     for (const r of persisted) {
-      const liveExec = live.get(r.workflowId)
-      if (liveExec && liveExec.startedAt === r.startedAt) {
+      const key = workflowRunId(r)
+      const liveExec = live.get(key)
+      if (liveExec) {
         out.push({ ...liveExec, workflowName: r.workflowName })
-        live.delete(r.workflowId)
+        live.delete(key)
       } else {
         out.push(r)
       }
     }
-    for (const [wfId, exec] of live) {
-      const wf = workflows?.find((w) => w.id === wfId)
+    for (const exec of live.values()) {
+      const wf = workflows?.find((w) => w.id === exec.workflowId)
       if (wf && (wf.workspaceId ?? 'personal') !== activeWorkspace) continue
       out.push({ ...exec, workflowName: wf?.name })
     }

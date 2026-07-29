@@ -7,6 +7,7 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "jsx": "react-jsx",
     "outDir": "./out",
     "rootDir": ".",
@@ -18,5 +19,10 @@
       "@vornrun/shared/*": ["./packages/shared/src/*"]
     }
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*", "packages/shared/src/**/*"]
+  "include": [
+    "src/renderer/**/*",
+    "src/renderer/**/*.json",
+    "src/shared/**/*",
+    "packages/shared/src/**/*"
+  ]
 }

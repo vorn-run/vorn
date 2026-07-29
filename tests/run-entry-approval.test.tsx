@@ -7,7 +7,9 @@ const approve = vi.fn()
 const reject = vi.fn()
 vi.mock('../src/renderer/lib/workflow-execution', () => ({
   approveWorkflowGate: (...args: unknown[]) => approve(...args),
-  rejectWorkflowGate: (...args: unknown[]) => reject(...args)
+  rejectWorkflowGate: (...args: unknown[]) => reject(...args),
+  isRunStoppable: (e: { status: string }) => e.status === 'running',
+  stopWorkflowRun: vi.fn()
 }))
 
 vi.mock('../src/renderer/components/Tooltip', () => ({
@@ -19,6 +21,7 @@ import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
 
 function makeExec(overrides: Partial<WorkflowExecution> = {}): WorkflowExecution {
   return {
+    runId: 'run-1',
     workflowId: 'wf-1',
     startedAt: '2026-04-20T10:00:00Z',
     status: 'running',

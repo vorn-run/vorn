@@ -27,21 +27,67 @@ function getUserShellEnv(): Record<string, string> {
 
 const resolvedEnv = getUserShellEnv()
 
-export function getDefaultShell(): string {
-  if (process.platform === 'win32') {
-    return process.env.COMSPEC || 'powershell.exe'
-  }
+/**
+ * The shell a terminal session should run.
+ *
+ * `configured` is the user's "Default Shell" setting and always wins when set.
+ *
+ * On Windows the fallback deliberately is not COMSPEC. That variable names the
+ * interpreter Windows runs .bat files with — it is always cmd.exe and says
+ * nothing about what a person wants to type into. cmd is also the weakest shell
+ * we can integrate with: it has no pre-execution hook and no way to read the
+ * previous command's status, so its blocks carry neither exit status nor
+ * command text. PowerShell reports all of it, ships with every Windows 10 and
+ * 11 install, and is what Windows Terminal itself opens by default.
+ */
+export function getDefaultShell(configured?: string): string {
+  const chosen = configured?.trim()
+  if (chosen) return chosen
+  if (process.platform === 'win32') return findWindowsShell()
   return process.env.SHELL || '/bin/zsh'
 }
 
-export function shellEscape(s: string, flavor: 'auto' | 'posix' = 'auto'): string {
-  const isWin = flavor === 'auto' && process.platform === 'win32'
+function findWindowsShell(): string {
+  // PowerShell 7 where it has been installed, then the Windows PowerShell that
+  // is always present.
+  const pathDirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)
+  for (const dir of pathDirs) {
+    const candidate = path.join(dir, 'pwsh.exe')
+    if (fs.existsSync(candidate)) return candidate
+  }
+  const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows'
+  const windowsPowerShell = path.join(
+    systemRoot,
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe'
+  )
+  if (fs.existsSync(windowsPowerShell)) return windowsPowerShell
+  // Only if neither exists, which should not happen on a supported Windows.
+  return process.env.COMSPEC || 'cmd.exe'
+}
+
+/**
+ * Quote an argument for a shell.
+ *  - `'auto'`  — pick by platform, and on Windows by `getDefaultShell()`
+ *    (PowerShell vs cmd.exe). Use for a PTY running the user's shell.
+ *  - `'cmd'`   — force cmd.exe quoting. Use when the command runs through
+ *    Node's `spawn(..., { shell: true })` on Windows, which always invokes
+ *    `comspec || cmd.exe` regardless of the user's default shell — so quoting
+ *    by `getDefaultShell()` (which falls back to PowerShell when COMSPEC is
+ *    unset) would mismatch and leave args un-quoted / mangled.
+ *  - `'posix'` — force POSIX single-quote quoting.
+ */
+export function shellEscape(s: string, flavor: 'auto' | 'posix' | 'cmd' = 'auto'): string {
+  const isWin = flavor === 'cmd' || (flavor === 'auto' && process.platform === 'win32')
   // Skip quoting for simple safe strings (flags, paths without spaces, etc.)
   // On Windows, exclude % from safe chars to prevent env var expansion in cmd.exe.
   const safePattern = isWin ? /^[a-zA-Z0-9_./:=@+,-]+$/ : /^[a-zA-Z0-9_./:=@%+,-]+$/
   if (safePattern.test(s)) return s
   if (isWin) {
-    const shell = getDefaultShell().toLowerCase()
+    // 'cmd' pins cmd.exe; 'auto' honors the user's PowerShell default.
+    const shell = flavor === 'cmd' ? 'cmd.exe' : getDefaultShell().toLowerCase()
     if (shell.includes('powershell') || shell.includes('pwsh')) {
       return "'" + s.replace(/'/g, "''") + "'"
     }

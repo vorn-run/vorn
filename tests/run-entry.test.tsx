@@ -21,7 +21,8 @@ vi.mock('lucide-react', () => ({
   ChevronDown: (p: Record<string, unknown>) => <svg data-testid="chev-down" {...p} />,
   ChevronRight: (p: Record<string, unknown>) => <svg data-testid="chev-right" {...p} />,
   Maximize2: (p: Record<string, unknown>) => <svg data-testid="maximize" {...p} />,
-  RotateCcw: (p: Record<string, unknown>) => <svg data-testid="rotate-ccw" {...p} />
+  RotateCcw: (p: Record<string, unknown>) => <svg data-testid="rotate-ccw" {...p} />,
+  Square: (p: Record<string, unknown>) => <svg data-testid="square" {...p} />
 }))
 
 import { RunEntry } from '../src/renderer/components/workflow-editor/RunEntry'
@@ -29,6 +30,7 @@ import type { WorkflowExecution, WorkflowNode, NodeExecutionState } from '../src
 
 function makeExec(overrides: Partial<WorkflowExecution> = {}): WorkflowExecution {
   return {
+    runId: 'run-1',
     workflowId: 'wf-1',
     startedAt: '2026-04-20T10:00:00Z',
     completedAt: '2026-04-20T10:00:05Z',

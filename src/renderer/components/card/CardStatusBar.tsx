@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores'
 import { GitChangesIndicator } from '../GitChangesIndicator'
 import { OpenInButton } from '../OpenInButton'
 import { BranchChip } from './BranchChip'
+import { LastCommandChip } from './LastCommandChip'
 import { ListTodo } from 'lucide-react'
 
 interface Props {
@@ -54,6 +55,8 @@ export function CardStatusBar({ terminalId, dimmed }: Props) {
           </span>
         </button>
       )}
+
+      <LastCommandChip terminalId={terminalId} />
 
       <div className="flex-1" />
 

@@ -65,6 +65,7 @@ export interface TerminalsSlice {
   updateLastOutput: (id: string, timestamp: number) => void
   renameTerminal: (id: string, displayName: string) => void
   updateSessionBranch: (id: string, branch: string) => void
+  updateSessionCwd: (id: string, shellCwd: string) => void
   setBranchForCwd: (cwd: string, branch: string) => void
   updateSessionWorktree: (
     id: string,
@@ -217,8 +218,9 @@ export interface UISlice {
   setTaskDialogOpen: (open: boolean, defaultStatus?: TaskStatus) => void
   setEditingTask: (task: TaskConfig | null) => void
   setActiveTabId: (id: string | null) => void
+  /** Live runs keyed by run id — one workflow can have several at once. */
   workflowExecutions: Map<string, WorkflowExecution>
-  setWorkflowExecution: (id: string, execution: WorkflowExecution) => void
+  setWorkflowExecution: (runId: string, execution: WorkflowExecution) => void
   updateVersion: string | null
   setUpdateVersion: (version: string | null) => void
   worktreeCache: Map<string, WorktreeInfo[]>

@@ -1,6 +1,6 @@
 {
   "name": "@vornrun/shared",
-  "version": "0.2.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -12,6 +12,7 @@
     "./prompt-builder": "./src/prompt-builder.ts",
     "./protocol": "./src/protocol.ts",
     "./string-utils": "./src/string-utils.ts",
-    "./json-schema-utils": "./src/json-schema-utils.ts"
+    "./json-schema-utils": "./src/json-schema-utils.ts",
+    "./structured-output": "./src/structured-output.ts"
   }
 }

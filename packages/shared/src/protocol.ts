@@ -190,6 +190,9 @@ export interface RequestMethods {
     result: { success: boolean; error?: string }
   }
 
+  // Intent bar completions
+  'shell:listExecutables': { params: void; result: string[] }
+
   // Connectors
   'connector:list': {
     params: void

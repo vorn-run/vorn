@@ -1,9 +1,11 @@
 import { memo, forwardRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { TerminalSlot } from './TerminalSlot'
+import { TerminalPane } from './TerminalPane'
+import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { CardHeader } from './card/CardHeader'
 import { CardStatusBar } from './card/CardStatusBar'
+import { IntentBar } from './IntentBar'
 import { useTerminalScrollButton } from '../hooks/useTerminalScrollButton'
 
 // On touch devices, always show action buttons (no hover available)
@@ -62,6 +64,7 @@ export const AgentCard = memo(
       }))
     )
     const { showScrollBtn, handleScrollToBottom } = useTerminalScrollButton(terminalId)
+    const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
 
     if (!terminal) return null
 
@@ -114,12 +117,12 @@ export const AgentCard = memo(
         {/* Terminal */}
         <div className="relative flex-1 min-h-0 pt-0.5" style={{ background: '#141416' }}>
           {!isFocused && (
-            // In flexible mode, reserve 16px at SE so the react-grid-layout
-            // resize handle isn't covered by the TerminalHost overlay (z-45).
-            <TerminalSlot
+            <TerminalPane
               terminalId={terminalId}
+              agentType={terminal.session.agentType}
               isFocused={isSelected}
-              className={flexible ? 'absolute inset-0 right-4 bottom-4' : 'w-full h-full'}
+              flexible={flexible}
+              domBlocks={domBlocks}
             />
           )}
           {isFocused && (
@@ -167,6 +170,14 @@ export const AgentCard = memo(
             </button>
           )}
         </div>
+
+        {!isFocused && (
+          <IntentBar
+            terminalId={terminalId}
+            compact
+            indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks)}
+          />
+        )}
 
         <CardStatusBar terminalId={terminalId} dimmed={isChromeDimmed} />
 

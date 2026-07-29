@@ -6,6 +6,8 @@ interface Props {
   terminalId: string
   isFocused: boolean
   className?: string
+  /** The overlay tracks this element's rect, so sizing it here sizes the pty. */
+  style?: React.CSSProperties
 }
 
 /**
@@ -14,7 +16,7 @@ interface Props {
  * and is positioned to overlay this element via fixed-position CSS. Unmounting
  * this component hides the terminal; it does not destroy or reparent it.
  */
-export function TerminalSlot({ terminalId, isFocused, className }: Props) {
+export function TerminalSlot({ terminalId, isFocused, className, style }: Props) {
   const ref = useRef<HTMLDivElement>(null)
 
   useStatusDetection(terminalId)
@@ -37,5 +39,5 @@ export function TerminalSlot({ terminalId, isFocused, className }: Props) {
     return () => cancelAnimationFrame(rafId)
   }, [isFocused, terminalId])
 
-  return <div ref={ref} className={className} />
+  return <div ref={ref} className={className} style={style} />
 }

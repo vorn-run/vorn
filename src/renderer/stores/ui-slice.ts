@@ -288,10 +288,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   setActiveTabId: (id) => set({ activeTabId: id }),
 
   workflowExecutions: new Map(),
-  setWorkflowExecution: (id, execution) =>
+  setWorkflowExecution: (runId, execution) =>
     set((state) => {
       const next = new Map(state.workflowExecutions)
-      next.set(id, execution)
+      next.set(runId, execution)
       return { workflowExecutions: next }
     }),
 

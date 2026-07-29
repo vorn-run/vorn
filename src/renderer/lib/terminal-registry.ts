@@ -2,6 +2,8 @@ import { Terminal, type ITerminalAddon } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
+import { attachCommandBlocks, jumpToCommand } from './command-blocks'
+import type { BufferMetrics } from './spine-layout'
 
 interface TerminalEntry {
   term: Terminal
@@ -13,6 +15,7 @@ interface TerminalEntry {
   lastSyncedRows: number
   _loadRenderer?: (() => void) | null
   _gpuAddon?: { dispose(): void } | null
+  _disposeCommandBlocks?: (() => void) | null
 }
 
 /** data attribute on the persistent wrapper, read by TerminalHost for event delegation. */
@@ -77,6 +80,19 @@ export function registerStatusHandler(terminalId: string, handler: StatusHandler
   }
 }
 
+/**
+ * Optional keystroke redirect, wired at app startup. Returning true means the
+ * keystroke was claimed (e.g. focus moved to the intent bar so the character
+ * lands there); xterm then ignores the event without preventing the browser
+ * default, which is what delivers the character to the newly focused input.
+ */
+type KeyRedirectHandler = (terminalId: string, ev: KeyboardEvent) => boolean
+let keyRedirectHandler: KeyRedirectHandler | null = null
+
+export function setKeyRedirectHandler(handler: KeyRedirectHandler | null): void {
+  keyRedirectHandler = handler
+}
+
 const TERM_OPTIONS = {
   cursorBlink: true,
   fontSize: 13,
@@ -136,8 +152,17 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
 
   // Let app-level shortcuts pass through instead of being consumed by xterm
   term.attachCustomKeyEventHandler((e) => {
+    if (e.type === 'keydown' && keyRedirectHandler?.(terminalId, e)) return false
+
     const mod = rendererIsMac ? e.metaKey : e.ctrlKey
     if (!mod) return true
+
+    // Jump between command blocks (shell-integration markers)
+    if (e.type === 'keydown' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      jumpToCommand(terminalId, term, e.key === 'ArrowUp' ? -1 : 1)
+      e.preventDefault()
+      return false
+    }
 
     if (!rendererIsMac && e.type === 'keydown') {
       const key = e.key.toLowerCase()
@@ -212,6 +237,8 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
     window.api.writeTerminal(terminalId, data)
   })
 
+  const disposeCommandBlocks = attachCommandBlocks(terminalId, term)
+
   const entry: TerminalEntry = {
     term,
     fitAddon,
@@ -223,6 +250,7 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
   }
 
   entry._loadRenderer = loadRenderer
+  entry._disposeCommandBlocks = disposeCommandBlocks
 
   registry.set(terminalId, entry)
 
@@ -463,6 +491,124 @@ export function scrollToBottom(terminalId: string): void {
   entry.term.scrollToBottom()
 }
 
+/** Buffer geometry for the command spine. Null when the terminal is gone. */
+export function getTerminalBufferMetrics(terminalId: string): BufferMetrics | null {
+  const entry = registry.get(terminalId)
+  if (!entry) return null
+  const buf = entry.term.buffer.active
+  return {
+    length: buf.length,
+    viewportY: buf.viewportY,
+    baseY: buf.baseY,
+    rows: entry.term.rows,
+    cursorLine: buf.baseY + buf.cursorY,
+    isAlternate: buf.type === 'alternate'
+  }
+}
+
+export function scrollTerminalToLine(terminalId: string, line: number): void {
+  registry.get(terminalId)?.term.scrollToLine(line)
+}
+
+/**
+ * Report which buffer row the pointer is over, so hovering anywhere in a
+ * block highlights it — not just the narrow gutter beside it.
+ *
+ * Returns a disposer. Emits null when the pointer leaves the terminal.
+ */
+export function onTerminalRowHover(
+  terminalId: string,
+  cb: (line: number | null) => void
+): () => void {
+  const entry = registry.get(terminalId)
+  const el = entry?.term.element
+  if (!el) return () => {}
+
+  // Cached across a hover: the geometry only changes on resize, and reading
+  // it per mousemove forces a synchronous layout while the overlay loop is
+  // writing styles every frame.
+  let rect: DOMRect | null = null
+  const handleEnter = (): void => {
+    rect = el.getBoundingClientRect()
+  }
+  const handleMove = (e: MouseEvent): void => {
+    if (!rect) rect = el.getBoundingClientRect()
+    const rows = entry.term.rows
+    if (rect.height <= 0 || rows <= 0) return
+    const row = Math.floor(((e.clientY - rect.top) / rect.height) * rows)
+    if (row < 0 || row >= rows) {
+      cb(null)
+      return
+    }
+    cb(entry.term.buffer.active.viewportY + row)
+  }
+  const handleLeave = (): void => {
+    rect = null
+    cb(null)
+  }
+
+  el.addEventListener('mouseenter', handleEnter)
+  el.addEventListener('mousemove', handleMove)
+  el.addEventListener('mouseleave', handleLeave)
+  return () => {
+    el.removeEventListener('mouseenter', handleEnter)
+    el.removeEventListener('mousemove', handleMove)
+    el.removeEventListener('mouseleave', handleLeave)
+  }
+}
+
+/** Transient block highlight, one per terminal. */
+const blockHighlights = new Map<string, { dispose(): void }>()
+
+/**
+ * Tint the rows of one block, so hovering its mark in the spine shows which
+ * part of the session it covers. Pass null to clear.
+ *
+ * Transient by design: a decoration spanning N rows drifts if the terminal
+ * reflows, which never happens inside a single hover.
+ */
+export function highlightTerminalBlock(
+  terminalId: string,
+  range: { startLine: number; endLine: number } | null
+): void {
+  blockHighlights.get(terminalId)?.dispose()
+  blockHighlights.delete(terminalId)
+  if (!range) return
+
+  const entry = registry.get(terminalId)
+  if (!entry) return
+  const term = entry.term
+  const buf = term.buffer.active
+  if (buf.type === 'alternate') return
+
+  // registerMarker takes an offset from the cursor, not an absolute row.
+  const cursorLine = buf.baseY + buf.cursorY
+  const marker = term.registerMarker(range.startLine - cursorLine)
+  if (!marker) return
+
+  const height = Math.max(1, range.endLine - range.startLine + 1)
+  const decoration = term.registerDecoration({
+    marker,
+    width: term.cols,
+    height,
+    layer: 'bottom'
+  })
+  decoration?.onRender((el) => {
+    if (el.dataset.vornBlockHl) return
+    el.dataset.vornBlockHl = '1'
+    el.style.width = '100%'
+    el.style.background = 'rgba(255, 255, 255, 0.045)'
+    el.style.pointerEvents = 'none'
+  })
+
+  blockHighlights.set(terminalId, {
+    dispose: () => {
+      decoration?.dispose()
+      marker.dispose()
+    }
+  })
+}
+
 export function isAtBottom(terminalId: string): boolean {
   const entry = registry.get(terminalId)
   if (!entry) return true
@@ -517,6 +663,8 @@ export function destroyTerminal(terminalId: string): void {
     pendingWrites.delete(terminalId)
   }
   statusHandlers.delete(terminalId)
+  entry._disposeCommandBlocks?.()
+  entry._disposeCommandBlocks = null
   // Dispose GPU addon first to avoid WebGL errors when the terminal
   // tears down the DOM element before the addon can clean up its GL context
   if (entry._gpuAddon) {

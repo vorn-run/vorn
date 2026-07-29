@@ -14,6 +14,7 @@ import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import { STATUS_DOT_CLASSES as SHARED_STATUS_DOTS } from './statusDot'
 import { Tooltip } from '../Tooltip'
 import { approveWorkflowGate, rejectWorkflowGate } from '../../lib/workflow-execution'
+import { StopRunButton } from '../workflow-runs/StopRunButton'
 
 const STATUS_LABELS: Record<WorkflowExecution['status'] | NodeExecutionState['status'], string> = {
   success: 'Success',
@@ -21,7 +22,8 @@ const STATUS_LABELS: Record<WorkflowExecution['status'] | NodeExecutionState['st
   running: 'Running',
   pending: 'Pending',
   skipped: 'Skipped',
-  waiting: 'Waiting for approval'
+  waiting: 'Waiting for approval',
+  cancelled: 'Stopped'
 }
 
 export function StatusDot({
@@ -319,37 +321,43 @@ export function RunEntry({
 
   return (
     <div className="border border-white/[0.08] rounded-md overflow-hidden">
-      {/* Run header */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-white/[0.04] transition-colors"
-      >
-        {expanded ? (
-          <ChevronDown size={12} className="text-gray-500" />
-        ) : (
-          <ChevronRight size={12} className="text-gray-500" />
-        )}
-        <StatusDot status={execution.status} />
-        <span className="text-[12px] text-gray-300 flex-1 min-w-0 truncate">
-          {workflowName && <span className="text-gray-500 mr-1.5">{workflowName}</span>}
-          {formatRelativeTime(execution.startedAt)}
-        </span>
-        {triggerTask && (
-          <span
-            className="text-[10px] px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 rounded text-violet-400 truncate max-w-[100px] shrink-0 cursor-pointer hover:bg-violet-500/20 transition-colors"
-            onClick={(e) => {
-              e.stopPropagation()
-              onClickTask?.(triggerTask.id)
-            }}
-            title={triggerTask.title}
-          >
-            {triggerTask.title}
+      {/* Run header — the toggle and the stop control are siblings so the
+          stop button isn't nested inside the row's button. */}
+      <div className="flex items-center hover:bg-white/[0.04] transition-colors">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2.5 text-left"
+        >
+          {expanded ? (
+            <ChevronDown size={12} className="text-gray-500" />
+          ) : (
+            <ChevronRight size={12} className="text-gray-500" />
+          )}
+          <StatusDot status={execution.status} />
+          <span className="text-[12px] text-gray-300 flex-1 min-w-0 truncate">
+            {workflowName && <span className="text-gray-500 mr-1.5">{workflowName}</span>}
+            {formatRelativeTime(execution.startedAt)}
           </span>
-        )}
-        <span className="text-[11px] text-gray-500 shrink-0">
-          {formatRunDuration(execution.startedAt, execution.completedAt)}
+          {triggerTask && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 rounded text-violet-400 truncate max-w-[100px] shrink-0 cursor-pointer hover:bg-violet-500/20 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation()
+                onClickTask?.(triggerTask.id)
+              }}
+              title={triggerTask.title}
+            >
+              {triggerTask.title}
+            </span>
+          )}
+          <span className="text-[11px] text-gray-500 shrink-0">
+            {formatRunDuration(execution.startedAt, execution.completedAt)}
+          </span>
+        </button>
+        <span className="pr-2 shrink-0">
+          <StopRunButton execution={execution} stopPropagation={false} />
         </span>
-      </button>
+      </div>
 
       {expanded && (
         <RunStepsList

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useAppStore } from '../stores'
 import { AiAgentType } from '../../shared/types'
 import { useShallow } from 'zustand/react/shallow'
+import { loadLaunchSettings, persistLaunchSettings } from '../lib/launch-prefs'
 
 export type WorktreeMode = 'project-root' | 'existing' | 'new'
 
@@ -13,33 +14,13 @@ export interface WorktreeOption {
   activeSessionCount: number
 }
 
-const STORAGE_KEY = 'vorn:lastLaunchSettings'
-
-interface SavedSettings {
-  project?: string
-  agent?: AiAgentType
-}
-
-function loadSaved(): SavedSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch {
-    return {}
-  }
-}
-
-function persistSettings(settings: SavedSettings): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
-}
-
 export function useLaunchSettings() {
   const config = useAppStore((s) => s.config)
   const activeProject = useAppStore((s) => s.activeProject)
   const activeWorktreePath = useAppStore((s) => s.activeWorktreePath)
   const defaultAgent = config?.defaults.defaultAgent || 'claude'
 
-  const [saved] = useState(loadSaved)
+  const [saved] = useState(loadLaunchSettings)
   const [selectedAgent, setSelectedAgent] = useState<AiAgentType>(saved.agent || defaultAgent)
   const [selectedProject, setSelectedProject] = useState(saved.project || '')
   const [localBranches, setLocalBranches] = useState<string[]>([])
@@ -271,13 +252,13 @@ export function useLaunchSettings() {
   }, [currentBranch])
 
   const persist = useCallback(() => {
-    persistSettings({ project: selectedProject, agent: selectedAgent })
+    persistLaunchSettings({ project: selectedProject, agent: selectedAgent })
   }, [selectedProject, selectedAgent])
 
   const firstProject = config?.projects?.[0]?.name || ''
 
   const reset = useCallback(() => {
-    const s = loadSaved()
+    const s = loadLaunchSettings()
     setSelectedAgent(s.agent || defaultAgent)
     setSelectedProject(s.project || activeProject || firstProject)
     setRemoteBranches([])

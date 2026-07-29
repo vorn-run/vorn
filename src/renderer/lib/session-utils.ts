@@ -16,7 +16,7 @@ function normalizeComparablePath(p: string): string {
   return normalized.toLowerCase()
 }
 
-function getDisplayPathBasename(p: string): string | undefined {
+export function getDisplayPathBasename(p: string): string | undefined {
   const normalized = p.replace(/\\/g, '/').replace(/\/+$/, '')
   if (!normalized || normalized === '/') return undefined
   const parts = normalized.split('/').filter(Boolean)
@@ -237,6 +237,40 @@ export async function createShellInProject(
   } catch (err) {
     console.error('[createShellInProject] failed:', err)
     toast.error(`Failed to start terminal: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/**
+ * Start an agent session from a shell card, seeded with the typed prompt.
+ *
+ * The agent lands in whatever directory the shell is currently in, so a `cd`
+ * before the prompt is honoured.
+ */
+export async function launchAgentFromShell(
+  shellSession: TerminalSession,
+  agentType: AiAgentType,
+  prompt: string
+): Promise<void> {
+  const cwd = shellSession.shellCwd ?? shellSession.worktreePath ?? shellSession.projectPath
+  try {
+    // `branch`, `useWorktree` and `existingWorktreePath` are deliberately
+    // omitted. createPty checks out `payload.branch` against the project when
+    // no worktree is supplied, which would move the user's checkout under
+    // them. The shell is already in the directory we want.
+    const session = await window.api.createTerminal({
+      agentType,
+      projectName: shellSession.projectName,
+      projectPath: cwd,
+      initialPrompt: prompt,
+      remoteHostId: shellSession.remoteHostId,
+      worktreeName: shellSession.worktreeName
+    })
+    const state = useAppStore.getState()
+    state.addTerminal(session)
+    state.setActiveTabId(session.id)
+  } catch (err) {
+    console.error('[launchAgentFromShell] failed:', err)
+    toast.error(`Failed to start agent: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
 

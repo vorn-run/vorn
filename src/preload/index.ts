@@ -22,7 +22,8 @@ import {
   SourceConnection,
   TaskSourceLink,
   ConnectorManifest,
-  ConnectorActionDef
+  ConnectorActionDef,
+  InstalledShell
 } from '../shared/types'
 
 const api = {
@@ -178,6 +179,9 @@ const api = {
   // File explorer
   listDir: (dirPath: string, remoteHostId?: string): Promise<FileEntry[]> =>
     ipcRenderer.invoke(IPC.FILE_LIST_DIR, { dirPath, remoteHostId }),
+  listShellExecutables: (): Promise<string[]> => ipcRenderer.invoke(IPC.SHELL_LIST_EXECUTABLES),
+  listInstalledShells: (): Promise<InstalledShell[]> =>
+    ipcRenderer.invoke(IPC.SHELL_LIST_INSTALLED),
   readFileContent: (
     filePath: string,
     maxBytes?: number,
@@ -382,10 +386,28 @@ const api = {
     workflowId: string
     workflowName: string
     completedAt: string
-    status: 'success' | 'error'
+    status: 'success' | 'error' | 'cancelled'
     sessionsLaunched: number
     source?: 'scheduler' | 'manual'
   }): Promise<void> => ipcRenderer.invoke(IPC.WORKFLOW_EXECUTION_COMPLETE, data),
+
+  /**
+   * Ask the core for the right to run this trigger. Every instance shares one
+   * core, so this is where a tick broadcast to several windows collapses into
+   * a single run. Returns the run id to use when granted.
+   */
+  claimWorkflowRun: (req: {
+    workflowId: string
+    params?: string
+    windowMs?: number
+  }): Promise<{ granted: boolean; runId: string }> =>
+    ipcRenderer.invoke(IPC.WORKFLOW_RUN_CLAIM, req),
+
+  releaseWorkflowRun: (req: {
+    workflowId: string
+    params?: string
+    runId: string
+  }): Promise<void> => ipcRenderer.invoke(IPC.WORKFLOW_RUN_RELEASE, req),
 
   // Credential vault
   storeSSHKey: (params: {

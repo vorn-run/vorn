@@ -188,4 +188,30 @@ describe('buildWorkflowPrompt', () => {
     expect(result).toContain('wf-123')
     expect(result).toContain('get_my_context')
   })
+
+  it('appends the structured-output instructions when an outputSchema is given', () => {
+    const result = buildWorkflowPrompt({
+      workflow,
+      stepName: 'Review',
+      userPrompt: 'Review the PR',
+      outputSchema: {
+        type: 'object',
+        properties: { verdict: { type: 'string' } },
+        required: ['verdict']
+      }
+    })
+    expect(result).toContain('## Required Output')
+    expect(result).toContain('<<<VORN_OUTPUT>>>')
+    expect(result).toContain('"verdict"')
+  })
+
+  it('omits the structured-output section when no schema is given', () => {
+    const result = buildWorkflowPrompt({
+      workflow,
+      stepName: 'Review',
+      userPrompt: 'Review the PR'
+    })
+    expect(result).not.toContain('Required Output')
+    expect(result).not.toContain('<<<VORN_OUTPUT>>>')
+  })
 })

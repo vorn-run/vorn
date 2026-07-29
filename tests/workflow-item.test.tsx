@@ -213,3 +213,60 @@ describe('WorkflowItem', () => {
     mockStore.editingWorkflowId = null
   })
 })
+
+describe('a gate waiting for approval', () => {
+  beforeEach(() => {
+    mockStore.workflowExecutions = new Map<string, unknown>()
+  })
+
+  function runWith(runId: string, workflowId: string, statuses: string[]): [string, unknown] {
+    return [
+      runId,
+      { runId, workflowId, nodeStates: statuses.map((status, i) => ({ nodeId: `n${i}`, status })) }
+    ]
+  }
+
+  it('flags the workflow amber while any run waits', () => {
+    mockStore.workflowExecutions = new Map([runWith('r1', 'w1', ['waiting'])])
+    const { container } = render(
+      <WorkflowItem
+        workflow={makeManual()}
+        isCollapsed={false}
+        iconSize={14}
+        onContextMenu={vi.fn()}
+      />
+    )
+    expect(container.querySelector('.bg-amber-400')).toBeInTheDocument()
+  })
+
+  it('finds a gate in an older run, not only the newest', () => {
+    // Runs of one workflow now proceed in parallel, so the run needing
+    // attention is not necessarily the most recent one.
+    mockStore.workflowExecutions = new Map([
+      runWith('older', 'w1', ['waiting']),
+      runWith('newer', 'w1', ['running'])
+    ])
+    const { container } = render(
+      <WorkflowItem
+        workflow={makeManual()}
+        isCollapsed={false}
+        iconSize={14}
+        onContextMenu={vi.fn()}
+      />
+    )
+    expect(container.querySelector('.bg-amber-400')).toBeInTheDocument()
+  })
+
+  it('ignores a gate belonging to a different workflow', () => {
+    mockStore.workflowExecutions = new Map([runWith('other', 'w-other', ['waiting'])])
+    const { container } = render(
+      <WorkflowItem
+        workflow={makeManual()}
+        isCollapsed={false}
+        iconSize={14}
+        onContextMenu={vi.fn()}
+      />
+    )
+    expect(container.querySelector('.bg-amber-400')).toBeNull()
+  })
+})

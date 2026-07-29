@@ -1,0 +1,1 @@
+{"detail":"Locate a program in the user's PATH","flags":[{"flag":"-s","detail":"No output, return 0 if all the executables are…"},{"flag":"-a","detail":"List all instances of executables found, instea…"}],"arg":"none"}

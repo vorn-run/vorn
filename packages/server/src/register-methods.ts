@@ -5,6 +5,7 @@ import { headlessManager } from './headless-manager'
 import { configManager } from './config-manager'
 import { sessionManager } from './session-persistence'
 import { scheduler } from './scheduler'
+import { claimWorkflowRun, releaseWorkflowRun, type RunClaimRequest } from './workflow-run-claims'
 import { scheduleLogManager } from './schedule-log'
 import { getRecentSessions } from './agent-history'
 import { detectIDEs, openInIDE } from './ide-detector'
@@ -29,6 +30,8 @@ import {
 import type { SourceConnection, TaskStatus } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
 import { listDir, readFileContent, writeFileContent } from './file-utils'
+import { listShellExecutables } from './shell-integration'
+import { listInstalledShells } from './shell-integration/installed'
 import {
   saveTaskImage,
   saveTaskImageFromBase64,
@@ -516,6 +519,10 @@ export function registerAllMethods(): void {
     return writeFileContent(filePath, content, remote)
   })
 
+  // Intent bar completions
+  registerMethod('shell:listExecutables', () => listShellExecutables())
+  registerMethod('shell:listInstalled', () => listInstalledShells())
+
   // SSH
   registerMethod('ssh:testConnection', (host) => testSshConnection(host))
 
@@ -550,12 +557,16 @@ export function registerAllMethods(): void {
       workflowId: string
       workflowName: string
       completedAt: string
-      status: 'success' | 'error'
+      status: 'success' | 'error' | 'cancelled'
       sessionsLaunched: number
       source?: 'scheduler' | 'manual'
     }) => {
-      if (data.status !== 'success' && data.status !== 'error') return
-      if (data.source === 'scheduler') {
+      if (data.status !== 'success' && data.status !== 'error' && data.status !== 'cancelled') {
+        return
+      }
+      // A run the user stopped isn't a schedule outcome — it still updates the
+      // workflow's last-run badge, but it would misreport the schedule's health.
+      if (data.source === 'scheduler' && data.status !== 'cancelled') {
         scheduleLogManager.addEntry({
           workflowId: data.workflowId,
           workflowName: data.workflowName,
@@ -673,6 +684,18 @@ export function registerAllMethods(): void {
   registerMethod('workflow:runManual', ({ workflowId }) => {
     scheduler.triggerWorkflow(workflowId)
   })
+
+  // Runs execute in the renderer, but a scheduler tick reaches every connected
+  // instance. Claiming here — in the one process they all share — is what stops
+  // two open windows from launching the same agents twice.
+  registerMethod('workflowRun:claim', (req: RunClaimRequest) => claimWorkflowRun(req))
+
+  registerMethod(
+    'workflowRun:release',
+    ({ workflowId, params, runId }: { workflowId: string; params?: string; runId: string }) => {
+      releaseWorkflowRun(workflowId, params, runId)
+    }
+  )
 
   registerMethod('credentials:setDecrypted', ({ connectionId, fields }) => {
     setDecryptedCreds(connectionId, fields)
