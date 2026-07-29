@@ -517,6 +517,15 @@ describe('interrupting a running command from the composer', () => {
     expect(pty).not.toHaveBeenCalled()
   })
 
+  it('does not interrupt on the terminal copy chord', async () => {
+    // Ctrl+Shift+C copies in the terminal, which swallows it even with nothing
+    // selected. Forwarding it here would interrupt on a keystroke meant to copy.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.keyDown(getInput(), { key: 'c', ctrlKey: true, shiftKey: true })
+    expect(pty).not.toHaveBeenCalled()
+  })
+
   it('does not treat Cmd+C as an interrupt', async () => {
     // Control characters are Ctrl-based on every platform; on macOS Cmd+C is
     // copy and must stay that way.

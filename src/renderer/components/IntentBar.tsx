@@ -402,13 +402,15 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      // Interrupts belong to the running command, not to this input.
-      if (e.ctrlKey && !e.metaKey && !e.altKey) {
+      // Interrupts belong to the running command, not to this input. Shift is
+      // excluded because Ctrl+Shift+C is the terminal's copy chord, which it
+      // swallows even with nothing selected — forwarding it here would
+      // interrupt on a keystroke pressed to copy.
+      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         const chord = CONTROL_CHORDS[e.key.toLowerCase()]
         const target = e.currentTarget
         const hasSelection = target.selectionStart !== target.selectionEnd
-        // Copying out of the composer still wins, which is what the terminal
-        // itself does with a selection too.
+        // Copying out of the composer still wins, as it does in the terminal.
         if (chord && !(e.key.toLowerCase() === 'c' && hasSelection)) {
           if (getShellInputState(terminalId) === 'running') {
             e.preventDefault()
