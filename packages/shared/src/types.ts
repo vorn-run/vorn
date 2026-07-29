@@ -745,6 +745,13 @@ export interface AppConfig {
      */
     minimalShellPrompt?: boolean
     /**
+     * Draw finished commands as real elements instead of leaving them in the
+     * terminal grid. The live command stays in the terminal; everything
+     * already finished becomes a container that can have padding, a boundary
+     * and its own copy button without anything being printed into the shell.
+     */
+    domBlockRendering?: boolean
+    /**
      * Set to `true` after the seeded "Default Task Workflow" has been inserted
      * once. Ensures deleting the workflow sticks — we don't resurrect it on
      * the next launch.
@@ -864,6 +871,26 @@ export interface GitCommitResult {
   error?: string
 }
 
+/** A shell found on this machine, and what it can report about commands. */
+export interface InstalledShell {
+  family: 'zsh' | 'bash' | 'fish' | 'powershell' | 'cmd'
+  /** Display name, e.g. "PowerShell 7". */
+  name: string
+  path: string
+  version: string | null
+  blocks: {
+    /**
+     * How completely this shell can describe a command.
+     *  full    — boundaries, exit status and command text
+     *  partial — all of it, but only once the command has finished
+     *  limited — boundaries only
+     */
+    level: 'full' | 'partial' | 'limited'
+    /** What it cannot do, phrased for a person rather than a protocol. */
+    limitation: string | null
+  }
+}
+
 export const IPC = {
   TERMINAL_CREATE: 'terminal:create',
   TERMINAL_WRITE: 'terminal:write',
@@ -963,6 +990,7 @@ export const IPC = {
   FILE_READ_CONTENT: 'file:readContent',
   FILE_WRITE_CONTENT: 'file:writeContent',
   SHELL_LIST_EXECUTABLES: 'shell:listExecutables',
+  SHELL_LIST_INSTALLED: 'shell:listInstalled',
   CONNECTOR_LIST: 'connector:list',
   CONNECTOR_GET: 'connector:get',
   CONNECTION_LIST: 'connection:list',

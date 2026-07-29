@@ -30,6 +30,7 @@ import type { SourceConnection, TaskStatus } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
 import { listDir, readFileContent, writeFileContent } from './file-utils'
 import { listShellExecutables } from './shell-integration'
+import { listInstalledShells } from './shell-integration/installed'
 import {
   saveTaskImage,
   saveTaskImageFromBase64,
@@ -519,6 +520,7 @@ export function registerAllMethods(): void {
 
   // Intent bar completions
   registerMethod('shell:listExecutables', () => listShellExecutables())
+  registerMethod('shell:listInstalled', () => listInstalledShells())
 
   // SSH
   registerMethod('ssh:testConnection', (host) => testSshConnection(host))

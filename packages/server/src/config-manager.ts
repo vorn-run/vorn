@@ -10,6 +10,7 @@ import {
   saveConfig as dbSaveConfig
 } from './database'
 import log from './logger'
+import { getDefaultShell } from './process-utils'
 
 type ConfigChangeCallback = (config: AppConfig) => void
 
@@ -41,10 +42,7 @@ class ConfigManager {
       return {
         version: 1,
         defaults: {
-          shell:
-            process.platform === 'win32'
-              ? process.env.COMSPEC || 'powershell.exe'
-              : process.env.SHELL || '/bin/zsh',
+          shell: getDefaultShell(),
           fontSize: 13,
           theme: 'dark'
         },

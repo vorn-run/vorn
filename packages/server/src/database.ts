@@ -3,6 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
 import log from './logger'
+import { getDefaultShell } from './process-utils'
 import {
   AppConfig,
   ProjectConfig,
@@ -767,10 +768,10 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
 
   return {
     shell:
-      (map.shell as string) ??
-      (process.platform === 'win32'
-        ? process.env.COMSPEC || 'powershell.exe'
-        : process.env.SHELL || '/bin/zsh'),
+      // Not COMSPEC on Windows: that names the .bat interpreter, is always
+      // cmd.exe, and seeding it here handed every Windows user the one shell
+      // that can report neither exit status nor command text.
+      (map.shell as string) ?? getDefaultShell(),
     fontSize: (map.fontSize as number) ?? 13,
     theme: (map.theme as 'dark' | 'light') ?? 'dark',
     ...(map.rowHeight !== undefined && { rowHeight: map.rowHeight as number }),
@@ -782,6 +783,10 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
       hasSeenOnboarding: map.hasSeenOnboarding as boolean | number
     }),
     ...(map.reopenSessions !== undefined && { reopenSessions: map.reopenSessions as boolean }),
+    // Terminal block rendering. Default on; the key only appears once the
+    // user has toggled it, so absence means "not yet decided", not "off".
+    domBlockRendering: (map.domBlockRendering as boolean) ?? true,
+    minimalShellPrompt: (map.minimalShellPrompt as boolean) ?? true,
     ...(map.widgetEnabled !== undefined && { widgetEnabled: map.widgetEnabled as boolean }),
     ...(map.taskViewMode !== undefined && {
       taskViewMode: map.taskViewMode as AppConfig['defaults']['taskViewMode']

@@ -73,7 +73,9 @@ function seedStore(overrides: Partial<ReturnType<typeof useAppStore.getState>> =
 }
 
 function getInput(): HTMLTextAreaElement {
-  return screen.getByPlaceholderText('Type a command')
+  // By role, not by placeholder: the placeholder changes with mode, and the
+  // mode is what several of these tests are asserting on.
+  return screen.getByRole('textbox') as HTMLTextAreaElement
 }
 
 describe('IntentBar', () => {
@@ -346,6 +348,21 @@ describe('IntentBar intent modes', () => {
       await Promise.resolve()
     })
   }
+
+  it('offers both kinds of input before there is anything to classify', async () => {
+    // Empty resolves to command mode, but a prompt is equally accepted and the
+    // placeholder is the only thing that says so.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    expect(getInput().placeholder).toBe('Type a command or send a prompt for the agent')
+  })
+
+  it('names only the pinned mode once the choice has been made', async () => {
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.keyDown(getInput(), { key: 'i', metaKey: true })
+    expect(getInput().placeholder).toBe('Describe a task')
+  })
 
   it('starts in command mode', async () => {
     render(<IntentBar terminalId="term-1" />)

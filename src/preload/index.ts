@@ -22,7 +22,8 @@ import {
   SourceConnection,
   TaskSourceLink,
   ConnectorManifest,
-  ConnectorActionDef
+  ConnectorActionDef,
+  InstalledShell
 } from '../shared/types'
 
 const api = {
@@ -179,6 +180,8 @@ const api = {
   listDir: (dirPath: string, remoteHostId?: string): Promise<FileEntry[]> =>
     ipcRenderer.invoke(IPC.FILE_LIST_DIR, { dirPath, remoteHostId }),
   listShellExecutables: (): Promise<string[]> => ipcRenderer.invoke(IPC.SHELL_LIST_EXECUTABLES),
+  listInstalledShells: (): Promise<InstalledShell[]> =>
+    ipcRenderer.invoke(IPC.SHELL_LIST_INSTALLED),
   readFileContent: (
     filePath: string,
     maxBytes?: number,

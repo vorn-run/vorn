@@ -33,7 +33,7 @@ import {
   normalizePath
 } from './process-utils'
 
-import { getShellIntegrationEnv } from './shell-integration'
+import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
@@ -146,7 +146,7 @@ class PtyManager extends EventEmitter {
 
   createPty(payload: CreateTerminalPayload): TerminalSession {
     const id = crypto.randomUUID()
-    const shell = getDefaultShell()
+    const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
 
     // Check if this is a remote session
     const remoteHost = payload.remoteHostId
@@ -435,18 +435,22 @@ class PtyManager extends EventEmitter {
 
   createShellPty(cwd?: string): TerminalSession {
     const id = crypto.randomUUID()
-    const shell = getDefaultShell()
+    const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
     const workingDir = cwd || os.homedir()
-    const ptyProcess = pty.spawn(shell, getShellArgs(), {
+    const integration = getShellIntegration({
+      shell,
+      minimalPrompt: configManager.loadConfig().defaults.minimalShellPrompt
+    })
+    // bash and PowerShell have no environment variable that injects
+    // initialisation, so integration for them replaces the launch arguments.
+    const ptyProcess = pty.spawn(shell, integration.args ?? getShellArgs(), {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: workingDir,
       env: {
         ...getSafeEnv(),
-        ...getShellIntegrationEnv({
-          minimalPrompt: configManager.loadConfig().defaults.minimalShellPrompt
-        })
+        ...integration.env
       }
     })
     this.setupPtyEvents(id, ptyProcess)

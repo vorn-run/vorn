@@ -9,7 +9,8 @@ vi.mock('@xterm/xterm', () => {
     options = { fontSize: 13 }
     buffer = { active: { viewportY: 0, baseY: 0, type: 'normal' } }
     parser = {
-      registerOscHandler: vi.fn().mockReturnValue({ dispose: vi.fn() })
+      registerOscHandler: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+      registerCsiHandler: vi.fn().mockReturnValue({ dispose: vi.fn() })
     }
     registerMarker = vi.fn()
     registerDecoration = vi.fn()

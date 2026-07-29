@@ -35,10 +35,22 @@ vi.mock('../src/renderer/hooks/useTerminalScrollButton', () => ({
   useTerminalScrollButton: () => ({ showScrollBtn: false, handleScrollToBottom: () => {} })
 }))
 
+// Whether the shell reports command boundaries. Blocks are gated on it, so a
+// layout test has to state which kind of shell it is describing.
+let integrated = false
+vi.mock('../src/renderer/lib/command-blocks', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return { ...actual, hasShellIntegration: () => integrated }
+})
+
 import { useAppStore } from '../src/renderer/stores'
 import { AgentCard } from '../src/renderer/components/AgentCard'
 
-function seedTerminal(id: string, agentType: 'claude' | 'shell' = 'claude') {
+function seedTerminal(
+  id: string,
+  agentType: 'claude' | 'shell' = 'claude',
+  domBlockRendering = false
+) {
   const terminals = new Map()
   terminals.set(id, {
     id,
@@ -55,6 +67,7 @@ function seedTerminal(id: string, agentType: 'claude' | 'shell' = 'claude') {
     lastOutputTimestamp: Date.now()
   })
   useAppStore.setState({
+    config: { defaults: { domBlockRendering } } as never,
     terminals,
     focusedTerminalId: null,
     selectedTerminalId: null,
@@ -65,6 +78,7 @@ function seedTerminal(id: string, agentType: 'claude' | 'shell' = 'claude') {
 
 beforeEach(() => {
   slotCalls.length = 0
+  integrated = false
   seedTerminal('t1')
 })
 
@@ -97,5 +111,33 @@ describe('AgentCard TerminalSlot sizing', () => {
     render(<AgentCard terminalId="t1" flexible />)
     const call = slotCalls.find((c) => c.terminalId === 't1')
     expect(call?.className).toBe('absolute inset-0 left-4 right-6 bottom-4')
+  })
+
+  it('gives the terminal a fixed live region when blocks are drawn as elements', () => {
+    integrated = true
+    seedTerminal('t1', 'shell', true)
+    render(<AgentCard terminalId="t1" />)
+    const call = slotCalls.find((c) => c.terminalId === 't1')
+    expect(call?.className).toBe('shrink-0 w-full')
+  })
+
+  it('keeps the SE reservation on the wrapper in flexible block mode', () => {
+    integrated = true
+    // The resize handle must stay reachable even though the terminal itself
+    // is now a flex child rather than the absolutely positioned element.
+    seedTerminal('t1', 'shell', true)
+    const { container } = render(<AgentCard terminalId="t1" flexible />)
+    expect(container.querySelector('.absolute.inset-0.right-4.bottom-4')).not.toBeNull()
+  })
+
+  it('leaves the terminal alone in a shell that reports no command boundaries', () => {
+    // bash, fish, PowerShell and cmd never send OSC 133, so there are no
+    // blocks to draw. Splitting the pane anyway would cap the terminal at the
+    // live region's height with nothing above it.
+    integrated = false
+    seedTerminal('t1', 'shell', true)
+    render(<AgentCard terminalId="t1" />)
+    const call = slotCalls.find((c) => c.terminalId === 't1')
+    expect(call?.className).toBe('flex-1 min-w-0 h-full')
   })
 })
