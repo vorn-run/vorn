@@ -146,7 +146,7 @@ class PtyManager extends EventEmitter {
 
   createPty(payload: CreateTerminalPayload): TerminalSession {
     const id = crypto.randomUUID()
-    const shell = getDefaultShell()
+    const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
 
     // Check if this is a remote session
     const remoteHost = payload.remoteHostId
@@ -435,9 +435,10 @@ class PtyManager extends EventEmitter {
 
   createShellPty(cwd?: string): TerminalSession {
     const id = crypto.randomUUID()
-    const shell = getDefaultShell()
+    const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
     const workingDir = cwd || os.homedir()
     const integration = getShellIntegration({
+      shell,
       minimalPrompt: configManager.loadConfig().defaults.minimalShellPrompt
     })
     // bash and PowerShell have no environment variable that injects

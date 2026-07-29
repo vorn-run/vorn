@@ -707,3 +707,51 @@ describe('shells that carry the command in their own marker', () => {
     expect(finished[0].command).toBeNull()
   })
 })
+
+describe('a shell that also emits markers itself', () => {
+  /**
+   * Clink does this for cmd, as do prompt frameworks and hand-rolled
+   * integrations. Duplicated markers must degrade to a correct block rather
+   * than losing the command outright.
+   */
+  function tracker(finished: CommandBlock[]): CommandBlockTracker {
+    let line = 0
+    return new CommandBlockTracker({
+      registerMarker: () => new FakeMarker(line++),
+      onBlockFinished: (b) => finished.push(b),
+      isAlternateBuffer: () => false,
+      now: () => 1000
+    })
+  }
+
+  it('still produces one block when every marker arrives twice', () => {
+    const finished: CommandBlock[] = []
+    const t = tracker(finished)
+    t.handleSequence('A')
+    t.handleSequence('A')
+    t.handleCommandText(`cmd;${btoa('ls')}`)
+    t.handleSequence('C')
+    t.handleSequence('C')
+    t.handleSequence('D;0')
+    t.handleSequence('D;0')
+    expect(finished).toHaveLength(1)
+    expect(finished[0].command).toBe('ls')
+  })
+
+  it('keeps tracking the command after a repeated marker', () => {
+    const finished: CommandBlock[] = []
+    const t = tracker(finished)
+    t.handleSequence('A')
+    t.handleSequence('C')
+    t.handleSequence('C')
+    t.handleSequence('D;3')
+    // A duplicated C used to strand the block with no start, so it never
+    // finished and the next command inherited the confusion.
+    t.handleSequence('A')
+    t.handleCommandText(`cmd;${btoa('pwd')}`)
+    t.handleSequence('C')
+    t.handleSequence('D;0')
+    expect(finished.map((b) => b.exitCode)).toEqual([3, 0])
+    expect(finished[1].command).toBe('pwd')
+  })
+})

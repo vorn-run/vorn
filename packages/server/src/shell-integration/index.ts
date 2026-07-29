@@ -31,8 +31,13 @@ const NONE: ShellSetup = { env: {}, args: null }
  * Returns empty env and null args for a shell we have no integration for, in
  * which case the session runs exactly as it would have.
  */
-export function getShellIntegration(opts: { minimalPrompt?: boolean } = {}): ShellSetup {
-  const shell = getDefaultShell()
+export function getShellIntegration(
+  opts: { minimalPrompt?: boolean; shell?: string } = {}
+): ShellSetup {
+  // Must be the shell actually being spawned: integrating with one shell while
+  // launching another writes a shim nothing reads, or launch arguments the
+  // real shell rejects.
+  const shell = opts.shell ?? getDefaultShell()
   const family = detectShellFamily(shell)
   if (!family) return NONE
 
@@ -67,7 +72,7 @@ export function getShellIntegration(opts: { minimalPrompt?: boolean } = {}): She
  * bash and PowerShell need arguments, so this is not enough for them.
  */
 export function getShellIntegrationEnv(
-  opts: { minimalPrompt?: boolean } = {}
+  opts: { minimalPrompt?: boolean; shell?: string } = {}
 ): Record<string, string> {
   return getShellIntegration(opts).env
 }

@@ -110,6 +110,13 @@ export class CommandBlockTracker {
       return
     }
     if (kind === 'C') {
+      // A second C for the same command means something else is emitting
+      // markers too — Clink, a prompt framework, or the user's own
+      // integration. Running beginRunning again would consume the prompt
+      // marker a second time and leave the block with no start at all, so the
+      // command silently vanishes. Ignoring the repeat makes duplication
+      // harmless rather than fatal.
+      if (this.runningMarker && !this.runningMarker.isDisposed) return
       // fish carries the command line in its own marker, percent-encoded. It
       // arrives before any sequence we could emit, so reading it here is the
       // only way to title a fish block.
