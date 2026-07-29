@@ -8,6 +8,7 @@ import { isElectron } from '../../lib/platform'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
+import { DEFAULT_STEP_TIMEOUT_MINUTES } from '../../lib/workflow-execution'
 
 export function GeneralSettings() {
   const config = useAppStore((s) => s.config)
@@ -164,6 +165,26 @@ export function GeneralSettings() {
             </select>
           </SettingRow>
         )}
+
+        {/* Workflow Step Timeout */}
+        <SettingRow
+          label="Workflow Step Timeout"
+          description="How long a headless workflow step may run before its agent is killed and the step fails. Individual steps can override this."
+        >
+          <select
+            value={config.defaults.headlessStepTimeoutMinutes ?? DEFAULT_STEP_TIMEOUT_MINUTES}
+            onChange={(e) => updateDefaults({ headlessStepTimeoutMinutes: +e.target.value })}
+            className="w-32 px-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-md text-sm
+                       text-gray-200 focus:border-white/[0.15] focus:outline-none"
+          >
+            <option value={15}>15 minutes</option>
+            <option value={30}>30 minutes</option>
+            <option value={60}>1 hour</option>
+            <option value={120}>2 hours</option>
+            <option value={360}>6 hours</option>
+            <option value={0}>No limit</option>
+          </select>
+        </SettingRow>
 
         {/* Update Channel — Electron only */}
         {isElectron && (

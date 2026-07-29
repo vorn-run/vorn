@@ -56,9 +56,14 @@ export function WorkflowItem({
   const WfIcon = ICON_MAP[workflow.icon] || Workflow
   const isScheduled = isScheduledWorkflow(workflow)
   const isDisabled = isScheduled && !workflow.enabled
+  // Any run of this workflow, not just the newest — parallel runs mean the
+  // gate that needs attention may not be the most recent one.
   const hasWaitingGate = useAppStore((s) => {
-    const exec = s.workflowExecutions.get(workflow.id)
-    return exec ? exec.nodeStates.some((ns) => ns.status === 'waiting') : false
+    for (const exec of s.workflowExecutions.values()) {
+      if (exec.workflowId !== workflow.id) continue
+      if (exec.nodeStates.some((ns) => ns.status === 'waiting')) return true
+    }
+    return false
   })
   const dot = statusDotColor(workflow, isScheduled, hasWaitingGate)
 

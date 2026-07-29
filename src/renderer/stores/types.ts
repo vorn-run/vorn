@@ -218,8 +218,9 @@ export interface UISlice {
   setTaskDialogOpen: (open: boolean, defaultStatus?: TaskStatus) => void
   setEditingTask: (task: TaskConfig | null) => void
   setActiveTabId: (id: string | null) => void
+  /** Live runs keyed by run id — one workflow can have several at once. */
   workflowExecutions: Map<string, WorkflowExecution>
-  setWorkflowExecution: (id: string, execution: WorkflowExecution) => void
+  setWorkflowExecution: (runId: string, execution: WorkflowExecution) => void
   updateVersion: string | null
   setUpdateVersion: (version: string | null) => void
   worktreeCache: Map<string, WorktreeInfo[]>

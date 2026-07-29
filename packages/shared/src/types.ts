@@ -522,6 +522,13 @@ export interface LaunchAgentConfig {
    * whose output can't be parsed/validated is marked `error`.
    */
   outputSchema?: Record<string, unknown>
+  /**
+   * How long a headless step may run before the engine gives up on it, in
+   * milliseconds. On expiry the agent is killed, the node is marked `error`,
+   * and the run finishes — so one agent that never exits can't hold its run
+   * open forever. Unset falls back to `defaults.headlessStepTimeoutMinutes`.
+   */
+  timeoutMs?: number
 }
 
 export interface ScriptConfig {
@@ -675,12 +682,37 @@ export interface WorkflowDefinition {
 }
 
 export interface WorkflowExecution {
+  /**
+   * Identity of this run, unique across every run of every workflow. A workflow
+   * can have several runs in flight at once (connector fan-out gives one run per
+   * item), so `workflowId` alone does not identify a run.
+   *
+   * Runs written before this field existed are keyed `<workflowId>:<startedAt>`;
+   * that remains the fallback when reading them back, so old history still loads.
+   */
+  runId: string
   workflowId: string
   startedAt: string
   completedAt?: string
-  status: 'running' | 'success' | 'error'
+  status: 'running' | 'success' | 'error' | 'cancelled'
   nodeStates: NodeExecutionState[]
   triggerTaskId?: string
+  /**
+   * What this run was triggered *with* — a connector item id, a task id, or
+   * `'manual'`. Two runs of one workflow are duplicates only when this matches
+   * as well, which is what lets fan-out run in parallel while a double-fire
+   * (two app instances, one scheduler tick) collapses to a single run.
+   */
+  dedupeParams?: string
+}
+
+/** Stable identity for a run row, tolerating history written before `runId`. */
+export function workflowRunId(execution: {
+  runId?: string
+  workflowId: string
+  startedAt: string
+}): string {
+  return execution.runId || `${execution.workflowId}:${execution.startedAt}`
 }
 
 // ─── Tailscale Network Access ────────────────────────────────────
@@ -736,6 +768,12 @@ export interface AppConfig {
     networkAccessEnabled?: boolean
     showHeadlessAgents?: boolean
     headlessRetentionMinutes?: number
+    /**
+     * Ceiling on a headless workflow step, in minutes, for steps that don't set
+     * their own timeout. Guards against an agent that starts but never exits —
+     * without it the step waits forever and its run never closes. 0 disables it.
+     */
+    headlessStepTimeoutMinutes?: number
     enableHoverPreview?: boolean
     /**
      * Shell sessions only. Replaces the shell's own prompt with a single
@@ -973,6 +1011,8 @@ export const IPC = {
   WORKFLOW_RUN_LIST_WAITING: 'workflowRun:listWaiting',
   WORKFLOW_RUN_LIST_RUNNING: 'workflowRun:listRunning',
   WORKFLOW_RUN_LIST_ALL: 'workflowRun:listAll',
+  WORKFLOW_RUN_CLAIM: 'workflowRun:claim',
+  WORKFLOW_RUN_RELEASE: 'workflowRun:release',
   SESSION_EVENT_LIST: 'sessionEvent:list',
   SESSION_EVENT_LIST_BY_SESSION: 'sessionEvent:listBySession',
   AGENT_DETECT_INSTALLED: 'agent:detectInstalled',

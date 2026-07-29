@@ -4,7 +4,13 @@ import { useAppStore } from '../../stores'
 import { formatRelativeTime, formatCompactDuration } from '../../lib/format-time'
 import { StatusDot, NodeLabel, RunStepsList } from '../workflow-editor/RunEntry'
 import { LogReplayModal } from '../LogReplayModal'
-import type { NodeExecutionState, WorkflowExecution, WorkflowNode } from '../../../shared/types'
+import { StopRunButton } from './StopRunButton'
+import {
+  workflowRunId,
+  type NodeExecutionState,
+  type WorkflowExecution,
+  type WorkflowNode
+} from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
 import type { RunBucket } from '../../stores/types'
 
@@ -89,7 +95,7 @@ export function AllRunsTable({ runs, workflowsById, filter }: Props) {
           <div className="text-center py-10 text-gray-600 text-[12px]">No runs to show</div>
         ) : (
           visible.map(({ run, bucket, last }) => {
-            const id = `${run.workflowId}-${run.startedAt}`
+            const id = workflowRunId(run)
             const expanded = expandedId === id
             const wf = workflowsById.get(run.workflowId)
             const wfNodes = wf?.nodes ?? []
@@ -168,7 +174,8 @@ export function AllRunsTable({ runs, workflowsById, filter }: Props) {
                 {expanded && (
                   <div className="bg-[#141416] border-b border-white/[0.04]">
                     <RunStepsList execution={run} nodes={wfNodes} onViewFullOutput={setLogModal} />
-                    <div className="px-4 py-2 flex items-center justify-end">
+                    <div className="px-4 py-2 flex items-center justify-end gap-2">
+                      <StopRunButton execution={run} />
                       <button
                         type="button"
                         disabled={isDeleted}
