@@ -9,6 +9,7 @@ import { fishSetup } from '../packages/server/src/shell-integration/fish'
 import { powershellSetup } from '../packages/server/src/shell-integration/powershell'
 import { cmdSetup } from '../packages/server/src/shell-integration/cmd'
 import { resetShimCache } from '../packages/server/src/shell-integration/shim'
+import { getShellIntegration } from '../packages/server/src/shell-integration'
 
 /**
  * Command boundaries for the shells beyond zsh. The markers are the same
@@ -224,4 +225,57 @@ describe.skipIf(!hasBash)('an interactive bash emits command boundaries', () => 
     expect(out).toContain('VORNPROBE')
     fs.rmSync(emptyHome, { recursive: true, force: true })
   }, 15_000)
+})
+
+describe('choosing an integration for a shell', () => {
+  /**
+   * The dispatch must follow the shell actually being spawned. Integrating
+   * with one shell while launching another writes a shim nothing reads, or
+   * launch arguments the real shell rejects.
+   */
+  it.each([
+    ['/bin/zsh', 'ZDOTDIR'],
+    ['/usr/local/bin/fish', 'XDG_DATA_DIRS'],
+    ['C:\\Windows\\system32\\cmd.exe', 'PROMPT']
+  ])('%s is set up through %s', (shell, envKey) => {
+    expect(Object.keys(getShellIntegration({ shell }).env)).toContain(envKey)
+  })
+
+  it.each([
+    ['/bin/bash', '--rcfile'],
+    ['C:\\pwsh.exe', '-EncodedCommand']
+  ])('%s is set up through launch arguments', (shell, arg) => {
+    expect(getShellIntegration({ shell }).args).toContain(arg)
+  })
+
+  it('leaves an unknown shell completely untouched', () => {
+    // Anything we cannot integrate with must run exactly as it would have.
+    expect(getShellIntegration({ shell: '/usr/bin/nu' })).toEqual({ env: {}, args: null })
+  })
+
+  it('keeps boundaries when the prompt override is declined', () => {
+    // Opting out of the minimal prompt must not cost command blocks.
+    const setup = getShellIntegration({ shell: '/bin/zsh', minimalPrompt: false })
+    expect(setup.env.ZDOTDIR).toBeTruthy()
+    expect(setup.env.VORN_MINIMAL_PROMPT).toBe('0')
+  })
+
+  it('does not override the prompt in bash when declined', () => {
+    const setup = getShellIntegration({ shell: '/bin/bash', minimalPrompt: false })
+    const rc = fs.readFileSync(setup.args![1], 'utf-8')
+    expect(rc).not.toContain("PS1=''")
+    expect(rc).toContain(']133;C')
+  })
+
+  it('does not override the prompt in fish when declined', () => {
+    const setup = getShellIntegration({ shell: '/usr/local/bin/fish', minimalPrompt: false })
+    const conf = readConf(setup.env.XDG_DATA_DIRS)
+    expect(conf).not.toContain('function fish_prompt')
+    expect(conf).toContain(']5522;cwd;')
+  })
+
+  it('keeps the cmd prompt visible when declined', () => {
+    const setup = getShellIntegration({ shell: 'C:\\cmd.exe', minimalPrompt: false })
+    expect(setup.env.PROMPT).toContain('$P$G')
+  })
 })
