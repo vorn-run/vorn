@@ -94,6 +94,17 @@ describe('ShellPicker', () => {
     expect(onChange).toHaveBeenCalledWith('/opt/weird/shell')
   })
 
+  it('falls back to typing when the preload has no detection at all', async () => {
+    // Optional chaining short-circuits rather than throwing, so the failure
+    // here is silent: the list would stay pending forever and never offer the
+    // path input.
+    Object.defineProperty(window, 'api', { value: {}, writable: true, configurable: true })
+    render(<ShellPicker value="/bin/zsh" onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button'))
+    expect(await screen.findByText(/No shells detected/)).toBeInTheDocument()
+    expect(screen.getByText('Enter a path…')).toBeInTheDocument()
+  })
+
   it('stays usable when detection fails', async () => {
     // Detection is a convenience. Losing it must not cost the ability to set a
     // shell at all.

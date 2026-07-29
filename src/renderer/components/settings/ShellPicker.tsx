@@ -66,7 +66,13 @@ interface Props {
 }
 
 export function ShellPicker({ value, onChange }: Props) {
-  const [shells, setShells] = useState<InstalledShell[] | null>(null)
+  // An older preload has no detection at all. Optional chaining would
+  // short-circuit rather than throw, but it would also leave the list pending
+  // forever and never reach the typed-path fallback — so that case starts out
+  // resolved and empty rather than unknown.
+  const [shells, setShells] = useState<InstalledShell[] | null>(() =>
+    typeof window.api?.listInstalledShells === 'function' ? null : []
+  )
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
@@ -81,8 +87,9 @@ export function ShellPicker({ value, onChange }: Props) {
 
   useEffect(() => {
     let cancelled = false
-    void window.api
-      .listInstalledShells?.()
+    const detect = window.api?.listInstalledShells
+    if (typeof detect !== 'function') return
+    void detect()
       .then((found) => {
         if (!cancelled) setShells(found)
       })

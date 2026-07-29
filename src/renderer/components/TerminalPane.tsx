@@ -24,8 +24,9 @@ interface Props {
   isFocused: boolean
   /**
    * Finished commands are drawn above as elements, and the terminal below
-   * holds only the live one. The terminal keeps its full row count so
-   * programs still see a normal-sized screen.
+   * holds only the live one, sized to what that command is currently drawing.
+   * The pty is resized to match, so a full-screen program is given the whole
+   * pane instead — see useLiveTerminalRows.
    */
   domBlocks?: boolean
   /**
