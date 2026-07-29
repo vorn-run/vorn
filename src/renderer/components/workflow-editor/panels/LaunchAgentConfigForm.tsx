@@ -15,6 +15,7 @@ import {
   isContextRef
 } from '../../../lib/template-vars'
 import { getWorktreeMode } from '../../../lib/workflow-helpers'
+import { DEFAULT_STEP_TIMEOUT_MINUTES } from '../../../lib/workflow-execution'
 import { useAgentInstallStatus } from '../../../hooks/useAgentInstallStatus'
 import { VariableAutocomplete } from './VariableAutocomplete'
 import { ProjectPicker } from '../../ProjectPicker'
@@ -118,6 +119,9 @@ export function LaunchAgentConfigForm({
   const isHeadless = !!config.headless
   const canUseFromTask = isTaskTrigger || promptSource === 'task' || promptSource === 'queue'
   const defaultAgentFallback = useAppStore((s) => s.config?.defaults.defaultAgent) ?? 'claude'
+  const defaultTimeoutMinutes =
+    useAppStore((s) => s.config?.defaults.headlessStepTimeoutMinutes) ??
+    DEFAULT_STEP_TIMEOUT_MINUTES
 
   useEffect(() => {
     if (!canUseFromTask && config.agentType === 'fromTask') {
@@ -461,6 +465,43 @@ export function LaunchAgentConfigForm({
             value={config.outputSchema}
             onChange={(schema) => onChange({ ...config, outputSchema: schema })}
           />
+        )}
+
+        {isHeadless && (
+          <div>
+            <label className="text-[13px] text-gray-400 font-medium block mb-2">Timeout</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={
+                  typeof config.timeoutMs === 'number'
+                    ? String(Math.round(config.timeoutMs / 60_000))
+                    : ''
+                }
+                onChange={(e) => {
+                  const raw = e.target.value.trim()
+                  if (raw === '') {
+                    onChange({ ...config, timeoutMs: undefined })
+                    return
+                  }
+                  const minutes = Number(raw)
+                  if (!Number.isFinite(minutes) || minutes < 0) return
+                  onChange({ ...config, timeoutMs: Math.round(minutes) * 60_000 })
+                }}
+                placeholder={String(defaultTimeoutMinutes)}
+                className="w-24 px-3 py-2 text-[13px] bg-white/[0.06] border border-white/[0.1] rounded-md
+                           text-white placeholder:text-gray-600 focus:outline-none focus:border-white/[0.2]"
+              />
+              <span className="text-[12px] text-gray-500">minutes</span>
+            </div>
+            <p className="text-[11px] text-gray-500 mt-1.5">
+              {config.timeoutMs === 0
+                ? 'No limit. A step whose agent never exits keeps its run open indefinitely.'
+                : `Kills the agent and fails the step if it hasn't exited by then, so one stuck agent can't hold the run open. Blank uses the ${defaultTimeoutMinutes}-minute default; 0 means no limit.`}
+            </p>
+          </div>
         )}
       </div>
 

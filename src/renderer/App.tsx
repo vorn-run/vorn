@@ -377,8 +377,8 @@ export function App() {
         const store = useAppStore.getState()
         const hydrated: WorkflowExecution[] = []
         for (const run of runs) {
-          if (store.workflowExecutions.has(run.workflowId)) continue
-          store.setWorkflowExecution(run.workflowId, run)
+          if (store.workflowExecutions.has(run.runId)) continue
+          store.setWorkflowExecution(run.runId, run)
           hydrated.push(run)
         }
         rescheduleWaitingGateTimers(hydrated, store.config?.workflows ?? [])
@@ -394,8 +394,8 @@ export function App() {
       .then((runs) => {
         const store = useAppStore.getState()
         for (const run of runs) {
-          if (!store.workflowExecutions.has(run.workflowId)) {
-            store.setWorkflowExecution(run.workflowId, run)
+          if (!store.workflowExecutions.has(run.runId)) {
+            store.setWorkflowExecution(run.runId, run)
           }
         }
         return reconcileRunningExecutions(runs)

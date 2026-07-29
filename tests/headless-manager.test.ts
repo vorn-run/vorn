@@ -134,50 +134,76 @@ describe('headlessManager.createHeadless', () => {
 
     afterEach(() => setPlatform(realPlatform))
 
-    it('spawns through the shell with the prompt quoted so it is not word-split', () => {
+    // The prompt no longer rides on argv for any agent, but per-step args still
+    // do, and those can contain spaces — so the cmd.exe quoting still matters.
+    it('spawns through the shell with argv quoted so it is not word-split', () => {
       setPlatform('win32')
-      const prompt = '# Workflow: Demo\n\n**Step:** one\n\nDo the thing with spaces.'
       const session = headlessManager.createHeadless({
-        agentType: 'codex', // arg-based agent — the prompt rides on argv
+        agentType: 'gemini',
         projectName: 'p',
         projectPath: '/p',
-        initialPrompt: prompt,
+        initialPrompt: 'hello',
+        args: ['--model', 'some model name'],
         headless: true
       })
 
       const [, args, options] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }]
       expect(options.shell).toBe(true)
-      // The raw prompt must NOT appear as a bare element (that word-splits under
+      // The value must NOT appear as a bare element (that word-splits under
       // cmd.exe); it must be a single quoted token that still contains the text.
-      expect(args).not.toContain(prompt)
-      const promptArgs = args.filter((a) => a.includes('Do the thing with spaces.'))
-      expect(promptArgs).toHaveLength(1)
+      expect(args).not.toContain('some model name')
+      const quoted = args.filter((a) => a.includes('some model name'))
+      expect(quoted).toHaveLength(1)
       // cmd.exe quoting (double quotes) is used regardless of the machine's
       // default shell, since Node's shell:true always runs cmd.exe — not
       // PowerShell single-quotes, which cmd.exe wouldn't treat as quoting.
-      expect(promptArgs[0].startsWith('"')).toBe(true)
-      expect(promptArgs[0].endsWith('"')).toBe(true)
+      expect(quoted[0].startsWith('"')).toBe(true)
+      expect(quoted[0].endsWith('"')).toBe(true)
 
       headlessManager.killHeadless(session.id)
     })
 
     it('does not quote args on POSIX (no shell wrapper)', () => {
       setPlatform('linux')
-      const prompt = 'do a thing with spaces'
       const session = headlessManager.createHeadless({
-        agentType: 'codex',
+        agentType: 'gemini',
         projectName: 'p',
         projectPath: '/p',
-        initialPrompt: prompt,
+        initialPrompt: 'hello',
+        args: ['--model', 'some model name'],
         headless: true
       })
 
       const [, args, options] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }]
       expect(options.shell).toBe(false)
       // Passed to execve verbatim — one unquoted element.
-      expect(args).toContain(prompt)
+      expect(args).toContain('some model name')
 
       headlessManager.killHeadless(session.id)
     })
+
+    // The hang this guards against: on Windows a multi-line prompt on the
+    // cmd.exe command line is truncated, and copilot, codex and opencode all
+    // then block on stdin producing no output at all — the step never ends.
+    it.each(['claude', 'copilot', 'codex', 'opencode', 'gemini'] as const)(
+      'keeps the %s prompt off the Windows command line entirely',
+      (agentType) => {
+        setPlatform('win32')
+        const prompt = '# Workflow: Demo\n\n**Step:** one\n\nDo the thing with spaces.'
+        const session = headlessManager.createHeadless({
+          agentType,
+          projectName: 'p',
+          projectPath: '/p',
+          initialPrompt: prompt,
+          headless: true
+        })
+
+        const [, args] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }]
+        expect(args.some((a) => a.includes('Do the thing with spaces.'))).toBe(false)
+        expect(args.some((a) => a.includes('\n'))).toBe(false)
+
+        headlessManager.killHeadless(session.id)
+      }
+    )
   })
 })

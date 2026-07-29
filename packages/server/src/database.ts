@@ -9,6 +9,7 @@ import {
   ProjectConfig,
   WorkflowDefinition,
   WorkflowExecution,
+  workflowRunId,
   NodeExecutionState,
   AgentCommandConfig,
   RemoteHost,
@@ -2108,20 +2109,20 @@ const MAX_WORKFLOW_RUNS = 50
 export function saveWorkflowRun(execution: WorkflowExecution): void {
   const d = getDb()
 
+  const runId = workflowRunId(execution)
+
   const run = d.transaction(() => {
     d.prepare(
       `INSERT OR REPLACE INTO workflow_runs (id, workflow_id, started_at, completed_at, status, trigger_task_id)
        VALUES (?, ?, ?, ?, ?, ?)`
     ).run(
-      execution.workflowId + ':' + execution.startedAt,
+      runId,
       execution.workflowId,
       execution.startedAt,
       execution.completedAt ?? null,
       execution.status,
       execution.triggerTaskId ?? null
     )
-
-    const runId = execution.workflowId + ':' + execution.startedAt
 
     // Delete existing nodes for this run (for upsert behavior)
     d.prepare('DELETE FROM workflow_run_nodes WHERE run_id = ?').run(runId)
@@ -2236,6 +2237,7 @@ function mapRunRows(
   nodesByRun: Map<string, NodeExecutionState[]>
 ): (WorkflowExecution & { workflowName?: string })[] {
   return rows.map((r) => ({
+    runId: r.id,
     workflowId: r.workflow_id,
     startedAt: r.started_at,
     ...(r.completed_at != null && { completedAt: r.completed_at }),

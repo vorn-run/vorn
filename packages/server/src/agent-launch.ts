@@ -165,10 +165,11 @@ export interface HeadlessSpawnArgs {
   args: string[]
   /**
    * When set, the prompt should be written to the child's stdin rather than
-   * passed as a command-line argument. Used for agents that read their prompt
-   * from stdin (claude) so a multi-line prompt survives intact on Windows,
-   * where `spawn(..., { shell: true })` word-splits and line-breaks unquoted
-   * argv on the cmd.exe command line. See buildHeadlessSpawnArgs.
+   * passed as a command-line argument. Every supported agent reads its prompt
+   * this way, so a multi-line prompt survives intact on Windows — there,
+   * `spawn(..., { shell: true })` word-splits unquoted argv on the cmd.exe
+   * command line, and a literal newline cannot be carried by it at all,
+   * quoted or not. See buildHeadlessSpawnArgs.
    */
   stdin?: string
 }
@@ -216,13 +217,44 @@ export function buildHeadlessSpawnArgs(
         ? { command: cmd.command, args: [...extraArgs, '-p'], stdin: prompt }
         : { command: cmd.command, args: [...extraArgs, '-p', ''] }
     case 'copilot':
-      return { command: cmd.command, args: [...extraArgs, '-p', prompt] }
+      // `copilot` reads the prompt from stdin when `-p` is absent ("Run in an
+      // interactive terminal or provide a prompt with -p or via standard in").
+      // Deliver it there so the workflow prompt — always multi-line — never
+      // reaches the cmd.exe command line, which cannot carry a literal newline.
+      //
+      // Passing it as `-p` on Windows left copilot with a truncated value or
+      // none at all, and with no prompt it blocks on stdin producing no output
+      // whatsoever: the step never finished and its run never closed.
+      return prompt
+        ? { command: cmd.command, args: [...extraArgs], stdin: prompt }
+        : { command: cmd.command, args: [...extraArgs, '-p', ''] }
     case 'codex':
-      return { command: cmd.command, args: [...extraArgs, 'exec', prompt] }
+      // `codex exec` reads its instructions from stdin when no PROMPT argument
+      // is given. Passing the prompt positionally instead would also work on
+      // POSIX, but on Windows it goes through the cmd.exe command line, which
+      // truncates it at the first newline. Note the prompt must NOT also be
+      // passed as an argument — codex then treats stdin as a separate
+      // `<stdin>` block rather than as the instructions.
+      return prompt
+        ? { command: cmd.command, args: [...extraArgs, 'exec'], stdin: prompt }
+        : { command: cmd.command, args: [...extraArgs, 'exec', ''] }
     case 'opencode':
-      return { command: cmd.command, args: [...extraArgs, 'run', prompt] }
+      // `opencode run` with no positional message reads the message from stdin.
+      return prompt
+        ? { command: cmd.command, args: [...extraArgs, 'run'], stdin: prompt }
+        : { command: cmd.command, args: [...extraArgs, 'run', ''] }
     case 'gemini':
-      return { command: cmd.command, args: [...extraArgs, '-p', prompt] }
+      // gemini reads stdin whenever stdin isn't a TTY and uses it as the input
+      // when no `-p` is given (`input = input ? stdin + input : stdin`). Piped
+      // stdio also puts it in headless mode on its own, so `-p` isn't needed to
+      // stop it going interactive.
+      //
+      // Caveat: under gemini's own sandbox (GEMINI_SANDBOX), it reads stdin and
+      // re-injects it as `--prompt` on the relaunch command line — which would
+      // reintroduce the newline truncation. Vorn doesn't enable that sandbox.
+      return prompt
+        ? { command: cmd.command, args: [...extraArgs], stdin: prompt }
+        : { command: cmd.command, args: [...extraArgs, '-p', ''] }
     default:
       return { command: cmd.command, args: [...extraArgs, '-p', prompt] }
   }

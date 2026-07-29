@@ -135,6 +135,12 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.WORKFLOW_RUN_LIST_RUNNING, () =>
     requireBridge().request(IPC.WORKFLOW_RUN_LIST_RUNNING, {})
   )
+  safeHandle(IPC.WORKFLOW_RUN_CLAIM, (_, req) =>
+    requireBridge().request(IPC.WORKFLOW_RUN_CLAIM, req)
+  )
+  safeHandle(IPC.WORKFLOW_RUN_RELEASE, (_, req) =>
+    requireBridge().request(IPC.WORKFLOW_RUN_RELEASE, req)
+  )
 
   // Session events
   safeHandle(IPC.SESSION_EVENT_LIST_BY_SESSION, (_, sessionId, limit) =>

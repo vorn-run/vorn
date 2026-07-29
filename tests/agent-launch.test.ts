@@ -208,14 +208,14 @@ describe('buildHeadlessSpawnArgs', () => {
     expect(result.args[result.args.length - 1]).toBe('-p')
   })
 
-  it('returns exec for codex', () => {
+  it('returns exec for codex, with the prompt on stdin', () => {
     const result = buildHeadlessSpawnArgs(
       makePayload({ agentType: 'codex', initialPrompt: 'fix' }),
       cmds,
       env
     )
     expect(result.args).toContain('exec')
-    expect(result.args).toContain('fix')
+    expect(result.stdin).toBe('fix')
   })
 
   it('returns run for opencode', () => {
@@ -295,9 +295,11 @@ describe('buildHeadlessSpawnArgs', () => {
 // Windows the headless spawn runs through `shell: true`, which word-splits
 // unquoted argv — the trigger for issue #374 (claude got only `#`) and the
 // equivalent copilot "extra words were treated as separate arguments" failure.
-// Every supported agent must therefore deliver the ENTIRE prompt as one unit:
-// claude on stdin (bare `-p`), everyone else as a single argv element that the
-// spawn site can quote. These tests lock that contract in per agent.
+//
+// Quoting fixes the word-splitting but NOT the newlines: a cmd.exe command line
+// cannot carry a literal LF, so any prompt passed on argv is still mangled
+// there. Agents that can take the prompt on stdin must therefore do so — that
+// route never touches the command line. These tests lock that in per agent.
 describe('buildHeadlessSpawnArgs — every agent delivers the whole prompt as one unit', () => {
   const PROMPT = '# Workflow: Demo\n\n**Step:** one\n\nDo the thing with spaces.'
 
@@ -315,25 +317,86 @@ describe('buildHeadlessSpawnArgs — every agent delivers the whole prompt as on
     expect(result.args[result.args.length - 1]).toBe('-p')
   })
 
-  // For the arg-based agents the prompt must be exactly one array element so
-  // it can be quoted as a single token — never spread across several.
+  it('copilot delivers the prompt on stdin, with no -p to mangle', () => {
+    const result = buildHeadlessSpawnArgs(
+      makePayload({ agentType: 'copilot', initialPrompt: PROMPT }),
+      cmds,
+      env
+    )
+    expect(result.command).toBe('copilot')
+    expect(result.stdin).toBe(PROMPT)
+    expect(result.args).not.toContain(PROMPT)
+    // `-p` must be absent: copilot only reads stdin when it isn't given one,
+    // and a `-p` whose value the shell ate leaves it blocking on stdin forever.
+    expect(result.args).not.toContain('-p')
+    expect(result.args).toContain('--allow-all')
+  })
+
+  // codex and opencode both read the prompt from stdin when no positional
+  // prompt is given, and both — like copilot — block forever on an open stdin
+  // when they have no prompt at all. Verified against the real CLIs.
   it.each([
-    { agentType: 'copilot' as const, command: 'copilot', flag: '--allow-all' },
-    { agentType: 'codex' as const, command: 'codex', flag: 'exec' },
-    { agentType: 'opencode' as const, command: 'opencode', flag: 'run' },
-    { agentType: 'gemini' as const, command: 'gemini', flag: '-y' }
-  ])('$agentType delivers the prompt as a single argv element', ({ agentType, command, flag }) => {
+    { agentType: 'codex' as const, command: 'codex', sub: 'exec' },
+    { agentType: 'opencode' as const, command: 'opencode', sub: 'run' }
+  ])('$agentType delivers the prompt on stdin, not on argv', ({ agentType, command, sub }) => {
     const result = buildHeadlessSpawnArgs(
       makePayload({ agentType, initialPrompt: PROMPT }),
       cmds,
       env
     )
     expect(result.command).toBe(command)
-    expect(result.stdin).toBeUndefined()
-    expect(result.args).toContain(flag)
-    // The full multi-word/multi-line prompt is a single element, not split.
-    expect(result.args).toContain(PROMPT)
-    expect(result.args.filter((a) => a === PROMPT)).toHaveLength(1)
+    expect(result.stdin).toBe(PROMPT)
+    expect(result.args).toContain(sub)
+    expect(result.args).not.toContain(PROMPT)
+    // The subcommand must be last: a positional after it would be read as the
+    // prompt, which demotes stdin to a separate block (codex) or wins outright.
+    expect(result.args[result.args.length - 1]).toBe(sub)
+  })
+
+  // gemini goes headless on its own when stdio is piped, and uses stdin as the
+  // input when no -p is given. Confirmed against its source and the installed
+  // build: with a stdin prompt it gets past input validation, whereas empty
+  // stdin exits on "No input provided via stdin".
+  it('gemini delivers the prompt on stdin, with no -p', () => {
+    const result = buildHeadlessSpawnArgs(
+      makePayload({ agentType: 'gemini', initialPrompt: PROMPT }),
+      cmds,
+      env
+    )
+    expect(result.command).toBe('gemini')
+    expect(result.stdin).toBe(PROMPT)
+    expect(result.args).toContain('-y')
+    expect(result.args).not.toContain(PROMPT)
+    expect(result.args).not.toContain('-p')
+  })
+
+  // With no prompt an agent must not be left reading stdin — that is the exact
+  // state in which copilot, codex and opencode wait forever, silently.
+  it.each(['claude', 'copilot', 'codex', 'opencode', 'gemini'] as const)(
+    '%s is given an explicit empty prompt rather than being left to read stdin',
+    (agentType) => {
+      const result = buildHeadlessSpawnArgs(
+        makePayload({ agentType, initialPrompt: '' }),
+        cmds,
+        env
+      )
+      expect(result.stdin).toBeUndefined()
+      expect(result.args[result.args.length - 1]).toBe('')
+    }
+  )
+
+  it('keeps the prompt off the Windows command line for every agent', () => {
+    // Guards the regression directly: a cmd.exe command line cannot carry a
+    // literal LF, so no agent may receive the prompt on argv.
+    for (const agentType of ['claude', 'copilot', 'codex', 'opencode', 'gemini'] as const) {
+      const result = buildHeadlessSpawnArgs(
+        makePayload({ agentType, initialPrompt: PROMPT }),
+        cmds,
+        env
+      )
+      expect(result.args.some((a) => a.includes('\n'))).toBe(false)
+      expect(result.stdin).toBe(PROMPT)
+    }
   })
 })
 

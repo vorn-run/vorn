@@ -208,13 +208,19 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   // scalars avoids refetching on every streaming log chunk.
   const liveExecSignature = useAppStore((s) => {
     if (!editingId) return ''
-    const exec = s.workflowExecutions.get(editingId)
-    if (!exec) return ''
-    const waiting = (exec.nodeStates ?? [])
-      .filter((n) => n.status === 'waiting')
-      .map((n) => n.nodeId)
-      .join(',')
-    return `${exec.status ?? ''}|${exec.completedAt ?? ''}|${waiting}`
+    // Folds in every live run of this workflow: with runs in parallel, any of
+    // them changing status or parking on a gate should re-query.
+    const parts: string[] = []
+    for (const exec of s.workflowExecutions.values()) {
+      if (exec.workflowId !== editingId) continue
+      const waiting = (exec.nodeStates ?? [])
+        .filter((n) => n.status === 'waiting')
+        .map((n) => n.nodeId)
+        .join(',')
+      parts.push(`${exec.runId}|${exec.status ?? ''}|${exec.completedAt ?? ''}|${waiting}`)
+    }
+    parts.sort()
+    return parts.join(';')
   })
   useEffect(() => {
     if (!editingId || !isActive || !liveExecSignature) return

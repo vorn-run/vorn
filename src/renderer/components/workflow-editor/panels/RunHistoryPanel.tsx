@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
-import { WorkflowExecution, WorkflowNode, TaskConfig, AiAgentType } from '../../../../shared/types'
+import {
+  workflowRunId,
+  WorkflowExecution,
+  WorkflowNode,
+  TaskConfig,
+  AiAgentType
+} from '../../../../shared/types'
 import { RunEntry } from '../RunEntry'
 import { LogReplayModal } from '../../LogReplayModal'
 
@@ -47,9 +53,9 @@ export function RunHistoryPanel({
           {executions.length === 0 ? (
             <p className="text-[12px] text-gray-600 text-center py-8">No runs yet</p>
           ) : (
-            executions.map((exec, i) => (
+            executions.map((exec) => (
               <RunEntry
-                key={`${exec.workflowId}-${exec.startedAt}-${i}`}
+                key={workflowRunId(exec)}
                 execution={exec}
                 nodes={nodes}
                 tasks={tasks}
