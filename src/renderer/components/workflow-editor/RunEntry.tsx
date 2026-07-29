@@ -260,7 +260,7 @@ export function RunStepsList({
               </div>
             )}
 
-            {expandedNodeId === ns.nodeId && !ns.logs && !ns.error && (
+            {expandedNodeId === ns.nodeId && !ns.logs && !ns.error && !ns.diagnostics && (
               <div className="px-4 pb-2">
                 <p className="text-[11px] text-gray-600 italic">
                   {ns.status === 'running'
@@ -271,6 +271,23 @@ export function RunStepsList({
                         ? 'Step was skipped.'
                         : 'No output recorded.'}
                 </p>
+              </div>
+            )}
+
+            {/* What the engine did, as distinct from what the agent said. This
+                is the only thing left to read when a step produced no output,
+                so it renders even — especially — when the log is empty. */}
+            {expandedNodeId === ns.nodeId && ns.diagnostics && (
+              <div className="px-4 pb-2">
+                <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-1">
+                  Diagnostics
+                </p>
+                <pre
+                  className="text-[11px] text-gray-500 bg-black/20 rounded p-2 max-h-[160px] overflow-auto
+                             font-mono whitespace-pre-wrap break-all leading-relaxed"
+                >
+                  {ns.diagnostics}
+                </pre>
               </div>
             )}
           </div>

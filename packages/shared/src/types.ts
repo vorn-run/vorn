@@ -664,6 +664,19 @@ export interface NodeExecutionState {
   worktreeOrigin?: 'created' | 'inherited'
   /** Timestamp when an approval gate was approved. */
   approvedAt?: string
+  /**
+   * What the engine did on this step's behalf, and when — what it launched,
+   * whether the agent ever produced anything, and how the step ended.
+   *
+   * Kept out of `logs` on purpose. `logs` is the agent's own stdout/stderr, and
+   * a typed step parses it for the declared JSON payload; mixing engine notes
+   * into it would both corrupt that parse and misreport what the agent said.
+   *
+   * This is the answer to "it hung and the output was empty, now what?" — an
+   * empty log with a full timeline still tells you whether the process was
+   * spawned and whether it ever wrote a byte.
+   */
+  diagnostics?: string
 }
 
 export interface WorkflowDefinition {
@@ -865,6 +878,12 @@ export interface HeadlessSession {
   /** The agent's own session id (pinned via --session-id for claude/copilot),
    *  enabling later --resume. Only set for agents that support pinning. */
   agentSessionId?: string
+  /**
+   * Exactly what was spawned, for diagnosing a session that produces nothing.
+   * Safe to display: every agent now takes its prompt on stdin, so the argv
+   * carries flags and ids only.
+   */
+  launchCommand?: string
 }
 
 export interface ResizePayload {
