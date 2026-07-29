@@ -28,6 +28,14 @@ export function StopRunButton({ execution, stopPropagation = true }: Props) {
     setStopping(true)
     try {
       await stopWorkflowRun(execution.runId)
+    } catch (err) {
+      // An async click handler that throws becomes an unhandled rejection and
+      // the run silently appears not to stop. Say so instead.
+      console.error(`[workflow] failed to stop run ${execution.runId}`, err)
+      // Imported here rather than at the top so a leaf button does not pull the
+      // toast system into the module graph of every run row that renders it.
+      const { toast } = await import('../Toast')
+      toast.error('Could not stop the run')
     } finally {
       setStopping(false)
     }

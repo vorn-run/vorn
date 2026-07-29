@@ -430,7 +430,12 @@ async function executeNode(
         if (id !== runId) return
         streamedLogs = appendBoundedLog(streamedLogs, data)
         updateNodeState(execution, node.id, { logs: streamedLogs })
-        useAppStore.getState().setWorkflowExecution(workflow.id, { ...execution })
+        // Keyed by the run, like every other write. Under the workflow id this
+        // both missed the real run — so streamed script logs never reached it —
+        // and inserted a second entry that runsForWorkflow reported as a
+        // duplicate run. Note `runId` in this scope is the script's, not the
+        // run's.
+        useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
       }
     )
 
