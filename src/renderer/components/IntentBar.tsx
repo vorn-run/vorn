@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { focusTerminal, pasteToTerminal, scrollToBottom } from '../lib/terminal-registry'
+import { getShellInputState } from '../lib/command-blocks'
 import {
   ghostSuggestion,
   recordCommand,
@@ -123,6 +124,22 @@ function longestCommonPrefix(inserts: string[]): string {
  * newline, Escape returns focus to the terminal. Tab fills the longest
  * common prefix, then inserts the highlighted (or first) completion.
  */
+/**
+ * Control chords forwarded to the pty while a command is running.
+ *
+ * The composer keeps focus after a command is submitted, so these would
+ * otherwise be swallowed by the textarea and there would be no way to
+ * interrupt anything without first clicking into the terminal. Ctrl, never
+ * Cmd: control characters are Ctrl-based on every platform, and on macOS
+ * Cmd+C is copy.
+ */
+const CONTROL_CHORDS: Record<string, string> = {
+  c: '\x03', // SIGINT
+  d: '\x04', // EOF
+  z: '\x1a', // SIGTSTP
+  '\\': '\x1c' // SIGQUIT
+}
+
 export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   const session = useAppStore((s) => s.terminals.get(terminalId)?.session)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -385,6 +402,24 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Interrupts belong to the running command, not to this input. Shift is
+      // excluded because Ctrl+Shift+C is the terminal's copy chord, which it
+      // swallows even with nothing selected — forwarding it here would
+      // interrupt on a keystroke pressed to copy.
+      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        const chord = CONTROL_CHORDS[e.key.toLowerCase()]
+        const target = e.currentTarget
+        const hasSelection = target.selectionStart !== target.selectionEnd
+        // Copying out of the composer still wins, as it does in the terminal.
+        if (chord && !(e.key.toLowerCase() === 'c' && hasSelection)) {
+          if (getShellInputState(terminalId) === 'running') {
+            e.preventDefault()
+            window.api.writeTerminal(terminalId, chord)
+            return
+          }
+        }
+      }
+
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i') {
         e.preventDefault()
         toggleMode()

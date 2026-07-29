@@ -30,6 +30,13 @@ const registryMocks = vi.hoisted(() => ({
 
 vi.mock('../src/renderer/lib/terminal-registry', () => registryMocks)
 
+// What the shell is doing right now decides where a keystroke belongs.
+const shellState = vi.hoisted(() => ({ value: 'prompt' as 'prompt' | 'running' | 'unknown' }))
+vi.mock('../src/renderer/lib/command-blocks', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return { ...actual, getShellInputState: () => shellState.value }
+})
+
 Object.defineProperty(window, 'api', {
   value: {
     writeTerminal: vi.fn()
@@ -435,5 +442,105 @@ describe('IntentBar intent modes', () => {
       await new Promise((r) => setTimeout(r, 120))
     })
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+})
+
+describe('interrupting a running command from the composer', () => {
+  /**
+   * Submitting leaves focus in the composer, so without this the textarea
+   * swallows Ctrl+C and a running command cannot be stopped without first
+   * clicking into the terminal.
+   */
+  /** The known-command set loads asynchronously; let it settle. */
+  async function ready() {
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+
+  // Earlier tests replace window.api wholesale, so the module-level handle to
+  // writeTerminal goes stale. Install a fresh one per test and assert on that.
+  let pty: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    localStorage.clear()
+    resetCommandHistoryCache()
+    seedStore()
+    pty = vi.fn()
+    // Assigned, not redefined: the module-level definition is not configurable.
+    window.api = { writeTerminal: pty } as unknown as typeof window.api
+    shellState.value = 'running'
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    shellState.value = 'prompt'
+  })
+
+  it('sends SIGINT to the pty', async () => {
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.keyDown(getInput(), { key: 'c', ctrlKey: true })
+    expect(pty).toHaveBeenCalledWith('term-1', '\x03')
+  })
+
+  it.each([
+    ['d', '\x04'],
+    ['z', '\x1a'],
+    ['\\', '\x1c']
+  ])('forwards Ctrl+%s', async (key, byte) => {
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.keyDown(getInput(), { key, ctrlKey: true })
+    expect(pty).toHaveBeenCalledWith('term-1', byte)
+  })
+
+  it('leaves the typed text alone', async () => {
+    // The command being interrupted is not the one being composed.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    const input = getInput()
+    fireEvent.change(input, { target: { value: 'next command' } })
+    fireEvent.keyDown(input, { key: 'c', ctrlKey: true })
+    expect(input.value).toBe('next command')
+  })
+
+  it('copies instead of interrupting when text is selected', async () => {
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    const input = getInput()
+    fireEvent.change(input, { target: { value: 'git status' } })
+    input.setSelectionRange(0, 3)
+    fireEvent.keyDown(input, { key: 'c', ctrlKey: true })
+    expect(pty).not.toHaveBeenCalled()
+  })
+
+  it('does not interrupt on the terminal copy chord', async () => {
+    // Ctrl+Shift+C copies in the terminal, which swallows it even with nothing
+    // selected. Forwarding it here would interrupt on a keystroke meant to copy.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.keyDown(getInput(), { key: 'c', ctrlKey: true, shiftKey: true })
+    expect(pty).not.toHaveBeenCalled()
+  })
+
+  it('does not treat Cmd+C as an interrupt', async () => {
+    // Control characters are Ctrl-based on every platform; on macOS Cmd+C is
+    // copy and must stay that way.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.keyDown(getInput(), { key: 'c', metaKey: true })
+    expect(pty).not.toHaveBeenCalled()
+  })
+
+  it('stays out of the way while the shell waits at its prompt', async () => {
+    // Nothing is running, so Ctrl+C belongs to the composer.
+    shellState.value = 'prompt'
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.keyDown(getInput(), { key: 'c', ctrlKey: true })
+    expect(pty).not.toHaveBeenCalled()
   })
 })
