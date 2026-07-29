@@ -19,11 +19,9 @@ describe('getShellIntegrationEnv', () => {
   })
 
   it.skipIf(process.platform === 'win32')('writes the zsh shim files', () => {
-    const env = getShellIntegrationEnv()
-    if (path.basename(process.env.SHELL ?? '') !== 'zsh') {
-      expect(env).toEqual({})
-      return
-    }
+    // Asks for zsh explicitly rather than reading the host's SHELL: every
+    // shell is integrated now, so the host's own shell decides nothing here.
+    const env = getShellIntegrationEnv({ shell: '/bin/zsh' })
     expect(env.ZDOTDIR).toBeTruthy()
     expect(env.VORN_USER_ZDOTDIR).toBeTruthy()
     const zshrc = fs.readFileSync(path.join(env.ZDOTDIR, '.zshrc'), 'utf-8')

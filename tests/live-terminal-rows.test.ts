@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from 'vitest'
 import {
   clampLiveRows,
@@ -6,6 +7,9 @@ import {
 } from '../src/renderer/hooks/useLiveTerminalRows'
 
 /**
+ * jsdom, only because importing the hook pulls in terminal-registry, which
+ * reads navigator at module scope — absent in the Node the CI runs.
+ *
  * The live region sits under the block log holding only the running command.
  * Sizing it to a fixed row count leaves a band of empty terminal below the
  * log — which reads as a second scrolling pane rather than one surface.
