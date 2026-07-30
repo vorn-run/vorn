@@ -45,6 +45,12 @@ jobs:
       - name: Completion index matches allowlist
         run: node scripts/check-completion-allowlist.mjs
 
+      - name: Lockfile has no private registry references
+        # Installs behind a corporate npm mirror make Yarn pin tarballs to that
+        # mirror via __archiveUrl, which leaks an internal host into this public
+        # repo and breaks installs for everyone else.
+        run: yarn lint:lockfile
+
       - name: Lint
         run: yarn lint
 
