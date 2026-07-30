@@ -1,6 +1,7 @@
 import { TerminalSlot } from './TerminalSlot'
 import { CommandSpine } from './CommandSpine'
 import { BlockLog } from './BlockLog'
+import { RunningCommand } from './RunningCommand'
 import { registerBlockLogView } from '../lib/block-log'
 import { useLiveTerminalRows } from '../hooks/useLiveTerminalRows'
 import { hasShellIntegration, onCommandBlocksChange } from '../lib/command-blocks'
@@ -73,6 +74,7 @@ export function TerminalPane({ terminalId, agentType, isFocused, flexible, domBl
     return (
       <div className="absolute inset-0 right-4 bottom-4 flex flex-col justify-end">
         <BlockLog terminalId={terminalId} className={logClass} />
+        {!fullScreen && <RunningCommand terminalId={terminalId} />}
         <TerminalSlot
           terminalId={terminalId}
           isFocused={isFocused}
@@ -114,6 +116,10 @@ export function TerminalPane({ terminalId, agentType, isFocused, flexible, domBl
       // has run, rather than stranded at the top above empty space.
       <div className="flex h-full w-full flex-col justify-end">
         <BlockLog terminalId={terminalId} className={logClass} />
+        {/* Blocks only exist once a command has finished, so a running one
+            needs saying out loud — otherwise a command that never exits looks
+            like a terminal that stopped responding. */}
+        {!fullScreen && <RunningCommand terminalId={terminalId} />}
         {/* The live command only. Capped so a quiet session is mostly log,
             but tall enough that a running command has room to draw. */}
         <TerminalSlot
