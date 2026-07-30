@@ -42,7 +42,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@tiptap/core": "^3.27.4",
-    "@tiptap/extension-code-block": "^3.27.4",
+    "@tiptap/extension-code-block": "^3.29.2",
     "@tiptap/extension-code-block-lowlight": "^3.27.4",
     "@tiptap/extension-link": "^3.27.4",
     "@tiptap/extension-list": "^3.27.4",
