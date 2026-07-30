@@ -3691,12 +3691,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tiptap/extension-placeholder@npm:^3.27.4":
-  version: 3.27.4
-  resolution: "@tiptap/extension-placeholder@npm:3.27.4"
+"@tiptap/extension-placeholder@npm:^3.29.2":
+  version: 3.29.2
+  resolution: "@tiptap/extension-placeholder@npm:3.29.2"
   peerDependencies:
-    "@tiptap/extensions": 3.27.4
-  checksum: 10c0/11b6a72d6cba1385aafdbf644fcbcf0f5afa438c942c7f92257913b1ae607c7e4366ddfd456d541b182f5a07bbcbcccbd750a85d35f84fd503deca5de22cb83f
+    "@tiptap/extensions": 3.29.2
+  checksum: 10c0/c9098330735db4261a86349a660945bd52c4752d92c48959353c13dcc9c599ab7e02ee5002c0ffe6f0def799ba7e568e4b766ead15f29bd4b3f538018eeb64a1
   languageName: node
   linkType: hard
 
@@ -12411,7 +12411,7 @@ __metadata:
     "@tiptap/extension-code-block-lowlight": "npm:^3.27.4"
     "@tiptap/extension-link": "npm:^3.27.4"
     "@tiptap/extension-list": "npm:^3.27.4"
-    "@tiptap/extension-placeholder": "npm:^3.27.4"
+    "@tiptap/extension-placeholder": "npm:^3.29.2"
     "@tiptap/extension-task-item": "npm:^3.27.4"
     "@tiptap/extension-task-list": "npm:^3.27.4"
     "@tiptap/extensions": "npm:^3.27.4"
