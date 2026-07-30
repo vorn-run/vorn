@@ -25,6 +25,9 @@ git diff --exit-code src/renderer/lib/completion-index
 # allowlist edited without regenerating.
 node scripts/check-completion-allowlist.mjs
 
+step "Lockfile has no private registry references"
+yarn lint:lockfile
+
 step "Lint"
 yarn lint
 
