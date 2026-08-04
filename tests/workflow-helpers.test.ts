@@ -536,6 +536,19 @@ describe('run inputs helpers', () => {
     expect(needsRunPrompt(wf)).toBe(false)
   })
 
+  it('drops input keys that cannot be referenced by the template parser', () => {
+    const wf = wfWith({
+      triggerType: 'manual',
+      inputs: [
+        { key: '   ', label: 'Whitespace', type: 'text' },
+        { key: 'issue-number', label: 'Punctuation', type: 'text' },
+        { key: '2issue', label: 'Leading digit', type: 'text' },
+        { key: '_issue2', label: 'Valid', type: 'text' }
+      ]
+    })
+    expect(getWorkflowInputs(wf).map((input) => input.key)).toEqual(['_issue2'])
+  })
+
   it('ignores inputs on a non-manual trigger', () => {
     expect(getWorkflowInputs(wfWith({ triggerType: 'recurring', cron: '0 9 * * *' }))).toEqual([])
   })

@@ -154,6 +154,35 @@ describe('SourcePromptDialog', () => {
     expect(screen.queryByText('Branch')).not.toBeInTheDocument()
   })
 
+  it('always shows the project choice for a global contextual run', () => {
+    const wf = makeWorkflow({
+      nodes: [
+        {
+          id: 't',
+          type: 'trigger',
+          config: { triggerType: 'manual', contextual: true },
+          position: { x: 0, y: 0 },
+          label: 'Manual'
+        },
+        {
+          id: 'a',
+          type: 'launchAgent',
+          config: { agentType: 'claude', prompt: 'No context references' },
+          position: { x: 0, y: 0 },
+          label: 'Run'
+        }
+      ]
+    })
+    useAppStore.setState({
+      pendingWorkflowRun: { workflowId: wf.id },
+      config: { ...useAppStore.getState().config!, workflows: [wf] }
+    })
+
+    render(<SourcePromptDialog />)
+
+    expect(screen.getByTestId('project-picker')).toBeInTheDocument()
+  })
+
   it('shows a worktree checkbox when an agent uses useWorktree: fromContext', () => {
     const wf = makeWorkflow({
       nodes: [

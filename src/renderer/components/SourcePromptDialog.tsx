@@ -92,13 +92,15 @@ export function SourcePromptDialog() {
 
   // A non-contextual workflow reaches this dialog only to collect inputs — it
   // has no source to ask about, so none of the context fields apply.
-  const required = useMemo(
-    () =>
-      workflow && contextual && !hasCallerContext
-        ? detectRequiredFields(workflow)
-        : { needsProject: false, needsBranch: false, needsWorktree: false },
-    [workflow, contextual, hasCallerContext]
-  )
+  const required = useMemo(() => {
+    if (!workflow || !contextual || hasCallerContext) {
+      return { needsProject: false, needsBranch: false, needsWorktree: false }
+    }
+    // A contextual workflow always executes against a source. When a global
+    // launcher did not supply one, expose the project choice instead of
+    // silently synthesizing a source from the first configured project.
+    return { ...detectRequiredFields(workflow), needsProject: true }
+  }, [workflow, contextual, hasCallerContext])
 
   // Reset state and seed sensible defaults each time the dialog opens for a
   // new workflow. Depending on `config` here would clobber user input

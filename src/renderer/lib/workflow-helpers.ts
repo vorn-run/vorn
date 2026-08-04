@@ -139,7 +139,10 @@ export function isContextualWorkflow(wf: WorkflowDefinition): boolean {
 export function getWorkflowInputs(wf: WorkflowDefinition): WorkflowInputDef[] {
   const trigger = getTriggerConfig(wf)
   if (trigger?.triggerType !== 'manual') return []
-  return (trigger.inputs ?? []).filter((i) => i.key)
+  // Match the template parser's identifier grammar. Invalid or half-authored
+  // keys cannot be referenced as `{{inputs.<key>}}`, so they must not cause a
+  // run prompt or enter the values map.
+  return (trigger.inputs ?? []).filter((i) => /^[a-zA-Z_]\w*$/.test(i.key))
 }
 
 /**
