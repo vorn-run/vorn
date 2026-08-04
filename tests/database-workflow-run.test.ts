@@ -247,6 +247,22 @@ describe('workflow run inputs persistence', () => {
     expect(run.inputs).toEqual({ issue: 'gh-42', count: 3, item: { number: 7 } })
   })
 
+  it('ignores a non-object inputs blob rather than surfacing numeric keys', () => {
+    saveWorkflowRun({
+      runId: 'run-inputs-3',
+      workflowId: 'wf-bad',
+      startedAt: '2026-04-20T10:00:00Z',
+      status: 'success',
+      nodeStates: [],
+      // An array survives JSON.parse and is `typeof 'object'`, so without an
+      // explicit check it would render as a row of numeric keys.
+      inputs: ['a', 'b'] as unknown as Record<string, unknown>
+    })
+
+    const [run] = listWorkflowRuns('wf-bad')
+    expect(run.inputs).toBeUndefined()
+  })
+
   it('omits inputs entirely for a run that had none', () => {
     saveWorkflowRun({
       runId: 'run-inputs-2',

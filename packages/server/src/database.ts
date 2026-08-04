@@ -2265,7 +2265,11 @@ function parseRunInputs(raw: string | null): Record<string, unknown> | undefined
   if (!raw) return undefined
   try {
     const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
+    // Arrays are `typeof 'object'` but would surface as numeric-keyed rows in
+    // run history, so they're rejected alongside scalars and null.
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined
   } catch {
     return undefined
   }

@@ -28,6 +28,11 @@ export function areInputsValid(defs: WorkflowInputDef[], values: Record<string, 
   return defs.every((def) => {
     if (!def.required || def.type === 'boolean') return true
     const value = values[def.key]
-    return value !== undefined && value !== null && String(value).trim() !== ''
+    if (value === undefined || value === null) return false
+    // A number field that failed to parse is missing, not answered —
+    // String(NaN) is 'NaN', which would otherwise sail through as non-empty
+    // and reach templates, persistence and the dedupe fingerprint.
+    if (typeof value === 'number' && Number.isNaN(value)) return false
+    return String(value).trim() !== ''
   })
 }
