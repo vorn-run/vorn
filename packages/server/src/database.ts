@@ -2,6 +2,7 @@ import Database from 'libsql'
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import log from './logger'
 import { getDefaultShell } from './process-utils'
 import {
@@ -346,7 +347,10 @@ function createSchema(): void {
       status TEXT NOT NULL DEFAULT 'running',
       trigger_task_id TEXT,
       inputs TEXT,
-      connector_inbox_id INTEGER
+      connector_item TEXT,
+      connector_inbox_id INTEGER,
+      connector_inbox_lease_token TEXT,
+      connector_inbox_disposition TEXT
     );
 
     CREATE TABLE IF NOT EXISTS workflow_run_nodes (
@@ -406,10 +410,11 @@ function createSchema(): void {
       attempts INTEGER NOT NULL DEFAULT 0,
       available_at TEXT NOT NULL,
       lease_until TEXT,
+      lease_token TEXT,
       last_error TEXT,
       created_at TEXT NOT NULL,
       processed_at TEXT,
-      UNIQUE (workflow_id, event_type, event_id)
+      UNIQUE (workflow_id, connection_id, event_type, event_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_connector_inbox_ready
@@ -420,6 +425,43 @@ function createSchema(): void {
 
   migrateSchema(d)
   verifySchema(d)
+  seedLegacyConnectorPollState(d)
+}
+
+function seedLegacyConnectorPollState(d: Database.Database): void {
+  const workflows = d.prepare('SELECT id, nodes FROM workflows').all() as Array<{
+    id: string
+    nodes: string
+  }>
+  const readConnection = d.prepare(
+    'SELECT sync_cursor, last_sync_at FROM source_connections WHERE id = ?'
+  )
+  const insertState = d.prepare(
+    `INSERT OR IGNORE INTO connector_poll_state (
+       workflow_id, connection_id, cursor, last_polled_at, last_error
+     ) VALUES (?, ?, ?, ?, NULL)`
+  )
+  for (const workflow of workflows) {
+    let nodes: Array<{
+      type?: string
+      config?: { triggerType?: string; connectionId?: string }
+    }>
+    try {
+      nodes = JSON.parse(workflow.nodes) as typeof nodes
+    } catch {
+      continue
+    }
+    const trigger = nodes.find(
+      (node) => node.type === 'trigger' && node.config?.triggerType === 'connectorPoll'
+    )
+    const connectionId = trigger?.config?.connectionId
+    if (!connectionId) continue
+    const connection = readConnection.get(connectionId) as
+      | { sync_cursor: string | null; last_sync_at: string | null }
+      | undefined
+    if (!connection) continue
+    insertState.run(workflow.id, connectionId, connection.sync_cursor, connection.last_sync_at)
+  }
 }
 
 function migrateSchema(d: Database.Database): void {
@@ -698,6 +740,15 @@ function migrateSchema(d: Database.Database): void {
       if (!runCols.some((column) => column.name === 'connector_inbox_id')) {
         d.exec('ALTER TABLE workflow_runs ADD COLUMN connector_inbox_id INTEGER')
       }
+      if (!runCols.some((column) => column.name === 'connector_item')) {
+        d.exec('ALTER TABLE workflow_runs ADD COLUMN connector_item TEXT')
+      }
+      if (!runCols.some((column) => column.name === 'connector_inbox_lease_token')) {
+        d.exec('ALTER TABLE workflow_runs ADD COLUMN connector_inbox_lease_token TEXT')
+      }
+      if (!runCols.some((column) => column.name === 'connector_inbox_disposition')) {
+        d.exec('ALTER TABLE workflow_runs ADD COLUMN connector_inbox_disposition TEXT')
+      }
       d.exec(`
         CREATE TABLE IF NOT EXISTS connector_poll_state (
           workflow_id TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
@@ -720,6 +771,7 @@ function migrateSchema(d: Database.Database): void {
           attempts INTEGER NOT NULL DEFAULT 0,
           available_at TEXT NOT NULL,
           lease_until TEXT,
+          lease_token TEXT,
           last_error TEXT,
           created_at TEXT NOT NULL,
           processed_at TEXT,
@@ -736,6 +788,62 @@ function migrateSchema(d: Database.Database): void {
       ).run()
     })()
     log.info('[database] migrated schema to version 12 (durable connector ingestion)')
+  }
+
+  if (version < 13) {
+    d.transaction(() => {
+      const inboxCols = d.prepare('PRAGMA table_info(connector_inbox)').all() as Array<{
+        name: string
+      }>
+      if (!inboxCols.some((column) => column.name === 'lease_token')) {
+        d.exec('ALTER TABLE connector_inbox ADD COLUMN lease_token TEXT')
+      }
+      d.exec(`
+        ALTER TABLE connector_inbox RENAME TO connector_inbox_v12;
+
+        CREATE TABLE connector_inbox (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+          connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
+          connector_id TEXT NOT NULL,
+          event_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          event_timestamp TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          attempts INTEGER NOT NULL DEFAULT 0,
+          available_at TEXT NOT NULL,
+          lease_until TEXT,
+          lease_token TEXT,
+          last_error TEXT,
+          created_at TEXT NOT NULL,
+          processed_at TEXT,
+          UNIQUE (workflow_id, connection_id, event_type, event_id)
+        );
+
+        INSERT INTO connector_inbox (
+          id, workflow_id, connection_id, connector_id, event_id, event_type,
+          event_timestamp, payload, status, attempts, available_at, lease_until,
+          lease_token, last_error, created_at, processed_at
+        )
+        SELECT
+          id, workflow_id, connection_id, connector_id, event_id, event_type,
+          event_timestamp, payload, status, attempts, available_at, lease_until,
+          lease_token, last_error, created_at, processed_at
+        FROM connector_inbox_v12;
+
+        DROP TABLE connector_inbox_v12;
+
+        CREATE INDEX idx_connector_inbox_ready
+          ON connector_inbox(status, available_at, lease_until);
+        CREATE INDEX idx_connector_inbox_connection
+          ON connector_inbox(connection_id, created_at);
+      `)
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '13')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 13 (connection-scoped inbox)')
   }
 }
 
@@ -785,8 +893,26 @@ function verifySchema(d: Database.Database): void {
     workflow_runs: [
       { column: 'inputs', ddl: 'ALTER TABLE workflow_runs ADD COLUMN inputs TEXT' },
       {
+        column: 'connector_item',
+        ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_item TEXT'
+      },
+      {
         column: 'connector_inbox_id',
         ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_inbox_id INTEGER'
+      },
+      {
+        column: 'connector_inbox_lease_token',
+        ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_inbox_lease_token TEXT'
+      },
+      {
+        column: 'connector_inbox_disposition',
+        ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_inbox_disposition TEXT'
+      }
+    ],
+    connector_inbox: [
+      {
+        column: 'lease_token',
+        ddl: 'ALTER TABLE connector_inbox ADD COLUMN lease_token TEXT'
       }
     ],
     workflow_run_nodes: [
@@ -1052,7 +1178,7 @@ function loadWorkspaces(d: Database.Database): WorkspaceConfig[] {
 }
 
 // ---------------------------------------------------------------------------
-// Config: save (full replace inside a transaction)
+// Config: save inside a transaction
 // ---------------------------------------------------------------------------
 
 export function saveConfig(config: AppConfig): void {
@@ -1085,14 +1211,34 @@ export function saveConfig(config: AppConfig): void {
       )
     }
 
-    // Workflows
-    d.prepare('DELETE FROM workflows').run()
-    const insertWorkflow = d.prepare(
+    // Preserve existing workflow rows so foreign-key cascades do not erase
+    // connector inbox entries and poll cursors during ordinary config saves.
+    const workflows = config.workflows ?? []
+    const workflowIds = new Set(workflows.map((workflow) => workflow.id))
+    const existingWorkflowIds = d.prepare('SELECT id FROM workflows').all() as Array<{
+      id: string
+    }>
+    const deleteWorkflow = d.prepare('DELETE FROM workflows WHERE id = ?')
+    for (const { id } of existingWorkflowIds) {
+      if (!workflowIds.has(id)) deleteWorkflow.run(id)
+    }
+    const upsertWorkflow = d.prepare(
       `INSERT INTO workflows (id, name, icon, icon_color, nodes, edges, enabled, last_run_at, last_run_status, stagger_delay_ms, workspace_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         icon = excluded.icon,
+         icon_color = excluded.icon_color,
+         nodes = excluded.nodes,
+         edges = excluded.edges,
+         enabled = excluded.enabled,
+         last_run_at = excluded.last_run_at,
+         last_run_status = excluded.last_run_status,
+         stagger_delay_ms = excluded.stagger_delay_ms,
+         workspace_id = excluded.workspace_id`
     )
-    for (const w of config.workflows ?? []) {
-      insertWorkflow.run(
+    for (const w of workflows) {
+      upsertWorkflow.run(
         w.id,
         w.name,
         w.icon,
@@ -1486,6 +1632,7 @@ export function dbDeleteSourceConnection(id: string): void {
 
 export interface ConnectorInboxItem {
   id: number
+  leaseToken: string
   workflowId: string
   connectionId: string
   connectorId: string
@@ -1498,6 +1645,7 @@ export interface ConnectorInboxItem {
 
 interface ConnectorInboxRow {
   id: number
+  lease_token: string
   workflow_id: string
   connection_id: string
   connector_id: string
@@ -1511,6 +1659,7 @@ interface ConnectorInboxRow {
 function rowToConnectorInboxItem(row: ConnectorInboxRow): ConnectorInboxItem {
   return {
     id: row.id,
+    leaseToken: row.lease_token,
     workflowId: row.workflow_id,
     connectionId: row.connection_id,
     connectorId: row.connector_id,
@@ -1522,11 +1671,25 @@ function rowToConnectorInboxItem(row: ConnectorInboxRow): ConnectorInboxItem {
   }
 }
 
-export function dbGetConnectorPollCursor(workflowId: string): string | undefined {
+export function dbGetConnectorPollCursor(
+  workflowId: string,
+  connectionId: string
+): string | undefined {
   const row = getDb()
-    .prepare('SELECT cursor FROM connector_poll_state WHERE workflow_id = ?')
-    .get(workflowId) as { cursor: string | null } | undefined
+    .prepare('SELECT cursor FROM connector_poll_state WHERE workflow_id = ? AND connection_id = ?')
+    .get(workflowId, connectionId) as { cursor: string | null } | undefined
   return row?.cursor ?? undefined
+}
+
+export function dbCountActiveConnectorInboxLeases(now: string): number {
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM connector_inbox
+       WHERE status = 'leased' AND lease_until > ?`
+    )
+    .get(now) as { count: number }
+  return row.count
 }
 
 /**
@@ -1642,64 +1805,104 @@ export function dbClaimConnectorInbox(args: {
 
     const claim = d.prepare(
       `UPDATE connector_inbox
-       SET status = 'leased', attempts = attempts + 1, lease_until = ?
+       SET status = 'leased', attempts = attempts + 1, lease_until = ?, lease_token = ?
        WHERE id = ?`
     )
     const read = d.prepare(
       `SELECT id, workflow_id, connection_id, connector_id, event_id,
-              event_type, event_timestamp, payload, attempts
+              event_type, event_timestamp, payload, attempts, lease_token
        FROM connector_inbox WHERE id = ?`
     )
     return rows.map(({ id }) => {
-      claim.run(args.leaseUntil, id)
+      claim.run(args.leaseUntil, randomUUID(), id)
       return rowToConnectorInboxItem(read.get(id) as ConnectorInboxRow)
     })
   })()
 }
 
-export function dbCompleteConnectorInbox(id: number, processedAt: string): void {
-  getDb()
+export function dbCompleteConnectorInbox(
+  id: number,
+  leaseToken: string,
+  processedAt: string
+): boolean {
+  const result = getDb()
     .prepare(
       `UPDATE connector_inbox
-       SET status = 'processed', processed_at = ?, lease_until = NULL, last_error = NULL
-       WHERE id = ?`
+       SET status = 'processed', processed_at = ?, lease_until = NULL,
+           lease_token = NULL, last_error = NULL
+       WHERE id = ? AND status = 'leased' AND lease_token = ?`
     )
-    .run(processedAt, id)
+    .run(processedAt, id, leaseToken)
+  return result.changes === 1
 }
 
-export function dbRetryConnectorInbox(args: { id: number; error: string; now: string }): void {
+export function dbRetryConnectorInbox(args: {
+  id: number
+  leaseToken: string
+  error: string
+  now: string
+}): boolean {
   const d = getDb()
-  const row = d.prepare('SELECT attempts FROM connector_inbox WHERE id = ?').get(args.id) as
-    | { attempts: number }
-    | undefined
-  if (!row) return
+  const row = d
+    .prepare(
+      `SELECT attempts FROM connector_inbox
+       WHERE id = ? AND status = 'leased' AND lease_token = ?`
+    )
+    .get(args.id, args.leaseToken) as { attempts: number } | undefined
+  if (!row) return false
   const delayMs = Math.min(60_000 * 2 ** Math.max(0, row.attempts - 1), 60 * 60_000)
   const availableAt = new Date(Date.parse(args.now) + delayMs).toISOString()
-  d.prepare(
-    `UPDATE connector_inbox
-       SET status = 'pending', available_at = ?, lease_until = NULL, last_error = ?
-       WHERE id = ?`
-  ).run(availableAt, args.error, args.id)
+  const result = d
+    .prepare(
+      `UPDATE connector_inbox
+       SET status = 'pending', available_at = ?, lease_until = NULL,
+           lease_token = NULL, last_error = ?
+       WHERE id = ? AND status = 'leased' AND lease_token = ?`
+    )
+    .run(availableAt, args.error, args.id, args.leaseToken)
+  if (result.changes !== 1) return false
   d.prepare(
     `UPDATE source_connections
      SET last_sync_error = ?
      WHERE id = (SELECT connection_id FROM connector_inbox WHERE id = ?)`
   ).run(args.error, args.id)
+  return true
 }
 
 /** The renderer could not accept this event yet (for example, another run is
  * parked at an approval gate). This is not a workflow attempt or an error. */
-export function dbDeferConnectorInbox(id: number, availableAt: string): void {
-  getDb()
+export function dbDeferConnectorInbox(
+  id: number,
+  leaseToken: string,
+  availableAt: string
+): boolean {
+  const result = getDb()
     .prepare(
       `UPDATE connector_inbox
        SET status = 'pending',
            attempts = MAX(0, attempts - 1),
            available_at = ?,
-           lease_until = NULL
-       WHERE id = ?`
+           lease_until = NULL,
+           lease_token = NULL
+       WHERE id = ? AND status = 'leased' AND lease_token = ?`
     )
-    .run(availableAt, id)
+    .run(availableAt, id, leaseToken)
+  return result.changes === 1
+}
+
+export function dbRenewConnectorInboxLease(
+  id: number,
+  leaseToken: string,
+  leaseUntil: string
+): boolean {
+  const result = getDb()
+    .prepare(
+      `UPDATE connector_inbox
+       SET lease_until = ?
+       WHERE id = ? AND status = 'leased' AND lease_token = ?`
+    )
+    .run(leaseUntil, id, leaseToken)
+  return result.changes === 1
 }
 
 /** Server restarts invalidate every in-memory workflow owner, so leases from
@@ -1708,7 +1911,7 @@ export function dbReleaseConnectorInboxLeases(now: string): void {
   getDb()
     .prepare(
       `UPDATE connector_inbox
-       SET status = 'pending', available_at = ?, lease_until = NULL
+       SET status = 'pending', available_at = ?, lease_until = NULL, lease_token = NULL
        WHERE status = 'leased'`
     )
     .run(now)
@@ -2461,8 +2664,9 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     d.prepare(
       `INSERT OR REPLACE INTO workflow_runs (
          id, workflow_id, started_at, completed_at, status, trigger_task_id,
-         inputs, connector_inbox_id
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         inputs, connector_item, connector_inbox_id, connector_inbox_lease_token,
+         connector_inbox_disposition
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       runId,
       execution.workflowId,
@@ -2471,7 +2675,10 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
       execution.status,
       execution.triggerTaskId ?? null,
       execution.inputs ? JSON.stringify(execution.inputs) : null,
-      execution.connectorInboxId ?? null
+      execution.connectorItem ? JSON.stringify(execution.connectorItem) : null,
+      execution.connectorInboxId ?? null,
+      execution.connectorInboxLeaseToken ?? null,
+      execution.connectorInboxDisposition ?? null
     )
 
     // Delete existing nodes for this run (for upsert behavior)
@@ -2501,7 +2708,9 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
       )
     }
 
-    // Trim old runs for this workflow
+    // Keep active and unacknowledged connector runs available for restart
+    // recovery; only terminal history that no longer owns inbox work is safe
+    // to trim.
     const count = (
       d
         .prepare('SELECT COUNT(*) as c FROM workflow_runs WHERE workflow_id = ?')
@@ -2510,7 +2719,19 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     if (count > MAX_WORKFLOW_RUNS) {
       d.prepare(
         `DELETE FROM workflow_runs WHERE id IN (
-          SELECT id FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at ASC LIMIT ?
+          SELECT id FROM workflow_runs
+          WHERE workflow_id = ?
+            AND status != 'running'
+            AND (
+              connector_inbox_id IS NULL
+              OR EXISTS (
+                SELECT 1 FROM connector_inbox
+                WHERE connector_inbox.id = workflow_runs.connector_inbox_id
+                  AND connector_inbox.status = 'processed'
+              )
+            )
+          ORDER BY started_at ASC
+          LIMIT ?
         )`
       ).run(execution.workflowId, count - MAX_WORKFLOW_RUNS)
     }
@@ -2583,7 +2804,10 @@ type RunRow = {
   status: string
   trigger_task_id: string | null
   inputs: string | null
+  connector_item: string | null
   connector_inbox_id: number | null
+  connector_inbox_lease_token: string | null
+  connector_inbox_disposition: string | null
   workflow_name?: string | null
 }
 
@@ -2610,6 +2834,7 @@ function mapRunRows(
 ): (WorkflowExecution & { workflowName?: string })[] {
   return rows.map((r) => {
     const inputs = parseRunInputs(r.inputs)
+    const connectorItem = parseRunInputs(r.connector_item) as ConnectorItemContext | undefined
     return {
       runId: r.id,
       workflowId: r.workflow_id,
@@ -2618,11 +2843,34 @@ function mapRunRows(
       status: r.status as WorkflowExecution['status'],
       ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
       ...(inputs && { inputs }),
+      ...(connectorItem && { connectorItem }),
       ...(r.connector_inbox_id != null && { connectorInboxId: r.connector_inbox_id }),
+      ...(r.connector_inbox_lease_token != null && {
+        connectorInboxLeaseToken: r.connector_inbox_lease_token
+      }),
+      ...(r.connector_inbox_disposition === 'processed' || r.connector_inbox_disposition === 'retry'
+        ? { connectorInboxDisposition: r.connector_inbox_disposition }
+        : {}),
       ...(r.workflow_name != null && { workflowName: r.workflow_name }),
       nodeStates: nodesByRun.get(r.id) ?? []
     }
   })
+}
+
+export function dbGetWorkflowRunByConnectorInboxId(
+  connectorInboxId: number
+): WorkflowExecution | null {
+  const d = getDb()
+  const row = d
+    .prepare(
+      `SELECT * FROM workflow_runs
+       WHERE connector_inbox_id = ?
+       ORDER BY started_at DESC
+       LIMIT 1`
+    )
+    .get(connectorInboxId) as RunRow | undefined
+  if (!row) return null
+  return mapRunRows([row], fetchNodesByRunIds(d, [row.id]))[0] ?? null
 }
 
 export function listWorkflowRuns(workflowId: string, limit = 20): WorkflowExecution[] {

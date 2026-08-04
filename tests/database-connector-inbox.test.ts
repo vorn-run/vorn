@@ -14,7 +14,9 @@ import {
   dbRecordConnectorPollPage,
   dbReleaseConnectorInboxLeases,
   dbRetryConnectorInbox,
-  initTestDatabase
+  initTestDatabase,
+  loadConfig,
+  saveConfig
 } from '../packages/server/src/database'
 
 let teardown: () => void
@@ -75,7 +77,7 @@ afterEach(() => teardown())
 describe('durable connector inbox', () => {
   it('persists events and their cursor as one poll page', () => {
     expect(record('wf-issues', 'cursor-1', ['1', '2'])).toBe(2)
-    expect(dbGetConnectorPollCursor('wf-issues')).toBe('cursor-1')
+    expect(dbGetConnectorPollCursor('wf-issues', connection.id)).toBe('cursor-1')
 
     const claimed = dbClaimConnectorInbox({
       now: '2026-08-04T01:00:00.000Z',
@@ -89,7 +91,7 @@ describe('durable connector inbox', () => {
   it('deduplicates an overlapping remote page without losing the checkpoint', () => {
     expect(record('wf-issues', 'cursor-1', ['1', '2'])).toBe(2)
     expect(record('wf-issues', 'cursor-2', ['2', '3'])).toBe(1)
-    expect(dbGetConnectorPollCursor('wf-issues')).toBe('cursor-2')
+    expect(dbGetConnectorPollCursor('wf-issues', connection.id)).toBe('cursor-2')
 
     const claimed = dbClaimConnectorInbox({
       now: '2026-08-04T01:00:00.000Z',
@@ -102,8 +104,33 @@ describe('durable connector inbox', () => {
   it('keeps independent cursors for workflows on one connection', () => {
     record('wf-issues', 'issue-cursor', [])
     record('wf-prs', 'pr-cursor', [])
-    expect(dbGetConnectorPollCursor('wf-issues')).toBe('issue-cursor')
-    expect(dbGetConnectorPollCursor('wf-prs')).toBe('pr-cursor')
+    expect(dbGetConnectorPollCursor('wf-issues', connection.id)).toBe('issue-cursor')
+    expect(dbGetConnectorPollCursor('wf-prs', connection.id)).toBe('pr-cursor')
+  })
+
+  it('resets the cursor and dedupe scope when a workflow changes connection', () => {
+    record('wf-issues', 'cursor-1', ['1'])
+    const secondConnection = { ...connection, id: 'conn-2', name: 'owner/other' }
+    dbInsertSourceConnection(secondConnection)
+
+    expect(dbGetConnectorPollCursor('wf-issues', secondConnection.id)).toBeUndefined()
+    expect(
+      dbRecordConnectorPollPage({
+        workflowId: 'wf-issues',
+        connectionId: secondConnection.id,
+        connectorId: secondConnection.connectorId,
+        cursor: 'cursor-2',
+        polledAt: '2026-08-04T02:00:00.000Z',
+        events: [
+          {
+            eventId: '1',
+            eventType: 'issueCreated',
+            eventTimestamp: '2026-08-04T01:30:00.000Z',
+            connectorItem: { ...item('1'), connectionId: secondConnection.id }
+          }
+        ]
+      })
+    ).toBe(1)
   })
 
   it('does not reclaim a completed item', () => {
@@ -113,7 +140,7 @@ describe('durable connector inbox', () => {
       leaseUntil: '2026-08-04T02:00:00.000Z',
       limit: 10
     })
-    dbCompleteConnectorInbox(claimed.id, '2026-08-04T01:01:00.000Z')
+    dbCompleteConnectorInbox(claimed.id, claimed.leaseToken, '2026-08-04T01:01:00.000Z')
     expect(
       dbClaimConnectorInbox({
         now: '2026-08-04T03:00:00.000Z',
@@ -132,6 +159,7 @@ describe('durable connector inbox', () => {
     })
     dbRetryConnectorInbox({
       id: claimed.id,
+      leaseToken: claimed.leaseToken,
       error: 'workflow failed',
       now: '2026-08-04T01:00:00.000Z'
     })
@@ -160,7 +188,7 @@ describe('durable connector inbox', () => {
       limit: 10
     })
     expect(claimed.attempts).toBe(1)
-    dbDeferConnectorInbox(claimed.id, '2026-08-04T01:00:30.000Z')
+    dbDeferConnectorInbox(claimed.id, claimed.leaseToken, '2026-08-04T01:00:30.000Z')
     const [reclaimed] = dbClaimConnectorInbox({
       now: '2026-08-04T01:00:30.000Z',
       leaseUntil: '2026-08-05T01:00:00.000Z',
@@ -184,5 +212,45 @@ describe('durable connector inbox', () => {
         limit: 10
       })[0].attempts
     ).toBe(2)
+  })
+
+  it('ignores acknowledgements from an expired lease owner', () => {
+    record('wf-issues', 'cursor-1', ['1'])
+    const [first] = dbClaimConnectorInbox({
+      now: '2026-08-04T01:00:00.000Z',
+      leaseUntil: '2026-08-04T01:01:00.000Z',
+      limit: 10
+    })
+    const [second] = dbClaimConnectorInbox({
+      now: '2026-08-04T01:01:00.000Z',
+      leaseUntil: '2026-08-04T01:06:00.000Z',
+      limit: 10
+    })
+
+    expect(second.leaseToken).not.toBe(first.leaseToken)
+    expect(dbDeferConnectorInbox(first.id, first.leaseToken, '2026-08-04T01:01:30.000Z')).toBe(
+      false
+    )
+    expect(dbCompleteConnectorInbox(second.id, second.leaseToken, '2026-08-04T01:02:00.000Z')).toBe(
+      true
+    )
+  })
+
+  it('preserves inbox rows and poll cursors when saving an existing workflow', () => {
+    record('wf-issues', 'cursor-1', ['1'])
+    const config = loadConfig()
+    config.workflows = config.workflows?.map((entry) =>
+      entry.id === 'wf-issues' ? { ...entry, name: 'Renamed' } : entry
+    )
+    saveConfig(config)
+
+    expect(dbGetConnectorPollCursor('wf-issues', connection.id)).toBe('cursor-1')
+    expect(
+      dbClaimConnectorInbox({
+        now: '2026-08-04T01:00:00.000Z',
+        leaseUntil: '2026-08-04T01:05:00.000Z',
+        limit: 10
+      })
+    ).toHaveLength(1)
   })
 })

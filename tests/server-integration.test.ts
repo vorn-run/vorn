@@ -40,7 +40,9 @@ vi.mock('../packages/server/src/database', () => ({
   listWorkflowRunsByTask: vi.fn(() => []),
   updateWorkflowRunStatus: vi.fn(),
   dbReleaseConnectorInboxLeases: vi.fn(),
+  dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
   dbClaimConnectorInbox: vi.fn(() => []),
+  dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null),
   loadWorkspaces: vi.fn(() => [])
 }))
 

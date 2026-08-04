@@ -13,12 +13,15 @@ const {
   loadConfigMock,
   dbGetSourceConnectionMock,
   dbGetConnectorPollCursorMock,
+  dbGetWorkflowRunByConnectorInboxIdMock,
   dbRecordConnectorPollPageMock,
   dbRecordConnectorPollErrorMock,
   dbClaimConnectorInboxMock,
+  dbCountActiveConnectorInboxLeasesMock,
   dbCompleteConnectorInboxMock,
   dbRetryConnectorInboxMock,
   dbDeferConnectorInboxMock,
+  dbRenewConnectorInboxLeaseMock,
   clientRegistryMock,
   connectorGetMock,
   pollMcpConnectionMock
@@ -26,12 +29,15 @@ const {
   loadConfigMock: vi.fn(),
   dbGetSourceConnectionMock: vi.fn(),
   dbGetConnectorPollCursorMock: vi.fn(),
+  dbGetWorkflowRunByConnectorInboxIdMock: vi.fn(),
   dbRecordConnectorPollPageMock: vi.fn(),
   dbRecordConnectorPollErrorMock: vi.fn(),
   dbClaimConnectorInboxMock: vi.fn(),
+  dbCountActiveConnectorInboxLeasesMock: vi.fn(),
   dbCompleteConnectorInboxMock: vi.fn(),
   dbRetryConnectorInboxMock: vi.fn(),
   dbDeferConnectorInboxMock: vi.fn(),
+  dbRenewConnectorInboxLeaseMock: vi.fn(),
   clientRegistryMock: { size: 1 },
   connectorGetMock: vi.fn(),
   pollMcpConnectionMock: vi.fn()
@@ -58,12 +64,15 @@ vi.mock('../packages/server/src/database', async (importOriginal) => {
     ...actual,
     dbGetSourceConnection: dbGetSourceConnectionMock,
     dbGetConnectorPollCursor: dbGetConnectorPollCursorMock,
+    dbGetWorkflowRunByConnectorInboxId: dbGetWorkflowRunByConnectorInboxIdMock,
     dbRecordConnectorPollPage: dbRecordConnectorPollPageMock,
     dbRecordConnectorPollError: dbRecordConnectorPollErrorMock,
     dbClaimConnectorInbox: dbClaimConnectorInboxMock,
+    dbCountActiveConnectorInboxLeases: dbCountActiveConnectorInboxLeasesMock,
     dbCompleteConnectorInbox: dbCompleteConnectorInboxMock,
     dbRetryConnectorInbox: dbRetryConnectorInboxMock,
-    dbDeferConnectorInbox: dbDeferConnectorInboxMock
+    dbDeferConnectorInbox: dbDeferConnectorInboxMock,
+    dbRenewConnectorInboxLease: dbRenewConnectorInboxLeaseMock
   }
 })
 vi.mock('../packages/server/src/connectors', async (importOriginal) => {
@@ -133,13 +142,18 @@ beforeEach(() => {
   dbGetSourceConnectionMock.mockReset()
   dbGetConnectorPollCursorMock.mockReset()
   dbGetConnectorPollCursorMock.mockReturnValue(undefined)
+  dbGetWorkflowRunByConnectorInboxIdMock.mockReset()
+  dbGetWorkflowRunByConnectorInboxIdMock.mockReturnValue(null)
   dbRecordConnectorPollPageMock.mockReset()
   dbRecordConnectorPollErrorMock.mockReset()
   dbClaimConnectorInboxMock.mockReset()
   dbClaimConnectorInboxMock.mockReturnValue([])
+  dbCountActiveConnectorInboxLeasesMock.mockReset()
+  dbCountActiveConnectorInboxLeasesMock.mockReturnValue(0)
   dbCompleteConnectorInboxMock.mockReset()
   dbRetryConnectorInboxMock.mockReset()
   dbDeferConnectorInboxMock.mockReset()
+  dbRenewConnectorInboxLeaseMock.mockReset()
   clientRegistryMock.size = 1
   connectorGetMock.mockReset()
   pollMcpConnectionMock.mockReset()
@@ -243,6 +257,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     dbClaimConnectorInboxMock.mockReturnValue([
       {
         id: 11,
+        leaseToken: 'lease-11',
         workflowId: 'wf-items',
         connectorItem: {
           connectionId: 'conn-1',
@@ -254,6 +269,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
       },
       {
         id: 12,
+        leaseToken: 'lease-12',
         workflowId: 'wf-items',
         connectorItem: {
           connectionId: 'conn-1',
@@ -269,6 +285,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
       workflowId: string
       connectorItem?: unknown
       connectorInboxId?: number
+      connectorInboxLeaseToken?: string
     }> = []
     const listener = (
       _ch: string,
@@ -286,6 +303,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     expect(emitted[0].connectorItem).toMatchObject({ externalId: '1', title: 'A' })
     expect(emitted[1].connectorItem).toMatchObject({ externalId: '2', title: 'B' })
     expect(emitted.map((event) => event.connectorInboxId)).toEqual([11, 12])
+    expect(emitted.map((event) => event.connectorInboxLeaseToken)).toEqual(['lease-11', 'lease-12'])
   })
 
   it('drains every bounded remote page before dispatching the inbox', async () => {
@@ -336,6 +354,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     const wf = makePollWorkflow('wf-stuck')
     loadConfigMock.mockReturnValue({ workflows: [wf] })
     dbGetSourceConnectionMock.mockReturnValue(makeConn({ syncCursor: 'same' }))
+    dbGetConnectorPollCursorMock.mockReturnValue('same')
     connectorGetMock.mockReturnValue({
       poll: vi.fn().mockResolvedValue({ events: [], nextCursor: 'same', hasMore: true })
     })
@@ -350,22 +369,103 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
   })
 
   it('acknowledges success and backs off workflow failures', () => {
-    scheduler.completeConnectorInbox(41, 'processed')
-    expect(dbCompleteConnectorInboxMock).toHaveBeenCalledWith(41, expect.any(String))
+    scheduler.completeConnectorInbox(41, 'lease-41', 'processed')
+    expect(dbCompleteConnectorInboxMock).toHaveBeenCalledWith(41, 'lease-41', expect.any(String))
 
-    scheduler.completeConnectorInbox(42, 'retry', 'agent failed')
+    scheduler.completeConnectorInbox(42, 'lease-42', 'retry', 'agent failed')
     expect(dbRetryConnectorInboxMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 42, error: 'agent failed' })
+      expect.objectContaining({ id: 42, leaseToken: 'lease-42', error: 'agent failed' })
     )
 
-    scheduler.completeConnectorInbox(43, 'defer')
-    expect(dbDeferConnectorInboxMock).toHaveBeenCalledWith(43, expect.any(String))
+    scheduler.completeConnectorInbox(43, 'lease-43', 'defer')
+    expect(dbDeferConnectorInboxMock).toHaveBeenCalledWith(43, 'lease-43', expect.any(String))
   })
 
   it('leaves inbox rows unclaimed while no renderer is connected', () => {
     clientRegistryMock.size = 0
     scheduler.deliverPendingConnectorInbox()
     expect(dbClaimConnectorInboxMock).not.toHaveBeenCalled()
+  })
+
+  it('claims only the remaining global delivery capacity', () => {
+    dbCountActiveConnectorInboxLeasesMock.mockReturnValue(49)
+
+    scheduler.deliverPendingConnectorInbox()
+
+    expect(dbClaimConnectorInboxMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 1 }))
+  })
+
+  it('redelivers a leased row with its persisted running execution', () => {
+    dbClaimConnectorInboxMock.mockReturnValue([
+      {
+        id: 51,
+        leaseToken: 'lease-51',
+        workflowId: 'wf-items',
+        connectorItem: {
+          connectionId: 'conn-1',
+          connectorId: 'github',
+          externalId: '51',
+          title: 'A',
+          raw: {}
+        }
+      }
+    ])
+    dbGetWorkflowRunByConnectorInboxIdMock.mockReturnValue({
+      runId: 'run-51',
+      workflowId: 'wf-items',
+      startedAt: '2026-04-24T10:00:00Z',
+      status: 'running',
+      connectorInboxId: 51,
+      nodeStates: [{ nodeId: 'approval', status: 'waiting' }]
+    })
+    const listener = vi.fn()
+    scheduler.on('client-message', listener)
+
+    scheduler.deliverPendingConnectorInbox()
+
+    scheduler.off('client-message', listener)
+    expect(listener).toHaveBeenCalledWith(
+      'scheduler:execute',
+      expect.objectContaining({
+        connectorInboxLeaseToken: 'lease-51',
+        existingExecution: expect.objectContaining({ runId: 'run-51' })
+      })
+    )
+  })
+
+  it('finishes a redelivered row whose persisted run already succeeded', () => {
+    dbClaimConnectorInboxMock.mockReturnValue([
+      {
+        id: 52,
+        leaseToken: 'lease-52',
+        workflowId: 'wf-items',
+        connectorItem: {
+          connectionId: 'conn-1',
+          connectorId: 'github',
+          externalId: '52',
+          title: 'B',
+          raw: {}
+        }
+      }
+    ])
+    dbGetWorkflowRunByConnectorInboxIdMock.mockReturnValue({
+      runId: 'run-52',
+      workflowId: 'wf-items',
+      startedAt: '2026-04-24T10:00:00Z',
+      completedAt: '2026-04-24T10:01:00Z',
+      status: 'success',
+      connectorInboxId: 52,
+      connectorInboxDisposition: 'processed',
+      nodeStates: []
+    })
+    const listener = vi.fn()
+    scheduler.on('client-message', listener)
+
+    scheduler.deliverPendingConnectorInbox()
+
+    scheduler.off('client-message', listener)
+    expect(dbCompleteConnectorInboxMock).toHaveBeenCalledWith(52, 'lease-52', expect.any(String))
+    expect(listener).not.toHaveBeenCalled()
   })
 
   it('skips silently when the connection was deleted between scheduling and firing', async () => {
@@ -434,7 +534,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     // pollMcpConnection called with the full connection + cursor.
     expect(pollMcpConnectionMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'conn-1', connectorId: 'mcp' }),
-      'c0'
+      undefined
     )
     expect(dbRecordConnectorPollPageMock).toHaveBeenCalledWith(
       expect.objectContaining({ workflowId: 'wf-mcp', connectionId: 'conn-1', cursor: 't1' })

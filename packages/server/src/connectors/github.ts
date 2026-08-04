@@ -206,6 +206,7 @@ interface GitHubIssue {
 
 interface GitHubSearchResponse {
   total_count: number
+  incomplete_results: boolean
   items: GitHubIssue[]
 }
 
@@ -216,6 +217,7 @@ interface GitHubPollCursor {
 
 const GITHUB_POLL_PAGE_SIZE = 100
 const GITHUB_SEARCH_MAX_PAGE = 10
+const GITHUB_SEARCH_INDEX_OVERLAP_MS = 5 * 60_000
 
 function parsePollCursor(cursor: string | undefined): GitHubPollCursor {
   if (cursor) {
@@ -245,10 +247,9 @@ function githubSearchTimestamp(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime()))
     throw new Error(`Invalid GitHub poll cursor timestamp: ${value}`)
-  // GitHub search qualifiers accept second-precision ISO-8601. Truncating
-  // milliseconds intentionally overlaps the previous boundary; the durable
-  // inbox removes those repeats.
-  return date.toISOString().replace(/\.\d{3}Z$/, 'Z')
+  // GitHub compares at second precision with a strict lower bound. Replay the
+  // previous second so items sharing the cursor's second cannot be skipped.
+  return new Date(date.getTime() - 1_000).toISOString().replace(/\.\d{3}Z$/, 'Z')
 }
 
 function githubSearchEndpoint(
@@ -287,7 +288,14 @@ function nextSearchCursor(
   pollStartedAt: string
 ): { cursor: string; hasMore: boolean } {
   const hasAnotherSearchPage = response.total_count > current.page * GITHUB_POLL_PAGE_SIZE
-  if (!hasAnotherSearchPage) return { cursor: pollStartedAt, hasMore: false }
+  if (!hasAnotherSearchPage) {
+    return {
+      cursor: new Date(
+        new Date(pollStartedAt).getTime() - GITHUB_SEARCH_INDEX_OVERLAP_MS
+      ).toISOString(),
+      hasMore: false
+    }
+  }
 
   if (current.page < GITHUB_SEARCH_MAX_PAGE) {
     return {
@@ -311,6 +319,12 @@ function nextSearchCursor(
     )
   }
   return { cursor: searchCursor({ since: overlap, page: 1 }), hasMore: true }
+}
+
+function assertCompleteSearch(response: GitHubSearchResponse): void {
+  if (response.incomplete_results) {
+    throw new Error('GitHub search returned incomplete results; retrying without advancing cursor')
+  }
 }
 
 function issueToExternalItem(issue: GitHubIssue): ExternalItem {
@@ -404,6 +418,7 @@ export const githubConnector: VornConnector = {
         const response = (await ghApi(
           githubSearchEndpoint(owner, repo, 'issue', parsedCursor, config.labels)
         )) as GitHubSearchResponse
+        assertCompleteSearch(response)
         const next = nextSearchCursor(parsedCursor, response, pollStartedAt)
         return {
           events: response.items.map((i) => ({
@@ -420,6 +435,7 @@ export const githubConnector: VornConnector = {
         const response = (await ghApi(
           githubSearchEndpoint(owner, repo, 'pr', parsedCursor, undefined)
         )) as GitHubSearchResponse
+        assertCompleteSearch(response)
         const next = nextSearchCursor(parsedCursor, response, pollStartedAt)
         return {
           events: response.items.map((pr) => ({

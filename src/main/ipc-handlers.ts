@@ -198,6 +198,9 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.CONNECTOR_INBOX_COMPLETE, (_, params) =>
     requireBridge().request(IPC.CONNECTOR_INBOX_COMPLETE, params)
   )
+  safeHandle(IPC.CONNECTOR_INBOX_RENEW, (_, params) =>
+    requireBridge().request(IPC.CONNECTOR_INBOX_RENEW, params)
+  )
   safeHandle(IPC.WORKFLOW_RUN_MANUAL, (_, params) =>
     requireBridge().request(IPC.WORKFLOW_RUN_MANUAL, params)
   )

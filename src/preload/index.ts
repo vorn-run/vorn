@@ -298,6 +298,8 @@ const api = {
       connectorItem?: import('../../packages/shared/src/types').ConnectorItemContext
       inputs?: Record<string, unknown>
       connectorInboxId?: number
+      connectorInboxLeaseToken?: string
+      existingExecution?: import('../../packages/shared/src/types').WorkflowExecution
     }) => void
   ) => {
     const listener = (
@@ -307,6 +309,8 @@ const api = {
         connectorItem?: import('../../packages/shared/src/types').ConnectorItemContext
         inputs?: Record<string, unknown>
         connectorInboxId?: number
+        connectorInboxLeaseToken?: string
+        existingExecution?: import('../../packages/shared/src/types').WorkflowExecution
       }
     ): void => callback(event)
     ipcRenderer.on(IPC.SCHEDULER_EXECUTE, listener)
@@ -538,9 +542,13 @@ const api = {
 
   completeConnectorInbox: (params: {
     id: number
+    leaseToken: string
     disposition: 'processed' | 'retry' | 'defer'
     error?: string
   }): Promise<void> => ipcRenderer.invoke(IPC.CONNECTOR_INBOX_COMPLETE, params),
+
+  renewConnectorInbox: (params: { id: number; leaseToken: string }): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.CONNECTOR_INBOX_RENEW, params),
 
   getTaskSourceLink: (taskId: string): Promise<TaskSourceLink | null> =>
     ipcRenderer.invoke(IPC.CONNECTION_GET_SOURCE_LINK, taskId),

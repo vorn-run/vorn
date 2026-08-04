@@ -93,7 +93,14 @@ vi.mock('../src/renderer/lib/notifications', () => ({
   sendWorkflowGateNotification: vi.fn()
 }))
 
-const { executeWorkflow, stopWorkflowRun } = await import('../src/renderer/lib/workflow-execution')
+const {
+  adoptConnectorInboxLease,
+  approveWorkflowGate,
+  executeWorkflow,
+  reconcileRunningExecutions,
+  rejectWorkflowGate,
+  stopWorkflowRun
+} = await import('../src/renderer/lib/workflow-execution')
 
 function makeWorkflow(id = 'wf-1'): WorkflowDefinition {
   return {
@@ -159,6 +166,7 @@ beforeEach(() => {
     saveWorkflowRun: vi.fn(() => Promise.resolve()),
     reportWorkflowComplete: vi.fn(() => Promise.resolve()),
     completeConnectorInbox: vi.fn(() => Promise.resolve()),
+    renewConnectorInbox: vi.fn(() => Promise.resolve(true)),
     runWorkflowManual: vi.fn(() => Promise.resolve()),
     listSessionEventsBySession: vi.fn(() => Promise.resolve([])),
     getWorktreeActiveSessions: vi.fn(() => Promise.resolve({ count: 0 })),
@@ -249,6 +257,7 @@ describe('run concurrency', () => {
     const run = executeWorkflow(wf, {
       connectorItem: {
         inboxId: 73,
+        inboxLeaseToken: 'lease-73',
         connectionId: 'conn-1',
         connectorId: 'github',
         externalId: 'issue-7',
@@ -264,6 +273,7 @@ describe('run concurrency', () => {
     expect((await run).status).toBe('success')
     expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
       id: 73,
+      leaseToken: 'lease-73',
       disposition: 'processed'
     })
   })
@@ -415,6 +425,7 @@ describe('stopping a run', () => {
     const runPromise = executeWorkflow(wf, {
       connectorItem: {
         inboxId: 74,
+        inboxLeaseToken: 'lease-74',
         connectionId: 'conn-1',
         connectorId: 'github',
         externalId: 'issue-8',
@@ -435,6 +446,7 @@ describe('stopping a run', () => {
     expect(execution.nodeStates.find((n) => n.nodeId === 'agent')?.error).toBe('Stopped by user')
     expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
       id: 74,
+      leaseToken: 'lease-74',
       disposition: 'processed',
       error: 'Workflow stopped by user'
     })
@@ -455,6 +467,130 @@ describe('stopping a run', () => {
     const sessionId = await nextSession()
     emitExit(sessionId, 0)
     expect((await second).status).toBe('success')
+  })
+})
+
+describe('rejecting an approval gate', () => {
+  it('restores connector context for steps after approval', async () => {
+    const base = makeWorkflow()
+    const agent = {
+      ...base.nodes.find((node) => node.id === 'agent')!,
+      config: {
+        ...(base.nodes.find((node) => node.id === 'agent')!.config as Record<string, unknown>),
+        prompt: 'Handle {{connectorItem.title}}'
+      }
+    }
+    const workflow = {
+      ...base,
+      nodes: [
+        base.nodes.find((node) => node.id === 'trigger')!,
+        {
+          id: 'approval',
+          type: 'approval',
+          label: 'Approve',
+          position: { x: 0, y: 1 },
+          config: {}
+        },
+        agent
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'approval' },
+        { id: 'e2', source: 'approval', target: 'agent' }
+      ]
+    } as unknown as WorkflowDefinition
+    mockState.config.workflows = [workflow]
+    const waiting = await executeWorkflow(workflow, {
+      connectorItem: {
+        inboxId: 90,
+        inboxLeaseToken: 'lease-90',
+        connectionId: 'conn-1',
+        connectorId: 'github',
+        externalId: 'issue-90',
+        title: 'Context survives',
+        raw: {}
+      }
+    })
+
+    const resumed = approveWorkflowGate(waiting, 'approval')
+    const sessionId = await nextSession()
+    emitExit(sessionId, 0)
+    await resumed
+
+    expect(createHeadlessSession.mock.calls.at(-1)?.[0].initialPrompt).toContain(
+      'Handle Context survives'
+    )
+  })
+
+  it('treats explicit rejection as a terminal connector decision', async () => {
+    const workflow = {
+      ...makeWorkflow(),
+      nodes: [
+        {
+          id: 'trigger',
+          type: 'trigger',
+          label: 'Trigger',
+          position: { x: 0, y: 0 },
+          config: {}
+        },
+        {
+          id: 'approval',
+          type: 'approval',
+          label: 'Approve',
+          position: { x: 0, y: 1 },
+          config: {}
+        }
+      ],
+      edges: [{ id: 'e1', source: 'trigger', target: 'approval' }]
+    } as unknown as WorkflowDefinition
+    mockState.config.workflows = [workflow]
+
+    const waiting = await executeWorkflow(workflow, {
+      connectorItem: {
+        inboxId: 91,
+        inboxLeaseToken: 'lease-91',
+        connectionId: 'conn-1',
+        connectorId: 'github',
+        externalId: 'issue-91',
+        title: 'Needs approval',
+        raw: {}
+      }
+    })
+    expect(waiting.nodeStates.find((node) => node.nodeId === 'approval')?.status).toBe('waiting')
+
+    await adoptConnectorInboxLease(waiting, {
+      ...waiting.connectorItem!,
+      inboxLeaseToken: 'lease-92'
+    })
+    const rejected = await rejectWorkflowGate(waiting, 'approval')
+    expect(rejected.status).toBe('error')
+    expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
+      id: 91,
+      leaseToken: 'lease-92',
+      disposition: 'processed'
+    })
+  })
+})
+
+describe('connector run recovery', () => {
+  it('acknowledges a terminal run restored after persistence', async () => {
+    const execution: WorkflowExecution = {
+      runId: 'run-restored',
+      workflowId: 'wf-restored',
+      startedAt: '2026-04-20T10:00:00Z',
+      completedAt: '2026-04-20T10:01:00Z',
+      status: 'success',
+      connectorInboxId: 101,
+      connectorInboxLeaseToken: 'lease-101',
+      nodeStates: [{ nodeId: 'agent', status: 'success' }]
+    }
+
+    await reconcileRunningExecutions([execution])
+
+    expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
+      id: 101,
+      leaseToken: 'lease-101',
+      disposition: 'processed'
+    })
   })
 })
 

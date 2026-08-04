@@ -405,6 +405,8 @@ export interface SessionEvent {
 export interface ConnectorItemContext {
   /** Durable delivery row. Internal to Vorn; connectors do not set it. */
   inboxId?: number
+  /** Identifies the current delivery lease so stale windows cannot acknowledge it. */
+  inboxLeaseToken?: string
   connectionId: string
   connectorId: string
   externalId: string
@@ -786,15 +788,21 @@ export interface WorkflowExecution {
    * as well, which is what lets fan-out run in parallel while a double-fire
    * (two app instances, one scheduler tick) collapses to a single run.
    */
-   dedupeParams?: string
-   /**
-    * Values this run was started with, keyed by `WorkflowInputDef.key`. Kept on
+  dedupeParams?: string
+  /**
+   * Values this run was started with, keyed by `WorkflowInputDef.key`. Kept on
    * the run (not just the live context) so Run History can show what a run was
    * launched with long after it finished.
    */
   inputs?: Record<string, unknown>
+  /** Connector payload retained so approval-gated runs can resume downstream steps. */
+  connectorItem?: ConnectorItemContext
   /** Durable connector event acknowledged only when this run finishes. */
   connectorInboxId?: number
+  /** Ownership token for the connector inbox lease. */
+  connectorInboxLeaseToken?: string
+  /** Durable terminal handling for restart recovery. */
+  connectorInboxDisposition?: 'processed' | 'retry'
 }
 
 /** Stable identity for a run row, tolerating history written before `runId`. */
@@ -1140,6 +1148,7 @@ export const IPC = {
   CONNECTOR_STATUS: 'connector:status',
   CONNECTION_UPSERT_FROM_ITEM: 'connection:upsertFromItem',
   CONNECTOR_INBOX_COMPLETE: 'connector:inboxComplete',
+  CONNECTOR_INBOX_RENEW: 'connector:inboxRenew',
   WORKFLOW_RUN_MANUAL: 'workflow:runManual',
   CONNECTION_BACKFILL: 'connection:backfill',
   CREDENTIALS_SET_DECRYPTED: 'credentials:setDecrypted',

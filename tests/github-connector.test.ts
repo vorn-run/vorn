@@ -272,7 +272,7 @@ describe('github connector — poll()', () => {
     const endpoint = execFileMock.mock.calls[0][1][1] as string
     expect(endpoint).toContain('search/issues?')
     expect(decodeURIComponent(endpoint)).toContain('is:issue')
-    expect(decodeURIComponent(endpoint)).toContain('created:>2026-04-24T10:00:00Z')
+    expect(decodeURIComponent(endpoint)).toContain('created:>2026-04-24T09:59:59Z')
   })
 
   it('issueCreated: returns a resumable next page instead of skipping a backlog', async () => {
@@ -349,13 +349,21 @@ describe('github connector — poll()', () => {
     expect(endpoint).toContain('page=2')
   })
 
-  it('normalizes cursor timestamps to GitHub search precision', async () => {
+  it('overlaps the previous second at GitHub search precision', async () => {
     setExecFileResponse(JSON.stringify({ total_count: 0, items: [] }))
     const gh = await importGithub()
     await gh.poll!('issueCreated', { owner: 'o', repo: 'r' }, '2026-04-24T10:00:00.987Z')
     const endpoint = decodeURIComponent(execFileMock.mock.calls[0][1][1] as string)
-    expect(endpoint).toContain('created:>2026-04-24T10:00:00Z')
+    expect(endpoint).toContain('created:>2026-04-24T09:59:59Z')
     expect(endpoint).not.toContain('.987Z')
+  })
+
+  it('does not advance when GitHub reports incomplete search results', async () => {
+    setExecFileResponse(JSON.stringify({ total_count: 1, incomplete_results: true, items: [] }))
+    const gh = await importGithub()
+    await expect(
+      gh.poll!('issueCreated', { owner: 'o', repo: 'r' }, '2026-04-24T10:00:00Z')
+    ).rejects.toThrow(/incomplete results/)
   })
 
   it('unknown trigger type returns empty', async () => {

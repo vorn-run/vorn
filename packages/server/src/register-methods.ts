@@ -686,8 +686,12 @@ export function registerAllMethods(): void {
     scheduler.triggerWorkflow(workflowId, inputs)
   })
 
-  registerMethod('connector:inboxComplete', ({ id, disposition, error }) => {
-    scheduler.completeConnectorInbox(id, disposition, error)
+  registerMethod('connector:inboxComplete', ({ id, leaseToken, disposition, error }) => {
+    scheduler.completeConnectorInbox(id, leaseToken, disposition, error)
+  })
+
+  registerMethod('connector:inboxRenew', ({ id, leaseToken }) => {
+    return scheduler.renewConnectorInbox(id, leaseToken)
   })
 
   // Runs execute in the renderer, but a scheduler tick reaches every connected

@@ -14,12 +14,15 @@ import { configManager } from './config-manager'
 import {
   dbClaimConnectorInbox,
   dbCompleteConnectorInbox,
+  dbCountActiveConnectorInboxLeases,
   dbDeferConnectorInbox,
   dbGetConnectorPollCursor,
   dbGetSourceConnection,
+  dbGetWorkflowRunByConnectorInboxId,
   dbRecordConnectorPollError,
   dbRecordConnectorPollPage,
   dbReleaseConnectorInboxLeases,
+  dbRenewConnectorInboxLease,
   dbRetryConnectorInbox
 } from './database'
 import { connectorRegistry, applyDecryptedCreds } from './connectors'
@@ -28,7 +31,7 @@ import { clientRegistry } from './broadcast'
 import log from './logger'
 
 const LOCK_DIR = path.join(os.homedir(), '.vorn')
-const INBOX_LEASE_MS = 24 * 60 * 60_000
+const INBOX_LEASE_MS = 5 * 60_000
 const INBOX_DRAIN_INTERVAL_MS = 30_000
 const INBOX_BATCH_SIZE = 50
 const MAX_POLL_PAGES_PER_TICK = 20
@@ -97,22 +100,32 @@ class Scheduler extends EventEmitter {
 
   completeConnectorInbox(
     id: number,
+    leaseToken: string,
     disposition: 'processed' | 'retry' | 'defer',
     error?: string
   ): void {
     const now = new Date().toISOString()
     if (disposition === 'processed') {
-      dbCompleteConnectorInbox(id, now)
+      dbCompleteConnectorInbox(id, leaseToken, now)
     } else if (disposition === 'retry') {
       dbRetryConnectorInbox({
         id,
+        leaseToken,
         error: error || 'Connector workflow failed',
         now
       })
     } else {
-      dbDeferConnectorInbox(id, new Date(Date.now() + 30_000).toISOString())
+      dbDeferConnectorInbox(id, leaseToken, new Date(Date.now() + 30_000).toISOString())
     }
     this.deliverPendingConnectorInbox()
+  }
+
+  renewConnectorInbox(id: number, leaseToken: string): boolean {
+    return dbRenewConnectorInboxLease(
+      id,
+      leaseToken,
+      new Date(Date.now() + INBOX_LEASE_MS).toISOString()
+    )
   }
 
   deliverPendingConnectorInbox(): void {
@@ -120,16 +133,36 @@ class Scheduler extends EventEmitter {
     // expires. Leave it pending and drain immediately when a client connects.
     if (clientRegistry.size === 0) return
     const now = Date.now()
+    const nowIso = new Date(now).toISOString()
+    const availableSlots = INBOX_BATCH_SIZE - dbCountActiveConnectorInboxLeases(nowIso)
+    if (availableSlots <= 0) return
     const claimed = dbClaimConnectorInbox({
-      now: new Date(now).toISOString(),
+      now: nowIso,
       leaseUntil: new Date(now + INBOX_LEASE_MS).toISOString(),
-      limit: INBOX_BATCH_SIZE
+      limit: availableSlots
     })
     for (const item of claimed) {
+      const existingExecution = dbGetWorkflowRunByConnectorInboxId(item.id)
+      if (
+        existingExecution &&
+        existingExecution.status !== 'running' &&
+        (existingExecution.connectorInboxDisposition === 'processed' ||
+          existingExecution.status === 'success' ||
+          existingExecution.status === 'cancelled')
+      ) {
+        dbCompleteConnectorInbox(item.id, item.leaseToken, new Date().toISOString())
+        continue
+      }
       this.emit('client-message', IPC.SCHEDULER_EXECUTE, {
         workflowId: item.workflowId,
-        connectorItem: { ...item.connectorItem, inboxId: item.id },
-        connectorInboxId: item.id
+        connectorItem: {
+          ...item.connectorItem,
+          inboxId: item.id,
+          inboxLeaseToken: item.leaseToken
+        },
+        connectorInboxId: item.id,
+        connectorInboxLeaseToken: item.leaseToken,
+        ...(existingExecution?.status === 'running' && { existingExecution })
       })
     }
   }
@@ -295,7 +328,7 @@ class Scheduler extends EventEmitter {
       return
     }
 
-    let cursor = dbGetConnectorPollCursor(workflowId) ?? conn.syncCursor
+    let cursor = dbGetConnectorPollCursor(workflowId, conn.id)
     const now = new Date().toISOString()
     try {
       for (let page = 0; page < MAX_POLL_PAGES_PER_TICK; page++) {

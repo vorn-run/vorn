@@ -368,15 +368,21 @@ export function createApiShim(wsUrl: string) {
         workflowId: string
         connectorItem?: import('../../shared/src/types').ConnectorItemContext
         connectorInboxId?: number
+        connectorInboxLeaseToken?: string
+        inputs?: Record<string, unknown>
+        existingExecution?: import('../../shared/src/types').WorkflowExecution
       }) => void
     ) => rpc.on('scheduler:execute', callback as (p: unknown) => void),
     onSchedulerMissed: (callback: (missed: unknown[]) => void) =>
       rpc.on('scheduler:missed', callback as (p: unknown) => void),
     completeConnectorInbox: (params: {
       id: number
+      leaseToken: string
       disposition: 'processed' | 'retry' | 'defer'
       error?: string
     }) => rpc.invoke('connector:inboxComplete', params),
+    renewConnectorInbox: (params: { id: number; leaseToken: string }) =>
+      rpc.invoke('connector:inboxRenew', params),
 
     // ── Window Controls (no-op in web) ──
     windowMinimize: () => {},

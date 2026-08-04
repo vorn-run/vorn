@@ -13,6 +13,7 @@ import {
   CreateTaskFromItemConfig,
   CallConnectorActionConfig,
   TaskConfig,
+  ConnectorItemContext,
   getProjectRemoteHostId
 } from '../../shared/types'
 import { resolveContextField, resolveTemplateVars, StepOutputs } from './template-vars'
@@ -49,6 +50,79 @@ interface ActiveRun {
 }
 
 const activeRuns = new Map<string, ActiveRun>()
+const connectorLeaseHeartbeats = new Map<string, ReturnType<typeof setInterval>>()
+const restoredConnectorMonitors = new Map<string, ReturnType<typeof setInterval>>()
+const terminalConnectorDecisions = new Set<string>()
+const CONNECTOR_LEASE_RENEW_INTERVAL_MS = 60_000
+const RESTORED_CONNECTOR_POLL_INTERVAL_MS = 5_000
+
+function startConnectorLeaseHeartbeat(execution: WorkflowExecution): void {
+  const inboxId = execution.connectorInboxId
+  const leaseToken = execution.connectorInboxLeaseToken
+  if (inboxId === undefined || !leaseToken || connectorLeaseHeartbeats.has(execution.runId)) {
+    return
+  }
+  const timer = setInterval(() => {
+    void window.api
+      .renewConnectorInbox({
+        id: inboxId,
+        leaseToken
+      })
+      .then((renewed) => {
+        if (!renewed) stopConnectorLeaseHeartbeat(execution.runId)
+      })
+      .catch((err) => console.warn('[connector] failed to renew inbox lease:', err))
+  }, CONNECTOR_LEASE_RENEW_INTERVAL_MS)
+  connectorLeaseHeartbeats.set(execution.runId, timer)
+}
+
+function stopConnectorLeaseHeartbeat(runId: string): void {
+  const timer = connectorLeaseHeartbeats.get(runId)
+  if (timer) clearInterval(timer)
+  connectorLeaseHeartbeats.delete(runId)
+}
+
+function stopRestoredConnectorMonitor(runId: string): void {
+  const timer = restoredConnectorMonitors.get(runId)
+  if (timer) clearInterval(timer)
+  restoredConnectorMonitors.delete(runId)
+}
+
+function monitorRestoredConnectorExecution(execution: WorkflowExecution): void {
+  if (
+    execution.connectorInboxId === undefined ||
+    !execution.connectorInboxLeaseToken ||
+    restoredConnectorMonitors.has(execution.runId)
+  ) {
+    return
+  }
+  let reconciling = false
+  const timer = setInterval(() => {
+    if (reconciling) return
+    reconciling = true
+    void reconcileRunningExecutions([execution]).finally(() => {
+      reconciling = false
+    })
+  }, RESTORED_CONNECTOR_POLL_INTERVAL_MS)
+  restoredConnectorMonitors.set(execution.runId, timer)
+}
+
+async function acknowledgeReconciledConnectorExecution(
+  execution: WorkflowExecution
+): Promise<void> {
+  if (execution.connectorInboxId === undefined || !execution.connectorInboxLeaseToken) return
+  await window.api.completeConnectorInbox({
+    id: execution.connectorInboxId,
+    leaseToken: execution.connectorInboxLeaseToken,
+    disposition:
+      execution.connectorInboxDisposition ??
+      (execution.status === 'success' ? 'processed' : 'retry'),
+    ...(execution.status !== 'success' &&
+      execution.connectorInboxDisposition !== 'processed' && {
+        error: `Workflow recovered with status ${execution.status}`
+      })
+  })
+}
 
 /** Default ceiling for a headless step that never reports an exit. */
 export const DEFAULT_STEP_TIMEOUT_MINUTES = 60
@@ -118,7 +192,13 @@ export async function reconcileRunningExecutions(
   executions: Iterable<WorkflowExecution>
 ): Promise<void> {
   for (const execution of executions) {
-    if (execution.completedAt && execution.status !== 'running') continue
+    if (execution.completedAt && execution.status !== 'running') {
+      stopConnectorLeaseHeartbeat(execution.runId)
+      stopRestoredConnectorMonitor(execution.runId)
+      await acknowledgeReconciledConnectorExecution(execution)
+      continue
+    }
+    startConnectorLeaseHeartbeat(execution)
 
     let dirty = false
     let anyStillRunning = false
@@ -151,6 +231,7 @@ export async function reconcileRunningExecutions(
         ns.error = 'Run abandoned (no session id recorded)'
         ns.completedAt = new Date().toISOString()
         dirty = true
+        anyResolvedHere = true
       } else if (probe.kind === 'exited') {
         const meta = (probe.exitEvent.metadata as { exitCode?: number } | undefined) ?? {}
         const exitCode = typeof meta.exitCode === 'number' ? meta.exitCode : 0
@@ -187,9 +268,30 @@ export async function reconcileRunningExecutions(
       dirty = true
     }
 
+    const hasWaitingGate = execution.nodeStates.some((ns) => ns.status === 'waiting')
+    if (runningNodes.length === 0 && !hasWaitingGate && execution.status === 'running') {
+      for (const ns of execution.nodeStates) {
+        if (ns.status === 'pending') {
+          ns.status = 'error'
+          ns.completedAt = new Date().toISOString()
+          ns.error = 'Renderer reload abandoned this run; re-run to continue'
+        }
+      }
+      execution.status = 'error'
+      execution.completedAt = new Date().toISOString()
+      dirty = true
+    }
+
     if (dirty) {
       useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
       await window.api.saveWorkflowRun(execution)
+    }
+    if (execution.status !== 'running') {
+      stopConnectorLeaseHeartbeat(execution.runId)
+      stopRestoredConnectorMonitor(execution.runId)
+      await acknowledgeReconciledConnectorExecution(execution)
+    } else if (anyStillRunning) {
+      monitorRestoredConnectorExecution(execution)
     }
   }
 }
@@ -205,6 +307,7 @@ export function rescheduleWaitingGateTimers(
 ): void {
   const now = Date.now()
   for (const execution of executions) {
+    if (execution.status === 'running') startConnectorLeaseHeartbeat(execution)
     const workflow = workflows.find((w) => w.id === execution.workflowId)
     if (!workflow) continue
     for (const ns of execution.nodeStates) {
@@ -1129,7 +1232,9 @@ export async function executeWorkflow(
       status: n.type === 'trigger' ? 'success' : 'pending'
     })),
     triggerTaskId: context?.task?.id,
+    connectorItem: context?.connectorItem,
     connectorInboxId: context?.connectorItem?.inboxId,
+    connectorInboxLeaseToken: context?.connectorItem?.inboxLeaseToken,
     dedupeParams,
     inputs: context?.inputs
   }
@@ -1207,6 +1312,9 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
   }
   execution.status = 'cancelled'
   execution.completedAt = now
+  execution.connectorInboxDisposition = 'processed'
+  stopConnectorLeaseHeartbeat(runId)
+  stopRestoredConnectorMonitor(runId)
   persistExecution(execution)
 
   // Release immediately rather than at the dedupe window's expiry, so stopping
@@ -1227,10 +1335,11 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
       status: 'cancelled',
       sessionsLaunched: sessionIds.size
     }),
-    ...(execution.connectorInboxId !== undefined
+    ...(execution.connectorInboxId !== undefined && execution.connectorInboxLeaseToken
       ? [
           window.api.completeConnectorInbox({
             id: execution.connectorInboxId,
+            leaseToken: execution.connectorInboxLeaseToken,
             // Stop is an explicit user decision, not a transient failure that
             // should relaunch the agents after backoff.
             disposition: 'processed',
@@ -1268,6 +1377,7 @@ async function runExecution(
     execution
   }
   activeRuns.set(execution.runId, active)
+  startConnectorLeaseHeartbeat(execution)
 
   const nodeMap = new Map(workflow.nodes.map((n) => [n.id, n]))
   const { successors: successorsMap, predecessors: predecessorsMap } = buildGraph(workflow.edges)
@@ -1454,7 +1564,15 @@ async function runExecution(
     }
   }
 
+  if (execution.connectorInboxId !== undefined) {
+    execution.connectorInboxDisposition =
+      execution.status === 'success' || terminalConnectorDecisions.has(execution.runId)
+        ? 'processed'
+        : 'retry'
+  }
   persistExecution(execution)
+  stopConnectorLeaseHeartbeat(execution.runId)
+  stopRestoredConnectorMonitor(execution.runId)
 
   if (workflow.autoCleanupWorktrees) {
     // Skip 'inherited' worktrees: a contextual workflow reused the parent
@@ -1501,18 +1619,21 @@ async function runExecution(
       sessionsLaunched: actionNodeCount,
       source: options?.source
     }),
-    ...(execution.connectorInboxId !== undefined
+    ...(execution.connectorInboxId !== undefined && execution.connectorInboxLeaseToken
       ? [
           window.api.completeConnectorInbox({
             id: execution.connectorInboxId,
-            disposition: execution.status === 'success' ? 'processed' : 'retry',
-            ...(execution.status !== 'success' && {
-              error: `Workflow finished with status ${execution.status}`
-            })
+            leaseToken: execution.connectorInboxLeaseToken,
+            disposition: execution.connectorInboxDisposition ?? 'retry',
+            ...(execution.status !== 'success' &&
+              !terminalConnectorDecisions.has(execution.runId) && {
+                error: `Workflow finished with status ${execution.status}`
+              })
           })
         ]
       : [])
   ])
+  terminalConnectorDecisions.delete(execution.runId)
 
   if (Notification.permission === 'granted') {
     new Notification('Vorn', {
@@ -1523,18 +1644,34 @@ async function runExecution(
   return execution
 }
 
-/**
- * Only `triggerTaskId` is persisted — trigger.fromStatus/toStatus aren't,
- * so `{{trigger.fromStatus}}` template vars in post-gate nodes are empty on resume.
- */
+/** Rebuild persisted trigger context for steps after an approval gate. */
 function rebuildContextForResume(
   execution: WorkflowExecution
 ): WorkflowExecutionContext | undefined {
-  if (!execution.triggerTaskId) return undefined
-  const task = (useAppStore.getState().config?.tasks || []).find(
-    (t) => t.id === execution.triggerTaskId
-  )
-  return task ? { task } : undefined
+  const task = execution.triggerTaskId
+    ? (useAppStore.getState().config?.tasks || []).find((t) => t.id === execution.triggerTaskId)
+    : undefined
+  if (!task && !execution.connectorItem && !execution.inputs) return undefined
+  return { task, connectorItem: execution.connectorItem, inputs: execution.inputs }
+}
+
+export async function adoptConnectorInboxLease(
+  execution: WorkflowExecution,
+  connectorItem: ConnectorItemContext
+): Promise<void> {
+  if (
+    connectorItem.inboxId === undefined ||
+    !connectorItem.inboxLeaseToken ||
+    execution.connectorInboxId !== connectorItem.inboxId
+  ) {
+    return
+  }
+  stopConnectorLeaseHeartbeat(execution.runId)
+  execution.connectorItem = connectorItem
+  execution.connectorInboxLeaseToken = connectorItem.inboxLeaseToken
+  useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
+  await window.api.saveWorkflowRun(execution)
+  startConnectorLeaseHeartbeat(execution)
 }
 
 function resolveWaitingGate(
@@ -1597,6 +1734,10 @@ export async function rejectWorkflowGate(
   const resolved = resolveWaitingGate(execution, nodeId, 'reject')
   if (!resolved) return execution
   const { workflow } = resolved
+  if (reason === 'Rejected by user') {
+    terminalConnectorDecisions.add(execution.runId)
+    execution.connectorInboxDisposition = 'processed'
+  }
 
   const now = new Date().toISOString()
   updateNodeState(execution, nodeId, {

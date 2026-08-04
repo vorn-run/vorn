@@ -19,6 +19,7 @@ const WorkflowsLandingView = lazy(() =>
   }))
 )
 import {
+  adoptConnectorInboxLease,
   executeWorkflow as runWorkflow,
   rescheduleWaitingGateTimers,
   reconcileRunningExecutions
@@ -292,16 +293,31 @@ export function App() {
 
     // Scheduler: auto-execute workflows when triggered
     const removeSchedulerListener = window.api.onSchedulerExecute(
-      async ({ workflowId, connectorItem, connectorInboxId, inputs }) => {
+      async ({
+        workflowId,
+        connectorItem,
+        connectorInboxId,
+        connectorInboxLeaseToken,
+        existingExecution,
+        inputs
+      }) => {
         const state = useAppStore.getState()
         const workflow = state.config?.workflows?.find((w) => w.id === workflowId)
         if (!workflow) {
-          if (connectorInboxId !== undefined) {
+          if (connectorInboxId !== undefined && connectorInboxLeaseToken) {
             await window.api.completeConnectorInbox({
               id: connectorInboxId,
+              leaseToken: connectorInboxLeaseToken,
               disposition: 'defer'
             })
           }
+          return
+        }
+
+        if (existingExecution && connectorItem) {
+          await adoptConnectorInboxLease(existingExecution, connectorItem)
+          rescheduleWaitingGateTimers([existingExecution], [workflow])
+          await reconcileRunningExecutions([existingExecution])
           return
         }
 
@@ -311,11 +327,22 @@ export function App() {
           // A different run may be parked on an approval gate. It did not
           // accept this event, so release the row for a short retry instead of
           // holding its full delivery lease.
-          if (connectorInboxId !== undefined && execution.connectorInboxId !== connectorInboxId) {
+          if (
+            connectorInboxId !== undefined &&
+            connectorInboxLeaseToken &&
+            execution.connectorInboxId !== connectorInboxId
+          ) {
             await window.api.completeConnectorInbox({
               id: connectorInboxId,
+              leaseToken: connectorInboxLeaseToken,
               disposition: 'defer'
             })
+          } else if (
+            connectorItem &&
+            connectorInboxLeaseToken &&
+            execution.connectorInboxLeaseToken !== connectorInboxLeaseToken
+          ) {
+            await adoptConnectorInboxLease(execution, connectorItem)
           }
         } catch (err) {
           // Another renderer may have won the workflow claim. It will

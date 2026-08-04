@@ -13,7 +13,6 @@ import type {
   RecentSession,
   PermissionRequestInfo,
   WidgetAgentInfo,
-  WorkflowDefinition,
   SSHKey,
   SSHKeyMeta,
   SessionEvent,
@@ -286,10 +285,15 @@ export interface RequestMethods {
   'connector:inboxComplete': {
     params: {
       id: number
+      leaseToken: string
       disposition: 'processed' | 'retry' | 'defer'
       error?: string
     }
     result: void
+  }
+  'connector:inboxRenew': {
+    params: { id: number; leaseToken: string }
+    result: boolean
   }
   'connection:getSourceLink': {
     params: string
@@ -333,12 +337,15 @@ export interface ServerNotifications {
   }
   'scheduler:execute': {
     workflowId: string
-    workflow: WorkflowDefinition
+    inputs?: Record<string, unknown>
     /** Populated when the scheduler fan-outs a connector-poll result. One
      *  scheduler:execute is emitted per new item, each carrying its own item
      *  context. Consumed by createTaskFromItem nodes (and any downstream
      *  nodes that reference context.connectorItem). */
     connectorItem?: ConnectorItemContext
+    connectorInboxId?: number
+    connectorInboxLeaseToken?: string
+    existingExecution?: WorkflowExecution
   }
   'scheduler:missed': Array<{
     workflowId: string
