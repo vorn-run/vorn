@@ -104,14 +104,19 @@ export function WorkflowInputsEditor({ inputs, onChange }: Props) {
                 <SelectPicker
                   value={input.type}
                   options={INPUT_TYPES}
-                  onChange={(v) =>
+                  onChange={(v) => {
+                    const type = v as WorkflowInputType
+                    // Options only mean something for a select, and the
+                    // default field is hidden for select and toggle; carrying
+                    // either across a type change leaves config the editor
+                    // can no longer show but the run dialog would still seed.
+                    const keepsDefault = type !== 'boolean' && type !== 'select'
                     update(index, {
-                      type: v as WorkflowInputType,
-                      // Options only mean something for a select; carrying
-                      // them across a type change leaves dead config behind.
-                      options: v === 'select' ? (input.options ?? []) : undefined
+                      type,
+                      options: type === 'select' ? (input.options ?? []) : undefined,
+                      defaultValue: keepsDefault ? input.defaultValue : undefined
                     })
-                  }
+                  }}
                   variant="form"
                 />
               </div>

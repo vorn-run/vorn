@@ -6,26 +6,21 @@ import type { WorkflowInputDef } from '../../shared/types'
  */
 
 /**
- * Starting value for one declared input. `defaultValue` wins when present;
- * otherwise the empty value for the field's type — booleans need `false`
- * rather than `''` so a toggle renders unchecked instead of indeterminate.
- */
-/**
- * Starting value for one declared input. `defaultValue` wins when present;
- * otherwise the empty value for the field's type — booleans need `false`
- * rather than `''` so a toggle renders unchecked instead of indeterminate.
+ * Starting value for one declared input: the authored default where it makes
+ * sense, otherwise the empty value for the field's type.
  *
- * Defaults are authored as text, so a number field's default is parsed here.
- * Without that, submitting an untouched field persists `'42'` while touching
- * it first persists `42`, and the two dedupe as different runs.
+ * Type is checked before `defaultValue` because a default left behind by an
+ * earlier type must not leak through. A toggle seeds `false` so it renders
+ * unchecked rather than indeterminate, and a number's default is parsed —
+ * defaults are authored as text, and left as a string an untouched field
+ * would submit `'42'` where a touched one submits `42`, deduping as two runs.
  */
 function defaultInputValue(def: WorkflowInputDef): unknown {
+  if (def.type === 'boolean') return def.defaultValue === 'true'
   if (def.type === 'number') {
     return def.defaultValue !== undefined ? parseNumberInput(def.defaultValue) : ''
   }
-  if (def.defaultValue !== undefined) return def.defaultValue
-  if (def.type === 'boolean') return false
-  return ''
+  return def.defaultValue ?? ''
 }
 
 /**

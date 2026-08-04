@@ -22,6 +22,20 @@ describe('initialInputValues', () => {
     expect(initialInputValues([def({ type: 'boolean' })])).toEqual({ k: false })
   })
 
+  it('seeds a toggle from a declared default', () => {
+    expect(initialInputValues([def({ type: 'boolean', defaultValue: 'true' })])).toEqual({
+      k: true
+    })
+  })
+
+  it('never seeds a toggle with a stale default left by an earlier type', () => {
+    // Switching an input to boolean hides the default field, so a leftover
+    // string must not reach the run as a non-boolean value.
+    expect(initialInputValues([def({ type: 'boolean', defaultValue: 'hello' })])).toEqual({
+      k: false
+    })
+  })
+
   it('seeds everything else as empty string', () => {
     expect(initialInputValues([def({ type: 'number' })])).toEqual({ k: '' })
   })

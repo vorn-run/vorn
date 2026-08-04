@@ -117,6 +117,27 @@ describe('WorkflowInputsEditor', () => {
     ])
   })
 
+  it('drops a stale default when switching to a type that hides the field', () => {
+    // boolean and select hide the default field, so a leftover value would be
+    // invisible in the editor yet still seed the run dialog.
+    for (const type of ['boolean', 'select']) {
+      const { getByTestId, onChange, unmount } = setup([
+        { key: 'pr', label: 'PR', type: 'text', defaultValue: 'stale' }
+      ])
+      fireEvent.change(getByTestId('type-picker'), { target: { value: type } })
+      expect(onChange.mock.calls.at(-1)?.[0][0].defaultValue).toBeUndefined()
+      unmount()
+    }
+  })
+
+  it('keeps the default when switching between types that show the field', () => {
+    const { getByTestId, onChange } = setup([
+      { key: 'pr', label: 'PR', type: 'text', defaultValue: '42' }
+    ])
+    fireEvent.change(getByTestId('type-picker'), { target: { value: 'number' } })
+    expect(onChange.mock.calls.at(-1)?.[0][0].defaultValue).toBe('42')
+  })
+
   it('parses comma-separated choices, ignoring blanks and padding', () => {
     const { getByLabelText, onChange } = setup([{ key: 'e', label: 'E', type: 'select' }])
     fireEvent.change(getByLabelText('Input choices'), { target: { value: 'dev, , prod ,' } })
