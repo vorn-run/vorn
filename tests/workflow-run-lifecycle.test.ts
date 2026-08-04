@@ -158,6 +158,7 @@ beforeEach(() => {
     killHeadlessSession,
     saveWorkflowRun: vi.fn(() => Promise.resolve()),
     reportWorkflowComplete: vi.fn(() => Promise.resolve()),
+    completeConnectorInbox: vi.fn(() => Promise.resolve()),
     runWorkflowManual: vi.fn(() => Promise.resolve()),
     listSessionEventsBySession: vi.fn(() => Promise.resolve([])),
     getWorktreeActiveSessions: vi.fn(() => Promise.resolve({ count: 0 })),
@@ -243,6 +244,30 @@ describe('headless step completion', () => {
 })
 
 describe('run concurrency', () => {
+  it('acknowledges a durable connector event only after its workflow succeeds', async () => {
+    const wf = makeWorkflow()
+    const run = executeWorkflow(wf, {
+      connectorItem: {
+        inboxId: 73,
+        connectionId: 'conn-1',
+        connectorId: 'github',
+        externalId: 'issue-7',
+        title: 'A',
+        raw: {}
+      }
+    })
+    const sessionId = await nextSession()
+
+    expect(window.api.completeConnectorInbox).not.toHaveBeenCalled()
+    emitExit(sessionId, 0)
+    await vi.runAllTimersAsync()
+    expect((await run).status).toBe('success')
+    expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
+      id: 73,
+      disposition: 'processed'
+    })
+  })
+
   it('runs the same workflow in parallel for different trigger parameters', async () => {
     const wf = makeWorkflow()
     const ids: string[] = []
@@ -387,7 +412,16 @@ describe('stopping a run', () => {
   it('kills the run’s sessions and closes it as cancelled', async () => {
     const wf = makeWorkflow()
     mockState.config.workflows = [wf]
-    const runPromise = executeWorkflow(wf)
+    const runPromise = executeWorkflow(wf, {
+      connectorItem: {
+        inboxId: 74,
+        connectionId: 'conn-1',
+        connectorId: 'github',
+        externalId: 'issue-8',
+        title: 'B',
+        raw: {}
+      }
+    })
 
     const sessionId = await nextSession()
     await vi.advanceTimersByTimeAsync(0)
@@ -399,6 +433,11 @@ describe('stopping a run', () => {
     expect(killHeadlessSession).toHaveBeenCalledWith(sessionId)
     expect(execution.status).toBe('cancelled')
     expect(execution.nodeStates.find((n) => n.nodeId === 'agent')?.error).toBe('Stopped by user')
+    expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
+      id: 74,
+      disposition: 'processed',
+      error: 'Workflow stopped by user'
+    })
   })
 
   it('frees the trigger so the workflow can be run again right away', async () => {

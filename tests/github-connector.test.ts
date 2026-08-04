@@ -172,6 +172,28 @@ describe('github connector — listItems()', () => {
     const items = await gh.listItems!({ owner: 'owner', repo: 'repo' })
     expect(items.map((i) => i.title)).toEqual(['Real issue'])
   })
+
+  it('exposes resumable pages for complete reconciliation', async () => {
+    const raw = Array.from({ length: 100 }, (_, index) => ({
+      number: index + 1,
+      title: `Issue ${index + 1}`,
+      body: '',
+      state: 'open',
+      html_url: '',
+      updated_at: '2026-08-04T00:00:00Z',
+      created_at: '2026-08-04T00:00:00Z',
+      labels: [],
+      assignee: null
+    }))
+    setExecFileResponse(JSON.stringify(raw))
+    const gh = await importGithub()
+    const page = await gh.listItemsPage!({ owner: 'o', repo: 'r' }, '2')
+    expect(page.items).toHaveLength(100)
+    expect(page).toMatchObject({ hasMore: true, nextCursor: '3' })
+    const endpoint = execFileMock.mock.calls[0][1][1] as string
+    expect(endpoint).toContain('per_page=100')
+    expect(endpoint).toContain('page=2')
+  })
 })
 
 describe('github connector — getItem()', () => {
@@ -220,64 +242,85 @@ describe('github connector — poll()', () => {
     expect(result.events).toEqual([])
   })
 
-  it('issueCreated: filters to new items and advances cursor to now when under page cap', async () => {
+  it('issueCreated: includes items closed while offline and advances when caught up', async () => {
     setExecFileResponse(
-      JSON.stringify([
-        {
-          number: 1,
-          title: 'New',
-          body: 'b',
-          state: 'open',
-          html_url: '',
-          updated_at: '2026-04-24T10:05:00Z',
-          created_at: '2026-04-24T10:05:00Z',
-          labels: [],
-          assignee: null
-        }
-      ])
+      JSON.stringify({
+        total_count: 1,
+        items: [
+          {
+            number: 1,
+            title: 'New, then closed',
+            body: 'b',
+            state: 'closed',
+            html_url: '',
+            updated_at: '2026-04-24T10:06:00Z',
+            created_at: '2026-04-24T10:05:00Z',
+            labels: [],
+            assignee: null
+          }
+        ]
+      })
     )
     const gh = await importGithub()
     const result = await gh.poll!('issueCreated', { owner: 'o', repo: 'r' }, '2026-04-24T10:00:00Z')
     expect(result.events).toHaveLength(1)
     expect(result.events[0].id).toBe('1')
-    // No page cap → advance cursor to now (any ISO timestamp).
+    expect(result.events[0].data.status).toBe('closed')
+    expect(result.hasMore).toBe(false)
     expect(typeof result.nextCursor).toBe('string')
     expect(result.nextCursor).not.toBe('2026-04-24T10:05:00Z')
+    const endpoint = execFileMock.mock.calls[0][1][1] as string
+    expect(endpoint).toContain('search/issues?')
+    expect(decodeURIComponent(endpoint)).toContain('is:issue')
+    expect(decodeURIComponent(endpoint)).toContain('created:>2026-04-24T10:00:00Z')
   })
 
-  it('issueCreated: advances cursor only to the oldest seen item when page cap fills', async () => {
-    // Construct 30 items, descending by created_at. Newest at index 0, oldest at index 29.
-    const items = Array.from({ length: 30 }, (_, i) => ({
-      number: 30 - i,
-      title: `issue ${30 - i}`,
+  it('issueCreated: returns a resumable next page instead of skipping a backlog', async () => {
+    const items = Array.from({ length: 100 }, (_, i) => ({
+      number: i + 1,
+      title: `issue ${i + 1}`,
       body: '',
       state: 'open',
       html_url: '',
       updated_at: '',
-      created_at: `2026-04-24T10:${String(30 - i).padStart(2, '0')}:00Z`,
+      created_at: `2026-04-24T10:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(
+        i % 60
+      ).padStart(2, '0')}Z`,
       labels: [],
       assignee: null
     }))
-    setExecFileResponse(JSON.stringify(items))
+    setExecFileResponse(JSON.stringify({ total_count: 250, items }))
 
     const gh = await importGithub()
     const result = await gh.poll!('issueCreated', { owner: 'o', repo: 'r' }, '2026-04-24T09:59:00Z')
-    expect(result.events).toHaveLength(30)
-    // Oldest of the processed items is the last in descending order.
-    expect(result.nextCursor).toBe('2026-04-24T10:01:00Z')
+    expect(result.events).toHaveLength(100)
+    expect(result.hasMore).toBe(true)
+    expect(JSON.parse(result.nextCursor!)).toEqual({
+      since: '2026-04-24T09:59:00Z',
+      page: 2
+    })
   })
 
   it('prOpened: maps PRs into trigger events', async () => {
     setExecFileResponse(
-      JSON.stringify([
-        {
-          number: 7,
-          title: 'Cool PR',
-          html_url: 'https://github.com/o/r/pull/7',
-          created_at: '2026-04-24T11:00:00Z',
-          user: { login: 'dev' }
-        }
-      ])
+      JSON.stringify({
+        total_count: 1,
+        items: [
+          {
+            number: 7,
+            title: 'Cool PR',
+            body: 'description',
+            state: 'merged',
+            html_url: 'https://github.com/o/r/pull/7',
+            updated_at: '2026-04-24T12:00:00Z',
+            created_at: '2026-04-24T11:00:00Z',
+            labels: [],
+            assignee: null,
+            user: { login: 'dev' },
+            pull_request: {}
+          }
+        ]
+      })
     )
     const gh = await importGithub()
     // Pin the `since` cursor so the test stays deterministic regardless of
@@ -289,8 +332,30 @@ describe('github connector — poll()', () => {
     expect(result.events[0].data).toMatchObject({
       number: 7,
       title: 'Cool PR',
+      state: 'merged',
       author: 'dev'
     })
+  })
+
+  it('resumes the exact search page encoded in the cursor', async () => {
+    setExecFileResponse(JSON.stringify({ total_count: 150, items: [] }))
+    const gh = await importGithub()
+    await gh.poll!(
+      'issueCreated',
+      { owner: 'o', repo: 'r' },
+      JSON.stringify({ since: '2026-04-24T10:00:00Z', page: 2 })
+    )
+    const endpoint = execFileMock.mock.calls[0][1][1] as string
+    expect(endpoint).toContain('page=2')
+  })
+
+  it('normalizes cursor timestamps to GitHub search precision', async () => {
+    setExecFileResponse(JSON.stringify({ total_count: 0, items: [] }))
+    const gh = await importGithub()
+    await gh.poll!('issueCreated', { owner: 'o', repo: 'r' }, '2026-04-24T10:00:00.987Z')
+    const endpoint = decodeURIComponent(execFileMock.mock.calls[0][1][1] as string)
+    expect(endpoint).toContain('created:>2026-04-24T10:00:00Z')
+    expect(endpoint).not.toContain('.987Z')
   })
 
   it('unknown trigger type returns empty', async () => {

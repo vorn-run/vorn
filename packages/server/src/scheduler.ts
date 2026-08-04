@@ -11,12 +11,27 @@ import {
   IPC
 } from '@vornrun/shared/types'
 import { configManager } from './config-manager'
-import { dbGetSourceConnection, dbUpdateSourceConnection } from './database'
+import {
+  dbClaimConnectorInbox,
+  dbCompleteConnectorInbox,
+  dbDeferConnectorInbox,
+  dbGetConnectorPollCursor,
+  dbGetSourceConnection,
+  dbRecordConnectorPollError,
+  dbRecordConnectorPollPage,
+  dbReleaseConnectorInboxLeases,
+  dbRetryConnectorInbox
+} from './database'
 import { connectorRegistry, applyDecryptedCreds } from './connectors'
 import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, pollMcpConnection } from './connectors/mcp'
+import { clientRegistry } from './broadcast'
 import log from './logger'
 
 const LOCK_DIR = path.join(os.homedir(), '.vorn')
+const INBOX_LEASE_MS = 24 * 60 * 60_000
+const INBOX_DRAIN_INTERVAL_MS = 30_000
+const INBOX_BATCH_SIZE = 50
+const MAX_POLL_PAGES_PER_TICK = 20
 
 /**
  * Try to acquire an execution lock for a workflow run.
@@ -68,6 +83,56 @@ function getTriggerConfig(wf: WorkflowDefinition): TriggerConfig | null {
 class Scheduler extends EventEmitter {
   private cronJobs = new Map<string, ScheduledTask>()
   private timeouts = new Map<string, NodeJS.Timeout>()
+  private inboxTimer: NodeJS.Timeout | null = null
+
+  startInboxWorker(): void {
+    if (this.inboxTimer) return
+    dbReleaseConnectorInboxLeases(new Date().toISOString())
+    this.deliverPendingConnectorInbox()
+    this.inboxTimer = setInterval(
+      () => this.deliverPendingConnectorInbox(),
+      INBOX_DRAIN_INTERVAL_MS
+    )
+  }
+
+  completeConnectorInbox(
+    id: number,
+    disposition: 'processed' | 'retry' | 'defer',
+    error?: string
+  ): void {
+    const now = new Date().toISOString()
+    if (disposition === 'processed') {
+      dbCompleteConnectorInbox(id, now)
+    } else if (disposition === 'retry') {
+      dbRetryConnectorInbox({
+        id,
+        error: error || 'Connector workflow failed',
+        now
+      })
+    } else {
+      dbDeferConnectorInbox(id, new Date(Date.now() + 30_000).toISOString())
+    }
+    this.deliverPendingConnectorInbox()
+  }
+
+  deliverPendingConnectorInbox(): void {
+    // Claiming without a receiver would hide the row behind its lease until it
+    // expires. Leave it pending and drain immediately when a client connects.
+    if (clientRegistry.size === 0) return
+    const now = Date.now()
+    const claimed = dbClaimConnectorInbox({
+      now: new Date(now).toISOString(),
+      leaseUntil: new Date(now + INBOX_LEASE_MS).toISOString(),
+      limit: INBOX_BATCH_SIZE
+    })
+    for (const item of claimed) {
+      this.emit('client-message', IPC.SCHEDULER_EXECUTE, {
+        workflowId: item.workflowId,
+        connectorItem: { ...item.connectorItem, inboxId: item.id },
+        connectorInboxId: item.id
+      })
+    }
+  }
 
   syncSchedules(workflows: WorkflowDefinition[]): void {
     log.info(
@@ -191,12 +256,14 @@ class Scheduler extends EventEmitter {
   /**
    * Poll a connector and fan out one workflow execution per new item.
    *
-   * - Cursor lives on the connection row; advanced after a successful poll.
-   * - Per-item workflow failures do NOT stall the pipe — the cursor has
-   *   already advanced past them; the failure shows up in run history and in
-   *   the connection's lastSyncError field.
-   * - Connector-level failures (poll() throws) record lastSyncError, emit one
-   *   failed execution so run history surfaces it, and do not advance cursor.
+   * - Cursor lives per workflow, so subscriptions sharing a connection cannot
+   *   skip each other's events.
+   * - Each bounded remote page and its cursor are committed atomically to the
+   *   durable inbox before anything is broadcast.
+   * - Workflow failures release their lease with backoff; process crashes
+   *   leave the row reclaimable.
+   * - Connector-level failures record lastSyncError and do not advance beyond
+   *   the last page that was safely persisted.
    */
   private async dispatchConnectorPoll(
     workflowId: string,
@@ -228,56 +295,65 @@ class Scheduler extends EventEmitter {
       return
     }
 
-    const cursor = conn.syncCursor
+    let cursor = dbGetConnectorPollCursor(workflowId) ?? conn.syncCursor
     const now = new Date().toISOString()
-    let result
     try {
-      result = isMcp
-        ? await pollMcpConnection(conn, cursor)
-        : await connector!.poll!(trigger.event, applyDecryptedCreds(conn), cursor)
+      for (let page = 0; page < MAX_POLL_PAGES_PER_TICK; page++) {
+        const result = isMcp
+          ? await pollMcpConnection(conn, cursor)
+          : await connector!.poll!(trigger.event, applyDecryptedCreds(conn), cursor)
+        const nextCursor = result.nextCursor ?? cursor
+        if (result.hasMore && nextCursor === cursor) {
+          throw new Error(
+            `${conn.connectorId}.poll(${trigger.event}) returned hasMore without advancing its cursor`
+          )
+        }
+
+        const events = result.events.map((event) => {
+          const data = event.data as Record<string, unknown>
+          const connectorItem: ConnectorItemContext = {
+            connectionId: conn.id,
+            connectorId: conn.connectorId,
+            externalId: String(data.externalId ?? event.id),
+            externalUrl: typeof data.url === 'string' ? data.url : undefined,
+            title: typeof data.title === 'string' ? data.title : String(data.title ?? ''),
+            body: typeof data.description === 'string' ? data.description : undefined,
+            raw: data
+          }
+          return {
+            eventId: event.id,
+            eventType: event.type,
+            eventTimestamp: event.timestamp,
+            connectorItem
+          }
+        })
+
+        dbRecordConnectorPollPage({
+          workflowId,
+          connectionId: conn.id,
+          connectorId: conn.connectorId,
+          cursor: nextCursor,
+          polledAt: now,
+          events
+        })
+        cursor = nextCursor
+        if (!result.hasMore) break
+      }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
       log.error(
         `[scheduler] connectorPoll: ${conn.connectorId}.poll(${trigger.event}) failed: ${errorMsg}`
       )
-      dbUpdateSourceConnection(conn.id, { lastSyncAt: now, lastSyncError: errorMsg })
-      // Do not emit SCHEDULER_EXECUTE here. An event without a connectorItem
-      // would bounce back through the renderer's connectorPoll guard (which
-      // reroutes context-less runs via workflow:runManual), creating churn.
-      // The failure is already visible via the connection's lastSyncError.
-      return
-    }
-
-    // Advance cursor + clear last error atomically.
-    dbUpdateSourceConnection(conn.id, {
-      lastSyncAt: now,
-      lastSyncError: undefined,
-      syncCursor: result.nextCursor ?? cursor
-    })
-
-    if (result.events.length === 0) {
-      log.info(`[scheduler] connectorPoll: no new items for ${conn.connectorId}:${trigger.event}`)
-      return
-    }
-
-    log.info(
-      `[scheduler] connectorPoll: fanning out ${result.events.length} item(s) for ${conn.connectorId}:${trigger.event}`
-    )
-    for (const event of result.events) {
-      // Event data from the connector is the upstream item payload. The
-      // GitHub connector puts an ExternalItem-shaped object into `data`.
-      const data = event.data as Record<string, unknown>
-      const connectorItem: ConnectorItemContext = {
+      dbRecordConnectorPollError({
+        workflowId,
         connectionId: conn.id,
-        connectorId: conn.connectorId,
-        externalId: String(data.externalId ?? event.id),
-        externalUrl: typeof data.url === 'string' ? data.url : undefined,
-        title: typeof data.title === 'string' ? data.title : String(data.title ?? ''),
-        body: typeof data.description === 'string' ? data.description : undefined,
-        raw: data
-      }
-      this.emit('client-message', IPC.SCHEDULER_EXECUTE, { workflowId, connectorItem })
+        error: errorMsg,
+        polledAt: now
+      })
+      return
     }
+
+    this.deliverPendingConnectorInbox()
   }
 
   checkMissedSchedules(workflows: WorkflowDefinition[]): MissedSchedule[] {
@@ -331,6 +407,8 @@ class Scheduler extends EventEmitter {
     for (const [, timer] of this.timeouts) clearTimeout(timer)
     this.cronJobs.clear()
     this.timeouts.clear()
+    if (this.inboxTimer) clearInterval(this.inboxTimer)
+    this.inboxTimer = null
   }
 }
 

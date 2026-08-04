@@ -1129,6 +1129,7 @@ export async function executeWorkflow(
       status: n.type === 'trigger' ? 'success' : 'pending'
     })),
     triggerTaskId: context?.task?.id,
+    connectorInboxId: context?.connectorItem?.inboxId,
     dedupeParams,
     inputs: context?.inputs
   }
@@ -1225,7 +1226,18 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
       completedAt: now,
       status: 'cancelled',
       sessionsLaunched: sessionIds.size
-    })
+    }),
+    ...(execution.connectorInboxId !== undefined
+      ? [
+          window.api.completeConnectorInbox({
+            id: execution.connectorInboxId,
+            // Stop is an explicit user decision, not a transient failure that
+            // should relaunch the agents after backoff.
+            disposition: 'processed',
+            error: 'Workflow stopped by user'
+          })
+        ]
+      : [])
   ])
   console.log(`[workflow] run ${runId} stopped by user`)
 }
@@ -1480,14 +1492,27 @@ async function runExecution(
   }
 
   // Report completion to main process for schedule log + workflow status update
-  await window.api.reportWorkflowComplete({
-    workflowId: workflow.id,
-    workflowName: workflow.name,
-    completedAt: execution.completedAt!,
-    status: execution.status,
-    sessionsLaunched: actionNodeCount,
-    source: options?.source
-  })
+  await Promise.all([
+    window.api.reportWorkflowComplete({
+      workflowId: workflow.id,
+      workflowName: workflow.name,
+      completedAt: execution.completedAt!,
+      status: execution.status,
+      sessionsLaunched: actionNodeCount,
+      source: options?.source
+    }),
+    ...(execution.connectorInboxId !== undefined
+      ? [
+          window.api.completeConnectorInbox({
+            id: execution.connectorInboxId,
+            disposition: execution.status === 'success' ? 'processed' : 'retry',
+            ...(execution.status !== 'success' && {
+              error: `Workflow finished with status ${execution.status}`
+            })
+          })
+        ]
+      : [])
+  ])
 
   if (Notification.permission === 'granted') {
     new Notification('Vorn', {

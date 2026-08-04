@@ -77,6 +77,19 @@ describe('workflow run persistence', () => {
     expect(runs[0].nodeStates[0].diagnostics).toBe(timeline)
   })
 
+  it('round-trips the connector inbox row across approval-gate resumes', () => {
+    const exec: WorkflowExecution = {
+      workflowId: 'wf-connector',
+      startedAt: '2026-04-20T10:00:00Z',
+      status: 'running',
+      connectorInboxId: 73,
+      nodeStates: [{ nodeId: 'approval', status: 'waiting' }]
+    }
+
+    saveWorkflowRun(exec)
+    expect(listWorkflowRuns('wf-connector')[0].connectorInboxId).toBe(73)
+  })
+
   it('omits fields that were not set', () => {
     const exec: WorkflowExecution = {
       workflowId: 'wf-2',

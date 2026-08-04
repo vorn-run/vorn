@@ -26,7 +26,8 @@ import {
   SessionEvent,
   SessionEventType,
   SourceConnection,
-  TaskSourceLink
+  TaskSourceLink,
+  ConnectorItemContext
 } from '@vornrun/shared/types'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import { DEFAULT_TASK_WORKFLOW_ID, buildDefaultTaskWorkflow } from './default-workflows'
@@ -344,7 +345,8 @@ function createSchema(): void {
       completed_at TEXT,
       status TEXT NOT NULL DEFAULT 'running',
       trigger_task_id TEXT,
-      inputs TEXT
+      inputs TEXT,
+      connector_inbox_id INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS workflow_run_nodes (
@@ -382,6 +384,38 @@ function createSchema(): void {
 
     CREATE INDEX IF NOT EXISTS idx_session_events_session ON session_events(session_id, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(event_type, timestamp DESC);
+
+    CREATE TABLE IF NOT EXISTS connector_poll_state (
+      workflow_id TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
+      connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
+      cursor TEXT,
+      last_polled_at TEXT,
+      last_error TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS connector_inbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+      connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
+      connector_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      event_timestamp TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      available_at TEXT NOT NULL,
+      lease_until TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      processed_at TEXT,
+      UNIQUE (workflow_id, event_type, event_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_connector_inbox_ready
+      ON connector_inbox(status, available_at, lease_until);
+    CREATE INDEX IF NOT EXISTS idx_connector_inbox_connection
+      ON connector_inbox(connection_id, created_at);
   `)
 
   migrateSchema(d)
@@ -652,6 +686,57 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 11 (workflow run inputs)')
   }
+
+  // Version 11 is reserved by the workflow-run inputs change (PR #403).
+  // Keeping connector ingestion at 12 makes either merge order safe; every
+  // migration-added column is also covered by verifySchema.
+  if (version < 12) {
+    d.transaction(() => {
+      const runCols = d.prepare('PRAGMA table_info(workflow_runs)').all() as Array<{
+        name: string
+      }>
+      if (!runCols.some((column) => column.name === 'connector_inbox_id')) {
+        d.exec('ALTER TABLE workflow_runs ADD COLUMN connector_inbox_id INTEGER')
+      }
+      d.exec(`
+        CREATE TABLE IF NOT EXISTS connector_poll_state (
+          workflow_id TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
+          connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
+          cursor TEXT,
+          last_polled_at TEXT,
+          last_error TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS connector_inbox (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+          connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
+          connector_id TEXT NOT NULL,
+          event_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          event_timestamp TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          attempts INTEGER NOT NULL DEFAULT 0,
+          available_at TEXT NOT NULL,
+          lease_until TEXT,
+          last_error TEXT,
+          created_at TEXT NOT NULL,
+          processed_at TEXT,
+          UNIQUE (workflow_id, event_type, event_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_connector_inbox_ready
+          ON connector_inbox(status, available_at, lease_until);
+        CREATE INDEX IF NOT EXISTS idx_connector_inbox_connection
+          ON connector_inbox(connection_id, created_at);
+      `)
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '12')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 12 (durable connector ingestion)')
+  }
 }
 
 /**
@@ -697,7 +782,13 @@ function verifySchema(d: Database.Database): void {
         ddl: 'ALTER TABLE agent_commands ADD COLUMN headless_args TEXT'
       }
     ],
-    workflow_runs: [{ column: 'inputs', ddl: 'ALTER TABLE workflow_runs ADD COLUMN inputs TEXT' }],
+    workflow_runs: [
+      { column: 'inputs', ddl: 'ALTER TABLE workflow_runs ADD COLUMN inputs TEXT' },
+      {
+        column: 'connector_inbox_id',
+        ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_inbox_id INTEGER'
+      }
+    ],
     workflow_run_nodes: [
       { column: 'agent_type', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN agent_type TEXT' },
       {
@@ -1387,6 +1478,240 @@ export function dbUpdateSourceConnection(id: string, updates: Partial<SourceConn
 
 export function dbDeleteSourceConnection(id: string): void {
   getDb().prepare('DELETE FROM source_connections WHERE id = ?').run(id)
+}
+
+// ---------------------------------------------------------------------------
+// Durable connector ingestion
+// ---------------------------------------------------------------------------
+
+export interface ConnectorInboxItem {
+  id: number
+  workflowId: string
+  connectionId: string
+  connectorId: string
+  eventId: string
+  eventType: string
+  eventTimestamp: string
+  connectorItem: ConnectorItemContext
+  attempts: number
+}
+
+interface ConnectorInboxRow {
+  id: number
+  workflow_id: string
+  connection_id: string
+  connector_id: string
+  event_id: string
+  event_type: string
+  event_timestamp: string
+  payload: string
+  attempts: number
+}
+
+function rowToConnectorInboxItem(row: ConnectorInboxRow): ConnectorInboxItem {
+  return {
+    id: row.id,
+    workflowId: row.workflow_id,
+    connectionId: row.connection_id,
+    connectorId: row.connector_id,
+    eventId: row.event_id,
+    eventType: row.event_type,
+    eventTimestamp: row.event_timestamp,
+    connectorItem: JSON.parse(row.payload) as ConnectorItemContext,
+    attempts: row.attempts
+  }
+}
+
+export function dbGetConnectorPollCursor(workflowId: string): string | undefined {
+  const row = getDb()
+    .prepare('SELECT cursor FROM connector_poll_state WHERE workflow_id = ?')
+    .get(workflowId) as { cursor: string | null } | undefined
+  return row?.cursor ?? undefined
+}
+
+/**
+ * Persist one remote page and its checkpoint in a single transaction.
+ * A crash can leave both absent or both present, never a cursor that points
+ * beyond events which were only held in memory.
+ */
+export function dbRecordConnectorPollPage(args: {
+  workflowId: string
+  connectionId: string
+  connectorId: string
+  cursor?: string
+  polledAt: string
+  events: Array<{
+    eventId: string
+    eventType: string
+    eventTimestamp: string
+    connectorItem: ConnectorItemContext
+  }>
+}): number {
+  const d = getDb()
+  return d.transaction(() => {
+    let inserted = 0
+    const insert = d.prepare(`
+      INSERT OR IGNORE INTO connector_inbox (
+        workflow_id, connection_id, connector_id, event_id, event_type,
+        event_timestamp, payload, status, attempts, available_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+    `)
+    for (const event of args.events) {
+      const result = insert.run(
+        args.workflowId,
+        args.connectionId,
+        args.connectorId,
+        event.eventId,
+        event.eventType,
+        event.eventTimestamp,
+        JSON.stringify(event.connectorItem),
+        args.polledAt,
+        args.polledAt
+      )
+      inserted += result.changes
+    }
+
+    d.prepare(
+      `INSERT INTO connector_poll_state (
+         workflow_id, connection_id, cursor, last_polled_at, last_error
+       ) VALUES (?, ?, ?, ?, NULL)
+       ON CONFLICT(workflow_id) DO UPDATE SET
+         connection_id = excluded.connection_id,
+         cursor = excluded.cursor,
+         last_polled_at = excluded.last_polled_at,
+         last_error = NULL`
+    ).run(args.workflowId, args.connectionId, args.cursor ?? null, args.polledAt)
+
+    // Keep the connection-level fields current for the existing settings UI
+    // and as a one-time fallback for workflows created before per-poll state.
+    d.prepare(
+      `UPDATE source_connections
+       SET sync_cursor = ?, last_sync_at = ?, last_sync_error = NULL
+       WHERE id = ?`
+    ).run(args.cursor ?? null, args.polledAt, args.connectionId)
+
+    return inserted
+  })()
+}
+
+export function dbRecordConnectorPollError(args: {
+  workflowId: string
+  connectionId: string
+  error: string
+  polledAt: string
+}): void {
+  const d = getDb()
+  d.transaction(() => {
+    d.prepare(
+      `INSERT INTO connector_poll_state (
+         workflow_id, connection_id, cursor, last_polled_at, last_error
+       ) VALUES (?, ?, NULL, ?, ?)
+       ON CONFLICT(workflow_id) DO UPDATE SET
+         connection_id = excluded.connection_id,
+         last_polled_at = excluded.last_polled_at,
+         last_error = excluded.last_error`
+    ).run(args.workflowId, args.connectionId, args.polledAt, args.error)
+    d.prepare(
+      'UPDATE source_connections SET last_sync_at = ?, last_sync_error = ? WHERE id = ?'
+    ).run(args.polledAt, args.error, args.connectionId)
+  })()
+}
+
+/**
+ * Lease ready inbox rows before broadcasting them. Expired leases are
+ * reclaimable after a renderer/server crash. Retry backoff caps at one hour,
+ * but rows remain pending until they succeed or the user removes their source.
+ */
+export function dbClaimConnectorInbox(args: {
+  now: string
+  leaseUntil: string
+  limit: number
+}): ConnectorInboxItem[] {
+  const d = getDb()
+  return d.transaction(() => {
+    const rows = d
+      .prepare(
+        `SELECT id
+         FROM connector_inbox
+         WHERE (status = 'pending' AND available_at <= ?)
+            OR (status = 'leased' AND lease_until <= ?)
+         ORDER BY created_at, id
+         LIMIT ?`
+      )
+      .all(args.now, args.now, args.limit) as Array<{ id: number }>
+
+    const claim = d.prepare(
+      `UPDATE connector_inbox
+       SET status = 'leased', attempts = attempts + 1, lease_until = ?
+       WHERE id = ?`
+    )
+    const read = d.prepare(
+      `SELECT id, workflow_id, connection_id, connector_id, event_id,
+              event_type, event_timestamp, payload, attempts
+       FROM connector_inbox WHERE id = ?`
+    )
+    return rows.map(({ id }) => {
+      claim.run(args.leaseUntil, id)
+      return rowToConnectorInboxItem(read.get(id) as ConnectorInboxRow)
+    })
+  })()
+}
+
+export function dbCompleteConnectorInbox(id: number, processedAt: string): void {
+  getDb()
+    .prepare(
+      `UPDATE connector_inbox
+       SET status = 'processed', processed_at = ?, lease_until = NULL, last_error = NULL
+       WHERE id = ?`
+    )
+    .run(processedAt, id)
+}
+
+export function dbRetryConnectorInbox(args: { id: number; error: string; now: string }): void {
+  const d = getDb()
+  const row = d.prepare('SELECT attempts FROM connector_inbox WHERE id = ?').get(args.id) as
+    | { attempts: number }
+    | undefined
+  if (!row) return
+  const delayMs = Math.min(60_000 * 2 ** Math.max(0, row.attempts - 1), 60 * 60_000)
+  const availableAt = new Date(Date.parse(args.now) + delayMs).toISOString()
+  d.prepare(
+    `UPDATE connector_inbox
+       SET status = 'pending', available_at = ?, lease_until = NULL, last_error = ?
+       WHERE id = ?`
+  ).run(availableAt, args.error, args.id)
+  d.prepare(
+    `UPDATE source_connections
+     SET last_sync_error = ?
+     WHERE id = (SELECT connection_id FROM connector_inbox WHERE id = ?)`
+  ).run(args.error, args.id)
+}
+
+/** The renderer could not accept this event yet (for example, another run is
+ * parked at an approval gate). This is not a workflow attempt or an error. */
+export function dbDeferConnectorInbox(id: number, availableAt: string): void {
+  getDb()
+    .prepare(
+      `UPDATE connector_inbox
+       SET status = 'pending',
+           attempts = MAX(0, attempts - 1),
+           available_at = ?,
+           lease_until = NULL
+       WHERE id = ?`
+    )
+    .run(availableAt, id)
+}
+
+/** Server restarts invalidate every in-memory workflow owner, so leases from
+ * the previous process must be immediately reclaimable. */
+export function dbReleaseConnectorInboxLeases(now: string): void {
+  getDb()
+    .prepare(
+      `UPDATE connector_inbox
+       SET status = 'pending', available_at = ?, lease_until = NULL
+       WHERE status = 'leased'`
+    )
+    .run(now)
 }
 
 // ---------------------------------------------------------------------------
@@ -2134,8 +2459,10 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
 
   const run = d.transaction(() => {
     d.prepare(
-      `INSERT OR REPLACE INTO workflow_runs (id, workflow_id, started_at, completed_at, status, trigger_task_id, inputs)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT OR REPLACE INTO workflow_runs (
+         id, workflow_id, started_at, completed_at, status, trigger_task_id,
+         inputs, connector_inbox_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       runId,
       execution.workflowId,
@@ -2143,7 +2470,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
       execution.completedAt ?? null,
       execution.status,
       execution.triggerTaskId ?? null,
-      execution.inputs ? JSON.stringify(execution.inputs) : null
+      execution.inputs ? JSON.stringify(execution.inputs) : null,
+      execution.connectorInboxId ?? null
     )
 
     // Delete existing nodes for this run (for upsert behavior)
@@ -2255,6 +2583,7 @@ type RunRow = {
   status: string
   trigger_task_id: string | null
   inputs: string | null
+  connector_inbox_id: number | null
   workflow_name?: string | null
 }
 
@@ -2289,6 +2618,7 @@ function mapRunRows(
       status: r.status as WorkflowExecution['status'],
       ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
       ...(inputs && { inputs }),
+      ...(r.connector_inbox_id != null && { connectorInboxId: r.connector_inbox_id }),
       ...(r.workflow_name != null && { workflowName: r.workflow_name }),
       nodeStates: nodesByRun.get(r.id) ?? []
     }

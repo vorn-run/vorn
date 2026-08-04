@@ -66,6 +66,7 @@ export async function startServer(
 
   app.get('/ws', { websocket: true }, (socket) => {
     handleConnection(socket)
+    scheduler.deliverPendingConnectorInbox()
   })
 
   app.get('/health', async () => ({ status: 'ok' }))
@@ -121,6 +122,7 @@ export async function startServer(
 
   // Register all RPC methods
   registerAllMethods()
+  scheduler.startInboxWorker()
 
   // Server shutdown method (callable from clients)
   registerMethod('server:shutdown', async () => {

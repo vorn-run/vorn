@@ -281,6 +281,16 @@ export interface RequestMethods {
     }
     result: { taskId: string; created: boolean }
   }
+  /** A renderer accepted a durable connector event and finished its workflow.
+   * Failures are retried with bounded exponential backoff. */
+  'connector:inboxComplete': {
+    params: {
+      id: number
+      disposition: 'processed' | 'retry' | 'defer'
+      error?: string
+    }
+    result: void
+  }
   'connection:getSourceLink': {
     params: string
     result: TaskSourceLink | null

@@ -292,13 +292,37 @@ export function App() {
 
     // Scheduler: auto-execute workflows when triggered
     const removeSchedulerListener = window.api.onSchedulerExecute(
-      async ({ workflowId, connectorItem, inputs }) => {
+      async ({ workflowId, connectorItem, connectorInboxId, inputs }) => {
         const state = useAppStore.getState()
         const workflow = state.config?.workflows?.find((w) => w.id === workflowId)
-        if (!workflow) return
+        if (!workflow) {
+          if (connectorInboxId !== undefined) {
+            await window.api.completeConnectorInbox({
+              id: connectorInboxId,
+              disposition: 'defer'
+            })
+          }
+          return
+        }
 
         const context = connectorItem || inputs ? { connectorItem, inputs } : undefined
-        await runWorkflow(workflow, context, { source: 'scheduler' })
+        try {
+          const execution = await runWorkflow(workflow, context, { source: 'scheduler' })
+          // A different run may be parked on an approval gate. It did not
+          // accept this event, so release the row for a short retry instead of
+          // holding its full delivery lease.
+          if (connectorInboxId !== undefined && execution.connectorInboxId !== connectorInboxId) {
+            await window.api.completeConnectorInbox({
+              id: connectorInboxId,
+              disposition: 'defer'
+            })
+          }
+        } catch (err) {
+          // Another renderer may have won the workflow claim. It will
+          // acknowledge the shared inbox row; otherwise the lease expires and
+          // the server retries it.
+          console.warn('[connector] scheduled workflow did not complete:', err)
+        }
       }
     )
 
