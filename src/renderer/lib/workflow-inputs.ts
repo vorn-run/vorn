@@ -49,8 +49,10 @@ export function areInputsValid(defs: WorkflowInputDef[], values: Record<string, 
     // Checked ahead of the `required` shortcut: a non-finite number breaks
     // persistence and dedupe whether or not the field had to be answered.
     if (typeof value === 'number' && !Number.isFinite(value)) return false
-    if (!def.required || def.type === 'boolean') return true
+    if (!def.required) return true
     if (value === undefined || value === null) return false
+    // A required toggle must be present, but false is a real answer.
+    if (def.type === 'boolean') return typeof value === 'boolean'
     return String(value).trim() !== ''
   })
 }

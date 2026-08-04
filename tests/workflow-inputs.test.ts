@@ -89,6 +89,12 @@ describe('areInputsValid', () => {
     expect(areInputsValid([def({ type: 'boolean', required: true })], { k: false })).toBe(true)
   })
 
+  it('rejects a required toggle that is missing or not a boolean', () => {
+    const defs = [def({ type: 'boolean', required: true })]
+    expect(areInputsValid(defs, {})).toBe(false)
+    expect(areInputsValid(defs, { k: 'false' })).toBe(false)
+  })
+
   it('accepts a required number of zero', () => {
     expect(areInputsValid([def({ type: 'number', required: true })], { k: 0 })).toBe(true)
   })
