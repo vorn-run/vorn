@@ -1771,6 +1771,11 @@ export function dbRecordConnectorPollError(args: {
        ) VALUES (?, ?, NULL, ?, ?)
        ON CONFLICT(workflow_id) DO UPDATE SET
          connection_id = excluded.connection_id,
+         cursor = CASE
+           WHEN connector_poll_state.connection_id = excluded.connection_id
+             THEN connector_poll_state.cursor
+           ELSE NULL
+         END,
          last_polled_at = excluded.last_polled_at,
          last_error = excluded.last_error`
     ).run(args.workflowId, args.connectionId, args.polledAt, args.error)
@@ -1803,20 +1808,27 @@ export function dbClaimConnectorInbox(args: {
       )
       .all(args.now, args.now, args.limit) as Array<{ id: number }>
 
+    // Re-check claimability inside the UPDATE so a concurrent claimer cannot
+    // steal a lease it lost the race for and inflate that row's attempts.
     const claim = d.prepare(
       `UPDATE connector_inbox
        SET status = 'leased', attempts = attempts + 1, lease_until = ?, lease_token = ?
-       WHERE id = ?`
+       WHERE id = ?
+         AND ((status = 'pending' AND available_at <= ?)
+           OR (status = 'leased' AND lease_until <= ?))`
     )
     const read = d.prepare(
       `SELECT id, workflow_id, connection_id, connector_id, event_id,
               event_type, event_timestamp, payload, attempts, lease_token
        FROM connector_inbox WHERE id = ?`
     )
-    return rows.map(({ id }) => {
-      claim.run(args.leaseUntil, randomUUID(), id)
-      return rowToConnectorInboxItem(read.get(id) as ConnectorInboxRow)
-    })
+    const claimed: ConnectorInboxItem[] = []
+    for (const { id } of rows) {
+      const result = claim.run(args.leaseUntil, randomUUID(), id, args.now, args.now)
+      if (result.changes !== 1) continue
+      claimed.push(rowToConnectorInboxItem(read.get(id) as ConnectorInboxRow))
+    }
+    return claimed
   })()
 }
 
@@ -2709,8 +2721,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     }
 
     // Keep active and unacknowledged connector runs available for restart
-    // recovery; only terminal history that no longer owns inbox work is safe
-    // to trim.
+    // recovery; terminal history whose inbox work is done — or whose inbox row
+    // is already gone — is safe to trim.
     const count = (
       d
         .prepare('SELECT COUNT(*) as c FROM workflow_runs WHERE workflow_id = ?')
@@ -2724,10 +2736,10 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
             AND status != 'running'
             AND (
               connector_inbox_id IS NULL
-              OR EXISTS (
+              OR NOT EXISTS (
                 SELECT 1 FROM connector_inbox
                 WHERE connector_inbox.id = workflow_runs.connector_inbox_id
-                  AND connector_inbox.status = 'processed'
+                  AND connector_inbox.status != 'processed'
               )
             )
           ORDER BY started_at ASC

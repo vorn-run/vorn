@@ -309,6 +309,39 @@ describe('durable connector inbox', () => {
     expect(dbListSourceConnections()[0].lastSyncError).toBe('rate limited')
   })
 
+  it('drops the old cursor when the first poll on a new connection fails', () => {
+    record('wf-issues', 'cursor-1', ['1'])
+    const secondConnection = { ...connection, id: 'conn-2', name: 'owner/other' }
+    dbInsertSourceConnection(secondConnection)
+
+    dbRecordConnectorPollError({
+      workflowId: 'wf-issues',
+      connectionId: secondConnection.id,
+      error: 'unauthorized',
+      polledAt: '2026-08-04T01:05:00.000Z'
+    })
+
+    expect(dbGetConnectorPollCursor('wf-issues', secondConnection.id)).toBeUndefined()
+  })
+
+  it('leases each ready row at most once per claim window', () => {
+    record('wf-issues', 'cursor-1', ['1'])
+    const first = dbClaimConnectorInbox({
+      now: '2026-08-04T01:00:00.000Z',
+      leaseUntil: '2026-08-04T01:05:00.000Z',
+      limit: 10
+    })
+    const second = dbClaimConnectorInbox({
+      now: '2026-08-04T01:00:00.000Z',
+      leaseUntil: '2026-08-04T01:05:00.000Z',
+      limit: 10
+    })
+
+    expect(first).toHaveLength(1)
+    expect(second).toEqual([])
+    expect(first[0].attempts).toBe(1)
+  })
+
   it('finds the run that already owns an inbox row', () => {
     saveWorkflowRun({
       runId: 'run-inbox-9',

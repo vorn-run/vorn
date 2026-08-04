@@ -149,6 +149,32 @@ describe('workflow run persistence', () => {
       listWorkflowRuns('wf-trim', 100).some((run) => run.runId === 'active-connector-run')
     ).toBe(true)
   })
+
+  it('trims a finished connector run whose inbox row is already gone', () => {
+    saveWorkflowRun({
+      runId: 'orphan-connector-run',
+      workflowId: 'wf-orphan',
+      startedAt: '2026-04-20T00:00:00Z',
+      completedAt: '2026-04-20T00:00:30Z',
+      status: 'success',
+      connectorInboxId: 900,
+      nodeStates: []
+    })
+    for (let index = 0; index < 60; index++) {
+      saveWorkflowRun({
+        runId: `later-${index}`,
+        workflowId: 'wf-orphan',
+        startedAt: `2026-04-21T00:${String(index).padStart(2, '0')}:00Z`,
+        completedAt: `2026-04-21T00:${String(index).padStart(2, '0')}:30Z`,
+        status: 'success',
+        nodeStates: []
+      })
+    }
+
+    const runs = listWorkflowRuns('wf-orphan', 200)
+    expect(runs.some((run) => run.runId === 'orphan-connector-run')).toBe(false)
+    expect(runs.length).toBeLessThanOrEqual(51)
+  })
 })
 
 function configWithWorkflows(
