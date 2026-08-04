@@ -7,16 +7,22 @@ import type {
 import {
   dbClaimConnectorInbox,
   dbCompleteConnectorInbox,
+  dbCountActiveConnectorInboxLeases,
   dbDeferConnectorInbox,
   dbGetConnectorPollCursor,
+  dbGetWorkflowRunByConnectorInboxId,
   dbInsertSourceConnection,
   dbInsertWorkflow,
+  dbListSourceConnections,
+  dbRecordConnectorPollError,
   dbRecordConnectorPollPage,
   dbReleaseConnectorInboxLeases,
+  dbRenewConnectorInboxLease,
   dbRetryConnectorInbox,
   initTestDatabase,
   loadConfig,
-  saveConfig
+  saveConfig,
+  saveWorkflowRun
 } from '../packages/server/src/database'
 
 let teardown: () => void
@@ -252,5 +258,69 @@ describe('durable connector inbox', () => {
         limit: 10
       })
     ).toHaveLength(1)
+  })
+
+  it('renews only the lease its current owner holds', () => {
+    record('wf-issues', 'cursor-1', ['1'])
+    const [claimed] = dbClaimConnectorInbox({
+      now: '2026-08-04T01:00:00.000Z',
+      leaseUntil: '2026-08-04T01:05:00.000Z',
+      limit: 10
+    })
+
+    expect(
+      dbRenewConnectorInboxLease(claimed.id, claimed.leaseToken, '2026-08-04T01:10:00.000Z')
+    ).toBe(true)
+    expect(dbRenewConnectorInboxLease(claimed.id, 'stale-token', '2026-08-04T01:20:00.000Z')).toBe(
+      false
+    )
+    // The renewal held the row past the original expiry.
+    expect(
+      dbClaimConnectorInbox({
+        now: '2026-08-04T01:06:00.000Z',
+        leaseUntil: '2026-08-04T01:11:00.000Z',
+        limit: 10
+      })
+    ).toEqual([])
+  })
+
+  it('counts only unexpired leases so delivery stays within capacity', () => {
+    record('wf-issues', 'cursor-1', ['1', '2'])
+    dbClaimConnectorInbox({
+      now: '2026-08-04T01:00:00.000Z',
+      leaseUntil: '2026-08-04T01:05:00.000Z',
+      limit: 10
+    })
+
+    expect(dbCountActiveConnectorInboxLeases('2026-08-04T01:01:00.000Z')).toBe(2)
+    expect(dbCountActiveConnectorInboxLeases('2026-08-04T01:06:00.000Z')).toBe(0)
+  })
+
+  it('records a poll failure without disturbing the last good cursor', () => {
+    record('wf-issues', 'cursor-1', ['1'])
+    dbRecordConnectorPollError({
+      workflowId: 'wf-issues',
+      connectionId: connection.id,
+      error: 'rate limited',
+      polledAt: '2026-08-04T01:05:00.000Z'
+    })
+
+    expect(dbGetConnectorPollCursor('wf-issues', connection.id)).toBe('cursor-1')
+    expect(dbListSourceConnections()[0].lastSyncError).toBe('rate limited')
+  })
+
+  it('finds the run that already owns an inbox row', () => {
+    saveWorkflowRun({
+      runId: 'run-inbox-9',
+      workflowId: 'wf-issues',
+      startedAt: '2026-08-04T01:00:00.000Z',
+      status: 'running',
+      connectorInboxId: 9,
+      connectorInboxLeaseToken: 'lease-9',
+      nodeStates: []
+    })
+
+    expect(dbGetWorkflowRunByConnectorInboxId(9)?.runId).toBe('run-inbox-9')
+    expect(dbGetWorkflowRunByConnectorInboxId(404)).toBeNull()
   })
 })

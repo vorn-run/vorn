@@ -358,6 +358,92 @@ describe('github connector — poll()', () => {
     expect(endpoint).not.toContain('.987Z')
   })
 
+  it('scopes the search query with quoted label filters', async () => {
+    setExecFileResponse(JSON.stringify({ total_count: 0, items: [] }))
+    const gh = await importGithub()
+    await gh.poll!(
+      'issueCreated',
+      { owner: 'o', repo: 'r', labels: 'bug, needs "triage" ' },
+      '2026-04-24T10:00:00Z'
+    )
+    const endpoint = decodeURIComponent(execFileMock.mock.calls[0][1][1] as string)
+    expect(endpoint).toContain('label:"bug"')
+    expect(endpoint).toContain('label:"needs+\\"triage\\""')
+  })
+
+  it('rolls the time window over once the 1,000-result search cap is reached', async () => {
+    const items = Array.from({ length: 100 }, (_, i) => ({
+      number: i + 1,
+      title: `issue ${i + 1}`,
+      body: '',
+      state: 'open',
+      html_url: '',
+      updated_at: '',
+      created_at: i === 99 ? '2026-04-24T11:00:10Z' : '2026-04-24T10:30:00Z',
+      labels: [],
+      assignee: null
+    }))
+    setExecFileResponse(JSON.stringify({ total_count: 5000, items }))
+    const gh = await importGithub()
+    const result = await gh.poll!(
+      'issueCreated',
+      { owner: 'o', repo: 'r' },
+      JSON.stringify({ since: '2026-04-24T10:00:00Z', page: 10 })
+    )
+    expect(result.hasMore).toBe(true)
+    expect(JSON.parse(result.nextCursor!)).toEqual({
+      since: '2026-04-24T11:00:09.000Z',
+      page: 1
+    })
+  })
+
+  it('fails loudly when the capped search page comes back empty', async () => {
+    setExecFileResponse(JSON.stringify({ total_count: 5000, items: [] }))
+    const gh = await importGithub()
+    await expect(
+      gh.poll!(
+        'issueCreated',
+        { owner: 'o', repo: 'r' },
+        JSON.stringify({ since: '2026-04-24T10:00:00Z', page: 10 })
+      )
+    ).rejects.toThrow(/empty page/)
+  })
+
+  it('fails loudly when more than 1,000 items share the cursor timestamp', async () => {
+    const items = Array.from({ length: 100 }, (_, i) => ({
+      number: i + 1,
+      title: `issue ${i + 1}`,
+      body: '',
+      state: 'open',
+      html_url: '',
+      updated_at: '',
+      created_at: '2026-04-24T10:00:00Z',
+      labels: [],
+      assignee: null
+    }))
+    setExecFileResponse(JSON.stringify({ total_count: 5000, items }))
+    const gh = await importGithub()
+    await expect(
+      gh.poll!(
+        'issueCreated',
+        { owner: 'o', repo: 'r' },
+        JSON.stringify({ since: '2026-04-24T10:00:00Z', page: 10 })
+      )
+    ).rejects.toThrow(/cannot advance safely/)
+  })
+
+  it('rejects a corrupt cursor timestamp instead of querying everything', async () => {
+    setExecFileResponse(JSON.stringify({ total_count: 0, items: [] }))
+    const gh = await importGithub()
+    await expect(
+      gh.poll!(
+        'issueCreated',
+        { owner: 'o', repo: 'r' },
+        JSON.stringify({ since: 'not-a-timestamp', page: 1 })
+      )
+    ).rejects.toThrow(/Invalid GitHub poll cursor timestamp/)
+  })
+
   it('does not advance when GitHub reports incomplete search results', async () => {
     setExecFileResponse(JSON.stringify({ total_count: 1, incomplete_results: true, items: [] }))
     const gh = await importGithub()

@@ -62,4 +62,27 @@ describe('forEachConnectorItem', () => {
       )
     ).rejects.toThrow(/did not advance/)
   })
+
+  it('rejects a connector that cannot list items at all', async () => {
+    await expect(forEachConnectorItem(connector({}), {}, () => {})).rejects.toThrow(
+      /does not support listItems/
+    )
+  })
+
+  it('stops an endlessly paging connector instead of looping forever', async () => {
+    let page = 0
+    await expect(
+      forEachConnectorItem(
+        connector({
+          listItemsPage: vi.fn().mockImplementation(async () => ({
+            items: [],
+            nextCursor: `page-${++page}`,
+            hasMore: true
+          }))
+        }),
+        {},
+        () => {}
+      )
+    ).rejects.toThrow(/exceeded 1000 backfill pages/)
+  })
 })
