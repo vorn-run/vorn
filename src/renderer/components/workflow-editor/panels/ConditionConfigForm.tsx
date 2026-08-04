@@ -1,5 +1,5 @@
 import { ConditionConfig, ConditionOperator, TriggerConfig } from '../../../../shared/types'
-import { TEMPLATE_VARIABLES, StepVariableGroup } from '../../../lib/template-vars'
+import { TEMPLATE_VARIABLES, StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 import { SelectPicker } from '../../SelectPicker'
 
@@ -7,6 +7,7 @@ interface Props {
   config: ConditionConfig
   onChange: (config: ConditionConfig) => void
   triggerType?: TriggerConfig['triggerType']
+  inputVars?: TemplateVariable[]
   stepGroups: StepVariableGroup[]
 }
 
@@ -21,7 +22,13 @@ const OPERATORS = [
 
 const hiddenValueOperators: ConditionOperator[] = ['isEmpty', 'isNotEmpty']
 
-export function ConditionConfigForm({ config, onChange, triggerType, stepGroups }: Props) {
+export function ConditionConfigForm({
+  config,
+  onChange,
+  triggerType,
+  inputVars = [],
+  stepGroups
+}: Props) {
   const contextVars = TEMPLATE_VARIABLES.filter((v) => {
     if (v.category === 'task') {
       return triggerType === 'taskCreated' || triggerType === 'taskStatusChanged'
@@ -30,7 +37,7 @@ export function ConditionConfigForm({ config, onChange, triggerType, stepGroups 
       return triggerType === 'taskStatusChanged'
     }
     return false
-  })
+  }).concat(inputVars)
 
   return (
     <div className="space-y-5">

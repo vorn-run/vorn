@@ -48,13 +48,14 @@ import {
   removeNode,
   getWorktreeMode
 } from '../../lib/workflow-helpers'
-import { executeWorkflow } from '../../lib/workflow-execution'
+import { startManualRun } from '../../lib/workflow-menu-items'
 import { toast } from '../Toast'
 import {
   slugify,
   ensureUniqueSlug,
   getAncestorNodes,
-  buildStepGroups
+  buildStepGroups,
+  buildInputVars
 } from '../../lib/template-vars'
 
 const EMPTY_TASKS: import('../../../shared/types').TaskConfig[] = []
@@ -102,18 +103,18 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     [nodes, selectedNodeId]
   )
 
-  const triggerType = useMemo(() => {
-    const triggerNode = nodes.find((n) => n.type === 'trigger')
-    if (!triggerNode) return undefined
-    return (triggerNode.config as TriggerConfig).triggerType
-  }, [nodes])
+  const triggerNode = useMemo(() => nodes.find((n) => n.type === 'trigger') ?? null, [nodes])
+  const triggerConfig = triggerNode?.config as TriggerConfig | undefined
 
-  const isContextualTrigger = useMemo(() => {
-    const triggerNode = nodes.find((n) => n.type === 'trigger')
-    if (!triggerNode) return false
-    const cfg = triggerNode.config as TriggerConfig
-    return cfg.triggerType === 'manual' && cfg.contextual === true
-  }, [nodes])
+  const triggerType = triggerConfig?.triggerType
+  const isContextualTrigger =
+    triggerConfig?.triggerType === 'manual' && triggerConfig.contextual === true
+  /** Autocomplete entries for the trigger's declared run inputs. */
+  const inputVars = useMemo(
+    () =>
+      buildInputVars(triggerConfig?.triggerType === 'manual' ? triggerConfig.inputs : undefined),
+    [triggerConfig]
+  )
 
   // Disabled state for the cleanup toggle: when every LaunchAgent inherits
   // its worktree from context, there's nothing for autoCleanupWorktrees to
@@ -347,10 +348,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     if (!inline) handleClose()
   }, [persistWorkflow, editingId, inline, handleClose])
 
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(() => {
     const workflow = persistWorkflow()
     if (!inline) handleClose()
-    await executeWorkflow(workflow)
+    startManualRun(workflow)
   }, [persistWorkflow, inline, handleClose])
 
   const handleDelete = useCallback(() => {
@@ -757,6 +758,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             onClose={() => setSelectedNodeId(null)}
             triggerType={triggerType}
             isContextualTrigger={isContextualTrigger}
+            inputVars={inputVars}
             stepGroups={stepGroups}
           />
         )}
@@ -770,10 +772,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             autoCleanupWorktrees={autoCleanupWorktrees}
             onCleanupChange={setAutoCleanupWorktrees}
             cleanupDisabled={allWorktreesInherited}
-            triggerNode={nodes.find((n) => n.type === 'trigger') ?? null}
+            triggerNode={triggerNode}
             onSelectTrigger={() => {
-              const t = nodes.find((n) => n.type === 'trigger')
-              if (t) setSelectedNodeId(t.id)
+              if (triggerNode) setSelectedNodeId(triggerNode.id)
             }}
             lastRun={executionHistory[0] ?? null}
             onClose={() => setShowProperties(false)}

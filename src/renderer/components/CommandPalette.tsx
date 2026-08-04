@@ -13,7 +13,7 @@ import {
   createSessionFromProject,
   createShellInProject
 } from '../lib/session-utils'
-import { runWorkflowFromGlobalSurface } from '../lib/workflow-menu-items'
+import { startManualRun } from '../lib/workflow-menu-items'
 import { useAgentInstallStatus } from '../hooks/useAgentInstallStatus'
 import {
   Search,
@@ -338,7 +338,7 @@ function useCommands(
           .map((n) => (n.config as unknown as Record<string, unknown>)?.projectName as string)
           .filter(Boolean),
         onExecute: () => {
-          runWorkflowFromGlobalSurface(wf)
+          startManualRun(wf)
         }
       })
     }

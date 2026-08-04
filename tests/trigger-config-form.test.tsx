@@ -125,3 +125,80 @@ describe('TriggerConfigForm — contextual toggle', () => {
     expect(onChange).toHaveBeenCalledWith({ triggerType: 'manual', contextual: undefined })
   })
 })
+
+describe('TriggerConfigForm — run inputs', () => {
+  it('offers the inputs editor only for the manual trigger type', () => {
+    const { unmount } = render(
+      <TriggerConfigForm config={{ triggerType: 'manual' }} onChange={vi.fn()} />
+    )
+    expect(screen.getByText('Run Inputs')).toBeInTheDocument()
+    unmount()
+
+    render(<TriggerConfigForm config={{ triggerType: 'taskCreated' }} onChange={vi.fn()} />)
+    expect(screen.queryByText('Run Inputs')).not.toBeInTheDocument()
+  })
+
+  it('adds an input with a usable default key', () => {
+    const onChange = vi.fn()
+    render(<TriggerConfigForm config={{ triggerType: 'manual' }} onChange={onChange} />)
+    fireEvent.click(screen.getByText('Add input'))
+
+    expect(onChange).toHaveBeenCalledWith({
+      triggerType: 'manual',
+      inputs: [{ key: 'input', label: '', type: 'text' }]
+    })
+  })
+
+  it('does not clobber the contextual flag when adding an input', () => {
+    const onChange = vi.fn()
+    render(
+      <TriggerConfigForm config={{ triggerType: 'manual', contextual: true }} onChange={onChange} />
+    )
+    fireEvent.click(screen.getByText('Add input'))
+
+    expect(onChange.mock.calls[0][0]).toMatchObject({ contextual: true })
+  })
+
+  it('normalizes a typed key so it survives the template syntax', () => {
+    const onChange = vi.fn()
+    render(
+      <TriggerConfigForm
+        config={{ triggerType: 'manual', inputs: [{ key: 'a', label: '', type: 'text' }] }}
+        onChange={onChange}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('Input key'), {
+      target: { value: 'issue url.x' }
+    })
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ inputs: [expect.objectContaining({ key: 'issue_url_x' })] })
+    )
+  })
+
+  it('names a second input uniquely rather than colliding with the first', () => {
+    const onChange = vi.fn()
+    render(
+      <TriggerConfigForm
+        config={{ triggerType: 'manual', inputs: [{ key: 'input', label: '', type: 'text' }] }}
+        onChange={onChange}
+      />
+    )
+    fireEvent.click(screen.getByText('Add input'))
+
+    expect(onChange.mock.calls[0][0].inputs[1].key).toBe('input_2')
+  })
+
+  it('drops the inputs key entirely when the last input is removed', () => {
+    const onChange = vi.fn()
+    render(
+      <TriggerConfigForm
+        config={{ triggerType: 'manual', inputs: [{ key: 'issue', label: '', type: 'text' }] }}
+        onChange={onChange}
+      />
+    )
+    fireEvent.click(screen.getByLabelText('Remove input issue'))
+
+    expect(onChange).toHaveBeenCalledWith({ triggerType: 'manual', inputs: undefined })
+  })
+})

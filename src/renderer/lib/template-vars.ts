@@ -6,7 +6,8 @@ import {
   WorkflowEdge,
   CallConnectorActionConfig,
   LaunchAgentConfig,
-  ConnectorActionDef
+  ConnectorActionDef,
+  WorkflowInputDef
 } from '../../shared/types'
 import { schemaProperties, schemaTypeHint } from '../../shared/json-schema-utils'
 
@@ -60,7 +61,7 @@ export interface StepVariableGroup {
 export interface TemplateVariable {
   key: string
   label: string
-  category: 'task' | 'trigger' | 'connectorItem' | 'context'
+  category: 'task' | 'trigger' | 'connectorItem' | 'context' | 'inputs'
 }
 
 export const TEMPLATE_VARIABLES: TemplateVariable[] = [
@@ -119,6 +120,21 @@ export function getAvailableContextVars(opts: {
     if (opts.isContextualTrigger && v.category === 'context') return true
     return false
   })
+}
+
+/**
+ * Autocomplete entries for the workflow's declared manual-run inputs. Built
+ * per workflow rather than listed in TEMPLATE_VARIABLES because the keys are
+ * whatever the user named them.
+ */
+export function buildInputVars(inputs: WorkflowInputDef[] | undefined): TemplateVariable[] {
+  return (inputs ?? [])
+    .filter((i) => i.key)
+    .map((i) => ({
+      key: `{{inputs.${i.key}}}`,
+      label: i.label || i.key,
+      category: 'inputs' as const
+    }))
 }
 
 /** Whether `value` contains a `{{context.<field>}}` reference anywhere. */
@@ -299,6 +315,13 @@ export function resolveTemplateVars(
     }
     if (ns === 'connectorItem' && context?.connectorItem) {
       return stringifyResolved(walkPath(context.connectorItem, rest))
+    }
+    if (ns === 'inputs' && context?.inputs) {
+      const [key, ...keyPath] = rest
+      const value = context.inputs[key]
+      if (value === undefined) return ''
+      if (keyPath.length === 0) return stringifyResolved(value)
+      return stringifyResolved(walkPath(value, keyPath))
     }
     if (ns === 'context' && rest.length === 1 && context) {
       const resolved = resolveContextField(rest[0], context)

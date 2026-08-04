@@ -681,8 +681,8 @@ export function registerAllMethods(): void {
     configManager.notifyChanged()
   })
 
-  registerMethod('workflow:runManual', ({ workflowId }) => {
-    scheduler.triggerWorkflow(workflowId)
+  registerMethod('workflow:runManual', ({ workflowId, inputs }) => {
+    scheduler.triggerWorkflow(workflowId, inputs)
   })
 
   // Runs execute in the renderer, but a scheduler tick reaches every connected

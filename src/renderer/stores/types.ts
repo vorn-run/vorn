@@ -128,12 +128,22 @@ export interface UISlice {
   isWorkflowEditorOpen: boolean
   editingWorkflowId: string | null
   /**
-   * A contextual workflow whose run was triggered from a non-contextual
-   * surface (sidebar, command palette). The SourcePromptDialog renders when
-   * this is set and asks the user to pick a folder/branch before launching.
-   * Cleared when the user submits or cancels.
+   * A workflow whose manual run is waiting on the user. Set when the run was
+   * triggered from a surface that can't supply everything the workflow needs —
+   * a contextual workflow started from the sidebar / command palette (no
+   * folder), or any workflow declaring run inputs. The SourcePromptDialog
+   * renders while this is set. Cleared when the user submits or cancels.
+   *
+   * `context` is what the launching surface already knew (a card or terminal
+   * right-click), letting the dialog prompt only for what's genuinely missing
+   * instead of re-asking for a folder the caller already has. It lives inside
+   * this object rather than beside it so a stale context can't outlive the
+   * run it belongs to.
    */
-  pendingContextualWorkflowId: string | null
+  pendingWorkflowRun: {
+    workflowId: string
+    context?: { task?: TaskConfig; source?: TerminalSession }
+  } | null
   editingProject: ProjectConfig | null
   isCommandPaletteOpen: boolean
   isShortcutsPanelOpen: boolean
@@ -181,7 +191,10 @@ export interface UISlice {
   setNewAgentDialogOpen: (open: boolean) => void
   setAddProjectDialogOpen: (open: boolean) => void
   setWorkflowEditorOpen: (open: boolean) => void
-  setPendingContextualWorkflowId: (id: string | null) => void
+  setPendingWorkflowRun: (
+    workflowId: string | null,
+    context?: { task?: TaskConfig; source?: TerminalSession }
+  ) => void
   setEditingWorkflowId: (id: string | null) => void
   setEditingProject: (project: ProjectConfig | null) => void
   setCommandPaletteOpen: (open: boolean) => void

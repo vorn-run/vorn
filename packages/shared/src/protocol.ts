@@ -236,7 +236,7 @@ export interface RequestMethods {
   /** Trigger a workflow manually via the scheduler — same dispatch path as
    *  cron, so connectorPoll triggers do their full poll+fan-out. */
   'workflow:runManual': {
-    params: { workflowId: string }
+    params: { workflowId: string; inputs?: Record<string, unknown> }
     result: void
   }
   /** Main→server push of decrypted credential fields. Called after main

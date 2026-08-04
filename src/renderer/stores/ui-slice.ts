@@ -76,7 +76,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   isAddProjectDialogOpen: false,
   isWorkflowEditorOpen: false,
   editingWorkflowId: null,
-  pendingContextualWorkflowId: null,
+  pendingWorkflowRun: null,
   editingProject: null,
   isCommandPaletteOpen: false,
   isShortcutsPanelOpen: false,
@@ -151,7 +151,8 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 
   setWorkflowEditorOpen: (open) => set({ isWorkflowEditorOpen: open }),
 
-  setPendingContextualWorkflowId: (id) => set({ pendingContextualWorkflowId: id }),
+  setPendingWorkflowRun: (workflowId, context) =>
+    set({ pendingWorkflowRun: workflowId ? { workflowId, context } : null }),
 
   setEditingWorkflowId: (id) => set({ editingWorkflowId: id }),
 

@@ -9,6 +9,7 @@ import {
   isContextRef,
   containsContextRef,
   getAvailableContextVars,
+  buildInputVars,
   CONTEXT_REF
 } from '../src/renderer/lib/template-vars'
 import type {
@@ -439,5 +440,63 @@ describe('getAvailableContextVars', () => {
   it('returns empty list for plain manual non-contextual trigger', () => {
     const vars = getAvailableContextVars({ triggerType: 'manual', isContextualTrigger: false })
     expect(vars).toEqual([])
+  })
+})
+
+describe('inputs namespace', () => {
+  const context: WorkflowExecutionContext = {
+    inputs: {
+      issue: 'gh-42',
+      count: 3,
+      force: false,
+      item: { number: 7, url: 'https://example.test/7' }
+    }
+  }
+
+  it('resolves a scalar input', () => {
+    expect(resolveTemplateVars('issue {{inputs.issue}}', context)).toBe('issue gh-42')
+  })
+
+  it('stringifies non-string scalars', () => {
+    expect(resolveTemplateVars('{{inputs.count}}/{{inputs.force}}', context)).toBe('3/false')
+  })
+
+  it('walks into an object-valued input', () => {
+    expect(resolveTemplateVars('#{{inputs.item.number}}', context)).toBe('#7')
+  })
+
+  it('serializes an object input referenced whole', () => {
+    expect(resolveTemplateVars('{{inputs.item}}', context)).toBe(
+      '{"number":7,"url":"https://example.test/7"}'
+    )
+  })
+
+  it('resolves an undeclared key to empty rather than leaking the placeholder', () => {
+    expect(resolveTemplateVars('[{{inputs.missing}}]', context)).toBe('[]')
+  })
+
+  it('leaves the placeholder intact when the run supplied no inputs', () => {
+    expect(resolveTemplateVars('{{inputs.issue}}', { task: undefined })).toBe('{{inputs.issue}}')
+  })
+})
+
+describe('buildInputVars', () => {
+  it('builds an autocomplete entry per declared input', () => {
+    const vars = buildInputVars([
+      { key: 'issue', label: 'Issue URL', type: 'text' },
+      { key: 'force', label: '', type: 'boolean' }
+    ])
+    expect(vars).toEqual([
+      { key: '{{inputs.issue}}', label: 'Issue URL', category: 'inputs' },
+      { key: '{{inputs.force}}', label: 'force', category: 'inputs' }
+    ])
+  })
+
+  it('skips half-written inputs with no key yet', () => {
+    expect(buildInputVars([{ key: '', label: 'wip', type: 'text' }])).toEqual([])
+  })
+
+  it('returns empty for a workflow declaring none', () => {
+    expect(buildInputVars(undefined)).toEqual([])
   })
 })

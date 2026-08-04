@@ -343,7 +343,8 @@ function createSchema(): void {
       started_at TEXT NOT NULL,
       completed_at TEXT,
       status TEXT NOT NULL DEFAULT 'running',
-      trigger_task_id TEXT
+      trigger_task_id TEXT,
+      inputs TEXT
     );
 
     CREATE TABLE IF NOT EXISTS workflow_run_nodes (
@@ -637,6 +638,20 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 10 (drop session_logs)')
   }
+
+  if (version < 11) {
+    d.transaction(() => {
+      const runCols = d.prepare('PRAGMA table_info(workflow_runs)').all() as Array<{ name: string }>
+      if (!runCols.some((c) => c.name === 'inputs')) {
+        d.exec('ALTER TABLE workflow_runs ADD COLUMN inputs TEXT')
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '11')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 11 (workflow run inputs)')
+  }
 }
 
 /**
@@ -682,6 +697,7 @@ function verifySchema(d: Database.Database): void {
         ddl: 'ALTER TABLE agent_commands ADD COLUMN headless_args TEXT'
       }
     ],
+    workflow_runs: [{ column: 'inputs', ddl: 'ALTER TABLE workflow_runs ADD COLUMN inputs TEXT' }],
     workflow_run_nodes: [
       { column: 'agent_type', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN agent_type TEXT' },
       {
@@ -2118,15 +2134,16 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
 
   const run = d.transaction(() => {
     d.prepare(
-      `INSERT OR REPLACE INTO workflow_runs (id, workflow_id, started_at, completed_at, status, trigger_task_id)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT OR REPLACE INTO workflow_runs (id, workflow_id, started_at, completed_at, status, trigger_task_id, inputs)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
       runId,
       execution.workflowId,
       execution.startedAt,
       execution.completedAt ?? null,
       execution.status,
-      execution.triggerTaskId ?? null
+      execution.triggerTaskId ?? null,
+      execution.inputs ? JSON.stringify(execution.inputs) : null
     )
 
     // Delete existing nodes for this run (for upsert behavior)
@@ -2237,23 +2254,45 @@ type RunRow = {
   completed_at: string | null
   status: string
   trigger_task_id: string | null
+  inputs: string | null
   workflow_name?: string | null
+}
+
+/** Run inputs are stored as a JSON blob. A row written before the column
+ *  existed — or by a build that wrote something unparseable — must not take
+ *  the whole run's history down with it. */
+function parseRunInputs(raw: string | null): Record<string, unknown> | undefined {
+  if (!raw) return undefined
+  try {
+    const parsed = JSON.parse(raw)
+    // Arrays are `typeof 'object'` but would surface as numeric-keyed rows in
+    // run history, so they're rejected alongside scalars and null.
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function mapRunRows(
   rows: RunRow[],
   nodesByRun: Map<string, NodeExecutionState[]>
 ): (WorkflowExecution & { workflowName?: string })[] {
-  return rows.map((r) => ({
-    runId: r.id,
-    workflowId: r.workflow_id,
-    startedAt: r.started_at,
-    ...(r.completed_at != null && { completedAt: r.completed_at }),
-    status: r.status as WorkflowExecution['status'],
-    ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
-    ...(r.workflow_name != null && { workflowName: r.workflow_name }),
-    nodeStates: nodesByRun.get(r.id) ?? []
-  }))
+  return rows.map((r) => {
+    const inputs = parseRunInputs(r.inputs)
+    return {
+      runId: r.id,
+      workflowId: r.workflow_id,
+      startedAt: r.started_at,
+      ...(r.completed_at != null && { completedAt: r.completed_at }),
+      status: r.status as WorkflowExecution['status'],
+      ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
+      ...(inputs && { inputs }),
+      ...(r.workflow_name != null && { workflowName: r.workflow_name }),
+      nodeStates: nodesByRun.get(r.id) ?? []
+    }
+  })
 }
 
 export function listWorkflowRuns(workflowId: string, limit = 20): WorkflowExecution[] {

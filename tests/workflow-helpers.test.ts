@@ -38,7 +38,9 @@ import {
   insertNodeBetween,
   insertConditionBetween,
   addParallelBranch,
-  computeFlowLayout
+  computeFlowLayout,
+  getWorkflowInputs,
+  needsRunPrompt
 } from '../src/renderer/lib/workflow-helpers'
 
 beforeEach(() => {
@@ -498,5 +500,64 @@ describe('computeFlowLayout', () => {
     const orphan = makeActionNode('orphan')
     const rows = computeFlowLayout([t, orphan], [])
     expect(rows).toHaveLength(2)
+  })
+})
+
+describe('run inputs helpers', () => {
+  function wfWith(config: TriggerConfig): WorkflowDefinition {
+    return {
+      id: 'wf',
+      name: 'wf',
+      icon: 'Zap',
+      iconColor: '#fff',
+      nodes: [
+        { id: 'trigger-1', type: 'trigger', label: 'Manual', config, position: { x: 0, y: 0 } }
+      ],
+      edges: [],
+      enabled: true
+    }
+  }
+
+  it('reads inputs off a manual trigger', () => {
+    const wf = wfWith({
+      triggerType: 'manual',
+      inputs: [{ key: 'issue', label: 'Issue', type: 'text' }]
+    })
+    expect(getWorkflowInputs(wf)).toHaveLength(1)
+    expect(needsRunPrompt(wf)).toBe(true)
+  })
+
+  it('drops half-written inputs with no key', () => {
+    const wf = wfWith({
+      triggerType: 'manual',
+      inputs: [{ key: '', label: 'wip', type: 'text' }]
+    })
+    expect(getWorkflowInputs(wf)).toEqual([])
+    expect(needsRunPrompt(wf)).toBe(false)
+  })
+
+  it('drops input keys that cannot be referenced by the template parser', () => {
+    const wf = wfWith({
+      triggerType: 'manual',
+      inputs: [
+        { key: '   ', label: 'Whitespace', type: 'text' },
+        { key: 'issue-number', label: 'Punctuation', type: 'text' },
+        { key: '2issue', label: 'Leading digit', type: 'text' },
+        { key: '_issue2', label: 'Valid', type: 'text' }
+      ]
+    })
+    expect(getWorkflowInputs(wf).map((input) => input.key)).toEqual(['_issue2'])
+  })
+
+  it('ignores inputs on a non-manual trigger', () => {
+    expect(getWorkflowInputs(wfWith({ triggerType: 'recurring', cron: '0 9 * * *' }))).toEqual([])
+  })
+
+  it('still prompts for a contextual workflow declaring no inputs', () => {
+    expect(needsRunPrompt(wfWith({ triggerType: 'manual', contextual: true }))).toBe(true)
+  })
+
+  it('does not prompt for a plain manual workflow', () => {
+    expect(needsRunPrompt(wfWith({ triggerType: 'manual' }))).toBe(false)
   })
 })

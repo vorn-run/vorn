@@ -7,13 +7,14 @@ import type {
 } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
 import { ConnectorIcon } from '../../ConnectorIcon'
-import { TEMPLATE_VARIABLES, StepVariableGroup } from '../../../lib/template-vars'
+import { TEMPLATE_VARIABLES, StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 
 interface Props {
   config: CallConnectorActionConfig
   onChange: (config: CallConnectorActionConfig) => void
   triggerType?: TriggerConfig['triggerType']
+  inputVars?: TemplateVariable[]
   stepGroups?: StepVariableGroup[]
 }
 
@@ -21,6 +22,7 @@ export function CallConnectorActionNodeForm({
   config,
   onChange,
   triggerType,
+  inputVars = [],
   stepGroups = []
 }: Props) {
   const [connections, setConnections] = useState<SourceConnection[]>([])
@@ -60,7 +62,7 @@ export function CallConnectorActionNodeForm({
       return triggerType === 'taskStatusChanged'
     }
     return false
-  })
+  }).concat(inputVars)
 
   const selectedConn = connections.find((c) => c.id === config.connectionId)
   const selectedAction: ConnectorActionDef | undefined = actions.find(

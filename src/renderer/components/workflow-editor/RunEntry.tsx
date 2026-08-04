@@ -63,6 +63,17 @@ interface RunStepsListProps {
   ) => void
 }
 
+const MAX_INPUT_PREVIEW = 60
+
+/** One-line preview of a run input. Object-valued inputs (a picked connector
+ *  item) get JSON-serialized and clipped so a large payload can't push the
+ *  steps off screen. */
+function formatInputValue(value: unknown): string {
+  const text =
+    value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value)
+  return text.length > MAX_INPUT_PREVIEW ? `${text.slice(0, MAX_INPUT_PREVIEW)}…` : text
+}
+
 export function RunStepsList({
   execution,
   nodes,
@@ -85,6 +96,15 @@ export function RunStepsList({
 
   return (
     <div className="border-t border-white/[0.06]">
+      {execution.inputs && Object.keys(execution.inputs).length > 0 && (
+        <div className="px-4 py-2 border-b border-white/[0.04] flex flex-wrap gap-x-3 gap-y-1">
+          {Object.entries(execution.inputs).map(([key, value]) => (
+            <span key={key} className="text-[11px] text-gray-500 font-mono">
+              {key}=<span className="text-gray-400">{formatInputValue(value)}</span>
+            </span>
+          ))}
+        </div>
+      )}
       {actionStates.map((ns, i) => {
         const nodeTask = ns.taskId && tasks ? tasks.find((t) => t.id === ns.taskId) : undefined
         const node = nodes.find((n) => n.id === ns.nodeId)
