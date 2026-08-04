@@ -415,6 +415,16 @@ export interface WorkflowExecutionContext {
     toStatus?: TaskStatus
   }
   connectorItem?: ConnectorItemContext
+  /**
+   * Values the user supplied when starting the run, keyed by
+   * `WorkflowInputDef.key`. Drives the `{{inputs.*}}` namespace.
+   *
+   * Values are `unknown` rather than `string` on purpose: a scalar input
+   * resolves to a scalar, but a resource-backed input (a GitHub issue picked
+   * from a connection) stores the whole item so templates can reach into it
+   * with `{{inputs.issue.number}}`.
+   */
+  inputs?: Record<string, unknown>
 }
 
 export type WorkflowNodeType =
@@ -431,6 +441,46 @@ export interface WorkflowNodePosition {
   y: number
 }
 
+/**
+ * Field types a manual-run input can take. The scalar types render as plain
+ * form controls; `project` and `branch` reuse the pickers the run dialog
+ * already has.
+ *
+ * A connection-backed picker (a GitHub issue / PR / repo) is intended next.
+ * It is deliberately absent from this union until it has a producer: input
+ * values are already `unknown`, so storing a whole resolved item needs no
+ * type change here, and a member no editor can create would force every
+ * future exhaustive switch to carry an untestable branch.
+ */
+export type WorkflowInputType =
+  | 'text'
+  | 'textarea'
+  | 'number'
+  | 'select'
+  | 'boolean'
+  | 'project'
+  | 'branch'
+
+/**
+ * One parameter the user fills in when starting a manual run. Declared on the
+ * trigger, so it travels with the workflow definition and needs no schema
+ * change; supplied values land in `WorkflowExecutionContext.inputs` and expand
+ * as `{{inputs.<key>}}` anywhere a template is accepted.
+ */
+export interface WorkflowInputDef {
+  /** Template key — `{{inputs.<key>}}`. Must be a valid identifier. */
+  key: string
+  label: string
+  type: WorkflowInputType
+  required?: boolean
+  /** Pre-filled value in the run dialog, as authored in the editor. */
+  defaultValue?: string
+  /** Choices for `type: 'select'`. Ignored otherwise. */
+  options?: { value: string; label: string }[]
+  placeholder?: string
+  description?: string
+}
+
 // Trigger configs (discriminated union)
 export interface ManualTriggerConfig {
   triggerType: 'manual'
@@ -441,6 +491,12 @@ export interface ManualTriggerConfig {
    * prompted for the source via SourcePromptDialog.
    */
   contextual?: boolean
+  /**
+   * Parameters the user is prompted for before the run starts. A workflow
+   * that declares any of these always opens the run dialog, contextual or
+   * not — there is no other moment at which the values could be supplied.
+   */
+  inputs?: WorkflowInputDef[]
 }
 export interface OnceTriggerConfig {
   triggerType: 'once'
@@ -717,6 +773,12 @@ export interface WorkflowExecution {
    * (two app instances, one scheduler tick) collapses to a single run.
    */
   dedupeParams?: string
+  /**
+   * Values this run was started with, keyed by `WorkflowInputDef.key`. Kept on
+   * the run (not just the live context) so Run History can show what a run was
+   * launched with long after it finished.
+   */
+  inputs?: Record<string, unknown>
 }
 
 /** Stable identity for a run row, tolerating history written before `runId`. */

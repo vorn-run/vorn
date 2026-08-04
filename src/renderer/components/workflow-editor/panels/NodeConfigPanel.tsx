@@ -30,7 +30,7 @@ import { ConditionConfigForm } from './ConditionConfigForm'
 import { ApprovalConfigForm } from './ApprovalConfigForm'
 import { CreateTaskFromItemNodeForm } from './CreateTaskFromItemNodeForm'
 import { CallConnectorActionNodeForm } from './CallConnectorActionNodeForm'
-import type { StepVariableGroup } from '../../../lib/template-vars'
+import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 
 const NODE_TYPE_CONFIG: Record<
   WorkflowNode['type'],
@@ -69,6 +69,8 @@ interface Props {
   onClose: () => void
   triggerType?: TriggerConfig['triggerType']
   isContextualTrigger?: boolean
+  /** Autocomplete entries for the workflow's declared manual-run inputs. */
+  inputVars?: TemplateVariable[]
   stepGroups?: StepVariableGroup[]
 }
 
@@ -81,6 +83,7 @@ export function NodeConfigPanel({
   onClose,
   triggerType,
   isContextualTrigger,
+  inputVars,
   stepGroups
 }: Props) {
   const [showMenu, setShowMenu] = useState(false)
@@ -187,6 +190,7 @@ export function NodeConfigPanel({
 
         {node.type === 'launchAgent' && (
           <LaunchAgentConfigForm
+            inputVars={inputVars}
             config={node.config as LaunchAgentConfig}
             onChange={(config) => onChange(node.id, config)}
             triggerType={triggerType}
@@ -199,6 +203,7 @@ export function NodeConfigPanel({
 
         {node.type === 'script' && (
           <ScriptConfigForm
+            inputVars={inputVars}
             config={node.config as ScriptConfig}
             onChange={(config) => onChange(node.id, config)}
             triggerType={triggerType}
@@ -209,6 +214,7 @@ export function NodeConfigPanel({
 
         {node.type === 'condition' && (
           <ConditionConfigForm
+            inputVars={inputVars}
             config={node.config as ConditionConfig}
             onChange={(config) => onChange(node.id, config)}
             triggerType={triggerType}
@@ -232,6 +238,7 @@ export function NodeConfigPanel({
 
         {node.type === 'callConnectorAction' && (
           <CallConnectorActionNodeForm
+            inputVars={inputVars}
             config={node.config as CallConnectorActionConfig}
             onChange={(config) => onChange(node.id, config)}
             triggerType={triggerType}

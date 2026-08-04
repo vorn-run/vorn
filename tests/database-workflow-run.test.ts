@@ -230,3 +230,33 @@ describe('listAllWorkflowRuns', () => {
     expect(listAllWorkflowRuns()).toHaveLength(1)
   })
 })
+
+describe('workflow run inputs persistence', () => {
+  it('round-trips the values a manual run was started with', () => {
+    const exec: WorkflowExecution = {
+      runId: 'run-inputs-1',
+      workflowId: 'wf-inputs',
+      startedAt: '2026-04-20T10:00:00Z',
+      status: 'success',
+      nodeStates: [{ nodeId: 'n1', status: 'success' }],
+      inputs: { issue: 'gh-42', count: 3, item: { number: 7 } }
+    }
+    saveWorkflowRun(exec)
+
+    const [run] = listWorkflowRuns('wf-inputs')
+    expect(run.inputs).toEqual({ issue: 'gh-42', count: 3, item: { number: 7 } })
+  })
+
+  it('omits inputs entirely for a run that had none', () => {
+    saveWorkflowRun({
+      runId: 'run-inputs-2',
+      workflowId: 'wf-none',
+      startedAt: '2026-04-20T10:00:00Z',
+      status: 'success',
+      nodeStates: []
+    })
+
+    const [run] = listWorkflowRuns('wf-none')
+    expect(run.inputs).toBeUndefined()
+  })
+})

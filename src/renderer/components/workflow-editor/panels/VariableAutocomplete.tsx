@@ -21,6 +21,29 @@ interface Props {
   mono?: boolean
 }
 
+/**
+ * How each variable category is presented in the picker, in display order.
+ *
+ * A Record over the category union rather than a loop per category: the picker
+ * previously listed three categories by hand, so anything else a form passed
+ * in — connector item fields, and later run inputs — was silently dropped from
+ * the dropdown while still resolving at run time. Adding a category to
+ * TemplateVariable now fails to compile until it is given a group here.
+ */
+const VAR_CATEGORY_GROUPS: Record<
+  TemplateVariable['category'],
+  { group: string; description: string }
+> = {
+  task: { group: 'Task', description: '' },
+  trigger: { group: 'Trigger', description: '' },
+  context: { group: 'Context', description: 'Resolved from the launching card or terminal' },
+  inputs: { group: 'Run Inputs', description: 'Entered when the run is started' },
+  connectorItem: {
+    group: 'Connector Item',
+    description: 'The upstream item that triggered this run'
+  }
+}
+
 interface DropdownItem {
   group: string
   groupId: string
@@ -66,37 +89,20 @@ export function VariableAutocomplete({
       }
     }
 
-    for (const v of contextVars.filter((v) => v.category === 'task')) {
-      items.push({
-        group: 'Task',
-        groupId: 'task',
-        key: v.key,
-        label: v.label,
-        description: '',
-        pattern: v.key
-      })
-    }
-
-    for (const v of contextVars.filter((v) => v.category === 'trigger')) {
-      items.push({
-        group: 'Trigger',
-        groupId: 'trigger',
-        key: v.key,
-        label: v.label,
-        description: '',
-        pattern: v.key
-      })
-    }
-
-    for (const v of contextVars.filter((v) => v.category === 'context')) {
-      items.push({
-        group: 'Context',
-        groupId: 'context',
-        key: v.key,
-        label: v.label,
-        description: 'Resolved from the launching card or terminal',
-        pattern: v.key
-      })
+    for (const [category, { group, description }] of Object.entries(VAR_CATEGORY_GROUPS) as [
+      TemplateVariable['category'],
+      { group: string; description: string }
+    ][]) {
+      for (const v of contextVars.filter((v) => v.category === category)) {
+        items.push({
+          group,
+          groupId: category,
+          key: v.key,
+          label: v.label,
+          description,
+          pattern: v.key
+        })
+      }
     }
 
     return items

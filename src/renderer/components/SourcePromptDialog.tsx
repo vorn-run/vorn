@@ -5,6 +5,9 @@ import { useAppStore } from '../stores'
 import { ProjectPicker } from './ProjectPicker'
 import { executeWorkflow } from '../lib/workflow-execution'
 import { containsContextRef, isContextRef } from '../lib/template-vars'
+import { getWorkflowInputs, isContextualWorkflow } from '../lib/workflow-helpers'
+import { WorkflowInputFields } from './WorkflowInputFields'
+import { areInputsValid, initialInputValues } from '../lib/workflow-inputs'
 import type {
   LaunchAgentConfig,
   ScriptConfig,
@@ -66,8 +69,10 @@ function detectRequiredFields(workflow: WorkflowDefinition): {
 }
 
 export function SourcePromptDialog() {
-  const pendingId = useAppStore((s) => s.pendingContextualWorkflowId)
-  const setPendingId = useAppStore((s) => s.setPendingContextualWorkflowId)
+  const pendingRun = useAppStore((s) => s.pendingWorkflowRun)
+  const pendingId = pendingRun?.workflowId ?? null
+  const pendingContext = pendingRun?.context ?? null
+  const setPendingId = useAppStore((s) => s.setPendingWorkflowRun)
   const config = useAppStore((s) => s.config)
   const workflow = useAppStore((s) =>
     pendingId ? (s.config?.workflows ?? []).find((w) => w.id === pendingId) : undefined
@@ -77,13 +82,22 @@ export function SourcePromptDialog() {
   const [projectPath, setProjectPath] = useState('')
   const [branch, setBranch] = useState('')
   const [useWorktree, setUseWorktree] = useState(false)
+  const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
 
+  const inputDefs = useMemo(() => (workflow ? getWorkflowInputs(workflow) : []), [workflow])
+  // The caller already supplied a source (card / terminal right-click), so the
+  // only thing still missing is the declared inputs.
+  const hasCallerContext = !!(pendingContext?.task || pendingContext?.source)
+  const contextual = workflow ? isContextualWorkflow(workflow) : false
+
+  // A non-contextual workflow reaches this dialog only to collect inputs — it
+  // has no source to ask about, so none of the context fields apply.
   const required = useMemo(
     () =>
-      workflow
+      workflow && contextual && !hasCallerContext
         ? detectRequiredFields(workflow)
-        : { needsProject: true, needsBranch: false, needsWorktree: false },
-    [workflow]
+        : { needsProject: false, needsBranch: false, needsWorktree: false },
+    [workflow, contextual, hasCallerContext]
   )
 
   // Reset state and seed sensible defaults each time the dialog opens for a
@@ -91,34 +105,53 @@ export function SourcePromptDialog() {
   // mid-edit on any unrelated config change.
   useEffect(() => {
     if (!pendingId) return
-    const first = (useAppStore.getState().config?.projects ?? [])[0]
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    const state = useAppStore.getState()
+    const first = (state.config?.projects ?? [])[0]
+    const wf = (state.config?.workflows ?? []).find((w) => w.id === pendingId)
+    /* eslint-disable react-hooks/set-state-in-effect */
     setProjectName(first?.name ?? '')
     setProjectPath(first?.path ?? '')
     setBranch('')
     setUseWorktree(false)
+    setInputValues(wf ? initialInputValues(getWorkflowInputs(wf)) : {})
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [pendingId])
 
   if (!pendingId || !workflow) return null
 
   const close = () => setPendingId(null)
 
+  const canSubmit =
+    !(required.needsProject && (!projectName || !projectPath)) &&
+    areInputsValid(inputDefs, inputValues)
+
   const submit = () => {
-    if (required.needsProject && (!projectName || !projectPath)) return
-    // Synthesize a TerminalSession-shaped source for the resolver. Fields
-    // the dialog doesn't capture (id, status, etc.) are placeholders.
-    const source: TerminalSession = {
-      id: `prompt:${pendingId}:${Date.now()}`,
-      agentType: 'shell',
-      projectName,
-      projectPath,
-      status: 'idle',
-      createdAt: Date.now(),
-      pid: 0,
-      branch: branch || undefined,
-      isWorktree: useWorktree
-    }
-    void executeWorkflow(workflow, { source }, { source: 'manual' })
+    if (!canSubmit) return
+    const inputs = inputDefs.length > 0 ? inputValues : undefined
+    // Three cases, one launch: the caller's context if it supplied one, a
+    // source synthesized from the fields if this workflow needs one, and
+    // nothing but the inputs otherwise (pendingContext is null there, so the
+    // spread collapses to `{ inputs }`).
+    const base = hasCallerContext
+      ? pendingContext
+      : contextual
+        ? {
+            // Synthesize a TerminalSession-shaped source for the resolver.
+            // Fields the dialog doesn't capture are placeholders.
+            source: {
+              id: `prompt:${pendingId}:${Date.now()}`,
+              agentType: 'shell',
+              projectName,
+              projectPath,
+              status: 'idle',
+              createdAt: Date.now(),
+              pid: 0,
+              branch: branch || undefined,
+              isWorktree: useWorktree
+            } satisfies TerminalSession
+          }
+        : null
+    void executeWorkflow(workflow, { ...base, inputs }, { source: 'manual' })
     close()
   }
 
@@ -146,7 +179,9 @@ export function SourcePromptDialog() {
             Run "{workflow.name}"
           </div>
           <p className="text-[12px] text-gray-500 mt-1">
-            This contextual workflow needs a source. Pick the folder it should run against.
+            {contextual
+              ? 'This contextual workflow needs a source. Pick the folder it should run against.'
+              : 'This workflow needs a few details before it runs.'}
           </p>
         </div>
 
@@ -201,6 +236,12 @@ export function SourcePromptDialog() {
               <span className="text-[13px] text-gray-300">Run in a new worktree</span>
             </label>
           )}
+
+          <WorkflowInputFields
+            defs={inputDefs}
+            values={inputValues}
+            onChange={(key, value) => setInputValues((prev) => ({ ...prev, [key]: value }))}
+          />
         </div>
 
         <div className="px-6 py-3 border-t border-white/[0.06] flex justify-end gap-2">
@@ -213,7 +254,7 @@ export function SourcePromptDialog() {
           </button>
           <button
             onClick={submit}
-            disabled={required.needsProject && !projectName}
+            disabled={!canSubmit}
             className="px-4 py-1.5 text-[13px] text-white bg-white/[0.1] hover:bg-white/[0.15]
                        rounded-md transition-colors disabled:opacity-40 disabled:pointer-events-none"
           >

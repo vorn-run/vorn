@@ -78,7 +78,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   projectPickerProps.length = 0
   useAppStore.setState({
-    pendingContextualWorkflowId: null,
+    pendingWorkflowRun: null,
     config: {
       projects: [
         { name: 'Vorn', path: '/repo/vorn', preferredAgents: [], icon: '', iconColor: '' }
@@ -102,7 +102,7 @@ describe('SourcePromptDialog', () => {
   it('renders the workflow name in its title when pending', () => {
     const wf = makeWorkflow()
     useAppStore.setState({
-      pendingContextualWorkflowId: wf.id,
+      pendingWorkflowRun: { workflowId: wf.id },
       config: {
         ...useAppStore.getState().config!,
         workflows: [wf]
@@ -137,7 +137,7 @@ describe('SourcePromptDialog', () => {
       ]
     })
     useAppStore.setState({
-      pendingContextualWorkflowId: wf.id,
+      pendingWorkflowRun: { workflowId: wf.id },
       config: { ...useAppStore.getState().config!, workflows: [wf] }
     })
     render(<SourcePromptDialog />)
@@ -147,7 +147,7 @@ describe('SourcePromptDialog', () => {
   it('hides the branch input when nothing references {{context.branch}}', () => {
     const wf = makeWorkflow()
     useAppStore.setState({
-      pendingContextualWorkflowId: wf.id,
+      pendingWorkflowRun: { workflowId: wf.id },
       config: { ...useAppStore.getState().config!, workflows: [wf] }
     })
     render(<SourcePromptDialog />)
@@ -179,7 +179,7 @@ describe('SourcePromptDialog', () => {
       ]
     })
     useAppStore.setState({
-      pendingContextualWorkflowId: wf.id,
+      pendingWorkflowRun: { workflowId: wf.id },
       config: { ...useAppStore.getState().config!, workflows: [wf] }
     })
     render(<SourcePromptDialog />)
@@ -189,19 +189,19 @@ describe('SourcePromptDialog', () => {
   it('clears the pending id and does not run on Cancel', () => {
     const wf = makeWorkflow()
     useAppStore.setState({
-      pendingContextualWorkflowId: wf.id,
+      pendingWorkflowRun: { workflowId: wf.id },
       config: { ...useAppStore.getState().config!, workflows: [wf] }
     })
     render(<SourcePromptDialog />)
     fireEvent.click(screen.getByText('Cancel'))
-    expect(useAppStore.getState().pendingContextualWorkflowId).toBeNull()
+    expect(useAppStore.getState().pendingWorkflowRun).toBeNull()
     expect(mockExecuteWorkflow).not.toHaveBeenCalled()
   })
 
   it('runs executeWorkflow with a synthesized source on submit', () => {
     const wf = makeWorkflow()
     useAppStore.setState({
-      pendingContextualWorkflowId: wf.id,
+      pendingWorkflowRun: { workflowId: wf.id },
       config: { ...useAppStore.getState().config!, workflows: [wf] }
     })
     render(<SourcePromptDialog />)
@@ -218,7 +218,7 @@ describe('SourcePromptDialog', () => {
       }),
       { source: 'manual' }
     )
-    expect(useAppStore.getState().pendingContextualWorkflowId).toBeNull()
+    expect(useAppStore.getState().pendingWorkflowRun).toBeNull()
   })
 
   it('detects context references in script nodes (cwd / projectName / projectPath)', () => {
@@ -247,7 +247,7 @@ describe('SourcePromptDialog', () => {
       ]
     })
     useAppStore.setState({
-      pendingContextualWorkflowId: wf.id,
+      pendingWorkflowRun: { workflowId: wf.id },
       config: { ...useAppStore.getState().config!, workflows: [wf] }
     })
     render(<SourcePromptDialog />)
@@ -277,7 +277,7 @@ describe('SourcePromptDialog', () => {
       ]
     })
     useAppStore.setState({
-      pendingContextualWorkflowId: wf.id,
+      pendingWorkflowRun: { workflowId: wf.id },
       config: { ...useAppStore.getState().config!, workflows: [wf] }
     })
     render(<SourcePromptDialog />)

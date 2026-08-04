@@ -50,6 +50,7 @@ const mockState = {
   updateWorkflow: vi.fn(),
   removeWorkflow: vi.fn(),
   config: { workflows: [], tasks: [], projects: [], defaults: {} },
+  setPendingWorkflowRun: vi.fn(),
   addTerminal: vi.fn(),
   setFocusedTerminal: vi.fn(),
   setSelectedTaskId: vi.fn(),
@@ -128,6 +129,56 @@ describe('WorkflowEditor', () => {
     ) as HTMLInputElement
     fireEvent.change(nameInput, { target: { value: 'New name' } })
     expect(nameInput.value).toBe('New name')
+  })
+
+  it('prompts for run inputs instead of launching the workflow blind', async () => {
+    // Running straight from the editor used to skip the prompt entirely, so
+    // {{inputs.*}} reached the agent unresolved.
+    const { executeWorkflow } = await import('../src/renderer/lib/workflow-execution')
+    vi.mocked(executeWorkflow).mockClear()
+    mockState.setPendingWorkflowRun.mockClear()
+    mockState.editingWorkflowId = 'wf-inputs' as unknown as null
+    mockState.config.workflows = [
+      {
+        id: 'wf-inputs',
+        name: 'Needs inputs',
+        enabled: true,
+        nodes: [
+          {
+            id: 'trigger',
+            type: 'trigger',
+            label: 'Trigger',
+            position: { x: 0, y: 0 },
+            config: {
+              triggerType: 'manual',
+              inputs: [{ key: 'pr_number', label: 'PR number', type: 'text' }]
+            }
+          }
+        ],
+        edges: []
+      }
+    ] as unknown as never[]
+
+    const { container } = render(<WorkflowEditor />)
+    fireEvent.click(container.querySelector('button[aria-label="Run workflow"]')!)
+
+    expect(mockState.setPendingWorkflowRun).toHaveBeenCalledWith('wf-inputs', undefined)
+    expect(executeWorkflow).not.toHaveBeenCalled()
+
+    mockState.editingWorkflowId = null
+    mockState.config.workflows = []
+  })
+
+  it('runs a workflow with no declared inputs directly', async () => {
+    const { executeWorkflow } = await import('../src/renderer/lib/workflow-execution')
+    vi.mocked(executeWorkflow).mockClear()
+    mockState.setPendingWorkflowRun.mockClear()
+
+    const { container } = render(<WorkflowEditor />)
+    fireEvent.click(container.querySelector('button[aria-label="Run workflow"]')!)
+
+    expect(executeWorkflow).toHaveBeenCalled()
+    expect(mockState.setPendingWorkflowRun).not.toHaveBeenCalled()
   })
 
   it('renders the back button which closes the editor', () => {

@@ -284,7 +284,23 @@ function dedupeFingerprint(context?: WorkflowExecutionContext): string {
   if (item) return `item:${item.connectionId}:${item.externalId}`
   if (context?.task) return `task:${context.task.id}`
   if (context?.source) return `session:${context.source.id}`
-  return 'manual'
+  // Two manual runs started with different parameters are different triggers.
+  // Without this they would collapse into one and the second would be dropped.
+  const inputs = fingerprintInputs(context?.inputs)
+  return inputs ? `manual:${inputs}` : 'manual'
+}
+
+/** Stable serialization of run inputs — key-sorted so object ordering can't
+ *  make two identical parameter sets look like different triggers. */
+function fingerprintInputs(inputs: Record<string, unknown> | undefined): string {
+  if (!inputs) return ''
+  const keys = Object.keys(inputs).sort()
+  if (keys.length === 0) return ''
+  // No try/catch: values are already required to be JSON-serializable, since
+  // saveWorkflowRun persists them the same way. Falling back to a key-only
+  // digest would silently collapse two different parameter sets into one
+  // fingerprint — exactly the dedupe bug this function exists to prevent.
+  return JSON.stringify(keys.map((k) => [k, inputs[k]]))
 }
 
 /** Resolved step ceiling: the node's own value, else the configured default. 0 disables. */
@@ -1058,7 +1074,7 @@ export async function executeWorkflow(
     !context?.connectorItem &&
     options?.source !== 'scheduler'
   ) {
-    await window.api.runWorkflowManual(workflow.id)
+    await window.api.runWorkflowManual(workflow.id, context?.inputs)
     const existing = latestRunForWorkflow(workflow.id)
     if (existing) return existing
     // Return a minimal synthetic execution so callers don't break. The real
@@ -1110,7 +1126,8 @@ export async function executeWorkflow(
       status: n.type === 'trigger' ? 'success' : 'pending'
     })),
     triggerTaskId: context?.task?.id,
-    dedupeParams
+    dedupeParams,
+    inputs: context?.inputs
   }
 
   const actionNodeCount = workflow.nodes.filter((n) => n.type !== 'trigger').length

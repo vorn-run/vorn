@@ -5,6 +5,7 @@ import { ScriptConfig, TriggerConfig } from '../../../../shared/types'
 import { useAppStore } from '../../../stores'
 import {
   StepVariableGroup,
+  TemplateVariable,
   CONTEXT_REF,
   getAvailableContextVars,
   isContextRef
@@ -18,6 +19,7 @@ interface Props {
   onChange: (config: ScriptConfig) => void
   triggerType?: TriggerConfig['triggerType']
   isContextualTrigger?: boolean
+  inputVars?: TemplateVariable[]
   stepGroups?: StepVariableGroup[]
 }
 
@@ -39,13 +41,18 @@ export function ScriptConfigForm({
   onChange,
   triggerType,
   isContextualTrigger = false,
+  inputVars = [],
   stepGroups = []
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(!!config.args?.length)
   const projects = useAppStore((s) => s.config?.projects ?? EMPTY_PROJECTS)
   const isTaskTrigger = triggerType === 'taskCreated' || triggerType === 'taskStatusChanged'
-  const hasTemplateVars = stepGroups.length > 0 || isTaskTrigger || isContextualTrigger
-  const contextVars = getAvailableContextVars({ triggerType, isContextualTrigger })
+  const hasTemplateVars =
+    stepGroups.length > 0 || isTaskTrigger || isContextualTrigger || inputVars.length > 0
+  const contextVars = [
+    ...getAvailableContextVars({ triggerType, isContextualTrigger }),
+    ...inputVars
+  ]
   const cwdIsFromContext =
     isContextRef(config.cwd) || isContextRef(config.projectName) || isContextRef(config.projectPath)
 

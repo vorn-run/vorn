@@ -292,12 +292,12 @@ export function App() {
 
     // Scheduler: auto-execute workflows when triggered
     const removeSchedulerListener = window.api.onSchedulerExecute(
-      async ({ workflowId, connectorItem }) => {
+      async ({ workflowId, connectorItem, inputs }) => {
         const state = useAppStore.getState()
         const workflow = state.config?.workflows?.find((w) => w.id === workflowId)
         if (!workflow) return
 
-        const context = connectorItem ? { connectorItem } : undefined
+        const context = connectorItem || inputs ? { connectorItem, inputs } : undefined
         await runWorkflow(workflow, context, { source: 'scheduler' })
       }
     )

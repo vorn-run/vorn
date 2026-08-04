@@ -156,7 +156,7 @@ class Scheduler extends EventEmitter {
     }
   }
 
-  private executeWorkflow(workflowId: string): void {
+  private executeWorkflow(workflowId: string, inputs?: Record<string, unknown>): void {
     if (!acquireExecutionLock(workflowId)) {
       log.info(`[scheduler] skipping workflow ${workflowId} — already executed by another instance`)
       this.timeouts.delete(workflowId)
@@ -184,7 +184,7 @@ class Scheduler extends EventEmitter {
     }
 
     log.info(`[scheduler] executing workflow ${workflowId}`)
-    this.emit('client-message', IPC.SCHEDULER_EXECUTE, { workflowId })
+    this.emit('client-message', IPC.SCHEDULER_EXECUTE, { workflowId, inputs })
     this.timeouts.delete(workflowId)
   }
 
@@ -318,9 +318,12 @@ class Scheduler extends EventEmitter {
    * in settings for connector-seeded workflows: the same dispatch path as
    * cron, so no hidden logic — just a forced tick. The minute-key lock still
    * applies so repeated clicks within the same minute fold into one run.
+   *
+   * `inputs` carries the values a manual run was started with, forwarded to
+   * the renderer so `{{inputs.*}}` resolves the same as a direct run.
    */
-  triggerWorkflow(workflowId: string): void {
-    this.executeWorkflow(workflowId)
+  triggerWorkflow(workflowId: string, inputs?: Record<string, unknown>): void {
+    this.executeWorkflow(workflowId, inputs)
   }
 
   stopAll(): void {

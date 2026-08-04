@@ -296,6 +296,7 @@ const api = {
     callback: (event: {
       workflowId: string
       connectorItem?: import('../../packages/shared/src/types').ConnectorItemContext
+      inputs?: Record<string, unknown>
     }) => void
   ) => {
     const listener = (
@@ -303,6 +304,7 @@ const api = {
       event: {
         workflowId: string
         connectorItem?: import('../../packages/shared/src/types').ConnectorItemContext
+        inputs?: Record<string, unknown>
       }
     ): void => callback(event)
     ipcRenderer.on(IPC.SCHEDULER_EXECUTE, listener)
@@ -495,8 +497,8 @@ const api = {
 
   deleteConnection: (id: string): Promise<void> => ipcRenderer.invoke(IPC.CONNECTION_DELETE, id),
 
-  runWorkflowManual: (workflowId: string): Promise<void> =>
-    ipcRenderer.invoke(IPC.WORKFLOW_RUN_MANUAL, { workflowId }),
+  runWorkflowManual: (workflowId: string, inputs?: Record<string, unknown>): Promise<void> =>
+    ipcRenderer.invoke(IPC.WORKFLOW_RUN_MANUAL, { workflowId, inputs }),
 
   backfillConnection: (
     connectionId: string

@@ -7,7 +7,10 @@ import {
   ScriptConfig,
   ConditionConfig,
   ApprovalConfig,
-  WorkflowNodePosition
+  WorkflowNodePosition,
+  WorkflowInputDef,
+  TaskConfig,
+  TerminalSession
 } from '../../shared/types'
 import { slugify } from './template-vars'
 
@@ -130,6 +133,38 @@ export function isScheduledWorkflow(wf: WorkflowDefinition): boolean {
 export function isContextualWorkflow(wf: WorkflowDefinition): boolean {
   const trigger = getTriggerConfig(wf)
   return trigger?.triggerType === 'manual' && trigger.contextual === true
+}
+
+/** Manual-run parameters the workflow declares on its trigger, if any. */
+export function getWorkflowInputs(wf: WorkflowDefinition): WorkflowInputDef[] {
+  const trigger = getTriggerConfig(wf)
+  if (trigger?.triggerType !== 'manual') return []
+  return (trigger.inputs ?? []).filter((i) => i.key)
+}
+
+/**
+ * What a launching surface already knows about the run. A card or terminal
+ * right-click supplies these; a sidebar or palette launch does not.
+ */
+export interface ManualRunContext {
+  task?: TaskConfig
+  source?: TerminalSession
+}
+
+/**
+ * Whether starting this workflow requires asking the user for something first.
+ *
+ * Contextual workflows need a source folder/branch — unless the launching
+ * surface already supplied one. Declared run inputs always need the user,
+ * since a run is the only moment those values can be supplied.
+ *
+ * Takes the launch context so there is exactly one definition of "must
+ * prompt": call sites that pass a source and call sites that don't share this
+ * predicate rather than each hand-rolling half of it.
+ */
+export function needsRunPrompt(wf: WorkflowDefinition, ctx?: ManualRunContext): boolean {
+  const hasSource = !!(ctx?.task || ctx?.source)
+  return (isContextualWorkflow(wf) && !hasSource) || getWorkflowInputs(wf).length > 0
 }
 
 export type WorktreeMode = 'none' | 'new' | 'fromStep' | 'existing' | 'fromContext'

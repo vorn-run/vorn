@@ -2,9 +2,10 @@ import { type ReactNode } from 'react'
 import { Workflow } from 'lucide-react'
 import { ICON_MAP } from '../components/project-sidebar/icon-map'
 import { executeWorkflow } from './workflow-execution'
-import { isContextualWorkflow } from './workflow-helpers'
+import { isContextualWorkflow, needsRunPrompt } from './workflow-helpers'
+import type { ManualRunContext } from './workflow-helpers'
 import { useAppStore } from '../stores'
-import type { TaskConfig, TerminalSession, WorkflowDefinition } from '../../shared/types'
+import type { WorkflowDefinition } from '../../shared/types'
 
 export interface WorkflowMenuItem {
   id: string
@@ -23,23 +24,27 @@ export interface WorkflowMenuItem {
  * right-click) it lists only non-contextual workflows so users don't see
  * actions that would dead-end on a missing source.
  */
-export interface WorkflowMenuContext {
-  task?: TaskConfig
-  source?: TerminalSession
-}
+export type WorkflowMenuContext = ManualRunContext
 
 /**
- * Routes a workflow run from a non-contextual surface (sidebar, palette).
- * Contextual workflows open SourcePromptDialog so the user picks the source;
- * everything else launches immediately. Centralized here so each call site
- * doesn't need to repeat the gating logic.
+ * The single door for starting a workflow from the UI.
+ *
+ * Anything the user still has to supply — a source folder, or declared run
+ * inputs — opens the run dialog first; everything else launches immediately.
+ * Every manual surface (sidebar, palette, card/terminal menus, the editor's
+ * Run button) must go through here rather than calling `executeWorkflow`
+ * directly: skipping the prompt is silent, and produces a run whose
+ * `{{inputs.*}}` templates reach the agent unresolved.
+ *
+ * `executeWorkflow` itself stays unguarded because the scheduler, connector
+ * triggers and missed-schedule recovery legitimately run without a user.
  */
-export function runWorkflowFromGlobalSurface(workflow: WorkflowDefinition): void {
-  if (isContextualWorkflow(workflow)) {
-    useAppStore.getState().setPendingContextualWorkflowId(workflow.id)
+export function startManualRun(workflow: WorkflowDefinition, ctx?: ManualRunContext): void {
+  if (needsRunPrompt(workflow, ctx)) {
+    useAppStore.getState().setPendingWorkflowRun(workflow.id, ctx)
     return
   }
-  void executeWorkflow(workflow, undefined, { source: 'manual' })
+  void executeWorkflow(workflow, ctx, { source: 'manual' })
 }
 
 export function buildWorkflowMenuItems(
@@ -59,10 +64,9 @@ export function buildWorkflowMenuItems(
       label: wf.name,
       onClick: () => {
         onSelect()
-        executeWorkflow(
+        startManualRun(
           wf,
-          hasContext ? { task: context?.task, source: context?.source } : undefined,
-          { source: 'manual' }
+          hasContext ? { task: context?.task, source: context?.source } : undefined
         )
       }
     }

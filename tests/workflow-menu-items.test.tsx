@@ -10,7 +10,7 @@ vi.mock('../src/renderer/lib/workflow-execution', () => ({
 const mockSetPending = vi.fn()
 vi.mock('../src/renderer/stores', () => {
   const state = {
-    setPendingContextualWorkflowId: (id: string | null) => mockSetPending(id)
+    setPendingWorkflowRun: (...args: unknown[]) => mockSetPending(...args)
   }
   return {
     useAppStore: Object.assign(
@@ -20,10 +20,7 @@ vi.mock('../src/renderer/stores', () => {
   }
 })
 
-import {
-  buildWorkflowMenuItems,
-  runWorkflowFromGlobalSurface
-} from '../src/renderer/lib/workflow-menu-items'
+import { buildWorkflowMenuItems, startManualRun } from '../src/renderer/lib/workflow-menu-items'
 import type { TaskConfig, TerminalSession, WorkflowDefinition } from '../src/shared/types'
 
 function makeWorkflow(id: string, contextual: boolean): WorkflowDefinition {
@@ -123,20 +120,66 @@ describe('buildWorkflowMenuItems', () => {
   })
 })
 
-describe('runWorkflowFromGlobalSurface', () => {
+describe('startManualRun', () => {
   it('opens SourcePromptDialog for contextual workflows', () => {
-    runWorkflowFromGlobalSurface(makeWorkflow('a', true))
-    expect(mockSetPending).toHaveBeenCalledWith('a')
+    startManualRun(makeWorkflow('a', true))
+    expect(mockSetPending).toHaveBeenCalledWith('a', undefined)
     expect(mockExecuteWorkflow).not.toHaveBeenCalled()
   })
 
   it('runs non-contextual workflows directly', () => {
-    runWorkflowFromGlobalSurface(makeWorkflow('b', false))
+    startManualRun(makeWorkflow('b', false))
     expect(mockExecuteWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'b' }),
       undefined,
       { source: 'manual' }
     )
     expect(mockSetPending).not.toHaveBeenCalled()
+  })
+})
+
+function withInputs(wf: WorkflowDefinition): WorkflowDefinition {
+  const [trigger, ...rest] = wf.nodes
+  return {
+    ...wf,
+    nodes: [
+      {
+        ...trigger,
+        config: {
+          ...(trigger.config as Record<string, unknown>),
+          triggerType: 'manual',
+          inputs: [{ key: 'issue', label: 'Issue', type: 'text' }]
+        } as WorkflowDefinition['nodes'][number]['config']
+      },
+      ...rest
+    ]
+  }
+}
+
+describe('workflows declaring run inputs', () => {
+  it('prompts instead of launching from a global surface', () => {
+    startManualRun(withInputs(makeWorkflow('wf-i', false)))
+    expect(mockExecuteWorkflow).not.toHaveBeenCalled()
+    expect(mockSetPending).toHaveBeenCalledWith('wf-i', undefined)
+  })
+
+  it('prompts from a card menu too, forwarding the card as context', () => {
+    const items = buildWorkflowMenuItems([withInputs(makeWorkflow('wf-i', true))], () => {}, {
+      task: someTask
+    })
+    items[0].onClick()
+
+    expect(mockExecuteWorkflow).not.toHaveBeenCalled()
+    expect(mockSetPending).toHaveBeenCalledWith('wf-i', { task: someTask, source: undefined })
+  })
+
+  it('still launches straight away when no inputs are declared', () => {
+    const items = buildWorkflowMenuItems([makeWorkflow('wf-plain', true)], () => {}, {
+      task: someTask
+    })
+    items[0].onClick()
+
+    expect(mockSetPending).not.toHaveBeenCalled()
+    expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1)
   })
 })

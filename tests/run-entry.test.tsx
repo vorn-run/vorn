@@ -294,3 +294,54 @@ describe('RunEntry', () => {
     expect(getByText(/Step was skipped/)).toBeInTheDocument()
   })
 })
+
+describe('RunEntry — run inputs', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-20T10:00:10Z'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function expand(getByText: (m: RegExp) => HTMLElement): void {
+    fireEvent.click(getByText(/ago|just now|seconds/i).closest('button')!)
+  }
+
+  it('shows what the run was launched with', () => {
+    const exec = makeExec({
+      nodeStates: [makeState()],
+      inputs: { issue: 'gh-42', force: false }
+    })
+    const { getByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
+    expand(getByText)
+
+    expect(getByText('gh-42')).toBeInTheDocument()
+    expect(getByText('false')).toBeInTheDocument()
+  })
+
+  it('clips a large object-valued input instead of flooding the row', () => {
+    const exec = makeExec({
+      nodeStates: [makeState()],
+      inputs: { item: { body: 'x'.repeat(200) } }
+    })
+    const { getByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
+    expand(getByText)
+
+    const rendered = getByText(/^\{"body"/)
+    expect(rendered.textContent!.length).toBeLessThanOrEqual(61)
+    expect(rendered.textContent!.endsWith('…')).toBe(true)
+  })
+
+  it('renders no inputs row for a run that had none', () => {
+    const exec = makeExec({ nodeStates: [makeState()] })
+    const { getByText, queryByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
+    expand(getByText)
+
+    // Queried the same way as the positive case above: the row renders the
+    // value in its own node, so a regex over `key=value` would match nothing
+    // even when the row *is* present and the assertion could never fail.
+    expect(queryByText('gh-42')).not.toBeInTheDocument()
+    expect(queryByText('issue')).not.toBeInTheDocument()
+  })
+})

@@ -539,4 +539,18 @@ describe('LaunchAgentConfigForm — contextual workflow surface', () => {
     )
     expect(container.querySelector('[data-testid="variable-autocomplete"]')).toBeTruthy()
   })
+
+  it('offers the variable picker on a plain manual workflow that declares inputs', () => {
+    // Without inputVars in hasTemplateVars this fell back to RichMarkdownEditor,
+    // leaving no {} button to insert {{inputs.*}} in the agent prompt.
+    const { container } = render(
+      <LaunchAgentConfigForm
+        config={baseConfig()}
+        onChange={vi.fn()}
+        triggerType="manual"
+        inputVars={[{ key: '{{inputs.pr}}', label: 'PR', category: 'inputs' }]}
+      />
+    )
+    expect(container.querySelector('[data-testid="variable-autocomplete"]')).toBeTruthy()
+  })
 })

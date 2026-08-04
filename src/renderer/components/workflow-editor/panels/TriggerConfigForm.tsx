@@ -4,6 +4,7 @@ import { TriggerConfig, TaskStatus } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
 import { ProjectPicker } from '../../ProjectPicker'
 import { ConnectorPollTriggerForm } from './ConnectorPollTriggerForm'
+import { WorkflowInputsEditor } from './WorkflowInputsEditor'
 
 interface Props {
   config: TriggerConfig
@@ -106,47 +107,55 @@ export function TriggerConfigForm({ config, onChange }: Props) {
         (() => {
           const isContextual = config.contextual === true
           return (
-            <button
-              role="switch"
-              aria-checked={isContextual}
-              onClick={() =>
-                onChange({
-                  triggerType: 'manual',
-                  contextual: isContextual ? undefined : true
-                })
-              }
-              className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg border transition-all ${
-                isContextual
-                  ? 'border-white/[0.1] bg-white/[0.04]'
-                  : 'border-white/[0.04] bg-white/[0.02] hover:border-white/[0.1]'
-              }`}
-            >
-              <div
-                className={`w-7 h-[16px] rounded-full transition-colors relative shrink-0 ${
-                  isContextual ? 'bg-gray-400' : 'bg-white/[0.1]'
+            <>
+              <button
+                role="switch"
+                aria-checked={isContextual}
+                onClick={() =>
+                  onChange({
+                    ...config,
+                    contextual: isContextual ? undefined : true
+                  })
+                }
+                className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg border transition-all ${
+                  isContextual
+                    ? 'border-white/[0.1] bg-white/[0.04]'
+                    : 'border-white/[0.04] bg-white/[0.02] hover:border-white/[0.1]'
                 }`}
               >
                 <div
-                  className={`absolute top-[2px] w-[12px] h-[12px] rounded-full bg-white transition-transform ${
-                    isContextual ? 'translate-x-[13px]' : 'translate-x-[2px]'
+                  className={`w-7 h-[16px] rounded-full transition-colors relative shrink-0 ${
+                    isContextual ? 'bg-gray-400' : 'bg-white/[0.1]'
                   }`}
-                />
-              </div>
-              <div className="text-left min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <Zap size={12} className={isContextual ? 'text-gray-300' : 'text-gray-500'} />
-                  <span
-                    className={`text-[12px] ${isContextual ? 'text-gray-200' : 'text-gray-400'}`}
-                  >
-                    Contextual
-                  </span>
+                >
+                  <div
+                    className={`absolute top-[2px] w-[12px] h-[12px] rounded-full bg-white transition-transform ${
+                      isContextual ? 'translate-x-[13px]' : 'translate-x-[2px]'
+                    }`}
+                  />
                 </div>
-                <p className="text-[11px] text-gray-500 mt-0.5">
-                  Run this workflow directly from any card or terminal, against that session's
-                  folder and branch.
-                </p>
-              </div>
-            </button>
+                <div className="text-left min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <Zap size={12} className={isContextual ? 'text-gray-300' : 'text-gray-500'} />
+                    <span
+                      className={`text-[12px] ${isContextual ? 'text-gray-200' : 'text-gray-400'}`}
+                    >
+                      Contextual
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Run this workflow directly from any card or terminal, against that session's
+                    folder and branch.
+                  </p>
+                </div>
+              </button>
+              <WorkflowInputsEditor
+                inputs={config.inputs ?? []}
+                onChange={(inputs) =>
+                  onChange({ ...config, inputs: inputs.length > 0 ? inputs : undefined })
+                }
+              />
+            </>
           )
         })()}
 

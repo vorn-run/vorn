@@ -52,7 +52,7 @@ const killHeadlessSession = vi.fn(() => Promise.resolve())
 /** Resolves once the given session has been created, so tests can await launch. */
 let onSessionCreated: ((id: string) => void) | null = null
 
-const createHeadlessSession = vi.fn(() => {
+const createHeadlessSession = vi.fn((_opts: { initialPrompt?: string }) => {
   const id = `sess-${++sessionSeq}`
   queueMicrotask(() => onSessionCreated?.(id))
   return Promise.resolve({
@@ -266,6 +266,63 @@ describe('run concurrency', () => {
     expect(a.runId).not.toBe(b.runId)
     expect(a.status).toBe('success')
     expect(b.status).toBe('success')
+  })
+
+  it('runs in parallel for manual triggers started with different inputs', async () => {
+    const wf = makeWorkflow()
+    const ids: string[] = []
+    onSessionCreated = (id) => ids.push(id)
+
+    const runA = executeWorkflow(wf, { inputs: { issue: 'gh-7' } })
+    const runB = executeWorkflow(wf, { inputs: { issue: 'gh-8' } })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ids).toHaveLength(2)
+
+    ids.forEach((id) => emitExit(id, 0))
+    const [a, b] = await Promise.all([runA, runB])
+
+    expect(a.runId).not.toBe(b.runId)
+    expect(a.inputs).toEqual({ issue: 'gh-7' })
+    expect(b.inputs).toEqual({ issue: 'gh-8' })
+  })
+
+  it('substitutes run inputs into the agent prompt it launches', async () => {
+    const wf = makeWorkflow('wf-tmpl')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(wf.nodes[1].config as any).prompt = 'Review PR {{inputs.pr_number}} in {{inputs.repo}}'
+    mockState.config.workflows = [wf]
+
+    const run = executeWorkflow(wf, { inputs: { pr_number: 42, repo: 'vorn-run/vorn' } })
+    const sess = await nextSession()
+    // Drive the run to completion before asserting: a throw here would
+    // otherwise leave the run pending and strand the shared fake timers.
+    emitData(sess, 'done')
+    emitExit(sess, 0)
+    await vi.runAllTimersAsync()
+    await run
+
+    const launch = createHeadlessSession.mock.calls.at(-1)?.[0]
+    expect(launch?.initialPrompt).toContain('Review PR 42 in vorn-run/vorn')
+    expect(launch?.initialPrompt).not.toContain('{{inputs.')
+  })
+
+  it('collapses two manual triggers carrying the same inputs into a single run', async () => {
+    const wf = makeWorkflow()
+    const ids: string[] = []
+    onSessionCreated = (id) => ids.push(id)
+
+    // Key order differs, but the parameters are the same trigger.
+    const first = executeWorkflow(wf, { inputs: { a: '1', b: '2' } })
+    await vi.advanceTimersByTimeAsync(0)
+    const second = executeWorkflow(wf, { inputs: { b: '2', a: '1' } })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(ids).toHaveLength(1)
+    ids.forEach((id) => emitExit(id, 0))
+
+    const [a, b] = await Promise.all([first, second])
+    expect(b.runId).toBe(a.runId)
   })
 
   it('collapses two identical triggers fired at once into a single run', async () => {

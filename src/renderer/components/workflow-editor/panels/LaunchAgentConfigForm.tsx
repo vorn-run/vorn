@@ -10,6 +10,7 @@ import {
 import { useAppStore } from '../../../stores'
 import {
   StepVariableGroup,
+  TemplateVariable,
   CONTEXT_REF,
   getAvailableContextVars,
   isContextRef
@@ -29,6 +30,7 @@ interface Props {
   onChange: (config: LaunchAgentConfig) => void
   triggerType?: TriggerConfig['triggerType']
   isContextualTrigger?: boolean
+  inputVars?: TemplateVariable[]
   stepGroups?: StepVariableGroup[]
   currentNodeId?: string
   allNodes?: WorkflowNode[]
@@ -48,6 +50,7 @@ export function LaunchAgentConfigForm({
   onChange,
   triggerType,
   isContextualTrigger = false,
+  inputVars = [],
   stepGroups = [],
   currentNodeId,
   allNodes
@@ -114,7 +117,8 @@ export function LaunchAgentConfigForm({
   const worktreeMode = getWorktreeMode(config)
   const promptSource = config.taskId ? 'task' : config.taskFromQueue ? 'queue' : 'inline'
   const isTaskTrigger = triggerType === 'taskCreated' || triggerType === 'taskStatusChanged'
-  const hasTemplateVars = stepGroups.length > 0 || isTaskTrigger || isContextualTrigger
+  const hasTemplateVars =
+    stepGroups.length > 0 || isTaskTrigger || isContextualTrigger || inputVars.length > 0
   const hasBranch = !isRemote && !!(config.branch && config.branch.trim())
   const isHeadless = !!config.headless
   const canUseFromTask = isTaskTrigger || promptSource === 'task' || promptSource === 'queue'
@@ -151,7 +155,10 @@ export function LaunchAgentConfigForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isContextualTrigger])
 
-  const contextVars = getAvailableContextVars({ triggerType, isContextualTrigger })
+  const contextVars = [
+    ...getAvailableContextVars({ triggerType, isContextualTrigger }),
+    ...inputVars
+  ]
 
   return (
     <div className="space-y-5">
