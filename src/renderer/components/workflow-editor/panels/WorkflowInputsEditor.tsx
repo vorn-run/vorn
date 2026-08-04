@@ -29,6 +29,14 @@ function normalizeKey(raw: string): string {
 }
 
 export function WorkflowInputsEditor({ inputs, onChange }: Props) {
+  // Two inputs sharing a key silently lose one of their values when the run
+  // dialog builds its value map, and make `{{inputs.<key>}}` ambiguous. The
+  // key is flagged rather than auto-renamed: rewriting a key mid-keystroke
+  // would fight anyone typing a name that is briefly a prefix of another.
+  const duplicateKeys = new Set(
+    inputs.map((i) => i.key).filter((key, i, all) => key && all.indexOf(key) !== i)
+  )
+
   const update = (index: number, patch: Partial<WorkflowInputDef>) => {
     onChange(inputs.map((input, i) => (i === index ? { ...input, ...patch } : input)))
   }
@@ -60,7 +68,10 @@ export function WorkflowInputsEditor({ inputs, onChange }: Props) {
                 onChange={(e) => update(index, { key: normalizeKey(e.target.value) })}
                 placeholder="key"
                 aria-label="Input key"
-                className={`${FIELD_CLASS} font-mono flex-1`}
+                aria-invalid={duplicateKeys.has(input.key) || undefined}
+                className={`${FIELD_CLASS} font-mono flex-1 ${
+                  duplicateKeys.has(input.key) ? 'border-red-500/60' : ''
+                }`}
               />
               <button
                 onClick={() => onChange(inputs.filter((_, i) => i !== index))}
@@ -71,6 +82,13 @@ export function WorkflowInputsEditor({ inputs, onChange }: Props) {
                 <Trash2 size={12} />
               </button>
             </div>
+
+            {duplicateKeys.has(input.key) && (
+              <p className="text-[11px] text-red-400">
+                Duplicate key — only one input named <code className="font-mono">{input.key}</code>{' '}
+                will reach the run.
+              </p>
+            )}
 
             <input
               type="text"

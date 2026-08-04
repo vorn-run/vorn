@@ -287,6 +287,44 @@ describe('run concurrency', () => {
     expect(b.inputs).toEqual({ issue: 'gh-8' })
   })
 
+  it('runs in parallel when one context is launched with different inputs', async () => {
+    // The context alone used to decide the fingerprint, so two runs from the
+    // same card with different answers collapsed into one.
+    const wf = makeWorkflow()
+    const ids: string[] = []
+    onSessionCreated = (id) => ids.push(id)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const task = { id: 'task-1', title: 'T' } as any
+    const runA = executeWorkflow(wf, { task, inputs: { issue: 'gh-7' } })
+    const runB = executeWorkflow(wf, { task, inputs: { issue: 'gh-8' } })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ids).toHaveLength(2)
+
+    ids.forEach((id) => emitExit(id, 0))
+    const [a, b] = await Promise.all([runA, runB])
+    expect(a.runId).not.toBe(b.runId)
+  })
+
+  it('still collapses a double-fire of one context with identical inputs', async () => {
+    const wf = makeWorkflow()
+    const ids: string[] = []
+    onSessionCreated = (id) => ids.push(id)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const task = { id: 'task-2', title: 'T' } as any
+    const runA = executeWorkflow(wf, { task, inputs: { issue: 'gh-7' } })
+    const runB = executeWorkflow(wf, { task, inputs: { issue: 'gh-7' } })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ids).toHaveLength(1)
+
+    ids.forEach((id) => emitExit(id, 0))
+    const [a, b] = await Promise.all([runA, runB])
+    expect(a.runId).toBe(b.runId)
+  })
+
   it('substitutes run inputs into the agent prompt it launches', async () => {
     const wf = makeWorkflow('wf-tmpl')
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

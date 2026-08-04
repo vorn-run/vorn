@@ -280,14 +280,17 @@ function persistExecution(execution: WorkflowExecution): void {
  * run its items in parallel while a genuine double-fire collapses to one run.
  */
 function dedupeFingerprint(context?: WorkflowExecutionContext): string {
-  const item = context?.connectorItem
-  if (item) return `item:${item.connectionId}:${item.externalId}`
-  if (context?.task) return `task:${context.task.id}`
-  if (context?.source) return `session:${context.source.id}`
-  // Two manual runs started with different parameters are different triggers.
-  // Without this they would collapse into one and the second would be dropped.
+  // Two runs started with different parameters are different triggers, so the
+  // inputs qualify every fingerprint rather than only the context-less one —
+  // a workflow launched twice from the same card with different answers is
+  // still two distinct runs.
   const inputs = fingerprintInputs(context?.inputs)
-  return inputs ? `manual:${inputs}` : 'manual'
+  const params = inputs ? `:inputs:${inputs}` : ''
+  const item = context?.connectorItem
+  if (item) return `item:${item.connectionId}:${item.externalId}${params}`
+  if (context?.task) return `task:${context.task.id}${params}`
+  if (context?.source) return `session:${context.source.id}${params}`
+  return `manual${params}`
 }
 
 /** Stable serialization of run inputs — key-sorted so object ordering can't

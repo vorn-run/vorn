@@ -46,6 +46,43 @@ describe('WorkflowInputsEditor', () => {
     expect(onChange).toHaveBeenCalledWith([{ key: '_2_pr_num_', label: 'PR', type: 'text' }])
   })
 
+  it('flags a key that collides with another input', () => {
+    // Colliding keys silently lose one value when the run dialog builds its
+    // value map, and make {{inputs.pr}} ambiguous.
+    const { getAllByLabelText, getAllByText } = setup([
+      { key: 'pr', label: 'A', type: 'text' },
+      { key: 'pr', label: 'B', type: 'text' }
+    ])
+    expect(getAllByText(/Duplicate key/)).toHaveLength(2)
+    for (const field of getAllByLabelText('Input key')) {
+      expect(field).toHaveAttribute('aria-invalid', 'true')
+    }
+  })
+
+  it('leaves distinct keys unflagged', () => {
+    const { queryByText, getAllByLabelText } = setup([
+      { key: 'pr', label: 'A', type: 'text' },
+      { key: 'repo', label: 'B', type: 'text' }
+    ])
+    expect(queryByText(/Duplicate key/)).not.toBeInTheDocument()
+    for (const field of getAllByLabelText('Input key')) {
+      expect(field).not.toHaveAttribute('aria-invalid')
+    }
+  })
+
+  it('does not rewrite a key that is briefly a prefix of another while typing', () => {
+    // Auto-renaming on collision would fight anyone typing a longer name.
+    const { getAllByLabelText, onChange } = setup([
+      { key: 'pr', label: 'A', type: 'text' },
+      { key: 'x', label: 'B', type: 'text' }
+    ])
+    fireEvent.change(getAllByLabelText('Input key')[1], { target: { value: 'pr' } })
+    expect(onChange).toHaveBeenCalledWith([
+      { key: 'pr', label: 'A', type: 'text' },
+      { key: 'pr', label: 'B', type: 'text' }
+    ])
+  })
+
   it('removes the right input', () => {
     const { getByLabelText, onChange } = setup([
       ...oneText,

@@ -2,6 +2,7 @@ import { GitBranch } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { ProjectPicker } from './ProjectPicker'
 import { SelectPicker } from './SelectPicker'
+import { parseNumberInput } from '../lib/workflow-inputs'
 import type { WorkflowInputDef } from '../../shared/types'
 
 const INPUT_CLASS =
@@ -48,9 +49,7 @@ export function WorkflowInputFields({ defs, values, onChange }: Props) {
               <input
                 type="number"
                 value={value === '' || value == null ? '' : String(value)}
-                onChange={(e) =>
-                  onChange(def.key, e.target.value === '' ? '' : Number(e.target.value))
-                }
+                onChange={(e) => onChange(def.key, parseNumberInput(e.target.value))}
                 placeholder={def.placeholder}
                 aria-label={label}
                 className={INPUT_CLASS}
