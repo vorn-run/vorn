@@ -66,6 +66,9 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
           `expected ${DEDUPE_STRATEGIES.join(' or ')}`
       )
     }
+    if (loose.poll !== undefined && !imperative) {
+      throw new Error(`Trigger ${trigger.type} declares poll but it is not a function`)
+    }
     if (!declarative && !imperative) {
       throw new Error(`Trigger ${trigger.type} is missing a fetch() or poll() implementation`)
     }

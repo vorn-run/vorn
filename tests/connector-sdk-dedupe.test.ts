@@ -56,6 +56,25 @@ describe('declarative triggers', () => {
     ).toThrow(/fetch\(\) and a dedupe strategy together/)
   })
 
+  it('rejects a poll that is not callable rather than crashing at poll time', () => {
+    expect(() =>
+      defineConnector({
+        id: 'x',
+        name: 'X',
+        triggers: [
+          {
+            type: 'a',
+            label: 'A',
+            dedupe: 'timestamp',
+            fetch: () => [],
+            // A plain-JS author gets no type error here.
+            poll: 'later' as unknown as undefined
+          }
+        ]
+      })
+    ).toThrow(/declares poll but it is not a function/)
+  })
+
   it('rejects a misspelled dedupe strategy instead of guessing one', () => {
     expect(() =>
       defineConnector({
@@ -223,6 +242,13 @@ describe('timestamp dedupe', () => {
     await expect(
       runPoll(connector, 'newTicket', {
         cursor: '{"v":1,"s":"timestamp","t":"2026-01-01T00:00:00.000Z","ids":5}',
+        now: () => NOW
+      })
+    ).rejects.toThrow(/missing the fields the "timestamp" strategy needs/)
+
+    await expect(
+      runPoll(connector, 'newTicket', {
+        cursor: '{"v":1,"s":"timestamp","t":"2026-01-01T00:00:00.000Z","ids":[1]}',
         now: () => NOW
       })
     ).rejects.toThrow(/missing the fields the "timestamp" strategy needs/)

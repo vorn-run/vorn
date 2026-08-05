@@ -249,6 +249,9 @@ function walkPath(root: unknown, path: string | undefined): unknown {
   let current: unknown = root
   for (const segment of path.split('.')) {
     if (current == null || typeof current !== 'object') return undefined
+    // Own properties only: a path like `constructor.name` would otherwise
+    // resolve against Object.prototype and quietly yield a real-looking value.
+    if (!Object.prototype.hasOwnProperty.call(current, segment)) return undefined
     current = (current as Record<string, unknown>)[segment]
   }
   return current

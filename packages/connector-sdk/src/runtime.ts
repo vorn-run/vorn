@@ -43,9 +43,10 @@ export async function runPoll(
     now
   }
 
-  const outcome = trigger.poll
-    ? await trigger.poll(context)
-    : await pollWithDedupe(trigger, context)
+  const outcome =
+    typeof trigger.poll === 'function'
+      ? await trigger.poll(context)
+      : await pollWithDedupe(trigger, context)
   if (!outcome || !Array.isArray(outcome.items)) {
     throw new Error(`Trigger ${triggerType} did not return an items array`)
   }

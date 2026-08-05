@@ -215,6 +215,13 @@ describe('pollMcpConnection', () => {
       expect(result.nextCursor).toBe('c2')
     })
 
+    it('ignores a cursor path that only resolves through the prototype chain', async () => {
+      toolReturns({ items: [] })
+      const result = await pollMcpConnection(cursorConn({ cursorPath: 'constructor.name' }), 'c1')
+      // Without an own-property check this would store "Object" as the cursor.
+      expect(result.nextCursor).toBe('c1')
+    })
+
     it('reads the next cursor from a configured cursorPath', async () => {
       toolReturns({ items: [], paging: { next: 'c9' } })
       const result = await pollMcpConnection(cursorConn({ cursorPath: 'paging.next' }))

@@ -47,7 +47,9 @@ function decodeCursor<S extends DedupeStrategy>(
   // rather than somewhere further in with an unrelated error.
   const wellFormed =
     state.s === 'timestamp'
-      ? typeof state.t === 'string' && Array.isArray(state.ids)
+      ? typeof state.t === 'string' &&
+        Array.isArray(state.ids) &&
+        state.ids.every((id) => typeof id === 'string')
       : typeof state.id === 'string'
   if (!wellFormed) {
     throw new Error(`Cursor is missing the fields the "${strategy}" strategy needs: ${cursor}`)
