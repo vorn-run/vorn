@@ -256,9 +256,17 @@ jobs:
           fi
           [ -f dist/latest-linux.yml ] && gh release upload "$tag" dist/latest-linux.yml --clobber
 
-  publish-mcp:
+  publish-npm:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: '@vornrun/mcp'
+            directory: packages/mcp
+          - name: '@vornrun/connector-sdk'
+            directory: packages/connector-sdk
     steps:
       - uses: actions/checkout@v7
 
@@ -279,16 +287,16 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
-      - name: Sync MCP version from tag
+      - name: Sync version from tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          cd packages/mcp && npm pkg set version="$VERSION"
+          cd "${{ matrix.directory }}" && npm pkg set version="$VERSION"
 
-      - name: Build MCP package
-        run: yarn workspace @vornrun/mcp build
+      - name: Build package
+        run: yarn workspace ${{ matrix.name }} build
 
       - name: Publish to npm
-        working-directory: packages/mcp
+        working-directory: ${{ matrix.directory }}
         run: |
           VERSION=$(node -p 'require("./package.json").version')
           TAG="${GITHUB_REF_NAME}"
@@ -299,12 +307,12 @@ jobs:
             NPM_TAG="beta"
           fi
 
-          PUBLISHED=$(npm view @vornrun/mcp version 2>/dev/null || echo "none")
+          PUBLISHED=$(npm view "${{ matrix.name }}@$VERSION" version 2>/dev/null || echo "none")
           if [ "$VERSION" = "$PUBLISHED" ]; then
             echo "Version $VERSION already published, skipping"
           else
             yarn npm publish --access public --tag "$NPM_TAG"
-            echo "Published @vornrun/mcp@$VERSION with dist-tag '$NPM_TAG'"
+            echo "Published ${{ matrix.name }}@$VERSION with dist-tag '$NPM_TAG'"
           fi
         env:
           YARN_NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
