@@ -532,6 +532,11 @@ const api = {
   ): Promise<{ ok: boolean; count?: number; error?: string }> =>
     ipcRenderer.invoke(IPC.CONNECTION_REFRESH_MCP_TOOLS, connectionId),
 
+  probeSdkConnector: (
+    request: import('../../packages/shared/src/types').SdkProbeRequest
+  ): Promise<import('../../packages/shared/src/types').SdkProbeResult> =>
+    ipcRenderer.invoke(IPC.CONNECTOR_PROBE_SDK, request),
+
   upsertTaskFromItem: (params: {
     connectionId: string
     item: import('../../packages/shared/src/types').ConnectorItemContext

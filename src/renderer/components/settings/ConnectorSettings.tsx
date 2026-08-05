@@ -25,6 +25,10 @@ import type {
   WorkflowDefinition
 } from '../../../shared/types'
 import { schemaProperties, schemaTypeHint } from '../../../shared/json-schema-utils'
+import { SdkConnectorForm } from './SdkConnectorForm'
+
+/** Connector id the generic MCP stdio connection registers under. */
+const MCP_CONNECTOR_ID = 'mcp'
 
 interface ConnectorInfo {
   id: string
@@ -99,7 +103,8 @@ export function ConnectorSettings() {
   }, [])
 
   useEffect(() => {
-    load()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: loads connectors from the main process on mount
+    void load()
   }, [load])
 
   const findSeededWorkflows = (conn: SourceConnection): WorkflowDefinition[] => {
@@ -423,6 +428,11 @@ function AddConnectionForm({
   const projects = useAppStore((s) => s.config?.projects || [])
   const manifest = connector.manifest
   const usesRepoDetect = connector.id === 'github'
+  // An MCP connection is either a connector package that describes itself or
+  // a raw server the user wires up by hand. The first covers most cases, so
+  // it leads.
+  const isMcp = connector.id === MCP_CONNECTOR_ID
+  const [fromPackage, setFromPackage] = useState(isMcp)
 
   const [selectedProject, setSelectedProject] = useState(projects[0]?.name || '')
   const [detectedRepo, setDetectedRepo] = useState<{
@@ -443,8 +453,10 @@ function AddConnectionForm({
     if (!usesRepoDetect) return
     const project = projects.find((p) => p.name === selectedProject)
     if (!project) return
+    /* eslint-disable react-hooks/set-state-in-effect -- intentional: marks detection in flight before querying the main process */
     setDetecting(true)
     setDetectedRepo(null)
+    /* eslint-enable react-hooks/set-state-in-effect */
     window.api.detectRepo(project.path).then((result) => {
       setDetectedRepo(result)
       setDetecting(false)
@@ -521,108 +533,135 @@ function AddConnectionForm({
         <h3 className="text-sm font-medium text-gray-200">Connect {connector.name}</h3>
       </div>
 
-      <div className="space-y-3">
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Project</label>
-          <select
-            value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
-            className="w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none"
-          >
-            {projects.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+      {isMcp && (
+        <div className="flex gap-1 mb-3">
+          {[
+            { key: true, label: 'From a package' },
+            { key: false, label: 'Manual setup' }
+          ].map((tab) => (
+            <button
+              key={String(tab.key)}
+              onClick={() => setFromPackage(tab.key)}
+              className={`px-3 py-1 text-xs rounded-sm transition-colors ${
+                fromPackage === tab.key
+                  ? 'bg-white/[0.1] text-gray-200'
+                  : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
+      )}
 
-        {usesRepoDetect && (
-          <>
-            <div className="text-xs">
-              {detecting && <span className="text-gray-500">Detecting repository...</span>}
-              {detectedRepo && (
-                <span className="text-green-400 flex items-center gap-1">
-                  <Check size={12} /> Detected: {detectedRepo.owner}/{detectedRepo.repo}
-                </span>
-              )}
-              {!detecting && !detectedRepo && selectedProject && (
-                <span className="text-amber-400">
-                  No GitHub repo detected. Enter the repo manually below.
-                </span>
-              )}
-            </div>
-
-            {/* Manual fallback — only visible when auto-detect failed. Covers
-                GH Enterprise, non-standard remotes, and detached repos. */}
-            {!detecting && !detectedRepo && (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Owner</label>
-                  <input
-                    type="text"
-                    value={manualRepo.owner}
-                    onChange={(e) => setManualRepo((prev) => ({ ...prev, owner: e.target.value }))}
-                    placeholder="e.g. octocat"
-                    className="w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Repository</label>
-                  <input
-                    type="text"
-                    value={manualRepo.repo}
-                    onChange={(e) => setManualRepo((prev) => ({ ...prev, repo: e.target.value }))}
-                    placeholder="e.g. hello-world"
-                    className="w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none"
-                  />
-                </div>
-              </div>
-            )}
-          </>
-        )}
-
-        {(manifest.auth ?? []).map((field) => (
-          <DynamicField
-            key={field.key}
-            field={field}
-            value={auth[field.key] || ''}
-            onChange={(v) => setAuth((prev) => ({ ...prev, [field.key]: v }))}
-          />
-        ))}
-
-        {(manifest.taskFilters || []).map((field) => (
-          <DynamicField
-            key={field.key}
-            field={field}
-            value={filters[field.key] || ''}
-            onChange={(v) => setFilters((prev) => ({ ...prev, [field.key]: v }))}
-          />
-        ))}
-
-        {error && (
-          <div className="text-[11px] text-red-400 flex items-start gap-1">
-            <AlertCircle size={12} className="mt-0.5 shrink-0" />
-            <span>{error}</span>
+      {isMcp && fromPackage ? (
+        <SdkConnectorForm onDone={onDone} onCancel={onCancel} />
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Project</label>
+            <select
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              className="w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none"
+            >
+              {projects.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
-        )}
 
-        <div className="flex gap-2 pt-1">
-          <button
-            onClick={handleSave}
-            disabled={saving || !canSave}
-            className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50"
-          >
-            {saving ? 'Connecting...' : 'Connect'}
-          </button>
-          <button
-            onClick={onCancel}
-            className="px-4 py-1.5 text-sm text-gray-500 hover:text-gray-300 transition-colors"
-          >
-            Cancel
-          </button>
+          {usesRepoDetect && (
+            <>
+              <div className="text-xs">
+                {detecting && <span className="text-gray-500">Detecting repository...</span>}
+                {detectedRepo && (
+                  <span className="text-green-400 flex items-center gap-1">
+                    <Check size={12} /> Detected: {detectedRepo.owner}/{detectedRepo.repo}
+                  </span>
+                )}
+                {!detecting && !detectedRepo && selectedProject && (
+                  <span className="text-amber-400">
+                    No GitHub repo detected. Enter the repo manually below.
+                  </span>
+                )}
+              </div>
+
+              {/* Manual fallback — only visible when auto-detect failed. Covers
+                GH Enterprise, non-standard remotes, and detached repos. */}
+              {!detecting && !detectedRepo && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Owner</label>
+                    <input
+                      type="text"
+                      value={manualRepo.owner}
+                      onChange={(e) =>
+                        setManualRepo((prev) => ({ ...prev, owner: e.target.value }))
+                      }
+                      placeholder="e.g. octocat"
+                      className="w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Repository</label>
+                    <input
+                      type="text"
+                      value={manualRepo.repo}
+                      onChange={(e) => setManualRepo((prev) => ({ ...prev, repo: e.target.value }))}
+                      placeholder="e.g. hello-world"
+                      className="w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {(manifest.auth ?? []).map((field) => (
+            <DynamicField
+              key={field.key}
+              field={field}
+              value={auth[field.key] || ''}
+              onChange={(v) => setAuth((prev) => ({ ...prev, [field.key]: v }))}
+            />
+          ))}
+
+          {(manifest.taskFilters || []).map((field) => (
+            <DynamicField
+              key={field.key}
+              field={field}
+              value={filters[field.key] || ''}
+              onChange={(v) => setFilters((prev) => ({ ...prev, [field.key]: v }))}
+            />
+          ))}
+
+          {error && (
+            <div className="text-[11px] text-red-400 flex items-start gap-1">
+              <AlertCircle size={12} className="mt-0.5 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={handleSave}
+              disabled={saving || !canSave}
+              className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50"
+            >
+              {saving ? 'Connecting...' : 'Connect'}
+            </button>
+            <button
+              onClick={onCancel}
+              className="px-4 py-1.5 text-sm text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
