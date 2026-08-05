@@ -77,13 +77,81 @@ export interface PollOutcome {
   hasMore?: boolean
 }
 
-export interface TriggerDefinition {
+/**
+ * How the SDK decides which fetched items are new.
+ *
+ * - `timestamp` — for sources that expose a reliable "last changed" field and
+ *   can filter on it. Handles the boundary case where several items share the
+ *   newest timestamp, which is the classic source of both duplicates and
+ *   silently dropped items.
+ * - `lastItem` — for feeds that return newest-first with no dependable
+ *   timestamp. The cursor is the newest id already delivered.
+ */
+export type DedupeStrategy = 'timestamp' | 'lastItem'
+
+/**
+ * What a declarative trigger's `fetch` receives. Deliberately smaller than
+ * {@link PollContext}: cursor encoding, ordering, windowing and de-duplication
+ * are the SDK's job, so the author only has to answer "what is there now?".
+ */
+export interface FetchContext {
+  config: ConnectorConfig
+  /**
+   * With `dedupe: 'timestamp'`, everything changed at or after this instant is
+   * worth returning. Absent on the very first poll. Returning a little too
+   * much is safe — the SDK drops what was already delivered.
+   */
+  since?: string
+  /**
+   * With `dedupe: 'lastItem'`, the newest id already delivered. Absent on the
+   * very first poll. Return the feed newest-first and the SDK will stop there.
+   */
+  lastItemId?: string
+  /** Upper bound on items worth returning in one call. */
+  limit?: number
+  /** Injectable clock so tests are deterministic. */
+  now(): string
+}
+
+interface TriggerBase {
   /** Event key, e.g. `workItemCreated`. Becomes the `poll_<type>` MCP tool. */
   type: string
   label: string
   description?: string
-  poll(context: PollContext): Promise<PollOutcome> | PollOutcome
+  /**
+   * Representative items. `vorn-connector check` replays these through the
+   * real dedupe pipeline, so a connector can be verified before anyone has
+   * credentials for it.
+   */
+  sample?: ConnectorItem[]
 }
+
+/**
+ * A trigger is either declarative or hand-written, never both — expressed as a
+ * union so the invalid combinations are a type error at authoring time rather
+ * than a throw when the connector is first loaded.
+ */
+export type TriggerDefinition = TriggerBase &
+  (
+    | {
+        /**
+         * Declarative polling: return what the source has and let the SDK
+         * handle cursors and de-duplication.
+         */
+        dedupe: DedupeStrategy
+        fetch(context: FetchContext): Promise<ConnectorItem[]> | ConnectorItem[]
+        poll?: never
+      }
+    | {
+        /**
+         * Full control over cursors and paging. Use only when the source's
+         * paging cannot be expressed as "give me everything since X".
+         */
+        poll(context: PollContext): Promise<PollOutcome> | PollOutcome
+        dedupe?: never
+        fetch?: never
+      }
+  )
 
 export interface ActionInputField {
   key: string
@@ -114,6 +182,12 @@ export interface ActionDefinition {
   type: string
   label: string
   description?: string
+  /**
+   * Whether repeating the call with the same arguments is safe. Surfaced in
+   * the MCP tool description, because an agent retrying a failed step has no
+   * other way to know whether it is about to create a second issue.
+   */
+  idempotent?: boolean
   inputs?: ActionInputField[]
   outputs?: ActionOutputField[]
   run(

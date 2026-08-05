@@ -44,8 +44,21 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
     if (!KEY_PATTERN.test(trigger.type ?? '')) {
       throw new Error(`Trigger type "${trigger.type}" must start with a letter and be url-safe`)
     }
-    if (typeof trigger.poll !== 'function') {
-      throw new Error(`Trigger ${trigger.type} is missing a poll() implementation`)
+    // `TriggerDefinition` already rules these out for TypeScript authors; the
+    // checks stay for plain-JS connectors, where the union buys nothing.
+    const loose = trigger as { dedupe?: unknown; fetch?: unknown; poll?: unknown }
+    const declarative = typeof loose.fetch === 'function'
+    const imperative = typeof loose.poll === 'function'
+    if (declarative && imperative) {
+      throw new Error(`Trigger ${trigger.type} declares both fetch() and poll(); pick one`)
+    }
+    if (declarative !== (loose.dedupe !== undefined)) {
+      throw new Error(
+        `Trigger ${trigger.type} needs fetch() and a dedupe strategy together, not one alone`
+      )
+    }
+    if (!declarative && !imperative) {
+      throw new Error(`Trigger ${trigger.type} is missing a fetch() or poll() implementation`)
     }
   }
   for (const action of actions) {

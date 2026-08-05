@@ -141,10 +141,19 @@ export function createConnectorServer(
   }
 
   for (const action of connector.actions) {
+    const base = action.description ?? `${action.label} in ${connector.name}`
+    // An agent retrying a failed step has no other way to know whether it is
+    // about to create a second issue.
+    const retryHint =
+      action.idempotent === undefined
+        ? ''
+        : action.idempotent
+          ? ' Safe to retry: repeating this call with the same arguments has no additional effect.'
+          : ' Not idempotent: repeating this call performs the operation again.'
     server.registerTool(
       action.type,
       {
-        description: action.description ?? `${action.label} in ${connector.name}`,
+        description: `${base}${retryHint}`,
         inputSchema: inputShape(action.inputs ?? []),
         outputSchema: outputSchema(action.outputs ?? [])
       },

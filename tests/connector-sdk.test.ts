@@ -68,7 +68,7 @@ describe('defineConnector', () => {
         name: 'Acme',
         triggers: [{ type: 'a', label: 'A' } as never]
       })
-    ).toThrow(/missing a poll\(\)/)
+    ).toThrow(/missing a fetch\(\) or poll\(\)/)
   })
 
   it('rejects duplicate config keys', () => {

@@ -217,6 +217,8 @@ interface McpPollConfig {
   timestampField?: string
   titleField?: string
   urlField?: string
+  cursorArg?: string
+  cursorPath?: string
 }
 
 function readPollConfig(conn: SourceConnection): McpPollConfig {
@@ -232,7 +234,9 @@ function readPollConfig(conn: SourceConnection): McpPollConfig {
     idField: str(f.idField),
     timestampField: str(f.timestampField),
     titleField: str(f.titleField),
-    urlField: str(f.urlField)
+    urlField: str(f.urlField),
+    cursorArg: str(f.cursorArg),
+    cursorPath: str(f.cursorPath)
   }
 }
 
@@ -264,11 +268,20 @@ function fieldString(item: Record<string, unknown>, field: string | undefined): 
  * flattened filters object) can't provide. The scheduler special-cases MCP to
  * call this directly.
  *
- * Cursor semantics mirror the GitHub connector: when a `timestampField` is
- * configured, only items with `timestampField > cursor` are emitted and the
- * cursor advances to the newest timestamp seen. Without a `timestampField`
- * every item is emitted each poll; that stays at-most-once because
- * `createTaskFromItem` upserts by `externalId` (from `idField`).
+ * Cursor semantics come in two flavours. When `cursorArg` is configured the
+ * tool owns dedup: the stored cursor is passed through as that argument, every
+ * returned item is emitted, and the next cursor is read back from the result
+ * (`cursorPath`, default `nextCursor`). Connectors built with
+ * `@vornrun/connector-sdk` are wired this way, so their dedupe strategy — not
+ * this function — decides what is new.
+ *
+ * Otherwise Vorn dedupes client-side, mirroring the GitHub connector: with a
+ * `timestampField` configured, only items with `timestampField >= cursor` are
+ * emitted and the cursor advances to the newest timestamp seen. Items exactly
+ * at the cursor are re-emitted so none are lost at the boundary; that stays
+ * at-most-once because the inbox ignores event ids it already holds. Without a
+ * `timestampField` every item is emitted each poll; that stays at-most-once
+ * because `createTaskFromItem` upserts by `externalId` (from `idField`).
  */
 export async function pollMcpConnection(
   conn: SourceConnection,
@@ -296,6 +309,10 @@ export async function pollMcpConnection(
     }
   }
 
+  if (cfg.cursorArg && cursor !== undefined) {
+    pollArgs = { ...pollArgs, [cfg.cursorArg]: cursor }
+  }
+
   const result = await invokeMcpTool(conn, cfg.pollTool, pollArgs)
   if (!result.success) {
     throw new Error(result.error || `MCP poll tool ${cfg.pollTool} failed`)
@@ -315,13 +332,21 @@ export async function pollMcpConnection(
   let newest = cursor
   for (const item of items) {
     const ts = fieldString(item, cfg.timestampField)
-    if (cfg.timestampField) {
+    // When the tool takes the cursor it has already dropped what we have seen,
+    // so filtering again here would only re-apply a weaker rule to its output.
+    if (cfg.timestampField && !cfg.cursorArg) {
       // With ordering configured, an item that lacks the timestamp field can't
       // be placed relative to the cursor — emit it and it would re-fire every
       // poll. Skip it rather than churn.
       if (ts === undefined) continue
-      // Skip items at or before the cursor.
-      if (cursor && ts <= cursor) continue
+      // Skip items strictly before the cursor. Items *at* the cursor are
+      // re-emitted on purpose: the newest timestamp is usually shared by
+      // several items, and skipping them would drop the ones that arrived
+      // after this cursor was recorded — permanently, since nothing re-reads
+      // that window. Re-emission is free because the inbox insert ignores an
+      // event id it has already stored. The GitHub connector rewinds its
+      // cursor by a second for the same reason.
+      if (cursor && ts < cursor) continue
     }
     if (ts !== undefined && (newest === undefined || ts > newest)) newest = ts
 
@@ -347,6 +372,11 @@ export async function pollMcpConnection(
 
   // Advance the cursor only when we can order by timestamp; otherwise leave it
   // unset and rely on upsert dedup.
+  if (cfg.cursorArg) {
+    const next = walkPath(result.output, cfg.cursorPath ?? 'nextCursor')
+    const nextCursor = typeof next === 'string' && next ? next : cursor
+    return nextCursor === undefined ? { events } : { events, nextCursor }
+  }
   return cfg.timestampField ? { events, nextCursor: newest ?? cursor } : { events }
 }
 
@@ -460,6 +490,25 @@ export const mcpConnector: VornConnector = {
           type: 'text',
           placeholder: 'url',
           description: 'Field mapped into the created task URL.'
+        },
+        {
+          key: 'cursorArg',
+          label: 'Cursor argument',
+          type: 'text',
+          placeholder: 'cursor',
+          description:
+            'Tool argument that receives the previous cursor. Set this when the tool tracks ' +
+            'what it has already returned; Vorn then fires for every item it hands back ' +
+            'instead of filtering by timestamp field.'
+        },
+        {
+          key: 'cursorPath',
+          label: 'Cursor path',
+          type: 'text',
+          placeholder: 'nextCursor',
+          description:
+            'Dotted path to the next cursor in the tool result. Only used with a cursor ' +
+            'argument. Blank = `nextCursor`.'
         }
       ],
       triggers: [

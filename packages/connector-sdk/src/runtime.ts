@@ -1,3 +1,4 @@
+import { pollWithDedupe } from './dedupe'
 import { normalizeItems } from './normalize'
 import type { Connector, ConnectorConfig, NormalizedItem, PollContext } from './types'
 
@@ -42,7 +43,9 @@ export async function runPoll(
     now
   }
 
-  const outcome = await trigger.poll(context)
+  const outcome = trigger.poll
+    ? await trigger.poll(context)
+    : await pollWithDedupe(trigger, context)
   if (!outcome || !Array.isArray(outcome.items)) {
     throw new Error(`Trigger ${triggerType} did not return an items array`)
   }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
+import { checkConnector, formatFindings } from './check'
 import { resolveConfig } from './define'
 import { runPoll } from './runtime'
 import { connectionSetup, connectorManifest } from './setup'
@@ -12,12 +13,14 @@ const USAGE = `vorn-connector <command> <module> [options]
 Commands:
   manifest <module>             Print the connector manifest as JSON
   setup <module> [trigger]      Print the Vorn connection settings to paste
+  check <module>                Verify the connector against Vorn's contract
   poll <module> <trigger>       Run one poll against the current environment
   serve <module>                Serve the connector on stdio (what Vorn runs)
 
 Options:
   --since <iso>                 Lower bound passed to poll
-  --limit <n>                   Maximum items to request`
+  --limit <n>                   Maximum items to request
+  --live                        Let check poll for real using the environment`
 
 export interface CliDeps {
   load(modulePath: string): Promise<unknown>
@@ -25,16 +28,24 @@ export interface CliDeps {
   env?: NodeJS.ProcessEnv
 }
 
+/** Flags that stand alone; everything else must be followed by a value. */
+const BOOLEAN_FLAGS = new Set(['live'])
+
 function parseFlags(args: string[]): Record<string, string> {
   const flags: Record<string, string> = {}
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]
     if (!arg.startsWith('--')) continue
+    const name = arg.slice(2)
+    if (BOOLEAN_FLAGS.has(name)) {
+      flags[name] = 'true'
+      continue
+    }
     const value = args[index + 1]
     if (value === undefined || value.startsWith('--')) {
       throw new Error(`Missing value for ${arg}`)
     }
-    flags[arg.slice(2)] = value
+    flags[name] = value
     index++
   }
   return flags
@@ -90,6 +101,23 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         }
       }
       return 0
+    }
+
+    case 'check': {
+      const findings = await checkConnector(connector, {
+        ...(flags.live === 'true' && {
+          live: true,
+          config: resolveConfig(connector, deps.env ?? process.env)
+        })
+      })
+      const errors = findings.filter((item) => item.level === 'error')
+      if (findings.length > 0) deps.write(formatFindings(findings))
+      deps.write(
+        errors.length > 0
+          ? `\n${errors.length} error(s), ${findings.length - errors.length} warning(s)`
+          : `\n${connector.id} passed with ${findings.length} warning(s)`
+      )
+      return errors.length > 0 ? 1 : 0
     }
 
     case 'poll': {
