@@ -261,12 +261,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Serialised, in order: a dependent must not reach the registry before
+      # the package it depends on, or installing it fails until the other
+      # lands. The matrix runs top to bottom at max-parallel 1.
+      max-parallel: 1
       matrix:
         include:
-          - name: '@vornrun/mcp'
-            directory: packages/mcp
           - name: '@vornrun/connector-sdk'
             directory: packages/connector-sdk
+          - name: '@vornrun/mcp'
+            directory: packages/mcp
           - name: '@vornrun/connector-kusto'
             directory: packages/connector-kusto
     steps:
@@ -289,10 +293,16 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
+      # Every publishable package, not just the one being published: a
+      # `workspace:^` dependency is rewritten at pack time using the version
+      # found in the workspace, so bumping only the matrix package would ship
+      # a dependency range pointing at the version we are replacing.
       - name: Sync version from tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          cd "${{ matrix.directory }}" && npm pkg set version="$VERSION"
+          for dir in packages/connector-sdk packages/mcp packages/connector-kusto; do
+            (cd "$dir" && npm pkg set version="$VERSION")
+          done
 
       - name: Build package
         run: yarn workspace ${{ matrix.name }} build
