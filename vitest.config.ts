@@ -14,6 +14,7 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'text-summary', 'lcov'],
       include: [
+        'packages/connector-sdk/src/**/*.ts',
         'packages/server/src/**/*.ts',
         'packages/shared/src/**/*.ts',
         'src/renderer/lib/**/*.ts',

@@ -4552,6 +4552,19 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@vornrun/connector-sdk@workspace:packages/connector-sdk":
+  version: 0.0.0-use.local
+  resolution: "@vornrun/connector-sdk@workspace:packages/connector-sdk"
+  dependencies:
+    "@modelcontextprotocol/sdk": "npm:^1.29.0"
+    tsup: "npm:^8.5.1"
+    typescript: "npm:^6.0.3"
+    zod: "npm:^4.4.3"
+  bin:
+    vorn-connector: dist/cli.js
+  languageName: unknown
+  linkType: soft
+
 "@vornrun/desktop@workspace:packages/desktop":
   version: 0.0.0-use.local
   resolution: "@vornrun/desktop@workspace:packages/desktop"

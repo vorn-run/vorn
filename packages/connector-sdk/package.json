@@ -1,0 +1,43 @@
+{
+  "name": "@vornrun/connector-sdk",
+  "version": "0.5.1",
+  "description": "Build and share Vorn pull connectors as ordinary npm packages",
+  "type": "module",
+  "license": "MIT",
+  "author": "Javier Canizalez <javier-canizalez@outlook.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vorn-run/vorn.git",
+    "directory": "packages/connector-sdk"
+  },
+  "keywords": [
+    "vorn",
+    "connector",
+    "mcp",
+    "model-context-protocol",
+    "integration"
+  ],
+  "bin": {
+    "vorn-connector": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3"
+  }
+}
