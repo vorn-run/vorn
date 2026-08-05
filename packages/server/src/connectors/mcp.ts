@@ -322,6 +322,8 @@ export async function pollMcpConnection(
     if (UNSAFE_ARG_KEYS.includes(cfg.cursorArg)) {
       throw new Error(`Cursor argument "${cfg.cursorArg}" is not a usable argument name`)
     }
+    // Only overwrite once a cursor is stored, so any value already in
+    // `pollArgs` under this key acts as the seed for the very first poll.
     if (cursor !== undefined) pollArgs = { ...pollArgs, [cfg.cursorArg]: cursor }
   }
 
