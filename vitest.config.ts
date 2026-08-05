@@ -15,12 +15,15 @@ export default defineConfig({
       reporter: ['text', 'text-summary', 'lcov'],
       include: [
         'packages/connector-sdk/src/**/*.ts',
+        'packages/connector-kusto/src/**/*.ts',
         'packages/server/src/**/*.ts',
         'packages/shared/src/**/*.ts',
         'src/renderer/lib/**/*.ts',
         'src/renderer/components/**/*.tsx'
       ],
       exclude: [
+        // Process entry point: starts the stdio server, nothing to assert.
+        'packages/connector-kusto/src/index.ts',
         'packages/server/src/index.ts',
         'packages/server/src/register-methods.ts',
         'packages/server/src/pty-manager.ts',
@@ -44,7 +47,10 @@ export default defineConfig({
     alias: {
       '@shared': path.resolve(__dirname, 'src/shared'),
       '@main': path.resolve(__dirname, 'src/main'),
-      '@renderer': path.resolve(__dirname, 'src/renderer')
+      '@renderer': path.resolve(__dirname, 'src/renderer'),
+      // Connector packages depend on the published SDK. Tests must exercise
+      // the SDK source, not whatever `dist` a previous build left behind.
+      '@vornrun/connector-sdk': path.resolve(__dirname, 'packages/connector-sdk/src/index.ts')
     }
   }
 })
