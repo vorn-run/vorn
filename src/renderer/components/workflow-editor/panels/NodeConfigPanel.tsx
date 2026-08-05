@@ -22,7 +22,7 @@ import {
   CallConnectorActionConfig
 } from '../../../../shared/types'
 import { ConnectorIcon } from '../../ConnectorIcon'
-import { useConnectorIdFor } from '../../../lib/use-connections'
+import { useConnectorIdFor, useConnectionIconFor } from '../../../lib/use-connections'
 import { TriggerConfigForm } from './TriggerConfigForm'
 import { LaunchAgentConfigForm } from './LaunchAgentConfigForm'
 import { ScriptConfigForm } from './ScriptConfigForm'
@@ -110,6 +110,7 @@ export function NodeConfigPanel({
   const connectorConfig =
     node.type === 'callConnectorAction' ? (node.config as CallConnectorActionConfig) : null
   const headerConnectorId = useConnectorIdFor(connectorConfig?.connectionId)
+  const headerConnectorIcon = useConnectionIconFor(connectorConfig?.connectionId)
 
   return (
     <div className="w-[420px] border-l border-white/[0.08] bg-[#1e1e22] flex flex-col h-full overflow-hidden titlebar-no-drag">
@@ -117,6 +118,7 @@ export function NodeConfigPanel({
         {headerConnectorId ? (
           <ConnectorIcon
             connectorId={headerConnectorId}
+            icon={headerConnectorIcon}
             size={14}
             className="text-gray-300 shrink-0"
           />

@@ -153,6 +153,16 @@ export function createKustoConnector(options: KustoConnectorOptions = {}) {
     name: 'Azure Data Explorer',
     ...(options.version && { version: options.version }),
     description: 'Trigger workflows from the rows a KQL query returns.',
+    // A stack of layers over a magnifying glass: stored data being queried.
+    icon: {
+      viewBox: '0 0 24 24',
+      paths: [
+        'M12 2C7.6 2 4 3.6 4 5.5S7.6 9 12 9s8-1.6 8-3.5S16.4 2 12 2zm0 5.5c-3.6 0-6-1.2-6-2s2.4-2 6-2 6 1.2 6 2-2.4 2-6 2z',
+        'M4 9.4v2.1c0 1.9 3.6 3.5 8 3.5.5 0 1 0 1.4-.1a5.6 5.6 0 01.8-1.9c-.7.1-1.5.2-2.2.2-3.6 0-6-1.2-6-2V9.4z',
+        'M4 15.4v2.1C4 19.4 7.6 21 12 21c.3 0 .6 0 .9-.1a5.6 5.6 0 01-1-1.9H12c-3.6 0-6-1.2-6-2v-1.6z',
+        'M17.5 13a4.5 4.5 0 103.1 7.7l1.6 1.6a1 1 0 001.4-1.4l-1.6-1.6A4.5 4.5 0 0017.5 13zm0 2a2.5 2.5 0 110 5 2.5 2.5 0 010-5z'
+      ]
+    },
     config: [
       {
         key: 'cluster',

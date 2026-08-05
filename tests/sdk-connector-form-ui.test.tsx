@@ -227,6 +227,33 @@ describe('SdkConnectorForm', () => {
     expect(arg.name).toBe('Azure Data Explorer: Alerts')
   })
 
+  it('stores the connector glyph on the connection so it is recognizable later', async () => {
+    const icon = { viewBox: '0 0 16 16', paths: ['M1 1h4v4z'] }
+    probeSdkConnector.mockResolvedValue({ ok: true, manifest: { ...MANIFEST, env: [], icon } })
+    const utils = setup()
+    await lookUp(utils)
+
+    // The glyph stands in for the generic check mark once one is available.
+    const drawn = [...utils.container.querySelectorAll('path')].map((p) => p.getAttribute('d'))
+    expect(drawn).toContain('M1 1h4v4z')
+
+    fireEvent.click(utils.getByText('Connect'))
+
+    await waitFor(() => expect(createConnection).toHaveBeenCalled())
+    expect(createConnection.mock.calls[0][0].filters.sdkIcon).toBe(JSON.stringify(icon))
+  })
+
+  it('omits sdkIcon entirely for a connector that ships no glyph', async () => {
+    probeSdkConnector.mockResolvedValue({ ok: true, manifest: { ...MANIFEST, env: [] } })
+    const utils = setup()
+    await lookUp(utils)
+
+    fireEvent.click(utils.getByText('Connect'))
+
+    await waitFor(() => expect(createConnection).toHaveBeenCalled())
+    expect(createConnection.mock.calls[0][0].filters).not.toHaveProperty('sdkIcon')
+  })
+
   it('surfaces a failed connection attempt rather than closing the form', async () => {
     createConnection.mockRejectedValue(new Error('database is locked'))
     probeSdkConnector.mockResolvedValue({ ok: true, manifest: { ...MANIFEST, env: [] } })

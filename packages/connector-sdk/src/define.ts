@@ -1,6 +1,17 @@
 import type { Connector, ConnectorConfig, ConnectorDefinition, DedupeStrategy } from './types'
 
 const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+
+/**
+ * Characters that appear in SVG path data: the command letters, digits, and
+ * the separators and exponent notation a number can use.
+ *
+ * Anything else is rejected here rather than at render time, because the app
+ * drawing this icon has no way to tell a typo from an attempt to break out of
+ * the `d` attribute.
+ */
+const PATH_DATA_PATTERN = /^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$/
+const VIEW_BOX_PATTERN = /^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$/
 const DEDUPE_STRATEGIES: DedupeStrategy[] = ['timestamp', 'lastItem']
 
 function assertUnique(kind: string, keys: string[]): void {
@@ -33,6 +44,24 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
   }
   if (!definition.name?.trim()) {
     throw new Error(`Connector ${definition.id} is missing a name`)
+  }
+
+  if (definition.icon) {
+    const { viewBox, paths } = definition.icon
+    if (!Array.isArray(paths) || paths.length === 0) {
+      throw new Error(`Connector ${definition.id} has an icon with no paths`)
+    }
+    for (const path of paths) {
+      if (typeof path !== 'string' || !PATH_DATA_PATTERN.test(path)) {
+        throw new Error(
+          `Connector ${definition.id} has an icon path that is not SVG path data. ` +
+            `Only path data is accepted, not markup.`
+        )
+      }
+    }
+    if (viewBox !== undefined && !VIEW_BOX_PATTERN.test(viewBox)) {
+      throw new Error(`Connector ${definition.id} has an icon viewBox that is not four numbers`)
+    }
   }
 
   const triggers = definition.triggers ?? []

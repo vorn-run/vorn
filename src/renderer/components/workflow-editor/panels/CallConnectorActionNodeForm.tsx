@@ -7,6 +7,7 @@ import type {
 } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
 import { ConnectorIcon } from '../../ConnectorIcon'
+import { connectionIcon } from '../../../lib/connection-icon'
 import { TEMPLATE_VARIABLES, StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 
@@ -80,7 +81,14 @@ export function CallConnectorActionNodeForm({
           options={connections.map((c) => ({
             value: c.id,
             label: c.name,
-            icon: <ConnectorIcon connectorId={c.connectorId} size={14} className="text-gray-400" />
+            icon: (
+              <ConnectorIcon
+                connectorId={c.connectorId}
+                icon={connectionIcon(c)}
+                size={14}
+                className="text-gray-400"
+              />
+            )
           }))}
           onChange={(v) => onChange({ ...config, connectionId: v, action: '', args: {} })}
           variant="form"

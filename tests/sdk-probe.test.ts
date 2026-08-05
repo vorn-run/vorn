@@ -294,3 +294,71 @@ describe('probeSdkConnector', () => {
     expect(result.ok).toBe(true)
   })
 })
+
+describe('probeSdkConnector icon handling', () => {
+  const withIcon = (icon: unknown) => respond({ ...manifest(), icon })
+
+  it('passes through a well-formed icon', async () => {
+    withIcon({ viewBox: '0 0 16 16', paths: ['M1 1h4v4z', 'M8 8l2 2'] })
+    const { probeSdkConnector } = await importProbe()
+
+    const result = await probeSdkConnector({ command: 'npx' })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.manifest.icon).toEqual({ viewBox: '0 0 16 16', paths: ['M1 1h4v4z', 'M8 8l2 2'] })
+  })
+
+  it('defaults the viewBox when the connector omits or malforms it', async () => {
+    withIcon({ viewBox: 'not a viewbox', paths: ['M1 1h4v4z'] })
+    const { probeSdkConnector } = await importProbe()
+
+    const result = await probeSdkConnector({ command: 'npx' })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.manifest.icon?.viewBox).toBe('0 0 24 24')
+  })
+
+  it('drops an icon containing markup rather than path data', async () => {
+    withIcon({ paths: ['M1 1h4v4z', '"/><script>alert(1)</script>'] })
+    const { probeSdkConnector } = await importProbe()
+
+    const result = await probeSdkConnector({ command: 'npx' })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    // The whole icon goes, not just the offending path — a partial glyph
+    // would render as garbage.
+    expect(result.manifest.icon).toBeUndefined()
+  })
+
+  it.each([
+    ['no paths at all', { paths: [] }],
+    ['a non-array paths', { paths: 'M1 1h4v4z' }],
+    ['a non-string path', { paths: [42] }],
+    ['not an object', 'M1 1h4v4z'],
+    ['absurdly many paths', { paths: Array.from({ length: 25 }, () => 'M1 1h4v4z') }],
+    ['an absurdly long path', { paths: ['M'.repeat(8_001)] }]
+  ])('drops an icon with %s', async (_label, icon) => {
+    withIcon(icon)
+    const { probeSdkConnector } = await importProbe()
+
+    const result = await probeSdkConnector({ command: 'npx' })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.manifest.icon).toBeUndefined()
+  })
+
+  it('leaves the connector usable when its icon is rejected', async () => {
+    withIcon({ paths: ['<svg/>'] })
+    const { probeSdkConnector } = await importProbe()
+
+    const result = await probeSdkConnector({ command: 'npx' })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.manifest.triggers).toHaveLength(1)
+  })
+})

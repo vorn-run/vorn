@@ -3,6 +3,7 @@ import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
 import type { SdkConnectorManifest, TaskStatus } from '../../../shared/types'
 import { useAppStore } from '../../stores'
 import { parseLaunchSpec } from './parse-launch-spec'
+import { ConnectorIcon } from '../ConnectorIcon'
 
 const INPUT_CLASS =
   'w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none'
@@ -82,7 +83,10 @@ export function SdkConnectorForm({
         // Recorded so the connection can be re-probed later without the user
         // retyping what they installed.
         sdkConnectorId: manifest.id,
-        sdkVersion: manifest.version
+        sdkVersion: manifest.version,
+        // Carried on the connection because a packaged connector is stored as
+        // an `mcp` connection, so there is no connector id to key a glyph by.
+        ...(manifest.icon && { sdkIcon: JSON.stringify(manifest.icon) })
       }
 
       if (Object.keys(secret).length > 0) {
@@ -152,7 +156,16 @@ export function SdkConnectorForm({
         <>
           <div className="px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-sm">
             <div className="flex items-center gap-1.5 text-sm text-gray-200">
-              <Check size={12} className="text-green-400 shrink-0" />
+              {manifest.icon ? (
+                <ConnectorIcon
+                  connectorId="mcp"
+                  icon={manifest.icon}
+                  size={13}
+                  className="text-gray-200 shrink-0"
+                />
+              ) : (
+                <Check size={12} className="text-green-400 shrink-0" />
+              )}
               <span className="font-medium">{manifest.name}</span>
               <span className="text-[11px] text-gray-500">v{manifest.version}</span>
             </div>

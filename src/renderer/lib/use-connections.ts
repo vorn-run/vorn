@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { SourceConnection } from '../../shared/types'
+import type { SdkConnectorIcon, SourceConnection } from '../../shared/types'
+import { connectionIcon } from './connection-icon'
 
 /**
  * Module-level cache of `window.api.listConnections()` shared across every
@@ -44,6 +45,7 @@ export function useConnections(): SourceConnection[] {
     listeners.add(setValue)
     // If the cache was populated before this component mounted, seed
     // synchronously rather than waiting for the next refresh tick.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: seeds from a cache populated before this component mounted
     if (cache && value !== cache) setValue(cache)
     return () => {
       listeners.delete(setValue)
@@ -59,6 +61,18 @@ export function useConnectorIdFor(connectionId: string | null | undefined): stri
   const connections = useConnections()
   if (!connectionId) return null
   return connections.find((c) => c.id === connectionId)?.connectorId ?? null
+}
+
+/**
+ * Resolve a connectionId → the connector's own glyph, for the nodes and panels
+ * that hold only a connection id. Undefined means "use the built-in icon".
+ */
+export function useConnectionIconFor(
+  connectionId: string | null | undefined
+): SdkConnectorIcon | undefined {
+  const connections = useConnections()
+  if (!connectionId) return undefined
+  return connectionIcon(connections.find((c) => c.id === connectionId))
 }
 
 /** Test hook — drop cached state so unit tests can start clean. */

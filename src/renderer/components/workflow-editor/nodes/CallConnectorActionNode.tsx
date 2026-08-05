@@ -2,7 +2,7 @@ import { Zap } from 'lucide-react'
 import type { CallConnectorActionConfig, NodeExecutionStatus } from '../../../../shared/types'
 import { STATUS_DOT_CLASSES } from '../statusDot'
 import { ConnectorIcon } from '../../ConnectorIcon'
-import { useConnectorIdFor } from '../../../lib/use-connections'
+import { useConnectorIdFor, useConnectionIconFor } from '../../../lib/use-connections'
 
 interface Props {
   label: string
@@ -21,6 +21,7 @@ export function CallConnectorActionNode({
 }: Props) {
   // Uses the shared connections cache — no IPC call per node render.
   const connectorId = useConnectorIdFor(config.connectionId)
+  const icon = useConnectionIconFor(config.connectionId)
 
   return (
     <div
@@ -39,7 +40,12 @@ export function CallConnectorActionNode({
       )}
       <div className="flex items-center gap-2">
         {connectorId ? (
-          <ConnectorIcon connectorId={connectorId} size={14} className="text-gray-400 shrink-0" />
+          <ConnectorIcon
+            connectorId={connectorId}
+            icon={icon}
+            size={14}
+            className="text-gray-400 shrink-0"
+          />
         ) : (
           <Zap size={14} className="text-gray-400 shrink-0" strokeWidth={2} />
         )}

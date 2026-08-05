@@ -16,6 +16,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type {
+  SdkConnectorIcon,
   SdkConnectorManifest,
   SdkEnvVar,
   SdkProbeRequest,
@@ -140,6 +141,37 @@ function manifestPayload(result: unknown): Record<string, unknown> | undefined {
   }
 }
 
+/**
+ * Characters that appear in SVG path data. The SDK rejects anything else at
+ * definition time, but this payload comes from a package the user just named,
+ * so it is checked again here rather than trusted to have used the SDK.
+ */
+const PATH_DATA_PATTERN = /^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$/
+const VIEW_BOX_PATTERN = /^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$/
+/** Enough glyph to be recognizable; past this it is not an icon. */
+const MAX_ICON_PATHS = 24
+const MAX_PATH_LENGTH = 8_000
+
+/**
+ * A malformed icon costs the connector its glyph, nothing more — it must not
+ * fail an otherwise usable install, so this returns undefined rather than
+ * throwing.
+ */
+function toIcon(value: unknown): SdkConnectorIcon | undefined {
+  if (!isRecord(value)) return undefined
+  const paths = Array.isArray(value.paths) ? value.paths : []
+  if (paths.length === 0 || paths.length > MAX_ICON_PATHS) return undefined
+  const safe = paths.filter(
+    (path): path is string =>
+      typeof path === 'string' && path.length <= MAX_PATH_LENGTH && PATH_DATA_PATTERN.test(path)
+  )
+  // Dropping only the bad paths would draw a mangled glyph, so a single
+  // rejected path discards the whole icon.
+  if (safe.length !== paths.length) return undefined
+  const viewBox = str(value.viewBox).trim()
+  return { viewBox: VIEW_BOX_PATTERN.test(viewBox) ? viewBox : '0 0 24 24', paths: safe }
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 
@@ -213,6 +245,8 @@ function toManifest(payload: Record<string, unknown>): SdkConnectorManifest {
     throw new Error(`Connector ${name} reports no triggers and no actions`)
   }
 
+  const icon = toIcon(payload.icon)
+
   log.info(`[sdk-probe] ${id}@${str(payload.version, '0.0.0')}: ${triggers.length} trigger(s)`)
 
   return {
@@ -220,6 +254,7 @@ function toManifest(payload: Record<string, unknown>): SdkConnectorManifest {
     name,
     version: str(payload.version, '0.0.0'),
     ...(typeof payload.description === 'string' && { description: payload.description }),
+    ...(icon && { icon }),
     triggers,
     actions,
     env: [...env.values()]

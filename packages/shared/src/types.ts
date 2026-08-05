@@ -1191,11 +1191,24 @@ export interface SdkTrigger {
   filters: SdkSetupFilters
 }
 
+/**
+ * A connector's own glyph.
+ *
+ * Path data only, never markup: this arrives from a third-party package and is
+ * drawn inside an `<svg>` the renderer owns, so there is nothing for a
+ * connector to inject.
+ */
+export interface SdkConnectorIcon {
+  viewBox: string
+  paths: string[]
+}
+
 export interface SdkConnectorManifest {
   id: string
   name: string
   version: string
   description?: string
+  icon?: SdkConnectorIcon
   triggers: SdkTrigger[]
   actions: Array<{ type: string; label: string; description?: string }>
   /** Union of the environment variables the connector reads. */

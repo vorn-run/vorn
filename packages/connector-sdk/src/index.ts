@@ -19,6 +19,7 @@ export type {
   ConnectorConfig,
   ConnectorConfigField,
   ConnectorDefinition,
+  ConnectorIcon,
   ConnectorItem,
   DedupeStrategy,
   FetchContext,

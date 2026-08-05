@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { useAppStore } from '../../stores'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { ConnectorIcon } from '../ConnectorIcon'
+import { connectionIcon } from '../../lib/connection-icon'
 import {
   Plus,
   Play,
@@ -258,6 +259,7 @@ export function ConnectorSettings() {
                       <span className="w-6 h-6 shrink-0 flex items-center justify-center bg-white/[0.04] rounded-sm">
                         <ConnectorIcon
                           connectorId={conn.connectorId}
+                          icon={connectionIcon(conn)}
                           size={14}
                           className="text-gray-200"
                         />

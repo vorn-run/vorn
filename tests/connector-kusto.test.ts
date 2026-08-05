@@ -335,3 +335,11 @@ describe('kusto connector', () => {
     })
   })
 })
+
+describe('kusto connector icon', () => {
+  it('ships a glyph so the connection is not just another MCP row', () => {
+    const icon = createKustoConnector({ fetch: async () => new Response('{}') }).icon
+    expect(icon?.paths.length).toBeGreaterThan(0)
+    expect(icon?.viewBox).toBe('0 0 24 24')
+  })
+})
