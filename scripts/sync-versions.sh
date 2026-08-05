@@ -11,6 +11,7 @@ PACKAGES=(
   "packages/server"
   "packages/shared"
   "packages/mcp"
+  "packages/connector-sdk"
 )
 
 OUT_OF_SYNC=0

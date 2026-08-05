@@ -1,6 +1,6 @@
 {
   "name": "@vornrun/connector-sdk",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Build and share Vorn pull connectors as ordinary npm packages",
   "type": "module",
   "license": "MIT",
@@ -23,7 +23,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
     "dist",
