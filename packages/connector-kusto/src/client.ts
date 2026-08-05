@@ -11,7 +11,16 @@
 export function normalizeClusterUrl(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, '')
   if (!trimmed) throw new Error('Kusto cluster is empty')
-  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  if (/^http:\/\//i.test(trimmed)) {
+    // Every request carries an Entra bearer token, so plaintext is refused
+    // rather than silently upgraded — a misconfigured cluster should be a
+    // setup error, not a token on the wire.
+    throw new Error(`Kusto cluster must use https, got "${trimmed}"`)
+  }
+  if (/^https:\/\//i.test(trimmed)) return trimmed
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    throw new Error(`Kusto cluster must be a cluster name or an https URL, got "${trimmed}"`)
+  }
   // A bare name is by far the most common way people refer to a cluster, and
   // the regional suffix is not guessable, so only the well-known public form
   // is completed for them.
@@ -52,9 +61,16 @@ export function primaryTable(body: unknown): KustoTable {
   return { columns, rows }
 }
 
-/** Turn a row array into a keyed object using the table's column names. */
+/**
+ * Turn a row array into a keyed object using the table's column names.
+ *
+ * Null-prototype, because the query author picks the column names: on a plain
+ * object a column projected as `__proto__` would set the record's prototype
+ * instead of becoming a property, so the value would vanish from the item and
+ * the record would carry whatever the row supplied.
+ */
 export function rowToRecord(columns: string[], row: unknown[]): Record<string, unknown> {
-  const record: Record<string, unknown> = {}
+  const record: Record<string, unknown> = Object.create(null) as Record<string, unknown>
   columns.forEach((column, index) => {
     record[column] = row[index]
   })

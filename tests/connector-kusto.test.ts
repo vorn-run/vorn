@@ -75,6 +75,16 @@ describe('kusto connector', () => {
     it('rejects an empty cluster', () => {
       expect(() => normalizeClusterUrl('  ')).toThrow(/empty/)
     })
+
+    it('refuses plaintext http, which would put an Entra token on the wire', () => {
+      expect(() => normalizeClusterUrl('http://adx.example.com')).toThrow(/must use https/)
+      expect(() => normalizeClusterUrl('HTTP://adx.example.com')).toThrow(/must use https/)
+    })
+
+    it('refuses a scheme that is not http(s) rather than treating it as a name', () => {
+      // Without this, `file://x` becomes `https://file://x.kusto.windows.net`.
+      expect(() => normalizeClusterUrl('file:///etc/passwd')).toThrow(/cluster name or an https/)
+    })
   })
 
   describe('query parameters', () => {
@@ -87,6 +97,26 @@ describe('kusto connector', () => {
     it('refuses a query that declares its own parameters', () => {
       expect(() => withParameters('declare query_parameters(x:string);\nAlerts')).toThrow(
         /must not declare its own query parameters/
+      )
+    })
+
+    it('sees a declaration hidden behind leading comments and blank lines', () => {
+      // Otherwise the connector prepends a second declaration and Kusto
+      // answers with a syntax error that points nowhere useful.
+      expect(() =>
+        withParameters('// alerts query\n\n  declare query_parameters(x:string);\nAlerts')
+      ).toThrow(/must not declare its own query parameters/)
+    })
+
+    it('leaves a query alone when declare only appears inside its text', () => {
+      // Scanning the whole query would reject legitimate text like this.
+      const query = 'Alerts | where Message has "declare query_parameters"'
+      expect(withParameters(query)).toContain(query)
+    })
+
+    it('keeps leading comments in the query it sends', () => {
+      expect(withParameters('// why this query exists\nAlerts')).toContain(
+        '// why this query exists'
       )
     })
 
@@ -103,7 +133,7 @@ describe('kusto connector', () => {
     })
 
     it('bounds the first poll by the lookback instead of replaying everything', async () => {
-      const { fetchImpl, calls } = respondWith(['Id'], [])
+      const { fetchImpl, calls } = respondWith(['Id', 'Timestamp'], [])
       await harness(fetchImpl, { ...CONFIG, lookback: '2h' }).poll('queryResult')
 
       const params = (calls[0].body.properties as { Parameters: Record<string, string> }).Parameters
@@ -145,7 +175,7 @@ describe('kusto connector', () => {
     })
 
     it('falls back to the id when the title column is absent', async () => {
-      const { fetchImpl } = respondWith(['Id'], [['a1']])
+      const { fetchImpl } = respondWith(['Id', 'Timestamp'], [['a1', NOW]])
       const page = await harness(fetchImpl).poll('queryResult')
       expect(page.items[0].title).toBe('a1')
     })
@@ -157,8 +187,27 @@ describe('kusto connector', () => {
       )
     })
 
+    it('names the missing column when the query does not project a timestamp', async () => {
+      // Dedupe is by timestamp: without it the cursor never advances and
+      // every poll re-delivers the same rows.
+      const { fetchImpl } = respondWith(['Id', 'Name'], [['a1', 'x']])
+      await expect(harness(fetchImpl).poll('queryResult')).rejects.toThrow(
+        /no "Timestamp" column \(got: Id, Name\)/
+      )
+    })
+
+    it('refuses a row whose timestamp is null rather than replaying it forever', async () => {
+      const { fetchImpl } = respondWith(['Id', 'Timestamp'], [['a1', null]])
+      await expect(harness(fetchImpl).poll('queryResult')).rejects.toThrow(/unusable "Timestamp"/)
+    })
+
+    it('refuses a row whose timestamp is not a datetime', async () => {
+      const { fetchImpl } = respondWith(['Id', 'Timestamp'], [['a1', 'whenever']])
+      await expect(harness(fetchImpl).poll('queryResult')).rejects.toThrow(/unusable "Timestamp"/)
+    })
+
     it('refuses a row whose id is null rather than dedupe them together', async () => {
-      const { fetchImpl } = respondWith(['Id'], [[null]])
+      const { fetchImpl } = respondWith(['Id', 'Timestamp'], [[null, NOW]])
       await expect(harness(fetchImpl).poll('queryResult')).rejects.toThrow(/needs a stable id/)
     })
 
@@ -332,6 +381,16 @@ describe('kusto connector', () => {
   describe('rowToRecord', () => {
     it('pads a row that is shorter than the column list', () => {
       expect(rowToRecord(['a', 'b'], [1])).toEqual({ a: 1, b: undefined })
+    })
+
+    it('keeps a __proto__ column as data instead of mutating the record', () => {
+      // The query author picks the column names. On a plain object this
+      // assignment sets the prototype, so the value disappears from the item.
+      const record = rowToRecord(['__proto__', 'Severity'], [{ polluted: true }, 'high'])
+
+      expect(Object.hasOwn(record, '__proto__')).toBe(true)
+      expect({ ...record }['__proto__']).toEqual({ polluted: true })
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined()
     })
   })
 })

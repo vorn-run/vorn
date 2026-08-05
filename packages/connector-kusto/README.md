@@ -31,11 +31,11 @@ of the process and refreshed five minutes before they expire.
 
 | Variable                 | Required | Default     | Meaning                                                    |
 | ------------------------ | -------- | ----------- | ---------------------------------------------------------- |
-| `KUSTO_CLUSTER`          | yes      |             | `help`, `adx.eastus.kusto.windows.net`, or a full URL      |
+| `KUSTO_CLUSTER`          | yes      |             | `help`, `adx.eastus.kusto.windows.net`, or an https URL    |
 | `KUSTO_DATABASE`         | yes      |             | Database to query                                          |
 | `KUSTO_QUERY`            | yes      |             | The KQL to poll                                            |
-| `KUSTO_ID_COLUMN`        | no       | `Id`        | Stable per-row id. Vorn dedupes on it.                     |
-| `KUSTO_TIMESTAMP_COLUMN` | no       | `Timestamp` | Column the poll watermark advances from                    |
+| `KUSTO_ID_COLUMN`        | no       | `Id`        | Stable per-row id. Vorn dedupes on it. Must be projected.  |
+| `KUSTO_TIMESTAMP_COLUMN` | no       | `Timestamp` | Watermark column. Must be projected on every row.          |
 | `KUSTO_TITLE_COLUMN`     | no       | `Title`     | Falls back to the id when absent                           |
 | `KUSTO_URL_COLUMN`       | no       |             | Link to open from the event                                |
 | `KUSTO_LOOKBACK`         | no       | `1h`        | How far back the very first poll looks (`30m`, `2h`, `7d`) |
@@ -64,6 +64,12 @@ and the connector supplies it.
 
 Every column you project is available to workflow templates as
 `{{trigger.item.Host}}`, `{{trigger.item.Severity}}`, and so on.
+
+The id and timestamp columns are the two the query **must** project, and every
+row needs a real datetime in the timestamp column. The watermark advances from
+it, so a row without one could never be marked as delivered and would fire
+again on every poll — the connector reports that as a setup error rather than
+polling forever.
 
 ### Dedupe
 

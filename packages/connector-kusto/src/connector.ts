@@ -39,10 +39,21 @@ export function parseLookback(raw: string | undefined): number {
  * KQL requires `declare query_parameters` to lead the query, so a query that
  * already declares its own would end up with two declaration statements.
  */
+/**
+ * Strip leading `//` comments and blank lines.
+ *
+ * KQL allows a query to open with commentary, so the declaration check has to
+ * look past it — only the leading run is removed, since a `declare` further
+ * in could just as easily be text inside a string literal.
+ */
+function firstStatement(query: string): string {
+  return query.replace(/^(?:[\t ]*(?:\/\/[^\n]*)?\r?\n)*[\t ]*/, '')
+}
+
 export function withParameters(query: string): string {
   const trimmed = query.trim()
   if (!trimmed) throw new Error('KUSTO_QUERY is empty')
-  if (/^\s*declare\s+query_parameters/i.test(trimmed)) {
+  if (/^declare\s+query_parameters/i.test(firstStatement(trimmed))) {
     throw new Error(
       `KUSTO_QUERY must not declare its own query parameters; ` +
         `${SINCE_PARAM} and ${LIMIT_PARAM} are declared for you`
@@ -120,10 +131,20 @@ export function createKustoConnector(options: KustoConnectorOptions = {}) {
       ...(options.fetchImpl && { fetchImpl: options.fetchImpl })
     })
 
+    const available = table.columns.join(', ') || 'no columns'
     if (!table.columns.includes(idColumn)) {
       throw new Error(
-        `Query result has no "${idColumn}" column (got: ${table.columns.join(', ') || 'no columns'}). ` +
+        `Query result has no "${idColumn}" column (got: ${available}). ` +
           `Set KUSTO_ID_COLUMN, or project the column in the query.`
+      )
+    }
+    if (!table.columns.includes(timestampColumn)) {
+      // Dedupe is by timestamp, so without this column every item is missing
+      // `updatedAt`, the cursor never advances, and each poll re-reads an
+      // ever-growing window while re-firing rows it has already delivered.
+      throw new Error(
+        `Query result has no "${timestampColumn}" column (got: ${available}). ` +
+          `Set KUSTO_TIMESTAMP_COLUMN, or project the column in the query.`
       )
     }
 
@@ -136,10 +157,19 @@ export function createKustoConnector(options: KustoConnectorOptions = {}) {
         throw new Error(`Row has an empty "${idColumn}"; every row needs a stable id`)
       }
       const updatedAt = toIsoTimestamp(record[timestampColumn])
+      if (updatedAt === undefined) {
+        // Same failure as a missing column, one row at a time: an item with no
+        // timestamp cannot move the cursor, so it would be re-delivered on
+        // every poll for as long as the query keeps returning it.
+        throw new Error(
+          `Row has an unusable "${timestampColumn}" (${JSON.stringify(record[timestampColumn])}); ` +
+            `dedupe needs a datetime on every row`
+        )
+      }
       return {
         externalId,
         title: text(record[titleColumn]) ?? externalId,
-        ...(updatedAt !== undefined && { updatedAt }),
+        updatedAt,
         ...(urlColumn && { url: text(record[urlColumn]) ?? '' }),
         // Every projected column is exposed, so a workflow can template any
         // field the query selected without the connector knowing about it.
