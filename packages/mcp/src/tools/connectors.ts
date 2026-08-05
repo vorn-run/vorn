@@ -23,6 +23,7 @@ import type {
   SourceConnection
 } from '@vornrun/shared/types'
 import { rpcCall } from '../ws-client'
+import { SDK_FILTER_KEYS, connectionConnectorId } from '@vornrun/shared/types'
 
 /**
  * Starting a connector package downloads it first, so the probe is allowed
@@ -52,12 +53,6 @@ const failure = (message: string) => ({
   content: [{ type: 'text' as const, text: `Error: ${message}` }],
   isError: true
 })
-
-/** The connector a connection belongs to, which for a package is not `mcp`. */
-function connectionConnectorId(conn: SourceConnection): string {
-  const packaged = conn.filters?.sdkConnectorId
-  return typeof packaged === 'string' && packaged !== '' ? packaged : conn.connectorId
-}
 
 export function registerConnectorTools(server: McpServer): void {
   server.tool(
@@ -222,20 +217,6 @@ export function registerConnectorTools(server: McpServer): void {
       if (!result.ok) return failure(result.error)
       const manifest = result.manifest
 
-      // Refused rather than stored in the clear: encryption runs in the
-      // desktop process, which this one cannot reach, so the only way to
-      // accept a secret here would be to write a credential to the database
-      // unprotected.
-      const missingSecret = manifest.env.filter((e) => e.required && e.secret)
-      if (missingSecret.length > 0) {
-        return failure(
-          `${manifest.name} requires the secret ${plural(missingSecret.length, 'value')} ` +
-            `${missingSecret.map((e) => e.name).join(', ')}, which must be entered by a person ` +
-            'in Settings > Connectors so it can be stored in the OS keychain. ' +
-            'Everything else about the connector is ready to install.'
-        )
-      }
-
       const supplied = args.env ?? {}
       const unknown = Object.keys(supplied).filter(
         (name) => !manifest.env.some((e) => e.name === name)
@@ -244,6 +225,22 @@ export function registerConnectorTools(server: McpServer): void {
         return failure(
           `${manifest.name} does not use ${unknown.join(', ')}. It accepts: ` +
             `${manifest.env.map((e) => e.name).join(', ') || '(none)'}.`
+        )
+      }
+
+      // Refused rather than stored in the clear: encryption runs in the
+      // desktop process, which this one cannot reach, so the only way to
+      // accept a secret here would be to write a credential to the database
+      // unprotected. This covers a secret the connector demands and one the
+      // caller offered unasked — an optional secret is no less a credential.
+      const secrets = manifest.env.filter((e) => e.secret && (e.required || supplied[e.name]))
+      if (secrets.length > 0) {
+        return failure(
+          `${manifest.name} uses the secret ${plural(secrets.length, 'value')} ` +
+            `${secrets.map((e) => e.name).join(', ')}, which this tool cannot accept: it runs ` +
+            'outside the desktop process, where encryption lives, so it could only store them ' +
+            'unprotected. They must be entered by a person in Settings > Connectors to reach ' +
+            'the OS keychain. Everything else about the connector is ready to install.'
         )
       }
 
@@ -273,9 +270,9 @@ export function registerConnectorTools(server: McpServer): void {
           command: launch.command,
           args: JSON.stringify(launch.args),
           env: JSON.stringify(supplied),
-          sdkConnectorId: manifest.id,
-          sdkVersion: manifest.version,
-          ...(manifest.icon && { sdkIcon: JSON.stringify(manifest.icon) }),
+          [SDK_FILTER_KEYS.connectorId]: manifest.id,
+          [SDK_FILTER_KEYS.version]: manifest.version,
+          ...(manifest.icon && { [SDK_FILTER_KEYS.icon]: JSON.stringify(manifest.icon) }),
           ...(trigger?.filters ?? {})
         },
         syncIntervalMinutes: args.sync_interval_minutes ?? 5,

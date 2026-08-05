@@ -1,34 +1,7 @@
 import type { SdkConnectorIcon, SourceConnection } from '../../shared/types'
+import { SDK_FILTER_KEYS } from '../../shared/types'
 
-/**
- * The `filters` keys a packaged connector writes about itself.
- *
- * A packaged connector is stored as an `mcp` connection, so everything that
- * distinguishes it from any other MCP server lives in `filters`. Naming the
- * keys once keeps the writer and the several readers from drifting apart,
- * where a mismatch shows up as a silently wrong icon or count rather than an
- * error.
- */
-export const SDK_FILTER_KEYS = {
-  connectorId: 'sdkConnectorId',
-  version: 'sdkVersion',
-  icon: 'sdkIcon'
-} as const
-
-/**
- * Which connector a connection belongs to.
- *
- * For a packaged connector this is not `connectorId` — that is `mcp` for all
- * of them, so counting by it would credit every packaged connector to every
- * other.
- */
-export function connectionConnectorId(connection: {
-  connectorId: string
-  filters: SourceConnection['filters']
-}): string {
-  const packaged = connection.filters?.[SDK_FILTER_KEYS.connectorId]
-  return typeof packaged === 'string' && packaged !== '' ? packaged : connection.connectorId
-}
+export { SDK_FILTER_KEYS, connectionConnectorId } from '../../shared/types'
 
 /**
  * The glyph a connection should show.

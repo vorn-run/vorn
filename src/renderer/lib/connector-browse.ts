@@ -17,6 +17,13 @@ export interface ConnectorListing {
   description?: string
   capabilities: string[]
   category: string
+  /**
+   * Where the row came from, which decides what "Add" can do.
+   *
+   * An `installed` row is a connector we can see connections for but hold no
+   * manifest or package spec for, so there is nothing to open a form against.
+   */
+  source: 'builtin' | 'catalog' | 'installed'
   /** Extra search terms, so a connector is findable by what it talks to. */
   keywords: string[]
   connectedCount: number
@@ -57,6 +64,7 @@ export function buildConnectorListings(
       name: c.name,
       capabilities: c.capabilities,
       category: 'Built in',
+      source: 'builtin' as const,
       keywords: [],
       connectedCount: countFor(c.id)
     })),
@@ -64,6 +72,7 @@ export function buildConnectorListings(
       ...entry,
       key: `catalog:${entry.id}`,
       category: entry.category ?? UNCATEGORIZED,
+      source: 'catalog' as const,
       keywords: entry.keywords ?? [],
       connectedCount: countFor(entry.id),
       catalogItem: entry
@@ -102,6 +111,7 @@ function installedListings(
       name: id,
       capabilities: [],
       category: 'Installed',
+      source: 'installed' as const,
       keywords: [],
       connectedCount: 1,
       icon: connectionIcon(conn)

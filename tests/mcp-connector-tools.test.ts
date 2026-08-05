@@ -320,6 +320,46 @@ describe('install_connector', () => {
     expect(rpcCall).not.toHaveBeenCalledWith('connection:create', expect.anything())
   })
 
+  it('refuses an optional secret the caller offered unasked', async () => {
+    // An optional secret is no less a credential; only checking `required`
+    // would let it through to the database unencrypted.
+    server({
+      'connector:probeSdk': {
+        ok: true,
+        manifest: {
+          ...MANIFEST,
+          env: [...MANIFEST.env, { name: 'KUSTO_APP_KEY', required: false, secret: true }]
+        }
+      }
+    })
+
+    const result = await tools.get('install_connector')!({
+      connector_id: 'kusto',
+      env: { ...ENV, KUSTO_APP_KEY: 'super-secret' }
+    })
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('KUSTO_APP_KEY')
+    expect(rpcCall).not.toHaveBeenCalledWith('connection:create', expect.anything())
+  })
+
+  it('installs when an optional secret is simply left out', async () => {
+    server({
+      'connector:probeSdk': {
+        ok: true,
+        manifest: {
+          ...MANIFEST,
+          env: [...MANIFEST.env, { name: 'KUSTO_APP_KEY', required: false, secret: true }]
+        }
+      }
+    })
+
+    const result = await tools.get('install_connector')!({ connector_id: 'kusto', env: ENV })
+
+    expect(result.isError).toBeFalsy()
+    expect(rpcCall).toHaveBeenCalledWith('connection:create', expect.anything())
+  })
+
   it('names the triggers on offer when asked for one that does not exist', async () => {
     const result = await tools.get('install_connector')!({
       connector_id: 'kusto',

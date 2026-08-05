@@ -132,6 +132,10 @@ export function ConnectorSettings() {
   )
   const visible = useMemo(() => filterConnectorListings(listings, search), [listings, search])
   const groups = useMemo(() => groupConnectorListings(visible), [visible])
+  // Resolved up front so the built-in form is only rendered once there is a
+  // connector to hand it.
+  const addingBuiltIn =
+    adding?.source === 'builtin' ? connectors.find((c) => c.id === adding.id) : undefined
 
   const findSeededWorkflows = (conn: SourceConnection): WorkflowDefinition[] => {
     const prefix = `connector:${conn.id}:`
@@ -265,16 +269,20 @@ export function ConnectorSettings() {
                         <Check size={12} /> {listing.connectedCount} connected
                       </span>
                     )}
-                    <Tooltip
-                      label={listing.catalogItem?.auth ?? `Add a ${listing.name} connection`}
-                    >
-                      <button
-                        onClick={() => setAdding(listing)}
-                        className="text-xs text-gray-400 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+                    {/* An installed row has no manifest and no package spec,
+                        so there is no form to open against it. */}
+                    {listing.source !== 'installed' && (
+                      <Tooltip
+                        label={listing.catalogItem?.auth ?? `Add a ${listing.name} connection`}
                       >
-                        <Plus size={12} /> Add
-                      </button>
-                    </Tooltip>
+                        <button
+                          onClick={() => setAdding(listing)}
+                          className="text-xs text-gray-400 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+                        >
+                          <Plus size={12} /> Add
+                        </button>
+                      </Tooltip>
+                    )}
                   </div>
                 </div>
               ))}
@@ -302,9 +310,9 @@ export function ConnectorSettings() {
         </div>
       )}
 
-      {adding && !adding.catalogItem && (
+      {adding && addingBuiltIn && (
         <AddConnectionForm
-          connector={connectors.find((c) => c.id === adding.id)!}
+          connector={addingBuiltIn}
           onDone={() => {
             setAdding(null)
             load()

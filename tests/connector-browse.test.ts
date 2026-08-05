@@ -185,6 +185,20 @@ describe('connectors that are installed but not in the catalog', () => {
     expect(jira?.connectedCount).toBe(1)
   })
 
+  it('is marked so the UI does not offer to add one', () => {
+    // There is no manifest and no package spec behind such a row, so there is
+    // nothing for an add form to open against.
+    const listings = buildConnectorListings(
+      [builtIn('github', 'GitHub')],
+      [catalogItem('kusto', 'Azure Data Explorer')],
+      [connection({ filters: { sdkConnectorId: 'jira' } })]
+    )
+
+    expect(listings.find((l) => l.id === 'jira')?.source).toBe('installed')
+    expect(listings.find((l) => l.id === 'github')?.source).toBe('builtin')
+    expect(listings.find((l) => l.id === 'kusto')?.source).toBe('catalog')
+  })
+
   it('keeps one row per connector rather than one per connection', () => {
     const listings = buildConnectorListings(
       [],
