@@ -56,6 +56,24 @@ describe('declarative triggers', () => {
     ).toThrow(/fetch\(\) and a dedupe strategy together/)
   })
 
+  it('rejects a misspelled dedupe strategy instead of guessing one', () => {
+    expect(() =>
+      defineConnector({
+        id: 'x',
+        name: 'X',
+        triggers: [
+          {
+            type: 'a',
+            label: 'A',
+            // A plain-JS author gets no type error here.
+            dedupe: 'timeStamp' as 'timestamp',
+            fetch: () => []
+          }
+        ]
+      })
+    ).toThrow(/unknown dedupe strategy "timeStamp"; expected timestamp or lastItem/)
+  })
+
   it('hands the author a since derived from its own cursor', async () => {
     const seen: (string | undefined)[] = []
     const connector = timestampConnector((context) => {

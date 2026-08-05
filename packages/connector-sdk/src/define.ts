@@ -1,6 +1,7 @@
-import type { Connector, ConnectorConfig, ConnectorDefinition } from './types'
+import type { Connector, ConnectorConfig, ConnectorDefinition, DedupeStrategy } from './types'
 
 const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+const DEDUPE_STRATEGIES: DedupeStrategy[] = ['timestamp', 'lastItem']
 
 function assertUnique(kind: string, keys: string[]): void {
   const seen = new Set<string>()
@@ -55,6 +56,14 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
     if (declarative !== (loose.dedupe !== undefined)) {
       throw new Error(
         `Trigger ${trigger.type} needs fetch() and a dedupe strategy together, not one alone`
+      )
+    }
+    if (loose.dedupe !== undefined && !DEDUPE_STRATEGIES.includes(loose.dedupe as DedupeStrategy)) {
+      // Without this a typo runs a strategy the author did not ask for, which
+      // shows up as mis-delivered items rather than as an error.
+      throw new Error(
+        `Trigger ${trigger.type} has unknown dedupe strategy ${JSON.stringify(loose.dedupe)}; ` +
+          `expected ${DEDUPE_STRATEGIES.join(' or ')}`
       )
     }
     if (!declarative && !imperative) {
