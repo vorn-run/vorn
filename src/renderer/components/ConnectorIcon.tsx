@@ -1,5 +1,6 @@
 import { ExternalLink } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import type { SdkConnectorIcon } from '../../shared/types'
 
 const CONNECTOR_ICONS: Record<string, React.FC<{ size: number; className?: string }>> = {
   github: ({ size, className }) => (
@@ -34,15 +35,50 @@ const DEFAULT_ICON: React.FC<{ size: number; className?: string }> = ({ size, cl
   <ExternalLink size={size} className={className} />
 )
 
+/**
+ * The glyph a connector package shipped with itself.
+ *
+ * Only the `d` data is used, drawn into an `<svg>` this component owns. The
+ * markup is never interpolated, so a connector package cannot contribute
+ * elements or scripts to the app rendering it.
+ */
+function CustomIcon({
+  icon,
+  size,
+  className
+}: {
+  icon: SdkConnectorIcon
+  size: number
+  className?: string
+}) {
+  return (
+    <svg
+      viewBox={icon.viewBox}
+      width={size}
+      height={size}
+      className={className}
+      fill="currentColor"
+    >
+      {icon.paths.map((d, i) => (
+        <path key={i} d={d} />
+      ))}
+    </svg>
+  )
+}
+
 export function ConnectorIcon({
   connectorId,
+  icon,
   size = 12,
   className = 'text-gray-500'
 }: {
   connectorId: string
+  /** A packaged connector's own glyph, which wins over the built-in lookup. */
+  icon?: SdkConnectorIcon
   size?: number
   className?: string
 }) {
+  if (icon) return <CustomIcon icon={icon} size={size} className={className} />
   const Icon = CONNECTOR_ICONS[connectorId] || DEFAULT_ICON
   return <Icon size={size} className={className} />
 }

@@ -1,0 +1,267 @@
+import { useState } from 'react'
+import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
+import type { SdkConnectorManifest, TaskStatus } from '../../../shared/types'
+import { useAppStore } from '../../stores'
+import { parseLaunchSpec } from './parse-launch-spec'
+import { ConnectorIcon } from '../ConnectorIcon'
+
+const INPUT_CLASS =
+  'w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none'
+
+/**
+ * Install a connector package by reading its own manifest.
+ *
+ * The alternative is asking a person to transcribe a dozen field names —
+ * `itemsPath`, `cursorArg`, `timestampField` — out of a README into the
+ * generic MCP form, where a single typo produces a connection that silently
+ * never fires. The connector already knows all of them, so it is asked.
+ */
+export function SdkConnectorForm({
+  onDone,
+  onCancel
+}: {
+  onDone: () => void
+  onCancel: () => void
+}) {
+  const projects = useAppStore((s) => s.config?.projects || [])
+
+  const [spec, setSpec] = useState('')
+  const [probing, setProbing] = useState(false)
+  const [manifest, setManifest] = useState<SdkConnectorManifest | null>(null)
+  const [launch, setLaunch] = useState<{ command: string; args: string[] } | null>(null)
+  const [triggerType, setTriggerType] = useState('')
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [selectedProject, setSelectedProject] = useState(projects[0]?.name || '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleProbe = async () => {
+    setError(null)
+    setManifest(null)
+    setProbing(true)
+    try {
+      const parsed = parseLaunchSpec(spec)
+      const result = await window.api.probeSdkConnector(parsed)
+      if (!result.ok) {
+        setError(result.error)
+        return
+      }
+      setManifest(result.manifest)
+      setLaunch(parsed)
+      setTriggerType(result.manifest.triggers[0]?.type ?? '')
+      // Seed defaults so a field the user never touches still round-trips.
+      setValues(Object.fromEntries(result.manifest.env.map((entry) => [entry.name, ''])))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setProbing(false)
+    }
+  }
+
+  const trigger = manifest?.triggers.find((entry) => entry.type === triggerType)
+  const missing = (manifest?.env ?? []).filter(
+    (entry) => entry.required && !values[entry.name]?.trim()
+  )
+
+  const handleSave = async () => {
+    if (!manifest || !launch) return
+    setError(null)
+    setSaving(true)
+    try {
+      const plain: Record<string, string> = {}
+      const secret: Record<string, string> = {}
+      for (const entry of manifest.env) {
+        const value = values[entry.name]?.trim()
+        if (!value) continue
+        ;(entry.secret ? secret : plain)[entry.name] = value
+      }
+
+      const filters: Record<string, unknown> = {
+        command: launch.command,
+        args: JSON.stringify(launch.args),
+        env: JSON.stringify(plain),
+        // Recorded so the connection can be re-probed later without the user
+        // retyping what they installed.
+        sdkConnectorId: manifest.id,
+        sdkVersion: manifest.version,
+        // Carried on the connection because a packaged connector is stored as
+        // an `mcp` connection, so there is no connector id to key a glyph by.
+        ...(manifest.icon && { sdkIcon: JSON.stringify(manifest.icon) })
+      }
+
+      if (Object.keys(secret).length > 0) {
+        // Encrypted here, before it reaches the database, exactly as the
+        // generic MCP form does for its own secret env blob.
+        filters.secretEnv = await window.api.encryptString(JSON.stringify(secret))
+      }
+
+      // The whole point of the probe: these are the values a person would
+      // otherwise have to copy by hand, and getting one wrong yields a
+      // connection that polls and never fires.
+      if (trigger) Object.assign(filters, trigger.filters)
+
+      await window.api.createConnection({
+        connectorId: 'mcp',
+        name: trigger ? `${manifest.name}: ${trigger.label}` : manifest.name,
+        filters,
+        syncIntervalMinutes: 5,
+        statusMapping: {} as Record<string, TaskStatus>,
+        executionProject: selectedProject
+      })
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">Connector package</label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={spec}
+            onChange={(e) => setSpec(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && spec.trim() && !probing) void handleProbe()
+            }}
+            placeholder="@vornrun/connector-kusto"
+            className={INPUT_CLASS}
+          />
+          <button
+            onClick={() => void handleProbe()}
+            disabled={probing || !spec.trim()}
+            className="px-3 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+          >
+            {probing ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+            {probing ? 'Reading…' : 'Look up'}
+          </button>
+        </div>
+        <p className="text-[11px] text-gray-600 mt-1">
+          An npm package name, or a command to run a connector from a local checkout.
+        </p>
+      </div>
+
+      {probing && (
+        <p className="text-[11px] text-gray-500">
+          Downloading and starting the connector to read what it needs. This can take a moment the
+          first time.
+        </p>
+      )}
+
+      {manifest && (
+        <>
+          <div className="px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-sm">
+            <div className="flex items-center gap-1.5 text-sm text-gray-200">
+              {manifest.icon ? (
+                <ConnectorIcon
+                  connectorId="mcp"
+                  icon={manifest.icon}
+                  size={13}
+                  className="text-gray-200 shrink-0"
+                />
+              ) : (
+                <Check size={12} className="text-green-400 shrink-0" />
+              )}
+              <span className="font-medium">{manifest.name}</span>
+              <span className="text-[11px] text-gray-500">v{manifest.version}</span>
+            </div>
+            {manifest.description && (
+              <p className="text-[11px] text-gray-500 mt-1">{manifest.description}</p>
+            )}
+            {manifest.actions.length > 0 && (
+              <p className="text-[11px] text-gray-600 mt-1">
+                {manifest.actions.length} action{manifest.actions.length === 1 ? '' : 's'} available
+                to workflow steps.
+              </p>
+            )}
+          </div>
+
+          {manifest.triggers.length > 0 && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Trigger</label>
+              <select
+                value={triggerType}
+                onChange={(e) => setTriggerType(e.target.value)}
+                className={INPUT_CLASS}
+              >
+                {manifest.triggers.map((entry) => (
+                  <option key={entry.type} value={entry.type}>
+                    {entry.label}
+                  </option>
+                ))}
+              </select>
+              {trigger?.description && (
+                <p className="text-[11px] text-gray-600 mt-1">{trigger.description}</p>
+              )}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Project</label>
+            <select
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              className={INPUT_CLASS}
+            >
+              {projects.map((project) => (
+                <option key={project.name} value={project.name}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {manifest.env.map((entry) => (
+            <div key={entry.name}>
+              <label className="text-xs text-gray-500 mb-1 flex items-center gap-1.5">
+                <span className="font-mono text-[11px]">{entry.name}</span>
+                {entry.required && <span className="text-red-400">*</span>}
+                {entry.secret && (
+                  <span className="text-[9px] text-gray-600 uppercase tracking-wider">
+                    · encrypted
+                  </span>
+                )}
+              </label>
+              <input
+                type={entry.secret ? 'password' : 'text'}
+                value={values[entry.name] ?? ''}
+                onChange={(e) => setValues((prev) => ({ ...prev, [entry.name]: e.target.value }))}
+                className={INPUT_CLASS}
+              />
+              {entry.description && (
+                <p className="text-[11px] text-gray-600 mt-1">{entry.description}</p>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+
+      {error && (
+        <div className="text-[11px] text-red-400 flex items-start gap-1">
+          <AlertCircle size={12} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={() => void handleSave()}
+          disabled={!manifest || saving || missing.length > 0}
+          className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50"
+        >
+          {saving ? 'Connecting…' : 'Connect'}
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-4 py-1.5 text-sm text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}

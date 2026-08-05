@@ -1,5 +1,5 @@
 import { envNameFor } from './define'
-import type { Connector } from './types'
+import type { Connector, ConnectorIcon } from './types'
 
 /** MCP tool name a trigger is served under. */
 export function pollToolName(triggerType: string): string {
@@ -68,6 +68,7 @@ export interface ConnectorManifest {
   name: string
   version: string
   description?: string
+  icon?: ConnectorIcon
   triggers: Array<{ type: string; label: string; description?: string; setup: ConnectionSetup }>
   actions: Array<{
     type: string
@@ -84,6 +85,7 @@ export function connectorManifest(connector: Connector): ConnectorManifest {
     name: connector.name,
     version: connector.version,
     ...(connector.description !== undefined && { description: connector.description }),
+    ...(connector.icon !== undefined && { icon: connector.icon }),
     triggers: connector.triggers.map((trigger) => ({
       type: trigger.type,
       label: trigger.label,

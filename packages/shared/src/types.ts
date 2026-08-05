@@ -1156,8 +1156,75 @@ export const IPC = {
   CONNECTION_EXECUTE_ACTION: 'connection:executeAction',
   CONNECTION_LIST_ACTIONS: 'connection:listActions',
   CONNECTION_LIST_MCP_TOOLS: 'connection:listMcpTools',
-  CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools'
+  CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
+  CONNECTOR_PROBE_SDK: 'connector:probeSdk'
 } as const
+
+/**
+ * Self-description read from a connector package built with
+ * `@vornrun/connector-sdk`, used to fill in a connection form.
+ */
+export interface SdkSetupFilters {
+  pollTool: string
+  itemsPath: string
+  idField: string
+  timestampField: string
+  titleField: string
+  urlField: string
+  cursorArg: string
+  cursorPath: string
+}
+
+export interface SdkEnvVar {
+  name: string
+  required: boolean
+  /** Stored via the OS keychain rather than in the config file. */
+  secret: boolean
+  description?: string
+}
+
+export interface SdkTrigger {
+  type: string
+  label: string
+  description?: string
+  /** Connection filter values that make this trigger poll correctly. */
+  filters: SdkSetupFilters
+}
+
+/**
+ * A connector's own glyph.
+ *
+ * Path data only, never markup: this arrives from a third-party package and is
+ * drawn inside an `<svg>` the renderer owns, so there is nothing for a
+ * connector to inject.
+ */
+export interface SdkConnectorIcon {
+  viewBox: string
+  paths: string[]
+}
+
+export interface SdkConnectorManifest {
+  id: string
+  name: string
+  version: string
+  description?: string
+  icon?: SdkConnectorIcon
+  triggers: SdkTrigger[]
+  actions: Array<{ type: string; label: string; description?: string }>
+  /** Union of the environment variables the connector reads. */
+  env: SdkEnvVar[]
+}
+
+export interface SdkProbeRequest {
+  command: string
+  args: string[]
+  /** Non-secret env for the probe; secrets are not needed to read a manifest. */
+  env?: Record<string, string>
+}
+
+export type SdkProbeResult =
+  | { ok: true; manifest: SdkConnectorManifest }
+  | { ok: false; error: string }
 
 export interface PermissionSuggestion {
   type: 'addRules' | 'setMode' | string

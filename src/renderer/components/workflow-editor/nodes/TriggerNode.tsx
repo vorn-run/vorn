@@ -1,6 +1,10 @@
 import { Zap, Clock, Calendar, ListPlus, ArrowRightLeft, Plug, type LucideIcon } from 'lucide-react'
-import type { TriggerConfig, ConnectorPollTriggerConfig } from '../../../../shared/types'
-import { useConnectorIdFor } from '../../../lib/use-connections'
+import type {
+  TriggerConfig,
+  ConnectorPollTriggerConfig,
+  SdkConnectorIcon
+} from '../../../../shared/types'
+import { useConnectorIdFor, useConnectionIconFor } from '../../../lib/use-connections'
 import { ConnectorIcon } from '../../ConnectorIcon'
 
 interface Props {
@@ -20,14 +24,20 @@ const TRIGGER_ICONS: Record<string, LucideIcon> = {
 }
 const DEFAULT_ICON = Zap
 
-function useConnectorId(config: TriggerConfig): string | null {
-  // For connectorPoll triggers, resolve the connector id via the shared
+function useConnectorGlyph(config: TriggerConfig): {
+  connectorId: string | null
+  icon: SdkConnectorIcon | undefined
+} {
+  // For connectorPoll triggers, resolve the connector via the shared
   // connections cache — avoids one IPC call per node instance.
   const connectionId =
     config.triggerType === 'connectorPoll'
       ? (config as ConnectorPollTriggerConfig).connectionId
       : null
-  return useConnectorIdFor(connectionId)
+  return {
+    connectorId: useConnectorIdFor(connectionId),
+    icon: useConnectionIconFor(connectionId)
+  }
 }
 
 function getSubtitle(config: TriggerConfig): string {
@@ -55,7 +65,7 @@ function getSubtitle(config: TriggerConfig): string {
 
 export function TriggerNode({ label, config, selected, onClick }: Props) {
   const Icon = TRIGGER_ICONS[config.triggerType] || DEFAULT_ICON
-  const connectorId = useConnectorId(config)
+  const { connectorId, icon: connectorGlyph } = useConnectorGlyph(config)
 
   return (
     <div
@@ -69,7 +79,12 @@ export function TriggerNode({ label, config, selected, onClick }: Props) {
     >
       <div className="flex items-center gap-2">
         {connectorId ? (
-          <ConnectorIcon connectorId={connectorId} size={14} className="text-gray-400 shrink-0" />
+          <ConnectorIcon
+            connectorId={connectorId}
+            icon={connectorGlyph}
+            size={14}
+            className="text-gray-400 shrink-0"
+          />
         ) : (
           <Icon size={14} className="text-blue-400 shrink-0" strokeWidth={2} />
         )}

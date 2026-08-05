@@ -15,6 +15,7 @@
 // Usage: node scripts/check-lockfile.mjs [--fix]
 
 import { readFileSync, writeFileSync } from 'node:fs'
+import { mergeDuplicateEntries } from './lockfile-entries.mjs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -54,7 +55,7 @@ const stripArchiveUrl = (line) =>
   )
 
 let archiveUrlCount = 0
-const fixed = original
+const stripped = original
   .split('\n')
   .map((line) => {
     if (!line.includes('__archiveUrl=')) return line
@@ -63,11 +64,23 @@ const fixed = original
   })
   .join('\n')
 
-if (archiveUrlCount > 0 && fix) {
+// Always merged, not only when a URL was stripped this run: `deps:install`
+// strips first and Yarn may split an entry again on a later install.
+const fixed = mergeDuplicateEntries(stripped)
+const splitCount = stripped === fixed ? 0 : 1
+
+if (fixed !== original && fix) {
   writeFileSync(LOCKFILE, fixed)
 }
 
 const errors = []
+
+if (splitCount > 0 && !fix) {
+  errors.push(
+    `yarn.lock has entries split by version that public npm would merge.\n` +
+      `    Run 'yarn lint:lockfile --fix' (or use 'yarn deps:install') before committing.`
+  )
+}
 
 if (archiveUrlCount > 0 && !fix) {
   errors.push(
@@ -100,4 +113,7 @@ if (archiveUrlCount > 0) {
   console.log(`✓ yarn.lock: stripped ${archiveUrlCount} private-mirror __archiveUrl binding(s)`)
 } else {
   console.log('✓ yarn.lock: no private registry references')
+}
+if (splitCount > 0) {
+  console.log('✓ yarn.lock: merged entries a private mirror had split by archive URL')
 }

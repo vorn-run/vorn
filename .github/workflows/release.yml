@@ -267,6 +267,8 @@ jobs:
             directory: packages/mcp
           - name: '@vornrun/connector-sdk'
             directory: packages/connector-sdk
+          - name: '@vornrun/connector-kusto'
+            directory: packages/connector-kusto
     steps:
       - uses: actions/checkout@v7
 

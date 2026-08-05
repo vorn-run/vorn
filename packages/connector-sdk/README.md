@@ -235,27 +235,53 @@ test('does not redeliver the same backlog forever', async () => {
 
 ## Install it in Vorn
 
-Run the CLI to get the exact connection settings:
+**Settings → Connectors → MCP → From a package**, then type the package name.
+
+Vorn starts the connector once, asks it to describe itself, and fills in the
+connection settings from the answer. All that is left on screen is the
+connector's own name, its triggers, and the config it declared.
+
+Nothing needs transcribing: `pollTool`, `itemsPath`, `idField`,
+`timestampField`, `titleField`, `urlField`, `cursorArg` and `cursorPath` all
+come from the manifest. `cursorArg` is what makes the dedupe strategy
+load-bearing — Vorn hands the connector back its own cursor on every poll and
+fires for whatever it returns, rather than re-filtering by timestamp itself.
+
+Because the connector is a normal npm package, versions are pinned by the
+package spec and upgrades are a version bump — no separate registry.
+
+To see the same values on the command line, or to wire a connection up by
+hand:
 
 ```bash
 npx vorn-connector setup ./dist/index.js
 ```
 
-It prints the values for **Settings → Connectors → MCP → New connection**:
+### Ship an icon
 
-| Field      | Value                                                                                                                                                                                   |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Command    | `npx`                                                                                                                                                                                   |
-| Arguments  | `["-y", "@your-scope/acme-connector"]`                                                                                                                                                  |
-| Secret env | `{"API_TOKEN": "…"}`                                                                                                                                                                    |
-| Filters    | `pollTool: poll_newTicket`, `itemsPath: items`, `idField: externalId`, `timestampField: updatedAt`, `titleField: title`, `urlField: url`, `cursorArg: cursor`, `cursorPath: nextCursor` |
+Without one, a connector shows the generic MCP glyph and is hard to pick out
+of a list of connections.
 
-`cursorArg` is what makes the dedupe strategy load-bearing: Vorn hands the
-connector back its own cursor on every poll and fires for whatever it returns,
-rather than re-filtering the results by timestamp itself.
+```ts
+defineConnector({
+  id: 'acme',
+  name: 'Acme',
+  icon: {
+    viewBox: '0 0 24 24',
+    paths: ['M12 2 2 22h20L12 2z']
+  }
+  // ...
+})
+```
 
-Because the connector is a normal npm package, versions are pinned by the
-`npx` argument and upgrades are a version bump — no separate registry.
+Path data only — no markup, no `<svg>` wrapper, no external references. Vorn
+draws these as `<path d="...">` inside an element it owns, so an icon can
+never contribute markup to the app rendering it. Anything that is not path
+data is rejected by `defineConnector` at import time, and again when Vorn
+reads the manifest.
+
+Paths are filled with `currentColor`, so the icon picks up the surrounding
+text color instead of fighting the theme.
 
 ## CLI
 

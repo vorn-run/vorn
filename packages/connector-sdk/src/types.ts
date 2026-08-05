@@ -196,12 +196,28 @@ export interface ActionDefinition {
   ): Promise<Record<string, unknown> | void> | Record<string, unknown> | void
 }
 
+/**
+ * A connector's own glyph, so an installed connector is recognizable in a list
+ * rather than sharing one generic icon with every other one.
+ *
+ * Path data only — deliberately not markup. Vorn draws these itself as
+ * `<path d="...">` inside an `<svg>` it owns, so a connector cannot inject
+ * elements, scripts or external references into the app rendering it.
+ */
+export interface ConnectorIcon {
+  /** Defaults to `0 0 24 24`. */
+  viewBox?: string
+  /** SVG path `d` data, drawn with `fill="currentColor"` so it inherits color. */
+  paths: string[]
+}
+
 export interface ConnectorDefinition {
   /** Stable connector id, e.g. `azure-devops`. */
   id: string
   name: string
   version?: string
   description?: string
+  icon?: ConnectorIcon
   config?: ConnectorConfigField[]
   triggers?: TriggerDefinition[]
   actions?: ActionDefinition[]

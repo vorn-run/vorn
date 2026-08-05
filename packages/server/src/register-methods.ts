@@ -84,6 +84,7 @@ import {
   stopMcpClient
 } from './connectors'
 import { MCP_CONNECTOR_ID } from './connectors/mcp'
+import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { detectRepoSlug } from './connectors/github'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
@@ -769,6 +770,15 @@ export function registerAllMethods(): void {
 
   registerMethod('connection:refreshMcpTools', async (connectionId: string) => {
     return runMcpDiscovery(connectionId)
+  })
+
+  /**
+   * Read a connector package's self-description before any connection exists,
+   * so the connection form can be filled in from the manifest rather than
+   * transcribed from a README.
+   */
+  registerMethod('connector:probeSdk', async (request: SdkProbeRequest) => {
+    return probeSdkConnector(request)
   })
 
   /**

@@ -7,7 +7,8 @@ import {
   resolveConfig,
   runAction,
   runPoll,
-  envNameFor
+  envNameFor,
+  connectorManifest
 } from '../packages/connector-sdk/src/index'
 import type { ConnectorItem, PollContext } from '../packages/connector-sdk/src/types'
 
@@ -368,5 +369,54 @@ describe('createConnectorHarness', () => {
     }))
     const harness = createConnectorHarness(connector, { now: () => NOW })
     expect((await harness.pollTwice('newTicket')).map((item) => item.externalId)).toEqual(['2'])
+  })
+})
+
+describe('connector icons', () => {
+  const withIcon = (icon: unknown) =>
+    defineConnector({
+      id: 'acme',
+      name: 'Acme',
+      icon: icon as never,
+      triggers: [{ type: 'newTicket', label: 'New ticket', poll: (() => ({ items: [] })) as never }]
+    })
+
+  it('keeps a valid icon and serves it in the manifest', () => {
+    const connector = withIcon({ viewBox: '0 0 16 16', paths: ['M1 1h4v4z'] })
+    expect(connectorManifest(connector).icon).toEqual({
+      viewBox: '0 0 16 16',
+      paths: ['M1 1h4v4z']
+    })
+  })
+
+  it('omits the icon from the manifest when the connector has none', () => {
+    expect(connectorManifest(simple(() => ({ items: [] }))).icon).toBeUndefined()
+  })
+
+  it('accepts the full range of path commands and number notation', () => {
+    expect(() =>
+      withIcon({ paths: ['M1.5,-2 L3 4 H5 V6 C1 2 3 4 5 6 S1 2 3 4 Q1 2 3 4 A1 1 0 0 1 2e1 3 Z'] })
+    ).not.toThrow()
+  })
+
+  it('rejects markup in path data, so an app can draw it without escaping', () => {
+    expect(() => withIcon({ paths: ['"/><script>alert(1)</script>'] })).toThrow(/not SVG path data/)
+  })
+
+  it('rejects a url() reference that would pull in something external', () => {
+    expect(() => withIcon({ paths: ['url(http://evil.test/x)'] })).toThrow(/not SVG path data/)
+  })
+
+  it('rejects an icon with no paths, which would render as nothing', () => {
+    expect(() => withIcon({ paths: [] })).toThrow(/icon with no paths/)
+    expect(() => withIcon({})).toThrow(/icon with no paths/)
+  })
+
+  it('rejects a viewBox that is not four numbers', () => {
+    expect(() => withIcon({ viewBox: '0 0 24', paths: ['M1 1h4v4z'] })).toThrow(/four numbers/)
+  })
+
+  it('accepts a viewBox with negative and fractional bounds', () => {
+    expect(() => withIcon({ viewBox: '-1.5 -1.5 27 27', paths: ['M1 1h4v4z'] })).not.toThrow()
   })
 })
