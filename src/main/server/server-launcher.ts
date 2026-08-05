@@ -33,13 +33,19 @@ export async function launchServer(): Promise<ServerBridge> {
 
   if (isDev) {
     // Dev mode: use npx tsx to run TypeScript directly
+    const repoRoot = path.join(__dirname, '../..')
+
     const child = spawn('npx', ['tsx', serverEntryPoint, `--data-dir=${dataDir}`], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        NODE_ENV: process.env.NODE_ENV ?? 'development'
+        NODE_ENV: process.env.NODE_ENV ?? 'development',
+        // Told, not guessed: this is the one place that knows a checkout is
+        // being run, so connector packages built locally can be preferred
+        // over published ones without the server sniffing its own cwd.
+        VORN_REPO_ROOT: repoRoot
       },
-      cwd: path.join(__dirname, '../..')
+      cwd: repoRoot
     })
 
     child.stdin?.end()

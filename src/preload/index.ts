@@ -537,6 +537,10 @@ const api = {
   ): Promise<import('../../packages/shared/src/types').SdkProbeResult> =>
     ipcRenderer.invoke(IPC.CONNECTOR_PROBE_SDK, request),
 
+  listConnectorCatalog: (): Promise<
+    Array<import('../../packages/shared/src/types').ConnectorCatalogItem>
+  > => ipcRenderer.invoke(IPC.CONNECTOR_CATALOG),
+
   upsertTaskFromItem: (params: {
     connectionId: string
     item: import('../../packages/shared/src/types').ConnectorItemContext

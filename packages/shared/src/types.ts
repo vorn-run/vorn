@@ -1157,7 +1157,8 @@ export const IPC = {
   CONNECTION_LIST_ACTIONS: 'connection:listActions',
   CONNECTION_LIST_MCP_TOOLS: 'connection:listMcpTools',
   CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
-  CONNECTOR_PROBE_SDK: 'connector:probeSdk'
+  CONNECTOR_PROBE_SDK: 'connector:probeSdk',
+  CONNECTOR_CATALOG: 'connector:catalog'
 } as const
 
 /**
@@ -1201,6 +1202,38 @@ export interface SdkTrigger {
 export interface SdkConnectorIcon {
   viewBox: string
   paths: string[]
+}
+
+/**
+ * A connector package Vorn ships knowledge of, so it can be offered by name
+ * instead of requiring one.
+ *
+ * Metadata only. What a connection actually needs is read from the package at
+ * install time, so this cannot become a stale second copy of the connector's
+ * own definition.
+ */
+export interface ConnectorCatalogEntry {
+  id: string
+  name: string
+  description: string
+  /** npm package the connector is published as. */
+  packageName: string
+  capabilities: Array<'tasks' | 'triggers' | 'actions'>
+  /** One line on how it authenticates, shown before anyone commits to install. */
+  auth?: string
+  icon?: SdkConnectorIcon
+  /** Groups the connector in the list once there are too many to scan. */
+  category?: string
+  /** Extra search terms, so it is findable by what it talks to. */
+  keywords?: string[]
+}
+
+/**
+ * A catalog entry plus where to actually launch it, resolved in the main
+ * process because that resolution depends on the filesystem.
+ */
+export interface ConnectorCatalogItem extends ConnectorCatalogEntry {
+  launch: { command: string; args: string[] }
 }
 
 export interface SdkConnectorManifest {
