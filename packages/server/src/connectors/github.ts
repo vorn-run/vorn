@@ -6,7 +6,8 @@ import type {
   PollResult,
   ActionResult,
   ConnectorManifest,
-  TaskStatus
+  TaskStatus,
+  ExternalItemPage
 } from '@vornrun/shared/types'
 import log from '../logger'
 import { resolveGhPath, GhNotFoundError, getGhEnv } from './gh-cli'
@@ -200,6 +201,130 @@ interface GitHubIssue {
   labels: Array<{ name: string }>
   assignee: { login: string } | null
   pull_request?: unknown
+  user?: { login: string }
+}
+
+interface GitHubSearchResponse {
+  total_count: number
+  incomplete_results: boolean
+  items: GitHubIssue[]
+}
+
+interface GitHubPollCursor {
+  since: string
+  page: number
+}
+
+const GITHUB_POLL_PAGE_SIZE = 100
+const GITHUB_SEARCH_MAX_PAGE = 10
+const GITHUB_SEARCH_INDEX_OVERLAP_MS = 5 * 60_000
+
+function parsePollCursor(cursor: string | undefined): GitHubPollCursor {
+  if (cursor) {
+    try {
+      const parsed = JSON.parse(cursor) as Partial<GitHubPollCursor>
+      if (
+        typeof parsed.since === 'string' &&
+        typeof parsed.page === 'number' &&
+        Number.isInteger(parsed.page) &&
+        parsed.page > 0
+      ) {
+        return { since: parsed.since, page: parsed.page }
+      }
+    } catch {
+      // Legacy cursors were plain ISO timestamps.
+    }
+    return { since: cursor, page: 1 }
+  }
+  return { since: new Date(Date.now() - 60_000).toISOString(), page: 1 }
+}
+
+function searchCursor(cursor: GitHubPollCursor): string {
+  return JSON.stringify(cursor)
+}
+
+function githubSearchTimestamp(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime()))
+    throw new Error(`Invalid GitHub poll cursor timestamp: ${value}`)
+  // GitHub compares at second precision with a strict lower bound. Replay the
+  // previous second so items sharing the cursor's second cannot be skipped.
+  return new Date(date.getTime() - 1_000).toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
+function githubSearchEndpoint(
+  owner: string,
+  repo: string,
+  kind: 'issue' | 'pr',
+  cursor: GitHubPollCursor,
+  labels: unknown
+): string {
+  const terms = [
+    `repo:${owner}/${repo}`,
+    `is:${kind}`,
+    `created:>${githubSearchTimestamp(cursor.since)}`
+  ]
+  if (kind === 'issue' && typeof labels === 'string') {
+    for (const label of labels
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)) {
+      terms.push(`label:"${label.replaceAll('"', '\\"')}"`)
+    }
+  }
+  const params = new URLSearchParams({
+    q: terms.join(' '),
+    sort: 'created',
+    order: 'asc',
+    per_page: String(GITHUB_POLL_PAGE_SIZE),
+    page: String(cursor.page)
+  })
+  return `search/issues?${params}`
+}
+
+function nextSearchCursor(
+  current: GitHubPollCursor,
+  response: GitHubSearchResponse,
+  pollStartedAt: string
+): { cursor: string; hasMore: boolean } {
+  const hasAnotherSearchPage = response.total_count > current.page * GITHUB_POLL_PAGE_SIZE
+  if (!hasAnotherSearchPage) {
+    return {
+      cursor: new Date(
+        new Date(pollStartedAt).getTime() - GITHUB_SEARCH_INDEX_OVERLAP_MS
+      ).toISOString(),
+      hasMore: false
+    }
+  }
+
+  if (current.page < GITHUB_SEARCH_MAX_PAGE) {
+    return {
+      cursor: searchCursor({ since: current.since, page: current.page + 1 }),
+      hasMore: true
+    }
+  }
+
+  // GitHub Search caps accessible results at 1,000. Advance the time window
+  // and start again instead of attempting page 11. Overlap one second so
+  // equal-timestamp items are replayed into the deduplicating durable inbox
+  // rather than skipped at the boundary.
+  const lastTimestamp = response.items.at(-1)?.created_at
+  if (!lastTimestamp) {
+    throw new Error('GitHub search reported more results but returned an empty page')
+  }
+  const overlap = new Date(new Date(lastTimestamp).getTime() - 1_000).toISOString()
+  if (new Date(overlap).getTime() <= new Date(current.since).getTime()) {
+    throw new Error(
+      'GitHub search returned more than 1,000 items at one timestamp; cannot advance safely'
+    )
+  }
+  return { cursor: searchCursor({ since: overlap, page: 1 }), hasMore: true }
+}
+
+function assertCompleteSearch(response: GitHubSearchResponse): void {
+  if (response.incomplete_results) {
+    throw new Error('GitHub search returned incomplete results; retrying without advancing cursor')
+  }
 }
 
 function issueToExternalItem(issue: GitHubIssue): ExternalItem {
@@ -216,6 +341,34 @@ function issueToExternalItem(issue: GitHubIssue): ExternalItem {
   }
 }
 
+async function listGitHubItemsPage(
+  filters: Record<string, unknown>,
+  cursor?: string
+): Promise<ExternalItemPage> {
+  const { owner, repo, state = 'open', labels, assignee } = filters
+  if (typeof owner !== 'string' || typeof repo !== 'string' || !owner || !repo) {
+    throw new Error('owner and repo are required')
+  }
+  const parsedPage = Number(cursor ?? '1')
+  const page = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1
+  const params = new URLSearchParams({
+    state: String(state),
+    per_page: String(GITHUB_POLL_PAGE_SIZE),
+    page: String(page)
+  })
+  if (labels) params.set('labels', String(labels))
+  if (assignee) params.set('assignee', String(assignee))
+  const endpoint = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?${params}`
+  const raw = (await ghApi(endpoint)) as GitHubIssue[]
+  return {
+    items: raw.filter((item) => !item.pull_request).map(issueToExternalItem),
+    ...(raw.length === GITHUB_POLL_PAGE_SIZE && {
+      nextCursor: String(page + 1),
+      hasMore: true
+    })
+  }
+}
+
 export const githubConnector: VornConnector = {
   id: 'github',
   name: 'GitHub',
@@ -223,22 +376,10 @@ export const githubConnector: VornConnector = {
   capabilities: ['tasks', 'triggers', 'actions'],
 
   async listItems(filters: Record<string, unknown>): Promise<ExternalItem[]> {
-    const { owner, repo, state = 'open', labels, assignee, per_page = 50 } = filters
-    if (typeof owner !== 'string' || typeof repo !== 'string' || !owner || !repo) {
-      throw new Error('owner and repo are required')
-    }
-
-    const params = new URLSearchParams({
-      state: String(state),
-      per_page: String(per_page)
-    })
-    if (labels) params.set('labels', String(labels))
-    if (assignee) params.set('assignee', String(assignee))
-    const endpoint = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?${params}`
-    // Exclude pull requests (GitHub API returns PRs in issues endpoint)
-    const data = (await ghApi(endpoint)) as GitHubIssue[]
-    return data.filter((i) => !i.pull_request).map(issueToExternalItem)
+    return (await listGitHubItemsPage(filters)).items
   },
+
+  listItemsPage: listGitHubItemsPage,
 
   async getItem(
     externalId: string,
@@ -269,60 +410,49 @@ export const githubConnector: VornConnector = {
       return { events: [] }
     }
 
-    const since = cursor || new Date(Date.now() - 60_000).toISOString()
-    const PAGE_SIZE = 30
-    const repoPath = `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`
+    const parsedCursor = parsePollCursor(cursor)
+    const pollStartedAt = new Date().toISOString()
 
     switch (triggerType) {
       case 'issueCreated': {
-        const endpoint = `${repoPath}/issues?state=open&sort=created&direction=desc&since=${encodeURIComponent(since)}&per_page=${PAGE_SIZE}`
-        const issues = (await ghApi(endpoint)) as GitHubIssue[]
-        const newIssues = issues.filter((i) => !i.pull_request && i.created_at > since)
-        // When we hit the page cap, advance the cursor only to the oldest
-        // item we actually saw — there may be older items between `since`
-        // and that point that got truncated by the per_page limit, and the
-        // next poll needs to pick them up rather than skip them.
-        const nextCursor =
-          newIssues.length >= PAGE_SIZE && newIssues.length > 0
-            ? newIssues[newIssues.length - 1].created_at
-            : new Date().toISOString()
+        const response = (await ghApi(
+          githubSearchEndpoint(owner, repo, 'issue', parsedCursor, config.labels)
+        )) as GitHubSearchResponse
+        assertCompleteSearch(response)
+        const next = nextSearchCursor(parsedCursor, response, pollStartedAt)
         return {
-          events: newIssues.map((i) => ({
+          events: response.items.map((i) => ({
             id: String(i.number),
             type: 'issueCreated',
             data: issueToExternalItem(i) as unknown as Record<string, unknown>,
             timestamp: i.created_at
           })),
-          nextCursor
+          nextCursor: next.cursor,
+          hasMore: next.hasMore
         }
       }
       case 'prOpened': {
-        const endpoint = `${repoPath}/pulls?state=open&sort=created&direction=desc&per_page=${PAGE_SIZE}`
-        const prs = (await ghApi(endpoint)) as Array<{
-          number: number
-          title: string
-          html_url: string
-          created_at: string
-          user: { login: string }
-        }>
-        const newPrs = prs.filter((pr) => pr.created_at > since)
-        const nextCursor =
-          newPrs.length >= PAGE_SIZE && newPrs.length > 0
-            ? newPrs[newPrs.length - 1].created_at
-            : new Date().toISOString()
+        const response = (await ghApi(
+          githubSearchEndpoint(owner, repo, 'pr', parsedCursor, undefined)
+        )) as GitHubSearchResponse
+        assertCompleteSearch(response)
+        const next = nextSearchCursor(parsedCursor, response, pollStartedAt)
         return {
-          events: newPrs.map((pr) => ({
+          events: response.items.map((pr) => ({
             id: String(pr.number),
             type: 'prOpened',
             data: {
               number: pr.number,
               title: pr.title,
               url: pr.html_url,
-              author: pr.user.login
+              description: pr.body || '',
+              state: pr.state,
+              author: pr.user?.login
             },
             timestamp: pr.created_at
           })),
-          nextCursor
+          nextCursor: next.cursor,
+          hasMore: next.hasMore
         }
       }
       default:

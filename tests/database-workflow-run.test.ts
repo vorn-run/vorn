@@ -77,6 +77,37 @@ describe('workflow run persistence', () => {
     expect(runs[0].nodeStates[0].diagnostics).toBe(timeline)
   })
 
+  it('round-trips the connector inbox row across approval-gate resumes', () => {
+    const exec: WorkflowExecution = {
+      workflowId: 'wf-connector',
+      startedAt: '2026-04-20T10:00:00Z',
+      status: 'running',
+      connectorInboxId: 73,
+      connectorInboxLeaseToken: 'lease-73',
+      connectorItem: {
+        inboxId: 73,
+        inboxLeaseToken: 'lease-73',
+        connectionId: 'conn-1',
+        connectorId: 'github',
+        externalId: 'issue-73',
+        title: 'Persist me',
+        raw: { number: 73 }
+      },
+      nodeStates: [{ nodeId: 'approval', status: 'waiting' }]
+    }
+
+    saveWorkflowRun(exec)
+    expect(listWorkflowRuns('wf-connector')[0]).toMatchObject({
+      connectorInboxId: 73,
+      connectorInboxLeaseToken: 'lease-73',
+      connectorItem: {
+        externalId: 'issue-73',
+        title: 'Persist me',
+        raw: { number: 73 }
+      }
+    })
+  })
+
   it('omits fields that were not set', () => {
     const exec: WorkflowExecution = {
       workflowId: 'wf-2',
@@ -91,6 +122,58 @@ describe('workflow run persistence', () => {
     expect(state.agentType).toBeUndefined()
     expect(state.projectName).toBeUndefined()
     expect(state.projectPath).toBeUndefined()
+  })
+
+  it('never trims a running connector execution needed for restart recovery', () => {
+    saveWorkflowRun({
+      runId: 'active-connector-run',
+      workflowId: 'wf-trim',
+      startedAt: '2026-04-20T00:00:00Z',
+      status: 'running',
+      connectorInboxId: 500,
+      connectorInboxLeaseToken: 'lease-500',
+      nodeStates: [{ nodeId: 'agent', status: 'running' }]
+    })
+    for (let index = 0; index < 50; index++) {
+      saveWorkflowRun({
+        runId: `completed-${index}`,
+        workflowId: 'wf-trim',
+        startedAt: `2026-04-21T00:${String(index).padStart(2, '0')}:00Z`,
+        completedAt: `2026-04-21T00:${String(index).padStart(2, '0')}:30Z`,
+        status: 'success',
+        nodeStates: []
+      })
+    }
+
+    expect(
+      listWorkflowRuns('wf-trim', 100).some((run) => run.runId === 'active-connector-run')
+    ).toBe(true)
+  })
+
+  it('trims a finished connector run whose inbox row is already gone', () => {
+    saveWorkflowRun({
+      runId: 'orphan-connector-run',
+      workflowId: 'wf-orphan',
+      startedAt: '2026-04-20T00:00:00Z',
+      completedAt: '2026-04-20T00:00:30Z',
+      status: 'success',
+      connectorInboxId: 900,
+      nodeStates: []
+    })
+    for (let index = 0; index < 60; index++) {
+      saveWorkflowRun({
+        runId: `later-${index}`,
+        workflowId: 'wf-orphan',
+        startedAt: `2026-04-21T00:${String(index).padStart(2, '0')}:00Z`,
+        completedAt: `2026-04-21T00:${String(index).padStart(2, '0')}:30Z`,
+        status: 'success',
+        nodeStates: []
+      })
+    }
+
+    const runs = listWorkflowRuns('wf-orphan', 200)
+    expect(runs.some((run) => run.runId === 'orphan-connector-run')).toBe(false)
+    expect(runs.length).toBeLessThanOrEqual(51)
   })
 })
 

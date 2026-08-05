@@ -12,13 +12,33 @@ import type {
 const {
   loadConfigMock,
   dbGetSourceConnectionMock,
-  dbUpdateSourceConnectionMock,
+  dbGetConnectorPollCursorMock,
+  dbGetWorkflowRunByConnectorInboxIdMock,
+  dbRecordConnectorPollPageMock,
+  dbRecordConnectorPollErrorMock,
+  dbClaimConnectorInboxMock,
+  dbCountActiveConnectorInboxLeasesMock,
+  dbCompleteConnectorInboxMock,
+  dbRetryConnectorInboxMock,
+  dbDeferConnectorInboxMock,
+  dbRenewConnectorInboxLeaseMock,
+  clientRegistryMock,
   connectorGetMock,
   pollMcpConnectionMock
 } = vi.hoisted(() => ({
   loadConfigMock: vi.fn(),
   dbGetSourceConnectionMock: vi.fn(),
-  dbUpdateSourceConnectionMock: vi.fn(),
+  dbGetConnectorPollCursorMock: vi.fn(),
+  dbGetWorkflowRunByConnectorInboxIdMock: vi.fn(),
+  dbRecordConnectorPollPageMock: vi.fn(),
+  dbRecordConnectorPollErrorMock: vi.fn(),
+  dbClaimConnectorInboxMock: vi.fn(),
+  dbCountActiveConnectorInboxLeasesMock: vi.fn(),
+  dbCompleteConnectorInboxMock: vi.fn(),
+  dbRetryConnectorInboxMock: vi.fn(),
+  dbDeferConnectorInboxMock: vi.fn(),
+  dbRenewConnectorInboxLeaseMock: vi.fn(),
+  clientRegistryMock: { size: 1 },
   connectorGetMock: vi.fn(),
   pollMcpConnectionMock: vi.fn()
 }))
@@ -35,12 +55,24 @@ vi.mock('node-cron', () => ({
 vi.mock('../packages/server/src/config-manager', () => ({
   configManager: { loadConfig: loadConfigMock, saveConfig: vi.fn(), notifyChanged: vi.fn() }
 }))
+vi.mock('../packages/server/src/broadcast', () => ({
+  clientRegistry: clientRegistryMock
+}))
 vi.mock('../packages/server/src/database', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
   return {
     ...actual,
     dbGetSourceConnection: dbGetSourceConnectionMock,
-    dbUpdateSourceConnection: dbUpdateSourceConnectionMock
+    dbGetConnectorPollCursor: dbGetConnectorPollCursorMock,
+    dbGetWorkflowRunByConnectorInboxId: dbGetWorkflowRunByConnectorInboxIdMock,
+    dbRecordConnectorPollPage: dbRecordConnectorPollPageMock,
+    dbRecordConnectorPollError: dbRecordConnectorPollErrorMock,
+    dbClaimConnectorInbox: dbClaimConnectorInboxMock,
+    dbCountActiveConnectorInboxLeases: dbCountActiveConnectorInboxLeasesMock,
+    dbCompleteConnectorInbox: dbCompleteConnectorInboxMock,
+    dbRetryConnectorInbox: dbRetryConnectorInboxMock,
+    dbDeferConnectorInbox: dbDeferConnectorInboxMock,
+    dbRenewConnectorInboxLease: dbRenewConnectorInboxLeaseMock
   }
 })
 vi.mock('../packages/server/src/connectors', async (importOriginal) => {
@@ -108,7 +140,21 @@ function makePollWorkflow(id = 'wf-1'): WorkflowDefinition {
 beforeEach(() => {
   loadConfigMock.mockReset()
   dbGetSourceConnectionMock.mockReset()
-  dbUpdateSourceConnectionMock.mockReset()
+  dbGetConnectorPollCursorMock.mockReset()
+  dbGetConnectorPollCursorMock.mockReturnValue(undefined)
+  dbGetWorkflowRunByConnectorInboxIdMock.mockReset()
+  dbGetWorkflowRunByConnectorInboxIdMock.mockReturnValue(null)
+  dbRecordConnectorPollPageMock.mockReset()
+  dbRecordConnectorPollErrorMock.mockReset()
+  dbClaimConnectorInboxMock.mockReset()
+  dbClaimConnectorInboxMock.mockReturnValue([])
+  dbCountActiveConnectorInboxLeasesMock.mockReset()
+  dbCountActiveConnectorInboxLeasesMock.mockReturnValue(0)
+  dbCompleteConnectorInboxMock.mockReset()
+  dbRetryConnectorInboxMock.mockReset()
+  dbDeferConnectorInboxMock.mockReset()
+  dbRenewConnectorInboxLeaseMock.mockReset()
+  clientRegistryMock.size = 1
   connectorGetMock.mockReset()
   pollMcpConnectionMock.mockReset()
   // Clean up any stale lock files from previous tests to avoid the minute-key
@@ -147,9 +193,12 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     // dispatchConnectorPoll is async; flush microtasks.
     await new Promise((r) => setImmediate(r))
 
-    expect(dbUpdateSourceConnectionMock).toHaveBeenCalledWith(
-      'conn-1',
-      expect.objectContaining({ syncCursor: '2026-04-24T10:05:00Z', lastSyncError: undefined })
+    expect(dbRecordConnectorPollPageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: 'wf-ok',
+        connectionId: 'conn-1',
+        cursor: '2026-04-24T10:05:00Z'
+      })
     )
   })
 
@@ -172,9 +221,12 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     scheduler.off('client-message', listener)
 
     // Scheduler should record the error without emitting a bounce event.
-    expect(dbUpdateSourceConnectionMock).toHaveBeenCalledWith(
-      'conn-1',
-      expect.objectContaining({ lastSyncError: 'gh network down' })
+    expect(dbRecordConnectorPollErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowId: 'wf-err',
+        connectionId: 'conn-1',
+        error: 'gh network down'
+      })
     )
     expect(emitted.length).toBe(0)
   })
@@ -202,8 +254,39 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
         nextCursor: 'now'
       })
     })
+    dbClaimConnectorInboxMock.mockReturnValue([
+      {
+        id: 11,
+        leaseToken: 'lease-11',
+        workflowId: 'wf-items',
+        connectorItem: {
+          connectionId: 'conn-1',
+          connectorId: 'github',
+          externalId: '1',
+          title: 'A',
+          raw: {}
+        }
+      },
+      {
+        id: 12,
+        leaseToken: 'lease-12',
+        workflowId: 'wf-items',
+        connectorItem: {
+          connectionId: 'conn-1',
+          connectorId: 'github',
+          externalId: '2',
+          title: 'B',
+          raw: {}
+        }
+      }
+    ])
 
-    const emitted: Array<{ workflowId: string; connectorItem?: unknown }> = []
+    const emitted: Array<{
+      workflowId: string
+      connectorItem?: unknown
+      connectorInboxId?: number
+      connectorInboxLeaseToken?: string
+    }> = []
     const listener = (
       _ch: string,
       payload: { workflowId: string; connectorItem?: unknown }
@@ -219,6 +302,170 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     expect(emitted).toHaveLength(2)
     expect(emitted[0].connectorItem).toMatchObject({ externalId: '1', title: 'A' })
     expect(emitted[1].connectorItem).toMatchObject({ externalId: '2', title: 'B' })
+    expect(emitted.map((event) => event.connectorInboxId)).toEqual([11, 12])
+    expect(emitted.map((event) => event.connectorInboxLeaseToken)).toEqual(['lease-11', 'lease-12'])
+  })
+
+  it('drains every bounded remote page before dispatching the inbox', async () => {
+    const wf = makePollWorkflow('wf-pages')
+    loadConfigMock.mockReturnValue({ workflows: [wf] })
+    dbGetSourceConnectionMock.mockReturnValue(makeConn())
+    const poll = vi
+      .fn()
+      .mockResolvedValueOnce({
+        events: [{ id: '1', type: 'issueCreated', data: { title: 'A' }, timestamp: 't1' }],
+        nextCursor: 'page-2',
+        hasMore: true
+      })
+      .mockResolvedValueOnce({
+        events: [{ id: '2', type: 'issueCreated', data: { title: 'B' }, timestamp: 't2' }],
+        nextCursor: 'caught-up',
+        hasMore: false
+      })
+    connectorGetMock.mockReturnValue({ poll })
+
+    scheduler.triggerWorkflow('wf-pages')
+    await new Promise((r) => setImmediate(r))
+
+    expect(poll).toHaveBeenNthCalledWith(1, 'issueCreated', expect.anything(), undefined)
+    expect(poll).toHaveBeenNthCalledWith(2, 'issueCreated', expect.anything(), 'page-2')
+    expect(dbRecordConnectorPollPageMock).toHaveBeenCalledTimes(2)
+    expect(dbRecordConnectorPollPageMock.mock.calls[1][0]).toMatchObject({
+      cursor: 'caught-up',
+      events: [expect.objectContaining({ eventId: '2' })]
+    })
+  })
+
+  it('uses the workflow cursor instead of another subscription’s connection cursor', async () => {
+    const wf = makePollWorkflow('wf-own-cursor')
+    loadConfigMock.mockReturnValue({ workflows: [wf] })
+    dbGetSourceConnectionMock.mockReturnValue(makeConn({ syncCursor: 'legacy-shared' }))
+    dbGetConnectorPollCursorMock.mockReturnValue('workflow-specific')
+    const poll = vi.fn().mockResolvedValue({ events: [], nextCursor: 'next' })
+    connectorGetMock.mockReturnValue({ poll })
+
+    scheduler.triggerWorkflow('wf-own-cursor')
+    await new Promise((r) => setImmediate(r))
+
+    expect(poll).toHaveBeenCalledWith('issueCreated', expect.anything(), 'workflow-specific')
+  })
+
+  it('rejects hasMore when the connector does not advance its cursor', async () => {
+    const wf = makePollWorkflow('wf-stuck')
+    loadConfigMock.mockReturnValue({ workflows: [wf] })
+    dbGetSourceConnectionMock.mockReturnValue(makeConn({ syncCursor: 'same' }))
+    dbGetConnectorPollCursorMock.mockReturnValue('same')
+    connectorGetMock.mockReturnValue({
+      poll: vi.fn().mockResolvedValue({ events: [], nextCursor: 'same', hasMore: true })
+    })
+
+    scheduler.triggerWorkflow('wf-stuck')
+    await new Promise((r) => setImmediate(r))
+
+    expect(dbRecordConnectorPollPageMock).not.toHaveBeenCalled()
+    expect(dbRecordConnectorPollErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowId: 'wf-stuck', error: expect.stringContaining('hasMore') })
+    )
+  })
+
+  it('acknowledges success and backs off workflow failures', () => {
+    scheduler.completeConnectorInbox(41, 'lease-41', 'processed')
+    expect(dbCompleteConnectorInboxMock).toHaveBeenCalledWith(41, 'lease-41', expect.any(String))
+
+    scheduler.completeConnectorInbox(42, 'lease-42', 'retry', 'agent failed')
+    expect(dbRetryConnectorInboxMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 42, leaseToken: 'lease-42', error: 'agent failed' })
+    )
+
+    scheduler.completeConnectorInbox(43, 'lease-43', 'defer')
+    expect(dbDeferConnectorInboxMock).toHaveBeenCalledWith(43, 'lease-43', expect.any(String))
+  })
+
+  it('leaves inbox rows unclaimed while no renderer is connected', () => {
+    clientRegistryMock.size = 0
+    scheduler.deliverPendingConnectorInbox()
+    expect(dbClaimConnectorInboxMock).not.toHaveBeenCalled()
+  })
+
+  it('claims only the remaining global delivery capacity', () => {
+    dbCountActiveConnectorInboxLeasesMock.mockReturnValue(49)
+
+    scheduler.deliverPendingConnectorInbox()
+
+    expect(dbClaimConnectorInboxMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 1 }))
+  })
+
+  it('redelivers a leased row with its persisted running execution', () => {
+    dbClaimConnectorInboxMock.mockReturnValue([
+      {
+        id: 51,
+        leaseToken: 'lease-51',
+        workflowId: 'wf-items',
+        connectorItem: {
+          connectionId: 'conn-1',
+          connectorId: 'github',
+          externalId: '51',
+          title: 'A',
+          raw: {}
+        }
+      }
+    ])
+    dbGetWorkflowRunByConnectorInboxIdMock.mockReturnValue({
+      runId: 'run-51',
+      workflowId: 'wf-items',
+      startedAt: '2026-04-24T10:00:00Z',
+      status: 'running',
+      connectorInboxId: 51,
+      nodeStates: [{ nodeId: 'approval', status: 'waiting' }]
+    })
+    const listener = vi.fn()
+    scheduler.on('client-message', listener)
+
+    scheduler.deliverPendingConnectorInbox()
+
+    scheduler.off('client-message', listener)
+    expect(listener).toHaveBeenCalledWith(
+      'scheduler:execute',
+      expect.objectContaining({
+        connectorInboxLeaseToken: 'lease-51',
+        existingExecution: expect.objectContaining({ runId: 'run-51' })
+      })
+    )
+  })
+
+  it('finishes a redelivered row whose persisted run already succeeded', () => {
+    dbClaimConnectorInboxMock.mockReturnValue([
+      {
+        id: 52,
+        leaseToken: 'lease-52',
+        workflowId: 'wf-items',
+        connectorItem: {
+          connectionId: 'conn-1',
+          connectorId: 'github',
+          externalId: '52',
+          title: 'B',
+          raw: {}
+        }
+      }
+    ])
+    dbGetWorkflowRunByConnectorInboxIdMock.mockReturnValue({
+      runId: 'run-52',
+      workflowId: 'wf-items',
+      startedAt: '2026-04-24T10:00:00Z',
+      completedAt: '2026-04-24T10:01:00Z',
+      status: 'success',
+      connectorInboxId: 52,
+      connectorInboxDisposition: 'processed',
+      nodeStates: []
+    })
+    const listener = vi.fn()
+    scheduler.on('client-message', listener)
+
+    scheduler.deliverPendingConnectorInbox()
+
+    scheduler.off('client-message', listener)
+    expect(dbCompleteConnectorInboxMock).toHaveBeenCalledWith(52, 'lease-52', expect.any(String))
+    expect(listener).not.toHaveBeenCalled()
   })
 
   it('skips silently when the connection was deleted between scheduling and firing', async () => {
@@ -229,7 +476,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     scheduler.triggerWorkflow('wf-gone')
     await new Promise((r) => setImmediate(r))
 
-    expect(dbUpdateSourceConnectionMock).not.toHaveBeenCalled()
+    expect(dbRecordConnectorPollPageMock).not.toHaveBeenCalled()
     expect(connectorGetMock).not.toHaveBeenCalled()
   })
 
@@ -242,7 +489,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     scheduler.triggerWorkflow('wf-nopoll')
     await new Promise((r) => setImmediate(r))
 
-    expect(dbUpdateSourceConnectionMock).not.toHaveBeenCalled()
+    expect(dbRecordConnectorPollPageMock).not.toHaveBeenCalled()
   })
 
   // --- MCP connections are routed through pollMcpConnection, not connector.poll ---
@@ -287,11 +534,10 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     // pollMcpConnection called with the full connection + cursor.
     expect(pollMcpConnectionMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'conn-1', connectorId: 'mcp' }),
-      'c0'
+      undefined
     )
-    expect(dbUpdateSourceConnectionMock).toHaveBeenCalledWith(
-      'conn-1',
-      expect.objectContaining({ syncCursor: 't1' })
+    expect(dbRecordConnectorPollPageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowId: 'wf-mcp', connectionId: 'conn-1', cursor: 't1' })
     )
   })
 
@@ -307,6 +553,6 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     await new Promise((r) => setImmediate(r))
 
     expect(pollMcpConnectionMock).not.toHaveBeenCalled()
-    expect(dbUpdateSourceConnectionMock).not.toHaveBeenCalled()
+    expect(dbRecordConnectorPollPageMock).not.toHaveBeenCalled()
   })
 })

@@ -243,9 +243,18 @@ export interface ExternalItem {
   metadata?: Record<string, unknown>
 }
 
+export interface ExternalItemPage {
+  items: ExternalItem[]
+  nextCursor?: string
+  hasMore?: boolean
+}
+
 export interface PollResult {
   events: TriggerEvent[]
   nextCursor?: string
+  /** More remote pages are immediately available. The scheduler keeps
+   * pulling bounded pages while the connector advances `nextCursor`. */
+  hasMore?: boolean
 }
 
 export interface TriggerEvent {
@@ -337,6 +346,9 @@ export interface VornConnector {
   readonly capabilities: ('tasks' | 'triggers' | 'actions')[]
 
   listItems?(filters: Record<string, unknown>): Promise<ExternalItem[]>
+  /** Bounded reconciliation page. Connectors that implement this let manual
+   * backfill drain the complete remote result set without one huge response. */
+  listItemsPage?(filters: Record<string, unknown>, cursor?: string): Promise<ExternalItemPage>
   getItem?(externalId: string, filters: Record<string, unknown>): Promise<ExternalItem | null>
   poll?(triggerType: string, config: Record<string, unknown>, cursor?: string): Promise<PollResult>
   execute?(actionType: string, args: Record<string, unknown>): Promise<ActionResult>
@@ -391,6 +403,10 @@ export interface SessionEvent {
  *  workflow execution. Kept small and serializable so the engine's existing
  *  persist-and-resume pattern keeps working. */
 export interface ConnectorItemContext {
+  /** Durable delivery row. Internal to Vorn; connectors do not set it. */
+  inboxId?: number
+  /** Identifies the current delivery lease so stale windows cannot acknowledge it. */
+  inboxLeaseToken?: string
   connectionId: string
   connectorId: string
   externalId: string
@@ -779,6 +795,14 @@ export interface WorkflowExecution {
    * launched with long after it finished.
    */
   inputs?: Record<string, unknown>
+  /** Connector payload retained so approval-gated runs can resume downstream steps. */
+  connectorItem?: ConnectorItemContext
+  /** Durable connector event acknowledged only when this run finishes. */
+  connectorInboxId?: number
+  /** Ownership token for the connector inbox lease. */
+  connectorInboxLeaseToken?: string
+  /** Durable terminal handling for restart recovery. */
+  connectorInboxDisposition?: 'processed' | 'retry'
 }
 
 /** Stable identity for a run row, tolerating history written before `runId`. */
@@ -1123,6 +1147,8 @@ export const IPC = {
   CONNECTOR_SEED_WORKFLOW: 'connector:seedWorkflow',
   CONNECTOR_STATUS: 'connector:status',
   CONNECTION_UPSERT_FROM_ITEM: 'connection:upsertFromItem',
+  CONNECTOR_INBOX_COMPLETE: 'connector:inboxComplete',
+  CONNECTOR_INBOX_RENEW: 'connector:inboxRenew',
   WORKFLOW_RUN_MANUAL: 'workflow:runManual',
   CONNECTION_BACKFILL: 'connection:backfill',
   CREDENTIALS_SET_DECRYPTED: 'credentials:setDecrypted',

@@ -85,6 +85,7 @@ import {
 } from './connectors'
 import { MCP_CONNECTOR_ID } from './connectors/mcp'
 import { detectRepoSlug } from './connectors/github'
+import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
 import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vornrun/shared/types'
 import { executeScript, scriptRunnerEvents } from './script-runner'
@@ -685,6 +686,14 @@ export function registerAllMethods(): void {
     scheduler.triggerWorkflow(workflowId, inputs)
   })
 
+  registerMethod('connector:inboxComplete', ({ id, leaseToken, disposition, error }) => {
+    scheduler.completeConnectorInbox(id, leaseToken, disposition, error)
+  })
+
+  registerMethod('connector:inboxRenew', ({ id, leaseToken }) => {
+    return scheduler.renewConnectorInbox(id, leaseToken)
+  })
+
   // Runs execute in the renderer, but a scheduler tick reaches every connected
   // instance. Claiming here — in the one process they all share — is what stops
   // two open windows from launching the same agents twice.
@@ -772,7 +781,7 @@ export function registerAllMethods(): void {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return { imported: 0, updated: 0, error: 'Connection not found' }
     const connector = connectorRegistry.get(conn.connectorId)
-    if (!connector?.listItems) {
+    if (!connector?.listItems && !connector?.listItemsPage) {
       return {
         imported: 0,
         updated: 0,
@@ -786,10 +795,9 @@ export function registerAllMethods(): void {
     const projectName = conn.executionProject || conn.name
 
     try {
-      const items = await connector.listItems(applyDecryptedCreds(conn))
-      for (const item of items) {
+      await forEachConnectorItem(connector, applyDecryptedCreds(conn), (item) => {
         const initialStatus = conn.statusMapping?.[item.status] || ('todo' as TaskStatus)
-        const result = upsertExternalItem(
+        const upserted = upsertExternalItem(
           conn,
           {
             externalId: item.externalId,
@@ -801,9 +809,9 @@ export function registerAllMethods(): void {
           },
           { projectName, initialStatus, now }
         )
-        if (result.created) imported++
+        if (upserted.created) imported++
         else updated++
-      }
+      })
       dbUpdateSourceConnection(conn.id, { lastSyncAt: now, lastSyncError: undefined })
       dbSignalChange()
       configManager.notifyChanged()
