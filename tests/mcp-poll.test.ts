@@ -67,7 +67,7 @@ describe('pollMcpConnection', () => {
     expect(result.nextCursor).toBe('2026-07-02')
   })
 
-  it('filters out items at or before the cursor when a timestampField is set', async () => {
+  it('filters out items strictly before the cursor when a timestampField is set', async () => {
     toolReturns({
       items: [
         { id: 'a', ts: '2026-07-01' },
@@ -82,6 +82,25 @@ describe('pollMcpConnection', () => {
     expect(result.nextCursor).toBe('2026-07-03')
   })
 
+  it('re-emits items sharing the cursor timestamp so none are lost at the boundary', async () => {
+    // 'known' was delivered by the poll that set this cursor; 'late' has the
+    // same timestamp but showed up afterwards. Skipping the whole instant
+    // would drop 'late' permanently, so both are re-emitted and the inbox
+    // ignores the one it already stored.
+    toolReturns({
+      items: [
+        { id: 'known', ts: '2026-07-02' },
+        { id: 'late', ts: '2026-07-02' }
+      ]
+    })
+    const result = await pollMcpConnection(
+      makeConn({ pollTool: 'list', itemsPath: 'items', idField: 'id', timestampField: 'ts' }),
+      '2026-07-02'
+    )
+    expect(result.events.map((e) => e.id)).toEqual(['known', 'late'])
+    expect(result.nextCursor).toBe('2026-07-02')
+  })
+
   it('skips items missing the timestampField when ordering is configured', async () => {
     toolReturns({
       items: [
@@ -94,7 +113,7 @@ describe('pollMcpConnection', () => {
       makeConn({ pollTool: 'list', itemsPath: 'items', idField: 'id', timestampField: 'ts' }),
       '2026-07-02'
     )
-    // Only 'a' (ts > cursor) fires; 'b' (no ts) and 'c' (<= cursor) are skipped.
+    // Only 'a' (ts > cursor) fires; 'b' (no ts) and 'c' (before cursor) are skipped.
     expect(result.events.map((e) => e.id)).toEqual(['a'])
     expect(result.nextCursor).toBe('2026-07-03')
   })
@@ -164,5 +183,96 @@ describe('pollMcpConnection', () => {
       pollMcpConnection(makeConn({ pollTool: 'list', pollArgs: '[1, 2, 3]' }))
     ).rejects.toThrow(/must be a JSON object/)
     expect(callTool).not.toHaveBeenCalled()
+  })
+
+  describe('when the tool tracks its own cursor (cursorArg)', () => {
+    const cursorConn = (extra: Record<string, unknown> = {}) =>
+      makeConn({
+        pollTool: 'poll_newOrder',
+        itemsPath: 'items',
+        idField: 'externalId',
+        timestampField: 'updatedAt',
+        cursorArg: 'cursor',
+        pollArgs: '{"project": "acme"}',
+        ...extra
+      })
+
+    it('hands the stored cursor back to the tool alongside the static args', async () => {
+      toolReturns({ items: [], nextCursor: 'c2' })
+      await pollMcpConnection(cursorConn(), 'c1')
+      expect(callTool).toHaveBeenCalledWith({
+        name: 'poll_newOrder',
+        arguments: { project: 'acme', cursor: 'c1' }
+      })
+    })
+
+    it('stores the cursor the tool returned rather than the newest timestamp', async () => {
+      toolReturns({
+        items: [{ externalId: 'a', updatedAt: '2026-07-02' }],
+        nextCursor: 'c2'
+      })
+      const result = await pollMcpConnection(cursorConn(), 'c1')
+      expect(result.nextCursor).toBe('c2')
+    })
+
+    it('ignores a cursor path that only resolves through the prototype chain', async () => {
+      toolReturns({ items: [] })
+      const result = await pollMcpConnection(cursorConn({ cursorPath: 'constructor.name' }), 'c1')
+      // Without an own-property check this would store "Object" as the cursor.
+      expect(result.nextCursor).toBe('c1')
+    })
+
+    it('reads the next cursor from a configured cursorPath', async () => {
+      toolReturns({ items: [], paging: { next: 'c9' } })
+      const result = await pollMcpConnection(cursorConn({ cursorPath: 'paging.next' }))
+      expect(result.nextCursor).toBe('c9')
+    })
+
+    it('keeps the previous cursor when the tool returns none', async () => {
+      toolReturns({ items: [] })
+      const result = await pollMcpConnection(cursorConn(), 'c1')
+      expect(result.nextCursor).toBe('c1')
+    })
+
+    it('drops prototype-chain keys from user-supplied pollArgs', async () => {
+      toolReturns({ items: [] })
+      await pollMcpConnection(
+        cursorConn({ pollArgs: '{"__proto__":{"polluted":true},"limit":5}' }),
+        undefined
+      )
+      expect(callTool).toHaveBeenCalledWith({
+        name: 'poll_newOrder',
+        arguments: { limit: 5 }
+      })
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    })
+
+    it('refuses a cursor argument that would reach the prototype chain', async () => {
+      toolReturns({ items: [], nextCursor: 'c2' })
+      await expect(pollMcpConnection(cursorConn({ cursorArg: '__proto__' }), 'c1')).rejects.toThrow(
+        /not a usable argument name/
+      )
+    })
+
+    it('refuses it on the very first poll, before any cursor exists', async () => {
+      await expect(pollMcpConnection(cursorConn({ cursorArg: 'constructor' }))).rejects.toThrow(
+        /not a usable argument name/
+      )
+      expect(callTool).not.toHaveBeenCalled()
+    })
+
+    it('emits every item the tool returned instead of filtering by timestamp', async () => {
+      // The tool already dropped what Vorn has seen; re-filtering here against
+      // an opaque cursor would only throw away items it deliberately sent.
+      toolReturns({
+        items: [
+          { externalId: 'a', updatedAt: '2026-07-01' },
+          { externalId: 'b', updatedAt: '2026-07-02' }
+        ],
+        nextCursor: 'c2'
+      })
+      const result = await pollMcpConnection(cursorConn(), 'c1')
+      expect(result.events.map((event) => event.id)).toEqual(['a', 'b'])
+    })
   })
 })

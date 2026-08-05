@@ -51,6 +51,7 @@ const connector: Connector = defineConnector({
     {
       type: 'closeTicket',
       label: 'Close ticket',
+      idempotent: true,
       inputs: [
         { key: 'id', label: 'Id', required: true },
         { key: 'reason', label: 'Reason' }
@@ -155,6 +156,33 @@ describe('connector MCP server', () => {
     await client.close()
   })
 
+  it('tells an agent whether an action is safe to retry', async () => {
+    const client = await connect()
+    const tools = (await client.listTools()).tools
+    expect(tools.find((entry) => entry.name === 'closeTicket')?.description).toContain(
+      'Safe to retry'
+    )
+
+    const risky = createConnectorServer(
+      defineConnector({
+        id: 'risky',
+        name: 'Risky',
+        actions: [
+          { type: 'createTicket', label: 'Create ticket', idempotent: false, run: () => ({}) }
+        ]
+      }),
+      { config: {} }
+    )
+    const [riskyClient, riskyServer] = InMemoryTransport.createLinkedPair()
+    const probe = new Client({ name: 'probe', version: '1.0.0' })
+    await Promise.all([risky.connect(riskyServer), probe.connect(riskyClient)])
+    expect(
+      (await probe.listTools()).tools.find((entry) => entry.name === 'createTicket')?.description
+    ).toContain('Not idempotent')
+    await probe.close()
+    await client.close()
+  })
+
   it('serves the manifest a user needs to configure the connection', async () => {
     const client = await connect()
     expect(payload(await client.callTool({ name: MANIFEST_TOOL, arguments: {} }))).toEqual(
@@ -175,7 +203,9 @@ describe('connectionSetup', () => {
         idField: 'externalId',
         timestampField: 'updatedAt',
         titleField: 'title',
-        urlField: 'url'
+        urlField: 'url',
+        cursorArg: 'cursor',
+        cursorPath: 'nextCursor'
       },
       env: [
         { name: 'API_TOKEN', required: true, secret: true },
@@ -211,6 +241,36 @@ describe('vorn-connector CLI', () => {
     const all = capture()
     await runCli(['setup', 'pkg'], { load, write: all.write })
     expect(all.lines.join('\n')).toContain('poll_brokenTrigger')
+  })
+
+  it('checks a connector and fails only on errors', async () => {
+    const warnings = capture()
+    expect(await runCli(['check', 'pkg'], { load, write: warnings.write })).toBe(0)
+    expect(warnings.lines.join('\n')).toContain('passed with')
+
+    const broken = defineConnector({
+      id: 'broken',
+      name: 'Broken',
+      description: 'Broken',
+      triggers: [
+        {
+          type: 'stuck',
+          label: 'Stuck',
+          description: 'Ignores its cursor',
+          poll: () => ({ items: [{ externalId: '1', title: 'One' }], nextCursor: 'same' })
+        }
+      ]
+    })
+    const errors = capture()
+    expect(
+      await runCli(['check', 'pkg', '--live'], {
+        load: async () => ({ default: broken }),
+        write: errors.write,
+        env: {}
+      })
+    ).toBe(1)
+    expect(errors.lines.join('\n')).toContain('redelivers-items')
+    expect(errors.lines.join('\n')).toContain('1 error(s)')
   })
 
   it('polls against the supplied environment', async () => {

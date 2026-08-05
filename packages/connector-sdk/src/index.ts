@@ -1,4 +1,7 @@
 export { defineConnector, resolveConfig, envNameFor } from './define'
+export { checkConnector, formatFindings } from './check'
+export type { CheckFinding, CheckOptions } from './check'
+export { pollWithDedupe } from './dedupe'
 export { normalizeItem, normalizeItems } from './normalize'
 export { runPoll, drainPoll, runAction, MAX_POLL_PAGES } from './runtime'
 export type { PollPage, RunPollOptions, RunActionOptions } from './runtime'
@@ -17,6 +20,8 @@ export type {
   ConnectorConfigField,
   ConnectorDefinition,
   ConnectorItem,
+  DedupeStrategy,
+  FetchContext,
   NormalizedItem,
   PollContext,
   PollOutcome,

@@ -1,6 +1,7 @@
-import type { Connector, ConnectorConfig, ConnectorDefinition } from './types'
+import type { Connector, ConnectorConfig, ConnectorDefinition, DedupeStrategy } from './types'
 
 const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+const DEDUPE_STRATEGIES: DedupeStrategy[] = ['timestamp', 'lastItem']
 
 function assertUnique(kind: string, keys: string[]): void {
   const seen = new Set<string>()
@@ -44,8 +45,32 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
     if (!KEY_PATTERN.test(trigger.type ?? '')) {
       throw new Error(`Trigger type "${trigger.type}" must start with a letter and be url-safe`)
     }
-    if (typeof trigger.poll !== 'function') {
-      throw new Error(`Trigger ${trigger.type} is missing a poll() implementation`)
+    // `TriggerDefinition` already rules these out for TypeScript authors; the
+    // checks stay for plain-JS connectors, where the union buys nothing.
+    const loose = trigger as { dedupe?: unknown; fetch?: unknown; poll?: unknown }
+    const declarative = typeof loose.fetch === 'function'
+    const imperative = typeof loose.poll === 'function'
+    if (declarative && imperative) {
+      throw new Error(`Trigger ${trigger.type} declares both fetch() and poll(); pick one`)
+    }
+    if (declarative !== (loose.dedupe !== undefined)) {
+      throw new Error(
+        `Trigger ${trigger.type} needs fetch() and a dedupe strategy together, not one alone`
+      )
+    }
+    if (loose.dedupe !== undefined && !DEDUPE_STRATEGIES.includes(loose.dedupe as DedupeStrategy)) {
+      // Without this a typo runs a strategy the author did not ask for, which
+      // shows up as mis-delivered items rather than as an error.
+      throw new Error(
+        `Trigger ${trigger.type} has unknown dedupe strategy ${JSON.stringify(loose.dedupe)}; ` +
+          `expected ${DEDUPE_STRATEGIES.join(' or ')}`
+      )
+    }
+    if (loose.poll !== undefined && !imperative) {
+      throw new Error(`Trigger ${trigger.type} declares poll but it is not a function`)
+    }
+    if (!declarative && !imperative) {
+      throw new Error(`Trigger ${trigger.type} is missing a fetch() or poll() implementation`)
     }
   }
   for (const action of actions) {

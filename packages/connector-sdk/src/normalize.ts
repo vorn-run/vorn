@@ -22,6 +22,25 @@ const RESERVED_KEYS = [
  */
 const UNSAFE_KEYS = ['__proto__', 'constructor', 'prototype'] as const
 
+/**
+ * Resolve an item's `externalId` to the string Vorn dedupes on. Exported for
+ * the same reason as `itemTimestamp`: the ids the dedupe strategies remember
+ * have to be the ones normalization emits, or a boundary id stops matching and
+ * items are silently redelivered.
+ */
+export function itemExternalId(item: ConnectorItem): string {
+  return String(item.externalId ?? '').trim()
+}
+
+/**
+ * Resolve an item's `updatedAt` to a comparable ISO string, falling back to
+ * poll time. Exported so the dedupe strategies order and window items by the
+ * exact value normalization will later emit.
+ */
+export function itemTimestamp(item: ConnectorItem, fallback: string): string {
+  return isoTimestamp(item.updatedAt, fallback)
+}
+
 function isoTimestamp(value: string | Date | undefined, fallback: string): string {
   if (value === undefined) return fallback
   const date = value instanceof Date ? value : new Date(value)
@@ -39,7 +58,7 @@ function isoTimestamp(value: string | Date | undefined, fallback: string): strin
  * work for every SDK connector.
  */
 export function normalizeItem(item: ConnectorItem, polledAt: string): NormalizedItem {
-  const externalId = String(item.externalId ?? '').trim()
+  const externalId = itemExternalId(item)
   if (!externalId) {
     throw new Error('Connector item is missing externalId')
   }

@@ -26,7 +26,9 @@ const SETUP_FILTERS = {
   idField: 'externalId',
   timestampField: 'updatedAt',
   titleField: 'title',
-  urlField: 'url'
+  urlField: 'url',
+  cursorArg: 'cursor',
+  cursorPath: 'nextCursor'
 }
 
 const orders = [
@@ -41,9 +43,10 @@ const connector = defineConnector({
     {
       type: 'newOrder',
       label: 'New order',
-      poll: ({ since }) => ({
-        items: orders
-          .filter((order) => !since || order.updatedAt > since)
+      dedupe: 'timestamp',
+      fetch: ({ since }) =>
+        orders
+          .filter((order) => !since || order.updatedAt >= since)
           .map((order) => ({
             externalId: order.id,
             title: `Order ${order.reference}`,
@@ -52,7 +55,6 @@ const connector = defineConnector({
             updatedAt: order.updatedAt,
             data: { reference: order.reference }
           }))
-      })
     }
   ],
   actions: [
@@ -98,7 +100,9 @@ describe('an SDK connector behind Vorn’s MCP connector', () => {
     const result = await pollMcpConnection(conn)
 
     expect(result.events.map((event) => event.id)).toEqual(['o-1', 'o-2'])
-    expect(result.nextCursor).toBe('2026-08-04T11:00:00.000Z')
+    // The cursor Vorn stores is the connector's own opaque one, handed straight
+    // back on the next poll rather than re-derived from timestamps here.
+    expect(JSON.parse(result.nextCursor!)).toMatchObject({ s: 'timestamp' })
     expect(result.events[0].data).toMatchObject({
       externalId: 'o-1',
       title: 'Order A',
@@ -108,13 +112,15 @@ describe('an SDK connector behind Vorn’s MCP connector', () => {
     })
   })
 
-  it('delivers nothing new once its cursor has caught up', async () => {
+  it('delivers nothing once its cursor has caught up', async () => {
     const conn = await connection()
     const { pollMcpConnection } = await import('../packages/server/src/connectors/mcp')
 
     const first = await pollMcpConnection(conn)
     const second = await pollMcpConnection(conn, first.nextCursor)
 
+    // The connector recognizes its own cursor, so nothing is re-delivered —
+    // not even the items sharing the newest instant.
     expect(second.events).toEqual([])
     expect(second.nextCursor).toBe(first.nextCursor)
   })
@@ -152,5 +158,61 @@ describe('an SDK connector behind Vorn’s MCP connector', () => {
     expect(Object.keys((ship?.outputSchema?.properties ?? {}) as Record<string, unknown>)).toEqual([
       'shipped'
     ])
+  })
+
+  it('drives a declarative dedupe trigger without the author writing cursor code', async () => {
+    const shared = '2026-08-04T12:00:00.000Z'
+    let rows = [{ id: 'r-1', updatedAt: shared }]
+    const declarative = defineConnector({
+      id: 'orders-db',
+      name: 'Orders database',
+      triggers: [
+        {
+          type: 'newOrder',
+          label: 'New order',
+          dedupe: 'timestamp',
+          // The author only answers "what is there now?" — no cursor handling.
+          fetch: () =>
+            rows.map((row) => ({
+              externalId: row.id,
+              title: `Order ${row.id}`,
+              updatedAt: row.updatedAt
+            }))
+        }
+      ]
+    })
+
+    const server = createConnectorServer(declarative, { config: {}, now: () => NOW })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'vorn', version: '1.0.0' })
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
+    getOrStartClient.mockResolvedValue(client)
+
+    const { discoverTools, pollMcpConnection } =
+      await import('../packages/server/src/connectors/mcp')
+    const base: SourceConnection = {
+      id: 'conn-declarative',
+      connectorId: 'mcp',
+      name: 'Orders database',
+      filters: { ...SETUP_FILTERS },
+      syncIntervalMinutes: 5,
+      statusMapping: {},
+      createdAt: NOW
+    }
+    const conn = {
+      ...base,
+      filters: { ...base.filters, discoveredTools: await discoverTools(base) }
+    }
+
+    const first = await pollMcpConnection(conn)
+    expect(first.events.map((event) => event.id)).toEqual(['r-1'])
+
+    // A second row lands at the exact same instant — the case that silently
+    // loses items when a connector windows on `updatedAt > cursor`.
+    rows = [...rows, { id: 'r-2', updatedAt: shared }]
+    const second = await pollMcpConnection(conn, first.nextCursor)
+    expect(second.events.map((event) => event.id)).toEqual(['r-2'])
+
+    await client.close()
   })
 })

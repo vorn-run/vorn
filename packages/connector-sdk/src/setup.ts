@@ -20,6 +20,8 @@ export interface ConnectionSetup {
     timestampField: 'updatedAt'
     titleField: 'title'
     urlField: 'url'
+    cursorArg: 'cursor'
+    cursorPath: 'nextCursor'
   }
   /** Environment variable names the connector reads. */
   env: Array<{ name: string; required: boolean; secret: boolean; description?: string }>
@@ -30,7 +32,9 @@ export interface ConnectionSetup {
  *
  * Every SDK connector normalizes to the same field names, so this mapping is
  * fixed; it is generated rather than documented so a rename in the SDK cannot
- * drift away from the setup instructions users copy.
+ * drift away from the setup instructions users copy. `cursorArg` hands the
+ * connector back its own cursor each poll, which is what lets its dedupe
+ * strategy — rather than Vorn's timestamp comparison — decide what is new.
  */
 export function connectionSetup(connector: Connector, triggerType: string): ConnectionSetup {
   const trigger = connector.triggers.find((entry) => entry.type === triggerType)
@@ -46,7 +50,9 @@ export function connectionSetup(connector: Connector, triggerType: string): Conn
       idField: 'externalId',
       timestampField: 'updatedAt',
       titleField: 'title',
-      urlField: 'url'
+      urlField: 'url',
+      cursorArg: 'cursor',
+      cursorPath: 'nextCursor'
     },
     env: connector.config.map((field) => ({
       name: envNameFor(field.key, field.env),
