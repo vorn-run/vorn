@@ -152,6 +152,20 @@ describe('normalizeItem', () => {
     )
   })
 
+  it('drops prototype-polluting keys from extra data', () => {
+    const normalized = normalizeItem(
+      {
+        externalId: '1',
+        title: 't',
+        data: JSON.parse('{"__proto__":{"polluted":true},"constructor":1,"safe":"yes"}')
+      },
+      NOW
+    )
+    expect(normalized.safe).toBe('yes')
+    expect(normalized.constructor).toBe(Object)
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
   it('rejects items that would be undeliverable', () => {
     expect(() => normalizeItem({ externalId: '  ', title: 't' }, NOW)).toThrow(/missing externalId/)
     expect(() => normalizeItem({ externalId: '1', title: ' ' }, NOW)).toThrow(/missing title/)
@@ -247,6 +261,17 @@ describe('drainPoll', () => {
     ).rejects.toThrow(/did not advance its cursor/)
   })
 
+  it('forwards an empty-string cursor instead of treating it as absent', async () => {
+    const seen: (string | undefined)[] = []
+    const connector = simple((context) => {
+      seen.push(context.cursor)
+      return { items: [ticket('1')] }
+    })
+
+    await drainPoll(connector, 'newTicket', { cursor: '', now: () => NOW })
+    expect(seen).toEqual([''])
+  })
+
   it('stops a trigger that pages forever', async () => {
     let page = 0
     const connector = simple(() => ({ items: [], nextCursor: `p${++page}`, hasMore: true }))
@@ -291,6 +316,9 @@ describe('runAction', () => {
     await expect(runAction(connector, 'closeTicket', {})).rejects.toThrow(/requires "id"/)
     await expect(runAction(connector, 'closeTicket', { id: '1', number: 'x' })).rejects.toThrow(
       /argument "number": Expected a number/
+    )
+    await expect(runAction(connector, 'closeTicket', { id: '1', notify: 'treu' })).rejects.toThrow(
+      /argument "notify": Expected a boolean/
     )
   })
 

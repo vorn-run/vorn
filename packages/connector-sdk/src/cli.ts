@@ -98,10 +98,15 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         deps.write(`Missing <trigger> argument\n\n${USAGE}`)
         return 1
       }
+      const limit = flags.limit === undefined ? undefined : Number(flags.limit)
+      if (limit !== undefined && !Number.isFinite(limit)) {
+        deps.write(`Invalid limit "${flags.limit}"`)
+        return 1
+      }
       const page = await runPoll(connector, triggerType, {
         config: resolveConfig(connector, deps.env ?? process.env),
         ...(flags.since !== undefined && { since: flags.since }),
-        ...(flags.limit !== undefined && { limit: Number(flags.limit) })
+        ...(limit !== undefined && { limit })
       })
       deps.write(JSON.stringify(page, null, 2))
       return 0

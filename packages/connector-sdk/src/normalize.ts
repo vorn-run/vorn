@@ -15,6 +15,13 @@ const RESERVED_KEYS = [
   'updatedAt'
 ] as const
 
+/**
+ * Keys that would mutate `Object.prototype` (or look like they do) once a
+ * consumer spreads or merges the normalized item. Dropped rather than thrown
+ * on, so a single odd column in a source system cannot stall a whole poll.
+ */
+const UNSAFE_KEYS = ['__proto__', 'constructor', 'prototype'] as const
+
 function isoTimestamp(value: string | Date | undefined, fallback: string): string {
   if (value === undefined) return fallback
   const date = value instanceof Date ? value : new Date(value)
@@ -43,6 +50,7 @@ export function normalizeItem(item: ConnectorItem, polledAt: string): Normalized
   const extra: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(item.data ?? {})) {
     if ((RESERVED_KEYS as readonly string[]).includes(key)) continue
+    if ((UNSAFE_KEYS as readonly string[]).includes(key)) continue
     extra[key] = value
   }
 

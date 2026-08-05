@@ -70,7 +70,10 @@ export async function drainPoll(
   const collected: NormalizedItem[] = []
   let cursor = options.cursor
   for (let page = 0; page < MAX_POLL_PAGES; page++) {
-    const result = await runPoll(connector, triggerType, { ...options, ...(cursor && { cursor }) })
+    const result = await runPoll(connector, triggerType, {
+      ...options,
+      ...(cursor !== undefined && { cursor })
+    })
     collected.push(...result.items)
     if (!result.hasMore) return collected
     if (result.nextCursor === cursor) {
@@ -93,7 +96,11 @@ function coerceArg(value: unknown, type: string | undefined): unknown {
     if (Number.isNaN(parsed)) throw new Error(`Expected a number, got "${value}"`)
     return parsed
   }
-  if (type === 'boolean') return value === 'true'
+  if (type === 'boolean') {
+    if (value === 'true') return true
+    if (value === 'false') return false
+    throw new Error(`Expected a boolean, got "${value}"`)
+  }
   return value
 }
 

@@ -247,6 +247,16 @@ describe('vorn-connector CLI', () => {
     expect(await runCli(['poll', 'pkg'], { load, write: noTrigger.write })).toBe(1)
     expect(noTrigger.lines.join('\n')).toContain('Missing <trigger>')
 
+    const badLimit = capture()
+    expect(
+      await runCli(['poll', 'pkg', 'newTicket', '--limit', 'lots'], {
+        load,
+        write: badLimit.write,
+        env: { API_TOKEN: 'tok' }
+      })
+    ).toBe(1)
+    expect(badLimit.lines.join('\n')).toContain('Invalid limit "lots"')
+
     const unknown = capture()
     expect(await runCli(['frobnicate', 'pkg'], { load, write: unknown.write })).toBe(1)
     expect(unknown.lines.join('\n')).toContain('Unknown command')
