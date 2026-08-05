@@ -311,13 +311,15 @@ export async function pollMcpConnection(
     }
   }
 
-  if (cfg.cursorArg && cursor !== undefined) {
+  if (cfg.cursorArg) {
     // `cursorArg` is user-supplied and becomes an object key, so a name that
-    // walks the prototype chain must not get that far.
+    // walks the prototype chain must not get that far. Checked whenever it is
+    // configured, not just once a cursor exists, so a misconfigured connection
+    // fails on its first poll rather than days later.
     if (UNSAFE_ARG_KEYS.includes(cfg.cursorArg)) {
       throw new Error(`Cursor argument "${cfg.cursorArg}" is not a usable argument name`)
     }
-    pollArgs = { ...pollArgs, [cfg.cursorArg]: cursor }
+    if (cursor !== undefined) pollArgs = { ...pollArgs, [cfg.cursorArg]: cursor }
   }
 
   const result = await invokeMcpTool(conn, cfg.pollTool, pollArgs)

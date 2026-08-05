@@ -218,6 +218,27 @@ describe('timestamp dedupe', () => {
     ).rejects.toThrow(/not valid SDK cursor JSON/)
   })
 
+  it('rejects a cursor whose payload is malformed', async () => {
+    const connector = timestampConnector(() => [])
+    await expect(
+      runPoll(connector, 'newTicket', {
+        cursor: '{"v":1,"s":"timestamp","t":"2026-01-01T00:00:00.000Z","ids":5}',
+        now: () => NOW
+      })
+    ).rejects.toThrow(/missing the fields the "timestamp" strategy needs/)
+
+    await expect(
+      runPoll(
+        lastItemConnector(() => []),
+        'newPost',
+        {
+          cursor: '{"v":1,"s":"lastItem"}',
+          now: () => NOW
+        }
+      )
+    ).rejects.toThrow(/missing the fields the "lastItem" strategy needs/)
+  })
+
   it('rejects a fetch that does not return an array', async () => {
     const connector = timestampConnector(() => undefined as never)
     await expect(runPoll(connector, 'newTicket', { now: () => NOW })).rejects.toThrow(

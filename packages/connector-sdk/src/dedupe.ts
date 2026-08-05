@@ -43,6 +43,15 @@ function decodeCursor<S extends DedupeStrategy>(
   if (!state || typeof state !== 'object' || state.v !== 1 || state.s !== strategy) {
     throw new Error(`Cursor does not belong to the "${strategy}" strategy: ${cursor}`)
   }
+  // Check the payload too, so a hand-edited or truncated cursor fails here
+  // rather than somewhere further in with an unrelated error.
+  const wellFormed =
+    state.s === 'timestamp'
+      ? typeof state.t === 'string' && Array.isArray(state.ids)
+      : typeof state.id === 'string'
+  if (!wellFormed) {
+    throw new Error(`Cursor is missing the fields the "${strategy}" strategy needs: ${cursor}`)
+  }
   return state as CursorFor<S>
 }
 

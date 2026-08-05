@@ -234,6 +234,13 @@ describe('pollMcpConnection', () => {
       )
     })
 
+    it('refuses it on the very first poll, before any cursor exists', async () => {
+      await expect(pollMcpConnection(cursorConn({ cursorArg: 'constructor' }))).rejects.toThrow(
+        /not a usable argument name/
+      )
+      expect(callTool).not.toHaveBeenCalled()
+    })
+
     it('emits every item the tool returned instead of filtering by timestamp', async () => {
       // The tool already dropped what Vorn has seen; re-filtering here against
       // an opaque cursor would only throw away items it deliberately sent.
