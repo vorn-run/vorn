@@ -234,6 +234,19 @@ describe('pollMcpConnection', () => {
       expect(result.nextCursor).toBe('c1')
     })
 
+    it('drops prototype-chain keys from user-supplied pollArgs', async () => {
+      toolReturns({ items: [] })
+      await pollMcpConnection(
+        cursorConn({ pollArgs: '{"__proto__":{"polluted":true},"limit":5}' }),
+        undefined
+      )
+      expect(callTool).toHaveBeenCalledWith({
+        name: 'poll_newOrder',
+        arguments: { limit: 5 }
+      })
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    })
+
     it('refuses a cursor argument that would reach the prototype chain', async () => {
       toolReturns({ items: [], nextCursor: 'c2' })
       await expect(pollMcpConnection(cursorConn({ cursorArg: '__proto__' }), 'c1')).rejects.toThrow(

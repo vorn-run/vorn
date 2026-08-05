@@ -223,6 +223,19 @@ interface McpPollConfig {
 
 const UNSAFE_ARG_KEYS: string[] = ['__proto__', 'constructor', 'prototype']
 
+/**
+ * Tool arguments come from user-supplied JSON and are later re-keyed onto a
+ * fresh object by `coerceMcpArgs`. Keys that address the prototype chain are
+ * dropped here so that re-keying cannot mutate anything but the payload.
+ */
+function withoutUnsafeKeys(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(args)) {
+    if (!UNSAFE_ARG_KEYS.includes(key)) out[key] = value
+  }
+  return out
+}
+
 function readPollConfig(conn: SourceConnection): McpPollConfig {
   const f = conn.filters
   const str = (v: unknown): string | undefined => {
@@ -300,7 +313,7 @@ export async function pollMcpConnection(
     try {
       const parsed = JSON.parse(cfg.pollArgs)
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        pollArgs = parsed as Record<string, unknown>
+        pollArgs = withoutUnsafeKeys(parsed as Record<string, unknown>)
       } else {
         throw new Error('pollArgs must be a JSON object')
       }
