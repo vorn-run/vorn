@@ -227,6 +227,13 @@ describe('pollMcpConnection', () => {
       expect(result.nextCursor).toBe('c1')
     })
 
+    it('refuses a cursor argument that would reach the prototype chain', async () => {
+      toolReturns({ items: [], nextCursor: 'c2' })
+      await expect(pollMcpConnection(cursorConn({ cursorArg: '__proto__' }), 'c1')).rejects.toThrow(
+        /not a usable argument name/
+      )
+    })
+
     it('emits every item the tool returned instead of filtering by timestamp', async () => {
       // The tool already dropped what Vorn has seen; re-filtering here against
       // an opaque cursor would only throw away items it deliberately sent.

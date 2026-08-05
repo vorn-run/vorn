@@ -221,6 +221,8 @@ interface McpPollConfig {
   cursorPath?: string
 }
 
+const UNSAFE_ARG_KEYS: string[] = ['__proto__', 'constructor', 'prototype']
+
 function readPollConfig(conn: SourceConnection): McpPollConfig {
   const f = conn.filters
   const str = (v: unknown): string | undefined => {
@@ -310,6 +312,11 @@ export async function pollMcpConnection(
   }
 
   if (cfg.cursorArg && cursor !== undefined) {
+    // `cursorArg` is user-supplied and becomes an object key, so a name that
+    // walks the prototype chain must not get that far.
+    if (UNSAFE_ARG_KEYS.includes(cfg.cursorArg)) {
+      throw new Error(`Cursor argument "${cfg.cursorArg}" is not a usable argument name`)
+    }
     pollArgs = { ...pollArgs, [cfg.cursorArg]: cursor }
   }
 

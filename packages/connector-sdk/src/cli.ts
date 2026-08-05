@@ -31,11 +31,22 @@ export interface CliDeps {
 /** Flags that stand alone; everything else must be followed by a value. */
 const BOOLEAN_FLAGS = new Set(['live'])
 
-function parseFlags(args: string[]): Record<string, string> {
+/**
+ * Split arguments into flags and positionals in one pass, so a flag's value is
+ * never also read as a positional argument.
+ */
+function parseArgs(args: string[]): {
+  flags: Record<string, string>
+  positional: string[]
+} {
   const flags: Record<string, string> = {}
+  const positional: string[] = []
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]
-    if (!arg.startsWith('--')) continue
+    if (!arg.startsWith('--')) {
+      positional.push(arg)
+      continue
+    }
     const name = arg.slice(2)
     if (BOOLEAN_FLAGS.has(name)) {
       flags[name] = 'true'
@@ -48,7 +59,7 @@ function parseFlags(args: string[]): Record<string, string> {
     flags[name] = value
     index++
   }
-  return flags
+  return { flags, positional }
 }
 
 /** Accept either `export default connector` or `export const connector`. */
@@ -76,8 +87,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   }
 
   const connector = pickConnector(await deps.load(modulePath), modulePath)
-  const positional = rest.filter((arg) => !arg.startsWith('--'))
-  const flags = parseFlags(rest)
+  const { flags, positional } = parseArgs(rest)
 
   switch (command) {
     case 'manifest':
