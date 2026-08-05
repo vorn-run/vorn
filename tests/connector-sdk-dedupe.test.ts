@@ -154,6 +154,42 @@ describe('timestamp dedupe', () => {
     expect(JSON.parse(first.nextCursor!).t).toBe(NOW)
   })
 
+  it('does not redeliver a timestamp-less item as poll time moves on', async () => {
+    const connector = timestampConnector(() => [{ externalId: '1', title: 'No timestamp' }])
+    const first = await runPoll(connector, 'newTicket', { now: () => NOW })
+
+    // Poll time has advanced, but the item is the same one — giving it the new
+    // poll time would make it look newer than the cursor on every single poll.
+    const later = '2026-08-05T13:00:00.000Z'
+    const second = await runPoll(connector, 'newTicket', {
+      cursor: first.nextCursor!,
+      now: () => later
+    })
+    expect(second.items).toEqual([])
+  })
+
+  it('still recognizes a timestamp-less item after the boundary has moved past it', async () => {
+    let rows: ConnectorItem[] = [{ externalId: 'x', title: 'No timestamp' }]
+    const connector = timestampConnector(() => rows)
+    const first = await runPoll(connector, 'newTicket', { now: () => NOW })
+    expect(first.items.map((item) => item.externalId)).toEqual(['x'])
+
+    // A properly stamped item arrives and drags the boundary forward. The
+    // timestamp-less one must not come back with it.
+    rows = [...rows, ticket('2', '2026-08-05T14:00:00.000Z')]
+    const second = await runPoll(connector, 'newTicket', {
+      cursor: first.nextCursor!,
+      now: () => '2026-08-05T13:00:00.000Z'
+    })
+    expect(second.items.map((item) => item.externalId)).toEqual(['2'])
+
+    const third = await runPoll(connector, 'newTicket', {
+      cursor: second.nextCursor!,
+      now: () => '2026-08-05T15:00:00.000Z'
+    })
+    expect(third.items).toEqual([])
+  })
+
   it('rejects a cursor belonging to another strategy', async () => {
     const connector = timestampConnector(() => [])
     await expect(

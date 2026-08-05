@@ -144,8 +144,8 @@ export async function checkConnector(
     )
   }
 
-  // Triggers share no state, so a live check of a multi-trigger connector pays
-  // one round-trip rather than one per trigger.
+  // Triggers share no state, so their checks run concurrently rather than
+  // waiting on each other's polls.
   const perTrigger = await Promise.all(
     connector.triggers.map(async (trigger) => {
       const target = `trigger ${trigger.type}`

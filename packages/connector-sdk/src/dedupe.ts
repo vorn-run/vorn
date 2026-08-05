@@ -56,6 +56,8 @@ interface Keyed {
   item: ConnectorItem
   at: string
   id: string
+  /** True when `at` was borrowed from the boundary because the item has none. */
+  pinned?: boolean
 }
 
 /**
@@ -94,16 +96,24 @@ function timestampPoll(
   const seen = new Set(state?.ids ?? [])
 
   const fresh: Keyed[] = []
+  // Ids of timestamp-less items this cursor has already delivered. They have to
+  // survive into the next cursor even when the boundary moves past them,
+  // because the id set is the only thing that can recognize them.
+  const pinnedAlreadySeen: string[] = []
+
   for (const item of fetched) {
-    const at = itemTimestamp(item, polledAt)
+    const id = itemExternalId(item)
+    // An item with no `updatedAt` cannot be placed against the boundary. Give
+    // it the boundary itself rather than poll time, which would make it look
+    // newer on every single poll and redeliver it forever.
+    const pinned = item.updatedAt === undefined && boundary !== undefined
+    const at = pinned ? boundary : itemTimestamp(item, polledAt)
     // Items sharing the boundary instant are new only if this cursor has not
     // already delivered them. Without this, `>` drops them forever and `>=`
     // redelivers them on every single poll.
-    const isNew =
-      boundary === undefined ||
-      at > boundary ||
-      (at === boundary && !seen.has(itemExternalId(item)))
-    if (isNew) fresh.push({ item, at, id: itemExternalId(item) })
+    const isNew = boundary === undefined || at > boundary || (at === boundary && !seen.has(id))
+    if (isNew) fresh.push({ item, at, id, ...(pinned && { pinned: true }) })
+    else if (pinned) pinnedAlreadySeen.push(id)
   }
   fresh.sort((left, right) => compare(left.at, right.at) || compare(left.id, right.id))
 
@@ -114,9 +124,17 @@ function timestampPoll(
       atNewest.push(delivered[i]!.id)
     }
     // Carry the previous boundary ids forward only while the boundary itself
-    // has not moved; once it does they can never match again.
-    const ids = (newest === boundary ? [...seen, ...atNewest] : atNewest).slice(-MAX_BOUNDARY_IDS)
-    return { v: 1, s: 'timestamp', t: newest, ids }
+    // has not moved; once it does they can never match again — except for
+    // pinned items, which re-pin to wherever the boundary lands next.
+    const carried =
+      newest === boundary
+        ? [...seen, ...atNewest]
+        : [
+            ...pinnedAlreadySeen,
+            ...delivered.filter((entry) => entry.pinned).map((entry) => entry.id),
+            ...atNewest
+          ]
+    return { v: 1, s: 'timestamp', t: newest, ids: carried.slice(-MAX_BOUNDARY_IDS) }
   })
 }
 
