@@ -46,6 +46,11 @@ function decodeCursor<S extends DedupeStrategy>(
   return state as CursorFor<S>
 }
 
+function compare(left: string, right: string): number {
+  if (left === right) return 0
+  return left < right ? -1 : 1
+}
+
 /** An item with its dedupe keys resolved once, rather than per comparison. */
 interface Keyed {
   item: ConnectorItem
@@ -100,9 +105,7 @@ function timestampPoll(
       (at === boundary && !seen.has(itemExternalId(item)))
     if (isNew) fresh.push({ item, at, id: itemExternalId(item) })
   }
-  fresh.sort((left, right) =>
-    left.at === right.at ? (left.id < right.id ? -1 : 1) : left.at < right.at ? -1 : 1
-  )
+  fresh.sort((left, right) => compare(left.at, right.at) || compare(left.id, right.id))
 
   return page(fresh, context, state !== undefined, (delivered) => {
     const newest = delivered[delivered.length - 1]!.at

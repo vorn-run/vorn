@@ -32,8 +32,10 @@ function finding(
 
 /**
  * Replay a trigger's declared `sample` through the real dedupe pipeline by
- * swapping in a fetch that serves the sample once. Everything else — cursor
- * encoding, ordering, normalization — is the production code path.
+ * swapping in a fetch that serves the whole sample on every call. Serving it
+ * again on the second poll is the point: a correct trigger recognizes its own
+ * cursor and delivers nothing, while one that redelivers is caught. Everything
+ * else — cursor encoding, ordering, normalization — is the production path.
  */
 function sampleTrigger(trigger: TriggerDefinition & { dedupe: DedupeStrategy }): TriggerDefinition {
   return { ...trigger, poll: undefined, fetch: () => trigger.sample ?? [] }
