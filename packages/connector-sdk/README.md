@@ -1,9 +1,8 @@
 # @vornrun/connector-sdk
 
 Build a Vorn pull connector in TypeScript and share it as an ordinary npm
-package. No marketplace, no plugin host, no changes to Vorn itself: a connector
-built with this SDK runs as an MCP stdio server, and Vorn's generic MCP
-connector already knows how to talk to one.
+package. A connector built with this SDK runs as an MCP stdio server, and
+Vorn's generic MCP connector already knows how to talk to one.
 
 ```bash
 npm install @vornrun/connector-sdk
