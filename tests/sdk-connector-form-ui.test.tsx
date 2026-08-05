@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { SdkConnectorForm } from '../src/renderer/components/settings/SdkConnectorForm'
-import type { SdkConnectorManifest } from '../src/shared/types'
+import type { ConnectorCatalogItem, SdkConnectorManifest } from '../src/shared/types'
 
 vi.mock('../src/renderer/stores', () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -54,10 +54,21 @@ beforeEach(() => {
   }
 })
 
-const setup = () => {
+const setup = (catalogEntry?: ConnectorCatalogItem) => {
   const onDone = vi.fn()
-  const utils = render(<SdkConnectorForm onDone={onDone} onCancel={vi.fn()} />)
+  const utils = render(
+    <SdkConnectorForm onDone={onDone} onCancel={vi.fn()} catalogEntry={catalogEntry} />
+  )
   return { ...utils, onDone }
+}
+
+const CATALOG_ENTRY: ConnectorCatalogItem = {
+  id: 'kusto',
+  name: 'Azure Data Explorer',
+  description: 'Trigger workflows from the rows a KQL query returns.',
+  packageName: '@vornrun/connector-kusto',
+  capabilities: ['triggers', 'actions'],
+  launch: { command: 'npx', args: ['-y', '@vornrun/connector-kusto'] }
 }
 
 /** Type a package name and run the lookup, leaving the manifest on screen. */
@@ -264,5 +275,45 @@ describe('SdkConnectorForm', () => {
 
     await waitFor(() => expect(utils.getByText('database is locked')).toBeInTheDocument())
     expect(utils.onDone).not.toHaveBeenCalled()
+  })
+})
+
+describe('installing from a catalog entry', () => {
+  it('reads the connector on open instead of asking for its package name', async () => {
+    const utils = setup(CATALOG_ENTRY)
+
+    await waitFor(() => expect(probeSdkConnector).toHaveBeenCalledWith(CATALOG_ENTRY.launch))
+    expect(await utils.findByText('Azure Data Explorer')).toBeInTheDocument()
+  })
+
+  it('hides the package lookup, which is the step the catalog exists to remove', async () => {
+    const utils = setup(CATALOG_ENTRY)
+
+    await waitFor(() => expect(probeSdkConnector).toHaveBeenCalled())
+    expect(utils.queryByText('Connector package')).not.toBeInTheDocument()
+    expect(utils.queryByPlaceholderText('@vornrun/connector-kusto')).not.toBeInTheDocument()
+  })
+
+  it('starts the connector once, not once per effect run', async () => {
+    // A probe spawns a child process that downloads a package, so a second
+    // run is a duplicate cold install racing the first.
+    setup(CATALOG_ENTRY)
+
+    await waitFor(() => expect(probeSdkConnector).toHaveBeenCalled())
+    expect(probeSdkConnector).toHaveBeenCalledTimes(1)
+  })
+
+  it('still offers the lookup with no entry, so a local build can be loaded', () => {
+    const utils = setup()
+
+    expect(utils.getByText('Connector package')).toBeInTheDocument()
+    expect(probeSdkConnector).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a failed read rather than leaving an empty form', async () => {
+    probeSdkConnector.mockResolvedValue({ ok: false, error: 'package not found' })
+    const utils = setup(CATALOG_ENTRY)
+
+    expect(await utils.findByText('package not found')).toBeInTheDocument()
   })
 })

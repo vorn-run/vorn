@@ -372,6 +372,32 @@ export interface SourceConnection {
   createdAt: string
 }
 
+/**
+ * Where a packaged connector records itself on the connection that runs it.
+ *
+ * A connector installed from a package is stored as an `mcp` connection, so
+ * `connectorId` is `mcp` for every one of them and its real identity, version
+ * and icon have to travel in `filters` instead. Both the desktop app and the
+ * MCP server create these connections, so the key names live here rather than
+ * being spelled out at each site — a disagreement between a writer and a
+ * reader is invisible until a connection shows the wrong icon or is counted
+ * against the wrong connector.
+ */
+export const SDK_FILTER_KEYS = {
+  connectorId: 'sdkConnectorId',
+  version: 'sdkVersion',
+  icon: 'sdkIcon'
+} as const
+
+/** The connector a connection belongs to, which for a package is not `mcp`. */
+export function connectionConnectorId(connection: {
+  connectorId: string
+  filters: SourceConnection['filters']
+}): string {
+  const packaged = connection.filters?.[SDK_FILTER_KEYS.connectorId]
+  return typeof packaged === 'string' && packaged !== '' ? packaged : connection.connectorId
+}
+
 // -- Task source link (sync metadata, separate from TaskConfig) --
 
 export interface TaskSourceLink {
@@ -1157,7 +1183,8 @@ export const IPC = {
   CONNECTION_LIST_ACTIONS: 'connection:listActions',
   CONNECTION_LIST_MCP_TOOLS: 'connection:listMcpTools',
   CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
-  CONNECTOR_PROBE_SDK: 'connector:probeSdk'
+  CONNECTOR_PROBE_SDK: 'connector:probeSdk',
+  CONNECTOR_CATALOG: 'connector:catalog'
 } as const
 
 /**
@@ -1201,6 +1228,38 @@ export interface SdkTrigger {
 export interface SdkConnectorIcon {
   viewBox: string
   paths: string[]
+}
+
+/**
+ * A connector package Vorn ships knowledge of, so it can be offered by name
+ * instead of requiring one.
+ *
+ * Metadata only. What a connection actually needs is read from the package at
+ * install time, so this cannot become a stale second copy of the connector's
+ * own definition.
+ */
+export interface ConnectorCatalogEntry {
+  id: string
+  name: string
+  description: string
+  /** npm package the connector is published as. */
+  packageName: string
+  capabilities: Array<'tasks' | 'triggers' | 'actions'>
+  /** One line on how it authenticates, shown before anyone commits to install. */
+  auth?: string
+  icon?: SdkConnectorIcon
+  /** Groups the connector in the list once there are too many to scan. */
+  category?: string
+  /** Extra search terms, so it is findable by what it talks to. */
+  keywords?: string[]
+}
+
+/**
+ * A catalog entry plus where to actually launch it, resolved in the main
+ * process because that resolution depends on the filesystem.
+ */
+export interface ConnectorCatalogItem extends ConnectorCatalogEntry {
+  launch: { command: string; args: string[] }
 }
 
 export interface SdkConnectorManifest {

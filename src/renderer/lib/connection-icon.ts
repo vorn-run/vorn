@@ -1,4 +1,7 @@
 import type { SdkConnectorIcon, SourceConnection } from '../../shared/types'
+import { SDK_FILTER_KEYS } from '../../shared/types'
+
+export { SDK_FILTER_KEYS, connectionConnectorId } from '../../shared/types'
 
 /**
  * The glyph a connection should show.
@@ -13,7 +16,7 @@ import type { SdkConnectorIcon, SourceConnection } from '../../shared/types'
 export function connectionIcon(
   connection: { filters: SourceConnection['filters'] } | null | undefined
 ): SdkConnectorIcon | undefined {
-  const raw = connection?.filters?.sdkIcon
+  const raw = connection?.filters?.[SDK_FILTER_KEYS.icon]
   if (typeof raw !== 'string' || raw === '') return undefined
   try {
     const parsed: unknown = JSON.parse(raw)

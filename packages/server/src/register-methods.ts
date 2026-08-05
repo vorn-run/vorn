@@ -85,6 +85,7 @@ import {
 } from './connectors'
 import { MCP_CONNECTOR_ID } from './connectors/mcp'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
+import { catalogItems } from './connectors/catalog'
 import { detectRepoSlug } from './connectors/github'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
@@ -780,6 +781,12 @@ export function registerAllMethods(): void {
   registerMethod('connector:probeSdk', async (request: SdkProbeRequest) => {
     return probeSdkConnector(request)
   })
+
+  /**
+   * Connector packages Vorn knows by name, so a first-party connector can be
+   * offered in the connector list rather than requiring its package name.
+   */
+  registerMethod('connector:catalog', () => catalogItems())
 
   /**
    * One-shot backfill for a connection. Calls listItems() (not poll()) so it

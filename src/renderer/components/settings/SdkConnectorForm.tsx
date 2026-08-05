@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
-import type { SdkConnectorManifest, TaskStatus } from '../../../shared/types'
+import type { ConnectorCatalogItem, SdkConnectorManifest, TaskStatus } from '../../../shared/types'
 import { useAppStore } from '../../stores'
 import { parseLaunchSpec } from './parse-launch-spec'
 import { ConnectorIcon } from '../ConnectorIcon'
+import { SDK_FILTER_KEYS } from '../../lib/connection-icon'
 
 const INPUT_CLASS =
   'w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none'
@@ -18,10 +19,18 @@ const INPUT_CLASS =
  */
 export function SdkConnectorForm({
   onDone,
-  onCancel
+  onCancel,
+  catalogEntry
 }: {
   onDone: () => void
   onCancel: () => void
+  /**
+   * Set when the install started from a connector Vorn already knows about.
+   * The package name is then a detail of the catalog rather than something to
+   * type, so the lookup step disappears and the form opens on the questions
+   * only the person can answer.
+   */
+  catalogEntry?: ConnectorCatalogItem
 }) {
   const projects = useAppStore((s) => s.config?.projects || [])
 
@@ -35,19 +44,24 @@ export function SdkConnectorForm({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleProbe = async () => {
+  /**
+   * Read a connector by starting it.
+   *
+   * Takes the target rather than reading `spec`, so it closes over no state
+   * and is safe to call from an effect.
+   */
+  const probe = useCallback(async (target: { command: string; args: string[] }) => {
     setError(null)
     setManifest(null)
     setProbing(true)
     try {
-      const parsed = parseLaunchSpec(spec)
-      const result = await window.api.probeSdkConnector(parsed)
+      const result = await window.api.probeSdkConnector(target)
       if (!result.ok) {
         setError(result.error)
         return
       }
       setManifest(result.manifest)
-      setLaunch(parsed)
+      setLaunch(target)
       setTriggerType(result.manifest.triggers[0]?.type ?? '')
       // Seed defaults so a field the user never touches still round-trips.
       setValues(Object.fromEntries(result.manifest.env.map((entry) => [entry.name, ''])))
@@ -56,7 +70,20 @@ export function SdkConnectorForm({
     } finally {
       setProbing(false)
     }
-  }
+  }, [])
+
+  // A catalog entry names its own package, so there is nothing to look up by
+  // hand — go straight to reading it.
+  //
+  // Guarded because a probe spawns a child process that downloads a package:
+  // React runs effects twice on mount in development, and two `npx` cold
+  // installs race to fill the same form.
+  const probedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!catalogEntry || probedRef.current === catalogEntry.packageName) return
+    probedRef.current = catalogEntry.packageName
+    void probe(catalogEntry.launch)
+  }, [catalogEntry, probe])
 
   const trigger = manifest?.triggers.find((entry) => entry.type === triggerType)
   const missing = (manifest?.env ?? []).filter(
@@ -82,11 +109,11 @@ export function SdkConnectorForm({
         env: JSON.stringify(plain),
         // Recorded so the connection can be re-probed later without the user
         // retyping what they installed.
-        sdkConnectorId: manifest.id,
-        sdkVersion: manifest.version,
+        [SDK_FILTER_KEYS.connectorId]: manifest.id,
+        [SDK_FILTER_KEYS.version]: manifest.version,
         // Carried on the connection because a packaged connector is stored as
         // an `mcp` connection, so there is no connector id to key a glyph by.
-        ...(manifest.icon && { sdkIcon: JSON.stringify(manifest.icon) })
+        ...(manifest.icon && { [SDK_FILTER_KEYS.icon]: JSON.stringify(manifest.icon) })
       }
 
       if (Object.keys(secret).length > 0) {
@@ -118,32 +145,34 @@ export function SdkConnectorForm({
 
   return (
     <div className="space-y-3">
-      <div>
-        <label className="block text-xs text-gray-500 mb-1">Connector package</label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={spec}
-            onChange={(e) => setSpec(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && spec.trim() && !probing) void handleProbe()
-            }}
-            placeholder="@vornrun/connector-kusto"
-            className={INPUT_CLASS}
-          />
-          <button
-            onClick={() => void handleProbe()}
-            disabled={probing || !spec.trim()}
-            className="px-3 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50 flex items-center gap-1.5 shrink-0"
-          >
-            {probing ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-            {probing ? 'Reading…' : 'Look up'}
-          </button>
+      {!catalogEntry && (
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Connector package</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={spec}
+              onChange={(e) => setSpec(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && spec.trim() && !probing) void probe(parseLaunchSpec(spec))
+              }}
+              placeholder="@vornrun/connector-kusto"
+              className={INPUT_CLASS}
+            />
+            <button
+              onClick={() => void probe(parseLaunchSpec(spec))}
+              disabled={probing || !spec.trim()}
+              className="px-3 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50 flex items-center gap-1.5 shrink-0"
+            >
+              {probing ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+              {probing ? 'Reading…' : 'Look up'}
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-600 mt-1">
+            An npm package name, or a command to run a connector from a local checkout.
+          </p>
         </div>
-        <p className="text-[11px] text-gray-600 mt-1">
-          An npm package name, or a command to run a connector from a local checkout.
-        </p>
-      </div>
+      )}
 
       {probing && (
         <p className="text-[11px] text-gray-500">

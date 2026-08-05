@@ -156,7 +156,16 @@ function readPort(): { port: number } | { port: null; reason: 'missing' | 'inval
  * Send a single JSON-RPC request to the running Vorn server over WebSocket.
  * Opens a connection, sends, waits for the response, then closes.
  */
-export async function rpcCall<T = unknown>(method: string, params?: unknown): Promise<T> {
+export async function rpcCall<T = unknown>(
+  method: string,
+  params?: unknown,
+  /**
+   * Overrides the default ceiling for the few calls that legitimately take
+   * longer — starting a connector package downloads it first, which the
+   * default would abort while it was still working.
+   */
+  timeoutMs: number = TIMEOUT_MS
+): Promise<T> {
   const result = readPort()
   if (!result.port) {
     throw new Error(result.reason === 'invalid' ? PORT_FILE_INVALID_MSG : PORT_FILE_MISSING_MSG)
@@ -168,8 +177,8 @@ export async function rpcCall<T = unknown>(method: string, params?: unknown): Pr
 
     const timer = setTimeout(() => {
       ws.close()
-      reject(new Error(`RPC call "${method}" timed out after ${TIMEOUT_MS}ms`))
-    }, TIMEOUT_MS)
+      reject(new Error(`RPC call "${method}" timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
 
     ws.on('open', () => {
       ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))

@@ -1,11 +1,18 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react'
 import { useAppStore } from '../../stores'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { connectionIcon } from '../../lib/connection-icon'
 import {
+  buildConnectorListings,
+  filterConnectorListings,
+  groupConnectorListings,
+  type ConnectorListing
+} from '../../lib/connector-browse'
+import {
   Plus,
   Play,
+  Search,
   Trash2,
   Check,
   AlertCircle,
@@ -19,6 +26,7 @@ import {
 } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
 import type {
+  ConnectorCatalogItem,
   SourceConnection,
   ConnectorManifest,
   ConnectorConfigField,
@@ -85,7 +93,10 @@ export function ConnectorSettings() {
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([])
   const [connections, setConnections] = useState<SourceConnection[]>([])
   const [statuses, setStatuses] = useState<ConnectorStatus[]>([])
-  const [adding, setAdding] = useState<string | null>(null)
+  // One selection, so "both open at once" is not a representable state.
+  const [adding, setAdding] = useState<ConnectorListing | null>(null)
+  const [catalog, setCatalog] = useState<ConnectorCatalogItem[]>([])
+  const [search, setSearch] = useState('')
   const [runningId, setRunningId] = useState<string | null>(null)
   const [backfillingId, setBackfillingId] = useState<string | null>(null)
   const [backfillResult, setBackfillResult] = useState<
@@ -107,6 +118,24 @@ export function ConnectorSettings() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: loads connectors from the main process on mount
     void load()
   }, [load])
+
+  // Fetched once rather than with every refresh: the catalog is fixed for the
+  // life of the process, so re-reading it after each run, delete or install
+  // would be a round trip that always returns the same answer.
+  useEffect(() => {
+    void window.api.listConnectorCatalog().then(setCatalog)
+  }, [])
+
+  const listings = useMemo(
+    () => buildConnectorListings(connectors, catalog, connections),
+    [connectors, catalog, connections]
+  )
+  const visible = useMemo(() => filterConnectorListings(listings, search), [listings, search])
+  const groups = useMemo(() => groupConnectorListings(visible), [visible])
+  // Resolved up front so the built-in form is only rendered once there is a
+  // connector to hand it.
+  const addingBuiltIn =
+    adding?.source === 'builtin' ? connectors.find((c) => c.id === adding.id) : undefined
 
   const findSeededWorkflows = (conn: SourceConnection): WorkflowDefinition[] => {
     const prefix = `connector:${conn.id}:`
@@ -180,53 +209,110 @@ export function ConnectorSettings() {
 
       {/* Available connectors */}
       <div className="mb-6">
-        <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-          Available Connectors
-        </h3>
-        <div className="space-y-1">
-          {connectors.map((c) => {
-            const existingConns = connections.filter((conn) => conn.connectorId === c.id)
-            return (
-              <div
-                key={c.id}
-                className="flex items-center justify-between px-4 py-2.5 bg-white/[0.03] border border-white/[0.06] rounded-sm"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="w-7 h-7 shrink-0 flex items-center justify-center bg-white/[0.04] rounded-sm">
-                    <ConnectorIcon connectorId={c.id} size={16} className="text-gray-200" />
-                  </span>
-                  <div>
-                    <span className="text-sm text-gray-200 font-medium">{c.name}</span>
-                    <span className="text-xs text-gray-500 ml-2">{c.capabilities.join(' · ')}</span>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Available Connectors
+          </h3>
+          <div className="relative w-56">
+            <Search
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600"
+            />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search connectors"
+              className="w-full pl-7 pr-2 py-1 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-200 focus:border-white/[0.2] outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {groups.map((group) => (
+            <div key={group.category} className="space-y-1">
+              {/* Headings only earn their place once there is more than one group. */}
+              {groups.length > 1 && (
+                <p className="text-[10px] text-gray-600 uppercase tracking-wider">
+                  {group.category}
+                </p>
+              )}
+              {group.listings.map((listing) => (
+                <div
+                  key={listing.key}
+                  className="flex items-center justify-between px-4 py-2.5 bg-white/[0.03] border border-white/[0.06] rounded-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="w-7 h-7 shrink-0 flex items-center justify-center bg-white/[0.04] rounded-sm">
+                      <ConnectorIcon
+                        connectorId={listing.id}
+                        icon={listing.catalogItem?.icon ?? listing.icon}
+                        size={16}
+                        className="text-gray-200"
+                      />
+                    </span>
+                    <div>
+                      <div>
+                        <span className="text-sm text-gray-200 font-medium">{listing.name}</span>
+                        <span className="text-xs text-gray-500 ml-2">
+                          {listing.capabilities.join(' · ')}
+                        </span>
+                      </div>
+                      {listing.description && (
+                        <p className="text-[11px] text-gray-500">{listing.description}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {listing.connectedCount > 0 && (
+                      <span className="text-xs text-green-500 flex items-center gap-1">
+                        <Check size={12} /> {listing.connectedCount} connected
+                      </span>
+                    )}
+                    {/* An installed row has no manifest and no package spec,
+                        so there is no form to open against it. */}
+                    {listing.source !== 'installed' && (
+                      <Tooltip
+                        label={listing.catalogItem?.auth ?? `Add a ${listing.name} connection`}
+                      >
+                        <button
+                          onClick={() => setAdding(listing)}
+                          className="text-xs text-gray-400 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+                        >
+                          <Plus size={12} /> Add
+                        </button>
+                      </Tooltip>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {existingConns.length > 0 && (
-                    <span className="text-xs text-green-500 flex items-center gap-1">
-                      <Check size={12} /> {existingConns.length} connected
-                    </span>
-                  )}
-                  <Tooltip label={`Add a ${c.name} connection`}>
-                    <button
-                      onClick={() => setAdding(c.id)}
-                      className="text-xs text-gray-400 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
-                    >
-                      <Plus size={12} /> Add
-                    </button>
-                  </Tooltip>
-                </div>
-              </div>
-            )
-          })}
-          {connectors.length === 0 && (
-            <p className="text-sm text-gray-500">No connectors available.</p>
+              ))}
+            </div>
+          ))}
+          {visible.length === 0 && (
+            <p className="text-sm text-gray-500">
+              {search ? `No connectors match "${search}".` : 'No connectors available.'}
+            </p>
           )}
         </div>
       </div>
 
-      {adding && (
+      {adding?.catalogItem && (
+        <div className="mb-6 p-4 bg-white/[0.03] border border-white/[0.08] rounded-sm">
+          <h4 className="text-sm text-gray-200 font-medium mb-3">Add {adding.name} connection</h4>
+          <SdkConnectorForm
+            catalogEntry={adding.catalogItem}
+            onDone={() => {
+              setAdding(null)
+              load()
+            }}
+            onCancel={() => setAdding(null)}
+          />
+        </div>
+      )}
+
+      {adding && addingBuiltIn && (
         <AddConnectionForm
-          connector={connectors.find((c) => c.id === adding)!}
+          connector={addingBuiltIn}
           onDone={() => {
             setAdding(null)
             load()
