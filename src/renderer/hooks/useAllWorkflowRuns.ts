@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useAppStore } from '../stores'
+import { rescheduleWaitingGateTimers } from '../lib/workflow-execution'
 import { workflowRunId, type WorkflowExecution } from '../../shared/types'
 
 export type RunListEntry = WorkflowExecution & { workflowName?: string }
@@ -34,6 +35,23 @@ export function useAllWorkflowRuns(limit = 50): {
     try {
       const rows = await window.api.listAllWorkflowRuns(activeWorkspace, limit)
       setPersisted(rows)
+      // A gate opened by another window is only in SQLite — without this the
+      // run shows as `running` here and never offers its approve/reject
+      // actions until the app restarts and App.tsx re-hydrates. Timers are
+      // rescheduled for whatever this pass adopted, exactly as App.tsx does on
+      // boot: whichever hydration wins the race, the gate timeout and the
+      // connector lease heartbeat still get started.
+      const waiting = await window.api.listRunsWithWaitingGates()
+      const store = useAppStore.getState()
+      const hydrated: WorkflowExecution[] = []
+      for (const run of waiting) {
+        if (store.workflowExecutions.has(run.runId)) continue
+        store.setWorkflowExecution(run.runId, run)
+        hydrated.push(run)
+      }
+      if (hydrated.length > 0) {
+        rescheduleWaitingGateTimers(hydrated, store.config?.workflows ?? [])
+      }
     } catch (err) {
       console.error('[useAllWorkflowRuns] load failed', err)
     } finally {
@@ -77,7 +95,13 @@ export function useAllWorkflowRuns(limit = 50): {
       const key = workflowRunId(r)
       const liveExec = live.get(key)
       if (liveExec) {
-        out.push({ ...liveExec, workflowName: r.workflowName })
+        // The live entry is normally the fresher one — except when it says the
+        // run is still going and the database says it already finished. That
+        // only happens for a run another window owns, whose live copy this
+        // renderer hydrated and can never update. Trusting it there would show
+        // a stale gate and let its Approve button re-run a finished workflow.
+        const staleLive = liveExec.status === 'running' && r.status !== 'running'
+        out.push(staleLive ? r : { ...liveExec, workflowName: r.workflowName })
         live.delete(key)
       } else {
         out.push(r)
