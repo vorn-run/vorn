@@ -17,7 +17,8 @@ vi.mock('react-dom', async () => {
   return { ...actual, createPortal: (node: React.ReactNode) => node }
 })
 
-vi.mock('lucide-react', () => ({
+vi.mock('lucide-react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('lucide-react')>()),
   ChevronDown: (p: Record<string, unknown>) => <svg data-testid="chev-down" {...p} />,
   ChevronRight: (p: Record<string, unknown>) => <svg data-testid="chev-right" {...p} />,
   Maximize2: (p: Record<string, unknown>) => <svg data-testid="maximize" {...p} />,
