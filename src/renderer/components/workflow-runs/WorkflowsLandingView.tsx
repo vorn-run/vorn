@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAllWorkflowRuns } from '../../hooks/useAllWorkflowRuns'
 import { useAppStore } from '../../stores'
 import { RunsList } from './RunsList'
@@ -6,7 +6,6 @@ import { bucketOf, type RunWorkflowRef } from '../../lib/run-presentation'
 import { RunDetailPane, RunDetailEmptyState } from './RunDetailPane'
 import { LogReplayModal } from '../LogReplayModal'
 import { useRunsListResize } from './useRunsListResize'
-import { useState } from 'react'
 import { workflowRunId } from '../../../shared/types'
 import type { RunBucket } from '../../stores/types'
 
