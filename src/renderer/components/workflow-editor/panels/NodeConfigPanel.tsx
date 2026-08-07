@@ -1,16 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import {
-  X,
-  Zap,
-  Play,
-  Terminal,
-  GitFork,
-  Hand,
-  ListPlus,
-  Zap as ZapIcon,
-  MoreHorizontal,
-  Trash2
-} from 'lucide-react'
+import { X, MoreHorizontal, Trash2 } from 'lucide-react'
 import {
   WorkflowNode,
   TriggerConfig,
@@ -30,35 +19,8 @@ import { ConditionConfigForm } from './ConditionConfigForm'
 import { ApprovalConfigForm } from './ApprovalConfigForm'
 import { CreateTaskFromItemNodeForm } from './CreateTaskFromItemNodeForm'
 import { CallConnectorActionNodeForm } from './CallConnectorActionNodeForm'
+import { NODE_TYPE_VISUAL } from '../node-visuals'
 import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
-
-const NODE_TYPE_CONFIG: Record<
-  WorkflowNode['type'],
-  { icon: typeof Zap; label: string; color: string; bg: string }
-> = {
-  trigger: { icon: Zap, label: 'Trigger', color: 'text-blue-400', bg: 'bg-blue-500/10' },
-  launchAgent: { icon: Play, label: 'Agent', color: 'text-green-400', bg: 'bg-green-500/10' },
-  script: { icon: Terminal, label: 'Script', color: 'text-amber-400', bg: 'bg-amber-500/10' },
-  condition: {
-    icon: GitFork,
-    label: 'Condition',
-    color: 'text-purple-400',
-    bg: 'bg-purple-500/10'
-  },
-  approval: { icon: Hand, label: 'Approval', color: 'text-amber-400', bg: 'bg-amber-500/10' },
-  createTaskFromItem: {
-    icon: ListPlus,
-    label: 'Create Task',
-    color: 'text-gray-300',
-    bg: 'bg-white/[0.06]'
-  },
-  callConnectorAction: {
-    icon: ZapIcon,
-    label: 'Connector Action',
-    color: 'text-gray-300',
-    bg: 'bg-white/[0.06]'
-  }
-}
 
 interface Props {
   node: WorkflowNode
@@ -100,7 +62,7 @@ export function NodeConfigPanel({
     return () => document.removeEventListener('pointerdown', handler)
   }, [showMenu])
 
-  const tc = NODE_TYPE_CONFIG[node.type]
+  const tc = NODE_TYPE_VISUAL[node.type]
   const Icon = tc.icon
   const canDelete = node.type !== 'trigger'
 

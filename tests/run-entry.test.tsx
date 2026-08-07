@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, fireEvent } from '@testing-library/react'
+import { render, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 vi.mock('framer-motion', () => ({
@@ -17,7 +17,8 @@ vi.mock('react-dom', async () => {
   return { ...actual, createPortal: (node: React.ReactNode) => node }
 })
 
-vi.mock('lucide-react', () => ({
+vi.mock('lucide-react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('lucide-react')>()),
   ChevronDown: (p: Record<string, unknown>) => <svg data-testid="chev-down" {...p} />,
   ChevronRight: (p: Record<string, unknown>) => <svg data-testid="chev-right" {...p} />,
   Maximize2: (p: Record<string, unknown>) => <svg data-testid="maximize" {...p} />,
@@ -25,7 +26,8 @@ vi.mock('lucide-react', () => ({
   Square: (p: Record<string, unknown>) => <svg data-testid="square" {...p} />
 }))
 
-import { RunEntry } from '../src/renderer/components/workflow-editor/RunEntry'
+import { RunEntry, RunStepsList } from '../src/renderer/components/workflow-editor/RunEntry'
+import { __resetConnectionsCacheForTests } from '../src/renderer/lib/use-connections'
 import type { WorkflowExecution, WorkflowNode, NodeExecutionState } from '../src/shared/types'
 
 function makeExec(overrides: Partial<WorkflowExecution> = {}): WorkflowExecution {
@@ -320,6 +322,22 @@ describe('RunEntry — run inputs', () => {
     expect(getByText('false')).toBeInTheDocument()
   })
 
+  it('labels the row and pairs each key with its own value chip', () => {
+    const exec = makeExec({
+      nodeStates: [makeState()],
+      inputs: { issue: 'gh-42', force: false }
+    })
+    const { getByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
+    expand(getByText)
+
+    expect(getByText('Inputs')).toBeInTheDocument()
+    // Each input is one chip carrying both halves, so a key can never be read
+    // against a neighbouring value.
+    const chip = getByText('issue').closest('span[title]')!
+    expect(chip).toHaveAttribute('title', 'issue=gh-42')
+    expect(chip.textContent).toBe('issuegh-42')
+  })
+
   it('clips a large object-valued input instead of flooding the row', () => {
     const exec = makeExec({
       nodeStates: [makeState()],
@@ -343,5 +361,92 @@ describe('RunEntry — run inputs', () => {
     // even when the row *is* present and the assertion could never fail.
     expect(queryByText('gh-42')).not.toBeInTheDocument()
     expect(queryByText('issue')).not.toBeInTheDocument()
+  })
+})
+
+describe('RunStepsList — step icons', () => {
+  beforeEach(() => {
+    __resetConnectionsCacheForTests()
+  })
+  afterEach(() => {
+    __resetConnectionsCacheForTests()
+    // @ts-expect-error - clearing the per-test window.api stub
+    delete window.api
+  })
+
+  const triggerNode = makeNode({
+    id: 'trig',
+    type: 'trigger',
+    label: 'GitHub Trigger',
+    config: { triggerType: 'connectorPoll', connectionId: 'conn-1', event: 'prOpened', cron: '*' }
+  })
+  const scriptNode = makeNode({
+    id: 'scr',
+    type: 'script',
+    label: 'Execute Script',
+    config: { scriptType: 'bash', scriptContent: 'echo hi', projectName: 'vorn' }
+  })
+  const exec = makeExec({
+    nodeStates: [makeState({ nodeId: 'trig', logs: undefined }), makeState({ nodeId: 'scr' })]
+  })
+
+  function stubConnections(connections: unknown[]) {
+    // @ts-expect-error - minimal window.api stub for this test
+    window.api = { listConnections: vi.fn().mockResolvedValue(connections) }
+  }
+
+  it("shows a connector-bound step under its connector's brand mark", async () => {
+    stubConnections([{ id: 'conn-1', connectorId: 'github', name: 'GitHub' }])
+
+    const { container } = render(
+      <RunStepsList execution={exec} nodes={[triggerNode, scriptNode]} includeTrigger />
+    )
+    await waitFor(() =>
+      expect(container.querySelector('svg[viewBox="0 0 16 16"]')).toBeInTheDocument()
+    )
+  })
+
+  it('describes each step and previews what it was configured to run', async () => {
+    stubConnections([{ id: 'conn-1', connectorId: 'github', name: 'GitHub' }])
+
+    const { getByText, findByText } = render(
+      <RunStepsList execution={exec} nodes={[triggerNode, scriptNode]} includeTrigger />
+    )
+    // The trigger names the connector it polls and the event it listens for.
+    expect(await findByText('github · prOpened')).toBeInTheDocument()
+    // The script names its shell and project.
+    expect(getByText('bash · vorn')).toBeInTheDocument()
+    // With no output of its own, the trigger falls back to its configured
+    // body rather than leaving a blank card.
+    expect(getByText('on: prOpened')).toBeInTheDocument()
+  })
+
+  it("previews the opening of a step's output and expands to the full log", async () => {
+    stubConnections([])
+    const noisy = makeExec({
+      nodeStates: [makeState({ nodeId: 'scr', logs: 'installing deps\nrunning tests\nall green' })]
+    })
+
+    const { getByText, queryByText, getByLabelText, findByText } = render(
+      <RunStepsList execution={noisy} nodes={[scriptNode]} />
+    )
+    // The card opens the log where the log itself opens.
+    expect(await findByText('installing deps')).toBeInTheDocument()
+    expect(queryByText(/all green/)).not.toBeInTheDocument()
+
+    fireEvent.click(getByLabelText('Show full output of step 1'))
+    expect(getByText(/all green/)).toBeInTheDocument()
+  })
+
+  it('falls back to the node-type icon for a step with no connection', async () => {
+    stubConnections([])
+
+    const { container } = render(
+      <RunStepsList execution={exec} nodes={[triggerNode, scriptNode]} includeTrigger />
+    )
+    await waitFor(() => expect(container.querySelector('svg.lucide-terminal')).toBeInTheDocument())
+    // The connector cache resolved to nothing, so the trigger keeps its own
+    // node-type glyph rather than borrowing a brand mark.
+    expect(container.querySelector('svg[viewBox="0 0 16 16"]')).not.toBeInTheDocument()
   })
 })

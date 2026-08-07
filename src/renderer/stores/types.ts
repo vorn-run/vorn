@@ -172,6 +172,8 @@ export interface UISlice {
   workflowsRunFilter: RunBucket
   workflowsRunsInflight: number
   workflowsRunsReloadToken: number
+  /** Run selected in the Inbox list, shown in the detail pane. */
+  selectedRunId: string | null
   selectedTaskId: string | null
   taskStatusFilter: TaskStatusFilter
   taskSourceFilter: TaskSourceFilter
@@ -221,6 +223,7 @@ export interface UISlice {
   setMainViewMode: (mode: 'sessions' | 'tasks' | 'workflows') => void
   setWorkflowsLandingTab: (tab: 'runs' | 'review') => void
   setWorkflowsRunFilter: (filter: RunBucket) => void
+  setSelectedRunId: (id: string | null) => void
   beginWorkflowsRunsLoad: () => void
   endWorkflowsRunsLoad: () => void
   bumpWorkflowsRunsReload: () => void
