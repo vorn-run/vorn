@@ -31,6 +31,7 @@ import {
   BookOpen,
   Terminal,
   Plug,
+  HardDrive,
   LayoutDashboard
 } from 'lucide-react'
 
@@ -247,6 +248,17 @@ function useCommands(
       icon: <Plug size={14} strokeWidth={1.5} />,
       keywords: ['mcp', 'api', 'integration', 'claude', 'cursor', 'server', 'url'],
       onExecute: () => navigator.clipboard.writeText('http://localhost:56433/mcp')
+    })
+    commands.push({
+      id: 'action:manage-worktrees',
+      label: 'Manage Worktrees',
+      category: 'actions',
+      icon: <HardDrive size={14} strokeWidth={1.5} />,
+      keywords: ['worktree', 'disk', 'space', 'cleanup', 'clean', 'prune', 'size', 'node_modules'],
+      onExecute: () => {
+        setSettingsOpen(true)
+        useAppStore.getState().setSettingsCategory('worktrees')
+      }
     })
     commands.push({
       id: 'action:manage-ssh',

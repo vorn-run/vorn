@@ -77,6 +77,21 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.WORKTREE_ACTIVE_SESSIONS, (_, worktreePath) =>
     requireBridge().request(IPC.WORKTREE_ACTIVE_SESSIONS, worktreePath)
   )
+  safeHandle(IPC.WORKTREE_INVENTORY, (_, params) =>
+    requireBridge().request(IPC.WORKTREE_INVENTORY, params)
+  )
+  safeHandle(IPC.WORKTREE_RECLAIM_ARTIFACTS, (_, params) =>
+    requireBridge().request(IPC.WORKTREE_RECLAIM_ARTIFACTS, params)
+  )
+  safeHandle(IPC.WORKTREE_REMOVE_MANY, (_, params) =>
+    requireBridge().request(IPC.WORKTREE_REMOVE_MANY, params)
+  )
+  safeHandle(IPC.WORKTREE_PRUNE_ORPHANS, (_, params) =>
+    requireBridge().request(IPC.WORKTREE_PRUNE_ORPHANS, params)
+  )
+  safeHandle(IPC.GIT_DELETE_BRANCHES, (_, params) =>
+    requireBridge().request(IPC.GIT_DELETE_BRANCHES, params)
+  )
   safeHandle(IPC.GIT_GET_BRANCH, (_, cwd) => requireBridge().request(IPC.GIT_GET_BRANCH, cwd))
   safeHandle(IPC.GIT_DIFF_STAT, (_, cwd) => requireBridge().request(IPC.GIT_DIFF_STAT, cwd))
   safeHandle(IPC.GIT_DIFF_FULL, (_, cwd) => requireBridge().request(IPC.GIT_DIFF_FULL, cwd))
