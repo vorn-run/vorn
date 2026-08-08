@@ -292,14 +292,33 @@ export function createApiShim(wsUrl: string) {
     listRemoteBranches: (projectPath: string) => rpc.invoke('git:listRemoteBranches', projectPath),
     createWorktree: (projectPath: string, branch: string) =>
       rpc.invoke('git:createWorktree', { projectPath, branch }),
-    removeWorktree: (projectPath: string, worktreePath: string, force?: boolean) =>
-      rpc.invoke('git:removeWorktree', { projectPath, worktreePath, force }),
+    removeWorktree: (
+      projectPath: string,
+      worktreePath: string,
+      force?: boolean,
+      deleteBranch?: boolean
+    ) => rpc.invoke('git:removeWorktree', { projectPath, worktreePath, force, deleteBranch }),
     renameWorktreeBranch: (worktreePath: string, newBranch: string) =>
       rpc.invoke('git:renameWorktreeBranch', { worktreePath, newBranch }),
     isWorktreeDirty: (worktreePath: string) => rpc.invoke('git:worktreeDirty', worktreePath),
     listWorktrees: (projectPath: string) => rpc.invoke('git:listWorktrees', projectPath),
     getWorktreeActiveSessions: (worktreePath: string) =>
       rpc.invoke('worktree:activeSessions', worktreePath),
+    getWorktreeInventory: (params?: { projectPaths?: string[]; refresh?: boolean }) =>
+      rpc.invoke('worktree:inventory', params),
+    reclaimWorktreeArtifacts: (paths: string[]) =>
+      rpc.invoke('worktree:reclaimArtifacts', { paths }),
+    removeWorktrees: (
+      items: {
+        projectPath: string
+        worktreePath: string
+        force?: boolean
+        deleteBranch?: boolean
+      }[]
+    ) => rpc.invoke('worktree:removeMany', { items }),
+    pruneOrphanWorktrees: (paths: string[]) => rpc.invoke('worktree:pruneOrphans', { paths }),
+    deleteBranches: (projectPath: string, branches: string[], force?: boolean) =>
+      rpc.invoke('git:deleteBranches', { projectPath, branches, force }),
     getGitDiffStat: (cwd: string) => rpc.invoke('git:diffStat', cwd),
     getGitDiffFull: (cwd: string) => rpc.invoke('git:diffFull', cwd),
     gitCommit: (payload: unknown) => rpc.invoke('git:commit', payload),

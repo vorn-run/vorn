@@ -185,6 +185,18 @@ function generateName(): string {
   return `${adj}-${noun}`
 }
 
+/**
+ * True when a branch name came from `generateName()` — an adjective-noun pair,
+ * optionally suffixed with the 8-hex worktree id. Used to tell branches vorn
+ * created for a worktree apart from branches the user named themselves, so
+ * cleanup only ever proposes deleting its own leftovers.
+ */
+export function isGeneratedWorktreeBranch(branch: string): boolean {
+  const match = branch.match(/^([a-z]+)-([a-z]+)(?:-[0-9a-f]{8})?$/)
+  if (!match) return false
+  return ADJECTIVES.includes(match[1]) && NOUNS.includes(match[2])
+}
+
 export function createWorktree(
   projectPath: string,
   branch: string,
@@ -316,16 +328,176 @@ export function removeWorktree(
   projectPath: string,
   worktreePath: string,
   force = false,
-  remote?: RemoteHost
+  remote?: RemoteHost,
+  deleteBranch = false
 ): boolean {
+  // Read the branch before removal — afterwards git no longer associates it
+  // with a path, and we would have nothing left to delete.
+  const branch = deleteBranch ? getGitBranch(worktreePath, remote) : null
   try {
     const args = ['worktree', 'remove', worktreePath]
     if (force) args.push('--force')
     gitExec(args, projectPath, { timeout: 10000, remote })
+  } catch {
+    return false
+  }
+  // Best-effort, and never forced: `force` here means "discard uncommitted
+  // changes", which is not permission to drop unmerged commits. A branch git
+  // refuses to delete is left alone rather than failing a removal that
+  // already succeeded.
+  if (branch) deleteBranches(projectPath, [branch], false, remote)
+  return true
+}
+
+/**
+ * The branch a project's work is measured against. Prefers the remote HEAD
+ * symref, then the usual local names, then whatever HEAD points at.
+ */
+export function getDefaultBranch(projectPath: string, remote?: RemoteHost): string | null {
+  try {
+    const symref = gitExec(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], projectPath, {
+      timeout: 5000,
+      remote
+    }).trim()
+    if (symref) return symref.replace(/^origin\//, '')
+  } catch {
+    // No origin/HEAD — fall through to local names.
+  }
+  const locals = listBranches(projectPath, remote)
+  for (const candidate of ['main', 'master', 'trunk', 'develop']) {
+    if (locals.includes(candidate)) return candidate
+  }
+  return getGitBranch(projectPath, remote)
+}
+
+/** True when `branch` is already contained in `base` — nothing would be lost. */
+export function isBranchMerged(
+  projectPath: string,
+  branch: string,
+  base: string,
+  remote?: RemoteHost
+): boolean {
+  if (branch === base) return true
+  try {
+    gitExec(['merge-base', '--is-ancestor', branch, base], projectPath, { timeout: 5000, remote })
     return true
   } catch {
     return false
   }
+}
+
+/** The upstream ref for a branch, or null when it was never pushed. */
+export function getBranchUpstream(
+  projectPath: string,
+  branch: string,
+  remote?: RemoteHost
+): string | null {
+  try {
+    const upstream = gitExec(
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${branch}@{upstream}`],
+      projectPath,
+      { timeout: 5000, remote }
+    ).trim()
+    return upstream || null
+  } catch {
+    return null
+  }
+}
+
+/** ISO timestamp of a ref's last commit, or null if the ref is unreadable. */
+export function getLastCommitDate(cwd: string, ref = 'HEAD', remote?: RemoteHost): string | null {
+  try {
+    const raw = gitExec(['log', '-1', '--format=%cI', ref], cwd, { timeout: 5000, remote }).trim()
+    return raw || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Branches already contained in `base` — one call instead of a `merge-base`
+ * per branch, which matters when a repo has dozens of them.
+ */
+export function listMergedBranches(
+  projectPath: string,
+  base: string,
+  remote?: RemoteHost
+): string[] {
+  try {
+    const output = gitExec(['branch', '--merged', base, '--format=%(refname:short)'], projectPath, {
+      timeout: 10000,
+      remote
+    }).trim()
+    return output
+      ? output
+          .split('\n')
+          .map((b: string) => b.trim())
+          .filter(Boolean)
+      : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Every local branch with its upstream and last commit date, tab-separated —
+ * enough to classify a whole repo's branches in a single git invocation.
+ */
+export function gitForEachRef(projectPath: string, remote?: RemoteHost): string[] {
+  try {
+    const output = gitExec(
+      [
+        'for-each-ref',
+        '--format=%(refname:short)%09%(upstream:short)%09%(committerdate:iso-strict)',
+        'refs/heads'
+      ],
+      projectPath,
+      { timeout: 10000, remote }
+    ).trim()
+    return output ? output.split('\n').filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The real git directory backing a path. For a linked worktree this is
+ * `<repo>/.git/worktrees/<name>`, whose `index` mtime tracks activity in that
+ * worktree alone. Returns null when the path isn't inside a repository.
+ */
+export function getAbsoluteGitDir(anyPath: string, remote?: RemoteHost): string | null {
+  try {
+    const dir = gitExec(['rev-parse', '--absolute-git-dir'], anyPath, {
+      timeout: 5000,
+      remote
+    }).trim()
+    return dir || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Delete local branches. Uses `-d` so git refuses anything unmerged; `force`
+ * escalates to `-D` and must be an explicit choice by the user.
+ */
+export function deleteBranches(
+  projectPath: string,
+  branches: string[],
+  force = false,
+  remote?: RemoteHost
+): { deleted: string[]; failed: { branch: string; error: string }[] } {
+  const deleted: string[] = []
+  const failed: { branch: string; error: string }[] = []
+  for (const branch of branches) {
+    try {
+      gitExec(['branch', force ? '-D' : '-d', branch], projectPath, { timeout: 10000, remote })
+      deleted.push(branch)
+    } catch (err) {
+      failed.push({ branch, error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  return { deleted, failed }
 }
 
 export interface WorktreeEntry {

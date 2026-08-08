@@ -23,7 +23,10 @@ import {
   TaskSourceLink,
   ConnectorManifest,
   ConnectorActionDef,
-  InstalledShell
+  InstalledShell,
+  WorktreeInventory,
+  WorktreeActionResult,
+  BranchDeleteResult
 } from '../shared/types'
 
 const api = {
@@ -131,8 +134,13 @@ const api = {
   ): Promise<{ worktreePath: string; branch: string; name: string }> =>
     ipcRenderer.invoke(IPC.GIT_CREATE_WORKTREE, { projectPath, branch, worktreeName }),
 
-  removeWorktree: (projectPath: string, worktreePath: string, force?: boolean): Promise<boolean> =>
-    ipcRenderer.invoke(IPC.GIT_REMOVE_WORKTREE, { projectPath, worktreePath, force }),
+  removeWorktree: (
+    projectPath: string,
+    worktreePath: string,
+    force?: boolean,
+    deleteBranch?: boolean
+  ): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.GIT_REMOVE_WORKTREE, { projectPath, worktreePath, force, deleteBranch }),
 
   renameWorktreeBranch: (worktreePath: string, newBranch: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.GIT_RENAME_WORKTREE_BRANCH, { worktreePath, newBranch }),
@@ -161,6 +169,33 @@ const api = {
     worktreePath: string
   ): Promise<{ count: number; sessionIds: string[] }> =>
     ipcRenderer.invoke(IPC.WORKTREE_ACTIVE_SESSIONS, worktreePath),
+
+  getWorktreeInventory: (params?: {
+    projectPaths?: string[]
+    refresh?: boolean
+  }): Promise<WorktreeInventory> => ipcRenderer.invoke(IPC.WORKTREE_INVENTORY, params),
+
+  reclaimWorktreeArtifacts: (paths: string[]): Promise<WorktreeActionResult> =>
+    ipcRenderer.invoke(IPC.WORKTREE_RECLAIM_ARTIFACTS, { paths }),
+
+  removeWorktrees: (
+    items: {
+      projectPath: string
+      worktreePath: string
+      force?: boolean
+      deleteBranch?: boolean
+    }[]
+  ): Promise<WorktreeActionResult> => ipcRenderer.invoke(IPC.WORKTREE_REMOVE_MANY, { items }),
+
+  pruneOrphanWorktrees: (paths: string[]): Promise<WorktreeActionResult> =>
+    ipcRenderer.invoke(IPC.WORKTREE_PRUNE_ORPHANS, { paths }),
+
+  deleteBranches: (
+    projectPath: string,
+    branches: string[],
+    force?: boolean
+  ): Promise<BranchDeleteResult> =>
+    ipcRenderer.invoke(IPC.GIT_DELETE_BRANCHES, { projectPath, branches, force }),
 
   getGitBranch: (cwd: string): Promise<string | null> =>
     ipcRenderer.invoke(IPC.GIT_GET_BRANCH, cwd),
