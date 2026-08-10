@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { filterEnv, SENSITIVE_ENV_PREFIXES } from '../packages/server/src/process-utils'
+import {
+  filterEnv,
+  normalizePassthrough,
+  SENSITIVE_ENV_PREFIXES
+} from '../packages/server/src/process-utils'
 
 const source = {
   PATH: '/usr/bin',
@@ -64,5 +68,31 @@ describe('filterEnv', () => {
   it('still lists the prefixes it protects', () => {
     expect(SENSITIVE_ENV_PREFIXES).toContain('ANTHROPIC_API')
     expect(SENSITIVE_ENV_PREFIXES).toContain('GITHUB_TOKEN')
+  })
+})
+
+describe('normalizePassthrough', () => {
+  it('uppercases and trims, so config casing does not matter', () => {
+    expect(normalizePassthrough([' anthropic_api_key '])).toEqual(new Set(['ANTHROPIC_API_KEY']))
+  })
+
+  it('treats undefined as empty', () => {
+    expect(normalizePassthrough(undefined)).toEqual(new Set())
+  })
+
+  it('drops blank entries', () => {
+    expect(normalizePassthrough(['', '   ', 'X'])).toEqual(new Set(['X']))
+  })
+
+  // The value comes from JSON.parse of a hand-editable file, so the declared
+  // string[] is a hope. Throwing here would take the server down at startup.
+  it('survives a non-array value', () => {
+    expect(normalizePassthrough('ANTHROPIC_API_KEY')).toEqual(new Set())
+    expect(normalizePassthrough(42)).toEqual(new Set())
+    expect(normalizePassthrough(null)).toEqual(new Set())
+  })
+
+  it('skips non-string entries rather than throwing', () => {
+    expect(normalizePassthrough(['GOOD', 42, null, { a: 1 }])).toEqual(new Set(['GOOD']))
   })
 })

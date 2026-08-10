@@ -143,10 +143,27 @@ const STRIP_ENV_KEYS_UPPER = STRIP_ENV_KEYS.map((k) => k.toUpperCase())
  */
 let envPassthrough: ReadonlySet<string> = new Set()
 
-export function setEnvPassthrough(keys: string[] | undefined): void {
-  envPassthrough = new Set(
-    (keys ?? []).map((k) => k.trim().toUpperCase()).filter((k) => k.length > 0)
+/**
+ * Normalize whatever the config held into a comparable set.
+ *
+ * Typed as `unknown` on purpose: this value arrives from JSON.parse of a file a
+ * user can hand-edit, so the declared `string[]` is a hope rather than a
+ * guarantee. A bare string or a stray number in the list would otherwise throw
+ * inside .map() — during server startup, where it takes the whole app down over
+ * a typo in a settings file.
+ */
+export function normalizePassthrough(keys: unknown): ReadonlySet<string> {
+  if (!Array.isArray(keys)) return new Set()
+  return new Set(
+    keys
+      .filter((k): k is string => typeof k === 'string')
+      .map((k) => k.trim().toUpperCase())
+      .filter((k) => k.length > 0)
   )
+}
+
+export function setEnvPassthrough(keys: unknown): void {
+  envPassthrough = normalizePassthrough(keys)
 }
 
 /**
