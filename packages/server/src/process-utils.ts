@@ -177,6 +177,16 @@ export function setEnvPassthrough(keys: unknown): void {
 }
 
 /**
+ * The configured set, exposed so a test can assert what each env function
+ * passes to filterEnv. getSafeEnv and getLaunchEnv themselves read the login
+ * shell, which a unit test cannot stand up — the difference that matters is
+ * which of these two sets each one hands over.
+ */
+export function getEnvPassthrough(): ReadonlySet<string> {
+  return envPassthrough
+}
+
+/**
  * Pure form of the filter, so the rules can be tested without a login shell.
  */
 export function filterEnv(

@@ -3,6 +3,7 @@ import {
   filterEnv,
   getLaunchEnv,
   getSafeEnv,
+  getEnvPassthrough,
   normalizePassthrough,
   setEnvPassthrough,
   SENSITIVE_ENV_PREFIXES
@@ -74,20 +75,40 @@ describe('filterEnv', () => {
   })
 })
 
-describe('getSafeEnv vs getLaunchEnv', () => {
-  it('keeps the two functions distinct, so passthrough cannot leak to every subprocess', () => {
-    // getSafeEnv serves git, tailscale and the detectors; only getLaunchEnv
-    // forwards an opted-in variable, and only to a launch the user asked for.
-    expect(getSafeEnv).not.toBe(getLaunchEnv)
-  })
+describe('the two env functions', () => {
+  // getSafeEnv and getLaunchEnv both read the login shell, which a unit test
+  // cannot stand up. What is testable — and what actually matters — is that the
+  // setter stores the configured list, and that the two sets those functions
+  // hand to filterEnv produce genuinely different results.
+  const source = { SECRET_THING: 'x' }
 
-  it('getSafeEnv ignores passthrough entirely', () => {
-    setEnvPassthrough(['SECRET_THING'])
+  it('stores what was configured', () => {
+    setEnvPassthrough(['secret_thing'])
     try {
-      expect(filterEnv({ SECRET_THING: 'x' }, new Set())).not.toHaveProperty('SECRET_THING')
+      expect(getEnvPassthrough()).toEqual(new Set(['SECRET_THING']))
     } finally {
       setEnvPassthrough([])
     }
+  })
+
+  it('forwards under the launch set and withholds under the safe set', () => {
+    setEnvPassthrough(['SECRET_THING'])
+    try {
+      // getLaunchEnv passes getEnvPassthrough(); getSafeEnv passes an empty set.
+      expect(filterEnv(source, getEnvPassthrough())).toHaveProperty('SECRET_THING', 'x')
+      expect(filterEnv(source, new Set())).not.toHaveProperty('SECRET_THING')
+    } finally {
+      setEnvPassthrough([])
+    }
+  })
+
+  it('forwards nothing once the configuration is cleared', () => {
+    setEnvPassthrough([])
+    expect(filterEnv(source, getEnvPassthrough())).not.toHaveProperty('SECRET_THING')
+  })
+
+  it('keeps the two functions distinct, so passthrough cannot reach every subprocess', () => {
+    expect(getSafeEnv).not.toBe(getLaunchEnv)
   })
 })
 
