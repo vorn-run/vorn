@@ -934,6 +934,8 @@ export interface AppConfig {
      * the next launch.
      */
     hasSeededDefaultTaskWorkflow?: boolean
+    /** Which worktrees the manager treats as stale, and what counts as build output. */
+    worktreeRetention?: WorktreeRetentionConfig
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>
@@ -1074,6 +1076,133 @@ export interface InstalledShell {
   }
 }
 
+/**
+ * The safest action available for a worktree, computed server-side so the
+ * settings panel, the command palette and any future nudge all agree on what
+ * can be touched.
+ *
+ *  keep    — do nothing; the main worktree, or sessions are running in it
+ *  review  — needs a human decision; uncommitted changes, or work that was
+ *            never pushed and so cannot be recovered after removal
+ *  reclaim — the build artifacts can go but the worktree should stay
+ *  remove  — the whole worktree can go; merged and clean
+ *  orphan  — a directory git no longer knows about; only `fs.rm` can clear it
+ */
+export type WorktreeVerdictLevel = 'keep' | 'review' | 'reclaim' | 'remove' | 'orphan'
+
+export interface WorktreeVerdict {
+  level: WorktreeVerdictLevel
+  /** Bytes recovered by taking the action this level names. */
+  freesBytes: number
+  /** Short phrases explaining the level, e.g. ['merged into main', 'idle 92 days']. */
+  reasons: string[]
+  /**
+   * Whether "Select suggested" ticks this row. A merged, clean worktree is
+   * always removable, but one touched yesterday shouldn't be pre-selected.
+   */
+  autoSelect: boolean
+}
+
+export interface WorktreeInventoryEntry {
+  path: string
+  name: string
+  projectPath: string
+  projectName: string
+  /** registered — git knows it; orphan-dir — on disk only. */
+  kind: 'registered' | 'orphan-dir'
+  branch: string | null
+  isMain: boolean
+
+  sizeBytes: number
+  /** node_modules, dist, out and friends — the part that a reinstall rebuilds. */
+  artifactBytes: number
+  /** False when sizing timed out or the platform has no fast path; sizes read 0. */
+  sizeMeasured: boolean
+
+  lastCommitAt: string | null
+  /** Newest git activity in the worktree, from the index mtime. */
+  lastTouchedAt: string | null
+  idleDays: number | null
+
+  isDirty: boolean
+  isMerged: boolean
+  hasUpstream: boolean
+  activeSessionIds: string[]
+
+  verdict: WorktreeVerdict
+}
+
+/** A branch left behind by a removed worktree. */
+export interface StaleBranch {
+  name: string
+  isMerged: boolean
+  hasUpstream: boolean
+  lastCommitAt: string | null
+}
+
+export interface WorktreeProjectInventory {
+  projectPath: string
+  projectName: string
+  defaultBranch: string | null
+  /** Set when the project lives on a remote host — sizes come over SSH. */
+  remoteHostId: string | null
+  entries: WorktreeInventoryEntry[]
+  staleBranches: StaleBranch[]
+  /** Populated when the project could not be scanned at all. */
+  error?: string
+}
+
+export interface WorktreeInventory {
+  projects: WorktreeProjectInventory[]
+  scannedAt: string
+}
+
+export interface WorktreeActionFailure {
+  path: string
+  error: string
+}
+
+export interface WorktreeActionResult {
+  succeeded: string[]
+  failed: WorktreeActionFailure[]
+  freedBytes: number
+  /** Branches deleted alongside removed worktrees. */
+  deletedBranches: string[]
+}
+
+export interface BranchDeleteResult {
+  deleted: string[]
+  failed: { branch: string; error: string }[]
+}
+
+/** Retention preferences for the worktree manager. */
+export interface WorktreeRetentionConfig {
+  /**
+   * A merged, clean worktree idle for at least this many days is pre-selected
+   * by "Select suggested". 0 pre-selects every removable worktree.
+   */
+  idleDaysThreshold?: number
+  /** Directory names treated as rebuildable build output. */
+  artifactDirs?: string[]
+  /** Worktree paths the scanner always reports as `keep`. */
+  pinnedPaths?: string[]
+}
+
+export const DEFAULT_ARTIFACT_DIRS = [
+  'node_modules',
+  'dist',
+  'out',
+  '.next',
+  '.turbo',
+  '.nuxt',
+  'target',
+  'coverage',
+  '.venv',
+  '__pycache__'
+]
+
+export const DEFAULT_IDLE_DAYS_THRESHOLD = 14
+
 export const IPC = {
   TERMINAL_CREATE: 'terminal:create',
   TERMINAL_WRITE: 'terminal:write',
@@ -1108,6 +1237,11 @@ export const IPC = {
   GIT_GET_WORKTREE_BRANCH: 'git:getWorktreeBranch',
   WORKTREE_CONFIRM_CLEANUP: 'worktree:confirmCleanup',
   WORKTREE_ACTIVE_SESSIONS: 'worktree:activeSessions',
+  WORKTREE_INVENTORY: 'worktree:inventory',
+  WORKTREE_RECLAIM_ARTIFACTS: 'worktree:reclaimArtifacts',
+  WORKTREE_REMOVE_MANY: 'worktree:removeMany',
+  WORKTREE_PRUNE_ORPHANS: 'worktree:pruneOrphans',
+  GIT_DELETE_BRANCHES: 'git:deleteBranches',
   GIT_GET_BRANCH: 'git:getBranch',
   GIT_DIFF_STAT: 'git:diffStat',
   GIT_DIFF_FULL: 'git:diffFull',

@@ -27,8 +27,23 @@ import {
   RemoteHost,
   getProjectRemoteHostId
 } from '@vornrun/shared/types'
-import type { SourceConnection, TaskStatus } from '@vornrun/shared/types'
+import type {
+  SourceConnection,
+  TaskStatus,
+  ProjectConfig,
+  WorktreeRetentionConfig
+} from '@vornrun/shared/types'
+import { DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
+import {
+  scanWorktreeInventory,
+  reclaimArtifacts,
+  removeWorktrees,
+  pruneOrphanDirs,
+  deleteStaleBranches,
+  measureWorktree,
+  invalidateSizeCache
+} from './worktree-inventory'
 import { listDir, readFileContent, writeFileContent } from './file-utils'
 import { listShellExecutables } from './shell-integration'
 import { listInstalledShells } from './shell-integration/installed'
@@ -348,9 +363,10 @@ export function registerAllMethods(): void {
     const remote = resolveRemoteHost(projectPath)
     return gitUtils.createWorktree(projectPath, branch, worktreeName, remote)
   })
-  registerMethod('git:removeWorktree', ({ projectPath, worktreePath, force }) => {
+  registerMethod('git:removeWorktree', ({ projectPath, worktreePath, force, deleteBranch }) => {
     const remote = resolveRemoteHost(projectPath)
-    return gitUtils.removeWorktree(projectPath, worktreePath, force, remote)
+    invalidateSizeCache(worktreePath)
+    return gitUtils.removeWorktree(projectPath, worktreePath, force, remote, deleteBranch)
   })
   registerMethod('git:checkoutBranch', ({ cwd, branch }) => {
     const remote = resolveRemoteHostByPath(cwd)
@@ -405,6 +421,87 @@ export function registerAllMethods(): void {
       count: pty.count + headless.count,
       sessionIds: [...pty.sessionIds, ...headless.sessionIds]
     }
+  })
+
+  // ─── Worktree manager ──────────────────────────────────────────
+
+  function activeSessionIds(worktreePath: string): string[] {
+    return [
+      ...ptyManager.getActiveSessionsForWorktree(worktreePath).sessionIds,
+      ...headlessManager.getActiveSessionsForWorktree(worktreePath).sessionIds
+    ]
+  }
+
+  function retentionConfig(): WorktreeRetentionConfig {
+    return configManager.loadConfig().defaults.worktreeRetention ?? {}
+  }
+
+  function artifactDirNames(): string[] {
+    const configured = retentionConfig().artifactDirs
+    return configured?.length ? configured : DEFAULT_ARTIFACT_DIRS
+  }
+
+  /** Cached size for a path — measured during the scan that preceded the action. */
+  function cachedSizeOf(worktreePath: string): number {
+    const remote = resolveRemoteHostByPath(worktreePath)
+    return measureWorktree(worktreePath, artifactDirNames(), remote).sizeBytes
+  }
+
+  /**
+   * Refuse to act on a worktree that has a live session. Checked immediately
+   * before the action rather than read off the scan, because a session can
+   * start while the panel is open.
+   */
+  function assertNoActiveSessions(paths: string[]): void {
+    for (const p of paths) {
+      const count = activeSessionIds(p).length
+      if (count > 0) {
+        throw new Error(
+          `${p} has ${count} active session${count > 1 ? 's' : ''} — close them first`
+        )
+      }
+    }
+  }
+
+  /** Resolve a project to its remote host, or undefined when it is local. */
+  function remoteForProject(project: ProjectConfig): RemoteHost | undefined {
+    const remoteId = getProjectRemoteHostId(project)
+    if (!remoteId) return undefined
+    return configManager.loadConfig().remoteHosts?.find((h) => h.id === remoteId)
+  }
+
+  registerMethod('worktree:inventory', (params) => {
+    const cfg = configManager.loadConfig()
+    return scanWorktreeInventory({
+      projects: cfg.projects,
+      projectPaths: params?.projectPaths,
+      refresh: params?.refresh,
+      retention: cfg.defaults.worktreeRetention,
+      resolveRemote: remoteForProject,
+      getActiveSessions: activeSessionIds
+    })
+  })
+
+  registerMethod('worktree:reclaimArtifacts', ({ paths }) => {
+    assertNoActiveSessions(paths)
+    const cfg = configManager.loadConfig()
+    return reclaimArtifacts(paths, artifactDirNames(), cfg.projects, remoteForProject)
+  })
+
+  registerMethod('worktree:removeMany', ({ items }) => {
+    assertNoActiveSessions(items.map((i) => i.worktreePath))
+    const cfg = configManager.loadConfig()
+    return removeWorktrees(items, cachedSizeOf, cfg.projects, remoteForProject)
+  })
+
+  registerMethod('worktree:pruneOrphans', ({ paths }) => {
+    assertNoActiveSessions(paths)
+    return pruneOrphanDirs(paths, cachedSizeOf, resolveRemoteHostByPath)
+  })
+
+  registerMethod('git:deleteBranches', ({ projectPath, branches, force }) => {
+    const remote = resolveRemoteHost(projectPath)
+    return deleteStaleBranches(projectPath, branches, force ?? false, remote)
   })
   registerMethod('git:getBranch', (cwd) => {
     const remote = resolveRemoteHostByPath(cwd)

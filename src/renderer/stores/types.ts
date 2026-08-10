@@ -110,6 +110,7 @@ export type SettingsCategory =
   | 'general'
   | 'notifications'
   | 'agents'
+  | 'worktrees'
   | 'ssh'
   | 'mcp'
   | 'connectors'

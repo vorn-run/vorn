@@ -6,6 +6,7 @@ import { SectionHeader } from './settings/SectionHeader'
 import { AppearanceSettings } from './settings/AppearanceSettings'
 import { GeneralSettings } from './settings/GeneralSettings'
 import { NotificationSettings } from './settings/NotificationSettings'
+import { WorktreeSettings } from './settings/WorktreeSettings'
 import { AgentSettings } from './settings/AgentSettings'
 import { SSHSettings } from './settings/SSHSettings'
 import { McpSettings } from './settings/McpSettings'
@@ -70,6 +71,25 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
           >
             <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.73 21a2 2 0 01-3.46 0" />
+          </svg>
+        )
+      },
+      {
+        key: 'worktrees',
+        label: 'Worktrees',
+        icon: (
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <circle cx="6" cy="5" r="2.5" />
+            <circle cx="18" cy="5" r="2.5" />
+            <circle cx="12" cy="19" r="2.5" />
+            <path d="M6 7.5v3a2 2 0 002 2h8a2 2 0 002-2v-3M12 12.5v4" />
           </svg>
         )
       }
@@ -276,6 +296,7 @@ export function SettingsPage() {
           {settingsCategory === 'appearance' && <AppearanceSettings />}
           {settingsCategory === 'general' && <GeneralSettings />}
           {settingsCategory === 'notifications' && <NotificationSettings />}
+          {settingsCategory === 'worktrees' && <WorktreeSettings />}
           {settingsCategory === 'agents' && <AgentSettings />}
           {settingsCategory === 'ssh' && <SSHSettings />}
           {settingsCategory === 'mcp' && <McpSettings />}

@@ -21,7 +21,10 @@ import type {
   TaskSourceLink,
   ConnectorManifest,
   ConnectorItemContext,
-  TaskStatus
+  TaskStatus,
+  WorktreeInventory,
+  WorktreeActionResult,
+  BranchDeleteResult
 } from './types'
 
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
@@ -78,8 +81,42 @@ export interface RequestMethods {
     result: string
   }
   'git:removeWorktree': {
-    params: { projectPath: string; worktreePath: string; force?: boolean }
-    result: void
+    params: {
+      projectPath: string
+      worktreePath: string
+      force?: boolean
+      /** Delete the worktree's branch too, when it is safe to (merged, or forced). */
+      deleteBranch?: boolean
+    }
+    /** False when `git worktree remove` refused — callers surface it as an error. */
+    result: boolean
+  }
+  'worktree:inventory': {
+    params: { projectPaths?: string[]; refresh?: boolean } | undefined
+    result: WorktreeInventory
+  }
+  'worktree:reclaimArtifacts': {
+    params: { paths: string[] }
+    result: WorktreeActionResult
+  }
+  'worktree:removeMany': {
+    params: {
+      items: Array<{
+        projectPath: string
+        worktreePath: string
+        force?: boolean
+        deleteBranch?: boolean
+      }>
+    }
+    result: WorktreeActionResult
+  }
+  'worktree:pruneOrphans': {
+    params: { paths: string[] }
+    result: WorktreeActionResult
+  }
+  'git:deleteBranches': {
+    params: { projectPath: string; branches: string[]; force?: boolean }
+    result: BranchDeleteResult
   }
   'git:renameWorktreeBranch': {
     params: { worktreePath: string; newBranch: string }
