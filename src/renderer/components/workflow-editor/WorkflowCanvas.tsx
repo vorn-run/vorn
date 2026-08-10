@@ -4,6 +4,9 @@ import { LaunchAgentNode } from './nodes/LaunchAgentNode'
 import { ScriptNode } from './nodes/ScriptNode'
 import { ConditionNode } from './nodes/ConditionNode'
 import { ApprovalNode } from './nodes/ApprovalNode'
+import { Repeat } from 'lucide-react'
+// Fallback for a loop node that is not reachable from the trigger: orphans are
+// appended as plain node rows, so they never reach LoopRenderer.
 import { LoopNode } from './nodes/LoopNode'
 import { CreateTaskFromItemNode } from './nodes/CreateTaskFromItemNode'
 import { CallConnectorActionNode } from './nodes/CallConnectorActionNode'
@@ -232,6 +235,19 @@ function FlowRowRenderer({
           )
         }
 
+        if (row.kind === 'loop') {
+          return (
+            <LoopRenderer
+              key={`loop-${row.loopNode.id}`}
+              row={row}
+              onNodeClick={onNodeClick}
+              onInsertNode={onInsertNode}
+              selectedNodeId={selectedNodeId}
+              nodes={nodes ?? []}
+            />
+          )
+        }
+
         return (
           <ForkRenderer
             key={`fork-${row.forkNodeId}`}
@@ -260,6 +276,108 @@ function HorizontalBar({ branchCount }: { branchCount: number }) {
           )}
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * A loop and the steps it repeats, drawn as one enclosure.
+ *
+ * The two questions a reader has — what repeats, and when does it stop — are
+ * answered at the top and bottom edges of the rail, so neither requires
+ * opening a panel. The body is inset, which is the whole point: a repeated
+ * step must not look like a step that runs once.
+ */
+function LoopRenderer({
+  row,
+  onNodeClick,
+  onInsertNode,
+  selectedNodeId,
+  nodes
+}: {
+  row: Extract<FlowRow, { kind: 'loop' }>
+  onNodeClick: (nodeId: string) => void
+  onInsertNode: (afterNodeId: string, beforeNodeId: string | null, type: AddableNodeType) => void
+  selectedNodeId: string | null
+  nodes: WorkflowNode[]
+}) {
+  const config = row.loopNode.config as LoopConfig
+  const selected = row.loopNode.id === selectedNodeId
+  const until = config.until?.variable
+    ? `until ${config.until.variable} ${config.until.operator} ${config.until.value}`
+    : 'runs every pass'
+  const lastBodyId = row.body.length > 0 ? row.body[row.body.length - 1] : null
+
+  return (
+    <div
+      className={`w-[300px] rounded-lg border transition-all
+                  ${selected ? 'border-cyan-400/60 shadow-[0_0_0_3px_rgba(34,211,238,0.08)]' : 'border-cyan-400/25'}
+                  bg-cyan-500/[0.03]`}
+    >
+      <div
+        onClick={(e) => {
+          e.stopPropagation()
+          onNodeClick(row.loopNode.id)
+        }}
+        className="flex items-center gap-2 px-3 py-2 border-b border-cyan-400/15 cursor-pointer
+                   hover:bg-white/[0.02] rounded-t-lg"
+      >
+        <Repeat size={13} className="shrink-0 text-cyan-400" strokeWidth={2} />
+        <span className="text-[12.5px] font-semibold text-white truncate flex-1">
+          {row.loopNode.label}
+        </span>
+        <span className="shrink-0 text-[10px] font-mono text-cyan-300/90 bg-cyan-500/10 rounded px-1.5 py-0.5">
+          max {config.maxIterations ?? 1}
+        </span>
+      </div>
+
+      <div className="px-3 pt-3 flex flex-col items-center">
+        {row.body.length === 0 ? (
+          <div
+            className="w-full rounded-md border border-dashed border-white/[0.12] px-3 py-4
+                       text-[11px] text-gray-500 text-center"
+          >
+            No steps yet — add one below
+          </div>
+        ) : (
+          row.body.map((bodyRow, i) => (
+            <Fragment key={bodyRow.kind === 'node' ? bodyRow.node.id : i}>
+              {i > 0 && <VerticalLine />}
+              {bodyRow.kind === 'node' && (
+                <NodeCard
+                  node={bodyRow.node}
+                  allNodes={nodes}
+                  selected={bodyRow.node.id === selectedNodeId}
+                  onClick={() => onNodeClick(bodyRow.node.id)}
+                />
+              )}
+            </Fragment>
+          ))
+        )}
+
+        {/* Inside the rail, so position is what decides membership. */}
+        <VerticalLine />
+        <ConnectorButton
+          onAddAction={() =>
+            onInsertNode(
+              lastBodyId?.kind === 'node' ? lastBodyId.node.id : row.loopNode.id,
+              '__LOOP_BODY__',
+              'agent'
+            )
+          }
+          onAddScript={() =>
+            onInsertNode(
+              lastBodyId?.kind === 'node' ? lastBodyId.node.id : row.loopNode.id,
+              '__LOOP_BODY__',
+              'script'
+            )
+          }
+        />
+      </div>
+
+      <div className="px-3 pt-2 pb-2.5 text-[10px] font-mono text-cyan-300/70 text-center truncate">
+        ↻ {until}
+      </div>
     </div>
   )
 }

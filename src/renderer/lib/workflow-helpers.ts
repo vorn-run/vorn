@@ -20,6 +20,15 @@ import { slugify } from './template-vars'
 export type FlowRow =
   | { kind: 'node'; node: WorkflowNode }
   | { kind: 'fork'; forkNodeId: string; branches: FlowRow[][]; joinNodeId?: string }
+  /**
+   * A loop and the steps it repeats, drawn as one thing.
+   *
+   * The body is lifted out of the trunk and nested here, the same move a fork
+   * already makes with its branches. Without it the repeated steps render as
+   * ordinary siblings of steps that run once, and the canvas stops being a
+   * picture of what happens.
+   */
+  | { kind: 'loop'; loopNode: WorkflowNode; body: FlowRow[] }
 
 // --- Graph Adjacency Helpers ---
 
@@ -251,6 +260,44 @@ export function createApprovalNode(config: Partial<ApprovalConfig> = {}): Workfl
     } as ApprovalConfig,
     position: { x: 0, y: 0 }
   }
+}
+
+/**
+ * Add a step into a loop's body.
+ *
+ * Writes the edge and the membership together, because they are one fact. The
+ * checkbox list this replaces let them drift: a step could sit in bodyNodeIds
+ * while the graph ran it somewhere else entirely.
+ */
+export function appendToLoopBody(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+  loopNodeId: string,
+  newNode: WorkflowNode
+): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
+  const loop = nodes.find((n) => n.id === loopNodeId)
+  if (!loop || loop.type !== 'loop') return { nodes, edges }
+
+  const config = loop.config as LoopConfig
+  const body = config.bodyNodeIds ?? []
+  const lastId = body[body.length - 1] ?? loopNodeId
+
+  // The new step goes after the current last body step, taking over whatever
+  // that step pointed at so the rest of the workflow still follows the loop.
+  const onward = edges.filter((e) => e.source === lastId)
+  const nextEdges: WorkflowEdge[] = [
+    ...edges.filter((e) => e.source !== lastId),
+    { id: crypto.randomUUID(), source: lastId, target: newNode.id },
+    ...onward.map((e) => ({ ...e, id: crypto.randomUUID(), source: newNode.id }))
+  ]
+
+  const nextNodes = nodes.map((n) =>
+    n.id === loopNodeId
+      ? { ...n, config: { ...config, bodyNodeIds: [...body, newNode.id] } as LoopConfig }
+      : n
+  )
+
+  return { nodes: [...nextNodes, newNode], edges: nextEdges }
 }
 
 export function createLoopNode(config: Partial<LoopConfig> = {}): WorkflowNode {
@@ -547,6 +594,9 @@ function collectNodeIds(rows: FlowRow[]): Set<string> {
   for (const row of rows) {
     if (row.kind === 'node') {
       ids.add(row.node.id)
+    } else if (row.kind === 'loop') {
+      ids.add(row.loopNode.id)
+      collectNodeIds(row.body).forEach((id) => ids.add(id))
     } else {
       for (const branch of row.branches) {
         collectNodeIds(branch).forEach((id) => ids.add(id))
@@ -602,6 +652,30 @@ function buildFlowFromNode(
     if (!node) break
 
     const successors: string[] = successorsMap.get(currentId) || []
+
+    if (node.type === 'loop') {
+      const bodyIds = ((node.config as LoopConfig).bodyNodeIds ?? []).filter((id) =>
+        nodeMap.has(id)
+      )
+      const body: FlowRow[] = bodyIds.map((id) => ({
+        kind: 'node' as const,
+        node: nodeMap.get(id)!
+      }))
+      // The body is drawn inside the loop, so mark it seen: walking into it
+      // again from the trunk would draw every repeated step twice.
+      for (const id of bodyIds) seen.add(id)
+
+      rows.push({ kind: 'loop', loopNode: node, body })
+
+      // Resume after the body, which is where the workflow actually continues.
+      let next: string | null = successors[0] || null
+      while (next && bodyIds.includes(next)) {
+        const onward: string[] = successorsMap.get(next) || []
+        next = onward[0] || null
+      }
+      currentId = next
+      continue
+    }
 
     if (successors.length <= 1) {
       rows.push({ kind: 'node', node })

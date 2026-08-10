@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { loopShouldStop, MAX_LOOP_ITERATIONS } from '../src/renderer/lib/workflow-execution'
 import { validateLoopBodies } from '../packages/mcp/src/tools/workflows'
-import { nodesAfter } from '../src/renderer/lib/workflow-helpers'
+import {
+  nodesAfter,
+  computeFlowLayout,
+  appendToLoopBody
+} from '../src/renderer/lib/workflow-helpers'
 import type { ConditionConfig, WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 const approved: ConditionConfig = {
@@ -138,5 +142,130 @@ describe('nodesAfter (which steps a loop can repeat)', () => {
   it('terminates on a cyclic graph', () => {
     const cyclic: WorkflowEdge[] = [...edges, { id: 'e5', source: 'publish', target: 'write' }]
     expect(nodesAfter(nodes, cyclic, 'loop').length).toBe(3)
+  })
+})
+
+describe('loop layout (the body is drawn inside the loop)', () => {
+  const n = (id: string, type: WorkflowNode['type'] = 'script', config = {}): WorkflowNode => ({
+    id,
+    type,
+    label: id,
+    config: config as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  })
+
+  const nodes = [
+    n('trigger', 'trigger'),
+    n('fetch'),
+    n('loop', 'loop', { nodeType: 'loop', bodyNodeIds: ['write', 'review'], maxIterations: 2 }),
+    n('write'),
+    n('review'),
+    n('gate', 'approval')
+  ]
+  const edges: WorkflowEdge[] = [
+    { id: 'e1', source: 'trigger', target: 'fetch' },
+    { id: 'e2', source: 'fetch', target: 'loop' },
+    { id: 'e3', source: 'loop', target: 'write' },
+    { id: 'e4', source: 'write', target: 'review' },
+    { id: 'e5', source: 'review', target: 'gate' }
+  ]
+
+  it('emits one loop row holding its body', () => {
+    const rows = computeFlowLayout(nodes, edges)
+    const loopRow = rows.find((r) => r.kind === 'loop')
+    expect(loopRow).toBeDefined()
+    if (loopRow?.kind === 'loop') {
+      expect(loopRow.body.map((b) => (b.kind === 'node' ? b.node.id : ''))).toEqual([
+        'write',
+        'review'
+      ])
+    }
+  })
+
+  it('never draws a repeated step as a sibling as well', () => {
+    // The bug the design exists to kill: body steps appearing twice, once
+    // inside the loop and once in the trunk beside steps that run only once.
+    const rows = computeFlowLayout(nodes, edges)
+    const trunkIds = rows
+      .filter((r) => r.kind === 'node')
+      .map((r) => (r as { node: WorkflowNode }).node.id)
+    expect(trunkIds).not.toContain('write')
+    expect(trunkIds).not.toContain('review')
+  })
+
+  it('resumes the trunk after the body', () => {
+    const rows = computeFlowLayout(nodes, edges)
+    const trunkIds = rows
+      .filter((r) => r.kind === 'node')
+      .map((r) => (r as { node: WorkflowNode }).node.id)
+    expect(trunkIds).toEqual(['trigger', 'fetch', 'gate'])
+  })
+
+  it('draws an empty loop as an empty rail rather than vanishing', () => {
+    const empty = [
+      n('trigger', 'trigger'),
+      n('loop', 'loop', { nodeType: 'loop', bodyNodeIds: [], maxIterations: 2 })
+    ]
+    const rows = computeFlowLayout(empty, [{ id: 'e1', source: 'trigger', target: 'loop' }])
+    const loopRow = rows.find((r) => r.kind === 'loop')
+    expect(loopRow).toBeDefined()
+    if (loopRow?.kind === 'loop') expect(loopRow.body).toEqual([])
+  })
+})
+
+describe('appendToLoopBody', () => {
+  const loopNode: WorkflowNode = {
+    id: 'loop',
+    type: 'loop',
+    label: 'Repeat',
+    config: {
+      nodeType: 'loop',
+      bodyNodeIds: ['write'],
+      maxIterations: 2
+    } as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const write: WorkflowNode = {
+    id: 'write',
+    type: 'script',
+    label: 'write',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const gate: WorkflowNode = {
+    id: 'gate',
+    type: 'approval',
+    label: 'gate',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const newStep: WorkflowNode = {
+    id: 'review',
+    type: 'script',
+    label: 'review',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const edges: WorkflowEdge[] = [
+    { id: 'e1', source: 'loop', target: 'write' },
+    { id: 'e2', source: 'write', target: 'gate' }
+  ]
+
+  it('writes the edge and the membership together', () => {
+    const out = appendToLoopBody([loopNode, write, gate], edges, 'loop', newStep)
+    const cfg = out.nodes.find((x) => x.id === 'loop')!.config as { bodyNodeIds: string[] }
+    expect(cfg.bodyNodeIds).toEqual(['write', 'review'])
+    expect(out.edges.some((e) => e.source === 'write' && e.target === 'review')).toBe(true)
+  })
+
+  it('keeps what followed the loop reachable', () => {
+    const out = appendToLoopBody([loopNode, write, gate], edges, 'loop', newStep)
+    expect(out.edges.some((e) => e.source === 'review' && e.target === 'gate')).toBe(true)
+    expect(out.edges.some((e) => e.source === 'write' && e.target === 'gate')).toBe(false)
+  })
+
+  it('refuses a node that is not a loop', () => {
+    const out = appendToLoopBody([loopNode, write], edges, 'write', newStep)
+    expect(out.nodes).toHaveLength(2)
   })
 })

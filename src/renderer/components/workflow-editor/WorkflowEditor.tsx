@@ -21,6 +21,7 @@ import { WindowControls } from '../WindowControls'
 import {
   WorkflowDefinition,
   WorkflowNode,
+  LoopConfig,
   WorkflowEdge,
   TriggerConfig,
   AiAgentType,
@@ -45,6 +46,7 @@ import {
   insertBeforeFork,
   insertConditionBetween,
   createLoopNode,
+  appendToLoopBody,
   addParallelBranch,
   removeNode,
   getWorktreeMode
@@ -405,7 +407,20 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       const newNode = createNodeWithUniqueSlug(type)
 
       let result: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
-      if (beforeNodeId === '__FORK__') {
+      if (beforeNodeId === '__LOOP_BODY__') {
+        // afterNodeId is the loop when its body is empty, otherwise the last
+        // body step; appendToLoopBody resolves the loop from either.
+        const loopId =
+          nodes.find((n) => n.id === afterNodeId && n.type === 'loop')?.id ??
+          nodes.find(
+            (n) =>
+              n.type === 'loop' &&
+              ((n.config as LoopConfig).bodyNodeIds ?? []).includes(afterNodeId)
+          )?.id
+        result = loopId
+          ? appendToLoopBody(nodes, edges, loopId, newNode)
+          : appendNodeAfter(nodes, edges, afterNodeId, newNode)
+      } else if (beforeNodeId === '__FORK__') {
         result = insertBeforeFork(nodes, edges, afterNodeId, newNode)
       } else if (beforeNodeId) {
         const edge = edges.find((e) => e.source === afterNodeId && e.target === beforeNodeId)
@@ -754,7 +769,6 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           <NodeConfigPanel
             node={selectedNode}
             allNodes={nodes}
-            allEdges={edges}
             onChange={handleNodeConfigChange}
             onLabelChange={handleNodeLabelChange}
             onDelete={handleDeleteNode}

@@ -1,4 +1,4 @@
-import type { ConditionOperator, LoopConfig, WorkflowNode } from '../../../../shared/types'
+import type { ConditionOperator, LoopConfig } from '../../../../shared/types'
 
 const MAX_ITERATIONS = 10
 
@@ -13,61 +13,22 @@ const OPERATORS: { value: ConditionOperator; label: string }[] = [
 
 interface Props {
   config: LoopConfig
-  /** Steps this loop is allowed to repeat: everything downstream of it. */
-  candidates: WorkflowNode[]
   onChange: (config: LoopConfig) => void
 }
 
-export function LoopConfigForm({ config, candidates, onChange }: Props) {
-  const body = config.bodyNodeIds ?? []
+/**
+ * Two fields, deliberately.
+ *
+ * Which steps a loop repeats is answered on the canvas, by putting them inside
+ * it. This panel used to carry a checkbox list of every downstream step, which
+ * made a spatial relationship into a data-entry form and let the list drift
+ * from the graph. Membership has one source of truth now, and it is not here.
+ */
+export function LoopConfigForm({ config, onChange }: Props) {
   const until = config.until
-
-  const toggle = (id: string): void => {
-    // Kept in the candidates' own order rather than click order, so the body
-    // always reads in the order the steps will actually run.
-    const next = body.includes(id) ? body.filter((b) => b !== id) : [...body, id]
-    const ordered = candidates.filter((n) => next.includes(n.id)).map((n) => n.id)
-    onChange({ ...config, bodyNodeIds: ordered })
-  }
-
-  const gateInBody = candidates.some((n) => body.includes(n.id) && n.type === 'approval')
 
   return (
     <div className="space-y-5">
-      <div>
-        <label className="text-[13px] text-gray-400 font-medium block mb-2">Steps to repeat</label>
-        {candidates.length === 0 ? (
-          <div className="text-[11px] text-gray-500">
-            Add steps after this loop first, then choose which of them it repeats.
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {candidates.map((node) => (
-              <label
-                key={node.id}
-                className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer
-                           hover:bg-white/[0.03] transition-colors"
-              >
-                <input
-                  type="checkbox"
-                  checked={body.includes(node.id)}
-                  onChange={() => toggle(node.id)}
-                  className="accent-cyan-500"
-                />
-                <span className="text-[13px] text-gray-200 truncate">{node.label}</span>
-                <span className="text-[11px] text-gray-600 shrink-0">{node.type}</span>
-              </label>
-            ))}
-          </div>
-        )}
-        {gateInBody && (
-          <div className="mt-2 text-[11px] text-amber-400/90">
-            An approval gate cannot be repeated: the run would park mid-pass with no way to resume
-            at the right one. Remove it from the body.
-          </div>
-        )}
-      </div>
-
       <div>
         <label className="text-[13px] text-gray-400 font-medium block mb-2">Maximum passes</label>
         <input

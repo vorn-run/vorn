@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vorn — The loop should look like a loop</title>
+  <style>
+    :root {
+      --night: #000000;
+      --ink: #f3f1ea;
+      --ink-2: rgba(243, 241, 234, 0.55);
+      --ink-3: rgba(243, 241, 234, 0.34);
+      --hairline: rgba(243, 241, 234, 0.14);
+      --hairline-soft: rgba(243, 241, 234, 0.08);
+      --brass: #c9a227;
+      --serif: ui-serif, 'New York', 'Iowan Old Style', Georgia, serif;
+      --sans: -apple-system, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+      --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+      /* Vorn's own surface, so a mockup reads as the app and not as this page. */
+      --card: #1d1d20;
+      --canvas: #0f0f11;
+      --cyan: #22d3ee;
+    }
+    html {
+      background: var(--night);
+    }
+    body {
+      background: var(--night);
+      color: var(--ink);
+      font-family: var(--serif);
+      line-height: 1.6;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 88px 28px 120px;
+    }
+    .eyebrow {
+      font-family: var(--sans);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+    }
+    h1 {
+      font-size: clamp(40px, 7vw, 56px);
+      font-weight: 500;
+      line-height: 1.08;
+      letter-spacing: -0.01em;
+      margin: 18px 0 0;
+      text-wrap: balance;
+    }
+    .thesis {
+      font-size: 21px;
+      line-height: 1.5;
+      color: var(--ink-2);
+      margin: 26px 0 0;
+      max-width: 34em;
+      text-wrap: balance;
+    }
+    .thesis em {
+      color: var(--ink);
+      font-style: italic;
+    }
+    section {
+      margin-top: 96px;
+    }
+    section > .eyebrow {
+      display: block;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--hairline);
+    }
+    h2 {
+      font-size: 28px;
+      font-weight: 500;
+      line-height: 1.25;
+      margin: 26px 0 0;
+      text-wrap: balance;
+    }
+    p {
+      font-size: 16.5px;
+      margin: 18px 0 0;
+      max-width: 38em;
+    }
+    p.quiet {
+      color: var(--ink-2);
+    }
+    strong {
+      font-weight: 600;
+      color: var(--ink);
+    }
+    code {
+      font-family: var(--mono);
+      font-size: 0.85em;
+      color: var(--ink);
+      background: rgba(243, 241, 234, 0.07);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .caption {
+      font-family: var(--sans);
+      font-size: 12.5px;
+      color: var(--ink-3);
+      margin-top: 18px;
+      line-height: 1.55;
+      max-width: 44em;
+    }
+    .warn {
+      color: var(--brass);
+    }
+
+    .tbl {
+      margin-top: 28px;
+      overflow-x: auto;
+    }
+    .tbl table {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 520px;
+      font-family: var(--sans);
+      font-size: 13.5px;
+    }
+    .tbl th {
+      text-align: left;
+      font-size: 10.5px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      font-weight: 500;
+      padding: 0 16px 10px 0;
+      border-bottom: 1px solid var(--hairline);
+    }
+    .tbl td {
+      padding: 12px 16px 12px 0;
+      border-bottom: 1px solid var(--hairline-soft);
+      color: var(--ink-2);
+      line-height: 1.5;
+      vertical-align: top;
+    }
+    .tbl td:first-child {
+      color: var(--ink);
+      font-weight: 500;
+    }
+
+    .steps {
+      margin-top: 30px;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 16px;
+      padding: 18px 0;
+      border-top: 1px solid var(--hairline-soft);
+    }
+    .step:first-child {
+      border-top: 1px solid var(--hairline);
+    }
+    .step-n {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--ink-3);
+      padding-top: 3px;
+    }
+    .step h4 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0;
+    }
+    .step p {
+      font-size: 14.5px;
+      color: var(--ink-2);
+      margin: 6px 0 0;
+    }
+
+    /* Canvas mockups: vorn is a desktop app, so the frame is a panel, not a phone. */
+    .compare {
+      display: flex;
+      gap: 28px;
+      flex-wrap: wrap;
+      margin-top: 36px;
+      justify-content: center;
+    }
+    .col {
+      flex: 1 1 300px;
+      max-width: 330px;
+      min-width: 280px;
+    }
+    .col-label {
+      font-family: var(--sans);
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .canvas {
+      background: var(--canvas);
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      padding: 22px 18px 26px;
+      font-family: var(--sans);
+    }
+    .canvas * {
+      box-sizing: border-box;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--hairline-soft);
+      border-radius: 6px;
+      padding: 9px 11px;
+    }
+    .card .t {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--ink);
+    }
+    .card .s {
+      font-size: 10.5px;
+      color: var(--ink-3);
+      margin-top: 2px;
+    }
+    .card .glyph {
+      font-size: 11px;
+      margin-right: 6px;
+      opacity: 0.8;
+    }
+    .wire {
+      width: 1px;
+      height: 16px;
+      background: var(--hairline);
+      margin: 0 auto;
+    }
+    .plus {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid var(--hairline);
+      color: var(--ink-3);
+      font-size: 12px;
+      line-height: 16px;
+      text-align: center;
+      margin: 0 auto;
+    }
+    .dashed {
+      border-style: dashed;
+    }
+    .cyan {
+      color: var(--cyan);
+    }
+
+    /* The proposal: a rail that physically contains the steps it repeats. */
+    .loop {
+      border: 1px solid rgba(34, 211, 238, 0.35);
+      border-radius: 8px;
+      background: rgba(34, 211, 238, 0.03);
+      padding: 0 0 10px;
+    }
+    .loop-head {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 11px;
+      border-bottom: 1px solid rgba(34, 211, 238, 0.18);
+    }
+    .loop-head .t {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .loop-body {
+      padding: 12px 12px 0 12px;
+    }
+    .loop-foot {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--cyan);
+      opacity: 0.85;
+      padding: 9px 12px 0;
+      text-align: center;
+    }
+    .pill {
+      font-family: var(--mono);
+      font-size: 9.5px;
+      color: var(--cyan);
+      background: rgba(34, 211, 238, 0.12);
+      border-radius: 3px;
+      padding: 1px 5px;
+    }
+
+    .coda {
+      margin-top: 96px;
+      padding-top: 28px;
+      border-top: 1px solid var(--hairline);
+      font-style: italic;
+      color: var(--ink-2);
+      font-size: 17px;
+    }
+  </style>
+
+  <div class="page">
+    <span class="eyebrow">Vorn · Workflow editor</span>
+    <h1>The loop should look like a loop</h1>
+    <p class="thesis">
+      A workflow canvas is a picture of what will happen. The loop node I shipped breaks that
+      promise: it repeats three steps and
+      <em>none of them look any different from the steps that run once</em>. You have to read a list
+      inside a card to know what the picture means.
+    </p>
+
+    <section>
+      <span class="eyebrow">01 · What shipped, and why it is wrong</span>
+      <h2>Membership is invisible</h2>
+      <p>
+        The node exists and executes correctly. <code>executeLoop</code> drives its body, the graph
+        stays acyclic, the bound holds. The <em>engine</em> is fine. The <em>drawing</em> is not.
+      </p>
+      <p>
+        On the canvas, a loop renders as one more 280px card in the vertical chain. The steps it
+        repeats render as ordinary cards below it — identical to steps that run exactly once. The
+        only evidence of the relationship is a text list inside the loop's own card, which means the
+        canvas has stopped being a diagram and started being a legend you cross-reference.
+      </p>
+      <p class="quiet">
+        The configuration follows the same mistake. To say "repeat these two steps" you tick
+        checkboxes in a side panel listing every downstream node. That is a data-entry form for a
+        spatial relationship, and it puts the answer somewhere other than where the question is.
+      </p>
+
+      <div class="compare">
+        <div class="col">
+          <div class="col-label">Shipped</div>
+          <div class="canvas">
+            <div class="card">
+              <div class="t"><span class="glyph">⚡</span>Manual</div>
+            </div>
+            <div class="wire"></div>
+            <div class="card">
+              <div class="t"><span class="glyph">▶</span>Pull feeds</div>
+              <div class="s">bash · deterministic</div>
+            </div>
+            <div class="wire"></div>
+            <div class="card" style="border-color: rgba(34, 211, 238, 0.35)">
+              <div class="t"><span class="glyph cyan">↻</span>Repeat Steps</div>
+              <div class="s">Repeats 2 steps · up to 2×</div>
+              <div
+                class="s"
+                style="
+                  margin-top: 6px;
+                  border-top: 1px solid var(--hairline-soft);
+                  padding-top: 6px;
+                "
+              >
+                1. Write the edition
+              </div>
+              <div class="s">2. Review the draft</div>
+            </div>
+            <div class="wire"></div>
+            <div class="card">
+              <div class="t"><span class="glyph">▶</span>Write the edition</div>
+              <div class="s">claude · headless</div>
+            </div>
+            <div class="wire"></div>
+            <div class="card">
+              <div class="t"><span class="glyph">▶</span>Review the draft</div>
+              <div class="s">claude · headless</div>
+            </div>
+            <div class="wire"></div>
+            <div class="card">
+              <div class="t"><span class="glyph">✋</span>Javier reviews</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="col-label">Proposed</div>
+          <div class="canvas">
+            <div class="card">
+              <div class="t"><span class="glyph">⚡</span>Manual</div>
+            </div>
+            <div class="wire"></div>
+            <div class="card">
+              <div class="t"><span class="glyph">▶</span>Pull feeds</div>
+              <div class="s">bash · deterministic</div>
+            </div>
+            <div class="wire"></div>
+            <div class="loop">
+              <div class="loop-head">
+                <span class="glyph cyan" style="margin: 0">↻</span>
+                <span class="t">Repeat until approved</span>
+                <span class="pill" style="margin-left: auto">max 2</span>
+              </div>
+              <div class="loop-body">
+                <div class="card">
+                  <div class="t"><span class="glyph">▶</span>Write the edition</div>
+                  <div class="s">claude · headless</div>
+                </div>
+                <div class="wire"></div>
+                <div class="card">
+                  <div class="t"><span class="glyph">▶</span>Review the draft</div>
+                  <div class="s">claude · headless</div>
+                </div>
+                <div class="wire"></div>
+                <div class="plus">+</div>
+              </div>
+              <div class="loop-foot">↻ until {{steps.review.approved}} = true</div>
+            </div>
+            <div class="wire"></div>
+            <div class="card">
+              <div class="t"><span class="glyph">✋</span>Javier reviews</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">
+        Same workflow, same execution. On the left you read a card to learn what repeats; on the
+        right you see it. The body is inset inside a rail, the header carries the budget, and the
+        footer carries the exit condition — so the two questions a reader has,
+        <em>what repeats</em> and <em>when does it stop</em>, are answered at the top and bottom
+        edges of the thing itself.
+      </p>
+    </section>
+
+    <section>
+      <span class="eyebrow">02 · What the tools that got this right do</span>
+      <h2>Containment, every time</h2>
+      <p>
+        <strong>n8n</strong> draws a Loop Over Items node with a distinct "loop" output that visibly
+        cycles back — the edge itself is the evidence. <strong>GitHub Actions</strong> has no
+        canvas, but its log UI nests each matrix iteration under a collapsible parent, so a repeated
+        job is never a sibling of an unrepeated one. <strong>Temporal</strong>'s web UI groups
+        activity attempts under one activity row with a retry count, rather than listing four
+        attempts as four peers.
+      </p>
+      <p>
+        The common rule is that
+        <strong>a repeated thing is drawn inside the thing that repeats it</strong>, and the count
+        lives on the container. Nobody asks the reader to hold a membership list in their head.
+      </p>
+      <p class="quiet">
+        Vorn cannot copy n8n's cycling edge: the canvas is a linear list of rows with no edge
+        drawing, and the runner requires an acyclic graph. But containment does not need edges — it
+        needs one nested row type.
+      </p>
+    </section>
+
+    <section>
+      <span class="eyebrow">03 · What it costs</span>
+      <h2>One row kind, one renderer</h2>
+      <p>
+        The layout already models more than a flat list. <code>computeFlowLayout</code> returns
+        <code>FlowRow[]</code> where a row is either <code>{ kind: 'node' }</code> or
+        <code>{ kind: 'fork', branches: FlowRow[][] }</code> —
+        <strong>a fork already nests rows inside a row</strong>. A loop is the same move with one
+        branch.
+      </p>
+
+      <div class="tbl">
+        <table>
+          <tr>
+            <th>Change</th>
+            <th>File</th>
+            <th>Size</th>
+          </tr>
+          <tr>
+            <td>Add <code>{ kind: 'loop', body: FlowRow[] }</code></td>
+            <td>workflow-helpers.ts</td>
+            <td>Mirrors the existing fork row</td>
+          </tr>
+          <tr>
+            <td>Emit it: pull body nodes out of the trunk</td>
+            <td>buildFlowFromNode</td>
+            <td>Skip ids in <code>bodyNodeIds</code>, recurse into them</td>
+          </tr>
+          <tr>
+            <td>Render the rail</td>
+            <td>WorkflowCanvas.tsx</td>
+            <td>Beside the fork renderer</td>
+          </tr>
+          <tr>
+            <td>Add a step inside the loop</td>
+            <td>ConnectorButton</td>
+            <td>The <code>+</code> already takes an insert position</td>
+          </tr>
+          <tr>
+            <td>Drop the checkbox list</td>
+            <td>LoopConfigForm.tsx</td>
+            <td>Deleted — membership is spatial now</td>
+          </tr>
+        </table>
+      </div>
+      <p class="caption">
+        The engine does not change at all. <code>executeLoop</code> already reads
+        <code>bodyNodeIds</code>; this only changes who writes that array — the canvas rather than a
+        form.
+      </p>
+    </section>
+
+    <section>
+      <span class="eyebrow">04 · The interaction</span>
+      <h2>Membership by position</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-n">01</div>
+          <div>
+            <h4>Add the loop</h4>
+            <p>
+              The <code>+</code> menu offers "Repeat steps until…". An empty loop appears as a rail
+              with a dashed drop zone and its own <code>+</code> inside.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-n">02</div>
+          <div>
+            <h4>Add steps into it</h4>
+            <p>
+              The <code>+</code> inside the rail appends to the body; the <code>+</code> outside
+              appends after the loop. Position is the only thing that decides membership, so there
+              is nothing to keep in sync.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-n">03</div>
+          <div>
+            <h4>Set the budget and the exit</h4>
+            <p>
+              Selecting the loop opens a panel with two fields only: max passes, and the condition.
+              The step list is gone.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-n">04</div>
+          <div>
+            <h4>Watch it run</h4>
+            <p>
+              During a run the rail shows <span class="pill">pass 2 / 2</span> in its header, and
+              the body's step cards show that pass's status. The count belongs to the container, as
+              it does in Temporal.
+            </p>
+          </div>
+        </div>
+      </div>
+      <p class="warn" style="font-family: var(--sans); font-size: 13.5px; margin-top: 26px">
+        One thing the rail must keep from the current build: an approval gate dropped into a loop
+        body is refused. The executor cannot resume a parked gate at the right pass, so the canvas
+        should reject the drop rather than let it be built.
+      </p>
+    </section>
+
+    <section>
+      <span class="eyebrow">05 · Build order</span>
+      <h2>Three steps, each shippable</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-n">01</div>
+          <div>
+            <h4>The loop row</h4>
+            <p>
+              Add the row kind, teach <code>buildFlowFromNode</code> to lift body nodes out of the
+              trunk and nest them, render the rail. The checkbox form still writes
+              <code>bodyNodeIds</code>, so nothing breaks while this lands.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-n">02</div>
+          <div>
+            <h4>The inner +</h4>
+            <p>
+              Insertion inside the rail writes both the edge and the <code>bodyNodeIds</code> entry.
+              At this point the form is redundant.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-n">03</div>
+          <div>
+            <h4>Delete the list</h4>
+            <p>
+              Remove the step picker from <code>LoopConfigForm</code>, leaving max passes and the
+              condition. Membership has exactly one source of truth.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <p class="coda">
+      A diagram earns its place by being faster to read than the list it replaces. Ours was slower.
+    </p>
+  </div>
+</html>
