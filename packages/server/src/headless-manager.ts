@@ -18,7 +18,7 @@ import {
   extractWorktreeName,
   isGitRepo
 } from './git-utils'
-import { getSafeEnv, shellEscape } from './process-utils'
+import { getLaunchEnv, shellEscape } from './process-utils'
 import { buildHeadlessSpawnArgs } from './agent-launch'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
@@ -97,7 +97,7 @@ class HeadlessManager extends EventEmitter {
       }
     }
 
-    const env = getSafeEnv()
+    const env = getLaunchEnv()
     const spawnArgs = buildHeadlessSpawnArgs(payload, this.agentCommands, env)
 
     // Windows needs `shell: true` to run the `.cmd`/`.ps1` shims that

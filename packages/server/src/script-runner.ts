@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { ScriptConfig, IPC } from '@vornrun/shared/types'
-import { getSafeEnv } from './process-utils'
+import { getLaunchEnv } from './process-utils'
 import log from './logger'
 
 export interface ScriptExecutionResult {
@@ -60,7 +60,7 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
     const child = spawn(command, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: getSafeEnv(),
+      env: getLaunchEnv(),
       windowsHide: true
     })
 

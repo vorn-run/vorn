@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   filterEnv,
+  getLaunchEnv,
+  getSafeEnv,
   normalizePassthrough,
+  setEnvPassthrough,
   SENSITIVE_ENV_PREFIXES
 } from '../packages/server/src/process-utils'
 
@@ -68,6 +71,23 @@ describe('filterEnv', () => {
   it('still lists the prefixes it protects', () => {
     expect(SENSITIVE_ENV_PREFIXES).toContain('ANTHROPIC_API')
     expect(SENSITIVE_ENV_PREFIXES).toContain('GITHUB_TOKEN')
+  })
+})
+
+describe('getSafeEnv vs getLaunchEnv', () => {
+  it('keeps the two functions distinct, so passthrough cannot leak to every subprocess', () => {
+    // getSafeEnv serves git, tailscale and the detectors; only getLaunchEnv
+    // forwards an opted-in variable, and only to a launch the user asked for.
+    expect(getSafeEnv).not.toBe(getLaunchEnv)
+  })
+
+  it('getSafeEnv ignores passthrough entirely', () => {
+    setEnvPassthrough(['SECRET_THING'])
+    try {
+      expect(filterEnv({ SECRET_THING: 'x' }, new Set())).not.toHaveProperty('SECRET_THING')
+    } finally {
+      setEnvPassthrough([])
+    }
   })
 })
 

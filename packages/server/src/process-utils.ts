@@ -25,7 +25,17 @@ function getUserShellEnv(): Record<string, string> {
   }
 }
 
-const resolvedEnv = getUserShellEnv()
+/**
+ * Resolved lazily and memoized: getUserShellEnv() spawns a login shell, and
+ * doing that at import time made merely importing this module — as the pure
+ * helpers' unit tests do — pay for a subprocess it never uses.
+ */
+let resolvedEnvCache: Record<string, string> | undefined
+
+function resolvedEnv(): Record<string, string> {
+  resolvedEnvCache ??= getUserShellEnv()
+  return resolvedEnvCache
+}
 
 /**
  * The shell a terminal session should run.
@@ -184,8 +194,26 @@ export function filterEnv(
   return env
 }
 
+/**
+ * Environment for subprocesses the user never asked about — git, tailscale,
+ * IDE and agent detection, file helpers. Always strict: a variable opted in so
+ * an agent could authenticate has no business reaching `git ls-remote`.
+ */
 export function getSafeEnv(): Record<string, string> {
-  return filterEnv(resolvedEnv, envPassthrough)
+  return filterEnv(resolvedEnv(), new Set())
+}
+
+/**
+ * Environment for a launch the user actually asked for: an agent terminal, a
+ * headless agent, or a workflow script node. Only these forward
+ * `defaults.envPassthrough`.
+ *
+ * Deliberately not used for the SSH session path. That connects to another
+ * machine, and forwarding a local secret there is precisely the widening this
+ * split exists to avoid.
+ */
+export function getLaunchEnv(): Record<string, string> {
+  return filterEnv(resolvedEnv(), envPassthrough)
 }
 
 function isWindowsStylePath(p: string): boolean {
