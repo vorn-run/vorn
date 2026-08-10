@@ -8,6 +8,7 @@ import {
   LaunchAgentConfig,
   ScriptConfig,
   ConditionConfig,
+  LoopConfig,
   ConditionOperator,
   ApprovalConfig,
   CreateTaskFromItemConfig,
@@ -492,6 +493,155 @@ function evaluateCondition(operator: ConditionOperator, resolved: string, value:
   }
 }
 
+/** Ceiling on `maxIterations`, whatever a workflow asks for. */
+export const MAX_LOOP_ITERATIONS = 10
+
+/**
+ * Decide whether a loop should stop after the pass that just finished.
+ *
+ * Split out because the interesting part is testable without a run: the stop
+ * reason is what a reader needs afterwards, and "we hit the cap" reads very
+ * differently from "the reviewer approved it".
+ */
+export function loopShouldStop(
+  until: ConditionConfig | undefined,
+  resolvedVariable: string,
+  resolvedValue: string
+): boolean {
+  if (!until) return false
+  return evaluateCondition(until.operator, resolvedVariable, resolvedValue)
+}
+
+/**
+ * Run a loop node's body until its condition holds or its budget runs out.
+ *
+ * The body nodes are ordinary nodes sitting downstream in the same graph; this
+ * drives them directly rather than letting the wave scheduler do it. By the
+ * time the loop reports success they are already `completed`, so the scheduler
+ * skips them and carries on with whatever follows — no cycle, and nothing to
+ * teach `getReadyNodes` about repetition.
+ */
+async function executeLoop(
+  node: WorkflowNode,
+  workflow: WorkflowDefinition,
+  execution: WorkflowExecution,
+  context?: WorkflowExecutionContext,
+  active?: ActiveRun
+): Promise<void> {
+  const config = node.config as LoopConfig
+  const nodeMap = new Map(workflow.nodes.map((n) => [n.id, n]))
+  const body = (config.bodyNodeIds ?? [])
+    .map((id) => nodeMap.get(id))
+    .filter((n): n is WorkflowNode => Boolean(n))
+
+  const fail = (message: string): void => {
+    updateNodeState(execution, node.id, {
+      status: 'error',
+      completedAt: new Date().toISOString(),
+      error: message
+    })
+    persistExecution(execution)
+  }
+
+  if (body.length === 0) {
+    fail('Loop has no body steps. Add at least one step for it to repeat.')
+    return
+  }
+
+  // A gate inside a loop would park the run mid-iteration, and resuming it
+  // means re-entering the loop at the pass it stopped on — state this loop
+  // does not keep. Refusing is honest; half-supporting it would strand runs.
+  const gate = body.find((n) => n.type === 'approval')
+  if (gate) {
+    fail(`Loop body contains an approval gate ("${gate.label}"), which is not supported.`)
+    return
+  }
+
+  const max = Math.min(Math.max(1, Math.floor(config.maxIterations ?? 1)), MAX_LOOP_ITERATIONS)
+  const summary: string[] = []
+  let stopReason = `reached the ${max}-pass limit`
+  let passes = 0
+
+  updateNodeState(execution, node.id, {
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    iteration: 0
+  })
+  persistExecution(execution)
+
+  for (let iteration = 1; iteration <= max; iteration++) {
+    if (active?.abort.signal.aborted) {
+      stopReason = 'the run was stopped'
+      break
+    }
+    passes = iteration
+    summary.push(`── iteration ${iteration} of at most ${max} ──`)
+
+    let failedStep: WorkflowNode | undefined
+    for (const step of body) {
+      if (active?.abort.signal.aborted) break
+
+      // Each pass starts the step fresh: a previous pass's terminal status
+      // would otherwise make buildStepOutputsMap serve stale output to the
+      // condition that decides whether to keep going.
+      updateNodeState(execution, step.id, {
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        completedAt: undefined,
+        error: undefined,
+        iteration
+      })
+      persistExecution(execution)
+
+      const stepOutputs = buildStepOutputsMap(execution, nodeMap)
+      await executeNode(step, workflow, execution, context, stepOutputs, active)
+
+      const state = execution.nodeStates.find((s) => s.nodeId === step.id)
+      updateNodeState(execution, step.id, { iteration })
+      summary.push(`  ${step.label}: ${state?.status ?? 'unknown'}`)
+      if (state?.status === 'error') {
+        failedStep = step
+        break
+      }
+    }
+
+    if (failedStep) {
+      stopReason = `"${failedStep.label}" failed on pass ${iteration}`
+      break
+    }
+    if (active?.abort.signal.aborted) {
+      stopReason = 'the run was stopped'
+      break
+    }
+
+    if (config.until) {
+      const outputs = buildStepOutputsMap(execution, nodeMap)
+      const resolvedVariable = resolveTemplateVars(config.until.variable || '', context, outputs)
+      const resolvedValue = resolveTemplateVars(config.until.value || '', context, outputs)
+      if (loopShouldStop(config.until, resolvedVariable, resolvedValue)) {
+        stopReason = `the condition held after pass ${iteration}`
+        break
+      }
+      summary.push(`  condition not met (${config.until.variable} was "${resolvedVariable}")`)
+    }
+  }
+
+  const failed = body.some(
+    (step) => execution.nodeStates.find((s) => s.nodeId === step.id)?.status === 'error'
+  )
+  summary.push(`Stopped after ${passes} pass(es): ${stopReason}.`)
+
+  updateNodeState(execution, node.id, {
+    status: failed ? 'error' : 'success',
+    completedAt: new Date().toISOString(),
+    iteration: passes,
+    output: String(passes),
+    logs: summary.join('\n'),
+    ...(failed && { error: stopReason })
+  })
+  persistExecution(execution)
+}
+
 async function executeNode(
   node: WorkflowNode,
   workflow: WorkflowDefinition,
@@ -500,6 +650,11 @@ async function executeNode(
   stepOutputs?: StepOutputs,
   active?: ActiveRun
 ): Promise<void> {
+  if (node.type === 'loop') {
+    await executeLoop(node, workflow, execution, context, active)
+    return
+  }
+
   if (node.type === 'approval') {
     const existing = execution.nodeStates.find((s) => s.nodeId === node.id)
     if (existing?.status === 'waiting') return

@@ -159,26 +159,92 @@ const triggerConfigSchema = z.union([
   })
 ])
 
-const nodeSchema = z.object({
-  id: V.id,
-  // Full node palette — parity with the editor. `config` is a passthrough so
-  // each type carries its own shape (ConditionConfig, ApprovalConfig, etc.).
-  type: z.enum([
-    'trigger',
-    'launchAgent',
-    'script',
-    'condition',
-    'approval',
-    'createTaskFromItem',
-    'callConnectorAction'
-  ]),
-  label: V.shortText,
-  // Referenced by typed step vars as `{{steps.<slug>.<field>}}`. Set one on any
-  // node whose output a later node consumes.
-  slug: V.shortText.optional(),
-  config: z.record(z.string(), z.unknown()),
-  position: z.object({ x: z.number(), y: z.number() })
-})
+const nodeSchema = z
+  .object({
+    id: V.id,
+    // Full node palette — parity with the editor. `config` is a passthrough so
+    // each type carries its own shape (ConditionConfig, ApprovalConfig, etc.).
+    type: z.enum([
+      'trigger',
+      'launchAgent',
+      'script',
+      'condition',
+      'approval',
+      'createTaskFromItem',
+      'callConnectorAction',
+      'loop'
+    ]),
+    label: V.shortText,
+    // Referenced by typed step vars as `{{steps.<slug>.<field>}}`. Set one on any
+    // node whose output a later node consumes.
+    slug: V.shortText.optional(),
+    config: z.record(z.string(), z.unknown()),
+    position: z.object({ x: z.number(), y: z.number() })
+  })
+  // `config` is a passthrough for every other node type, but a loop that
+  // declares no body or a nonsense budget cannot run at all — and the failure
+  // would surface on a run someone is waiting for rather than on the call that
+  // introduced it.
+  .superRefine((node, ctx) => {
+    if (node.type !== 'loop') return
+    const config = node.config as { bodyNodeIds?: unknown; maxIterations?: unknown }
+
+    if (!Array.isArray(config.bodyNodeIds) || config.bodyNodeIds.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['config', 'bodyNodeIds'],
+        message: `loop "${node.id}" must list at least one body step in bodyNodeIds`
+      })
+    }
+
+    const max = config.maxIterations
+    if (typeof max !== 'number' || !Number.isInteger(max) || max < 1 || max > MAX_LOOP_ITERATIONS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['config', 'maxIterations'],
+        message: `loop "${node.id}" needs maxIterations as a whole number from 1 to ${MAX_LOOP_ITERATIONS}`
+      })
+    }
+  })
+
+/**
+ * Ceiling on loop passes, mirrored from the renderer that enforces it.
+ *
+ * Duplicated rather than imported because this package is the stdio MCP server
+ * and does not pull in renderer code; the executor clamps regardless, so the
+ * worst case of drift is a workflow rejected here that would have been clamped
+ * there.
+ */
+const MAX_LOOP_ITERATIONS = 10
+
+/**
+ * Loop bodies must name steps that exist in the same workflow.
+ *
+ * Checked across the whole graph rather than per node, since a node cannot see
+ * its siblings during its own parse.
+ */
+export function validateLoopBodies(
+  nodes: { id: string; type: string; label?: string; config: Record<string, unknown> }[]
+): string[] {
+  const ids = new Set(nodes.map((n) => n.id))
+  const errors: string[] = []
+
+  for (const node of nodes) {
+    if (node.type !== 'loop') continue
+    const body = (node.config.bodyNodeIds as string[] | undefined) ?? []
+
+    for (const id of body) {
+      if (!ids.has(id)) {
+        errors.push(`loop "${node.label || node.id}" references unknown body step "${id}"`)
+      }
+    }
+    if (body.includes(node.id)) {
+      errors.push(`loop "${node.label || node.id}" lists itself as a body step`)
+    }
+  }
+
+  return errors
+}
 
 const edgeSchema = z.object({
   id: V.id,
@@ -404,6 +470,20 @@ export function registerWorkflowTools(server: McpServer): void {
       if (args.nodes && args.edges) {
         nodes = args.nodes as unknown as WorkflowNode[]
         edges = args.edges as unknown as WorkflowEdge[]
+        const loopErrors = validateLoopBodies(
+          nodes as unknown as {
+            id: string
+            type: string
+            label?: string
+            config: Record<string, unknown>
+          }[]
+        )
+        if (loopErrors.length > 0) {
+          return {
+            content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
+            isError: true
+          }
+        }
       } else {
         const trigger = (args.trigger as TriggerConfig) ?? { triggerType: 'manual' as const }
         const actions = (args.actions as LaunchAgentConfig[]) ?? []
@@ -460,7 +540,23 @@ export function registerWorkflowTools(server: McpServer): void {
 
       const updates: Partial<WorkflowDefinition> = {}
       if (args.name !== undefined) updates.name = args.name
-      if (args.nodes !== undefined) updates.nodes = args.nodes as unknown as WorkflowNode[]
+      if (args.nodes !== undefined) {
+        const loopErrors = validateLoopBodies(
+          args.nodes as unknown as {
+            id: string
+            type: string
+            label?: string
+            config: Record<string, unknown>
+          }[]
+        )
+        if (loopErrors.length > 0) {
+          return {
+            content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
+            isError: true
+          }
+        }
+        updates.nodes = args.nodes as unknown as WorkflowNode[]
+      }
       if (args.edges !== undefined) updates.edges = args.edges as unknown as WorkflowEdge[]
       if (args.icon !== undefined) updates.icon = args.icon
       if (args.icon_color !== undefined) updates.iconColor = args.icon_color

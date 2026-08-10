@@ -477,6 +477,7 @@ export type WorkflowNodeType =
   | 'approval'
   | 'createTaskFromItem'
   | 'callConnectorAction'
+  | 'loop'
 
 export interface WorkflowNodePosition {
   x: number
@@ -699,6 +700,35 @@ export type WorkflowNodeConfig =
   | ApprovalConfig
   | CreateTaskFromItemConfig
   | CallConnectorActionConfig
+  | LoopConfig
+
+/**
+ * Repeat a run of steps until they are good enough, or until the budget runs
+ * out.
+ *
+ * A loop node sits in the chain ahead of the steps it owns and drives them
+ * itself, so the ordinary wave scheduler never runs a body node directly — it
+ * only sees them already complete once the loop finishes. That keeps the graph
+ * acyclic, which matters because the runner requires every predecessor to have
+ * completed and a back edge would simply deadlock.
+ *
+ * `maxIterations` is not a safety net, it is the contract: an LLM judge asked
+ * "is this good yet" converges on yes, so the bound is what actually ends the
+ * loop. It is capped low deliberately.
+ */
+export interface LoopConfig {
+  nodeType: 'loop'
+  /** Steps this loop owns, in execution order. */
+  bodyNodeIds: string[]
+  /** Hard cap on passes. 1 means "run the body once", i.e. no repeat. */
+  maxIterations: number
+  /**
+   * Checked after each pass; the loop stops when it holds. Omit to always run
+   * exactly `maxIterations` passes. Resolved against step outputs, so
+   * `{{steps.review.approved}} equals true` is the shape this exists for.
+   */
+  until?: ConditionConfig
+}
 
 export interface WorkflowNode {
   id: string

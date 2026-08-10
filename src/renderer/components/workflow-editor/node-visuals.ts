@@ -1,4 +1,4 @@
-import { Zap, Play, Terminal, GitFork, Hand, ListPlus } from 'lucide-react'
+import { Zap, Play, Terminal, GitFork, Hand, ListPlus, Repeat } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { NodeExecutionState, WorkflowNode } from '../../../shared/types'
 
@@ -32,7 +32,8 @@ export const NODE_TYPE_VISUAL: Record<
     label: 'Connector Action',
     color: 'text-gray-300',
     bg: 'bg-white/[0.06]'
-  }
+  },
+  loop: { icon: Repeat, label: 'Loop', color: 'text-cyan-400', bg: 'bg-cyan-500/10' }
 }
 
 /**

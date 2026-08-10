@@ -536,13 +536,21 @@ function buildFlowFromNode(
   startId: string,
   stopBeforeId: string | null,
   nodeMap: Map<string, WorkflowNode>,
-  successorsMap: Map<string, string[]>
+  successorsMap: Map<string, string[]>,
+  // Nothing validates the graph for cycles, and this walk is the canvas: an
+  // edge pointing back at an ancestor used to spin here forever and hang the
+  // editor with no way back to the workflow that caused it. Stopping at a node
+  // we have already drawn renders such a graph as a truncated chain, which is
+  // wrong but visible and recoverable.
+  seen: Set<string> = new Set()
 ): FlowRow[] {
   const rows: FlowRow[] = []
   let currentId: string | null = startId
 
   while (currentId) {
     if (currentId === stopBeforeId) break
+    if (seen.has(currentId)) break
+    seen.add(currentId)
 
     const node = nodeMap.get(currentId)
     if (!node) break
@@ -556,8 +564,11 @@ function buildFlowFromNode(
       rows.push({ kind: 'node', node })
 
       const joinNodeId = findJoinPoint(currentId, successors, successorsMap)
+      // Each branch walks with its own `seen`, seeded from the trunk: two
+      // branches legitimately reconverge on the join, and sharing one set
+      // would let whichever branch drew first suppress the other.
       const branches = successors.map((childId: string) =>
-        buildFlowFromNode(childId, joinNodeId, nodeMap, successorsMap)
+        buildFlowFromNode(childId, joinNodeId, nodeMap, successorsMap, new Set(seen))
       )
 
       rows.push({
