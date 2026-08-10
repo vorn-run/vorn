@@ -36,6 +36,14 @@ describe('filterEnv', () => {
     expect(env.GITHUB_TOKEN).toBeUndefined()
   })
 
+  it('strips STRIP_ENV_KEYS whatever their casing', () => {
+    // Windows env names are case-insensitive and Node preserves the casing it
+    // enumerated, so a literal match would let this through.
+    const env = filterEnv({ claudecode: '1', ClaudeCode: '1' }, new Set())
+    expect(env).not.toHaveProperty('claudecode')
+    expect(env).not.toHaveProperty('ClaudeCode')
+  })
+
   it('never forwards STRIP_ENV_KEYS, even when named', () => {
     // CLAUDECODE is stripped so nested agent CLIs still launch; forwarding it
     // breaks the session rather than protecting anything.

@@ -121,6 +121,11 @@ export const SENSITIVE_ENV_PREFIXES = [
 // Env vars to strip so agent CLIs don't refuse to launch (e.g. nested session detection)
 export const STRIP_ENV_KEYS = ['CLAUDECODE']
 
+// Compared uppercased. Windows environment variable names are case-insensitive
+// and Node hands back whatever casing it enumerated, so a literal match would
+// let `claudecode` through — and this list is meant to be absolute.
+const STRIP_ENV_KEYS_UPPER = STRIP_ENV_KEYS.map((k) => k.toUpperCase())
+
 /**
  * Exact variable names the user has opted into forwarding, uppercased.
  *
@@ -155,7 +160,7 @@ export function filterEnv(
   for (const [key, val] of Object.entries(source)) {
     if (val === undefined) continue
     const upper = key.toUpperCase()
-    if (STRIP_ENV_KEYS.includes(key)) continue
+    if (STRIP_ENV_KEYS_UPPER.includes(upper)) continue
     if (!passthrough.has(upper) && SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue
     env[key] = val
   }
