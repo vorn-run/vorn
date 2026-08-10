@@ -7,7 +7,8 @@ import type {
   WorkflowNode,
   WorkflowEdge,
   TriggerConfig,
-  LaunchAgentConfig
+  LaunchAgentConfig,
+  WorkflowInputDef
 } from '@vornrun/shared/types'
 import type { ScheduleLogEntry } from '@vornrun/shared/types'
 import {
@@ -52,10 +53,31 @@ const launchAgentConfigSchema = z
     path: ['outputSchema']
   })
 
+// Parameters the run dialog prompts for, declared on the manual trigger so they
+// travel with the definition. Without this here, a workflow authored over MCP
+// could never declare the `{{inputs.*}}` it reads.
+const workflowInputDefSchema = z.object({
+  key: z
+    .string()
+    .regex(
+      /^[A-Za-z_][A-Za-z0-9_]*$/,
+      'key must be a valid identifier — it becomes {{inputs.<key>}}'
+    )
+    .max(100),
+  label: V.shortText,
+  type: z.enum(['text', 'textarea', 'number', 'select', 'boolean', 'project', 'branch']),
+  required: z.boolean().optional(),
+  defaultValue: V.shortText.optional(),
+  options: z.array(z.object({ value: V.shortText, label: V.shortText })).optional(),
+  placeholder: V.shortText.optional(),
+  description: V.shortText.optional()
+})
+
 const triggerConfigSchema = z.union([
   z.object({
     triggerType: z.literal('manual'),
-    contextual: z.boolean().optional()
+    contextual: z.boolean().optional(),
+    inputs: z.array(workflowInputDefSchema).optional()
   }),
   z.object({ triggerType: z.literal('once'), runAt: V.shortText }),
   z.object({
@@ -154,6 +176,72 @@ function buildGraphFromFlat(
   }
 
   return { nodes, edges }
+}
+
+/**
+ * Match supplied values against the parameters a workflow declares.
+ *
+ * The run dialog does this for a human — applies defaults, enforces required,
+ * limits a select to its options. An agent calling the tool gets no dialog, so
+ * without this a typo'd key would sail through and surface as an empty
+ * `{{inputs.*}}` somewhere deep in the run, which is a miserable thing to debug.
+ */
+export function resolveWorkflowInputs(
+  defs: WorkflowInputDef[],
+  supplied: Record<string, string | number | boolean>
+): { values: Record<string, unknown>; errors: string[] } {
+  const errors: string[] = []
+  const known = new Set(defs.map((d) => d.key))
+
+  for (const key of Object.keys(supplied)) {
+    if (!known.has(key)) {
+      errors.push(
+        `unknown input "${key}" — this workflow declares: ${Array.from(known).join(', ') || '(none)'}`
+      )
+    }
+  }
+
+  const values: Record<string, unknown> = {}
+  for (const def of defs) {
+    const provided = Object.prototype.hasOwnProperty.call(supplied, def.key)
+    const raw = provided ? supplied[def.key] : def.defaultValue
+
+    if (raw === undefined || raw === '') {
+      if (def.required) errors.push(`missing required input "${def.key}" (${def.label})`)
+      continue
+    }
+
+    switch (def.type) {
+      case 'number': {
+        const n = typeof raw === 'number' ? raw : Number(raw)
+        if (Number.isNaN(n)) {
+          errors.push(`input "${def.key}" must be a number, got ${JSON.stringify(raw)}`)
+        } else {
+          values[def.key] = n
+        }
+        break
+      }
+      case 'boolean': {
+        if (typeof raw === 'boolean') values[def.key] = raw
+        else if (raw === 'true' || raw === 'false') values[def.key] = raw === 'true'
+        else errors.push(`input "${def.key}" must be a boolean, got ${JSON.stringify(raw)}`)
+        break
+      }
+      case 'select': {
+        const allowed = (def.options ?? []).map((o) => o.value)
+        if (allowed.length > 0 && !allowed.includes(String(raw))) {
+          errors.push(`input "${def.key}" must be one of: ${allowed.join(', ')}`)
+        } else {
+          values[def.key] = String(raw)
+        }
+        break
+      }
+      default:
+        values[def.key] = String(raw)
+    }
+  }
+
+  return { values, errors }
 }
 
 export function registerWorkflowTools(server: McpServer): void {
@@ -360,6 +448,75 @@ export function registerWorkflowTools(server: McpServer): void {
           content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : err}` }],
           isError: true
         }
+      }
+    }
+  )
+
+  server.tool(
+    'execute_workflow',
+    "Run a workflow now, as if triggered manually. Supply values for any parameters the workflow declares (see the trigger node's inputs); declared defaults fill in anything omitted. Requires the Vorn app to be running. Returns as soon as the run is queued — poll list_workflow_runs for the outcome.",
+    {
+      workflow_id: V.id.describe('Workflow ID (from list_workflows)'),
+      inputs: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .optional()
+        .describe('Values for the declared parameters, keyed by input key ({{inputs.<key>}})')
+    },
+    async (args) => {
+      const workflow = dbListWorkflows().find((w) => w.id === args.workflow_id)
+      if (!workflow) {
+        return {
+          content: [{ type: 'text', text: `Error: no workflow with id ${args.workflow_id}` }],
+          isError: true
+        }
+      }
+
+      const trigger = workflow.nodes.find((n) => n.type === 'trigger')?.config as
+        | TriggerConfig
+        | undefined
+      const defs = trigger?.triggerType === 'manual' ? (trigger.inputs ?? []) : []
+      const supplied = args.inputs ?? {}
+
+      let inputs: Record<string, unknown> | undefined
+      if (defs.length > 0) {
+        const { values, errors } = resolveWorkflowInputs(defs, supplied)
+        if (errors.length > 0) {
+          return {
+            content: [
+              { type: 'text', text: `Error: invalid inputs\n  - ${errors.join('\n  - ')}` }
+            ],
+            isError: true
+          }
+        }
+        inputs = Object.keys(values).length > 0 ? values : undefined
+      } else if (Object.keys(supplied).length > 0) {
+        // Nothing declared to validate against. Pass the values through rather
+        // than rejecting them: a non-manual trigger cannot declare inputs, but
+        // its nodes may still read `{{inputs.*}}`.
+        inputs = supplied
+      }
+
+      try {
+        await rpcCall('workflow:runManual', { workflowId: args.workflow_id, inputs })
+      } catch (err) {
+        return {
+          content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : err}` }],
+          isError: true
+        }
+      }
+
+      // A disabled workflow still runs when triggered by hand — the flag only
+      // stops the scheduler. Say so, so the result is not a surprise.
+      const disabled =
+        workflow.enabled === false ? ' (workflow is disabled; manual runs still execute)' : ''
+      const shown = inputs ? `\ninputs: ${JSON.stringify(inputs, null, 2)}` : '\nno inputs'
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Queued "${workflow.name}"${disabled}${shown}\n\nRun history: list_workflow_runs with workflow_id ${args.workflow_id}`
+          }
+        ]
       }
     }
   )
