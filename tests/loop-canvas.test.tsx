@@ -169,3 +169,13 @@ describe('adding a step inside the rail', () => {
     expect(onInsertNode.mock.calls[0][0]).toBe('loop')
   })
 })
+
+describe('where a loop can be added', () => {
+  it('is offered on the trunk', () => {
+    const { container } = renderWith(nodes)
+    // The + between trunk steps, outside the rail.
+    const buttons = container.querySelectorAll('button')
+    fireEvent.click(buttons[buttons.length - 1])
+    expect(screen.queryByText(/Repeat steps/)).not.toBeNull()
+  })
+})

@@ -913,6 +913,23 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       )
 
+      // Export refuses a connector-bound workflow because its connectionId is
+      // local. Import has to refuse the same shape, or a hand-written file
+      // walks straight past that contract and lands a workflow that fails at
+      // run time against a connection this machine never had.
+      const blockers = portabilityBlockers(definition)
+      if (blockers.length > 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: this workflow cannot be imported because ${blockers.join('; ')}.`
+            }
+          ],
+          isError: true
+        }
+      }
+
       const existing = dbListWorkflows().find((w) => w.id === definition.id)
       if (existing) {
         dbUpdateWorkflow(definition.id, definition)

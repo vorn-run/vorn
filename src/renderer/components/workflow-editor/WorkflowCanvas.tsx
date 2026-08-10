@@ -206,7 +206,15 @@ function FlowRowRenderer({
                     onAddScript={() => onInsertNode(row.node.id, beforeNodeId, 'script')}
                     onAddCondition={() => onInsertNode(row.node.id, beforeNodeId, 'condition')}
                     onAddApproval={() => onInsertNode(row.node.id, beforeNodeId, 'approval')}
-                    onAddLoop={() => onInsertNode(row.node.id, beforeNodeId, 'loop')}
+                    onAddLoop={
+                      // Gated like onAddParallelBranch: a loop lifts its body
+                      // out of the trunk, and how that interacts with a fork's
+                      // join is untested. Offering it inside a branch would be
+                      // promising something that has never been tried.
+                      !isInsideBranch
+                        ? () => onInsertNode(row.node.id, beforeNodeId, 'loop')
+                        : undefined
+                    }
                     onAddConnectorAction={() =>
                       onInsertNode(row.node.id, beforeNodeId, 'connectorAction')
                     }
@@ -223,7 +231,9 @@ function FlowRowRenderer({
                     onAddScript={() => onInsertNode(row.node.id, null, 'script')}
                     onAddCondition={() => onInsertNode(row.node.id, null, 'condition')}
                     onAddApproval={() => onInsertNode(row.node.id, null, 'approval')}
-                    onAddLoop={() => onInsertNode(row.node.id, null, 'loop')}
+                    onAddLoop={
+                      !isInsideBranch ? () => onInsertNode(row.node.id, null, 'loop') : undefined
+                    }
                     onAddConnectorAction={() => onInsertNode(row.node.id, null, 'connectorAction')}
                     onAddParallelBranch={
                       !isInsideBranch ? () => onAddParallelBranch(row.node.id, 'agent') : undefined

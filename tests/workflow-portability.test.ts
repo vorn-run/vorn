@@ -260,3 +260,47 @@ describe('Windows paths', () => {
     expect(script.projectPath).toBe('/Users/other/novum')
   })
 })
+
+describe('import refuses what export refuses', () => {
+  // Export rejects a connector-bound workflow because its connectionId is
+  // local. Without the same check on the way in, a hand-written file walks
+  // past that contract and lands a workflow that fails at run time against a
+  // connection this machine never had.
+  it('detects a connector trigger in a resolved definition', () => {
+    const portable = toPortable(workflow(), PROJECT)
+    portable.nodes[0].config = {
+      triggerType: 'connectorPoll',
+      connectionId: 'from-another-machine',
+      event: 'issue.created',
+      cron: '*/5 * * * *'
+    } as never
+    const resolved = fromPortable(portable, 'novum', { name: 'N', path: '/tmp/n' })
+    expect(portabilityBlockers(resolved)).not.toEqual([])
+  })
+
+  it('detects a connector action step in a resolved definition', () => {
+    const portable = toPortable(workflow(), PROJECT)
+    portable.nodes.push({
+      id: 'act',
+      type: 'callConnectorAction',
+      label: 'Create issue',
+      config: {
+        nodeType: 'callConnectorAction',
+        connectionId: 'x',
+        action: 'a',
+        args: {}
+      } as never,
+      position: { x: 0, y: 0 }
+    })
+    const resolved = fromPortable(portable, 'novum', { name: 'N', path: '/tmp/n' })
+    expect(portabilityBlockers(resolved).some((b) => b.includes('Create issue'))).toBe(true)
+  })
+
+  it('passes an ordinary workflow through both directions', () => {
+    const resolved = fromPortable(toPortable(workflow(), PROJECT), 'novum', {
+      name: 'N',
+      path: '/tmp/n'
+    })
+    expect(portabilityBlockers(resolved)).toEqual([])
+  })
+})
