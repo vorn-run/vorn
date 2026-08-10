@@ -7,7 +7,8 @@ import type {
   WorkflowNode,
   WorkflowEdge,
   TriggerConfig,
-  LaunchAgentConfig
+  LaunchAgentConfig,
+  WorkflowInputDef
 } from '@vornrun/shared/types'
 import type { ScheduleLogEntry } from '@vornrun/shared/types'
 import {
@@ -52,10 +53,96 @@ const launchAgentConfigSchema = z
     path: ['outputSchema']
   })
 
+// Parameters the run dialog prompts for, declared on the manual trigger so they
+// travel with the definition. Without this here, a workflow authored over MCP
+// could never declare the `{{inputs.*}}` it reads.
+export const workflowInputDefSchema = z
+  .object({
+    key: z
+      .string()
+      .regex(
+        /^[A-Za-z_][A-Za-z0-9_]*$/,
+        'key must be a valid identifier — it becomes {{inputs.<key>}}'
+      )
+      .max(100),
+    label: V.shortText,
+    type: z.enum(['text', 'textarea', 'number', 'select', 'boolean', 'project', 'branch']),
+    required: z.boolean().optional(),
+    defaultValue: V.shortText.optional(),
+    options: z.array(z.object({ value: V.shortText, label: V.shortText })).optional(),
+    placeholder: V.shortText.optional(),
+    description: V.shortText.optional()
+  })
+  // Reject a declaration that can never be satisfied at the moment it is
+  // authored, rather than letting it become a run-time error later. A workflow
+  // that cannot be run correctly should not be storable.
+  .superRefine((def, ctx) => {
+    const options = def.options ?? []
+
+    if (def.type === 'select' && options.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['options'],
+        message: `select input "${def.key}" declares no options, so the run dialog could offer nothing`
+      })
+    }
+
+    if (def.defaultValue === undefined) return
+
+    // Finite, not merely numeric: "Infinity" and "1e999" parse but do not
+    // survive JSON, and resolveWorkflowInputs rejects them at run time. Letting
+    // one be authored would only defer the same failure to a worse moment.
+    if (def.type === 'number' && !Number.isFinite(Number(def.defaultValue))) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['defaultValue'],
+        message: `default "${def.defaultValue}" for number input "${def.key}" is not a finite number`
+      })
+    }
+
+    if (def.type === 'boolean' && !['true', 'false'].includes(def.defaultValue)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['defaultValue'],
+        message: `default "${def.defaultValue}" for boolean input "${def.key}" must be "true" or "false"`
+      })
+    }
+
+    if (
+      def.type === 'select' &&
+      options.length > 0 &&
+      !options.some((o) => o.value === def.defaultValue)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['defaultValue'],
+        message: `default "${def.defaultValue}" for select input "${def.key}" is not one of its options`
+      })
+    }
+  })
+
+// Two inputs sharing a key cannot both survive under one `{{inputs.<key>}}`.
+// The editor already flags this as an error the author has to resolve, so MCP
+// authoring must not be the way an ambiguous workflow gets persisted.
+export const workflowInputsSchema = z.array(workflowInputDefSchema).superRefine((inputs, ctx) => {
+  const seen = new Set<string>()
+  inputs.forEach((def, index) => {
+    if (seen.has(def.key)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [index, 'key'],
+        message: `duplicate input key "${def.key}" — only one value can survive under {{inputs.${def.key}}}`
+      })
+    }
+    seen.add(def.key)
+  })
+})
+
 const triggerConfigSchema = z.union([
   z.object({
     triggerType: z.literal('manual'),
-    contextual: z.boolean().optional()
+    contextual: z.boolean().optional(),
+    inputs: workflowInputsSchema.optional()
   }),
   z.object({ triggerType: z.literal('once'), runAt: V.shortText }),
   z.object({
@@ -156,6 +243,120 @@ function buildGraphFromFlat(
   return { nodes, edges }
 }
 
+/**
+ * Match supplied values against the parameters a workflow declares.
+ *
+ * The run dialog does this for a human — applies defaults, enforces required,
+ * limits a select to its options. An agent calling the tool gets no dialog, so
+ * without this a typo'd key would sail through and surface as an empty
+ * `{{inputs.*}}` somewhere deep in the run, which is a miserable thing to debug.
+ */
+export function resolveWorkflowInputs(
+  defs: WorkflowInputDef[],
+  supplied: Record<string, string | number | boolean>
+): { values: Record<string, unknown>; errors: string[] } {
+  const errors: string[] = []
+  const known = new Set(defs.map((d) => d.key))
+
+  for (const key of Object.keys(supplied)) {
+    if (!known.has(key)) {
+      errors.push(
+        `unknown input "${key}" — this workflow declares: ${Array.from(known).join(', ') || '(none)'}`
+      )
+    }
+  }
+
+  const values: Record<string, unknown> = {}
+  for (const def of defs) {
+    const provided = Object.prototype.hasOwnProperty.call(supplied, def.key)
+    const raw = provided ? supplied[def.key] : def.defaultValue
+
+    // A declared toggle always carries an answer. defaultInputValue seeds
+    // `false` when nothing was authored and areInputsValid counts `false` as a
+    // real answer, so omitting it here would expand `{{inputs.x}}` to '' on an
+    // MCP run and 'false' on a UI run — and dedupe them as different runs.
+    if (def.type === 'boolean') {
+      if (raw === undefined) {
+        values[def.key] = false
+      } else if (typeof raw === 'boolean') {
+        values[def.key] = raw
+      } else if (raw === 'true' || raw === 'false') {
+        values[def.key] = raw === 'true'
+      } else {
+        errors.push(`input "${def.key}" must be a boolean, got ${JSON.stringify(raw)}`)
+      }
+      continue
+    }
+
+    // Whitespace-only is "no value", matching areInputsValid's String(v).trim().
+    if (raw === undefined || (typeof raw === 'string' && raw.trim() === '')) {
+      if (def.required) errors.push(`missing required input "${def.key}" (${def.label})`)
+      continue
+    }
+
+    switch (def.type) {
+      case 'number': {
+        // parseNumberInput rejects anything non-finite because NaN and Infinity
+        // do not survive JSON — they corrupt the persisted run, the template
+        // expansion and the dedupe fingerprint alike. A boolean is not a number
+        // either, however willingly Number() turns it into one.
+        if (typeof raw === 'boolean') {
+          errors.push(`input "${def.key}" must be a number, got ${JSON.stringify(raw)}`)
+          break
+        }
+        const n = typeof raw === 'number' ? raw : Number(String(raw).trim())
+        if (!Number.isFinite(n)) {
+          errors.push(`input "${def.key}" must be a finite number, got ${JSON.stringify(raw)}`)
+        } else {
+          values[def.key] = n
+        }
+        break
+      }
+      case 'select': {
+        const allowed = (def.options ?? []).map((o) => o.value)
+        if (allowed.length === 0) {
+          // The run dialog can only offer what the select declares, so a select
+          // with no options can produce no value at all. Accepting an arbitrary
+          // string here would let a tool caller past a constraint the UI
+          // enforces absolutely.
+          errors.push(`input "${def.key}" is a select but declares no options`)
+        } else if (!allowed.includes(String(raw))) {
+          errors.push(`input "${def.key}" must be one of: ${allowed.join(', ')}`)
+        } else {
+          values[def.key] = String(raw)
+        }
+        break
+      }
+      default:
+        values[def.key] = String(raw)
+    }
+  }
+
+  return { values, errors }
+}
+
+/**
+ * The workflow tools grew two names for one argument: the read tools take
+ * `workflow_id`, while update/delete took `id`. Nothing signals which a given
+ * tool wants, so reaching for the wrong one costs a failed call and a re-read
+ * of the schema.
+ *
+ * `workflow_id` is canonical now — it is what the majority already used.
+ * `id` keeps working, because breaking every existing caller to win
+ * consistency would be a poor trade.
+ */
+export function resolveWorkflowId(args: {
+  workflow_id?: string
+  id?: string
+}): { id: string } | { error: string } {
+  const id = args.workflow_id ?? args.id
+  if (!id) return { error: 'provide workflow_id' }
+  if (args.workflow_id && args.id && args.workflow_id !== args.id) {
+    return { error: 'workflow_id and id disagree — pass only workflow_id' }
+  }
+  return { id }
+}
+
 export function registerWorkflowTools(server: McpServer): void {
   server.tool(
     'list_workflows',
@@ -233,7 +434,8 @@ export function registerWorkflowTools(server: McpServer): void {
     'update_workflow',
     "Update a workflow's properties",
     {
-      id: V.id.describe('Workflow ID'),
+      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
+      id: V.id.optional().describe('Deprecated alias for workflow_id'),
       name: V.title.optional(),
       nodes: z.array(nodeSchema).optional(),
       edges: z.array(edgeSchema).optional(),
@@ -243,11 +445,15 @@ export function registerWorkflowTools(server: McpServer): void {
       stagger_delay_ms: z.number().optional()
     },
     async (args) => {
+      const resolved = resolveWorkflowId(args)
+      if ('error' in resolved) {
+        return { content: [{ type: 'text', text: `Error: ${resolved.error}` }], isError: true }
+      }
       const workflows = dbListWorkflows()
-      const workflow = workflows.find((w) => w.id === args.id)
+      const workflow = workflows.find((w) => w.id === resolved.id)
       if (!workflow) {
         return {
-          content: [{ type: 'text', text: `Error: workflow "${args.id}" not found` }],
+          content: [{ type: 'text', text: `Error: workflow "${resolved.id}" not found` }],
           isError: true
         }
       }
@@ -261,7 +467,7 @@ export function registerWorkflowTools(server: McpServer): void {
       if (args.enabled !== undefined) updates.enabled = args.enabled
       if (args.stagger_delay_ms !== undefined) updates.staggerDelayMs = args.stagger_delay_ms
 
-      dbUpdateWorkflow(args.id, updates)
+      dbUpdateWorkflow(resolved.id, updates)
       dbSignalChange()
 
       return {
@@ -273,18 +479,25 @@ export function registerWorkflowTools(server: McpServer): void {
   server.tool(
     'delete_workflow',
     'Delete a workflow',
-    { id: V.id.describe('Workflow ID') },
+    {
+      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
+      id: V.id.optional().describe('Deprecated alias for workflow_id')
+    },
     async (args) => {
+      const resolved = resolveWorkflowId(args)
+      if ('error' in resolved) {
+        return { content: [{ type: 'text', text: `Error: ${resolved.error}` }], isError: true }
+      }
       const workflows = dbListWorkflows()
-      const workflow = workflows.find((w) => w.id === args.id)
+      const workflow = workflows.find((w) => w.id === resolved.id)
       if (!workflow) {
         return {
-          content: [{ type: 'text', text: `Error: workflow "${args.id}" not found` }],
+          content: [{ type: 'text', text: `Error: workflow "${resolved.id}" not found` }],
           isError: true
         }
       }
 
-      dbDeleteWorkflow(args.id)
+      dbDeleteWorkflow(resolved.id)
       dbSignalChange()
 
       return { content: [{ type: 'text', text: `Deleted workflow: ${workflow.name}` }] }
@@ -360,6 +573,81 @@ export function registerWorkflowTools(server: McpServer): void {
           content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : err}` }],
           isError: true
         }
+      }
+    }
+  )
+
+  server.tool(
+    'execute_workflow',
+    "Run a workflow now, as if triggered manually. Supply values for any parameters the workflow declares (see the trigger node's inputs); declared defaults fill in anything omitted. Requires the Vorn app to be running. Returns as soon as the run is queued — poll list_workflow_runs for the outcome.",
+    {
+      workflow_id: V.id.describe('Workflow ID (from list_workflows)'),
+      inputs: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .optional()
+        .describe('Values for the declared parameters, keyed by input key ({{inputs.<key>}})')
+    },
+    async (args) => {
+      const workflow = dbListWorkflows().find((w) => w.id === args.workflow_id)
+      if (!workflow) {
+        return {
+          content: [{ type: 'text', text: `Error: workflow "${args.workflow_id}" not found` }],
+          isError: true
+        }
+      }
+
+      const trigger = workflow.nodes.find((n) => n.type === 'trigger')?.config as
+        | TriggerConfig
+        | undefined
+      const defs = trigger?.triggerType === 'manual' ? (trigger.inputs ?? []) : []
+      const supplied = args.inputs ?? {}
+
+      let inputs: Record<string, unknown> | undefined
+      if (defs.length > 0) {
+        const { values, errors } = resolveWorkflowInputs(defs, supplied)
+        if (errors.length > 0) {
+          return {
+            content: [
+              { type: 'text', text: `Error: invalid inputs\n  - ${errors.join('\n  - ')}` }
+            ],
+            isError: true
+          }
+        }
+        // Always an object once the workflow declares inputs, even when every
+        // value resolved empty. resolveTemplateVars
+        // (src/renderer/lib/template-vars.ts) skips the whole `inputs`
+        // namespace when context.inputs is absent, which leaves a literal
+        // `{{inputs.topic}}` in the agent's prompt; an empty object resolves it
+        // to an empty string instead. Wrong-but-blank beats raw template text.
+        inputs = values
+      } else if (Object.keys(supplied).length > 0) {
+        // Nothing declared to validate against. Pass the values through rather
+        // than rejecting them: a non-manual trigger cannot declare inputs, but
+        // its nodes may still read `{{inputs.*}}`.
+        inputs = supplied
+      }
+
+      try {
+        await rpcCall('workflow:runManual', { workflowId: args.workflow_id, inputs })
+      } catch (err) {
+        return {
+          content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : err}` }],
+          isError: true
+        }
+      }
+
+      // A disabled workflow still runs when triggered by hand — the flag only
+      // stops the scheduler. Say so, so the result is not a surprise.
+      const disabled =
+        workflow.enabled === false ? ' (workflow is disabled; manual runs still execute)' : ''
+      const shown = inputs ? `\ninputs: ${JSON.stringify(inputs, null, 2)}` : '\nno inputs'
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Queued "${workflow.name}"${disabled}${shown}\n\nRun history: list_workflow_runs with workflow_id ${args.workflow_id}`
+          }
+        ]
       }
     }
   )

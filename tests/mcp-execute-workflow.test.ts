@@ -1,0 +1,217 @@
+import { describe, it, expect } from 'vitest'
+import {
+  resolveWorkflowInputs,
+  resolveWorkflowId,
+  workflowInputDefSchema,
+  workflowInputsSchema
+} from '../packages/mcp/src/tools/workflows'
+import type { WorkflowInputDef } from '../packages/shared/src/types'
+
+const defs: WorkflowInputDef[] = [
+  { key: 'topic', label: 'Topic', type: 'text', required: true },
+  { key: 'hours', label: 'Window (hours)', type: 'number', defaultValue: '24' },
+  { key: 'publish', label: 'Publish', type: 'boolean', defaultValue: 'false' },
+  {
+    key: 'tier',
+    label: 'Tier',
+    type: 'select',
+    options: [
+      { value: 'primary', label: 'Primary' },
+      { value: 'secondary', label: 'Secondary' }
+    ]
+  }
+]
+
+describe('resolveWorkflowInputs', () => {
+  it('applies declared defaults for values that were not supplied', () => {
+    const { values, errors } = resolveWorkflowInputs(defs, { topic: 'agents' })
+    expect(errors).toEqual([])
+    expect(values).toEqual({ topic: 'agents', hours: 24, publish: false })
+  })
+
+  it('reports a missing required input', () => {
+    const { errors } = resolveWorkflowInputs(defs, {})
+    expect(errors).toEqual(['missing required input "topic" (Topic)'])
+  })
+
+  it('rejects an unknown key rather than silently dropping it', () => {
+    const { errors } = resolveWorkflowInputs(defs, { topic: 'a', topci: 'typo' })
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('unknown input "topci"')
+    expect(errors[0]).toContain('topic')
+  })
+
+  it('coerces numeric and boolean strings, since MCP args arrive as JSON scalars', () => {
+    const { values, errors } = resolveWorkflowInputs(defs, {
+      topic: 'a',
+      hours: '48',
+      publish: 'true'
+    })
+    expect(errors).toEqual([])
+    expect(values.hours).toBe(48)
+    expect(values.publish).toBe(true)
+  })
+
+  it('rejects a non-numeric value for a number input', () => {
+    const { errors } = resolveWorkflowInputs(defs, { topic: 'a', hours: 'soon' })
+    expect(errors).toEqual(['input "hours" must be a finite number, got "soon"'])
+  })
+
+  it('limits a select to its declared options', () => {
+    const { errors } = resolveWorkflowInputs(defs, { topic: 'a', tier: 'tertiary' })
+    expect(errors).toEqual(['input "tier" must be one of: primary, secondary'])
+  })
+
+  it('rejects a select that declares no options, which the dialog could never satisfy', () => {
+    const noOptions: WorkflowInputDef[] = [{ key: 'tier', label: 'Tier', type: 'select' }]
+    const { errors } = resolveWorkflowInputs(noOptions, { tier: 'anything' })
+    expect(errors).toEqual(['input "tier" is a select but declares no options'])
+  })
+
+  it('accepts a valid select value', () => {
+    const { values, errors } = resolveWorkflowInputs(defs, { topic: 'a', tier: 'primary' })
+    expect(errors).toEqual([])
+    expect(values.tier).toBe('primary')
+  })
+
+  it('treats a whitespace-only string as no value, like areInputsValid', () => {
+    const { errors } = resolveWorkflowInputs(defs, { topic: '   ' })
+    expect(errors).toEqual(['missing required input "topic" (Topic)'])
+  })
+
+  it('always supplies a declared boolean, matching the dialog seeding false', () => {
+    const toggle: WorkflowInputDef[] = [{ key: 'publish', label: 'Publish', type: 'boolean' }]
+    const { values } = resolveWorkflowInputs(toggle, {})
+    expect(values).toEqual({ publish: false })
+  })
+
+  it('rejects a non-finite number, which would not survive JSON', () => {
+    const { errors } = resolveWorkflowInputs(defs, { topic: 'a', hours: 'Infinity' })
+    expect(errors).toEqual(['input "hours" must be a finite number, got "Infinity"'])
+  })
+
+  it('does not let a boolean coerce into a number input', () => {
+    const { errors } = resolveWorkflowInputs(defs, { topic: 'a', hours: true })
+    expect(errors).toEqual(['input "hours" must be a number, got true'])
+  })
+
+  it('omits an optional input with no value and no default', () => {
+    const { values } = resolveWorkflowInputs(defs, { topic: 'a' })
+    expect(values).not.toHaveProperty('tier')
+  })
+
+  it('returns no values when nothing is declared', () => {
+    const { values, errors } = resolveWorkflowInputs([], {})
+    expect(values).toEqual({})
+    expect(errors).toEqual([])
+  })
+})
+
+describe('workflowInputDefSchema', () => {
+  const base = { key: 'topic', label: 'Topic' }
+
+  it('accepts a well-formed declaration', () => {
+    expect(workflowInputDefSchema.safeParse({ ...base, type: 'text' }).success).toBe(true)
+  })
+
+  it('rejects a select with no options at authoring time, not at run time', () => {
+    const result = workflowInputDefSchema.safeParse({ ...base, type: 'select' })
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(result.error?.issues)).toContain('declares no options')
+  })
+
+  it('rejects a non-numeric default on a number input', () => {
+    const result = workflowInputDefSchema.safeParse({
+      ...base,
+      type: 'number',
+      defaultValue: 'soon'
+    })
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(result.error?.issues)).toContain('is not a finite number')
+  })
+
+  it('rejects a non-finite number default, matching the run-time check', () => {
+    for (const defaultValue of ['Infinity', '1e999']) {
+      const result = workflowInputDefSchema.safeParse({ ...base, type: 'number', defaultValue })
+      expect(result.success).toBe(false)
+    }
+  })
+
+  it('rejects a non-boolean default on a boolean input', () => {
+    const result = workflowInputDefSchema.safeParse({
+      ...base,
+      type: 'boolean',
+      defaultValue: 'yes'
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a select default that is not one of its options', () => {
+    const result = workflowInputDefSchema.safeParse({
+      ...base,
+      type: 'select',
+      defaultValue: 'tertiary',
+      options: [{ value: 'primary', label: 'Primary' }]
+    })
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(result.error?.issues)).toContain('not one of its options')
+  })
+
+  it('accepts a select default that is one of its options', () => {
+    const result = workflowInputDefSchema.safeParse({
+      ...base,
+      type: 'select',
+      defaultValue: 'primary',
+      options: [{ value: 'primary', label: 'Primary' }]
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a key that could not be referenced as a template', () => {
+    expect(
+      workflowInputDefSchema.safeParse({ key: '2fast', label: 'x', type: 'text' }).success
+    ).toBe(false)
+  })
+})
+
+describe('workflowInputsSchema', () => {
+  it('accepts distinct keys', () => {
+    const result = workflowInputsSchema.safeParse([
+      { key: 'a', label: 'A', type: 'text' },
+      { key: 'b', label: 'B', type: 'text' }
+    ])
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects duplicate keys, which the editor already flags as an error', () => {
+    const result = workflowInputsSchema.safeParse([
+      { key: 'topic', label: 'One', type: 'text' },
+      { key: 'topic', label: 'Two', type: 'text' }
+    ])
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(result.error?.issues)).toContain('duplicate input key')
+  })
+})
+
+describe('resolveWorkflowId', () => {
+  it('accepts the canonical workflow_id', () => {
+    expect(resolveWorkflowId({ workflow_id: 'abc' })).toEqual({ id: 'abc' })
+  })
+
+  it('still accepts the deprecated id, so existing callers keep working', () => {
+    expect(resolveWorkflowId({ id: 'abc' })).toEqual({ id: 'abc' })
+  })
+
+  it('accepts both when they agree', () => {
+    expect(resolveWorkflowId({ workflow_id: 'abc', id: 'abc' })).toEqual({ id: 'abc' })
+  })
+
+  it('refuses two different ids rather than guessing which was meant', () => {
+    const result = resolveWorkflowId({ workflow_id: 'abc', id: 'xyz' })
+    expect(result).toEqual({ error: 'workflow_id and id disagree — pass only workflow_id' })
+  })
+
+  it('reports a missing id', () => {
+    expect(resolveWorkflowId({})).toEqual({ error: 'provide workflow_id' })
+  })
+})
