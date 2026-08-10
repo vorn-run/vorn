@@ -56,22 +56,67 @@ const launchAgentConfigSchema = z
 // Parameters the run dialog prompts for, declared on the manual trigger so they
 // travel with the definition. Without this here, a workflow authored over MCP
 // could never declare the `{{inputs.*}}` it reads.
-const workflowInputDefSchema = z.object({
-  key: z
-    .string()
-    .regex(
-      /^[A-Za-z_][A-Za-z0-9_]*$/,
-      'key must be a valid identifier — it becomes {{inputs.<key>}}'
-    )
-    .max(100),
-  label: V.shortText,
-  type: z.enum(['text', 'textarea', 'number', 'select', 'boolean', 'project', 'branch']),
-  required: z.boolean().optional(),
-  defaultValue: V.shortText.optional(),
-  options: z.array(z.object({ value: V.shortText, label: V.shortText })).optional(),
-  placeholder: V.shortText.optional(),
-  description: V.shortText.optional()
-})
+export const workflowInputDefSchema = z
+  .object({
+    key: z
+      .string()
+      .regex(
+        /^[A-Za-z_][A-Za-z0-9_]*$/,
+        'key must be a valid identifier — it becomes {{inputs.<key>}}'
+      )
+      .max(100),
+    label: V.shortText,
+    type: z.enum(['text', 'textarea', 'number', 'select', 'boolean', 'project', 'branch']),
+    required: z.boolean().optional(),
+    defaultValue: V.shortText.optional(),
+    options: z.array(z.object({ value: V.shortText, label: V.shortText })).optional(),
+    placeholder: V.shortText.optional(),
+    description: V.shortText.optional()
+  })
+  // Reject a declaration that can never be satisfied at the moment it is
+  // authored, rather than letting it become a run-time error later. A workflow
+  // that cannot be run correctly should not be storable.
+  .superRefine((def, ctx) => {
+    const options = def.options ?? []
+
+    if (def.type === 'select' && options.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['options'],
+        message: `select input "${def.key}" declares no options, so the run dialog could offer nothing`
+      })
+    }
+
+    if (def.defaultValue === undefined) return
+
+    if (def.type === 'number' && Number.isNaN(Number(def.defaultValue))) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['defaultValue'],
+        message: `default "${def.defaultValue}" for number input "${def.key}" is not a number`
+      })
+    }
+
+    if (def.type === 'boolean' && !['true', 'false'].includes(def.defaultValue)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['defaultValue'],
+        message: `default "${def.defaultValue}" for boolean input "${def.key}" must be "true" or "false"`
+      })
+    }
+
+    if (
+      def.type === 'select' &&
+      options.length > 0 &&
+      !options.some((o) => o.value === def.defaultValue)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['defaultValue'],
+        message: `default "${def.defaultValue}" for select input "${def.key}" is not one of its options`
+      })
+    }
+  })
 
 const triggerConfigSchema = z.union([
   z.object({

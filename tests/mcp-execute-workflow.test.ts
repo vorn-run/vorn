@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { resolveWorkflowInputs, resolveWorkflowId } from '../packages/mcp/src/tools/workflows'
+import {
+  resolveWorkflowInputs,
+  resolveWorkflowId,
+  workflowInputDefSchema
+} from '../packages/mcp/src/tools/workflows'
 import type { WorkflowInputDef } from '../packages/shared/src/types'
 
 const defs: WorkflowInputDef[] = [
@@ -78,6 +82,66 @@ describe('resolveWorkflowInputs', () => {
     const { values, errors } = resolveWorkflowInputs([], {})
     expect(values).toEqual({})
     expect(errors).toEqual([])
+  })
+})
+
+describe('workflowInputDefSchema', () => {
+  const base = { key: 'topic', label: 'Topic' }
+
+  it('accepts a well-formed declaration', () => {
+    expect(workflowInputDefSchema.safeParse({ ...base, type: 'text' }).success).toBe(true)
+  })
+
+  it('rejects a select with no options at authoring time, not at run time', () => {
+    const result = workflowInputDefSchema.safeParse({ ...base, type: 'select' })
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(result.error?.issues)).toContain('declares no options')
+  })
+
+  it('rejects a non-numeric default on a number input', () => {
+    const result = workflowInputDefSchema.safeParse({
+      ...base,
+      type: 'number',
+      defaultValue: 'soon'
+    })
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(result.error?.issues)).toContain('is not a number')
+  })
+
+  it('rejects a non-boolean default on a boolean input', () => {
+    const result = workflowInputDefSchema.safeParse({
+      ...base,
+      type: 'boolean',
+      defaultValue: 'yes'
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects a select default that is not one of its options', () => {
+    const result = workflowInputDefSchema.safeParse({
+      ...base,
+      type: 'select',
+      defaultValue: 'tertiary',
+      options: [{ value: 'primary', label: 'Primary' }]
+    })
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(result.error?.issues)).toContain('not one of its options')
+  })
+
+  it('accepts a select default that is one of its options', () => {
+    const result = workflowInputDefSchema.safeParse({
+      ...base,
+      type: 'select',
+      defaultValue: 'primary',
+      options: [{ value: 'primary', label: 'Primary' }]
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a key that could not be referenced as a template', () => {
+    expect(
+      workflowInputDefSchema.safeParse({ key: '2fast', label: 'x', type: 'text' }).success
+    ).toBe(false)
   })
 })
 
