@@ -204,13 +204,15 @@ export function getSafeEnv(): Record<string, string> {
 }
 
 /**
- * Environment for a launch the user actually asked for: an agent terminal, a
- * headless agent, or a workflow script node. Only these forward
- * `defaults.envPassthrough`.
+ * Environment for an agent launch: the agent terminal, a headless agent, or a
+ * workflow script node. Only these three forward `defaults.envPassthrough`.
  *
- * Deliberately not used for the SSH session path. That connects to another
- * machine, and forwarding a local secret there is precisely the widening this
- * split exists to avoid.
+ * Not the plain shell session. A shell hands its environment to every command
+ * typed into it for as long as it lives, which is far wider than "the agent I
+ * configured a key for" — and wider than what the setting documents.
+ *
+ * Not the SSH session either: that connects to another machine, which is
+ * precisely the widening this split exists to avoid.
  */
 export function getLaunchEnv(): Record<string, string> {
   return filterEnv(resolvedEnv(), envPassthrough)

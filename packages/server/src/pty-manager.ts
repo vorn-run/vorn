@@ -450,7 +450,7 @@ class PtyManager extends EventEmitter {
       rows: 24,
       cwd: workingDir,
       env: {
-        ...getLaunchEnv(),
+        ...getSafeEnv(),
         ...integration.env
       }
     })
