@@ -4,7 +4,8 @@ import { validateLoopBodies } from '../packages/mcp/src/tools/workflows'
 import {
   nodesAfter,
   computeFlowLayout,
-  appendToLoopBody
+  appendToLoopBody,
+  loopOwningInsertPoint
 } from '../src/renderer/lib/workflow-helpers'
 import type { ConditionConfig, WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
@@ -267,5 +268,54 @@ describe('appendToLoopBody', () => {
   it('refuses a node that is not a loop', () => {
     const out = appendToLoopBody([loopNode, write], edges, 'write', newStep)
     expect(out.nodes).toHaveLength(2)
+  })
+})
+
+describe('loopOwningInsertPoint', () => {
+  const loop: WorkflowNode = {
+    id: 'loop',
+    type: 'loop',
+    label: 'Repeat',
+    config: {
+      nodeType: 'loop',
+      bodyNodeIds: ['write'],
+      maxIterations: 2
+    } as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const write: WorkflowNode = {
+    id: 'write',
+    type: 'script',
+    label: 'write',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const outside: WorkflowNode = {
+    id: 'gate',
+    type: 'approval',
+    label: 'gate',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+
+  it('resolves the loop itself while the body is empty', () => {
+    expect(loopOwningInsertPoint([loop, write], 'loop')?.id).toBe('loop')
+  })
+
+  it('resolves the owning loop from the last body step', () => {
+    expect(loopOwningInsertPoint([loop, write], 'write')?.id).toBe('loop')
+  })
+
+  it('returns nothing for a step outside any loop, so the insert falls through', () => {
+    expect(loopOwningInsertPoint([loop, write, outside], 'gate')).toBeUndefined()
+  })
+
+  it('ignores a loop whose body does not contain the step', () => {
+    const other = {
+      ...loop,
+      id: 'other',
+      config: { nodeType: 'loop', bodyNodeIds: [], maxIterations: 1 } as WorkflowNode['config']
+    }
+    expect(loopOwningInsertPoint([other], 'write')).toBeUndefined()
   })
 })

@@ -300,6 +300,26 @@ export function appendToLoopBody(
   return { nodes: [...nextNodes, newNode], edges: nextEdges }
 }
 
+/**
+ * The loop that owns an insertion point inside a rail.
+ *
+ * The + inside a loop reports the step it sits under, which is the loop itself
+ * while the body is empty and the last body step afterwards. Resolving that to
+ * a loop is the kind of branch that quietly rots inside a click handler, so it
+ * lives here where it can be tested.
+ */
+export function loopOwningInsertPoint(
+  nodes: WorkflowNode[],
+  afterNodeId: string
+): WorkflowNode | undefined {
+  const direct = nodes.find((n) => n.id === afterNodeId && n.type === 'loop')
+  if (direct) return direct
+
+  return nodes.find(
+    (n) => n.type === 'loop' && ((n.config as LoopConfig).bodyNodeIds ?? []).includes(afterNodeId)
+  )
+}
+
 export function createLoopNode(config: Partial<LoopConfig> = {}): WorkflowNode {
   return {
     id: crypto.randomUUID(),
