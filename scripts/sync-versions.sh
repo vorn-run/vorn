@@ -12,6 +12,7 @@ PACKAGES=(
   "packages/shared"
   "packages/mcp"
   "packages/connector-sdk"
+  "packages/connector-kusto"
 )
 
 OUT_OF_SYNC=0

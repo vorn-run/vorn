@@ -1,6 +1,6 @@
 {
   "name": "@vornrun/connector-kusto",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Trigger Vorn workflows from an Azure Data Explorer (Kusto) query",
   "type": "module",
   "license": "MIT",
