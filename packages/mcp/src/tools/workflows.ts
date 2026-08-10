@@ -244,6 +244,28 @@ export function resolveWorkflowInputs(
   return { values, errors }
 }
 
+/**
+ * The workflow tools grew two names for one argument: the read tools take
+ * `workflow_id`, while update/delete took `id`. Nothing signals which a given
+ * tool wants, so reaching for the wrong one costs a failed call and a re-read
+ * of the schema.
+ *
+ * `workflow_id` is canonical now — it is what the majority already used.
+ * `id` keeps working, because breaking every existing caller to win
+ * consistency would be a poor trade.
+ */
+export function resolveWorkflowId(args: {
+  workflow_id?: string
+  id?: string
+}): { id: string } | { error: string } {
+  const id = args.workflow_id ?? args.id
+  if (!id) return { error: 'provide workflow_id' }
+  if (args.workflow_id && args.id && args.workflow_id !== args.id) {
+    return { error: 'workflow_id and id disagree — pass only workflow_id' }
+  }
+  return { id }
+}
+
 export function registerWorkflowTools(server: McpServer): void {
   server.tool(
     'list_workflows',
@@ -321,7 +343,8 @@ export function registerWorkflowTools(server: McpServer): void {
     'update_workflow',
     "Update a workflow's properties",
     {
-      id: V.id.describe('Workflow ID'),
+      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
+      id: V.id.optional().describe('Deprecated alias for workflow_id'),
       name: V.title.optional(),
       nodes: z.array(nodeSchema).optional(),
       edges: z.array(edgeSchema).optional(),
@@ -331,11 +354,15 @@ export function registerWorkflowTools(server: McpServer): void {
       stagger_delay_ms: z.number().optional()
     },
     async (args) => {
+      const resolved = resolveWorkflowId(args)
+      if ('error' in resolved) {
+        return { content: [{ type: 'text', text: `Error: ${resolved.error}` }], isError: true }
+      }
       const workflows = dbListWorkflows()
-      const workflow = workflows.find((w) => w.id === args.id)
+      const workflow = workflows.find((w) => w.id === resolved.id)
       if (!workflow) {
         return {
-          content: [{ type: 'text', text: `Error: workflow "${args.id}" not found` }],
+          content: [{ type: 'text', text: `Error: workflow "${resolved.id}" not found` }],
           isError: true
         }
       }
@@ -349,7 +376,7 @@ export function registerWorkflowTools(server: McpServer): void {
       if (args.enabled !== undefined) updates.enabled = args.enabled
       if (args.stagger_delay_ms !== undefined) updates.staggerDelayMs = args.stagger_delay_ms
 
-      dbUpdateWorkflow(args.id, updates)
+      dbUpdateWorkflow(resolved.id, updates)
       dbSignalChange()
 
       return {
@@ -361,18 +388,25 @@ export function registerWorkflowTools(server: McpServer): void {
   server.tool(
     'delete_workflow',
     'Delete a workflow',
-    { id: V.id.describe('Workflow ID') },
+    {
+      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
+      id: V.id.optional().describe('Deprecated alias for workflow_id')
+    },
     async (args) => {
+      const resolved = resolveWorkflowId(args)
+      if ('error' in resolved) {
+        return { content: [{ type: 'text', text: `Error: ${resolved.error}` }], isError: true }
+      }
       const workflows = dbListWorkflows()
-      const workflow = workflows.find((w) => w.id === args.id)
+      const workflow = workflows.find((w) => w.id === resolved.id)
       if (!workflow) {
         return {
-          content: [{ type: 'text', text: `Error: workflow "${args.id}" not found` }],
+          content: [{ type: 'text', text: `Error: workflow "${resolved.id}" not found` }],
           isError: true
         }
       }
 
-      dbDeleteWorkflow(args.id)
+      dbDeleteWorkflow(resolved.id)
       dbSignalChange()
 
       return { content: [{ type: 'text', text: `Deleted workflow: ${workflow.name}` }] }
