@@ -21,6 +21,7 @@ import {
   NODE_TYPE_VISUAL,
   nodeConnectionId,
   stepMeta,
+  inlineLogTail,
   stepOutputPreview,
   stepPreview
 } from './node-visuals'
@@ -328,7 +329,7 @@ export function RunStepsList({
                       className="text-[11px] text-gray-400 bg-black/30 rounded-md p-2 max-h-[200px] overflow-auto
                                 font-mono whitespace-pre-wrap break-all leading-relaxed"
                     >
-                      {ns.logs.length > 2000 ? ns.logs.slice(0, 2000) + '\n...' : ns.logs}
+                      {inlineLogTail(ns.logs)}
                     </pre>
                     <div className="flex items-center gap-1 mt-1.5">
                       {onViewFullOutput && (

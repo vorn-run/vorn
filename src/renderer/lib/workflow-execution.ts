@@ -8,6 +8,7 @@ import {
   LaunchAgentConfig,
   ScriptConfig,
   ConditionConfig,
+  LoopConfig,
   ConditionOperator,
   ApprovalConfig,
   CreateTaskFromItemConfig,
@@ -492,6 +493,201 @@ function evaluateCondition(operator: ConditionOperator, resolved: string, value:
   }
 }
 
+/** Ceiling on `maxIterations`, whatever a workflow asks for. */
+export const MAX_LOOP_ITERATIONS = 10
+
+/**
+ * Decide whether a loop should stop after the pass that just finished.
+ *
+ * Split out because the interesting part is testable without a run: the stop
+ * reason is what a reader needs afterwards, and "we hit the cap" reads very
+ * differently from "the reviewer approved it".
+ */
+/** Operators that compare against a value; the other two test the variable alone. */
+const VALUE_OPERATORS: ConditionOperator[] = ['equals', 'notEquals', 'contains', 'notContains']
+
+export function loopShouldStop(
+  until: ConditionConfig | undefined,
+  resolvedVariable: string,
+  resolvedValue: string
+): boolean {
+  if (!until) return false
+
+  // A half-written condition means "not configured yet", not "stop now". Typing
+  // one into the form leaves it briefly incomplete, and some incomplete forms
+  // are degenerate rather than merely false: `contains ""` matches every
+  // string, and `notEquals ""` matches everything non-empty. Either would end
+  // the loop after one pass, which looks like the loop being broken.
+  //
+  // The cost is that `equals ""` cannot be expressed, and it does not need to
+  // be: isEmpty says exactly that and needs no value.
+  if (until.variable.trim() === '') return false
+  if (VALUE_OPERATORS.includes(until.operator) && resolvedValue.trim() === '') return false
+
+  return evaluateCondition(until.operator, resolvedVariable, resolvedValue)
+}
+
+/**
+ * The state a body step is reset to at the start of a pass.
+ *
+ * Enumerates what SURVIVES rather than what gets cleared. A list of fields to
+ * clear has to be updated every time NodeExecutionState gains one, and the
+ * failure is silent: the new field leaks from the previous pass into a step
+ * reported as pending. The first version of this listed eight fields and
+ * missed taskId, the worktree trio, approvedAt and diagnostics — and its test
+ * passed, because the test enumerated the same eight.
+ */
+const SURVIVES_A_PASS = new Set(['nodeId'])
+
+export function blankPassState(
+  state: NodeExecutionState,
+  iteration: number
+): Partial<NodeExecutionState> {
+  const cleared: Record<string, unknown> = {}
+  for (const key of Object.keys(state)) {
+    if (!SURVIVES_A_PASS.has(key)) cleared[key] = undefined
+  }
+  return { ...cleared, status: 'pending', iteration } as Partial<NodeExecutionState>
+}
+
+/**
+ * Run a loop node's body until its condition holds or its budget runs out.
+ *
+ * The body nodes are ordinary nodes sitting downstream in the same graph; this
+ * drives them directly rather than letting the wave scheduler do it. By the
+ * time the loop reports success they are already `completed`, so the scheduler
+ * skips them and carries on with whatever follows — no cycle, and nothing to
+ * teach `getReadyNodes` about repetition.
+ */
+async function executeLoop(
+  node: WorkflowNode,
+  workflow: WorkflowDefinition,
+  execution: WorkflowExecution,
+  context?: WorkflowExecutionContext,
+  active?: ActiveRun
+): Promise<void> {
+  const config = node.config as LoopConfig
+  const nodeMap = new Map(workflow.nodes.map((n) => [n.id, n]))
+  const body = (config.bodyNodeIds ?? [])
+    .map((id) => nodeMap.get(id))
+    .filter((n): n is WorkflowNode => Boolean(n))
+
+  const fail = (message: string): void => {
+    updateNodeState(execution, node.id, {
+      status: 'error',
+      completedAt: new Date().toISOString(),
+      error: message
+    })
+    persistExecution(execution)
+  }
+
+  if (body.length === 0) {
+    fail('Loop has no body steps. Add at least one step for it to repeat.')
+    return
+  }
+
+  // A gate inside a loop would park the run mid-iteration, and resuming it
+  // means re-entering the loop at the pass it stopped on — state this loop
+  // does not keep. Refusing is honest; half-supporting it would strand runs.
+  const gate = body.find((n) => n.type === 'approval')
+  if (gate) {
+    fail(`Loop body contains an approval gate ("${gate.label}"), which is not supported.`)
+    return
+  }
+
+  const requested = Number(config.maxIterations)
+  const max = Number.isFinite(requested)
+    ? Math.min(Math.max(1, Math.floor(requested)), MAX_LOOP_ITERATIONS)
+    : 1
+  const summary: string[] = []
+  let stopReason = `reached the ${max}-pass limit`
+  let passes = 0
+
+  updateNodeState(execution, node.id, {
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    iteration: 0
+  })
+  persistExecution(execution)
+
+  for (let iteration = 1; iteration <= max; iteration++) {
+    if (active?.abort.signal.aborted) {
+      stopReason = 'the run was stopped'
+      break
+    }
+    passes = iteration
+    summary.push(`── iteration ${iteration} of at most ${max} ──`)
+
+    // The whole body is cleared before the pass, not each step as its turn
+    // comes. Resetting lazily leaves later steps holding last pass's results,
+    // so an earlier step resolves {{steps.review.approved}} from a review that
+    // has not run yet this time — the loop would then revise against a verdict
+    // describing the draft it already replaced.
+    for (const step of body) {
+      const state = execution.nodeStates.find((x) => x.nodeId === step.id)
+      if (state) updateNodeState(execution, step.id, blankPassState(state, iteration))
+    }
+    persistExecution(execution)
+
+    let failedStep: WorkflowNode | undefined
+    for (const step of body) {
+      if (active?.abort.signal.aborted) break
+
+      updateNodeState(execution, step.id, {
+        status: 'running',
+        startedAt: new Date().toISOString()
+      })
+      persistExecution(execution)
+
+      const stepOutputs = buildStepOutputsMap(execution, nodeMap)
+      await executeNode(step, workflow, execution, context, stepOutputs, active)
+
+      const state = execution.nodeStates.find((s) => s.nodeId === step.id)
+      updateNodeState(execution, step.id, { iteration })
+      summary.push(`  ${step.label}: ${state?.status ?? 'unknown'}`)
+      if (state?.status === 'error') {
+        failedStep = step
+        break
+      }
+    }
+
+    if (failedStep) {
+      stopReason = `"${failedStep.label}" failed on pass ${iteration}`
+      break
+    }
+    if (active?.abort.signal.aborted) {
+      stopReason = 'the run was stopped'
+      break
+    }
+
+    if (config.until) {
+      const outputs = buildStepOutputsMap(execution, nodeMap)
+      const resolvedVariable = resolveTemplateVars(config.until.variable || '', context, outputs)
+      const resolvedValue = resolveTemplateVars(config.until.value || '', context, outputs)
+      if (loopShouldStop(config.until, resolvedVariable, resolvedValue)) {
+        stopReason = `the condition held after pass ${iteration}`
+        break
+      }
+      summary.push(`  condition not met (${config.until.variable} was "${resolvedVariable}")`)
+    }
+  }
+
+  const failed = body.some(
+    (step) => execution.nodeStates.find((s) => s.nodeId === step.id)?.status === 'error'
+  )
+  summary.push(`Stopped after ${passes} pass(es): ${stopReason}.`)
+
+  updateNodeState(execution, node.id, {
+    status: failed ? 'error' : 'success',
+    completedAt: new Date().toISOString(),
+    iteration: passes,
+    output: String(passes),
+    logs: summary.join('\n'),
+    ...(failed && { error: stopReason })
+  })
+  persistExecution(execution)
+}
+
 async function executeNode(
   node: WorkflowNode,
   workflow: WorkflowDefinition,
@@ -500,6 +696,11 @@ async function executeNode(
   stepOutputs?: StepOutputs,
   active?: ActiveRun
 ): Promise<void> {
+  if (node.type === 'loop') {
+    await executeLoop(node, workflow, execution, context, active)
+    return
+  }
+
   if (node.type === 'approval') {
     const existing = execution.nodeStates.find((s) => s.nodeId === node.id)
     if (existing?.status === 'waiting') return

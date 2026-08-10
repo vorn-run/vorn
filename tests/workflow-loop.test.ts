@@ -1,0 +1,501 @@
+import { describe, it, expect } from 'vitest'
+import {
+  loopShouldStop,
+  blankPassState,
+  MAX_LOOP_ITERATIONS
+} from '../src/renderer/lib/workflow-execution'
+import { validateLoopBodies } from '../packages/mcp/src/tools/workflows'
+import {
+  nodesAfter,
+  computeFlowLayout,
+  appendToLoopBody,
+  loopOwningInsertPoint
+} from '../src/renderer/lib/workflow-helpers'
+import type { ConditionConfig, WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
+
+const approved: ConditionConfig = {
+  variable: '{{steps.review.approved}}',
+  operator: 'equals',
+  value: 'true'
+}
+
+describe('loopShouldStop', () => {
+  it('never stops early when no condition is declared', () => {
+    // Such a loop is "run the body exactly maxIterations times".
+    expect(loopShouldStop(undefined, 'anything', 'true')).toBe(false)
+  })
+
+  it('stops once the condition holds', () => {
+    expect(loopShouldStop(approved, 'true', 'true')).toBe(true)
+  })
+
+  it('keeps going while it does not', () => {
+    expect(loopShouldStop(approved, 'false', 'true')).toBe(false)
+  })
+
+  it('keeps going when the variable did not resolve', () => {
+    // An unresolved template yields '' — treating that as "approved" would end
+    // the loop on a typo, which is the worst possible reading of silence.
+    expect(loopShouldStop(approved, '', 'true')).toBe(false)
+  })
+
+  it('supports isEmpty for a step that either produced blockers or did not', () => {
+    const cfg: ConditionConfig = {
+      variable: '{{steps.review.blocking}}',
+      operator: 'isEmpty',
+      value: ''
+    }
+    expect(loopShouldStop(cfg, '', '')).toBe(true)
+    expect(loopShouldStop(cfg, 'one problem', '')).toBe(false)
+  })
+})
+
+describe('loop bounds', () => {
+  // The cap is the contract, not a safety net: an LLM judge asked "is this good
+  // yet" trends toward yes, so the bound is what actually ends the loop.
+  const clamp = (requested: number): number =>
+    Math.min(Math.max(1, Math.floor(requested)), MAX_LOOP_ITERATIONS)
+
+  it('never runs zero passes', () => {
+    expect(clamp(0)).toBe(1)
+    expect(clamp(-5)).toBe(1)
+  })
+
+  it('caps a runaway request', () => {
+    expect(clamp(1000)).toBe(MAX_LOOP_ITERATIONS)
+  })
+
+  it('passes a sensible request through', () => {
+    expect(clamp(2)).toBe(2)
+  })
+
+  it('floors a fractional request rather than looping forever on NaN arithmetic', () => {
+    expect(clamp(2.9)).toBe(2)
+  })
+})
+
+describe('validateLoopBodies', () => {
+  const loop = (bodyNodeIds: string[]): Parameters<typeof validateLoopBodies>[0][number] => ({
+    id: 'loop-1',
+    type: 'loop',
+    label: 'Revise until approved',
+    config: { bodyNodeIds, maxIterations: 2 }
+  })
+  const step = (id: string): Parameters<typeof validateLoopBodies>[0][number] => ({
+    id,
+    type: 'script',
+    label: id,
+    config: {}
+  })
+
+  it('accepts a body of steps that exist', () => {
+    expect(validateLoopBodies([loop(['write', 'review']), step('write'), step('review')])).toEqual(
+      []
+    )
+  })
+
+  it('rejects a body step that does not exist', () => {
+    // Authoring-time, because at run time it is a silently shorter loop.
+    const errors = validateLoopBodies([loop(['write', 'typo']), step('write')])
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('unknown body step "typo"')
+  })
+
+  it('rejects a loop that contains itself', () => {
+    const errors = validateLoopBodies([loop(['loop-1']), step('write')])
+    expect(errors.some((e) => e.includes('lists itself'))).toBe(true)
+  })
+
+  it('ignores workflows with no loop', () => {
+    expect(validateLoopBodies([step('a'), step('b')])).toEqual([])
+  })
+})
+
+describe('nodesAfter (which steps a loop can repeat)', () => {
+  const n = (id: string, type: WorkflowNode['type'] = 'script'): WorkflowNode => ({
+    id,
+    type,
+    label: id,
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  })
+
+  const nodes = [n('trigger', 'trigger'), n('loop', 'loop'), n('write'), n('review'), n('publish')]
+  const edges: WorkflowEdge[] = [
+    { id: 'e1', source: 'trigger', target: 'loop' },
+    { id: 'e2', source: 'loop', target: 'write' },
+    { id: 'e3', source: 'write', target: 'review' },
+    { id: 'e4', source: 'review', target: 'publish' }
+  ]
+
+  it('offers every step downstream of the loop', () => {
+    expect(nodesAfter(nodes, edges, 'loop').map((x) => x.id)).toEqual([
+      'write',
+      'review',
+      'publish'
+    ])
+  })
+
+  it('never offers an upstream step, which the loop’s own inputs may depend on', () => {
+    expect(nodesAfter(nodes, edges, 'loop').map((x) => x.id)).not.toContain('trigger')
+  })
+
+  it('never offers the loop itself', () => {
+    expect(nodesAfter(nodes, edges, 'loop').map((x) => x.id)).not.toContain('loop')
+  })
+
+  it('terminates on a cyclic graph', () => {
+    const cyclic: WorkflowEdge[] = [...edges, { id: 'e5', source: 'publish', target: 'write' }]
+    expect(nodesAfter(nodes, cyclic, 'loop').length).toBe(3)
+  })
+})
+
+describe('loop layout (the body is drawn inside the loop)', () => {
+  const n = (id: string, type: WorkflowNode['type'] = 'script', config = {}): WorkflowNode => ({
+    id,
+    type,
+    label: id,
+    config: config as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  })
+
+  const nodes = [
+    n('trigger', 'trigger'),
+    n('fetch'),
+    n('loop', 'loop', { nodeType: 'loop', bodyNodeIds: ['write', 'review'], maxIterations: 2 }),
+    n('write'),
+    n('review'),
+    n('gate', 'approval')
+  ]
+  const edges: WorkflowEdge[] = [
+    { id: 'e1', source: 'trigger', target: 'fetch' },
+    { id: 'e2', source: 'fetch', target: 'loop' },
+    { id: 'e3', source: 'loop', target: 'write' },
+    { id: 'e4', source: 'write', target: 'review' },
+    { id: 'e5', source: 'review', target: 'gate' }
+  ]
+
+  it('emits one loop row holding its body', () => {
+    const rows = computeFlowLayout(nodes, edges)
+    const loopRow = rows.find((r) => r.kind === 'loop')
+    expect(loopRow).toBeDefined()
+    if (loopRow?.kind === 'loop') {
+      expect(loopRow.body.map((b) => (b.kind === 'node' ? b.node.id : ''))).toEqual([
+        'write',
+        'review'
+      ])
+    }
+  })
+
+  it('never draws a repeated step as a sibling as well', () => {
+    // The bug the design exists to kill: body steps appearing twice, once
+    // inside the loop and once in the trunk beside steps that run only once.
+    const rows = computeFlowLayout(nodes, edges)
+    const trunkIds = rows
+      .filter((r) => r.kind === 'node')
+      .map((r) => (r as { node: WorkflowNode }).node.id)
+    expect(trunkIds).not.toContain('write')
+    expect(trunkIds).not.toContain('review')
+  })
+
+  it('resumes the trunk after the body', () => {
+    const rows = computeFlowLayout(nodes, edges)
+    const trunkIds = rows
+      .filter((r) => r.kind === 'node')
+      .map((r) => (r as { node: WorkflowNode }).node.id)
+    expect(trunkIds).toEqual(['trigger', 'fetch', 'gate'])
+  })
+
+  it('draws an empty loop as an empty rail rather than vanishing', () => {
+    const empty = [
+      n('trigger', 'trigger'),
+      n('loop', 'loop', { nodeType: 'loop', bodyNodeIds: [], maxIterations: 2 })
+    ]
+    const rows = computeFlowLayout(empty, [{ id: 'e1', source: 'trigger', target: 'loop' }])
+    const loopRow = rows.find((r) => r.kind === 'loop')
+    expect(loopRow).toBeDefined()
+    if (loopRow?.kind === 'loop') expect(loopRow.body).toEqual([])
+  })
+})
+
+describe('appendToLoopBody', () => {
+  const loopNode: WorkflowNode = {
+    id: 'loop',
+    type: 'loop',
+    label: 'Repeat',
+    config: {
+      nodeType: 'loop',
+      bodyNodeIds: ['write'],
+      maxIterations: 2
+    } as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const write: WorkflowNode = {
+    id: 'write',
+    type: 'script',
+    label: 'write',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const gate: WorkflowNode = {
+    id: 'gate',
+    type: 'approval',
+    label: 'gate',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const newStep: WorkflowNode = {
+    id: 'review',
+    type: 'script',
+    label: 'review',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const edges: WorkflowEdge[] = [
+    { id: 'e1', source: 'loop', target: 'write' },
+    { id: 'e2', source: 'write', target: 'gate' }
+  ]
+
+  it('writes the edge and the membership together', () => {
+    const out = appendToLoopBody([loopNode, write, gate], edges, 'loop', newStep)
+    const cfg = out.nodes.find((x) => x.id === 'loop')!.config as { bodyNodeIds: string[] }
+    expect(cfg.bodyNodeIds).toEqual(['write', 'review'])
+    expect(out.edges.some((e) => e.source === 'write' && e.target === 'review')).toBe(true)
+  })
+
+  it('keeps what followed the loop reachable', () => {
+    const out = appendToLoopBody([loopNode, write, gate], edges, 'loop', newStep)
+    expect(out.edges.some((e) => e.source === 'review' && e.target === 'gate')).toBe(true)
+    expect(out.edges.some((e) => e.source === 'write' && e.target === 'gate')).toBe(false)
+  })
+
+  it('refuses a node that is not a loop', () => {
+    const out = appendToLoopBody([loopNode, write], edges, 'write', newStep)
+    expect(out.nodes).toHaveLength(2)
+  })
+})
+
+describe('loopOwningInsertPoint', () => {
+  const loop: WorkflowNode = {
+    id: 'loop',
+    type: 'loop',
+    label: 'Repeat',
+    config: {
+      nodeType: 'loop',
+      bodyNodeIds: ['write'],
+      maxIterations: 2
+    } as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const write: WorkflowNode = {
+    id: 'write',
+    type: 'script',
+    label: 'write',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+  const outside: WorkflowNode = {
+    id: 'gate',
+    type: 'approval',
+    label: 'gate',
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  }
+
+  it('resolves the loop itself while the body is empty', () => {
+    expect(loopOwningInsertPoint([loop, write], 'loop')?.id).toBe('loop')
+  })
+
+  it('resolves the owning loop from the last body step', () => {
+    expect(loopOwningInsertPoint([loop, write], 'write')?.id).toBe('loop')
+  })
+
+  it('returns nothing for a step outside any loop, so the insert falls through', () => {
+    expect(loopOwningInsertPoint([loop, write, outside], 'gate')).toBeUndefined()
+  })
+
+  it('ignores a loop whose body does not contain the step', () => {
+    const other = {
+      ...loop,
+      id: 'other',
+      config: { nodeType: 'loop', bodyNodeIds: [], maxIterations: 1 } as WorkflowNode['config']
+    }
+    expect(loopOwningInsertPoint([other], 'write')).toBeUndefined()
+  })
+})
+
+describe('blankPassState', () => {
+  // Built from a state carrying every optional field, so a field added to
+  // NodeExecutionState later is covered without anyone remembering to list it
+  // here. The previous version enumerated the fields to clear, and its test
+  // enumerated the same ones — so both missed taskId, the worktree trio,
+  // approvedAt and diagnostics, and agreed with each other about it.
+  const dirty = {
+    nodeId: 'review',
+    status: 'success',
+    startedAt: 'then',
+    completedAt: 'later',
+    sessionId: 's1',
+    error: 'boom',
+    logs: 'lots',
+    output: 'result',
+    structuredOutput: { approved: false },
+    taskId: 't1',
+    agentSessionId: 'a1',
+    agentType: 'claude',
+    projectName: 'p',
+    projectPath: '/p',
+    worktreePath: '/wt',
+    worktreeName: 'wt',
+    approvedAt: 'when',
+    diagnostics: 'diag',
+    iteration: 1
+  } as unknown as Parameters<typeof blankPassState>[0]
+
+  it('clears every field the previous pass left behind', () => {
+    const patch = blankPassState(dirty, 2)
+    for (const key of Object.keys(dirty)) {
+      if (key === 'nodeId' || key === 'status' || key === 'iteration') continue
+      expect(patch[key as keyof typeof patch]).toBeUndefined()
+    }
+  })
+
+  it('keeps the step identifiable and marks it not-yet-run', () => {
+    const patch = blankPassState(dirty, 2)
+    expect(patch.status).toBe('pending')
+    expect(patch).not.toHaveProperty('nodeId')
+  })
+
+  it('records which pass the step is about to run', () => {
+    expect(blankPassState(dirty, 3).iteration).toBe(3)
+  })
+
+  it('clears a field this test never named', () => {
+    // The point of resetting by exclusion: an unknown key still gets cleared.
+    const withNewField = { ...dirty, somethingAddedLater: 'stale' } as unknown as Parameters<
+      typeof blankPassState
+    >[0]
+    const patch = blankPassState(withNewField, 2) as Record<string, unknown>
+    expect(patch.somethingAddedLater).toBeUndefined()
+    expect('somethingAddedLater' in patch).toBe(true)
+  })
+})
+
+describe('loopShouldStop with a half-written condition', () => {
+  // The form is edited field by field, so a condition is briefly incomplete.
+  // Some incomplete conditions are degenerate rather than merely false, and
+  // those would end the loop after one pass and read as the loop being broken.
+  it('keeps going when the variable is still blank', () => {
+    expect(loopShouldStop({ variable: '', operator: 'equals', value: 'true' }, '', 'true')).toBe(
+      false
+    )
+  })
+
+  it('keeps going when the variable is only whitespace', () => {
+    expect(loopShouldStop({ variable: '   ', operator: 'equals', value: 'true' }, '', 'true')).toBe(
+      false
+    )
+  })
+
+  it('does not treat contains with an empty value as a match, which every string satisfies', () => {
+    expect(
+      loopShouldStop(
+        { variable: '{{steps.review.output}}', operator: 'contains', value: '' },
+        'anything',
+        ''
+      )
+    ).toBe(false)
+  })
+
+  it('does not treat notEquals with an empty value as a match', () => {
+    expect(
+      loopShouldStop(
+        { variable: '{{steps.review.output}}', operator: 'notEquals', value: '' },
+        'anything',
+        ''
+      )
+    ).toBe(false)
+  })
+
+  it('still allows isEmpty, which needs no value', () => {
+    expect(
+      loopShouldStop(
+        { variable: '{{steps.review.blocking}}', operator: 'isEmpty', value: '' },
+        '',
+        ''
+      )
+    ).toBe(true)
+  })
+
+  it('still allows isNotEmpty, which needs no value', () => {
+    expect(
+      loopShouldStop(
+        { variable: '{{steps.review.blocking}}', operator: 'isNotEmpty', value: '' },
+        'a problem',
+        ''
+      )
+    ).toBe(true)
+  })
+})
+
+describe('appendToLoopBody layout', () => {
+  it('lays the new step out like every other insert helper', () => {
+    // Left at its default (0,0) the persisted layout drifts from what the rest
+    // of the editor produces for the same action.
+    const loop: WorkflowNode = {
+      id: 'loop',
+      type: 'loop',
+      label: 'Repeat',
+      config: { nodeType: 'loop', bodyNodeIds: [], maxIterations: 2 } as WorkflowNode['config'],
+      position: { x: 0, y: 0 }
+    }
+    const trigger: WorkflowNode = {
+      id: 'trigger',
+      type: 'trigger',
+      label: 'Manual',
+      config: { triggerType: 'manual' } as WorkflowNode['config'],
+      position: { x: 0, y: 0 }
+    }
+    const step: WorkflowNode = {
+      id: 'write',
+      type: 'script',
+      label: 'write',
+      config: {} as WorkflowNode['config'],
+      position: { x: 0, y: 0 }
+    }
+    const out = appendToLoopBody(
+      [trigger, loop],
+      [{ id: 'e1', source: 'trigger', target: 'loop' }],
+      'loop',
+      step
+    )
+    const placed = out.nodes.find((n) => n.id === 'write')!
+    expect(placed.position.y).toBeGreaterThan(0)
+  })
+})
+
+describe('a corrupt maxIterations still runs the body', () => {
+  // Math.floor(NaN) is NaN, and `for (i = 1; i <= NaN; i++)` never enters —
+  // so a legacy or hand-edited config would make the loop silently run zero
+  // passes and report success having done nothing.
+  const clamp = (requested: unknown): number => {
+    const n = Number(requested)
+    return Number.isFinite(n) ? Math.min(Math.max(1, Math.floor(n)), MAX_LOOP_ITERATIONS) : 1
+  }
+
+  it('runs once for NaN', () => {
+    expect(clamp(NaN)).toBe(1)
+  })
+
+  it('runs once for a non-numeric string', () => {
+    expect(clamp('two')).toBe(1)
+  })
+
+  it('runs once when the field is missing', () => {
+    expect(clamp(undefined)).toBe(1)
+  })
+
+  it('runs once for Infinity rather than forever', () => {
+    expect(clamp(Infinity)).toBe(1)
+  })
+})

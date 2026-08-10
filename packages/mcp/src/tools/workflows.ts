@@ -12,6 +12,7 @@ import type {
 } from '@vornrun/shared/types'
 import type { ScheduleLogEntry } from '@vornrun/shared/types'
 import {
+  dbListProjects,
   dbListWorkflows,
   dbInsertWorkflow,
   dbUpdateWorkflow,
@@ -21,6 +22,15 @@ import {
   dbSignalChange
 } from '@vornrun/server/database'
 import { rpcCall } from '../ws-client'
+import {
+  toPortable,
+  fromPortable,
+  portabilityBlockers,
+  residualAbsolutePaths,
+  slugify,
+  PORTABLE_FORMAT_VERSION,
+  type PortableWorkflow
+} from '../workflow-portability'
 
 const launchAgentConfigSchema = z
   .object({
@@ -159,26 +169,92 @@ const triggerConfigSchema = z.union([
   })
 ])
 
-const nodeSchema = z.object({
-  id: V.id,
-  // Full node palette — parity with the editor. `config` is a passthrough so
-  // each type carries its own shape (ConditionConfig, ApprovalConfig, etc.).
-  type: z.enum([
-    'trigger',
-    'launchAgent',
-    'script',
-    'condition',
-    'approval',
-    'createTaskFromItem',
-    'callConnectorAction'
-  ]),
-  label: V.shortText,
-  // Referenced by typed step vars as `{{steps.<slug>.<field>}}`. Set one on any
-  // node whose output a later node consumes.
-  slug: V.shortText.optional(),
-  config: z.record(z.string(), z.unknown()),
-  position: z.object({ x: z.number(), y: z.number() })
-})
+const nodeSchema = z
+  .object({
+    id: V.id,
+    // Full node palette — parity with the editor. `config` is a passthrough so
+    // each type carries its own shape (ConditionConfig, ApprovalConfig, etc.).
+    type: z.enum([
+      'trigger',
+      'launchAgent',
+      'script',
+      'condition',
+      'approval',
+      'createTaskFromItem',
+      'callConnectorAction',
+      'loop'
+    ]),
+    label: V.shortText,
+    // Referenced by typed step vars as `{{steps.<slug>.<field>}}`. Set one on any
+    // node whose output a later node consumes.
+    slug: V.shortText.optional(),
+    config: z.record(z.string(), z.unknown()),
+    position: z.object({ x: z.number(), y: z.number() })
+  })
+  // `config` is a passthrough for every other node type, but a loop that
+  // declares no body or a nonsense budget cannot run at all — and the failure
+  // would surface on a run someone is waiting for rather than on the call that
+  // introduced it.
+  .superRefine((node, ctx) => {
+    if (node.type !== 'loop') return
+    const config = node.config as { bodyNodeIds?: unknown; maxIterations?: unknown }
+
+    if (!Array.isArray(config.bodyNodeIds) || config.bodyNodeIds.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['config', 'bodyNodeIds'],
+        message: `loop "${node.id}" must list at least one body step in bodyNodeIds`
+      })
+    }
+
+    const max = config.maxIterations
+    if (typeof max !== 'number' || !Number.isInteger(max) || max < 1 || max > MAX_LOOP_ITERATIONS) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['config', 'maxIterations'],
+        message: `loop "${node.id}" needs maxIterations as a whole number from 1 to ${MAX_LOOP_ITERATIONS}`
+      })
+    }
+  })
+
+/**
+ * Ceiling on loop passes, mirrored from the renderer that enforces it.
+ *
+ * Duplicated rather than imported because this package is the stdio MCP server
+ * and does not pull in renderer code; the executor clamps regardless, so the
+ * worst case of drift is a workflow rejected here that would have been clamped
+ * there.
+ */
+const MAX_LOOP_ITERATIONS = 10
+
+/**
+ * Loop bodies must name steps that exist in the same workflow.
+ *
+ * Checked across the whole graph rather than per node, since a node cannot see
+ * its siblings during its own parse.
+ */
+export function validateLoopBodies(
+  nodes: { id: string; type: string; label?: string; config: Record<string, unknown> }[]
+): string[] {
+  const ids = new Set(nodes.map((n) => n.id))
+  const errors: string[] = []
+
+  for (const node of nodes) {
+    if (node.type !== 'loop') continue
+    const body = (node.config.bodyNodeIds as string[] | undefined) ?? []
+
+    for (const id of body) {
+      if (!ids.has(id)) {
+        errors.push(`loop "${node.label || node.id}" references unknown body step "${id}"`)
+      }
+    }
+    if (body.includes(node.id)) {
+      errors.push(`loop "${node.label || node.id}" lists itself as a body step`)
+    }
+  }
+
+  return errors
+}
 
 const edgeSchema = z.object({
   id: V.id,
@@ -404,6 +480,20 @@ export function registerWorkflowTools(server: McpServer): void {
       if (args.nodes && args.edges) {
         nodes = args.nodes as unknown as WorkflowNode[]
         edges = args.edges as unknown as WorkflowEdge[]
+        const loopErrors = validateLoopBodies(
+          nodes as unknown as {
+            id: string
+            type: string
+            label?: string
+            config: Record<string, unknown>
+          }[]
+        )
+        if (loopErrors.length > 0) {
+          return {
+            content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
+            isError: true
+          }
+        }
       } else {
         const trigger = (args.trigger as TriggerConfig) ?? { triggerType: 'manual' as const }
         const actions = (args.actions as LaunchAgentConfig[]) ?? []
@@ -460,7 +550,23 @@ export function registerWorkflowTools(server: McpServer): void {
 
       const updates: Partial<WorkflowDefinition> = {}
       if (args.name !== undefined) updates.name = args.name
-      if (args.nodes !== undefined) updates.nodes = args.nodes as unknown as WorkflowNode[]
+      if (args.nodes !== undefined) {
+        const loopErrors = validateLoopBodies(
+          args.nodes as unknown as {
+            id: string
+            type: string
+            label?: string
+            config: Record<string, unknown>
+          }[]
+        )
+        if (loopErrors.length > 0) {
+          return {
+            content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
+            isError: true
+          }
+        }
+        updates.nodes = args.nodes as unknown as WorkflowNode[]
+      }
       if (args.edges !== undefined) updates.edges = args.edges as unknown as WorkflowEdge[]
       if (args.icon !== undefined) updates.icon = args.icon
       if (args.icon_color !== undefined) updates.iconColor = args.icon_color
@@ -646,6 +752,197 @@ export function registerWorkflowTools(server: McpServer): void {
           {
             type: 'text',
             text: `Queued "${workflow.name}"${disabled}${shown}\n\nRun history: list_workflow_runs with workflow_id ${args.workflow_id}`
+          }
+        ]
+      }
+    }
+  )
+
+  server.tool(
+    'export_workflow',
+    'Export a workflow as a portable file you can commit beside the code it drives. Absolute paths become {{project.path}} and the local remote-host binding is dropped, so it runs on another machine after import. Refuses a workflow bound to a connector connection, whose id means nothing elsewhere.',
+    {
+      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
+      id: V.id.optional().describe('Deprecated alias for workflow_id')
+    },
+    async (args) => {
+      const resolved = resolveWorkflowId(args)
+      if ('error' in resolved) {
+        return { content: [{ type: 'text', text: `Error: ${resolved.error}` }], isError: true }
+      }
+
+      const workflow = dbListWorkflows().find((w) => w.id === resolved.id)
+      if (!workflow) {
+        return {
+          content: [{ type: 'text', text: `Error: workflow "${resolved.id}" not found` }],
+          isError: true
+        }
+      }
+
+      const blockers = portabilityBlockers(workflow)
+      if (blockers.length > 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                `Error: "${workflow.name}" cannot be exported portably because ` +
+                blockers.join('; ') +
+                '. Rebuild those steps without the connection, or keep this workflow local.'
+            }
+          ],
+          isError: true
+        }
+      }
+
+      // The project the workflow's own steps point at is what its paths are
+      // relative to; without it there is nothing to rewrite against.
+      const projects = dbListProjects()
+      const projectName = workflow.nodes
+        .map((n) => (n.config as Record<string, unknown>).projectName)
+        .find((name): name is string => typeof name === 'string' && name.length > 0)
+      const project = projects.find((p) => p.name === projectName)
+
+      if (!project) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: no project named "${projectName ?? '(none)'}" is registered, so this workflow's paths cannot be made relative to anything.`
+            }
+          ],
+          isError: true
+        }
+      }
+
+      const portable = toPortable(workflow, project.path)
+      const residual = residualAbsolutePaths(portable)
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              JSON.stringify(portable, null, 2) +
+              (residual.length > 0
+                ? `\n\nWarning: these still hold a machine-specific path and will not travel: ${residual.join(', ')}`
+                : '')
+          }
+        ]
+      }
+    }
+  )
+
+  server.tool(
+    'import_workflow',
+    "Import a workflow exported by export_workflow, resolving {{project.path}} and {{project.name}} against a registered project. The id is derived from the bundle and the workflow's slug, so importing the same file again updates it in place instead of creating a duplicate.",
+    {
+      workflow: z.string().max(500_000).describe('The exported workflow JSON'),
+      project_name: V.name.describe('Registered project to resolve paths against'),
+      bundle: V.name.optional().describe('Namespace for the derived id (default: the project name)')
+    },
+    async (args) => {
+      let parsed: PortableWorkflow
+      try {
+        parsed = JSON.parse(args.workflow)
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: workflow is not valid JSON — ${String(err).slice(0, 200)}`
+            }
+          ],
+          isError: true
+        }
+      }
+
+      if (parsed?.version !== PORTABLE_FORMAT_VERSION) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: unsupported format version ${parsed?.version}; this build reads version ${PORTABLE_FORMAT_VERSION}`
+            }
+          ],
+          isError: true
+        }
+      }
+      if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges) || !parsed.name) {
+        return {
+          content: [{ type: 'text', text: 'Error: workflow is missing name, nodes or edges' }],
+          isError: true
+        }
+      }
+
+      const project = dbListProjects().find((p) => p.name === args.project_name)
+      if (!project) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: no project named "${args.project_name}". Create it first so its path is known.`
+            }
+          ],
+          isError: true
+        }
+      }
+
+      const loopErrors = validateLoopBodies(
+        parsed.nodes as unknown as {
+          id: string
+          type: string
+          label?: string
+          config: Record<string, unknown>
+        }[]
+      )
+      if (loopErrors.length > 0) {
+        return {
+          content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
+          isError: true
+        }
+      }
+
+      const bundle = args.bundle ?? slugify(project.name)
+      const definition = fromPortable(
+        { ...parsed, slug: parsed.slug ?? slugify(parsed.name) },
+        bundle,
+        {
+          name: project.name,
+          path: project.path
+        }
+      )
+
+      // Export refuses a connector-bound workflow because its connectionId is
+      // local. Import has to refuse the same shape, or a hand-written file
+      // walks straight past that contract and lands a workflow that fails at
+      // run time against a connection this machine never had.
+      const blockers = portabilityBlockers(definition)
+      if (blockers.length > 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: this workflow cannot be imported because ${blockers.join('; ')}.`
+            }
+          ],
+          isError: true
+        }
+      }
+
+      const existing = dbListWorkflows().find((w) => w.id === definition.id)
+      if (existing) {
+        dbUpdateWorkflow(definition.id, definition)
+      } else {
+        dbInsertWorkflow(definition)
+      }
+      dbSignalChange()
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `${existing ? 'Updated' : 'Imported'} "${definition.name}" as ${definition.id}, resolved against ${project.path}`
           }
         ]
       }

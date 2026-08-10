@@ -44,6 +44,9 @@ import {
   insertNodeBetween,
   insertBeforeFork,
   insertConditionBetween,
+  createLoopNode,
+  appendToLoopBody,
+  loopOwningInsertPoint,
   addParallelBranch,
   removeNode,
   getWorktreeMode
@@ -368,6 +371,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       const factories: Record<AddableNodeType, () => WorkflowNode> = {
         condition: () => createConditionNode(),
         approval: () => createApprovalNode(),
+        loop: () => createLoopNode(),
         script: () => createScriptNode(),
         connectorAction: () => createCallConnectorActionNode(),
         agent: () =>
@@ -403,7 +407,14 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       const newNode = createNodeWithUniqueSlug(type)
 
       let result: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
-      if (beforeNodeId === '__FORK__') {
+      if (beforeNodeId === '__LOOP_BODY__') {
+        // afterNodeId is the loop when its body is empty, otherwise the last
+        // body step; appendToLoopBody resolves the loop from either.
+        const loop = loopOwningInsertPoint(nodes, afterNodeId)
+        result = loop
+          ? appendToLoopBody(nodes, edges, loop.id, newNode)
+          : appendNodeAfter(nodes, edges, afterNodeId, newNode)
+      } else if (beforeNodeId === '__FORK__') {
         result = insertBeforeFork(nodes, edges, afterNodeId, newNode)
       } else if (beforeNodeId) {
         const edge = edges.find((e) => e.source === afterNodeId && e.target === beforeNodeId)

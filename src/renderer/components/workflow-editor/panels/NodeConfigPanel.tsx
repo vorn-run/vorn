@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { X, MoreHorizontal, Trash2 } from 'lucide-react'
 import {
   WorkflowNode,
+  LoopConfig,
   TriggerConfig,
   LaunchAgentConfig,
   ScriptConfig,
@@ -17,6 +18,7 @@ import { LaunchAgentConfigForm } from './LaunchAgentConfigForm'
 import { ScriptConfigForm } from './ScriptConfigForm'
 import { ConditionConfigForm } from './ConditionConfigForm'
 import { ApprovalConfigForm } from './ApprovalConfigForm'
+import { LoopConfigForm } from './LoopConfigForm'
 import { CreateTaskFromItemNodeForm } from './CreateTaskFromItemNodeForm'
 import { CallConnectorActionNodeForm } from './CallConnectorActionNodeForm'
 import { NODE_TYPE_VISUAL } from '../node-visuals'
@@ -183,6 +185,13 @@ export function NodeConfigPanel({
             onChange={(config) => onChange(node.id, config)}
             triggerType={triggerType}
             stepGroups={stepGroups || []}
+          />
+        )}
+
+        {node.type === 'loop' && (
+          <LoopConfigForm
+            config={node.config as LoopConfig}
+            onChange={(config) => onChange(node.id, config)}
           />
         )}
 

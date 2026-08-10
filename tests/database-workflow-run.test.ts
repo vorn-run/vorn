@@ -359,3 +359,90 @@ describe('workflow run inputs persistence', () => {
     expect(run.inputs).toBeUndefined()
   })
 })
+
+describe('step results survive a reload', () => {
+  // These were held only in renderer memory: after a restart the typed verdict
+  // was gone, {{steps.<slug>.<field>}} fell back to raw logs, and a run parked
+  // on an approval gate — the one kind that outlives a restart — reported
+  // "completed" for an agent that had said otherwise.
+  const withResult = (over: Record<string, unknown> = {}): WorkflowExecution => ({
+    workflowId: 'wf-results',
+    startedAt: '2026-08-10T10:00:00Z',
+    status: 'success',
+    nodeStates: [
+      {
+        nodeId: 'review-1',
+        status: 'success',
+        output: '2',
+        structuredOutput: { approved: true, blocking: [], main_story: 'Meta open-weights' },
+        iteration: 2,
+        ...over
+      }
+    ]
+  })
+
+  it('round-trips output, structuredOutput and iteration', () => {
+    saveWorkflowRun(withResult())
+    const [run] = listWorkflowRuns('wf-results', 10)
+    const node = run.nodeStates[0]
+    expect(node.output).toBe('2')
+    expect(node.structuredOutput).toEqual({
+      approved: true,
+      blocking: [],
+      main_story: 'Meta open-weights'
+    })
+    expect(node.iteration).toBe(2)
+  })
+
+  it('keeps a nested typed value walkable, which is why it is not flattened', () => {
+    saveWorkflowRun(
+      withResult({ structuredOutput: { issue: { number: 42, url: 'https://example/42' } } })
+    )
+    const [run] = listWorkflowRuns('wf-results', 10)
+    const nested = run.nodeStates[0].structuredOutput as { issue: { number: number } }
+    expect(nested.issue.number).toBe(42)
+  })
+
+  it('omits the fields entirely when a step produced none', () => {
+    saveWorkflowRun({
+      workflowId: 'wf-bare',
+      startedAt: '2026-08-10T10:00:00Z',
+      status: 'success',
+      nodeStates: [{ nodeId: 'plain', status: 'success' }]
+    })
+    const [run] = listWorkflowRuns('wf-bare', 10)
+    expect(run.nodeStates[0]).not.toHaveProperty('structuredOutput')
+    expect(run.nodeStates[0]).not.toHaveProperty('iteration')
+  })
+
+  it('degrades to no typed output rather than failing the whole run history', () => {
+    // Stores an array, which serialises fine and parses fine but is not the
+    // object shape a typed step output must be. The row must come back without
+    // the field rather than with an undefined one, or `'structuredOutput' in
+    // node` lies to every consumer downstream.
+    saveWorkflowRun(withResult({ structuredOutput: [] as unknown as Record<string, unknown> }))
+    const [run] = listWorkflowRuns('wf-results', 10)
+    expect(run.nodeStates).toHaveLength(1)
+    expect(run.nodeStates[0]).not.toHaveProperty('structuredOutput')
+  })
+
+  it('keeps the rest of the run when one typed output is unreadable', () => {
+    saveWorkflowRun({
+      workflowId: 'wf-mixed',
+      startedAt: '2026-08-10T10:00:00Z',
+      status: 'success',
+      nodeStates: [
+        {
+          nodeId: 'bad',
+          status: 'success',
+          structuredOutput: 'nope' as unknown as Record<string, unknown>
+        },
+        { nodeId: 'good', status: 'success', structuredOutput: { ok: true } }
+      ]
+    })
+    const [run] = listWorkflowRuns('wf-mixed', 10)
+    expect(run.nodeStates).toHaveLength(2)
+    expect(run.nodeStates[0]).not.toHaveProperty('structuredOutput')
+    expect(run.nodeStates[1].structuredOutput).toEqual({ ok: true })
+  })
+})

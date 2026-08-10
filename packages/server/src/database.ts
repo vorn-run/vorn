@@ -370,6 +370,9 @@ function createSchema(): void {
       project_path TEXT,
       approved_at TEXT,
       diagnostics TEXT,
+      output TEXT,
+      structured_output TEXT,
+      iteration INTEGER,
       FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
     );
 
@@ -929,7 +932,19 @@ function verifySchema(d: Database.Database): void {
       {
         column: 'diagnostics',
         ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN diagnostics TEXT'
-      }
+      },
+      // A step's result was held only in renderer memory. After a reload the
+      // typed verdict was gone, {{steps.<slug>.<field>}} silently fell back to
+      // raw logs, and verdictOf reported "completed" for a run whose agent had
+      // said otherwise — worst on a run parked at an approval gate, which is
+      // exactly the case that outlives a restart.
+      { column: 'output', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN output TEXT' },
+      {
+        column: 'structured_output',
+        ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN structured_output TEXT'
+      },
+      // Which pass of a loop produced this row.
+      { column: 'iteration', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN iteration INTEGER' }
     ],
     tasks: [
       {
@@ -2706,8 +2721,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     d.prepare('DELETE FROM workflow_run_nodes WHERE run_id = ?').run(runId)
 
     const insertNode = d.prepare(
-      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const ns of execution.nodeStates) {
       insertNode.run(
@@ -2725,7 +2740,12 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
         ns.projectName ?? null,
         ns.projectPath ?? null,
         ns.approvedAt ?? null,
-        ns.diagnostics ?? null
+        ns.diagnostics ?? null,
+        ns.output ?? null,
+        // Stored as JSON text: the parsed shape is whatever the step's
+        // outputSchema declared, so there is nothing narrower to store it as.
+        ns.structuredOutput ? JSON.stringify(ns.structuredOutput) : null,
+        ns.iteration ?? null
       )
     }
 
@@ -2777,9 +2797,18 @@ type WorkflowRunNodeRow = {
   project_path: string | null
   approved_at: string | null
   diagnostics: string | null
+  output: string | null
+  structured_output: string | null
+  iteration: number | null
 }
 
 function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
+  // Computed before the spread: `{ x: undefined }` still creates the key, so
+  // spreading the parse result directly would leave a present-but-undefined
+  // structuredOutput on exactly the corrupt rows this is supposed to degrade.
+  const structured =
+    n.structured_output != null ? parseStructuredOutput(n.structured_output) : undefined
+
   return {
     nodeId: n.node_id,
     status: n.status as NodeExecutionState['status'],
@@ -2794,7 +2823,27 @@ function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
     ...(n.project_name != null && { projectName: n.project_name }),
     ...(n.project_path != null && { projectPath: n.project_path }),
     ...(n.approved_at != null && { approvedAt: n.approved_at }),
-    ...(n.diagnostics != null && { diagnostics: n.diagnostics })
+    ...(n.diagnostics != null && { diagnostics: n.diagnostics }),
+    ...(n.output != null && { output: n.output }),
+    ...(structured !== undefined && { structuredOutput: structured }),
+    ...(n.iteration != null && { iteration: n.iteration })
+  }
+}
+
+/**
+ * A step's typed result, back out of storage.
+ *
+ * Tolerant on purpose: this column is JSON we wrote ourselves, but a row
+ * predating a schema change — or written by a build that serialised something
+ * unexpected — should degrade to "no typed output" rather than break loading
+ * an entire run's history.
+ */
+function parseStructuredOutput(raw: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined
+  } catch {
+    return undefined
   }
 }
 
