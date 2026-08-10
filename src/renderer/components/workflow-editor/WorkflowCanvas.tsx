@@ -4,6 +4,7 @@ import { LaunchAgentNode } from './nodes/LaunchAgentNode'
 import { ScriptNode } from './nodes/ScriptNode'
 import { ConditionNode } from './nodes/ConditionNode'
 import { ApprovalNode } from './nodes/ApprovalNode'
+import { LoopNode } from './nodes/LoopNode'
 import { CreateTaskFromItemNode } from './nodes/CreateTaskFromItemNode'
 import { CallConnectorActionNode } from './nodes/CallConnectorActionNode'
 import { ConnectorButton } from './nodes/AddStepNode'
@@ -15,12 +16,19 @@ import {
   ScriptConfig,
   ConditionConfig,
   ApprovalConfig,
+  LoopConfig,
   CreateTaskFromItemConfig,
   CallConnectorActionConfig
 } from '../../../shared/types'
 import { computeFlowLayout, FlowRow } from '../../lib/workflow-helpers'
 
-export type AddableNodeType = 'agent' | 'script' | 'condition' | 'approval' | 'connectorAction'
+export type AddableNodeType =
+  | 'agent'
+  | 'script'
+  | 'condition'
+  | 'approval'
+  | 'connectorAction'
+  | 'loop'
 
 interface Props {
   nodes: WorkflowNode[]
@@ -44,13 +52,28 @@ function VerticalLine({ dashed, height }: { dashed?: boolean; height?: number })
 
 function NodeCard({
   node,
+  allNodes,
   selected,
   onClick
 }: {
   node: WorkflowNode
+  /** Every node in the workflow: a loop card lists the steps it repeats. */
+  allNodes: WorkflowNode[]
   selected: boolean
   onClick: () => void
 }) {
+  if (node.type === 'loop') {
+    return (
+      <LoopNode
+        label={node.label}
+        config={node.config as LoopConfig}
+        nodes={allNodes}
+        selected={selected}
+        onClick={onClick}
+      />
+    )
+  }
+
   if (node.type === 'trigger') {
     return (
       <TriggerNode
@@ -167,6 +190,7 @@ function FlowRowRenderer({
 
               <NodeCard
                 node={row.node}
+                allNodes={nodes ?? []}
                 selected={row.node.id === selectedNodeId}
                 onClick={() => onNodeClick(row.node.id)}
               />
@@ -179,6 +203,7 @@ function FlowRowRenderer({
                     onAddScript={() => onInsertNode(row.node.id, beforeNodeId, 'script')}
                     onAddCondition={() => onInsertNode(row.node.id, beforeNodeId, 'condition')}
                     onAddApproval={() => onInsertNode(row.node.id, beforeNodeId, 'approval')}
+                    onAddLoop={() => onInsertNode(row.node.id, beforeNodeId, 'loop')}
                     onAddConnectorAction={() =>
                       onInsertNode(row.node.id, beforeNodeId, 'connectorAction')
                     }
@@ -195,6 +220,7 @@ function FlowRowRenderer({
                     onAddScript={() => onInsertNode(row.node.id, null, 'script')}
                     onAddCondition={() => onInsertNode(row.node.id, null, 'condition')}
                     onAddApproval={() => onInsertNode(row.node.id, null, 'approval')}
+                    onAddLoop={() => onInsertNode(row.node.id, null, 'loop')}
                     onAddConnectorAction={() => onInsertNode(row.node.id, null, 'connectorAction')}
                     onAddParallelBranch={
                       !isInsideBranch ? () => onAddParallelBranch(row.node.id, 'agent') : undefined

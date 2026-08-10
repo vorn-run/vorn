@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Plus, Play, GitBranch, Terminal, Split, Hand, Zap } from 'lucide-react'
+import { Plus, Play, GitBranch, Terminal, Split, Hand, Zap, Repeat } from 'lucide-react'
 
 interface Props {
   onAddAction: () => void
@@ -7,6 +7,7 @@ interface Props {
   onAddScript?: () => void
   onAddCondition?: () => void
   onAddApproval?: () => void
+  onAddLoop?: () => void
   onAddConnectorAction?: () => void
 }
 
@@ -16,6 +17,7 @@ export function ConnectorButton({
   onAddScript,
   onAddCondition,
   onAddApproval,
+  onAddLoop,
   onAddConnectorAction
 }: Props) {
   const [open, setOpen] = useState(false)
@@ -112,6 +114,21 @@ export function ConnectorButton({
             >
               <Hand size={14} className="text-gray-400 shrink-0" />
               Add an approval gate
+            </button>
+          )}
+
+          {onAddLoop && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setOpen(false)
+                onAddLoop()
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
+                         hover:bg-white/[0.06] hover:text-white transition-colors text-left"
+            >
+              <Repeat size={14} className="text-gray-400 shrink-0" />
+              Repeat steps until…
             </button>
           )}
 

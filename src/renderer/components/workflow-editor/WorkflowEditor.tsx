@@ -44,6 +44,7 @@ import {
   insertNodeBetween,
   insertBeforeFork,
   insertConditionBetween,
+  createLoopNode,
   addParallelBranch,
   removeNode,
   getWorktreeMode
@@ -368,6 +369,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       const factories: Record<AddableNodeType, () => WorkflowNode> = {
         condition: () => createConditionNode(),
         approval: () => createApprovalNode(),
+        loop: () => createLoopNode(),
         script: () => createScriptNode(),
         connectorAction: () => createCallConnectorActionNode(),
         agent: () =>
@@ -752,6 +754,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           <NodeConfigPanel
             node={selectedNode}
             allNodes={nodes}
+            allEdges={edges}
             onChange={handleNodeConfigChange}
             onLabelChange={handleNodeLabelChange}
             onDelete={handleDeleteNode}

@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { X, MoreHorizontal, Trash2 } from 'lucide-react'
 import {
   WorkflowNode,
+  WorkflowEdge,
+  LoopConfig,
   TriggerConfig,
   LaunchAgentConfig,
   ScriptConfig,
@@ -17,6 +19,8 @@ import { LaunchAgentConfigForm } from './LaunchAgentConfigForm'
 import { ScriptConfigForm } from './ScriptConfigForm'
 import { ConditionConfigForm } from './ConditionConfigForm'
 import { ApprovalConfigForm } from './ApprovalConfigForm'
+import { LoopConfigForm } from './LoopConfigForm'
+import { nodesAfter } from '../../../lib/workflow-helpers'
 import { CreateTaskFromItemNodeForm } from './CreateTaskFromItemNodeForm'
 import { CallConnectorActionNodeForm } from './CallConnectorActionNodeForm'
 import { NODE_TYPE_VISUAL } from '../node-visuals'
@@ -25,6 +29,8 @@ import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-
 interface Props {
   node: WorkflowNode
   allNodes?: WorkflowNode[]
+  /** Needed to work out which steps a loop node is able to repeat. */
+  allEdges?: WorkflowEdge[]
   onChange: (nodeId: string, config: WorkflowNode['config']) => void
   onLabelChange: (nodeId: string, label: string) => void
   onDelete: (nodeId: string) => void
@@ -39,6 +45,7 @@ interface Props {
 export function NodeConfigPanel({
   node,
   allNodes,
+  allEdges,
   onChange,
   onLabelChange,
   onDelete,
@@ -183,6 +190,14 @@ export function NodeConfigPanel({
             onChange={(config) => onChange(node.id, config)}
             triggerType={triggerType}
             stepGroups={stepGroups || []}
+          />
+        )}
+
+        {node.type === 'loop' && (
+          <LoopConfigForm
+            config={node.config as LoopConfig}
+            candidates={nodesAfter(allNodes ?? [], allEdges ?? [], node.id)}
+            onChange={(config) => onChange(node.id, config)}
           />
         )}
 

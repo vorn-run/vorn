@@ -7,6 +7,7 @@ import {
   ScriptConfig,
   ConditionConfig,
   ApprovalConfig,
+  LoopConfig,
   WorkflowNodePosition,
   WorkflowInputDef,
   TaskConfig,
@@ -250,6 +251,51 @@ export function createApprovalNode(config: Partial<ApprovalConfig> = {}): Workfl
     } as ApprovalConfig,
     position: { x: 0, y: 0 }
   }
+}
+
+export function createLoopNode(config: Partial<LoopConfig> = {}): WorkflowNode {
+  return {
+    id: crypto.randomUUID(),
+    type: 'loop',
+    label: 'Repeat Steps',
+    slug: slugify('Repeat Steps'),
+    config: {
+      nodeType: 'loop',
+      bodyNodeIds: [],
+      maxIterations: 2,
+      ...config
+    } as LoopConfig,
+    position: { x: 0, y: 0 }
+  }
+}
+
+/**
+ * Steps a loop is allowed to repeat: everything downstream of it.
+ *
+ * A loop drives its own body, so offering an upstream step would let someone
+ * build a workflow that re-runs work the loop's own inputs depend on.
+ */
+export function nodesAfter(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+  nodeId: string
+): WorkflowNode[] {
+  const successors = buildSuccessorsMap(edges)
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+  const found: WorkflowNode[] = []
+  const seen = new Set<string>([nodeId])
+  const queue = [...(successors.get(nodeId) ?? [])]
+
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    if (seen.has(id)) continue
+    seen.add(id)
+    const node = nodeMap.get(id)
+    if (node && node.type !== 'trigger') found.push(node)
+    queue.push(...(successors.get(id) ?? []))
+  }
+
+  return found
 }
 
 export function createCallConnectorActionNode(

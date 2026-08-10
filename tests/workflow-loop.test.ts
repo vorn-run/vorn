@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { loopShouldStop, MAX_LOOP_ITERATIONS } from '../src/renderer/lib/workflow-execution'
 import { validateLoopBodies } from '../packages/mcp/src/tools/workflows'
-import type { ConditionConfig } from '../packages/shared/src/types'
+import { nodesAfter } from '../src/renderer/lib/workflow-helpers'
+import type { ConditionConfig, WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 const approved: ConditionConfig = {
   variable: '{{steps.review.approved}}',
@@ -98,5 +99,44 @@ describe('validateLoopBodies', () => {
 
   it('ignores workflows with no loop', () => {
     expect(validateLoopBodies([step('a'), step('b')])).toEqual([])
+  })
+})
+
+describe('nodesAfter (which steps a loop can repeat)', () => {
+  const n = (id: string, type: WorkflowNode['type'] = 'script'): WorkflowNode => ({
+    id,
+    type,
+    label: id,
+    config: {} as WorkflowNode['config'],
+    position: { x: 0, y: 0 }
+  })
+
+  const nodes = [n('trigger', 'trigger'), n('loop', 'loop'), n('write'), n('review'), n('publish')]
+  const edges: WorkflowEdge[] = [
+    { id: 'e1', source: 'trigger', target: 'loop' },
+    { id: 'e2', source: 'loop', target: 'write' },
+    { id: 'e3', source: 'write', target: 'review' },
+    { id: 'e4', source: 'review', target: 'publish' }
+  ]
+
+  it('offers every step downstream of the loop', () => {
+    expect(nodesAfter(nodes, edges, 'loop').map((x) => x.id)).toEqual([
+      'write',
+      'review',
+      'publish'
+    ])
+  })
+
+  it('never offers an upstream step, which the loop’s own inputs may depend on', () => {
+    expect(nodesAfter(nodes, edges, 'loop').map((x) => x.id)).not.toContain('trigger')
+  })
+
+  it('never offers the loop itself', () => {
+    expect(nodesAfter(nodes, edges, 'loop').map((x) => x.id)).not.toContain('loop')
+  })
+
+  it('terminates on a cyclic graph', () => {
+    const cyclic: WorkflowEdge[] = [...edges, { id: 'e5', source: 'publish', target: 'write' }]
+    expect(nodesAfter(nodes, cyclic, 'loop').length).toBe(3)
   })
 })
