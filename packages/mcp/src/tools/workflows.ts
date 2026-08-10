@@ -12,6 +12,7 @@ import type {
 } from '@vornrun/shared/types'
 import type { ScheduleLogEntry } from '@vornrun/shared/types'
 import {
+  dbListProjects,
   dbListWorkflows,
   dbInsertWorkflow,
   dbUpdateWorkflow,
@@ -21,6 +22,15 @@ import {
   dbSignalChange
 } from '@vornrun/server/database'
 import { rpcCall } from '../ws-client'
+import {
+  toPortable,
+  fromPortable,
+  portabilityBlockers,
+  residualAbsolutePaths,
+  slugify,
+  PORTABLE_FORMAT_VERSION,
+  type PortableWorkflow
+} from '../workflow-portability'
 
 const launchAgentConfigSchema = z
   .object({
@@ -742,6 +752,180 @@ export function registerWorkflowTools(server: McpServer): void {
           {
             type: 'text',
             text: `Queued "${workflow.name}"${disabled}${shown}\n\nRun history: list_workflow_runs with workflow_id ${args.workflow_id}`
+          }
+        ]
+      }
+    }
+  )
+
+  server.tool(
+    'export_workflow',
+    'Export a workflow as a portable file you can commit beside the code it drives. Absolute paths become {{project.path}} and the local remote-host binding is dropped, so it runs on another machine after import. Refuses a workflow bound to a connector connection, whose id means nothing elsewhere.',
+    {
+      workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
+      id: V.id.optional().describe('Deprecated alias for workflow_id')
+    },
+    async (args) => {
+      const resolved = resolveWorkflowId(args)
+      if ('error' in resolved) {
+        return { content: [{ type: 'text', text: `Error: ${resolved.error}` }], isError: true }
+      }
+
+      const workflow = dbListWorkflows().find((w) => w.id === resolved.id)
+      if (!workflow) {
+        return {
+          content: [{ type: 'text', text: `Error: workflow "${resolved.id}" not found` }],
+          isError: true
+        }
+      }
+
+      const blockers = portabilityBlockers(workflow)
+      if (blockers.length > 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                `Error: "${workflow.name}" cannot be exported portably because ` +
+                blockers.join('; ') +
+                '. Rebuild those steps without the connection, or keep this workflow local.'
+            }
+          ],
+          isError: true
+        }
+      }
+
+      // The project the workflow's own steps point at is what its paths are
+      // relative to; without it there is nothing to rewrite against.
+      const projects = dbListProjects()
+      const projectName = workflow.nodes
+        .map((n) => (n.config as Record<string, unknown>).projectName)
+        .find((name): name is string => typeof name === 'string' && name.length > 0)
+      const project = projects.find((p) => p.name === projectName)
+
+      if (!project) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: no project named "${projectName ?? '(none)'}" is registered, so this workflow's paths cannot be made relative to anything.`
+            }
+          ],
+          isError: true
+        }
+      }
+
+      const portable = toPortable(workflow, project.path)
+      const residual = residualAbsolutePaths(portable)
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              JSON.stringify(portable, null, 2) +
+              (residual.length > 0
+                ? `\n\nWarning: these still hold a machine-specific path and will not travel: ${residual.join(', ')}`
+                : '')
+          }
+        ]
+      }
+    }
+  )
+
+  server.tool(
+    'import_workflow',
+    "Import a workflow exported by export_workflow, resolving {{project.path}} and {{project.name}} against a registered project. The id is derived from the bundle and the workflow's slug, so importing the same file again updates it in place instead of creating a duplicate.",
+    {
+      workflow: z.string().max(500_000).describe('The exported workflow JSON'),
+      project_name: V.name.describe('Registered project to resolve paths against'),
+      bundle: V.name.optional().describe('Namespace for the derived id (default: the project name)')
+    },
+    async (args) => {
+      let parsed: PortableWorkflow
+      try {
+        parsed = JSON.parse(args.workflow)
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: workflow is not valid JSON — ${String(err).slice(0, 200)}`
+            }
+          ],
+          isError: true
+        }
+      }
+
+      if (parsed?.version !== PORTABLE_FORMAT_VERSION) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: unsupported format version ${parsed?.version}; this build reads version ${PORTABLE_FORMAT_VERSION}`
+            }
+          ],
+          isError: true
+        }
+      }
+      if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges) || !parsed.name) {
+        return {
+          content: [{ type: 'text', text: 'Error: workflow is missing name, nodes or edges' }],
+          isError: true
+        }
+      }
+
+      const project = dbListProjects().find((p) => p.name === args.project_name)
+      if (!project) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: no project named "${args.project_name}". Create it first so its path is known.`
+            }
+          ],
+          isError: true
+        }
+      }
+
+      const loopErrors = validateLoopBodies(
+        parsed.nodes as unknown as {
+          id: string
+          type: string
+          label?: string
+          config: Record<string, unknown>
+        }[]
+      )
+      if (loopErrors.length > 0) {
+        return {
+          content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
+          isError: true
+        }
+      }
+
+      const bundle = args.bundle ?? slugify(project.name)
+      const definition = fromPortable(
+        { ...parsed, slug: parsed.slug ?? slugify(parsed.name) },
+        bundle,
+        {
+          name: project.name,
+          path: project.path
+        }
+      )
+
+      const existing = dbListWorkflows().find((w) => w.id === definition.id)
+      if (existing) {
+        dbUpdateWorkflow(definition.id, definition)
+      } else {
+        dbInsertWorkflow(definition)
+      }
+      dbSignalChange()
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `${existing ? 'Updated' : 'Imported'} "${definition.name}" as ${definition.id}, resolved against ${project.path}`
           }
         ]
       }
