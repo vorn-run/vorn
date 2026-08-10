@@ -18,6 +18,7 @@ import { scheduler } from './scheduler'
 import { setDataDir, getTaskImagePath as resolveTaskImagePath } from './task-images'
 import { getTailscaleStatus } from './tailscale'
 import { initRebind, checkAndRebind } from './server-rebind'
+import { setEnvPassthrough } from './process-utils'
 import log from './logger'
 
 export async function startServer(
@@ -42,6 +43,7 @@ export async function startServer(
 
   // Load initial config and wire up managers
   const config = configManager.loadConfig()
+  setEnvPassthrough(config.defaults.envPassthrough)
   ptyManager.setAgentCommands(config.agentCommands)
   ptyManager.setRemoteHosts(config.remoteHosts ?? [])
   headlessManager.setAgentCommands(config.agentCommands)
@@ -51,6 +53,7 @@ export async function startServer(
   const { clientRegistry } = await import('./broadcast')
   const { IPC } = await import('@vornrun/shared/types')
   configManager.onConfigChanged((cfg) => {
+    setEnvPassthrough(cfg.defaults.envPassthrough)
     ptyManager.setAgentCommands(cfg.agentCommands)
     ptyManager.setRemoteHosts(cfg.remoteHosts ?? [])
     headlessManager.setAgentCommands(cfg.agentCommands)

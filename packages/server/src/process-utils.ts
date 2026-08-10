@@ -121,15 +121,49 @@ export const SENSITIVE_ENV_PREFIXES = [
 // Env vars to strip so agent CLIs don't refuse to launch (e.g. nested session detection)
 export const STRIP_ENV_KEYS = ['CLAUDECODE']
 
-export function getSafeEnv(): Record<string, string> {
+/**
+ * Exact variable names the user has opted into forwarding, uppercased.
+ *
+ * SENSITIVE_ENV_PREFIXES is the right default — a shell that exports a real
+ * GITHUB_TOKEN should not hand it to every agent and script that happens to
+ * run. But some setups need one of those names on purpose: pointing an agent
+ * at a local Anthropic-compatible proxy needs ANTHROPIC_API_KEY, and the
+ * prefix rule drops it while letting ANTHROPIC_BASE_URL through, leaving the
+ * agent aimed at the proxy but authenticating as if it were not.
+ *
+ * Naming a variable here is a deliberate act, so it wins over the prefix rule.
+ * STRIP_ENV_KEYS deliberately does not become overridable: those are stripped
+ * to stop CLIs refusing to launch, and forwarding them breaks the session
+ * rather than exposing anything.
+ */
+let envPassthrough: ReadonlySet<string> = new Set()
+
+export function setEnvPassthrough(keys: string[] | undefined): void {
+  envPassthrough = new Set(
+    (keys ?? []).map((k) => k.trim().toUpperCase()).filter((k) => k.length > 0)
+  )
+}
+
+/**
+ * Pure form of the filter, so the rules can be tested without a login shell.
+ */
+export function filterEnv(
+  source: Record<string, string | undefined>,
+  passthrough: ReadonlySet<string>
+): Record<string, string> {
   const env: Record<string, string> = {}
-  for (const [key, val] of Object.entries(resolvedEnv)) {
+  for (const [key, val] of Object.entries(source)) {
     if (val === undefined) continue
-    if (SENSITIVE_ENV_PREFIXES.some((p) => key.toUpperCase().startsWith(p))) continue
+    const upper = key.toUpperCase()
     if (STRIP_ENV_KEYS.includes(key)) continue
+    if (!passthrough.has(upper) && SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue
     env[key] = val
   }
   return env
+}
+
+export function getSafeEnv(): Record<string, string> {
+  return filterEnv(resolvedEnv, envPassthrough)
 }
 
 function isWindowsStylePath(p: string): boolean {
