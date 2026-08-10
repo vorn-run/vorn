@@ -348,3 +348,96 @@ describe('blankPassState', () => {
     expect(blankPassState(3).iteration).toBe(3)
   })
 })
+
+describe('loopShouldStop with a half-written condition', () => {
+  // The form is edited field by field, so a condition is briefly incomplete.
+  // Some incomplete conditions are degenerate rather than merely false, and
+  // those would end the loop after one pass and read as the loop being broken.
+  it('keeps going when the variable is still blank', () => {
+    expect(loopShouldStop({ variable: '', operator: 'equals', value: 'true' }, '', 'true')).toBe(
+      false
+    )
+  })
+
+  it('keeps going when the variable is only whitespace', () => {
+    expect(loopShouldStop({ variable: '   ', operator: 'equals', value: 'true' }, '', 'true')).toBe(
+      false
+    )
+  })
+
+  it('does not treat contains with an empty value as a match, which every string satisfies', () => {
+    expect(
+      loopShouldStop(
+        { variable: '{{steps.review.output}}', operator: 'contains', value: '' },
+        'anything',
+        ''
+      )
+    ).toBe(false)
+  })
+
+  it('does not treat notEquals with an empty value as a match', () => {
+    expect(
+      loopShouldStop(
+        { variable: '{{steps.review.output}}', operator: 'notEquals', value: '' },
+        'anything',
+        ''
+      )
+    ).toBe(false)
+  })
+
+  it('still allows isEmpty, which needs no value', () => {
+    expect(
+      loopShouldStop(
+        { variable: '{{steps.review.blocking}}', operator: 'isEmpty', value: '' },
+        '',
+        ''
+      )
+    ).toBe(true)
+  })
+
+  it('still allows isNotEmpty, which needs no value', () => {
+    expect(
+      loopShouldStop(
+        { variable: '{{steps.review.blocking}}', operator: 'isNotEmpty', value: '' },
+        'a problem',
+        ''
+      )
+    ).toBe(true)
+  })
+})
+
+describe('appendToLoopBody layout', () => {
+  it('lays the new step out like every other insert helper', () => {
+    // Left at its default (0,0) the persisted layout drifts from what the rest
+    // of the editor produces for the same action.
+    const loop: WorkflowNode = {
+      id: 'loop',
+      type: 'loop',
+      label: 'Repeat',
+      config: { nodeType: 'loop', bodyNodeIds: [], maxIterations: 2 } as WorkflowNode['config'],
+      position: { x: 0, y: 0 }
+    }
+    const trigger: WorkflowNode = {
+      id: 'trigger',
+      type: 'trigger',
+      label: 'Manual',
+      config: { triggerType: 'manual' } as WorkflowNode['config'],
+      position: { x: 0, y: 0 }
+    }
+    const step: WorkflowNode = {
+      id: 'write',
+      type: 'script',
+      label: 'write',
+      config: {} as WorkflowNode['config'],
+      position: { x: 0, y: 0 }
+    }
+    const out = appendToLoopBody(
+      [trigger, loop],
+      [{ id: 'e1', source: 'trigger', target: 'loop' }],
+      'loop',
+      step
+    )
+    const placed = out.nodes.find((n) => n.id === 'write')!
+    expect(placed.position.y).toBeGreaterThan(0)
+  })
+})

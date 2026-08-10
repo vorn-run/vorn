@@ -503,12 +503,27 @@ export const MAX_LOOP_ITERATIONS = 10
  * reason is what a reader needs afterwards, and "we hit the cap" reads very
  * differently from "the reviewer approved it".
  */
+/** Operators that compare against a value; the other two test the variable alone. */
+const VALUE_OPERATORS: ConditionOperator[] = ['equals', 'notEquals', 'contains', 'notContains']
+
 export function loopShouldStop(
   until: ConditionConfig | undefined,
   resolvedVariable: string,
   resolvedValue: string
 ): boolean {
   if (!until) return false
+
+  // A half-written condition means "not configured yet", not "stop now". Typing
+  // one into the form leaves it briefly incomplete, and some incomplete forms
+  // are degenerate rather than merely false: `contains ""` matches every
+  // string, and `notEquals ""` matches everything non-empty. Either would end
+  // the loop after one pass, which looks like the loop being broken.
+  //
+  // The cost is that `equals ""` cannot be expressed, and it does not need to
+  // be: isEmpty says exactly that and needs no value.
+  if (until.variable.trim() === '') return false
+  if (VALUE_OPERATORS.includes(until.operator) && resolvedValue.trim() === '') return false
+
   return evaluateCondition(until.operator, resolvedVariable, resolvedValue)
 }
 

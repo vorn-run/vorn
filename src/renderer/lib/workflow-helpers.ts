@@ -297,7 +297,11 @@ export function appendToLoopBody(
       : n
   )
 
-  return { nodes: [...nextNodes, newNode], edges: nextEdges }
+  // Laid out like every other insert helper: without this the new step keeps
+  // its default (0,0) position and the persisted layout drifts from what the
+  // rest of the editor produces.
+  const withNew = [...nextNodes, newNode]
+  return { nodes: autoLayoutNodes(withNew, nextEdges), edges: nextEdges }
 }
 
 /**
