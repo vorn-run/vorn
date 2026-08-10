@@ -185,3 +185,78 @@ describe('ids and slugs', () => {
     expect(slugify('———')).toBe('workflow')
   })
 })
+
+describe('Windows paths', () => {
+  // Vorn ships a Windows installer, so a workflow can be authored with
+  // backslash paths. A POSIX-only rewriter would leave them untouched and the
+  // export would claim to be portable while naming one laptop's directory.
+  const WIN = 'C:\\Users\\someone\\dev\\novum'
+
+  function winWorkflow(): WorkflowDefinition {
+    const wf = workflow()
+    wf.nodes[1].config = {
+      scriptType: 'bash',
+      projectName: 'Novum',
+      projectPath: WIN,
+      scriptContent: 'x'
+    } as WorkflowDefinition['nodes'][number]['config']
+    wf.nodes[2].config = {
+      agentType: 'claude',
+      projectName: 'Novum',
+      projectPath: WIN,
+      existingWorktreePath: `${WIN}\\wt\\draft`,
+      headless: true
+    } as WorkflowDefinition['nodes'][number]['config']
+    return wf
+  }
+
+  it('rewrites a backslash project path', () => {
+    const p = toPortable(winWorkflow(), WIN)
+    const script = p.nodes.find((n) => n.id === 'fetch-1')!.config as Record<string, unknown>
+    expect(script.projectPath).toBe(PROJECT_PATH_TOKEN)
+  })
+
+  it('rewrites a nested backslash path and keeps its tail', () => {
+    const p = toPortable(winWorkflow(), WIN)
+    const agent = p.nodes.find((n) => n.id === 'write-1')!.config as Record<string, unknown>
+    expect(agent.existingWorktreePath).toBe(`${PROJECT_PATH_TOKEN}/wt/draft`)
+  })
+
+  it('reports nothing machine-specific left behind', () => {
+    expect(residualAbsolutePaths(toPortable(winWorkflow(), WIN))).toEqual([])
+  })
+
+  it('flags a leftover drive-letter path, which a POSIX-only check called portable', () => {
+    const p = toPortable(workflow(), '/wrong/project')
+    const stray = { ...p, nodes: [...p.nodes] }
+    stray.nodes[1] = {
+      ...stray.nodes[1],
+      config: { projectPath: 'C:\\Users\\someone\\elsewhere' } as never
+    }
+    expect(residualAbsolutePaths(stray)).toContain('fetch-1.projectPath')
+  })
+
+  it('flags a leftover UNC share', () => {
+    const p = toPortable(workflow(), '/wrong/project')
+    const stray = { ...p, nodes: [...p.nodes] }
+    stray.nodes[1] = {
+      ...stray.nodes[1],
+      config: { projectPath: '\\\\server\\share\\project' } as never
+    }
+    expect(residualAbsolutePaths(stray)).toContain('fetch-1.projectPath')
+  })
+
+  it('does not double the separator when the project path ends in one', () => {
+    const p = toPortable(winWorkflow(), WIN)
+    const imported = fromPortable(p, 'novum', { name: 'N', path: 'D:\\code\\novum\\' })
+    const script = imported.nodes.find((n) => n.id === 'fetch-1')!.config as Record<string, unknown>
+    expect(script.projectPath).toBe('D:\\code\\novum')
+  })
+
+  it('does not double a trailing POSIX separator either', () => {
+    const p = toPortable(workflow(), PROJECT)
+    const imported = fromPortable(p, 'novum', { name: 'N', path: '/Users/other/novum/' })
+    const script = imported.nodes.find((n) => n.id === 'fetch-1')!.config as Record<string, unknown>
+    expect(script.projectPath).toBe('/Users/other/novum')
+  })
+})

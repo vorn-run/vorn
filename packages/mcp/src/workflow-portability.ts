@@ -128,12 +128,25 @@ export function toPortable(workflow: WorkflowDefinition, projectPath: string): P
   }
 }
 
+/**
+ * Compare paths without caring which separator the machine writes.
+ *
+ * Vorn ships a Windows installer, and a workflow authored there carries
+ * `C:\\Users\\...` in its node configs. Exact POSIX string matching would
+ * leave those untouched and the export would claim to be portable while
+ * naming a directory on one laptop.
+ */
+function normalizeForCompare(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
 function replacePath(value: string, projectPath: string): string {
-  if (value === projectPath) return PROJECT_PATH_TOKEN
+  const v = normalizeForCompare(value)
+  const root = normalizeForCompare(projectPath)
+  if (v === root) return PROJECT_PATH_TOKEN
   // A path inside the project keeps its tail, so a worktree or a subdirectory
   // survives the round trip instead of collapsing onto the project root.
-  const prefix = projectPath.endsWith('/') ? projectPath : `${projectPath}/`
-  if (value.startsWith(prefix)) return PROJECT_PATH_TOKEN + '/' + value.slice(prefix.length)
+  if (v.startsWith(`${root}/`)) return `${PROJECT_PATH_TOKEN}/${v.slice(root.length + 1)}`
   return value
 }
 
@@ -149,8 +162,10 @@ export function fromPortable(
     for (const [key, value] of Object.entries(config)) {
       if (typeof value !== 'string') continue
       config[key] = value
+        // Trailing separator of either flavour: a Windows project path ending
+        // in a backslash would otherwise produce a doubled separator.
         .split(PROJECT_PATH_TOKEN)
-        .join(project.path.replace(/\/$/, ''))
+        .join(project.path.replace(/[/\\]+$/, ''))
         .split(PROJECT_NAME_TOKEN)
         .join(project.name)
     }
@@ -170,12 +185,20 @@ export function fromPortable(
   }
 }
 
-/** What is still machine-specific after export. Empty is the goal. */
+/**
+ * What is still machine-specific after export. Empty is the goal.
+ *
+ * Windows shapes are checked too — a drive letter or a UNC share — because a
+ * detector that only knows POSIX reports a Windows-authored workflow as
+ * portable when it is not, which is worse than not checking at all.
+ */
+const MACHINE_PATH = /(^|["'\s])(\/(Users|home)\/|[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/])/
+
 export function residualAbsolutePaths(portable: PortableWorkflow): string[] {
   const found: string[] = []
   for (const node of portable.nodes) {
     for (const [key, value] of Object.entries(node.config as Record<string, unknown>)) {
-      if (typeof value === 'string' && /(^|["'\s])\/(Users|home)\//.test(value)) {
+      if (typeof value === 'string' && MACHINE_PATH.test(value)) {
         found.push(`${node.id}.${key}`)
       }
     }

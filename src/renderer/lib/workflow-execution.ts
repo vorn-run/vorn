@@ -530,24 +530,24 @@ export function loopShouldStop(
 /**
  * The state a body step is reset to at the start of a pass.
  *
- * Every terminal field is cleared, not just the status. updateNodeState merges,
- * so a partial reset leaves the previous pass's logs and typed output attached
- * to a step that is currently running — stale data shown as if it were live,
- * and worse, still visible to buildStepOutputsMap.
+ * Enumerates what SURVIVES rather than what gets cleared. A list of fields to
+ * clear has to be updated every time NodeExecutionState gains one, and the
+ * failure is silent: the new field leaks from the previous pass into a step
+ * reported as pending. The first version of this listed eight fields and
+ * missed taskId, the worktree trio, approvedAt and diagnostics — and its test
+ * passed, because the test enumerated the same eight.
  */
-export function blankPassState(iteration: number): Partial<NodeExecutionState> {
-  return {
-    status: 'pending',
-    startedAt: undefined,
-    completedAt: undefined,
-    error: undefined,
-    logs: undefined,
-    output: undefined,
-    structuredOutput: undefined,
-    sessionId: undefined,
-    agentSessionId: undefined,
-    iteration
+const SURVIVES_A_PASS = new Set(['nodeId'])
+
+export function blankPassState(
+  state: NodeExecutionState,
+  iteration: number
+): Partial<NodeExecutionState> {
+  const cleared: Record<string, unknown> = {}
+  for (const key of Object.keys(state)) {
+    if (!SURVIVES_A_PASS.has(key)) cleared[key] = undefined
   }
+  return { ...cleared, status: 'pending', iteration } as Partial<NodeExecutionState>
 }
 
 /**
@@ -595,7 +595,10 @@ async function executeLoop(
     return
   }
 
-  const max = Math.min(Math.max(1, Math.floor(config.maxIterations ?? 1)), MAX_LOOP_ITERATIONS)
+  const requested = Number(config.maxIterations)
+  const max = Number.isFinite(requested)
+    ? Math.min(Math.max(1, Math.floor(requested)), MAX_LOOP_ITERATIONS)
+    : 1
   const summary: string[] = []
   let stopReason = `reached the ${max}-pass limit`
   let passes = 0
@@ -621,7 +624,8 @@ async function executeLoop(
     // has not run yet this time — the loop would then revise against a verdict
     // describing the draft it already replaced.
     for (const step of body) {
-      updateNodeState(execution, step.id, blankPassState(iteration))
+      const state = execution.nodeStates.find((x) => x.nodeId === step.id)
+      if (state) updateNodeState(execution, step.id, blankPassState(state, iteration))
     }
     persistExecution(execution)
 

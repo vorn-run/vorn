@@ -325,27 +325,59 @@ describe('loopOwningInsertPoint', () => {
 })
 
 describe('blankPassState', () => {
-  it('clears every field a previous pass could have left behind', () => {
-    // A partial reset is worse than none: the step reads as running while
-    // still carrying last pass's verdict, and buildStepOutputsMap serves it.
-    const patch = blankPassState(2)
-    expect(patch.status).toBe('pending')
-    for (const key of [
-      'startedAt',
-      'completedAt',
-      'error',
-      'logs',
-      'output',
-      'structuredOutput',
-      'sessionId',
-      'agentSessionId'
-    ] as const) {
-      expect(patch[key]).toBeUndefined()
+  // Built from a state carrying every optional field, so a field added to
+  // NodeExecutionState later is covered without anyone remembering to list it
+  // here. The previous version enumerated the fields to clear, and its test
+  // enumerated the same ones — so both missed taskId, the worktree trio,
+  // approvedAt and diagnostics, and agreed with each other about it.
+  const dirty = {
+    nodeId: 'review',
+    status: 'success',
+    startedAt: 'then',
+    completedAt: 'later',
+    sessionId: 's1',
+    error: 'boom',
+    logs: 'lots',
+    output: 'result',
+    structuredOutput: { approved: false },
+    taskId: 't1',
+    agentSessionId: 'a1',
+    agentType: 'claude',
+    projectName: 'p',
+    projectPath: '/p',
+    worktreePath: '/wt',
+    worktreeName: 'wt',
+    approvedAt: 'when',
+    diagnostics: 'diag',
+    iteration: 1
+  } as unknown as Parameters<typeof blankPassState>[0]
+
+  it('clears every field the previous pass left behind', () => {
+    const patch = blankPassState(dirty, 2)
+    for (const key of Object.keys(dirty)) {
+      if (key === 'nodeId' || key === 'status' || key === 'iteration') continue
+      expect(patch[key as keyof typeof patch]).toBeUndefined()
     }
   })
 
+  it('keeps the step identifiable and marks it not-yet-run', () => {
+    const patch = blankPassState(dirty, 2)
+    expect(patch.status).toBe('pending')
+    expect(patch).not.toHaveProperty('nodeId')
+  })
+
   it('records which pass the step is about to run', () => {
-    expect(blankPassState(3).iteration).toBe(3)
+    expect(blankPassState(dirty, 3).iteration).toBe(3)
+  })
+
+  it('clears a field this test never named', () => {
+    // The point of resetting by exclusion: an unknown key still gets cleared.
+    const withNewField = { ...dirty, somethingAddedLater: 'stale' } as unknown as Parameters<
+      typeof blankPassState
+    >[0]
+    const patch = blankPassState(withNewField, 2) as Record<string, unknown>
+    expect(patch.somethingAddedLater).toBeUndefined()
+    expect('somethingAddedLater' in patch).toBe(true)
   })
 })
 
@@ -439,5 +471,31 @@ describe('appendToLoopBody layout', () => {
     )
     const placed = out.nodes.find((n) => n.id === 'write')!
     expect(placed.position.y).toBeGreaterThan(0)
+  })
+})
+
+describe('a corrupt maxIterations still runs the body', () => {
+  // Math.floor(NaN) is NaN, and `for (i = 1; i <= NaN; i++)` never enters —
+  // so a legacy or hand-edited config would make the loop silently run zero
+  // passes and report success having done nothing.
+  const clamp = (requested: unknown): number => {
+    const n = Number(requested)
+    return Number.isFinite(n) ? Math.min(Math.max(1, Math.floor(n)), MAX_LOOP_ITERATIONS) : 1
+  }
+
+  it('runs once for NaN', () => {
+    expect(clamp(NaN)).toBe(1)
+  })
+
+  it('runs once for a non-numeric string', () => {
+    expect(clamp('two')).toBe(1)
+  })
+
+  it('runs once when the field is missing', () => {
+    expect(clamp(undefined)).toBe(1)
+  })
+
+  it('runs once for Infinity rather than forever', () => {
+    expect(clamp(Infinity)).toBe(1)
   })
 })
