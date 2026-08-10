@@ -735,13 +735,19 @@ export interface NodeExecutionState {
   logs?: string
   output?: string
   /**
-   * Typed payload returned by a callConnectorAction step (the connector's
-   * `ActionResult.output`, which matches the action's declared
-   * `outputSchema`). Stored separately from the string `output` / `logs`
-   * fields so the template resolver can walk nested paths like
-   * `{{steps.create_issue.html_url}}` at its original shape.
+   * Typed payload from a step that declared a shape: a callConnectorAction's
+   * `ActionResult.output`, or a headless launchAgent's `outputSchema` result.
+   * Stored separately from the string `output` / `logs` fields so the template
+   * resolver can walk nested paths like `{{steps.create_issue.html_url}}` at
+   * its original shape.
    */
   structuredOutput?: Record<string, unknown>
+  /**
+   * Which pass of an enclosing loop produced this state. Absent outside a
+   * loop. The state itself is last-write-wins, so this reports how many passes
+   * ran rather than indexing a history.
+   */
+  iteration?: number
   taskId?: string
   agentSessionId?: string
   /** Concrete agent type resolved at launch time. Distinct from the node's

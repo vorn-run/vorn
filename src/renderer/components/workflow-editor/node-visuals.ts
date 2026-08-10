@@ -155,3 +155,20 @@ export function stepOutputPreview(state: NodeExecutionState): string | undefined
   }
   return undefined
 }
+
+/**
+ * How much of a step's log the inline panel shows, and from which end.
+ *
+ * The end. An agent's answer — its verdict, its summary, the reason it failed —
+ * is the last thing it writes, and the previous head-first slice meant a long
+ * step showed its preamble and hid its conclusion. The container already
+ * scrolls, so the only job of this cap is to keep a very large log out of the
+ * DOM; "View full output" remains the untruncated path.
+ */
+const INLINE_LOG_CHARS = 8000
+
+export function inlineLogTail(logs: string): string {
+  if (logs.length <= INLINE_LOG_CHARS) return logs
+  const elided = logs.length - INLINE_LOG_CHARS
+  return `… ${elided.toLocaleString()} earlier characters hidden — use View full output\n\n${logs.slice(-INLINE_LOG_CHARS)}`
+}
