@@ -89,11 +89,14 @@ export const workflowInputDefSchema = z
 
     if (def.defaultValue === undefined) return
 
-    if (def.type === 'number' && Number.isNaN(Number(def.defaultValue))) {
+    // Finite, not merely numeric: "Infinity" and "1e999" parse but do not
+    // survive JSON, and resolveWorkflowInputs rejects them at run time. Letting
+    // one be authored would only defer the same failure to a worse moment.
+    if (def.type === 'number' && !Number.isFinite(Number(def.defaultValue))) {
       ctx.addIssue({
         code: 'custom',
         path: ['defaultValue'],
-        message: `default "${def.defaultValue}" for number input "${def.key}" is not a number`
+        message: `default "${def.defaultValue}" for number input "${def.key}" is not a finite number`
       })
     }
 
@@ -588,7 +591,7 @@ export function registerWorkflowTools(server: McpServer): void {
       const workflow = dbListWorkflows().find((w) => w.id === args.workflow_id)
       if (!workflow) {
         return {
-          content: [{ type: 'text', text: `Error: no workflow with id ${args.workflow_id}` }],
+          content: [{ type: 'text', text: `Error: workflow "${args.workflow_id}" not found` }],
           isError: true
         }
       }
@@ -611,7 +614,8 @@ export function registerWorkflowTools(server: McpServer): void {
           }
         }
         // Always an object once the workflow declares inputs, even when every
-        // value resolved empty. resolveTemplate skips the whole `inputs`
+        // value resolved empty. resolveTemplateVars
+        // (src/renderer/lib/template-vars.ts) skips the whole `inputs`
         // namespace when context.inputs is absent, which leaves a literal
         // `{{inputs.topic}}` in the agent's prompt; an empty object resolves it
         // to an empty string instead. Wrong-but-blank beats raw template text.

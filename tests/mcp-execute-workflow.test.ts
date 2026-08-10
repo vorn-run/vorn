@@ -127,7 +127,14 @@ describe('workflowInputDefSchema', () => {
       defaultValue: 'soon'
     })
     expect(result.success).toBe(false)
-    expect(JSON.stringify(result.error?.issues)).toContain('is not a number')
+    expect(JSON.stringify(result.error?.issues)).toContain('is not a finite number')
+  })
+
+  it('rejects a non-finite number default, matching the run-time check', () => {
+    for (const defaultValue of ['Infinity', '1e999']) {
+      const result = workflowInputDefSchema.safeParse({ ...base, type: 'number', defaultValue })
+      expect(result.success).toBe(false)
+    }
   })
 
   it('rejects a non-boolean default on a boolean input', () => {
