@@ -57,6 +57,12 @@ describe('resolveWorkflowInputs', () => {
     expect(errors).toEqual(['input "tier" must be one of: primary, secondary'])
   })
 
+  it('rejects a select that declares no options, which the dialog could never satisfy', () => {
+    const noOptions: WorkflowInputDef[] = [{ key: 'tier', label: 'Tier', type: 'select' }]
+    const { errors } = resolveWorkflowInputs(noOptions, { tier: 'anything' })
+    expect(errors).toEqual(['input "tier" is a select but declares no options'])
+  })
+
   it('accepts a valid select value', () => {
     const { values, errors } = resolveWorkflowInputs(defs, { topic: 'a', tier: 'primary' })
     expect(errors).toEqual([])

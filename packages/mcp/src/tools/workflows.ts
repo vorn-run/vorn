@@ -229,7 +229,13 @@ export function resolveWorkflowInputs(
       }
       case 'select': {
         const allowed = (def.options ?? []).map((o) => o.value)
-        if (allowed.length > 0 && !allowed.includes(String(raw))) {
+        if (allowed.length === 0) {
+          // The run dialog can only offer what the select declares, so a select
+          // with no options can produce no value at all. Accepting an arbitrary
+          // string here would let a tool caller past a constraint the UI
+          // enforces absolutely.
+          errors.push(`input "${def.key}" is a select but declares no options`)
+        } else if (!allowed.includes(String(raw))) {
           errors.push(`input "${def.key}" must be one of: ${allowed.join(', ')}`)
         } else {
           values[def.key] = String(raw)
@@ -522,7 +528,12 @@ export function registerWorkflowTools(server: McpServer): void {
             isError: true
           }
         }
-        inputs = Object.keys(values).length > 0 ? values : undefined
+        // Always an object once the workflow declares inputs, even when every
+        // value resolved empty. resolveTemplate skips the whole `inputs`
+        // namespace when context.inputs is absent, which leaves a literal
+        // `{{inputs.topic}}` in the agent's prompt; an empty object resolves it
+        // to an empty string instead. Wrong-but-blank beats raw template text.
+        inputs = values
       } else if (Object.keys(supplied).length > 0) {
         // Nothing declared to validate against. Pass the values through rather
         // than rejecting them: a non-manual trigger cannot declare inputs, but
