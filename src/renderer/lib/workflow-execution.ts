@@ -513,6 +513,29 @@ export function loopShouldStop(
 }
 
 /**
+ * The state a body step is reset to at the start of a pass.
+ *
+ * Every terminal field is cleared, not just the status. updateNodeState merges,
+ * so a partial reset leaves the previous pass's logs and typed output attached
+ * to a step that is currently running — stale data shown as if it were live,
+ * and worse, still visible to buildStepOutputsMap.
+ */
+export function blankPassState(iteration: number): Partial<NodeExecutionState> {
+  return {
+    status: 'pending',
+    startedAt: undefined,
+    completedAt: undefined,
+    error: undefined,
+    logs: undefined,
+    output: undefined,
+    structuredOutput: undefined,
+    sessionId: undefined,
+    agentSessionId: undefined,
+    iteration
+  }
+}
+
+/**
  * Run a loop node's body until its condition holds or its budget runs out.
  *
  * The body nodes are ordinary nodes sitting downstream in the same graph; this
@@ -577,19 +600,23 @@ async function executeLoop(
     passes = iteration
     summary.push(`── iteration ${iteration} of at most ${max} ──`)
 
+    // The whole body is cleared before the pass, not each step as its turn
+    // comes. Resetting lazily leaves later steps holding last pass's results,
+    // so an earlier step resolves {{steps.review.approved}} from a review that
+    // has not run yet this time — the loop would then revise against a verdict
+    // describing the draft it already replaced.
+    for (const step of body) {
+      updateNodeState(execution, step.id, blankPassState(iteration))
+    }
+    persistExecution(execution)
+
     let failedStep: WorkflowNode | undefined
     for (const step of body) {
       if (active?.abort.signal.aborted) break
 
-      // Each pass starts the step fresh: a previous pass's terminal status
-      // would otherwise make buildStepOutputsMap serve stale output to the
-      // condition that decides whether to keep going.
       updateNodeState(execution, step.id, {
         status: 'running',
-        startedAt: new Date().toISOString(),
-        completedAt: undefined,
-        error: undefined,
-        iteration
+        startedAt: new Date().toISOString()
       })
       persistExecution(execution)
 

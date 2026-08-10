@@ -17,7 +17,8 @@ describe('inlineLogTail', () => {
 
   it('says how much it hid rather than trailing off', () => {
     const shown = inlineLogTail('y'.repeat(9000))
-    expect(shown).toContain('1,000 earlier characters hidden')
+    // toLocaleString, so the separator depends on the runner's locale.
+    expect(shown).toContain(`${(1000).toLocaleString()} earlier characters hidden`)
     expect(shown).toContain('View full output')
   })
 

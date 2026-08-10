@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { loopShouldStop, MAX_LOOP_ITERATIONS } from '../src/renderer/lib/workflow-execution'
+import {
+  loopShouldStop,
+  blankPassState,
+  MAX_LOOP_ITERATIONS
+} from '../src/renderer/lib/workflow-execution'
 import { validateLoopBodies } from '../packages/mcp/src/tools/workflows'
 import {
   nodesAfter,
@@ -35,7 +39,7 @@ describe('loopShouldStop', () => {
     expect(loopShouldStop(approved, '', 'true')).toBe(false)
   })
 
-  it('supports isNotEmpty for a step that either produced something or did not', () => {
+  it('supports isEmpty for a step that either produced blockers or did not', () => {
     const cfg: ConditionConfig = {
       variable: '{{steps.review.blocking}}',
       operator: 'isEmpty',
@@ -317,5 +321,30 @@ describe('loopOwningInsertPoint', () => {
       config: { nodeType: 'loop', bodyNodeIds: [], maxIterations: 1 } as WorkflowNode['config']
     }
     expect(loopOwningInsertPoint([other], 'write')).toBeUndefined()
+  })
+})
+
+describe('blankPassState', () => {
+  it('clears every field a previous pass could have left behind', () => {
+    // A partial reset is worse than none: the step reads as running while
+    // still carrying last pass's verdict, and buildStepOutputsMap serves it.
+    const patch = blankPassState(2)
+    expect(patch.status).toBe('pending')
+    for (const key of [
+      'startedAt',
+      'completedAt',
+      'error',
+      'logs',
+      'output',
+      'structuredOutput',
+      'sessionId',
+      'agentSessionId'
+    ] as const) {
+      expect(patch[key]).toBeUndefined()
+    }
+  })
+
+  it('records which pass the step is about to run', () => {
+    expect(blankPassState(3).iteration).toBe(3)
   })
 })
