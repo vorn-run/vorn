@@ -899,6 +899,20 @@ export interface AppConfig {
      * without it the step waits forever and its run never closes. 0 disables it.
      */
     headlessStepTimeoutMinutes?: number
+    /**
+     * Environment variable names to forward to agent sessions and workflow
+     * script nodes even though they match a sensitive prefix. Opt-in and
+     * deliberate: the prefix rule stays the default for everything not named
+     * here, and nothing else — plain shells, git, tailscale, the detectors —
+     * receives them.
+     *
+     * Whole names, not prefixes: naming ANTHROPIC_API_KEY forwards that one
+     * variable and not ANTHROPIC_API_SECRET. Entries are trimmed and compared
+     * case-insensitively, so `anthropic_api_key` also matches
+     * ANTHROPIC_API_KEY — convenient for a hand-edited config, but worth
+     * knowing on POSIX where the two really are different variables.
+     */
+    envPassthrough?: string[]
     enableHoverPreview?: boolean
     /**
      * Shell sessions only. Replaces the shell's own prompt with a single

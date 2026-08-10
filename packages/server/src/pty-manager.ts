@@ -28,6 +28,7 @@ import { buildAgentLaunchLine as buildLaunchLine } from './agent-launch'
 import {
   shellEscape,
   getSafeEnv,
+  getLaunchEnv,
   getDefaultShell,
   getShellArgs,
   normalizePath
@@ -216,7 +217,7 @@ class PtyManager extends EventEmitter {
       // and is never drawn as command blocks. Installing the shim anyway made
       // the wrapper shell emit boundaries, which hid the terminal cursor and
       // drew block decorations into a card with no spine or input bar.
-      env: getSafeEnv()
+      env: getLaunchEnv()
     })
 
     // Session ID pinning: agents that support it (supportsSessionIdPinning) get a

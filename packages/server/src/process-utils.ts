@@ -25,7 +25,17 @@ function getUserShellEnv(): Record<string, string> {
   }
 }
 
-const resolvedEnv = getUserShellEnv()
+/**
+ * Resolved lazily and memoized: getUserShellEnv() spawns a login shell, and
+ * doing that at import time made merely importing this module — as the pure
+ * helpers' unit tests do — pay for a subprocess it never uses.
+ */
+let resolvedEnvCache: Record<string, string> | undefined
+
+function resolvedEnv(): Record<string, string> {
+  resolvedEnvCache ??= getUserShellEnv()
+  return resolvedEnvCache
+}
 
 /**
  * The shell a terminal session should run.
@@ -121,15 +131,101 @@ export const SENSITIVE_ENV_PREFIXES = [
 // Env vars to strip so agent CLIs don't refuse to launch (e.g. nested session detection)
 export const STRIP_ENV_KEYS = ['CLAUDECODE']
 
-export function getSafeEnv(): Record<string, string> {
+// Compared uppercased. Windows environment variable names are case-insensitive
+// and Node hands back whatever casing it enumerated, so a literal match would
+// let `claudecode` through — and this list is meant to be absolute.
+const STRIP_ENV_KEYS_UPPER = STRIP_ENV_KEYS.map((k) => k.toUpperCase())
+
+/**
+ * Exact variable names the user has opted into forwarding, uppercased.
+ *
+ * SENSITIVE_ENV_PREFIXES is the right default — a shell that exports a real
+ * GITHUB_TOKEN should not hand it to every agent and script that happens to
+ * run. But some setups need one of those names on purpose: pointing an agent
+ * at a local Anthropic-compatible proxy needs ANTHROPIC_API_KEY, and the
+ * prefix rule drops it while letting ANTHROPIC_BASE_URL through, leaving the
+ * agent aimed at the proxy but authenticating as if it were not.
+ *
+ * Naming a variable here is a deliberate act, so it wins over the prefix rule.
+ * STRIP_ENV_KEYS deliberately does not become overridable: those are stripped
+ * to stop CLIs refusing to launch, and forwarding them breaks the session
+ * rather than exposing anything.
+ */
+let envPassthrough: ReadonlySet<string> = new Set()
+
+/**
+ * Normalize whatever the config held into a comparable set.
+ *
+ * Typed as `unknown` on purpose: this value arrives from JSON.parse of a file a
+ * user can hand-edit, so the declared `string[]` is a hope rather than a
+ * guarantee. A bare string or a stray number in the list would otherwise throw
+ * inside .map() — during server startup, where it takes the whole app down over
+ * a typo in a settings file.
+ */
+export function normalizePassthrough(keys: unknown): ReadonlySet<string> {
+  if (!Array.isArray(keys)) return new Set()
+  return new Set(
+    keys
+      .filter((k): k is string => typeof k === 'string')
+      .map((k) => k.trim().toUpperCase())
+      .filter((k) => k.length > 0)
+  )
+}
+
+export function setEnvPassthrough(keys: unknown): void {
+  envPassthrough = normalizePassthrough(keys)
+}
+
+/**
+ * The configured set, exposed so a test can assert what each env function
+ * passes to filterEnv. getSafeEnv and getLaunchEnv themselves read the login
+ * shell, which a unit test cannot stand up — the difference that matters is
+ * which of these two sets each one hands over.
+ */
+export function getEnvPassthrough(): ReadonlySet<string> {
+  return envPassthrough
+}
+
+/**
+ * Pure form of the filter, so the rules can be tested without a login shell.
+ */
+export function filterEnv(
+  source: Record<string, string | undefined>,
+  passthrough: ReadonlySet<string>
+): Record<string, string> {
   const env: Record<string, string> = {}
-  for (const [key, val] of Object.entries(resolvedEnv)) {
+  for (const [key, val] of Object.entries(source)) {
     if (val === undefined) continue
-    if (SENSITIVE_ENV_PREFIXES.some((p) => key.toUpperCase().startsWith(p))) continue
-    if (STRIP_ENV_KEYS.includes(key)) continue
+    const upper = key.toUpperCase()
+    if (STRIP_ENV_KEYS_UPPER.includes(upper)) continue
+    if (!passthrough.has(upper) && SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue
     env[key] = val
   }
   return env
+}
+
+/**
+ * Environment for subprocesses the user never asked about — git, tailscale,
+ * IDE and agent detection, file helpers. Always strict: a variable opted in so
+ * an agent could authenticate has no business reaching `git ls-remote`.
+ */
+export function getSafeEnv(): Record<string, string> {
+  return filterEnv(resolvedEnv(), new Set())
+}
+
+/**
+ * Environment for an agent launch: the agent terminal, a headless agent, or a
+ * workflow script node. Only these three forward `defaults.envPassthrough`.
+ *
+ * Not the plain shell session. A shell hands its environment to every command
+ * typed into it for as long as it lives, which is far wider than "the agent I
+ * configured a key for" — and wider than what the setting documents.
+ *
+ * Not the SSH session either: that connects to another machine, which is
+ * precisely the widening this split exists to avoid.
+ */
+export function getLaunchEnv(): Record<string, string> {
+  return filterEnv(resolvedEnv(), envPassthrough)
 }
 
 function isWindowsStylePath(p: string): boolean {

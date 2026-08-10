@@ -1022,6 +1022,15 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
       hasSeenOnboarding: map.hasSeenOnboarding as boolean | number
     }),
     ...(map.reopenSessions !== undefined && { reopenSessions: map.reopenSessions as boolean }),
+    // Saving iterates over every key in defaults, but loading is this explicit
+    // list — so a key missing here round-trips to nothing and its feature is
+    // silently inert.
+    // Array-checked rather than cast: the value came from JSON.parse of a row a
+    // user can edit, and broadcasting a non-array under a string[] type would
+    // break any consumer that trusts the declaration.
+    ...(Array.isArray(map.envPassthrough) && {
+      envPassthrough: map.envPassthrough.filter((k): k is string => typeof k === 'string')
+    }),
     // Terminal block rendering. Default on; the key only appears once the
     // user has toggled it, so absence means "not yet decided", not "off".
     domBlockRendering: (map.domBlockRendering as boolean) ?? true,
