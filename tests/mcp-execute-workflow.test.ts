@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   resolveWorkflowInputs,
   resolveWorkflowId,
-  workflowInputDefSchema
+  workflowInputDefSchema,
+  workflowInputsSchema
 } from '../packages/mcp/src/tools/workflows'
 import type { WorkflowInputDef } from '../packages/shared/src/types'
 
@@ -53,7 +54,7 @@ describe('resolveWorkflowInputs', () => {
 
   it('rejects a non-numeric value for a number input', () => {
     const { errors } = resolveWorkflowInputs(defs, { topic: 'a', hours: 'soon' })
-    expect(errors).toEqual(['input "hours" must be a number, got "soon"'])
+    expect(errors).toEqual(['input "hours" must be a finite number, got "soon"'])
   })
 
   it('limits a select to its declared options', () => {
@@ -71,6 +72,27 @@ describe('resolveWorkflowInputs', () => {
     const { values, errors } = resolveWorkflowInputs(defs, { topic: 'a', tier: 'primary' })
     expect(errors).toEqual([])
     expect(values.tier).toBe('primary')
+  })
+
+  it('treats a whitespace-only string as no value, like areInputsValid', () => {
+    const { errors } = resolveWorkflowInputs(defs, { topic: '   ' })
+    expect(errors).toEqual(['missing required input "topic" (Topic)'])
+  })
+
+  it('always supplies a declared boolean, matching the dialog seeding false', () => {
+    const toggle: WorkflowInputDef[] = [{ key: 'publish', label: 'Publish', type: 'boolean' }]
+    const { values } = resolveWorkflowInputs(toggle, {})
+    expect(values).toEqual({ publish: false })
+  })
+
+  it('rejects a non-finite number, which would not survive JSON', () => {
+    const { errors } = resolveWorkflowInputs(defs, { topic: 'a', hours: 'Infinity' })
+    expect(errors).toEqual(['input "hours" must be a finite number, got "Infinity"'])
+  })
+
+  it('does not let a boolean coerce into a number input', () => {
+    const { errors } = resolveWorkflowInputs(defs, { topic: 'a', hours: true })
+    expect(errors).toEqual(['input "hours" must be a number, got true'])
   })
 
   it('omits an optional input with no value and no default', () => {
@@ -142,6 +164,25 @@ describe('workflowInputDefSchema', () => {
     expect(
       workflowInputDefSchema.safeParse({ key: '2fast', label: 'x', type: 'text' }).success
     ).toBe(false)
+  })
+})
+
+describe('workflowInputsSchema', () => {
+  it('accepts distinct keys', () => {
+    const result = workflowInputsSchema.safeParse([
+      { key: 'a', label: 'A', type: 'text' },
+      { key: 'b', label: 'B', type: 'text' }
+    ])
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects duplicate keys, which the editor already flags as an error', () => {
+    const result = workflowInputsSchema.safeParse([
+      { key: 'topic', label: 'One', type: 'text' },
+      { key: 'topic', label: 'Two', type: 'text' }
+    ])
+    expect(result.success).toBe(false)
+    expect(JSON.stringify(result.error?.issues)).toContain('duplicate input key')
   })
 })
 

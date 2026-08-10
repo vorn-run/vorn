@@ -118,11 +118,28 @@ export const workflowInputDefSchema = z
     }
   })
 
+// Two inputs sharing a key cannot both survive under one `{{inputs.<key>}}`.
+// The editor already flags this as an error the author has to resolve, so MCP
+// authoring must not be the way an ambiguous workflow gets persisted.
+export const workflowInputsSchema = z.array(workflowInputDefSchema).superRefine((inputs, ctx) => {
+  const seen = new Set<string>()
+  inputs.forEach((def, index) => {
+    if (seen.has(def.key)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [index, 'key'],
+        message: `duplicate input key "${def.key}" — only one value can survive under {{inputs.${def.key}}}`
+      })
+    }
+    seen.add(def.key)
+  })
+})
+
 const triggerConfigSchema = z.union([
   z.object({
     triggerType: z.literal('manual'),
     contextual: z.boolean().optional(),
-    inputs: z.array(workflowInputDefSchema).optional()
+    inputs: workflowInputsSchema.optional()
   }),
   z.object({ triggerType: z.literal('once'), runAt: V.shortText }),
   z.object({
@@ -251,25 +268,45 @@ export function resolveWorkflowInputs(
     const provided = Object.prototype.hasOwnProperty.call(supplied, def.key)
     const raw = provided ? supplied[def.key] : def.defaultValue
 
-    if (raw === undefined || raw === '') {
+    // A declared toggle always carries an answer. defaultInputValue seeds
+    // `false` when nothing was authored and areInputsValid counts `false` as a
+    // real answer, so omitting it here would expand `{{inputs.x}}` to '' on an
+    // MCP run and 'false' on a UI run — and dedupe them as different runs.
+    if (def.type === 'boolean') {
+      if (raw === undefined) {
+        values[def.key] = false
+      } else if (typeof raw === 'boolean') {
+        values[def.key] = raw
+      } else if (raw === 'true' || raw === 'false') {
+        values[def.key] = raw === 'true'
+      } else {
+        errors.push(`input "${def.key}" must be a boolean, got ${JSON.stringify(raw)}`)
+      }
+      continue
+    }
+
+    // Whitespace-only is "no value", matching areInputsValid's String(v).trim().
+    if (raw === undefined || (typeof raw === 'string' && raw.trim() === '')) {
       if (def.required) errors.push(`missing required input "${def.key}" (${def.label})`)
       continue
     }
 
     switch (def.type) {
       case 'number': {
-        const n = typeof raw === 'number' ? raw : Number(raw)
-        if (Number.isNaN(n)) {
+        // parseNumberInput rejects anything non-finite because NaN and Infinity
+        // do not survive JSON — they corrupt the persisted run, the template
+        // expansion and the dedupe fingerprint alike. A boolean is not a number
+        // either, however willingly Number() turns it into one.
+        if (typeof raw === 'boolean') {
           errors.push(`input "${def.key}" must be a number, got ${JSON.stringify(raw)}`)
+          break
+        }
+        const n = typeof raw === 'number' ? raw : Number(String(raw).trim())
+        if (!Number.isFinite(n)) {
+          errors.push(`input "${def.key}" must be a finite number, got ${JSON.stringify(raw)}`)
         } else {
           values[def.key] = n
         }
-        break
-      }
-      case 'boolean': {
-        if (typeof raw === 'boolean') values[def.key] = raw
-        else if (raw === 'true' || raw === 'false') values[def.key] = raw === 'true'
-        else errors.push(`input "${def.key}" must be a boolean, got ${JSON.stringify(raw)}`)
         break
       }
       case 'select': {
