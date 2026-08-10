@@ -2803,6 +2803,12 @@ type WorkflowRunNodeRow = {
 }
 
 function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
+  // Computed before the spread: `{ x: undefined }` still creates the key, so
+  // spreading the parse result directly would leave a present-but-undefined
+  // structuredOutput on exactly the corrupt rows this is supposed to degrade.
+  const structured =
+    n.structured_output != null ? parseStructuredOutput(n.structured_output) : undefined
+
   return {
     nodeId: n.node_id,
     status: n.status as NodeExecutionState['status'],
@@ -2819,9 +2825,7 @@ function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
     ...(n.approved_at != null && { approvedAt: n.approved_at }),
     ...(n.diagnostics != null && { diagnostics: n.diagnostics }),
     ...(n.output != null && { output: n.output }),
-    ...(n.structured_output != null && {
-      structuredOutput: parseStructuredOutput(n.structured_output)
-    }),
+    ...(structured !== undefined && { structuredOutput: structured }),
     ...(n.iteration != null && { iteration: n.iteration })
   }
 }

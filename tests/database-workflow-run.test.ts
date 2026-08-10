@@ -416,10 +416,33 @@ describe('step results survive a reload', () => {
   })
 
   it('degrades to no typed output rather than failing the whole run history', () => {
-    // The column is JSON we wrote, but a row from an older build should not be
-    // able to break loading every run for a workflow.
-    saveWorkflowRun(withResult())
+    // Stores an array, which serialises fine and parses fine but is not the
+    // object shape a typed step output must be. The row must come back without
+    // the field rather than with an undefined one, or `'structuredOutput' in
+    // node` lies to every consumer downstream.
+    saveWorkflowRun(withResult({ structuredOutput: [] as unknown as Record<string, unknown> }))
     const [run] = listWorkflowRuns('wf-results', 10)
     expect(run.nodeStates).toHaveLength(1)
+    expect(run.nodeStates[0]).not.toHaveProperty('structuredOutput')
+  })
+
+  it('keeps the rest of the run when one typed output is unreadable', () => {
+    saveWorkflowRun({
+      workflowId: 'wf-mixed',
+      startedAt: '2026-08-10T10:00:00Z',
+      status: 'success',
+      nodeStates: [
+        {
+          nodeId: 'bad',
+          status: 'success',
+          structuredOutput: 'nope' as unknown as Record<string, unknown>
+        },
+        { nodeId: 'good', status: 'success', structuredOutput: { ok: true } }
+      ]
+    })
+    const [run] = listWorkflowRuns('wf-mixed', 10)
+    expect(run.nodeStates).toHaveLength(2)
+    expect(run.nodeStates[0]).not.toHaveProperty('structuredOutput')
+    expect(run.nodeStates[1].structuredOutput).toEqual({ ok: true })
   })
 })
