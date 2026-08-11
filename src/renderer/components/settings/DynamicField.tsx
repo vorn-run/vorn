@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import type { ConnectorConfigField } from '../../../shared/types'
 
 /**
@@ -16,9 +17,12 @@ export function DynamicField({
   onChange: (v: string) => void
 }) {
   const isSecret = field.type === 'password'
+  // Tied to the control below, so the label is not just text sitting near an
+  // input a screen reader announces as unnamed.
+  const id = useId()
   return (
     <div>
-      <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1.5">
+      <label htmlFor={id} className="block text-xs text-gray-500 mb-1 flex items-center gap-1.5">
         <span>{field.label}</span>
         {field.required && <span className="text-red-400">*</span>}
         {isSecret && (
@@ -27,6 +31,7 @@ export function DynamicField({
       </label>
       {field.type === 'select' ? (
         <select
+          id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className="w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none"
@@ -40,6 +45,7 @@ export function DynamicField({
         </select>
       ) : field.type === 'textarea' ? (
         <textarea
+          id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={field.placeholder}
@@ -48,6 +54,7 @@ export function DynamicField({
         />
       ) : (
         <input
+          id={id}
           type={field.type === 'password' ? 'password' : 'text'}
           value={value}
           onChange={(e) => onChange(e.target.value)}

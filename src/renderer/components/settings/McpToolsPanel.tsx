@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { ChevronDown, ChevronRight, RefreshCw, Wrench, AlertCircle } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
 import { schemaProperties, schemaTypeHint } from '../../../shared/json-schema-utils'
@@ -174,6 +174,9 @@ function InvokeToolDialog({
   onClose: () => void
 }) {
   const [argsText, setArgsText] = useState(() => buildArgsStub(tool.inputSchema))
+  // Tied to the textarea below, so the label is not just text sitting near a
+  // box a screen reader announces as unnamed.
+  const argsId = useId()
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<{
     success: boolean
@@ -224,8 +227,11 @@ function InvokeToolDialog({
           </pre>
         </details>
       )}
-      <label className="block text-[10px] text-gray-500 mb-1">Arguments (JSON)</label>
+      <label htmlFor={argsId} className="block text-[10px] text-gray-500 mb-1">
+        Arguments (JSON)
+      </label>
       <textarea
+        id={argsId}
         value={argsText}
         onChange={(e) => setArgsText(e.target.value)}
         rows={4}

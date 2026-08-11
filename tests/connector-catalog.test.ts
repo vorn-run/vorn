@@ -126,6 +126,11 @@ describe('parseCatalog', () => {
     expect(parseCatalog({ version: 1, connectors: [entry] })).toEqual([entry])
   })
 
+  it('keeps a version and an icon it does not otherwise touch', () => {
+    const rich = { ...entry, version: '1.0.0', icon: { viewBox: '0 0 24 24', paths: ['M0 0'] } }
+    expect(parseCatalog({ version: 1, connectors: [rich] })?.[0]).toEqual(rich)
+  })
+
   it('carries what a listing needs to answer "will this do what I need"', () => {
     const rich = {
       ...entry,
@@ -143,6 +148,56 @@ describe('parseCatalog', () => {
     expect(parseCatalog({ connectors: [entry] })).toBeUndefined()
     expect(parseCatalog('<!DOCTYPE html>')).toBeUndefined()
     expect(parseCatalog(undefined)).toBeUndefined()
+  })
+
+  it('repairs an entry the UI would otherwise crash on', () => {
+    // This document comes off the network. The list calls
+    // capabilities.includes(...) and maps over triggers; a published entry
+    // missing either would take the whole connector list down.
+    const parsed = parseCatalog({
+      version: 1,
+      connectors: [{ id: 'x', name: 'X', packageName: '@vornrun/connector-x' }]
+    })
+
+    expect(parsed?.[0]).toMatchObject({ description: '', capabilities: [] })
+    expect(Array.isArray(parsed?.[0].capabilities)).toBe(true)
+  })
+
+  it('repairs a field carrying the wrong kind of value', () => {
+    // A string has .includes too, so this would not throw — it would quietly
+    // answer the wrong question.
+    const parsed = parseCatalog({
+      version: 1,
+      connectors: [
+        {
+          id: 'x',
+          name: 'X',
+          packageName: '@vornrun/connector-x',
+          capabilities: 'triggers',
+          description: 42,
+          triggers: 'nope',
+          keywords: null
+        }
+      ]
+    })
+
+    expect(parsed?.[0]).toMatchObject({
+      description: '',
+      capabilities: [],
+      triggers: [],
+      keywords: []
+    })
+  })
+
+  it('leaves out what the entry never mentioned, so absent stays absent', () => {
+    // listingDetails tells "no triggers" apart from "did not say", and
+    // inventing an empty list here would erase that distinction.
+    const parsed = parseCatalog({
+      version: 1,
+      connectors: [{ id: 'x', name: 'X', packageName: '@vornrun/connector-x' }]
+    })
+    expect(parsed?.[0].triggers).toBeUndefined()
+    expect(parsed?.[0].actions).toBeUndefined()
   })
 
   it('drops a single unusable entry rather than the whole list', () => {

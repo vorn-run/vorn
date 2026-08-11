@@ -104,15 +104,52 @@ export function parseCatalog(document: unknown): ConnectorCatalogEntry[] | undef
   const root = document as { version?: unknown; connectors?: unknown }
   if (root?.version !== 1 || !Array.isArray(root.connectors)) return undefined
 
-  const entries = root.connectors.filter(
-    (entry): entry is ConnectorCatalogEntry =>
-      typeof entry?.id === 'string' &&
-      typeof entry?.name === 'string' &&
-      typeof entry?.packageName === 'string' &&
-      // Anything else is decoration; without a package there is nothing to add.
-      entry.packageName.length > 0
-  )
+  const entries = root.connectors
+    .map(normalizeEntry)
+    .filter((entry): entry is ConnectorCatalogEntry => entry !== undefined)
   return entries.length > 0 ? entries : undefined
+}
+
+/**
+ * Make an entry safe to render, or refuse it.
+ *
+ * Only an id, a name and a package are required: without a package there is
+ * nothing to add, and without the other two nothing to show. Everything else is
+ * repaired rather than rejected, because dropping a whole connector for want of
+ * a blurb is worse than listing it without one.
+ *
+ * The repair is not cosmetic. This document comes off the network and the UI
+ * reads `capabilities.includes(...)` and maps over `triggers` — a published
+ * entry missing either, or carrying a string where a list belongs, would take
+ * the connector list down with a TypeError rather than degrade.
+ */
+function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
+  const entry = raw as Record<string, unknown> | null
+  if (
+    typeof entry?.id !== 'string' ||
+    typeof entry.name !== 'string' ||
+    typeof entry.packageName !== 'string' ||
+    entry.packageName.length === 0
+  ) {
+    return undefined
+  }
+
+  return {
+    ...entry,
+    id: entry.id,
+    name: entry.name,
+    packageName: entry.packageName,
+    description: typeof entry.description === 'string' ? entry.description : '',
+    capabilities: list(entry.capabilities) as ConnectorCatalogEntry['capabilities'],
+    ...(entry.triggers !== undefined && { triggers: list(entry.triggers) }),
+    ...(entry.actions !== undefined && { actions: list(entry.actions) }),
+    ...(entry.env !== undefined && { env: list(entry.env) }),
+    ...(entry.keywords !== undefined && { keywords: list(entry.keywords) })
+  } as ConnectorCatalogEntry
+}
+
+function list<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : []
 }
 
 /**
