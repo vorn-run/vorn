@@ -72,8 +72,7 @@ export function RunsToolbar({ filter, setFilter }: Props) {
       {open && (
         <div
           className="absolute right-0 top-full mt-1 z-50 w-[200px]
-                     border border-white/[0.08] rounded-lg shadow-xl overflow-hidden"
-          style={{ background: '#1a1a1e' }}
+                     border border-white/[0.08] rounded-lg shadow-xl overflow-hidden bg-surface-base"
         >
           <div className="py-1.5">
             <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">

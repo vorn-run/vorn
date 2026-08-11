@@ -67,7 +67,7 @@ function RunListRowImpl({
         selected ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
       }`}
     >
-      {selected && <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-blue-500" />}
+      {selected && <span className="absolute left-0 top-1 bottom-1 w-px bg-white rounded-full" />}
 
       <span className="flex items-center gap-2 min-w-0">
         <span

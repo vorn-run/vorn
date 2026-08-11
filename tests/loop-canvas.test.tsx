@@ -77,7 +77,7 @@ describe('the loop rail on the canvas', () => {
     // The whole point of the redesign: a repeated step must not look like a
     // step that runs once.
     const { container } = renderWith(nodes)
-    const rail = container.querySelector('[class*="border-cyan-400"]')
+    const rail = container.querySelector('[data-loop-rail]')
     expect(rail).not.toBeNull()
     expect(within(rail as HTMLElement).getByText('Write the edition')).toBeInTheDocument()
     expect(within(rail as HTMLElement).getByText('Review the draft')).toBeInTheDocument()
@@ -85,7 +85,7 @@ describe('the loop rail on the canvas', () => {
 
   it('leaves the steps that run once outside the rail', () => {
     const { container } = renderWith(nodes)
-    const rail = container.querySelector('[class*="border-cyan-400"]') as HTMLElement
+    const rail = container.querySelector('[data-loop-rail]') as HTMLElement
     expect(within(rail).queryByText('Pull feeds')).toBeNull()
     expect(within(rail).queryByText('Javier reviews')).toBeNull()
     expect(screen.getByText('Pull feeds')).toBeInTheDocument()
@@ -136,7 +136,7 @@ describe('adding a step inside the rail', () => {
     // membership together instead of appending after the loop.
     const onInsertNode = vi.fn()
     const { container } = renderWithSpy(nodes, onInsertNode)
-    const rail = container.querySelector('[class*="border-cyan-400"]') as HTMLElement
+    const rail = container.querySelector('[data-loop-rail]') as HTMLElement
 
     fireEvent.click(within(rail).getByRole('button', { name: '' }))
     fireEvent.click(screen.getByText(/Launch an agent|Add an agent|agent/i))
@@ -147,7 +147,7 @@ describe('adding a step inside the rail', () => {
   it('anchors the insert on the last body step', () => {
     const onInsertNode = vi.fn()
     const { container } = renderWithSpy(nodes, onInsertNode)
-    const rail = container.querySelector('[class*="border-cyan-400"]') as HTMLElement
+    const rail = container.querySelector('[data-loop-rail]') as HTMLElement
 
     fireEvent.click(within(rail).getByRole('button', { name: '' }))
     fireEvent.click(screen.getByText(/Launch an agent|Add an agent|agent/i))
@@ -161,7 +161,7 @@ describe('adding a step inside the rail', () => {
       withLoopConfig({ nodeType: 'loop', bodyNodeIds: [], maxIterations: 2 }),
       onInsertNode
     )
-    const rail = container.querySelector('[class*="border-cyan-400"]') as HTMLElement
+    const rail = container.querySelector('[data-loop-rail]') as HTMLElement
 
     fireEvent.click(within(rail).getByRole('button', { name: '' }))
     fireEvent.click(screen.getByText(/Launch an agent|Add an agent|agent/i))

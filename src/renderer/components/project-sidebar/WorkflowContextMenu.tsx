@@ -61,10 +61,10 @@ export function WorkflowContextMenu({
       ref={menuRef}
       className={
         useFixed
-          ? 'z-50 py-1 border border-white/[0.08] rounded-lg shadow-xl'
-          : 'absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1 border border-white/[0.08] rounded-lg shadow-xl'
+          ? 'z-50 py-1 bg-surface-sunken border border-white/[0.08] rounded-lg shadow-xl'
+          : 'absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1 bg-surface-sunken border border-white/[0.08] rounded-lg shadow-xl'
       }
-      style={{ background: '#141416', ...positionStyle }}
+      style={positionStyle}
     >
       <button
         onClick={() => {

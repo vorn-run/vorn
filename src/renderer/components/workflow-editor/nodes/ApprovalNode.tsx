@@ -23,7 +23,7 @@ export function ApprovalNode({ label, config, selected, executionStatus, onClick
       }}
       className={`relative px-3 py-2.5 rounded-md border w-[280px] transition-all cursor-pointer
                   ${selected ? 'border-blue-500/60 shadow-[0_0_0_3px_rgba(59,130,246,0.08)]' : 'border-white/[0.08]'}
-                  bg-[#1d1d20] hover:bg-white/[0.02]`}
+                  bg-surface-node hover:bg-white/[0.02]`}
     >
       {executionStatus && STATUS_DOT_CLASSES[executionStatus] && (
         <span

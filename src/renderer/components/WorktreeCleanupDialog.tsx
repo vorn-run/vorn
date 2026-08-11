@@ -98,8 +98,7 @@ export function WorktreeCleanupDialog() {
           />
           <motion.div
             className="fixed top-1/2 left-1/2 z-[60] w-[420px] border border-white/[0.08]
-                       rounded-xl shadow-2xl overflow-hidden"
-            style={{ background: '#1e1e22' }}
+                       rounded-xl shadow-2xl overflow-hidden bg-surface-raised"
             initial={{ opacity: 0, scale: 0.95, x: '-50%', y: '-50%' }}
             animate={{ opacity: 1, scale: 1, x: '-50%', y: '-50%' }}
             exit={{ opacity: 0, scale: 0.95, x: '-50%', y: '-50%' }}
@@ -108,8 +107,8 @@ export function WorktreeCleanupDialog() {
             <div className="px-5 py-4 border-b border-white/[0.06] flex items-center gap-3">
               <FolderGit2 size={18} className="text-amber-400 shrink-0" />
               <div>
-                <h3 className="text-sm font-medium text-white">Remove Worktree</h3>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <h3 className="text-[13px] font-medium text-white">Remove Worktree</h3>
+                <p className="text-[11px] text-gray-500 mt-0.5">
                   {sessionCount > 0
                     ? 'This worktree has active sessions'
                     : 'Remove this worktree from disk?'}
@@ -147,15 +146,15 @@ export function WorktreeCleanupDialog() {
             <div className="px-5 py-3 border-t border-white/[0.06] flex justify-end gap-2">
               <button
                 onClick={handleClose}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-300
-                           bg-white/[0.04] hover:bg-white/[0.08] rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-gray-300
+                           bg-white/[0.04] hover:bg-white/[0.08] rounded-md transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleRemove}
                 disabled={dirtyState === 'checking'}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-md transition-colors
                            disabled:opacity-50 ${
                              showWarning || sessionCount > 0
                                ? 'text-red-300 bg-red-500/[0.15] hover:bg-red-500/[0.25] border border-red-500/30'
@@ -164,7 +163,7 @@ export function WorktreeCleanupDialog() {
               >
                 <Trash2 size={12} />
                 {dirtyState === 'checking'
-                  ? 'Checking...'
+                  ? 'Checking…'
                   : sessionCount > 0
                     ? 'Close sessions & remove'
                     : showWarning

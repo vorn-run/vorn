@@ -46,7 +46,7 @@ export function ConnectorButton({
                     ${
                       open
                         ? 'bg-white/[0.08] border-blue-500/40 text-white'
-                        : 'bg-[#1d1d20] border-white/[0.1] text-gray-500 hover:border-white/[0.2] hover:text-white'
+                        : 'bg-surface-node border-white/[0.1] text-gray-500 hover:border-white/[0.2] hover:text-white'
                     }`}
       >
         <Plus size={13} strokeWidth={2.5} />

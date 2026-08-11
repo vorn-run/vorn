@@ -45,7 +45,7 @@ export function LoopNode({
       className={`relative px-3 py-2.5 rounded-md border w-[280px] transition-all cursor-pointer
                   ${selected ? 'border-blue-500/60 shadow-[0_0_0_3px_rgba(59,130,246,0.08)]' : 'border-white/[0.08]'}
                   ${body.length === 0 ? 'border-dashed' : ''}
-                  bg-[#1d1d20] hover:bg-white/[0.02]`}
+                  bg-surface-node hover:bg-white/[0.02]`}
     >
       {executionStatus && STATUS_DOT_CLASSES[executionStatus] && (
         <span
@@ -53,13 +53,13 @@ export function LoopNode({
         />
       )}
       <div className="flex items-center gap-2">
-        <Repeat size={14} className="shrink-0 text-cyan-400" strokeWidth={2} />
+        <Repeat size={14} className="shrink-0 text-gray-300" strokeWidth={2} />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-white truncate">{label}</div>
           <div className="text-[11px] text-gray-500 truncate">{subtitle}</div>
         </div>
         {iteration !== undefined && iteration > 0 && (
-          <span className="shrink-0 text-[10px] text-cyan-300/80 bg-cyan-500/10 rounded px-1.5 py-0.5">
+          <span className="shrink-0 text-[10px] text-gray-400 bg-white/[0.06] rounded px-1.5 py-0.5">
             {iteration}×
           </span>
         )}
