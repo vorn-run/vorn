@@ -98,7 +98,7 @@ import {
   mcpConnectionActions,
   stopMcpClient
 } from './connectors'
-import { MCP_CONNECTOR_ID } from './connectors/mcp'
+import { MCP_CONNECTOR_ID, backfillMcpConnection } from './connectors/mcp'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { detectRepoSlug } from './connectors/github'
@@ -904,7 +904,12 @@ export function registerAllMethods(): void {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return { imported: 0, updated: 0, error: 'Connection not found' }
     const connector = connectorRegistry.get(conn.connectorId)
-    if (!connector?.listItems && !connector?.listItemsPage) {
+    // MCP is polymorphic: draining it needs the full SourceConnection to
+    // address the per-connection stdio client, which the generic
+    // listItemsPage(filters) signature cannot carry — the same reason the
+    // scheduler routes MCP polling through pollMcpConnection.
+    const isMcp = conn.connectorId === MCP_CONNECTOR_ID
+    if (!isMcp && !connector?.listItems && !connector?.listItemsPage) {
       return {
         imported: 0,
         updated: 0,
@@ -918,7 +923,12 @@ export function registerAllMethods(): void {
     const projectName = conn.executionProject || conn.name
 
     try {
-      await forEachConnectorItem(connector, applyDecryptedCreds(conn), (item) => {
+      const drain = isMcp
+        ? (visit: (item: ExternalItem) => void) => backfillMcpConnection(conn, visit)
+        : (visit: (item: ExternalItem) => void) =>
+            forEachConnectorItem(connector!, applyDecryptedCreds(conn), visit)
+
+      await drain((item) => {
         const initialStatus = conn.statusMapping?.[item.status] || ('todo' as TaskStatus)
         const upserted = upsertExternalItem(
           conn,
