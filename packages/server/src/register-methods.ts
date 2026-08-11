@@ -100,7 +100,7 @@ import {
 } from './connectors'
 import { MCP_CONNECTOR_ID } from './connectors/mcp'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
-import { catalogItems } from './connectors/catalog'
+import { catalogItems, refreshCatalog } from './connectors/catalog'
 import { detectRepoSlug } from './connectors/github'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
@@ -884,6 +884,15 @@ export function registerAllMethods(): void {
    * offered in the connector list rather than requiring its package name.
    */
   registerMethod('connector:catalog', () => catalogItems())
+
+  /**
+   * Fetch the published catalog now rather than waiting for the next stale
+   * check, so someone who just heard a connector exists can go and find it.
+   */
+  registerMethod('connector:catalogRefresh', async () => {
+    await refreshCatalog()
+    return catalogItems()
+  })
 
   /**
    * One-shot backfill for a connection. Calls listItems() (not poll()) so it

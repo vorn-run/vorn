@@ -15,7 +15,6 @@ export default defineConfig({
       reporter: ['text', 'text-summary', 'lcov'],
       include: [
         'packages/connector-sdk/src/**/*.ts',
-        'packages/connector-kusto/src/**/*.ts',
         'packages/server/src/**/*.ts',
         'packages/shared/src/**/*.ts',
         'src/renderer/lib/**/*.ts',
@@ -23,7 +22,6 @@ export default defineConfig({
       ],
       exclude: [
         // Process entry point: starts the stdio server, nothing to assert.
-        'packages/connector-kusto/src/index.ts',
         'packages/server/src/index.ts',
         'packages/server/src/register-methods.ts',
         'packages/server/src/pty-manager.ts',

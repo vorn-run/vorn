@@ -39,11 +39,11 @@ export async function launchServer(): Promise<ServerBridge> {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        NODE_ENV: process.env.NODE_ENV ?? 'development',
-        // Told, not guessed: this is the one place that knows a checkout is
-        // being run, so connector packages built locally can be preferred
-        // over published ones without the server sniffing its own cwd.
-        VORN_REPO_ROOT: repoRoot
+        NODE_ENV: process.env.NODE_ENV ?? 'development'
+        // Connectors live in their own repository now, so a local build is
+        // preferred by setting VORN_CONNECTORS_ROOT to that checkout. It
+        // passes through with the rest of the environment above; deriving it
+        // from this repo's root would point at packages that are not here.
       },
       cwd: repoRoot
     })

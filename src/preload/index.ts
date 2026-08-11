@@ -576,6 +576,10 @@ const api = {
     Array<import('../../packages/shared/src/types').ConnectorCatalogItem>
   > => ipcRenderer.invoke(IPC.CONNECTOR_CATALOG),
 
+  refreshConnectorCatalog: (): Promise<
+    Array<import('../../packages/shared/src/types').ConnectorCatalogItem>
+  > => ipcRenderer.invoke(IPC.CONNECTOR_CATALOG_REFRESH),
+
   upsertTaskFromItem: (params: {
     connectionId: string
     item: import('../../packages/shared/src/types').ConnectorItemContext
