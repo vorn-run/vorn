@@ -184,6 +184,7 @@ export function WorktreeItem({
         <Tooltip label="Rename worktree" position="right">
           <button
             type="button"
+            aria-label="Rename worktree"
             onClick={(e) => {
               e.stopPropagation()
               setRenaming(true)
