@@ -78,7 +78,9 @@ export function WorktreeItem({
         <span
           role="button"
           tabIndex={0}
-          aria-expanded={sessionsExpanded}
+          // A disclosure control has to report its state even before anything
+          // has set it, or assistive tech is told nothing rather than closed.
+          aria-expanded={sessionsExpanded ?? false}
           aria-label="Toggle sessions"
           className="relative w-[14px] h-[14px] shrink-0 ml-2 cursor-pointer"
           onClick={(e) => {

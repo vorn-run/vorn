@@ -328,6 +328,13 @@ describe('WorktreeItem sessions toggle', () => {
     expect(onToggle).toHaveBeenCalledTimes(2)
   })
 
+  it('reports collapsed rather than nothing before anything sets the state', () => {
+    const { getByLabelText } = renderWorktreeItem(worktree, vi.fn(), {
+      onToggleSessionsExpanded: vi.fn()
+    })
+    expect(getByLabelText('Toggle sessions')).toHaveAttribute('aria-expanded', 'false')
+  })
+
   it('says whether it is expanded, so a screen reader is not guessing', () => {
     const { getByLabelText, rerender } = renderWorktreeItem(worktree, vi.fn(), {
       onToggleSessionsExpanded: vi.fn(),
@@ -355,7 +362,8 @@ describe('WorktreeItem sessions toggle', () => {
 describe('WorktreeItem rename', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockRenameWorktree.mockResolvedValue(true)
+    // The real contract: the new path and name, or null when it failed.
+    mockRenameWorktree.mockResolvedValue({ newPath: '/tmp/p/renamed', name: 'renamed' })
     useAppStore.setState({ config: baseConfig as AppConfig })
   })
 
@@ -397,7 +405,7 @@ describe('WorktreeItem rename', () => {
   })
 
   it('says so when the rename was refused', async () => {
-    mockRenameWorktree.mockResolvedValue(false)
+    mockRenameWorktree.mockResolvedValue(null)
     const onWorktreesChanged = vi.fn()
     const { input } = startRenaming(onWorktreesChanged)
 
