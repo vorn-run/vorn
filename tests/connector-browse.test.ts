@@ -3,6 +3,12 @@ import {
   buildConnectorListings,
   filterConnectorListings,
   groupConnectorListings,
+  connectorCategories,
+  describeCatalogAge,
+  filterByCategory,
+  listingDetails,
+  CALLABLE_FILTER,
+  CONNECTED_FILTER,
   type BuiltInConnector
 } from '../src/renderer/lib/connector-browse'
 import type { ConnectorCatalogItem, SourceConnection } from '../src/shared/types'
@@ -251,5 +257,161 @@ describe('connectors that are installed but not in the catalog', () => {
     expect(listings).toHaveLength(1)
     expect(listings[0].id).toBe('mcp')
     expect(listings[0].connectedCount).toBe(1)
+  })
+})
+
+describe('listingDetails', () => {
+  const packaged = catalogItem('ado', 'Azure DevOps', {
+    version: '0.1.0',
+    triggers: [{ type: 'workItem', label: 'A work item matches', description: 'Once per item' }],
+    actions: [],
+    env: [
+      { name: 'ADO_ORGANIZATION', required: true, description: 'Name or URL' },
+      { name: 'ADO_TOP', required: false }
+    ]
+  })
+
+  const listingFor = (item: ConnectorCatalogItem) =>
+    buildConnectorListings([], [item], []).find((listing) => listing.id === item.id)!
+
+  it('reads what a packaged connector says about itself', () => {
+    const details = listingDetails(listingFor(packaged))
+    expect(details.known).toBe(true)
+    expect(details.triggers).toEqual([
+      { type: 'workItem', label: 'A work item matches', description: 'Once per item' }
+    ])
+    expect(details.actions).toEqual([])
+    expect(details.settings).toEqual([
+      { name: 'ADO_ORGANIZATION', required: true, description: 'Name or URL' },
+      { name: 'ADO_TOP', required: false }
+    ])
+  })
+
+  it('reaches the same shape for a built-in, so one card serves every row', () => {
+    const github: BuiltInConnector = {
+      id: 'github',
+      name: 'GitHub',
+      capabilities: ['triggers', 'actions'],
+      manifest: {
+        triggers: [{ type: 'issue', label: 'An issue is opened' }],
+        actions: [{ type: 'comment', label: 'Comment on an issue' }],
+        auth: [{ key: 'token', label: 'GITHUB_TOKEN', required: true }]
+      }
+    }
+    const listing = buildConnectorListings([github], [], [])[0]
+    const details = listingDetails(listing, [github])
+
+    expect(details.known).toBe(true)
+    expect(details.triggers).toEqual([{ type: 'issue', label: 'An issue is opened' }])
+    expect(details.actions).toEqual([{ type: 'comment', label: 'Comment on an issue' }])
+    expect(details.settings).toEqual([{ name: 'GITHUB_TOKEN', required: true }])
+  })
+
+  it('says it knows nothing rather than claiming there is nothing', () => {
+    // An entry from a catalog published before these fields existed. Rendering
+    // "no triggers" for it would be a confident lie.
+    const details = listingDetails(listingFor(catalogItem('old', 'Old')))
+    expect(details.known).toBe(false)
+    expect(details.triggers).toEqual([])
+  })
+
+  it('knows nothing about a package installed by name, which carries no manifest', () => {
+    const listings = buildConnectorListings(
+      [],
+      [],
+      [connection({ id: 'c1', connectorId: 'mcp', name: 'thing', mcpServerId: 'thing' })]
+    )
+    const installed = listings.find((listing) => listing.source === 'installed')
+    if (installed) expect(listingDetails(installed).known).toBe(false)
+  })
+})
+
+describe('connectorCategories', () => {
+  it('offers the categories actually present, so a new one needs no release', () => {
+    const listings = buildConnectorListings(
+      [],
+      [
+        catalogItem('a', 'A', { category: 'Development' }),
+        catalogItem('b', 'B', { category: 'Data' })
+      ],
+      []
+    )
+    expect(connectorCategories(listings)).toEqual(['Data', 'Development'])
+  })
+
+  it('offers "callable" only when something can actually be called', () => {
+    const watcher = catalogItem('a', 'A', { capabilities: ['triggers'] })
+    const doer = catalogItem('b', 'B', { capabilities: ['triggers', 'actions'] })
+
+    expect(connectorCategories(buildConnectorListings([], [watcher], []))).not.toContain(
+      CALLABLE_FILTER
+    )
+    expect(connectorCategories(buildConnectorListings([], [watcher, doer], []))).toContain(
+      CALLABLE_FILTER
+    )
+  })
+
+  it('offers "connected" only once something is', () => {
+    const item = catalogItem('a', 'A')
+    expect(connectorCategories(buildConnectorListings([], [item], []))).not.toContain(
+      CONNECTED_FILTER
+    )
+    const connected = buildConnectorListings([], [item], [connection({ connectorId: 'a' })])
+    expect(connectorCategories(connected)).toContain(CONNECTED_FILTER)
+  })
+})
+
+describe('filterByCategory', () => {
+  const listings = () =>
+    buildConnectorListings(
+      [],
+      [
+        catalogItem('a', 'A', { category: 'Development', capabilities: ['triggers'] }),
+        catalogItem('b', 'B', { category: 'Data', capabilities: ['triggers', 'actions'] })
+      ],
+      [connection({ connectorId: 'b' })]
+    )
+
+  it('returns everything when nothing is picked', () => {
+    expect(filterByCategory(listings(), undefined)).toHaveLength(2)
+  })
+
+  it('narrows to one category', () => {
+    expect(filterByCategory(listings(), 'Data').map((l) => l.id)).toEqual(['b'])
+  })
+
+  it('narrows to what a workflow step can call', () => {
+    expect(filterByCategory(listings(), CALLABLE_FILTER).map((l) => l.id)).toEqual(['b'])
+  })
+
+  it('narrows to what is already set up, which is the other half of this page', () => {
+    expect(filterByCategory(listings(), CONNECTED_FILTER).map((l) => l.id)).toEqual(['b'])
+  })
+
+  it('returns nothing rather than everything for a category nothing is in', () => {
+    expect(filterByCategory(listings(), 'Nonexistent')).toEqual([])
+  })
+})
+
+describe('describeCatalogAge', () => {
+  const now = Date.UTC(2026, 7, 10, 12, 0, 0)
+
+  it('says plainly when the published list has never been read', () => {
+    // The alternative is a reassuring timestamp for a list that may be missing
+    // everything published since the app was built.
+    expect(describeCatalogAge(undefined, now)).toBe('Showing the connectors that shipped with Vorn')
+  })
+
+  it('reads in the units someone would ask in', () => {
+    expect(describeCatalogAge(now - 30_000, now)).toBe('Updated just now')
+    expect(describeCatalogAge(now - 60_000, now)).toBe('Updated 1 minute ago')
+    expect(describeCatalogAge(now - 25 * 60_000, now)).toBe('Updated 25 minutes ago')
+    expect(describeCatalogAge(now - 2 * 3_600_000, now)).toBe('Updated 2 hours ago')
+    expect(describeCatalogAge(now - 3 * 86_400_000, now)).toBe('Updated 3 days ago')
+  })
+
+  it('does not say "1 minutes"', () => {
+    expect(describeCatalogAge(now - 3_600_000, now)).toBe('Updated 1 hour ago')
+    expect(describeCatalogAge(now - 86_400_000, now)).toBe('Updated 1 day ago')
   })
 })

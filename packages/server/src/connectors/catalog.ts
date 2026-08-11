@@ -190,6 +190,7 @@ async function download(get: typeof fetch): Promise<ConnectorCatalogEntry[] | un
 }
 
 let resolved: ConnectorCatalogItem[] | undefined
+let resolvedAt: number | undefined
 
 /**
  * The catalog as the UI consumes it.
@@ -204,17 +205,36 @@ export function catalogItems(options: CatalogOptions = {}): ConnectorCatalogItem
     const now = options.now ?? Date.now()
     const cache = readCache(options.cachePath ?? CACHE_PATH)
     resolved = withLaunch(cache?.connectors ?? CONNECTOR_CATALOG)
+    resolvedAt = cache?.fetchedAt
     if (!cache || now - cache.fetchedAt > MAX_AGE_MS) void refreshCatalog(options)
   }
   return resolved
+}
+
+/**
+ * The catalog with when it was last fetched, which is what the UI shows.
+ *
+ * Undefined means nothing has ever been fetched — a first run, or every attempt
+ * so far has failed — and the list is the bundled seed. That is worth saying
+ * out loud rather than showing a reassuring timestamp for a list that may be
+ * missing everything published since the app was built.
+ */
+export function catalogSnapshot(options: CatalogOptions = {}): {
+  items: ConnectorCatalogItem[]
+  fetchedAt?: number
+} {
+  const items = catalogItems(options)
+  return resolvedAt === undefined ? { items } : { items, fetchedAt: resolvedAt }
 }
 
 /** Fetch the published catalog and adopt it if it parses. Never throws. */
 export async function refreshCatalog(options: CatalogOptions = {}): Promise<boolean> {
   const connectors = await download(options.fetchImpl ?? fetch)
   if (!connectors) return false
-  writeCache(options.cachePath ?? CACHE_PATH, connectors, options.now ?? Date.now())
+  const now = options.now ?? Date.now()
+  writeCache(options.cachePath ?? CACHE_PATH, connectors, now)
   resolved = withLaunch(connectors)
+  resolvedAt = now
   return true
 }
 
@@ -225,4 +245,5 @@ function withLaunch(entries: ConnectorCatalogEntry[]): ConnectorCatalogItem[] {
 /** Test seam: forget what has been resolved this process. */
 export function resetCatalogCache(): void {
   resolved = undefined
+  resolvedAt = undefined
 }

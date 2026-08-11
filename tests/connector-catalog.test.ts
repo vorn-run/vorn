@@ -7,6 +7,7 @@ import {
   CONNECTOR_CATALOG,
   catalogItems,
   catalogLaunchSpec,
+  catalogSnapshot,
   parseCatalog,
   refreshCatalog,
   resetCatalogCache
@@ -198,6 +199,25 @@ describe('catalogItems', () => {
   })
 })
 
+describe('catalogSnapshot', () => {
+  it('reports no fetch time at all when nothing has ever been fetched', () => {
+    // The UI says "showing what shipped with Vorn" for this, rather than a
+    // timestamp for a list that may be missing everything published since.
+    resetCatalogCache()
+    expect(catalogSnapshot({ ...offline(), cachePath: emptyCache() }).fetchedAt).toBeUndefined()
+  })
+
+  it('reports when the cached catalog was fetched', () => {
+    resetCatalogCache()
+    const cachePath = emptyCache()
+    writeFileSync(cachePath, JSON.stringify({ fetchedAt: 5000, connectors: [published('a')] }))
+
+    const snapshot = catalogSnapshot({ ...offline(), now: 5000, cachePath })
+    expect(snapshot.fetchedAt).toBe(5000)
+    expect(snapshot.items.map((item) => item.id)).toEqual(['a'])
+  })
+})
+
 describe('refreshCatalog', () => {
   it('adopts the published catalog and caches it for next time', async () => {
     resetCatalogCache()
@@ -210,6 +230,8 @@ describe('refreshCatalog', () => {
     expect(await refreshCatalog({ fetchImpl, cachePath, now: 42 })).toBe(true)
     expect(catalogItems({ ...offline(), cachePath }).map((i) => i.id)).toEqual(['remote'])
     expect(JSON.parse(readFileSync(cachePath, 'utf8'))).toMatchObject({ fetchedAt: 42 })
+    // The freshness line reads this, so a successful check has to move it.
+    expect(catalogSnapshot({ ...offline(), cachePath }).fetchedAt).toBe(42)
   })
 
   it('keeps what it had when the fetch fails', async () => {

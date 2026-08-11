@@ -1464,6 +1464,18 @@ export interface ConnectorCatalogItem extends ConnectorCatalogEntry {
   launch: { command: string; args: string[] }
 }
 
+/**
+ * The catalog plus when it was last fetched.
+ *
+ * `fetchedAt` is absent when nothing has ever been fetched — a first run, or
+ * every attempt so far has failed — so the UI can say that rather than showing
+ * a timestamp for a list that may be missing everything published since.
+ */
+export interface ConnectorCatalogSnapshot {
+  items: ConnectorCatalogItem[]
+  fetchedAt?: number
+}
+
 export interface SdkConnectorManifest {
   id: string
   name: string

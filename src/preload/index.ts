@@ -573,11 +573,11 @@ const api = {
     ipcRenderer.invoke(IPC.CONNECTOR_PROBE_SDK, request),
 
   listConnectorCatalog: (): Promise<
-    Array<import('../../packages/shared/src/types').ConnectorCatalogItem>
+    import('../../packages/shared/src/types').ConnectorCatalogSnapshot
   > => ipcRenderer.invoke(IPC.CONNECTOR_CATALOG),
 
   refreshConnectorCatalog: (): Promise<
-    Array<import('../../packages/shared/src/types').ConnectorCatalogItem>
+    import('../../packages/shared/src/types').ConnectorCatalogSnapshot
   > => ipcRenderer.invoke(IPC.CONNECTOR_CATALOG_REFRESH),
 
   upsertTaskFromItem: (params: {

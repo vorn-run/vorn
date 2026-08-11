@@ -3,16 +3,11 @@ import { useAppStore } from '../../stores'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { connectionIcon } from '../../lib/connection-icon'
+import { buildConnectorListings, type ConnectorListing } from '../../lib/connector-browse'
+import { ConnectorDirectory } from './ConnectorDirectory'
+import { ConnectorDetail } from './ConnectorDetail'
 import {
-  buildConnectorListings,
-  filterConnectorListings,
-  groupConnectorListings,
-  type ConnectorListing
-} from '../../lib/connector-browse'
-import {
-  Plus,
   Play,
-  Search,
   Trash2,
   Check,
   AlertCircle,
@@ -27,6 +22,7 @@ import {
 import { Tooltip } from '../Tooltip'
 import type {
   ConnectorCatalogItem,
+  ConnectorCatalogSnapshot,
   SourceConnection,
   ConnectorManifest,
   ConnectorConfigField,
@@ -96,7 +92,10 @@ export function ConnectorSettings() {
   // One selection, so "both open at once" is not a representable state.
   const [adding, setAdding] = useState<ConnectorListing | null>(null)
   const [catalog, setCatalog] = useState<ConnectorCatalogItem[]>([])
-  const [search, setSearch] = useState('')
+  const [catalogFetchedAt, setCatalogFetchedAt] = useState<number>()
+  // What the detail panel is describing. Separate from `adding` so opening a
+  // connector to read about it is not the same as committing to install it.
+  const [selected, setSelected] = useState<ConnectorListing | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [backfillingId, setBackfillingId] = useState<string | null>(null)
   const [backfillResult, setBackfillResult] = useState<
@@ -122,16 +121,24 @@ export function ConnectorSettings() {
   // Fetched once rather than with every refresh: the catalog is fixed for the
   // life of the process, so re-reading it after each run, delete or install
   // would be a round trip that always returns the same answer.
-  useEffect(() => {
-    void window.api.listConnectorCatalog().then(setCatalog)
+  const applyCatalog = useCallback((snapshot: ConnectorCatalogSnapshot) => {
+    setCatalog(snapshot.items)
+    setCatalogFetchedAt(snapshot.fetchedAt)
   }, [])
+
+  useEffect(() => {
+    void window.api.listConnectorCatalog().then(applyCatalog)
+  }, [applyCatalog])
 
   const listings = useMemo(
     () => buildConnectorListings(connectors, catalog, connections),
     [connectors, catalog, connections]
   )
-  const visible = useMemo(() => filterConnectorListings(listings, search), [listings, search])
-  const groups = useMemo(() => groupConnectorListings(visible), [visible])
+  // Re-read from the current listings so a connection made while the panel is
+  // open updates its "connected" count rather than showing the stale copy.
+  const selectedListing = selected
+    ? (listings.find((listing) => listing.key === selected.key) ?? selected)
+    : null
   // Resolved up front so the built-in form is only rendered once there is a
   // connector to hand it.
   const addingBuiltIn =
@@ -207,93 +214,29 @@ export function ConnectorSettings() {
           </div>
         ))}
 
-      {/* Available connectors */}
       <div className="mb-6">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-            Available Connectors
-          </h3>
-          <div className="relative w-56">
-            <Search
-              size={12}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600"
-            />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search connectors"
-              className="w-full pl-7 pr-2 py-1 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-200 focus:border-white/[0.2] outline-none"
-            />
-          </div>
-        </div>
+        <ConnectorDirectory
+          listings={listings}
+          builtIns={connectors}
+          selectedKey={selectedListing?.key}
+          fetchedAt={catalogFetchedAt}
+          onRefresh={async () => applyCatalog(await window.api.refreshConnectorCatalog())}
+          onSelect={(listing) => {
+            // Clicking the open card closes it, so the panel is never something
+            // you have to scroll past to get back to the grid.
+            setSelected((current) => (current?.key === listing.key ? null : listing))
+            setAdding(null)
+          }}
+        />
 
-        <div className="space-y-4">
-          {groups.map((group) => (
-            <div key={group.category} className="space-y-1">
-              {/* Headings only earn their place once there is more than one group. */}
-              {groups.length > 1 && (
-                <p className="text-[10px] text-gray-600 uppercase tracking-wider">
-                  {group.category}
-                </p>
-              )}
-              {group.listings.map((listing) => (
-                <div
-                  key={listing.key}
-                  className="flex items-center justify-between px-4 py-2.5 bg-white/[0.03] border border-white/[0.06] rounded-sm"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="w-7 h-7 shrink-0 flex items-center justify-center bg-white/[0.04] rounded-sm">
-                      <ConnectorIcon
-                        connectorId={listing.id}
-                        icon={listing.catalogItem?.icon ?? listing.icon}
-                        size={16}
-                        className="text-gray-200"
-                      />
-                    </span>
-                    <div>
-                      <div>
-                        <span className="text-sm text-gray-200 font-medium">{listing.name}</span>
-                        <span className="text-xs text-gray-500 ml-2">
-                          {listing.capabilities.join(' · ')}
-                        </span>
-                      </div>
-                      {listing.description && (
-                        <p className="text-[11px] text-gray-500">{listing.description}</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {listing.connectedCount > 0 && (
-                      <span className="text-xs text-green-500 flex items-center gap-1">
-                        <Check size={12} /> {listing.connectedCount} connected
-                      </span>
-                    )}
-                    {/* An installed row has no manifest and no package spec,
-                        so there is no form to open against it. */}
-                    {listing.source !== 'installed' && (
-                      <Tooltip
-                        label={listing.catalogItem?.auth ?? `Add a ${listing.name} connection`}
-                      >
-                        <button
-                          onClick={() => setAdding(listing)}
-                          className="text-xs text-gray-400 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
-                        >
-                          <Plus size={12} /> Add
-                        </button>
-                      </Tooltip>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
-          {visible.length === 0 && (
-            <p className="text-sm text-gray-500">
-              {search ? `No connectors match "${search}".` : 'No connectors available.'}
-            </p>
-          )}
-        </div>
+        {selectedListing && !adding && (
+          <ConnectorDetail
+            listing={selectedListing}
+            builtIns={connectors}
+            onAdd={() => setAdding(selectedListing)}
+            onClose={() => setSelected(null)}
+          />
+        )}
       </div>
 
       {adding?.catalogItem && (

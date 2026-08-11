@@ -100,7 +100,7 @@ import {
 } from './connectors'
 import { MCP_CONNECTOR_ID } from './connectors/mcp'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
-import { catalogItems, refreshCatalog } from './connectors/catalog'
+import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { detectRepoSlug } from './connectors/github'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
@@ -883,7 +883,7 @@ export function registerAllMethods(): void {
    * Connector packages Vorn knows by name, so a first-party connector can be
    * offered in the connector list rather than requiring its package name.
    */
-  registerMethod('connector:catalog', () => catalogItems())
+  registerMethod('connector:catalog', () => catalogSnapshot())
 
   /**
    * Fetch the published catalog now rather than waiting for the next stale
@@ -891,7 +891,7 @@ export function registerAllMethods(): void {
    */
   registerMethod('connector:catalogRefresh', async () => {
     await refreshCatalog()
-    return catalogItems()
+    return catalogSnapshot()
   })
 
   /**
