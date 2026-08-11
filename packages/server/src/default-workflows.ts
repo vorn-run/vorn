@@ -68,6 +68,22 @@ export function buildDefaultTaskWorkflow(): WorkflowDefinition {
 }
 
 /**
+ * A cron expression that fires every `minutes`.
+ *
+ * The minute field only counts to 59, so a step of 60 in it is not "hourly" —
+ * it is invalid, and a connector suggesting an hour would have been seeded with
+ * a schedule that never fires. An interval of an hour or more moves to the hour
+ * field instead; one that does not divide evenly into hours is rounded to the
+ * nearest hour rather than kept as an unschedulable minute step.
+ */
+export function cronEveryMinutes(minutes: number): string {
+  if (minutes <= 1) return '* * * * *'
+  if (minutes < 60) return `*/${minutes} * * * *`
+  const hours = Math.min(23, Math.round(minutes / 60))
+  return hours <= 1 ? '0 * * * *' : `0 */${hours} * * *`
+}
+
+/**
  * Build a seeded workflow for a (connection × manifest event). The graph is
  * `[connectorPoll trigger] → [createTaskFromItem node]`. Fully visible and
  * editable in the workflow editor — users can add condition/launchAgent nodes
@@ -82,8 +98,7 @@ export function buildConnectorSeededWorkflow(
   event: NonNullable<ConnectorManifest['defaultWorkflows']>[number]
 ): WorkflowDefinition {
   const id = connectorSeededWorkflowId(connection.id, event.event)
-  const minutes = Math.max(1, Math.round(event.defaultCronFromMinutes))
-  const cron = minutes === 1 ? '* * * * *' : `*/${minutes} * * * *`
+  const cron = cronEveryMinutes(Math.max(1, Math.round(event.defaultCronFromMinutes)))
 
   const triggerConfig: ConnectorPollTriggerConfig = {
     triggerType: 'connectorPoll',

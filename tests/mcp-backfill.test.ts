@@ -94,7 +94,7 @@ describe('backfillMcpConnection', () => {
     expect(args).toMatchObject({ limit: 10 })
   })
 
-  it('leaves the seed alone once it is following the tool own cursor', async () => {
+  it("leaves the seed alone once it is following the tool's own cursor", async () => {
     toolReturns({
       items: [{ externalId: '1', updatedAt: '2026-01-01T00:00:00Z' }],
       nextCursor: 'p2'
