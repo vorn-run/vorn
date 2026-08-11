@@ -37,16 +37,29 @@ const MANIFEST = {
   ]
 }
 
-const CATALOG = [
-  {
-    id: 'kusto',
-    name: 'Azure Data Explorer',
-    description: 'Trigger from a KQL query',
-    packageName: '@vornrun/connector-kusto',
-    capabilities: ['triggers'],
-    launch: { command: 'npx', args: ['-y', '@vornrun/connector-kusto'] }
-  }
-]
+/**
+ * The catalog exactly as `connector:catalog` returns it — a snapshot, not a
+ * bare list. A stub of the wrong shape passes every test here while every tool
+ * throws in production.
+ */
+const CATALOG = {
+  items: [
+    {
+      id: 'kusto',
+      name: 'Azure Data Explorer',
+      description: 'Trigger from a KQL query',
+      packageName: '@vornrun/connector-kusto',
+      version: '0.6.0',
+      capabilities: ['triggers', 'actions'],
+      auth: 'Signs in with your Azure identity.',
+      triggers: [{ type: 'queryResult', label: 'Query returns a row' }],
+      actions: [{ type: 'runQuery', label: 'Run a KQL query' }],
+      env: [{ name: 'KUSTO_CLUSTER', required: true }],
+      launch: { command: 'npx', args: ['-y', '@vornrun/connector-kusto'] }
+    }
+  ],
+  fetchedAt: 1_700_000_000_000
+}
 
 /** Route each RPC method to a canned answer, so a tool can be driven end to end. */
 function server(overrides: Record<string, unknown> = {}) {
@@ -122,6 +135,36 @@ describe('list_connectors', () => {
 
     expect(result.find((c: { id: string }) => c.id === 'kusto').connections).toBe(1)
     expect(result.find((c: { id: string }) => c.id === 'mcp').connections).toBe(0)
+  })
+
+  it('says what a connector does without launching it', async () => {
+    // The catalog carries this now, generated upstream from the connector's own
+    // manifest. Probing instead would mean an npx process per connector just to
+    // answer "which of these can create a work item".
+    const result = parsed(await tools.get('list_connectors')!({}))
+    const kusto = result.find((c: { id: string }) => c.id === 'kusto')
+
+    expect(kusto).toMatchObject({
+      version: '0.6.0',
+      triggers: [{ type: 'queryResult', label: 'Query returns a row' }],
+      actions: [{ type: 'runQuery', label: 'Run a KQL query' }],
+      env: ['KUSTO_CLUSTER'],
+      auth: 'Signs in with your Azure identity.'
+    })
+  })
+
+  it('leaves out what an older catalog never described', async () => {
+    server({
+      'connector:catalog': {
+        items: [{ ...CATALOG.items[0], triggers: undefined, actions: undefined, env: undefined }]
+      }
+    })
+
+    const kusto = parsed(await tools.get('list_connectors')!({})).find(
+      (c: { id: string }) => c.id === 'kusto'
+    )
+    expect(kusto.triggers).toBeUndefined()
+    expect(kusto).toMatchObject({ id: 'kusto', source: 'package' })
   })
 
   it('narrows to what is not set up yet when asked', async () => {
