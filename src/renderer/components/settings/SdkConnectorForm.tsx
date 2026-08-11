@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
-import type { ConnectorCatalogItem, SdkConnectorManifest, TaskStatus } from '../../../shared/types'
+import type {
+  ConnectorCatalogItem,
+  SdkConnectorManifest,
+  SdkTrigger,
+  TaskStatus
+} from '../../../shared/types'
 import { useAppStore } from '../../stores'
 import { parseLaunchSpec } from './parse-launch-spec'
 import { ConnectorIcon } from '../ConnectorIcon'
@@ -17,6 +22,19 @@ const INPUT_CLASS =
  * generic MCP form, where a single typo produces a connection that silently
  * never fires. The connector already knows all of them, so it is asked.
  */
+/**
+ * Turn a connector's suggestions into the connection's own mapping.
+ *
+ * A suggestion, not a rule: this is the starting point the person setting up
+ * the connection then owns, which is why it is written onto the connection
+ * rather than read from the manifest every time.
+ */
+function seedStatusMapping(suggestions: SdkTrigger['statusMapping']): Record<string, TaskStatus> {
+  const mapping: Record<string, TaskStatus> = {}
+  for (const entry of suggestions ?? []) mapping[entry.upstream] = entry.suggestedLocal
+  return mapping
+}
+
 export function SdkConnectorForm({
   onDone,
   onCancel,
@@ -132,7 +150,12 @@ export function SdkConnectorForm({
         name: trigger ? `${manifest.name}: ${trigger.label}` : manifest.name,
         filters,
         syncIntervalMinutes: 5,
-        statusMapping: {} as Record<string, TaskStatus>,
+        // Seeded from what the connector suggests. Left empty, every item it
+        // ever imports lands as `todo` — a closed issue included.
+        statusMapping: seedStatusMapping(trigger?.statusMapping),
+        // Without this the connection is made and then sits silent: nothing
+        // polls it until somebody builds the workflow by hand.
+        ...(trigger?.defaultWorkflow && { seedWorkflow: trigger.defaultWorkflow }),
         executionProject: selectedProject
       })
       onDone()

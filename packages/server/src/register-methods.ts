@@ -98,7 +98,7 @@ import {
   mcpConnectionActions,
   stopMcpClient
 } from './connectors'
-import { MCP_CONNECTOR_ID, backfillMcpConnection } from './connectors/mcp'
+import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, backfillMcpConnection } from './connectors/mcp'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { detectRepoSlug } from './connectors/github'
@@ -721,14 +721,39 @@ export function registerAllMethods(): void {
     }
     dbInsertSourceConnection(conn)
 
-    // Seed visible + editable default workflows from the connector manifest.
+    // Seed visible + editable default workflows. A built-in declares them on
+    // its manifest; a packaged connector cannot, because the connector the
+    // registry resolves for it is the generic MCP one — so the caller passes
+    // through what the probe read from the package.
     const connector = connectorRegistry.get(conn.connectorId)
-    if (connector) {
-      const manifest = connector.describe()
-      for (const event of manifest.defaultWorkflows ?? []) {
+    const manifest = connector?.describe()
+    const seeded: Array<NonNullable<ConnectorManifest['defaultWorkflows']>[number]> = [
+      ...(manifest?.defaultWorkflows ?? []),
+      ...(params.seedWorkflow
+        ? [
+            {
+              name: params.seedWorkflow.name,
+              event: MCP_POLL_EVENT,
+              defaultCronFromMinutes: params.seedWorkflow.defaultCronFromMinutes,
+              downstream: 'createTaskFromItem' as const
+            }
+          ]
+        : [])
+    ]
+    if (manifest) {
+      for (const event of seeded) {
         const wfId = connectorSeededWorkflowId(conn.id, event.event)
         if (dbGetWorkflow(wfId)) continue
-        const wf = buildConnectorSeededWorkflow(conn, manifest, event)
+        // The connection's own mapping beats the connector's suggestion: it is
+        // what the person setting it up actually chose.
+        const withMapping: ConnectorManifest = {
+          ...manifest,
+          statusMapping: Object.entries(conn.statusMapping ?? {}).map(([upstream, local]) => ({
+            upstream,
+            suggestedLocal: local
+          }))
+        }
+        const wf = buildConnectorSeededWorkflow(conn, withMapping, event)
         dbInsertWorkflow(wf)
         log.info(`[connector] seeded workflow ${wfId} for connection ${conn.id}`)
       }

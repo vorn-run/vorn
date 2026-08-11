@@ -362,3 +362,75 @@ describe('probeSdkConnector icon handling', () => {
     expect(result.manifest.triggers).toHaveLength(1)
   })
 })
+
+describe('what the probe accepts from a package', () => {
+  const probeWith = async (trigger: Record<string, unknown>) => {
+    const { probeSdkConnector } = await importProbe()
+    callTool.mockResolvedValue({
+      structuredContent: manifest({ triggers: [{ ...baseTrigger, ...trigger }] })
+    })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
+    if (!result.ok) throw new Error(result.error)
+    return result.manifest.triggers[0]
+  }
+
+  const baseTrigger = {
+    type: 'queryResult',
+    label: 'Query result',
+    setup: { filters: {}, env: [] }
+  }
+
+  it('reads a status mapping the connector suggested', async () => {
+    const trigger = await probeWith({
+      statusMapping: [
+        { upstream: 'open', suggestedLocal: 'todo' },
+        { upstream: 'closed', suggestedLocal: 'done' }
+      ]
+    })
+    expect(trigger.statusMapping).toEqual([
+      { upstream: 'open', suggestedLocal: 'todo' },
+      { upstream: 'closed', suggestedLocal: 'done' }
+    ])
+  })
+
+  it('drops a local status it does not recognise', async () => {
+    // This arrives from a third-party package. An unknown status written onto
+    // a connection would fail a constraint later, far from the connector that
+    // supplied it.
+    const trigger = await probeWith({
+      statusMapping: [
+        { upstream: 'open', suggestedLocal: 'todo' },
+        { upstream: 'weird', suggestedLocal: 'obliterated' }
+      ]
+    })
+    expect(trigger.statusMapping).toEqual([{ upstream: 'open', suggestedLocal: 'todo' }])
+  })
+
+  it('ignores a mapping that is not a list at all', async () => {
+    expect((await probeWith({ statusMapping: 'todo' })).statusMapping).toBeUndefined()
+    expect((await probeWith({ statusMapping: [] })).statusMapping).toBeUndefined()
+  })
+
+  it('reads a polling workflow', async () => {
+    const trigger = await probeWith({
+      defaultWorkflow: { name: 'Kusto: rows', defaultCronFromMinutes: 10 }
+    })
+    expect(trigger.defaultWorkflow).toEqual({ name: 'Kusto: rows', defaultCronFromMinutes: 10 })
+  })
+
+  it('refuses an interval that would never fire or never stop', async () => {
+    // A zero or fractional interval produces a cron that does one or the
+    // other, and neither is worth guessing a correction for.
+    for (const minutes of [0, -5, 1.5, 5000]) {
+      const trigger = await probeWith({
+        defaultWorkflow: { name: 'x', defaultCronFromMinutes: minutes }
+      })
+      expect(trigger.defaultWorkflow).toBeUndefined()
+    }
+  })
+
+  it('refuses a workflow with no name', async () => {
+    const trigger = await probeWith({ defaultWorkflow: { defaultCronFromMinutes: 5 } })
+    expect(trigger.defaultWorkflow).toBeUndefined()
+  })
+})

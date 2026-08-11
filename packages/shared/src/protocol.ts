@@ -258,7 +258,17 @@ export interface RequestMethods {
     params: Omit<
       SourceConnection,
       'id' | 'createdAt' | 'lastSyncAt' | 'lastSyncError' | 'syncCursor'
-    >
+    > & {
+      /**
+       * Polling workflow to seed alongside the connection.
+       *
+       * Built-ins declare this on their manifest, which the server reads
+       * directly. A packaged connector cannot: the connector the registry
+       * resolves for it is the generic MCP one, so what the probe read from
+       * the package is passed through here instead.
+       */
+      seedWorkflow?: { name: string; defaultCronFromMinutes: number }
+    }
     result: SourceConnection
   }
   'connection:update': {

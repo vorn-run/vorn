@@ -420,3 +420,52 @@ describe('connector icons', () => {
     expect(() => withIcon({ viewBox: '-1.5 -1.5 27 27', paths: ['M1 1h4v4z'] })).not.toThrow()
   })
 })
+
+describe('what a trigger says about setting up a connection', () => {
+  const withTrigger = (extra: Record<string, unknown>) =>
+    defineConnector({
+      id: 'acme',
+      name: 'Acme',
+      triggers: [
+        {
+          type: 'newTicket',
+          label: 'New ticket',
+          poll: (() => ({ items: [] })) as never,
+          ...extra
+        } as never
+      ]
+    })
+
+  it('carries the status mapping a connection should start from', () => {
+    // Without it every item a connector imports lands as `todo`, a ticket
+    // closed a year ago included.
+    const connector = withTrigger({
+      statusMapping: [
+        { upstream: 'open', suggestedLocal: 'todo' },
+        { upstream: 'closed', suggestedLocal: 'done' }
+      ]
+    })
+    expect(connectorManifest(connector).triggers[0].statusMapping).toEqual([
+      { upstream: 'open', suggestedLocal: 'todo' },
+      { upstream: 'closed', suggestedLocal: 'done' }
+    ])
+  })
+
+  it('carries the polling workflow to seed with the connection', () => {
+    const connector = withTrigger({
+      defaultWorkflow: { name: 'Acme: new tickets', defaultCronFromMinutes: 5 }
+    })
+    expect(connectorManifest(connector).triggers[0].defaultWorkflow).toEqual({
+      name: 'Acme: new tickets',
+      defaultCronFromMinutes: 5
+    })
+  })
+
+  it('says nothing rather than nothing-in-particular when the connector was silent', () => {
+    // Absent has to stay absent: the app treats "no suggestion" differently
+    // from "suggested an empty mapping".
+    const trigger = connectorManifest(withTrigger({})).triggers[0]
+    expect(trigger.statusMapping).toBeUndefined()
+    expect(trigger.defaultWorkflow).toBeUndefined()
+  })
+})
