@@ -190,6 +190,43 @@ function toManifest(payload: Record<string, unknown>): SdkConnectorManifest {
   const name = str(payload.name).trim()
   if (!id || !name) throw new Error('Connector manifest is missing an id or a name')
 
+  /** Local statuses a connector is allowed to suggest. */
+  const LOCAL_STATUSES = ['todo', 'in_progress', 'in_review', 'done', 'cancelled'] as const
+
+  /**
+   * Read a connector's suggested status mapping.
+   *
+   * This arrives from a third-party package, so an unrecognised local status is
+   * dropped rather than written into a connection where it would fail a
+   * constraint later, far from the connector that supplied it.
+   */
+  function readStatusMapping(
+    raw: unknown
+  ): Array<{ upstream: string; suggestedLocal: TaskStatus }> | undefined {
+    if (!Array.isArray(raw)) return undefined
+    const mapped = raw.filter(isRecord).flatMap((entry) => {
+      const upstream = str(entry.upstream).trim()
+      const local = str(entry.suggestedLocal).trim()
+      if (!upstream) return []
+      if (!(LOCAL_STATUSES as readonly string[]).includes(local)) return []
+      return [{ upstream, suggestedLocal: local as TaskStatus }]
+    })
+    return mapped.length > 0 ? mapped : undefined
+  }
+
+  /** Read a connector's suggested polling workflow, if it declared a usable one. */
+  function readDefaultWorkflow(
+    raw: unknown
+  ): { name: string; defaultCronFromMinutes: number } | undefined {
+    if (!isRecord(raw)) return undefined
+    const name = str(raw.name).trim()
+    const minutes = Number(raw.defaultCronFromMinutes)
+    // A zero or fractional interval would produce a cron that never fires or
+    // fires constantly; neither is worth guessing a correction for.
+    if (!name || !Number.isInteger(minutes) || minutes < 1 || minutes > 1440) return undefined
+    return { name, defaultCronFromMinutes: minutes }
+  }
+
   const rawTriggers = Array.isArray(payload.triggers) ? payload.triggers : []
   const triggers: SdkTrigger[] = []
   const env = new Map<string, SdkEnvVar>()
@@ -201,10 +238,15 @@ function toManifest(payload: Record<string, unknown>): SdkConnectorManifest {
     const setup = isRecord(raw.setup) ? raw.setup : {}
     const filters = isRecord(setup.filters) ? setup.filters : {}
 
+    const statusMapping = readStatusMapping(raw.statusMapping)
+    const defaultWorkflow = readDefaultWorkflow(raw.defaultWorkflow)
+
     triggers.push({
       type,
       label: str(raw.label, type),
       ...(typeof raw.description === 'string' && { description: raw.description }),
+      ...(statusMapping && { statusMapping }),
+      ...(defaultWorkflow && { defaultWorkflow }),
       filters: {
         pollTool: str(filters.pollTool, `poll_${type}`),
         itemsPath: str(filters.itemsPath, 'items'),

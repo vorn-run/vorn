@@ -528,7 +528,7 @@ const api = {
     params: Omit<
       SourceConnection,
       'id' | 'createdAt' | 'lastSyncAt' | 'lastSyncError' | 'syncCursor'
-    >
+    > & { seedWorkflow?: { name: string; defaultCronFromMinutes: number } }
   ): Promise<SourceConnection> => ipcRenderer.invoke(IPC.CONNECTION_CREATE, params),
 
   updateConnection: (

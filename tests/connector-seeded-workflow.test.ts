@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { buildConnectorSeededWorkflow } from '../packages/server/src/default-workflows'
+import {
+  buildConnectorSeededWorkflow,
+  cronEveryMinutes
+} from '../packages/server/src/default-workflows'
 import {
   connectorSeededWorkflowId,
   type SourceConnection,
@@ -122,5 +125,36 @@ describe('buildConnectorSeededWorkflow', () => {
     const node = wf.nodes.find((n) => n.type === 'createTaskFromItem')!
       .config as CreateTaskFromItemConfig
     expect(node.project).toBe('fromConnection')
+  })
+})
+
+describe('cronEveryMinutes', () => {
+  it('steps the minute field below an hour', () => {
+    expect(cronEveryMinutes(1)).toBe('* * * * *')
+    expect(cronEveryMinutes(5)).toBe('*/5 * * * *')
+    expect(cronEveryMinutes(59)).toBe('*/59 * * * *')
+  })
+
+  it('moves to the hour field at an hour, rather than emitting an invalid cron', () => {
+    // The minute field only counts to 59, so `*/60 * * * *` is not hourly — it
+    // is unschedulable, and a connector suggesting an hour would have been
+    // seeded with a workflow that never fires.
+    expect(cronEveryMinutes(60)).toBe('0 * * * *')
+    expect(cronEveryMinutes(120)).toBe('0 */2 * * *')
+    expect(cronEveryMinutes(720)).toBe('0 */12 * * *')
+  })
+
+  it('rounds an interval that does not divide into hours', () => {
+    expect(cronEveryMinutes(90)).toBe('0 */2 * * *')
+    expect(cronEveryMinutes(70)).toBe('0 * * * *')
+  })
+
+  it('treats a day as a day rather than every 23 hours', () => {
+    // The hour field counts 0-23, so a 24-step never fires. Capping to 23
+    // instead would drift a full hour earlier every day, which is not what
+    // anybody asking for "daily" means.
+    expect(cronEveryMinutes(1440)).toBe('0 0 * * *')
+    expect(cronEveryMinutes(1439)).toBe('0 0 * * *')
+    expect(cronEveryMinutes(23 * 60)).toBe('0 */23 * * *')
   })
 })

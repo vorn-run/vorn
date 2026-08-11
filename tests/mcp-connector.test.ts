@@ -287,9 +287,13 @@ describe('mcpConnector.describe', () => {
     expect(manifest.auth.find((f) => f.key === 'secretEnv')?.type).toBe('password')
   })
 
-  it('exposes actions and triggers, with an empty static action list', async () => {
+  it('exposes actions, triggers and tasks, with an empty static action list', async () => {
     const { mcpConnector } = await importMcp()
-    expect(mcpConnector.capabilities).toEqual(['actions', 'triggers'])
+    // `tasks` is what lets a packaged connector be backfilled; without it
+    // connection:backfill refuses every one of them. Whether a given
+    // connection can actually be imported from depends on it having a
+    // pollTool, which is per-connection and cannot be answered here.
+    expect(mcpConnector.capabilities).toEqual(['actions', 'triggers', 'tasks'])
     // Actions are per-connection (discovered via tools/list), so the static
     // list stays empty.
     expect(mcpConnector.describe().actions).toEqual([])

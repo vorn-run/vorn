@@ -1401,6 +1401,18 @@ export interface SdkTrigger {
   description?: string
   /** Connection filter values that make this trigger poll correctly. */
   filters: SdkSetupFilters
+  /**
+   * What an upstream status should become locally. Seeds the connection's own
+   * mapping, which the person setting it up then owns. Absent means the
+   * connector said nothing, and everything it imports lands as `todo`.
+   */
+  statusMapping?: Array<{ upstream: string; suggestedLocal: TaskStatus }>
+  /**
+   * The polling workflow to create with the connection. Without one a
+   * connector that fires on a schedule connects and then sits silent until
+   * somebody builds the workflow by hand.
+   */
+  defaultWorkflow?: { name: string; defaultCronFromMinutes: number }
 }
 
 /**

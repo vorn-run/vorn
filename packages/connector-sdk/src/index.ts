@@ -26,5 +26,7 @@ export type {
   NormalizedItem,
   PollContext,
   PollOutcome,
-  TriggerDefinition
+  TriggerDefinition,
+  StatusSuggestion,
+  DefaultWorkflow
 } from './types'

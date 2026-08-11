@@ -1,5 +1,5 @@
 import { envNameFor } from './define'
-import type { Connector, ConnectorIcon } from './types'
+import type { Connector, ConnectorIcon, DefaultWorkflow, StatusSuggestion } from './types'
 
 /** MCP tool name a trigger is served under. */
 export function pollToolName(triggerType: string): string {
@@ -69,7 +69,16 @@ export interface ConnectorManifest {
   version: string
   description?: string
   icon?: ConnectorIcon
-  triggers: Array<{ type: string; label: string; description?: string; setup: ConnectionSetup }>
+  triggers: Array<{
+    type: string
+    label: string
+    description?: string
+    /** Seeds a connection's status mapping; absent when the connector was silent. */
+    statusMapping?: StatusSuggestion[]
+    /** Seeds the polling workflow created with the connection. */
+    defaultWorkflow?: DefaultWorkflow
+    setup: ConnectionSetup
+  }>
   actions: Array<{
     type: string
     label: string
@@ -90,6 +99,11 @@ export function connectorManifest(connector: Connector): ConnectorManifest {
       type: trigger.type,
       label: trigger.label,
       ...(trigger.description !== undefined && { description: trigger.description }),
+      // Carried through so the app can seed a connection's status mapping and
+      // its polling workflow. Absent when the connector said nothing, which is
+      // different from saying there is nothing.
+      ...(trigger.statusMapping !== undefined && { statusMapping: trigger.statusMapping }),
+      ...(trigger.defaultWorkflow !== undefined && { defaultWorkflow: trigger.defaultWorkflow }),
       setup: connectionSetup(connector, trigger.type)
     })),
     actions: connector.actions.map((action) => ({

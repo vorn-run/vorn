@@ -113,11 +113,41 @@ export interface FetchContext {
   now(): string
 }
 
+/**
+ * What an upstream state should become when an item is imported as a task.
+ *
+ * A suggestion, not a rule: it seeds the connection form, and the person
+ * setting it up can change it. Without any, everything a connector imports
+ * lands as `todo` regardless of whether it was closed a year ago.
+ */
+export interface StatusSuggestion {
+  /** The value the connector reports in `ConnectorItem.status`. */
+  upstream: string
+  suggestedLocal: 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
+}
+
+/**
+ * The workflow to create when a connection is made.
+ *
+ * A connector that fires on a schedule is useless until something polls it, and
+ * expecting every person to build that workflow by hand is how a connection
+ * ends up configured and silent. Seeded workflows are ordinary, visible and
+ * editable — the schedule is a starting point, not a fixed rule.
+ */
+export interface DefaultWorkflow {
+  name: string
+  defaultCronFromMinutes: number
+}
+
 interface TriggerBase {
   /** Event key, e.g. `workItemCreated`. Becomes the `poll_<type>` MCP tool. */
   type: string
   label: string
   description?: string
+  /** Seeds the connection's status mapping; the person setting it up owns it. */
+  statusMapping?: StatusSuggestion[]
+  /** Seeds a polling workflow when a connection is created. */
+  defaultWorkflow?: DefaultWorkflow
   /**
    * Representative items. `vorn-connector check` replays these through the
    * real dedupe pipeline, so a connector can be verified before anyone has

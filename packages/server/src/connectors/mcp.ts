@@ -21,6 +21,7 @@ import type {
   ActionResult,
   PollResult,
   TriggerEvent,
+  ExternalItem,
   SourceConnection
 } from '@vornrun/shared/types'
 import { schemaProperties, schemaTypeHint, schemaRequired } from '@vornrun/shared/json-schema-utils'
@@ -407,6 +408,104 @@ export async function pollMcpConnection(
   return cfg.timestampField ? { events, nextCursor: newest ?? cursor } : { events }
 }
 
+/** Runaway guard: a tool that keeps handing back fresh cursors stops here. */
+const MAX_BACKFILL_PAGES = 1_000
+
+/**
+ * Turn a poll event back into the reconciliation shape backfill upserts.
+ *
+ * `pollMcpConnection` already normalized the fields that matter — externalId,
+ * url, title — so this reads them back rather than re-deriving them from the
+ * raw item and risking a second, subtly different answer.
+ */
+function eventToExternalItem(event: TriggerEvent): ExternalItem {
+  const data = event.data as Record<string, unknown>
+  const str = (v: unknown): string => (v == null ? '' : String(v))
+  return {
+    externalId: str(data.externalId ?? event.id),
+    url: str(data.url),
+    title: str(data.title),
+    description: str(data.description ?? data.body),
+    // Backfill maps this through the connection's statusMapping; an item with
+    // no status upstream lands wherever that mapping sends the empty string.
+    status: str(data.status ?? data.state),
+    updatedAt: event.timestamp,
+    metadata: data
+  }
+}
+
+/**
+ * Drain everything an MCP connection's poll tool will return, from the start.
+ *
+ * Backfill exists to import what the cron cursor has already passed over, so it
+ * begins with no cursor and follows the tool's own paging. Like
+ * `pollMcpConnection` it takes the whole `SourceConnection`, because addressing
+ * the per-connection stdio client needs more than the flattened filters
+ * `VornConnector.listItemsPage` is handed — which is why `connection:backfill`
+ * routes MCP here rather than through the generic connector, mirroring how the
+ * scheduler routes polling.
+ *
+ * A connection with no `pollTool` is not a task source and says so, rather than
+ * reporting that it imported nothing.
+ */
+/**
+ * The same connection with any pre-seeded cursor removed from its poll args.
+ *
+ * Returned as a copy: the stored connection is not ours to edit, and the seed
+ * still has to apply to ordinary polling.
+ */
+function withoutSeedCursor(conn: SourceConnection, cursorArg: string): SourceConnection {
+  const raw = conn.filters.pollArgs
+  if (typeof raw !== 'string' || !raw.includes(cursorArg)) return conn
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return conn
+    const { [cursorArg]: _seed, ...rest } = parsed
+    return { ...conn, filters: { ...conn.filters, pollArgs: JSON.stringify(rest) } }
+  } catch {
+    // Unparseable pollArgs is pollMcpConnection's error to report, with its
+    // own message; swallowing it here would turn it into a confusing one.
+    return conn
+  }
+}
+
+export async function backfillMcpConnection(
+  conn: SourceConnection,
+  visit: (item: ExternalItem) => void
+): Promise<void> {
+  const cfg = readPollConfig(conn)
+  if (!cfg.pollTool) {
+    throw new Error(
+      `Connection "${conn.name}" has no poll tool configured, so there is nothing to import.`
+    )
+  }
+
+  // Backfill means "from the beginning", and a connection may carry a starting
+  // cursor in its pollArgs — pollMcpConnection deliberately leaves that in
+  // place when it has no stored cursor, treating it as the seed for the very
+  // first poll. Honouring it here would start the import from that point and
+  // silently skip everything before it, which is precisely what a backfill is
+  // for.
+  const fromTheStart = cfg.cursorArg ? withoutSeedCursor(conn, cfg.cursorArg) : conn
+
+  let cursor: string | undefined
+  for (let page = 0; page < MAX_BACKFILL_PAGES; page++) {
+    const result = await pollMcpConnection(cursor === undefined ? fromTheStart : conn, cursor)
+    result.events.forEach((event) => visit(eventToExternalItem(event)))
+
+    // Only a tool that takes the cursor is paging. Without `cursorArg` the
+    // cursor coming back is a client-side dedup watermark over a window the
+    // tool returns in full every call — following it would re-read the same
+    // items until the page cap.
+    if (!cfg.cursorArg) return
+
+    const next = result.nextCursor
+    if (result.events.length === 0 || next === undefined || next === cursor) return
+    cursor = next
+  }
+  throw new Error(`Connection "${conn.name}" exceeded ${MAX_BACKFILL_PAGES} backfill pages`)
+}
+
 function extractTextError(content: unknown): string | undefined {
   if (!Array.isArray(content)) return undefined
   for (const block of content) {
@@ -422,9 +521,11 @@ export const mcpConnector: VornConnector = {
   id: 'mcp',
   name: 'MCP',
   icon: 'mcp',
-  // 'triggers' is always declared; whether a given connection actually fires
-  // depends on it having a `pollTool` configured (see pollMcpConnection).
-  capabilities: ['actions', 'triggers'],
+  // 'triggers' and 'tasks' are always declared; whether a given connection
+  // actually fires or can be imported from depends on it having a `pollTool`
+  // configured, which is per-connection and so cannot be answered here (see
+  // pollMcpConnection and backfillMcpConnection).
+  capabilities: ['actions', 'triggers', 'tasks'],
 
   describe(): ConnectorManifest {
     return {

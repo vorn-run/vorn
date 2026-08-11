@@ -52,6 +52,36 @@ describe('filterEnv', () => {
     expect(env).not.toHaveProperty('ClaudeCode')
   })
 
+  it('strips every marker describing the session Vorn was started from', () => {
+    // Vorn launches agents as subprocesses. Started from an agent session
+    // itself, these propagate through the app into every agent it spawns, and
+    // each one believes it is a nested child of that original session —
+    // transcripts stop being saved, and the messaging socket points at
+    // somebody else's session.
+    const env = filterEnv(
+      {
+        PATH: '/usr/bin',
+        CLAUDE_CODE_CHILD_SESSION: '1',
+        CLAUDE_CODE_SESSION_ID: '691e659a',
+        CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/cc-socks/17570.sock',
+        CLAUDE_CODE_WORKER_EPOCH: '1',
+        CLAUDE_CODE_ENTRYPOINT: 'sdk-cli'
+      },
+      new Set()
+    )
+    expect(Object.keys(env)).toEqual(['PATH'])
+  })
+
+  it('strips those markers whatever their casing, and even when named', () => {
+    // Same reasoning as CLAUDECODE: forwarding one breaks the session it
+    // reaches rather than protecting anything.
+    const env = filterEnv(
+      { claude_code_child_session: '1', CLAUDE_CODE_SESSION_ID: 'x' },
+      new Set(['CLAUDE_CODE_SESSION_ID'])
+    )
+    expect(env).toEqual({})
+  })
+
   it('never forwards STRIP_ENV_KEYS, even when named', () => {
     // CLAUDECODE is stripped so nested agent CLIs still launch; forwarding it
     // breaks the session rather than protecting anything.
