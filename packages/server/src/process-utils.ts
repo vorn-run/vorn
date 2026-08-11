@@ -128,8 +128,24 @@ export const SENSITIVE_ENV_PREFIXES = [
   'NODE_AUTH_TOKEN'
 ]
 
-// Env vars to strip so agent CLIs don't refuse to launch (e.g. nested session detection)
+/**
+ * Markers an agent CLI leaves in the environment to describe the session it is
+ * already inside.
+ *
+ * Vorn launches agents as subprocesses. When Vorn itself was started from an
+ * agent session — `yarn dev` typed into one, or the app opened from it — these
+ * propagate through the app into every agent it spawns, and each one then
+ * believes it is a nested child of that original session. The visible symptom
+ * is transcripts silently not being saved; the worse one is
+ * CLAUDE_CODE_MESSAGING_SOCKET, which points a freshly launched agent at
+ * another session's socket.
+ *
+ * The `CLAUDE_CODE_` prefix is stripped wholesale rather than by name because
+ * this list has been wrong once already: CLAUDECODE alone was stripped while
+ * five siblings went through untouched.
+ */
 export const STRIP_ENV_KEYS = ['CLAUDECODE']
+const STRIP_ENV_PREFIXES = ['CLAUDE_CODE_']
 
 // Compared uppercased. Windows environment variable names are case-insensitive
 // and Node hands back whatever casing it enumerated, so a literal match would
@@ -198,6 +214,7 @@ export function filterEnv(
     if (val === undefined) continue
     const upper = key.toUpperCase()
     if (STRIP_ENV_KEYS_UPPER.includes(upper)) continue
+    if (STRIP_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue
     if (!passthrough.has(upper) && SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue
     env[key] = val
   }
