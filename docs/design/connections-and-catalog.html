@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vorn — What you have, and what you could have</title>
+  <style>
+    :root {
+      --night: #000000;
+      --ink: #f3f1ea;
+      --ink-2: rgba(243, 241, 234, 0.55);
+      --ink-3: rgba(243, 241, 234, 0.34);
+      --hairline: rgba(243, 241, 234, 0.14);
+      --hairline-soft: rgba(243, 241, 234, 0.08);
+      --brass: #c9a227;
+      --serif: ui-serif, 'New York', 'Iowan Old Style', Georgia, serif;
+      --sans: -apple-system, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+      --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+      --card: #1d1d20;
+      --canvas: #0f0f11;
+      --cyan: #22d3ee;
+      --green: #4ade80;
+      --red: #f87171;
+    }
+    html,
+    body {
+      background: var(--night);
+    }
+    body {
+      color: var(--ink);
+      font-family: var(--serif);
+      line-height: 1.6;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 88px 28px 120px;
+    }
+    .eyebrow {
+      font-family: var(--sans);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+    }
+    h1 {
+      font-size: clamp(38px, 6.6vw, 54px);
+      font-weight: 500;
+      line-height: 1.08;
+      letter-spacing: -0.01em;
+      margin: 18px 0 0;
+      text-wrap: balance;
+    }
+    .thesis {
+      font-size: 21px;
+      line-height: 1.5;
+      color: var(--ink-2);
+      margin: 26px 0 0;
+      max-width: 34em;
+      text-wrap: balance;
+    }
+    section {
+      margin: 76px 0 0;
+      border-top: 1px solid var(--hairline-soft);
+      padding-top: 44px;
+    }
+    h2 {
+      font-size: 27px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      margin: 10px 0 0;
+    }
+    p {
+      margin: 18px 0 0;
+      max-width: 34em;
+    }
+    .muted {
+      color: var(--ink-2);
+    }
+    code {
+      font-family: var(--mono);
+      font-size: 0.86em;
+      background: rgba(243, 241, 234, 0.06);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .caption {
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--ink-3);
+      max-width: 32em;
+      margin-top: 16px;
+    }
+    figure {
+      margin: 34px 0 0;
+    }
+    ol,
+    ul {
+      max-width: 34em;
+      color: var(--ink-2);
+    }
+    li {
+      margin: 9px 0;
+    }
+    li strong {
+      color: var(--ink);
+      font-weight: 500;
+    }
+
+    /* ---- mockups ---- */
+    .app {
+      font-family: var(--sans);
+      background: var(--canvas);
+      border: 1px solid var(--hairline);
+      border-radius: 14px;
+      overflow: hidden;
+      line-height: 1.45;
+    }
+    .app-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--hairline-soft);
+    }
+    .app-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .spacer {
+      flex: 1;
+    }
+    .btn {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 7px;
+      background: var(--ink);
+      color: #111;
+    }
+    .btn.ghost {
+      background: transparent;
+      color: var(--ink-2);
+      border: 1px solid var(--hairline);
+    }
+    .btn.tiny {
+      font-size: 11px;
+      padding: 3px 9px;
+    }
+    .sect-label {
+      font-family: var(--sans);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      padding: 16px 16px 0;
+    }
+    .grouphead {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px 8px;
+    }
+    .icon {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      background: rgba(243, 241, 234, 0.07);
+      display: grid;
+      place-items: center;
+      flex: none;
+    }
+    .icon svg {
+      width: 15px;
+      height: 15px;
+      fill: var(--ink-2);
+    }
+    .gname {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .gsub {
+      font-size: 10.5px;
+      color: var(--ink-3);
+    }
+    .conn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 16px 6px;
+      padding: 9px 12px;
+      background: var(--card);
+      border: 1px solid var(--hairline-soft);
+      border-radius: 9px;
+    }
+    .conn .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      flex: none;
+    }
+    .conn .dot.err {
+      background: var(--red);
+    }
+    .cname {
+      font-size: 12.5px;
+      color: var(--ink);
+    }
+    .cmeta {
+      font-size: 10.5px;
+      color: var(--ink-3);
+    }
+    .rowacts {
+      margin-left: auto;
+      display: flex;
+      gap: 5px;
+      color: var(--ink-3);
+      font-size: 11px;
+    }
+    .addmore {
+      margin: 0 16px 14px;
+      font-size: 11px;
+      color: var(--ink-3);
+      padding: 7px 12px;
+      border: 1px dashed var(--hairline);
+      border-radius: 9px;
+    }
+    .browse {
+      border-top: 1px solid var(--hairline-soft);
+      background: rgba(243, 241, 234, 0.02);
+      padding: 14px 16px 18px;
+      margin-top: 10px;
+    }
+    .search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(243, 241, 234, 0.05);
+      border: 1px solid var(--hairline-soft);
+      border-radius: 8px;
+      padding: 7px 11px;
+      font-size: 12.5px;
+      color: var(--ink-3);
+    }
+    .chips {
+      display: flex;
+      gap: 6px;
+      margin-top: 11px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--hairline);
+      color: var(--ink-2);
+    }
+    .chip.on {
+      background: rgba(243, 241, 234, 0.1);
+      color: var(--ink);
+      border-color: transparent;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--hairline-soft);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+    }
+    .card-name {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .card-cat {
+      font-size: 10.5px;
+      color: var(--ink-3);
+    }
+    .card-desc {
+      font-size: 12px;
+      color: var(--ink-2);
+      margin-top: 9px;
+    }
+    .card-foot {
+      display: flex;
+      gap: 5px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .tag {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 5px;
+      background: rgba(243, 241, 234, 0.06);
+      color: var(--ink-3);
+    }
+    .tag.trig {
+      color: rgba(34, 211, 238, 0.85);
+      background: rgba(34, 211, 238, 0.1);
+    }
+    .tag.act {
+      color: rgba(201, 162, 39, 0.95);
+      background: rgba(201, 162, 39, 0.12);
+    }
+    .tag.have {
+      color: var(--green);
+      background: rgba(74, 222, 128, 0.1);
+    }
+    .bad {
+      border-color: rgba(248, 113, 113, 0.35);
+    }
+    .dupe {
+      outline: 1px dashed rgba(248, 113, 113, 0.5);
+      outline-offset: 2px;
+    }
+    .flag {
+      font-family: var(--sans);
+      font-size: 11px;
+      color: var(--red);
+      margin-top: 10px;
+    }
+  </style>
+
+  <body>
+    <div class="page">
+      <p class="eyebrow">Vorn · design note</p>
+      <h1>What you have, and what you could have</h1>
+      <p class="thesis">
+        The connectors page is answering two different questions in one list. A connector is a
+        <em>kind</em> of thing. A connection is one you actually set up and now have to run, watch
+        and fix. Mixing them means the thing you own shows up as a shopping result.
+      </p>
+
+      <section>
+        <p class="eyebrow">The problem</p>
+        <h2>Azure DevOps appears three times</h2>
+        <p>
+          Once as a card in the grid, because it is a connector that exists. Again inside that card
+          as “2 connected”, because you have some. And again below, twice, as the connections
+          themselves. Three representations of one thing, none of which is the one you came for.
+        </p>
+
+        <figure>
+          <div class="app">
+            <div class="app-bar"><span class="app-title">Connectors</span></div>
+            <div style="padding: 14px 16px">
+              <div class="grid">
+                <div class="card bad dupe">
+                  <div class="card-head">
+                    <span class="icon"
+                      ><svg viewBox="0 0 24 24">
+                        <path d="M4 4h5v16H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+                        <path d="M10.5 4h3v9h-3z" />
+                        <path d="M15 4h5a1 1 0 011 1v14a1 1 0 01-1 1h-5z" /></svg
+                    ></span>
+                    <span>
+                      <div class="card-name">Azure DevOps</div>
+                      <div class="card-cat">Development · v0.1.0</div>
+                    </span>
+                  </div>
+                  <div class="card-desc">Start a workflow when a work item matches.</div>
+                  <div class="card-foot">
+                    <span class="tag trig">1 trigger</span>
+                    <span class="tag have">2 connected</span>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-head">
+                    <span class="icon"
+                      ><svg viewBox="0 0 24 24">
+                        <path
+                          d="M12 2C7.6 2 4 3.6 4 5.5S7.6 9 12 9s8-1.6 8-3.5S16.4 2 12 2zm0 5.5c-3.6 0-6-1.2-6-2s2.4-2 6-2 6 1.2 6 2-2.4 2-6 2z"
+                        /></svg
+                    ></span>
+                    <span>
+                      <div class="card-name">Azure Data Explorer</div>
+                      <div class="card-cat">Data &amp; observability · v0.6.0</div>
+                    </span>
+                  </div>
+                  <div class="card-desc">Start a workflow when a KQL query returns a row.</div>
+                  <div class="card-foot"><span class="tag trig">1 trigger</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sect-label">Connected</div>
+            <div style="height: 8px"></div>
+            <div class="conn dupe">
+              <span class="dot"></span>
+              <span>
+                <div class="cname">Platform board</div>
+                <div class="cmeta">ado · every 5 min</div>
+              </span>
+              <span class="rowacts">Run · Backfill · Delete</span>
+            </div>
+            <div class="conn dupe">
+              <span class="dot"></span>
+              <span>
+                <div class="cname">Escalations</div>
+                <div class="cmeta">ado · every 15 min</div>
+              </span>
+              <span class="rowacts">Run · Backfill · Delete</span>
+            </div>
+            <div style="height: 12px"></div>
+          </div>
+          <p class="flag">
+            Dashed outlines mark the same connector said three ways. And the grid is a shopping
+            shelf you scroll past every time you come to check on something you already run.
+          </p>
+        </figure>
+
+        <p>
+          There is a quieter version of the same bug in the data.
+          <code>installedListings</code> invents a catalog-shaped row for a package installed by
+          name — a connection dressed up as something you could buy. It only exists because the
+          connections list was not trusted to show it.
+        </p>
+      </section>
+
+      <section>
+        <p class="eyebrow">The change</p>
+        <h2>Your connections lead. The catalog is a shelf you visit.</h2>
+        <p>
+          Connections are the working set: they run on a timer, they fail, they need a backfill.
+          That is why you open this page. The catalog is where you go occasionally to add something
+          new, so it sits below and starts collapsed — one line, not a wall.
+        </p>
+
+        <figure>
+          <div class="app">
+            <div class="app-bar">
+              <span class="app-title">Connections</span>
+              <span class="spacer"></span>
+              <span class="btn">Add a connection</span>
+            </div>
+
+            <div class="grouphead">
+              <span class="icon"
+                ><svg viewBox="0 0 24 24">
+                  <path d="M4 4h5v16H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+                  <path d="M10.5 4h3v9h-3z" />
+                  <path d="M15 4h5a1 1 0 011 1v14a1 1 0 01-1 1h-5z" /></svg
+              ></span>
+              <span>
+                <div class="gname">Azure DevOps</div>
+                <div class="gsub">2 connections · v0.1.0</div>
+              </span>
+              <span class="rowacts"><span class="btn ghost tiny">Add another</span></span>
+            </div>
+            <div class="conn">
+              <span class="dot"></span>
+              <span>
+                <div class="cname">Platform board</div>
+                <div class="cmeta">contoso / Platform · every 5 min · last run 3 min ago</div>
+              </span>
+              <span class="rowacts">Run · Backfill · Delete</span>
+            </div>
+            <div class="conn">
+              <span class="dot err"></span>
+              <span>
+                <div class="cname">Escalations</div>
+                <div class="cmeta">contoso / Support · sign-in expired</div>
+              </span>
+              <span class="rowacts">Fix · Delete</span>
+            </div>
+
+            <div class="grouphead">
+              <span class="icon"
+                ><svg viewBox="0 0 24 24">
+                  <path
+                    d="M12 2C7.6 2 4 3.6 4 5.5S7.6 9 12 9s8-1.6 8-3.5S16.4 2 12 2zm0 5.5c-3.6 0-6-1.2-6-2s2.4-2 6-2 6 1.2 6 2-2.4 2-6 2z"
+                  />
+                  <path
+                    d="M4 9.4v2.1c0 1.9 3.6 3.5 8 3.5.5 0 1 0 1.4-.1a5.6 5.6 0 01.8-1.9c-.7.1-1.5.2-2.2.2-3.6 0-6-1.2-6-2V9.4z"
+                  /></svg
+              ></span>
+              <span>
+                <div class="gname">Azure Data Explorer</div>
+                <div class="gsub">1 connection · v0.6.0</div>
+              </span>
+              <span class="rowacts"><span class="btn ghost tiny">Add another</span></span>
+            </div>
+            <div class="conn">
+              <span class="dot"></span>
+              <span>
+                <div class="cname">Alert rows</div>
+                <div class="cmeta">help / Samples · every 10 min</div>
+              </span>
+              <span class="rowacts">Run · Backfill · Delete</span>
+            </div>
+
+            <div class="browse">
+              <div class="sect-label" style="padding: 0 0 10px">Add a connection</div>
+              <div class="search">Search 2 connectors</div>
+              <div class="chips">
+                <span class="chip on">All</span>
+                <span class="chip">Development</span>
+                <span class="chip">Data &amp; observability</span>
+                <span class="chip">Can be called from a step</span>
+              </div>
+              <div class="grid">
+                <div class="card">
+                  <div class="card-head">
+                    <span class="icon"
+                      ><svg viewBox="0 0 24 24">
+                        <path d="M4 4h5v16H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+                        <path d="M10.5 4h3v9h-3z" />
+                        <path d="M15 4h5a1 1 0 011 1v14a1 1 0 01-1 1h-5z" /></svg
+                    ></span>
+                    <span>
+                      <div class="card-name">Azure DevOps</div>
+                      <div class="card-cat">Development · v0.1.0</div>
+                    </span>
+                  </div>
+                  <div class="card-desc">Start a workflow when a work item matches.</div>
+                  <div class="card-foot">
+                    <span class="tag trig">1 trigger</span>
+                    <span class="tag">in use</span>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-head">
+                    <span class="icon"
+                      ><svg viewBox="0 0 24 24">
+                        <path
+                          d="M12 2C7.6 2 4 3.6 4 5.5S7.6 9 12 9s8-1.6 8-3.5S16.4 2 12 2zm0 5.5c-3.6 0-6-1.2-6-2s2.4-2 6-2 6 1.2 6 2-2.4 2-6 2z"
+                        /></svg
+                    ></span>
+                    <span>
+                      <div class="card-name">Azure Data Explorer</div>
+                      <div class="card-cat">Data &amp; observability · v0.6.0</div>
+                    </span>
+                  </div>
+                  <div class="card-desc">Start a workflow when a KQL query returns a row.</div>
+                  <div class="card-foot">
+                    <span class="tag trig">1 trigger</span>
+                    <span class="tag act">1 action</span>
+                    <span class="tag">in use</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="caption">
+            The catalog opens from “Add a connection” and is otherwise a single collapsed line. A
+            card says “in use” rather than “2 connected” — a hint, not a second copy of the
+            connections above it.
+          </p>
+        </figure>
+      </section>
+
+      <section>
+        <p class="eyebrow">The rules this follows</p>
+        <h2>One noun per list</h2>
+        <ol>
+          <li>
+            <strong>Connections are instances; connectors are kinds.</strong>
+            Never in the same list. If a row can be run, paused or deleted, it is a connection and
+            belongs above.
+          </li>
+          <li>
+            <strong>Group connections by connector, not by nothing.</strong> Two Azure DevOps
+            connections nest under one heading that carries the icon and version. That is where “2
+            connections” belongs — next to them, not on a shopping card.
+          </li>
+          <li>
+            <strong>The catalog shows everything, always.</strong> Including what you already use,
+            because a second connection to the same connector is a normal thing to want. “In use” is
+            a hint that stops you wondering, not a status.
+          </li>
+          <li>
+            <strong>A package installed by name is a connection.</strong>
+            <code>installedListings</code> goes away. It exists to give an unlisted package a card
+            in the catalog, when the thing that actually exists is a connection to it — which the
+            connections list can render from what it already has.
+          </li>
+          <li>
+            <strong>Built-ins are connectors like any other.</strong> GitHub and Linear sit in the
+            same catalog, under their own category. Nothing about the page needs to know which ones
+            run in-process.
+          </li>
+        </ol>
+      </section>
+
+      <section>
+        <p class="eyebrow">Empty and error states</p>
+        <h2>The first run is the catalog</h2>
+        <p>
+          With no connections there is nothing to lead with, so the page opens on the catalog
+          expanded, with one line above it saying what a connection is for. The same page, one
+          section shorter — not a different screen with its own layout to maintain.
+        </p>
+        <p class="muted">
+          A connection that cannot sign in gets a red dot and
+          <em>Fix</em> instead of <em>Run</em>, in the connections list where someone will actually
+          see it. Today that lives in a separate banner at the top of the page, far from the row it
+          is about.
+        </p>
+      </section>
+
+      <section>
+        <p class="eyebrow">Build order</p>
+        <h2>Two steps</h2>
+        <ol>
+          <li>
+            <strong>Split the nouns.</strong> Group connections by connector, move the catalog below
+            a disclosure, drop <code>installedListings</code>, and change “2 connected” to a quiet
+            “in use”. The grid and panel already built do not change.
+          </li>
+          <li>
+            <strong>Move status to the row.</strong> Fold the sign-in banner into the connection it
+            concerns, with the action that fixes it.
+          </li>
+        </ol>
+        <p class="muted">
+          Step one is the confusion. Step two is a separate irritation that becomes obvious once
+          connections have a place of their own.
+        </p>
+      </section>
+    </div>
+  </body>
+</html>

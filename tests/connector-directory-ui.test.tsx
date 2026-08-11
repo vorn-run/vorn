@@ -55,32 +55,41 @@ const listings = (): ConnectorListing[] => buildConnectorListings([], [ADO, KUST
 
 const find = (id: string) => listings().find((listing) => listing.id === id)!
 
-describe('the connector grid', () => {
-  const setup = (selectedKey?: string) => {
+describe('the connector list', () => {
+  const setup = () => {
     const onSelect = vi.fn()
+    const onAdd = vi.fn()
     const utils = render(
-      <ConnectorDirectory
-        listings={listings()}
-        builtIns={[]}
-        selectedKey={selectedKey}
-        onSelect={onSelect}
-      />
+      <ConnectorDirectory listings={listings()} builtIns={[]} onSelect={onSelect} onAdd={onAdd} />
     )
-    return { ...utils, onSelect }
+    return { ...utils, onSelect, onAdd }
   }
 
-  it('says what a connector offers without anything being installed', () => {
-    const { getAllByText, getByText } = setup()
-    // The counts are the point: a name and a blurb cannot answer "will this do
-    // what I need", and both blurbs here start with the same four words.
-    expect(getAllByText('1 trigger')).toHaveLength(2)
-    // Only one of the two can be called from a step, which the grid now says.
-    expect(getByText('1 action')).toBeInTheDocument()
+  it('says what a connector offers, and what would be installed, in one line', () => {
+    // A name and a blurb cannot answer "will this do what I need", and both
+    // blurbs here start with the same four words.
+    const { getByText } = setup()
+    expect(getByText('Development · 1 trigger · v0.1.0')).toBeInTheDocument()
+    expect(getByText('Data & observability · 1 trigger, 1 action · v0.6.0')).toBeInTheDocument()
   })
 
-  it('shows the version that would be installed', () => {
-    const { getByText } = setup()
-    expect(getByText(/Development · v0\.1\.0/)).toBeInTheDocument()
+  it('offers to add another of something already in use', () => {
+    const inUse = buildConnectorListings(
+      [],
+      [ADO, KUSTO],
+      [{ id: 'c1', connectorId: 'ado', name: 'board', filters: {} } as never]
+    )
+    const { getByText } = render(
+      <ConnectorDirectory listings={inUse} builtIns={[]} onSelect={vi.fn()} onAdd={vi.fn()} />
+    )
+    expect(getByText('Add another')).toBeInTheDocument()
+    expect(getByText(/Development · 1 trigger · v0\.1\.0 · in use/)).toBeInTheDocument()
+  })
+
+  it('adds without making anyone open the details first', () => {
+    const { getAllByText, onAdd } = setup()
+    fireEvent.click(getAllByText('Add')[0])
+    expect(onAdd).toHaveBeenCalled()
   })
 
   it('finds a connector by a word that is nowhere in its name', () => {
@@ -92,25 +101,27 @@ describe('the connector grid', () => {
   })
 
   it('narrows to one category', () => {
-    const { getByText, queryByText } = setup()
-    fireEvent.click(getByText('Development'))
+    const { getByLabelText, getByText, queryByText } = setup()
+    fireEvent.change(getByLabelText('Filter by category'), { target: { value: 'Development' } })
 
     expect(getByText('Azure DevOps')).toBeInTheDocument()
     expect(queryByText('Azure Data Explorer')).not.toBeInTheDocument()
   })
 
   it('narrows to what a workflow step can call', () => {
-    const { getByText, queryByText } = setup()
-    fireEvent.click(getByText('Can be called from a step'))
+    const { getByLabelText, getByText, queryByText } = setup()
+    fireEvent.change(getByLabelText('Filter by category'), {
+      target: { value: 'Can be called from a step' }
+    })
 
     expect(getByText('Azure Data Explorer')).toBeInTheDocument()
     expect(queryByText('Azure DevOps')).not.toBeInTheDocument()
   })
 
-  it('lets a chip be clicked off, so a filter is never a trap', () => {
-    const { getByText } = setup()
-    fireEvent.click(getByText('Development'))
-    fireEvent.click(getByText('Development'))
+  it('goes back to everything, so a filter is never a trap', () => {
+    const { getByLabelText, getByText } = setup()
+    fireEvent.change(getByLabelText('Filter by category'), { target: { value: 'Development' } })
+    fireEvent.change(getByLabelText('Filter by category'), { target: { value: '' } })
     expect(getByText('Azure Data Explorer')).toBeInTheDocument()
   })
 
@@ -127,6 +138,7 @@ describe('the connector grid', () => {
         listings={listings()}
         builtIns={[]}
         onSelect={vi.fn()}
+        onAdd={vi.fn()}
         fetchedAt={Date.now() - 2 * 3_600_000}
         onRefresh={onRefresh}
       />
@@ -141,7 +153,7 @@ describe('the connector grid', () => {
     expect(queryByText('Check now')).not.toBeInTheDocument()
   })
 
-  it('reports the card that was picked', () => {
+  it('reports the row that was opened', () => {
     const { getByText, onSelect } = setup()
     fireEvent.click(getByText('Azure DevOps'))
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'ado' }))
@@ -179,13 +191,19 @@ describe('the connector detail panel', () => {
     // panel exists to prevent.
     const { getByText } = setup(find('ado'))
     expect(getByText('ADO_ORGANIZATION')).toBeInTheDocument()
-    expect(getByText('ADO_TOP')).toBeInTheDocument()
-    expect(getByText('Dashed settings are optional.')).toBeInTheDocument()
+    // Optional says so in words rather than by a border style nobody decodes.
+    expect(getByText('ADO_TOP (optional)')).toBeInTheDocument()
   })
 
   it('names the package and version, so what would be installed is not a mystery', () => {
     const { getByText } = setup(find('ado'))
     expect(getByText(/@vornrun\/connector-ado · v0\.1\.0/)).toBeInTheDocument()
+  })
+
+  it('offers a way back to the list it replaced', () => {
+    const { getByText, onClose } = setup(find('ado'))
+    fireEvent.click(getByText('All connectors'))
+    expect(onClose).toHaveBeenCalled()
   })
 
   it('says it knows nothing rather than claiming a connector does nothing', () => {
@@ -215,7 +233,7 @@ describe('the connector detail panel', () => {
 
   it('hands Add back rather than installing anything itself', () => {
     const { getByText, onAdd } = setup(find('ado'))
-    fireEvent.click(getByText('Add connection'))
+    fireEvent.click(getByText('Add a connection'))
     expect(onAdd).toHaveBeenCalled()
   })
 

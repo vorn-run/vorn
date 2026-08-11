@@ -1,4 +1,4 @@
-import { Plus, X, ExternalLink, KeyRound } from 'lucide-react'
+import { Plus, ArrowLeft, ExternalLink } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
 import {
   listingDetails,
@@ -8,6 +8,10 @@ import {
 
 /**
  * What a connector does, before anything is downloaded.
+ *
+ * Replaces the list rather than appearing beneath it, the way both catalogs
+ * worth copying do: nothing reflows, nothing has to fit beside anything else,
+ * and it reads the same at any width.
  *
  * Every string here comes from the connector's own manifest — through the
  * catalog for a packaged one, directly for a built-in — so it cannot advertise
@@ -28,44 +32,43 @@ export function ConnectorDetail({
 }) {
   const details = listingDetails(listing, builtIns)
   const entry = listing.catalogItem
-  const required = details.settings.filter((setting) => setting.required)
-  const optional = details.settings.filter((setting) => !setting.required)
 
   return (
-    <div className="mt-2 p-4 bg-white/[0.02] border border-white/[0.08] rounded-sm">
+    <div>
+      <button
+        onClick={onClose}
+        className="flex items-center gap-1.5 text-[12px] text-gray-500 hover:text-gray-300 transition-colors mb-4"
+      >
+        <ArrowLeft size={12} /> All connectors
+      </button>
+
       <div className="flex items-start gap-3">
-        <span className="w-8 h-8 shrink-0 flex items-center justify-center bg-white/[0.04] rounded-sm">
+        <span className="w-10 h-10 shrink-0 flex items-center justify-center bg-white/[0.05] rounded-md">
           <ConnectorIcon
             connectorId={listing.id}
             icon={entry?.icon ?? listing.icon}
-            size={18}
+            size={21}
             className="text-gray-200"
           />
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm text-gray-200 font-medium">{listing.name}</div>
-          <div className="text-[11px] text-gray-600 truncate">
+        <div className="min-w-0">
+          <div className="text-[16px] text-gray-100 font-medium tracking-tight">{listing.name}</div>
+          <div className="text-[11.5px] text-gray-600">
             {entry?.packageName ?? (listing.source === 'builtin' ? 'Built in' : listing.id)}
             {entry?.version && ` · v${entry.version}`}
-            {' · '}
-            {listing.connectedCount > 0
-              ? `${listing.connectedCount} connected`
-              : 'no connections yet'}
+            {listing.connectedCount > 0 && ` · ${count(listing.connectedCount, 'connection')}`}
           </div>
         </div>
-        <button
-          onClick={onClose}
-          aria-label="Close details"
-          className="text-gray-600 hover:text-gray-300 transition-colors"
-        >
-          <X size={14} />
-        </button>
       </div>
+
+      {listing.description && (
+        <p className="text-[12.5px] text-gray-400 mt-4 leading-relaxed">{listing.description}</p>
+      )}
 
       {/* An entry from a catalog published before these fields existed knows
           nothing, which is different from knowing there is nothing. */}
       {!details.known ? (
-        <p className="text-[12px] text-gray-500 mt-4">
+        <p className="text-[12px] text-gray-500 mt-5">
           This connector does not describe itself yet. Add it to see what it offers.
         </p>
       ) : (
@@ -73,9 +76,7 @@ export function ConnectorDetail({
           <Section label="Starts a workflow when">
             {details.triggers.length > 0 ? (
               details.triggers.map((trigger) => (
-                <Line key={trigger.type} tone="trigger" label={trigger.label}>
-                  {trigger.description}
-                </Line>
+                <Item key={trigger.type} title={trigger.label} detail={trigger.description} />
               ))
             ) : (
               <p className="text-[12px] text-gray-600">
@@ -87,9 +88,7 @@ export function ConnectorDetail({
           <Section label="A step can ask it to">
             {details.actions.length > 0 ? (
               details.actions.map((action) => (
-                <Line key={action.type} tone="action" label={action.label}>
-                  {action.description}
-                </Line>
+                <Item key={action.type} title={action.label} detail={action.description} />
               ))
             ) : (
               <p className="text-[12px] text-gray-600">Nothing — this one only watches.</p>
@@ -98,38 +97,33 @@ export function ConnectorDetail({
 
           {details.settings.length > 0 && (
             <Section label="You will need">
-              <div className="flex flex-wrap gap-1.5">
-                {required.map((setting) => (
-                  <Setting key={setting.name} name={setting.name} required />
+              <p className="font-mono text-[11px] text-gray-400 leading-relaxed">
+                {details.settings.map((setting, index) => (
+                  <span key={setting.name}>
+                    {index > 0 && '   '}
+                    <span className={setting.required ? undefined : 'text-gray-600'}>
+                      {setting.name}
+                      {!setting.required && ' (optional)'}
+                    </span>
+                  </span>
                 ))}
-                {optional.map((setting) => (
-                  <Setting key={setting.name} name={setting.name} required={false} />
-                ))}
-              </div>
-              {optional.length > 0 && (
-                <p className="text-[10.5px] text-gray-600 mt-1.5">Dashed settings are optional.</p>
-              )}
+              </p>
             </Section>
           )}
         </>
       )}
 
-      {entry?.auth && (
-        <div className="flex items-start gap-2 mt-3 text-[12px] text-gray-400">
-          <KeyRound size={12} className="mt-0.5 shrink-0 text-gray-600" />
-          <span>{entry.auth}</span>
-        </div>
-      )}
+      {entry?.auth && <p className="text-[12.5px] text-gray-400 mt-4">{entry.auth}</p>}
 
-      <div className="flex items-center gap-2 mt-4">
+      <div className="flex items-center gap-2 mt-6">
         {/* An installed row has no manifest and no package spec, so there is
             nothing to open a form against. */}
         {listing.source !== 'installed' && (
           <button
             onClick={onAdd}
-            className="text-xs text-gray-200 bg-white/[0.1] hover:bg-white/[0.16] px-3 py-1.5 rounded-sm transition-colors flex items-center gap-1"
+            className="text-xs text-gray-100 bg-white/[0.1] hover:bg-white/[0.16] px-3 py-1.5 rounded-sm transition-colors flex items-center gap-1"
           >
-            <Plus size={12} /> Add connection
+            <Plus size={12} /> Add a connection
           </button>
         )}
         {entry?.packageName && (
@@ -143,7 +137,7 @@ export function ConnectorDetail({
           </a>
         )}
         {listing.source === 'catalog' && (
-          <span className="text-[10.5px] text-gray-600 ml-auto">
+          <span className="text-[11px] text-gray-600 ml-auto">
             Runs on demand. Nothing is installed until you add it.
           </span>
         )}
@@ -154,48 +148,22 @@ export function ConnectorDetail({
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="mt-4">
+    <div className="mt-5">
       <p className="text-[10px] text-gray-600 uppercase tracking-wider">{label}</p>
-      <div className="mt-1.5 space-y-1.5">{children}</div>
+      <div className="mt-2 space-y-2">{children}</div>
     </div>
   )
 }
 
-function Line({
-  tone,
-  label,
-  children
-}: {
-  tone: 'trigger' | 'action'
-  label: string
-  children?: React.ReactNode
-}) {
+function Item({ title, detail }: { title: string; detail?: string }) {
   return (
-    <div className="flex items-baseline gap-2 text-[12px]">
-      <span
-        aria-hidden
-        className={`w-1 h-1 rounded-full shrink-0 ${
-          tone === 'trigger' ? 'bg-cyan-400' : 'bg-amber-400'
-        }`}
-      />
-      <span>
-        <span className="text-gray-300">{label}</span>
-        {children && <span className="text-gray-600"> — {children}</span>}
-      </span>
+    <div className="text-[12.5px]">
+      <div className="text-gray-300">{title}</div>
+      {detail && <div className="text-gray-600 mt-0.5">{detail}</div>}
     </div>
   )
 }
 
-function Setting({ name, required }: { name: string; required: boolean }) {
-  return (
-    <span
-      className={`font-mono text-[10.5px] px-1.5 py-0.5 rounded-sm border ${
-        required
-          ? 'text-gray-400 border-white/[0.1]'
-          : 'text-gray-600 border-white/[0.1] border-dashed'
-      }`}
-    >
-      {name}
-    </span>
-  )
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
 }

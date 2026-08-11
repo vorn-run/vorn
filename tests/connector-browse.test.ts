@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildConnectorListings,
   filterConnectorListings,
-  groupConnectorListings,
+  groupConnections,
   connectorCategories,
   describeCatalogAge,
   filterByCategory,
@@ -147,116 +147,75 @@ describe('filterConnectorListings', () => {
   })
 })
 
-describe('groupConnectorListings', () => {
-  it('groups by category and keeps each group in list order', () => {
-    const listings = buildConnectorListings(
-      [builtIn('github', 'GitHub')],
+describe('groupConnections', () => {
+  it('puts two connections to one connector under one heading', () => {
+    // The count belongs beside the things it counts, not on a catalog card.
+    const listings = buildConnectorListings([], [catalogItem('ado', 'Azure DevOps')], [])
+    const groups = groupConnections(
       [
-        catalogItem('kusto', 'Kusto', { category: 'Data' }),
-        catalogItem('grafana', 'Grafana', { category: 'Data' })
+        connection({ id: 'c1', connectorId: 'ado', name: 'Platform' }),
+        connection({ id: 'c2', connectorId: 'ado', name: 'Escalations' })
       ],
-      []
-    )
-
-    const groups = groupConnectorListings(listings)
-    // Group order follows the name-sorted listings: GitHub precedes Grafana.
-    expect(groups.map((g) => g.category)).toEqual(['Built in', 'Data'])
-    expect(groups[1].listings.map((l) => l.name)).toEqual(['Grafana', 'Kusto'])
-  })
-
-  it('files an uncategorised package rather than dropping it from the list', () => {
-    const groups = groupConnectorListings(
-      buildConnectorListings([], [catalogItem('kusto', 'Kusto')], [])
+      listings
     )
 
     expect(groups).toHaveLength(1)
-    expect(groups[0].listings.map((l) => l.id)).toEqual(['kusto'])
+    expect(groups[0]).toMatchObject({ connectorId: 'ado', name: 'Azure DevOps' })
+    expect(groups[0].connections.map((c) => c.id)).toEqual(['c1', 'c2'])
   })
 
-  it('produces nothing to render when a search matched nothing', () => {
-    expect(groupConnectorListings([])).toEqual([])
-  })
-})
-
-describe('connectors that are installed but not in the catalog', () => {
-  it('still gets a row, so a package installed by name is not invisible', () => {
+  it('carries the version, so a group can say what it is running', () => {
     const listings = buildConnectorListings(
-      [builtIn('github', 'GitHub')],
       [],
-      [connection({ filters: { sdkConnectorId: 'jira' } })]
+      [catalogItem('ado', 'Azure DevOps', { version: '0.1.0' })],
+      []
     )
-
-    const jira = listings.find((l) => l.id === 'jira')
-    expect(jira?.category).toBe('Installed')
-    expect(jira?.connectedCount).toBe(1)
+    const groups = groupConnections([connection({ connectorId: 'ado' })], listings)
+    expect(groups[0].version).toBe('0.1.0')
   })
 
-  it('is marked so the UI does not offer to add one', () => {
-    // There is no manifest and no package spec behind such a row, so there is
-    // nothing for an add form to open against.
-    const listings = buildConnectorListings(
-      [builtIn('github', 'GitHub')],
-      [catalogItem('kusto', 'Azure Data Explorer')],
-      [connection({ filters: { sdkConnectorId: 'jira' } })]
-    )
+  it('still shows a connection whose connector the catalog does not list', () => {
+    // A package installed by name, or one the catalog has dropped, still polls
+    // and can still fail. Hiding it would hide a running thing.
+    const groups = groupConnections([connection({ id: 'c1', connectorId: 'mystery' })], [])
 
-    expect(listings.find((l) => l.id === 'jira')?.source).toBe('installed')
-    expect(listings.find((l) => l.id === 'github')?.source).toBe('builtin')
-    expect(listings.find((l) => l.id === 'kusto')?.source).toBe('catalog')
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({ connectorId: 'mystery', name: 'mystery' })
+    // Nothing to open an Add form against.
+    expect(groups[0].listing).toBeUndefined()
   })
 
-  it('keeps one row per connector rather than one per connection', () => {
-    const listings = buildConnectorListings(
-      [],
-      [],
+  it('separates connectors rather than lumping every connection together', () => {
+    const groups = groupConnections(
       [
-        connection({ id: 'a', filters: { sdkConnectorId: 'jira' } }),
-        connection({ id: 'b', filters: { sdkConnectorId: 'jira' } })
-      ]
+        connection({ id: 'c1', connectorId: 'ado' }),
+        connection({ id: 'c2', connectorId: 'kusto' }),
+        connection({ id: 'c3', connectorId: 'ado' })
+      ],
+      []
     )
-
-    expect(listings).toHaveLength(1)
-    expect(listings[0].connectedCount).toBe(2)
+    expect(groups.map((g) => g.connectorId)).toEqual(['ado', 'kusto'])
+    expect(groups[0].connections).toHaveLength(2)
   })
 
-  it('does not duplicate a connector the catalog already lists', () => {
-    const listings = buildConnectorListings(
-      [],
-      [catalogItem('kusto', 'Kusto')],
-      [connection({ filters: { sdkConnectorId: 'kusto' } })]
-    )
-
-    expect(listings).toHaveLength(1)
-    expect(listings[0].catalogItem).toBeDefined()
-  })
-
-  it('carries the icon the connection stored, so the row is not blank', () => {
-    const listings = buildConnectorListings(
-      [],
-      [],
+  it('groups a packaged connection under the connector it installed', () => {
+    // The connection's own connectorId is `mcp`; what matters is the package.
+    const listings = buildConnectorListings([], [catalogItem('kusto', 'Kusto')], [])
+    const groups = groupConnections(
       [
         connection({
-          filters: {
-            sdkConnectorId: 'jira',
-            sdkIcon: JSON.stringify({ viewBox: '0 0 24 24', paths: ['M0 0h24v24H0z'] })
-          }
-        })
-      ]
+          id: 'c1',
+          connectorId: 'mcp',
+          filters: { sdkConnectorId: 'kusto' }
+        } as never)
+      ],
+      listings
     )
-
-    expect(listings[0].icon).toEqual({ viewBox: '0 0 24 24', paths: ['M0 0h24v24H0z'] })
+    expect(groups[0]).toMatchObject({ connectorId: 'kusto', name: 'Kusto' })
   })
 
-  it('leaves a plain MCP connection under mcp rather than inventing a row', () => {
-    const listings = buildConnectorListings(
-      [builtIn('mcp', 'MCP')],
-      [],
-      [connection({ connectorId: 'mcp', filters: {} })]
-    )
-
-    expect(listings).toHaveLength(1)
-    expect(listings[0].id).toBe('mcp')
-    expect(listings[0].connectedCount).toBe(1)
+  it('has nothing to group when there are no connections', () => {
+    expect(groupConnections([], [])).toEqual([])
   })
 })
 

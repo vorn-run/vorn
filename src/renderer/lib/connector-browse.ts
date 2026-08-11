@@ -112,12 +112,15 @@ export function listingDetails(
 const UNCATEGORIZED = 'Other'
 
 /**
- * Merge the built-in connectors, the catalog and anything already installed
- * into a single list.
+ * The connectors that can be added: the built-ins and the catalog.
  *
- * Connected connectors sort first — the list is also how you find something
- * already set up — and the rest sort by name so position is stable as the
- * catalog grows rather than depending on registration order.
+ * Only kinds of connector, never the connections someone already made — those
+ * are a different noun with a list of their own, and mixing them is how one
+ * connector ends up on a page three times.
+ *
+ * Connected ones sort first, since a connector you already use is the one you
+ * are most likely to want another of, and the rest sort by name so position is
+ * stable as the catalog grows rather than depending on registration order.
  */
 export function buildConnectorListings(
   builtIns: BuiltInConnector[],
@@ -146,11 +149,7 @@ export function buildConnectorListings(
       keywords: entry.keywords ?? [],
       connectedCount: countFor(entry.id),
       catalogItem: entry
-    })),
-    // A connector installed by package name, or one dropped from the catalog,
-    // still has working connections. Without a row of its own it would be
-    // missing from the list that is meant to show what is set up.
-    ...installedListings(builtIns, catalog, connections)
+    }))
   ]
 
   return listings.sort((a, b) => {
@@ -159,36 +158,58 @@ export function buildConnectorListings(
   })
 }
 
-function installedListings(
-  builtIns: BuiltInConnector[],
-  catalog: ConnectorCatalogItem[],
+/** A connector someone actually uses, with the connections they made to it. */
+export interface ConnectionGroup {
+  connectorId: string
+  name: string
+  icon?: SdkConnectorIcon
+  version?: string
+  /** Absent for a package installed by name, or one the catalog has dropped. */
+  listing?: ConnectorListing
   connections: SourceConnection[]
-): ConnectorListing[] {
-  const known = new Set([...builtIns.map((c) => c.id), ...catalog.map((c) => c.id)])
-  const seen = new Map<string, ConnectorListing>()
+}
+
+/**
+ * Group connections under the connector they belong to.
+ *
+ * Two connections to the same connector are one heading with two rows under it,
+ * which is the only place a count belongs — beside the things it counts, rather
+ * than on a card in the catalog that is trying to sell you a third.
+ *
+ * A connection whose connector is in neither the catalog nor the built-ins is
+ * still a connection: it polls, it fails, it can be deleted. It gets a group
+ * named after its connector id, with the icon the connection itself stored.
+ * Groups keep the order the connections arrive in, which is the order the
+ * server returns them.
+ */
+export function groupConnections(
+  connections: SourceConnection[],
+  listings: ConnectorListing[] = []
+): ConnectionGroup[] {
+  const byConnector = new Map<string, ConnectionGroup>()
 
   for (const conn of connections) {
     const id = connectionConnectorId(conn)
-    if (known.has(id)) continue
-    const existing = seen.get(id)
+    const existing = byConnector.get(id)
     if (existing) {
-      existing.connectedCount += 1
+      existing.connections.push(conn)
       continue
     }
-    seen.set(id, {
-      key: `installed:${id}`,
-      id,
-      name: id,
-      capabilities: [],
-      category: 'Installed',
-      source: 'installed' as const,
-      keywords: [],
-      connectedCount: 1,
-      icon: connectionIcon(conn)
+
+    const listing = listings.find((entry) => entry.id === id)
+    byConnector.set(id, {
+      connectorId: id,
+      name: listing?.name ?? id,
+      ...((listing?.catalogItem?.icon ?? connectionIcon(conn))
+        ? { icon: listing?.catalogItem?.icon ?? connectionIcon(conn) }
+        : {}),
+      ...(listing?.catalogItem?.version && { version: listing.catalogItem.version }),
+      ...(listing && { listing }),
+      connections: [conn]
     })
   }
 
-  return [...seen.values()]
+  return [...byConnector.values()]
 }
 
 /**
@@ -255,19 +276,6 @@ export function filterByCategory(
     return listings.filter((listing) => listing.connectedCount > 0)
   }
   return listings.filter((listing) => listing.category === category)
-}
-
-/** Listings grouped under their category, in the order the listings arrive. */
-export function groupConnectorListings(
-  listings: ConnectorListing[]
-): Array<{ category: string; listings: ConnectorListing[] }> {
-  const groups = new Map<string, ConnectorListing[]>()
-  for (const listing of listings) {
-    const existing = groups.get(listing.category)
-    if (existing) existing.push(listing)
-    else groups.set(listing.category, [listing])
-  }
-  return [...groups].map(([category, entries]) => ({ category, listings: entries }))
 }
 
 /**

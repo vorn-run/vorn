@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Search, Check, Zap, Play, RefreshCw } from 'lucide-react'
+import { Search, Plus, RefreshCw } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
 import {
   describeCatalogAge,
@@ -12,59 +12,98 @@ import {
 } from '../../lib/connector-browse'
 
 /**
- * The connector directory: search, facets, and a card per connector.
+ * The connectors Vorn can talk to, one per row.
  *
- * A row per connector was proportionate when there was one packaged connector.
- * Connectors now arrive from their own repository on their own schedule, so the
- * question stops being "which of these two" and becomes "will this one do what
- * I need" — which a name and a blurb cannot answer. Each card carries what the
- * connector says about itself, and selecting one opens the rest.
+ * Rows rather than cards because this lives in a settings panel: two columns
+ * halve the width available for a description and double the chrome around it.
+ * Every catalog built to sit inside a panel is a single column with the facts
+ * in one muted line and one action on the right.
+ *
+ * Those facts come from each connector's own manifest by way of the catalog, so
+ * a row can answer "will this do what I need" before anything is downloaded.
  */
 export function ConnectorDirectory({
   listings,
   builtIns,
-  selectedKey,
   onSelect,
+  onAdd,
   fetchedAt,
   onRefresh
 }: {
   listings: ConnectorListing[]
   builtIns: BuiltInConnector[]
-  selectedKey?: string
   onSelect: (listing: ConnectorListing) => void
+  onAdd: (listing: ConnectorListing) => void
   /** When the published list was last read. Absent until one has been. */
   fetchedAt?: number
   onRefresh?: () => Promise<void> | void
 }) {
   const [search, setSearch] = useState('')
-  const [category, setCategory] = useState<string>()
+  const [category, setCategory] = useState('')
   const [refreshing, setRefreshing] = useState(false)
 
   const categories = useMemo(() => connectorCategories(listings), [listings])
   const visible = useMemo(
-    () => filterByCategory(filterConnectorListings(listings, search), category),
+    () => filterByCategory(filterConnectorListings(listings, search), category || undefined),
     [listings, search, category]
   )
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Connectors</h3>
-        <div className="relative w-56">
+      <div className="flex items-center gap-2 mb-1">
+        <div className="relative flex-1">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search connectors"
-            className="w-full pl-7 pr-2 py-1 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-200 focus:border-white/[0.2] outline-none"
+            className="w-full pl-7 pr-2 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-200 focus:border-white/[0.2] outline-none"
           />
         </div>
+        {/* A dropdown rather than a row of chips, which wrapped to a second
+            line and pushed the list down. */}
+        {categories.length > 1 && (
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            aria-label="Filter by category"
+            className="py-1.5 px-2 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-300 outline-none focus:border-white/[0.2]"
+          >
+            <option value="">All categories</option>
+            {categories.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
+      <div>
+        {visible.map((listing) => (
+          <ConnectorRow
+            key={listing.key}
+            listing={listing}
+            builtIns={builtIns}
+            onSelect={() => onSelect(listing)}
+            onAdd={() => onAdd(listing)}
+          />
+        ))}
+      </div>
+
+      {visible.length === 0 && (
+        <p className="text-sm text-gray-500 py-4">
+          {search || category
+            ? 'No connectors match that.'
+            : 'No connectors available. Check your connection and try again.'}
+        </p>
+      )}
+
       {onRefresh && (
-        <p className="flex items-center gap-1.5 text-[10.5px] text-gray-600 mb-3">
+        <div className="flex items-center gap-1.5 pt-3 text-[11px] text-gray-600 border-t border-white/[0.06]">
           <span>{describeCatalogAge(fetchedAt)}</span>
+          <span>·</span>
           <button
             onClick={async () => {
               setRefreshing(true)
@@ -80,140 +119,89 @@ export function ConnectorDirectory({
             <RefreshCw size={9} className={refreshing ? 'animate-spin' : undefined} />
             {refreshing ? 'Checking' : 'Check now'}
           </button>
-        </p>
-      )}
-
-      {/* Chips only earn their place once there is more than one thing to pick. */}
-      {categories.length > 1 && (
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          <Chip label="All" active={!category} onClick={() => setCategory(undefined)} />
-          {categories.map((name) => (
-            <Chip
-              key={name}
-              label={name}
-              active={category === name}
-              onClick={() => setCategory(category === name ? undefined : name)}
-            />
-          ))}
         </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-        {visible.map((listing) => (
-          <ConnectorCard
-            key={listing.key}
-            listing={listing}
-            builtIns={builtIns}
-            selected={listing.key === selectedKey}
-            onSelect={() => onSelect(listing)}
-          />
-        ))}
-      </div>
-
-      {visible.length === 0 && (
-        <p className="text-sm text-gray-500">
-          {search || category
-            ? 'No connectors match that.'
-            : 'No connectors available. Check your connection and try again.'}
-        </p>
       )}
     </div>
   )
 }
 
-function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${
-        active
-          ? 'bg-white/[0.1] text-gray-200 border-transparent'
-          : 'text-gray-500 border-white/[0.1] hover:text-gray-300'
-      }`}
-    >
-      {label}
-    </button>
-  )
-}
-
-function ConnectorCard({
+function ConnectorRow({
   listing,
   builtIns,
-  selected,
-  onSelect
+  onSelect,
+  onAdd
 }: {
   listing: ConnectorListing
   builtIns: BuiltInConnector[]
-  selected: boolean
   onSelect: () => void
+  onAdd: () => void
 }) {
   const details = listingDetails(listing, builtIns)
-  const version = listing.catalogItem?.version
 
   return (
-    <button
-      onClick={onSelect}
-      aria-current={selected}
-      className={`text-left p-3 bg-white/[0.03] border rounded-sm transition-colors ${
-        selected ? 'border-cyan-400/50' : 'border-white/[0.06] hover:border-white/[0.14]'
-      }`}
-    >
-      <div className="flex items-start gap-2.5">
-        <span className="w-7 h-7 shrink-0 flex items-center justify-center bg-white/[0.04] rounded-sm">
+    <div className="flex items-start gap-3 py-3 border-t border-white/[0.06]">
+      <button
+        onClick={onSelect}
+        className="flex items-start gap-3 flex-1 min-w-0 text-left group"
+        aria-label={`About ${listing.name}`}
+      >
+        <span className="w-8 h-8 shrink-0 flex items-center justify-center bg-white/[0.05] rounded-md mt-0.5">
           <ConnectorIcon
             connectorId={listing.id}
             icon={listing.catalogItem?.icon ?? listing.icon}
-            size={16}
+            size={17}
             className="text-gray-200"
           />
         </span>
         <span className="min-w-0">
-          <span className="block text-[13px] text-gray-200 font-medium truncate">
+          <span className="block text-[13.5px] text-gray-200 font-medium group-hover:underline underline-offset-2 decoration-white/25">
             {listing.name}
           </span>
-          <span className="block text-[10px] text-gray-600">
-            {listing.category}
-            {version && ` · v${version}`}
-          </span>
+          {listing.description && (
+            <span className="block text-[12.5px] text-gray-500 leading-snug mt-0.5">
+              {listing.description}
+            </span>
+          )}
+          <span className="block text-[11px] text-gray-600 mt-1.5">{facts(listing, details)}</span>
         </span>
-      </div>
+      </button>
 
-      {listing.description && (
-        <p className="text-[11.5px] text-gray-500 leading-snug mt-2.5">{listing.description}</p>
+      {/* An installed row has no manifest and no package spec, so there is
+          nothing to open a form against. */}
+      {listing.source !== 'installed' && (
+        <button
+          onClick={onAdd}
+          className="shrink-0 self-center text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+        >
+          <Plus size={11} /> {listing.connectedCount > 0 ? 'Add another' : 'Add'}
+        </button>
       )}
-
-      <div className="flex items-center flex-wrap gap-1.5 mt-2.5">
-        {/* Counts, not names: the card says whether it is worth opening, the
-            panel says what it actually does. */}
-        {details.triggers.length > 0 && (
-          <Tag className="text-cyan-300/90 bg-cyan-400/10">
-            <Zap size={9} /> {count(details.triggers.length, 'trigger')}
-          </Tag>
-        )}
-        {details.actions.length > 0 && (
-          <Tag className="text-amber-300/90 bg-amber-400/10">
-            <Play size={9} /> {count(details.actions.length, 'action')}
-          </Tag>
-        )}
-        {listing.connectedCount > 0 && (
-          <Tag className="text-green-400 bg-green-400/10">
-            <Check size={9} /> {listing.connectedCount} connected
-          </Tag>
-        )}
-      </div>
-    </button>
+    </div>
   )
 }
 
-function Tag({ className, children }: { className: string; children: React.ReactNode }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-sm ${className}`}
-    >
-      {children}
-    </span>
-  )
+/**
+ * The one muted line under a connector's name.
+ *
+ * Written the way a good store writes them — "1 trigger, 1 action" — rather
+ * than a coloured pill per fact. Colour stops meaning anything when every row
+ * carries three of it, and the only thing on this page that earns colour is a
+ * connection that is failing.
+ */
+function facts(listing: ConnectorListing, details: ReturnType<typeof listingDetails>): string {
+  const parts = [listing.category]
+
+  const offers = [
+    details.triggers.length > 0 && count(details.triggers.length, 'trigger'),
+    details.actions.length > 0 && count(details.actions.length, 'action')
+  ].filter(Boolean) as string[]
+  if (offers.length > 0) parts.push(offers.join(', '))
+
+  const version = listing.catalogItem?.version
+  if (version) parts.push(`v${version}`)
+  if (listing.connectedCount > 0) parts.push('in use')
+
+  return parts.join(' · ')
 }
 
 function count(n: number, noun: string): string {
