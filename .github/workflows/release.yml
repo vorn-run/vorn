@@ -271,8 +271,6 @@ jobs:
             directory: packages/connector-sdk
           - name: '@vornrun/mcp'
             directory: packages/mcp
-          - name: '@vornrun/connector-kusto'
-            directory: packages/connector-kusto
     steps:
       - uses: actions/checkout@v7
 
@@ -300,7 +298,7 @@ jobs:
       - name: Sync version from tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          for dir in packages/connector-sdk packages/mcp packages/connector-kusto; do
+          for dir in packages/connector-sdk packages/mcp; do
             (cd "$dir" && npm pkg set version="$VERSION")
           done
 

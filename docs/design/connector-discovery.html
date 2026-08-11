@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vorn — A list you can decide from</title>
+  <style>
+    :root {
+      --night: #000000;
+      --ink: #f3f1ea;
+      --ink-2: rgba(243, 241, 234, 0.55);
+      --ink-3: rgba(243, 241, 234, 0.34);
+      --hairline: rgba(243, 241, 234, 0.14);
+      --hairline-soft: rgba(243, 241, 234, 0.08);
+      --brass: #c9a227;
+      --serif: ui-serif, 'New York', 'Iowan Old Style', Georgia, serif;
+      --sans: -apple-system, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+      --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+      /* Vorn's own surface, so a mockup reads as the app and not as this page. */
+      --card: #1d1d20;
+      --card-2: #232326;
+      --canvas: #0f0f11;
+      --cyan: #22d3ee;
+      --green: #4ade80;
+    }
+    html,
+    body {
+      background: var(--night);
+    }
+    body {
+      color: var(--ink);
+      font-family: var(--serif);
+      line-height: 1.6;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 88px 28px 120px;
+    }
+    .eyebrow {
+      font-family: var(--sans);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+    }
+    h1 {
+      font-size: clamp(40px, 7vw, 56px);
+      font-weight: 500;
+      line-height: 1.08;
+      letter-spacing: -0.01em;
+      margin: 18px 0 0;
+      text-wrap: balance;
+    }
+    .thesis {
+      font-size: 21px;
+      line-height: 1.5;
+      color: var(--ink-2);
+      margin: 26px 0 0;
+      max-width: 34em;
+      text-wrap: balance;
+    }
+    section {
+      margin: 76px 0 0;
+      border-top: 1px solid var(--hairline-soft);
+      padding-top: 44px;
+    }
+    h2 {
+      font-size: 27px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      margin: 10px 0 0;
+    }
+    p {
+      margin: 18px 0 0;
+      max-width: 34em;
+    }
+    .muted {
+      color: var(--ink-2);
+    }
+    code {
+      font-family: var(--mono);
+      font-size: 0.86em;
+      color: var(--ink);
+      background: rgba(243, 241, 234, 0.06);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .caption {
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--ink-3);
+      max-width: 32em;
+      margin-top: 16px;
+    }
+    figure {
+      margin: 34px 0 0;
+    }
+
+    /* ---- the mockups ---- */
+    .app {
+      font-family: var(--sans);
+      background: var(--canvas);
+      border: 1px solid var(--hairline);
+      border-radius: 14px;
+      overflow: hidden;
+      line-height: 1.45;
+    }
+    .app-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--hairline-soft);
+    }
+    .app-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .spacer {
+      flex: 1;
+    }
+    .search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(243, 241, 234, 0.05);
+      border: 1px solid var(--hairline-soft);
+      border-radius: 8px;
+      padding: 7px 11px;
+      font-size: 13px;
+      color: var(--ink-3);
+      min-width: 190px;
+    }
+    .filters {
+      display: flex;
+      gap: 7px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--hairline-soft);
+      flex-wrap: wrap;
+    }
+    .chip {
+      font-size: 12px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      border: 1px solid var(--hairline);
+      color: var(--ink-2);
+    }
+    .chip.on {
+      background: rgba(243, 241, 234, 0.1);
+      color: var(--ink);
+      border-color: transparent;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      padding: 16px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--hairline-soft);
+      border-radius: 11px;
+      padding: 14px;
+    }
+    .card.sel {
+      border-color: rgba(34, 211, 238, 0.5);
+    }
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: rgba(243, 241, 234, 0.07);
+      display: grid;
+      place-items: center;
+      flex: none;
+    }
+    .icon svg {
+      width: 17px;
+      height: 17px;
+      fill: var(--ink-2);
+    }
+    .card-name {
+      font-size: 13.5px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .card-cat {
+      font-size: 11px;
+      color: var(--ink-3);
+      margin-top: 1px;
+    }
+    .card-desc {
+      font-size: 12.5px;
+      color: var(--ink-2);
+      margin-top: 10px;
+      line-height: 1.45;
+    }
+    .card-foot {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .tag {
+      font-size: 10.5px;
+      letter-spacing: 0.02em;
+      padding: 2px 7px;
+      border-radius: 5px;
+      background: rgba(243, 241, 234, 0.06);
+      color: var(--ink-3);
+    }
+    .tag.trig {
+      color: rgba(34, 211, 238, 0.85);
+      background: rgba(34, 211, 238, 0.1);
+    }
+    .tag.act {
+      color: rgba(201, 162, 39, 0.95);
+      background: rgba(201, 162, 39, 0.12);
+    }
+    .tag.on {
+      color: var(--green);
+      background: rgba(74, 222, 128, 0.12);
+    }
+    .btn {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 13px;
+      border-radius: 7px;
+      background: var(--ink);
+      color: #111;
+      margin-left: auto;
+    }
+    .btn.ghost {
+      background: transparent;
+      color: var(--ink-2);
+      border: 1px solid var(--hairline);
+    }
+
+    /* detail panel */
+    .detail {
+      border-top: 1px solid var(--hairline-soft);
+      padding: 18px 16px 20px;
+      background: rgba(243, 241, 234, 0.02);
+    }
+    .detail-head {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+    }
+    .detail-name {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .detail-sub {
+      font-size: 11.5px;
+      color: var(--ink-3);
+      margin-top: 2px;
+    }
+    .sect {
+      margin-top: 17px;
+    }
+    .sect-label {
+      font-size: 10.5px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+    .row {
+      display: flex;
+      gap: 9px;
+      align-items: baseline;
+      margin-top: 8px;
+      font-size: 12.5px;
+    }
+    .row .dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--cyan);
+      flex: none;
+      transform: translateY(-2px);
+    }
+    .row.act .dot {
+      background: var(--brass);
+    }
+    .row .rl {
+      color: var(--ink);
+    }
+    .row .rd {
+      color: var(--ink-3);
+    }
+    .envs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 9px;
+    }
+    .env {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 5px;
+      border: 1px solid var(--hairline-soft);
+      color: var(--ink-2);
+    }
+    .env.opt {
+      color: var(--ink-3);
+      border-style: dashed;
+    }
+    .auth {
+      font-size: 12.5px;
+      color: var(--ink-2);
+      margin-top: 9px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .detail-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 20px;
+      align-items: center;
+    }
+    .note {
+      font-size: 11.5px;
+      color: var(--ink-3);
+      margin-left: auto;
+    }
+    .bad .card-desc {
+      color: var(--ink-3);
+    }
+    .stack {
+      display: grid;
+      gap: 0;
+      padding: 4px 0;
+    }
+    .listrow {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 11px 16px;
+      border-bottom: 1px solid var(--hairline-soft);
+    }
+    .listrow:last-child {
+      border-bottom: 0;
+    }
+    ol,
+    ul {
+      max-width: 34em;
+      color: var(--ink-2);
+    }
+    li {
+      margin: 9px 0;
+    }
+    li strong {
+      color: var(--ink);
+      font-weight: 500;
+    }
+  </style>
+
+  <body>
+    <div class="page">
+      <p class="eyebrow">Vorn · design note</p>
+      <h1>A list you can decide from</h1>
+      <p class="thesis">
+        Today a connector is a name, a blurb and an Add button. That was fine for one. With a
+        connector arriving most days, the question stops being “which of these two” and becomes
+        “will this one do what I need” — and nothing on screen answers it until after you have
+        installed it.
+      </p>
+
+      <section>
+        <p class="eyebrow">Where it stands</p>
+        <h2>The card says almost nothing</h2>
+        <p>
+          Everything the list knows is in this row. A name, a sentence, a button. Whether it can
+          only watch for things or can also be called from a step, what it will ask you for, whether
+          you already have the credentials — all of it is on the other side of an install.
+        </p>
+
+        <figure>
+          <div class="app">
+            <div class="app-bar">
+              <span class="app-title">Add a connection</span>
+            </div>
+            <div class="stack bad">
+              <div class="listrow">
+                <span class="icon"
+                  ><svg viewBox="0 0 24 24">
+                    <path
+                      d="M12 2C7.6 2 4 3.6 4 5.5S7.6 9 12 9s8-1.6 8-3.5S16.4 2 12 2zm0 5.5c-3.6 0-6-1.2-6-2s2.4-2 6-2 6 1.2 6 2-2.4 2-6 2z"
+                    />
+                    <path
+                      d="M4 9.4v2.1c0 1.9 3.6 3.5 8 3.5.5 0 1 0 1.4-.1a5.6 5.6 0 01.8-1.9c-.7.1-1.5.2-2.2.2-3.6 0-6-1.2-6-2V9.4z"
+                    /></svg
+                ></span>
+                <span>
+                  <div class="card-name">Azure Data Explorer</div>
+                  <div class="card-desc" style="margin-top: 2px">
+                    Trigger workflows from the rows a KQL query returns.
+                  </div>
+                </span>
+                <span class="btn">Add</span>
+              </div>
+              <div class="listrow">
+                <span class="icon"
+                  ><svg viewBox="0 0 24 24">
+                    <path d="M4 4h5v16H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+                    <path d="M10.5 4h3v9h-3z" />
+                    <path d="M15 4h5a1 1 0 011 1v14a1 1 0 01-1 1h-5z" /></svg
+                ></span>
+                <span>
+                  <div class="card-name">Azure DevOps</div>
+                  <div class="card-desc" style="margin-top: 2px">
+                    Trigger workflows from the work items a WIQL query returns.
+                  </div>
+                </span>
+                <span class="btn">Add</span>
+              </div>
+            </div>
+          </div>
+          <p class="caption">
+            Two rows is a list. Twenty is a wall, and every one of them still reads “trigger
+            workflows from…”.
+          </p>
+        </figure>
+      </section>
+
+      <section>
+        <p class="eyebrow">The change</p>
+        <h2>Say what it does before it is downloaded</h2>
+        <p>
+          Every connector already describes itself — its triggers, its actions, the settings it
+          reads — and the catalog is now generated from exactly that. So the list can show it. Not a
+          longer blurb somebody wrote, but the connector’s own manifest, which cannot drift from
+          what you get.
+        </p>
+
+        <figure>
+          <div class="app">
+            <div class="app-bar">
+              <span class="app-title">Connectors</span>
+              <span class="spacer"></span>
+              <span class="search">Search connectors</span>
+            </div>
+            <div class="filters">
+              <span class="chip on">All</span>
+              <span class="chip">Development</span>
+              <span class="chip">Data &amp; observability</span>
+              <span class="chip">Can be called from a step</span>
+              <span class="chip">Installed</span>
+            </div>
+            <div class="grid">
+              <div class="card sel">
+                <div class="card-head">
+                  <span class="icon"
+                    ><svg viewBox="0 0 24 24">
+                      <path d="M4 4h5v16H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+                      <path d="M10.5 4h3v9h-3z" />
+                      <path d="M15 4h5a1 1 0 011 1v14a1 1 0 01-1 1h-5z" /></svg
+                  ></span>
+                  <span>
+                    <div class="card-name">Azure DevOps</div>
+                    <div class="card-cat">Development · v0.1.0</div>
+                  </span>
+                </div>
+                <div class="card-desc">Start a workflow when a work item matches your query.</div>
+                <div class="card-foot">
+                  <span class="tag trig">1 trigger</span>
+                  <span class="tag">az login</span>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head">
+                  <span class="icon"
+                    ><svg viewBox="0 0 24 24">
+                      <path
+                        d="M12 2C7.6 2 4 3.6 4 5.5S7.6 9 12 9s8-1.6 8-3.5S16.4 2 12 2zm0 5.5c-3.6 0-6-1.2-6-2s2.4-2 6-2 6 1.2 6 2-2.4 2-6 2z"
+                      />
+                      <path
+                        d="M4 9.4v2.1c0 1.9 3.6 3.5 8 3.5.5 0 1 0 1.4-.1a5.6 5.6 0 01.8-1.9c-.7.1-1.5.2-2.2.2-3.6 0-6-1.2-6-2V9.4z"
+                      />
+                      <path
+                        d="M17.5 13a4.5 4.5 0 103.1 7.7l1.6 1.6a1 1 0 001.4-1.4l-1.6-1.6A4.5 4.5 0 0017.5 13zm0 2a2.5 2.5 0 110 5 2.5 2.5 0 010-5z"
+                      /></svg
+                  ></span>
+                  <span>
+                    <div class="card-name">Azure Data Explorer</div>
+                    <div class="card-cat">Data &amp; observability · v0.6.0</div>
+                  </span>
+                </div>
+                <div class="card-desc">
+                  Start a workflow when a KQL query returns a row, or run one from a step.
+                </div>
+                <div class="card-foot">
+                  <span class="tag trig">1 trigger</span>
+                  <span class="tag act">1 action</span>
+                  <span class="tag on">Connected</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="detail">
+              <div class="detail-head">
+                <span class="icon"
+                  ><svg viewBox="0 0 24 24">
+                    <path d="M4 4h5v16H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+                    <path d="M10.5 4h3v9h-3z" />
+                    <path d="M15 4h5a1 1 0 011 1v14a1 1 0 01-1 1h-5z" /></svg
+                ></span>
+                <span>
+                  <div class="detail-name">Azure DevOps</div>
+                  <div class="detail-sub">@vornrun/connector-ado · v0.1.0 · not installed</div>
+                </span>
+              </div>
+
+              <div class="sect">
+                <div class="sect-label">Starts a workflow when</div>
+                <div class="row">
+                  <span class="dot"></span>
+                  <span
+                    ><span class="rl">A work item matches the query</span>
+                    <span class="rd"
+                      >— fires once per work item the WIQL query newly returns.</span
+                    ></span
+                  >
+                </div>
+              </div>
+
+              <div class="sect">
+                <div class="sect-label">A step can ask it to</div>
+                <div class="row">
+                  <span class="rd">Nothing yet — this one only watches.</span>
+                </div>
+              </div>
+
+              <div class="sect">
+                <div class="sect-label">You will need</div>
+                <div class="envs">
+                  <span class="env">ADO_ORGANIZATION</span>
+                  <span class="env">ADO_PROJECT</span>
+                  <span class="env">ADO_QUERY</span>
+                  <span class="env opt">ADO_TOP</span>
+                </div>
+                <div class="auth">
+                  <span>🔑</span>
+                  <span
+                    >Signs in with your Azure identity — <code>az login</code> is usually all it
+                    needs.</span
+                  >
+                </div>
+              </div>
+
+              <div class="detail-actions">
+                <span class="btn">Add connection</span>
+                <span class="btn ghost">View on npm</span>
+                <span class="note"
+                  >Runs on demand via npx. Nothing installed until you add it.</span
+                >
+              </div>
+            </div>
+          </div>
+          <p class="caption">
+            Dashed outline is an optional setting. The cyan dot is something that starts a workflow;
+            the brass dot is something a step can call. Same two colours as the canvas uses.
+          </p>
+        </figure>
+      </section>
+
+      <section>
+        <p class="eyebrow">Why this shape</p>
+        <h2>Three questions, in the order people ask them</h2>
+        <p>
+          Grid, then detail, rather than a longer row. The grid answers
+          <em>is it here</em> at a glance across twenty cards; the panel answers
+          <em>will it do what I need</em> without leaving the page or installing anything.
+        </p>
+        <ol>
+          <li>
+            <strong>Is the thing I want here?</strong> Search covers name, description and the
+            keywords a connector declares — so “boards” and “tfs” both find Azure DevOps. Category
+            chips narrow a wall to a shelf.
+          </li>
+          <li>
+            <strong>Will it do what I need?</strong> Triggers and actions, verbatim from the
+            manifest. “1 trigger, 1 action” on the card is the count; the panel is the list, with
+            each one’s own description.
+          </li>
+          <li>
+            <strong>What will it cost me to set up?</strong> The settings it will ask for, optional
+            ones visibly optional, and one line on how it authenticates. Nobody should discover a
+            required API key on step three of a form.
+          </li>
+        </ol>
+        <p class="muted">
+          The Installed filter and the Connected tag come from what is already configured, so the
+          same view answers “what do I have” — which is the other half of why people open this page.
+        </p>
+      </section>
+
+      <section>
+        <p class="eyebrow">Where the words come from</p>
+        <h2>Nothing on this screen is written twice</h2>
+        <p>
+          Every string in that panel is generated from the connector’s own manifest, upstream, and
+          checked in CI. Rename a trigger and the list renames it. That is the difference between a
+          catalog and a brochure: the brochure keeps advertising last month’s feature.
+        </p>
+        <p>
+          Two things it deliberately does not do. It does not run anything to populate the list —
+          twenty connectors would mean twenty
+          <code>npx</code> launches to open a page. And it does not trust any of this once you click
+          Add: the connection form still probes the package you actually installed, so what you
+          configure always matches what you got.
+        </p>
+      </section>
+
+      <section>
+        <p class="eyebrow">Build order</p>
+        <h2>Three steps, each shippable</h2>
+        <ol>
+          <li>
+            <strong>Grid and search.</strong> Replace the row list with cards, trigger and action
+            counts, category chips, keyword search. Useful on its own the moment there are more than
+            about six connectors.
+          </li>
+          <li>
+            <strong>The detail panel.</strong> Triggers, actions, settings, auth line, npm link.
+            This is where the manifest data earns its place.
+          </li>
+          <li>
+            <strong>Freshness.</strong> A quiet “updated 2 hours ago · check now” under the search
+            box, calling the refresh the catalog already exposes. Only worth building once
+            connectors start arriving weekly.
+          </li>
+        </ol>
+        <p class="muted">
+          Step one is the whole value if connectors stay in single digits. Step two is what makes a
+          directory of thirty navigable. Neither needs the other to land.
+        </p>
+      </section>
+    </div>
+  </body>
+</html>

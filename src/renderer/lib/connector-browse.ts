@@ -37,17 +37,90 @@ export interface BuiltInConnector {
   id: string
   name: string
   capabilities: string[]
+  manifest?: {
+    triggers?: Array<{ type: string; label: string; description?: string }>
+    actions?: Array<{ type: string; label: string; description?: string }>
+    auth?: Array<{ key?: string; label?: string; required?: boolean }>
+  }
+}
+
+/**
+ * What a connector does, in the one shape the list renders.
+ *
+ * A built-in describes itself with `ConnectorTriggerDef`, a packaged one
+ * through its catalog entry, and they already agree on type/label/description.
+ * Reducing both here is what lets one card and one panel serve every row rather
+ * than branching on where the connector came from.
+ */
+export interface ConnectorDetails {
+  triggers: Array<{ type: string; label: string; description?: string }>
+  actions: Array<{ type: string; label: string; description?: string }>
+  settings: Array<{ name: string; required: boolean; description?: string }>
+  /** Absent on a row nothing describes — an installed package with no manifest. */
+  known: boolean
+}
+
+const EMPTY_DETAILS: ConnectorDetails = {
+  triggers: [],
+  actions: [],
+  settings: [],
+  known: false
+}
+
+/**
+ * Read what a connector does, whatever kind of row it is.
+ *
+ * For a packaged connector this comes from the catalog, which is generated from
+ * the connector's own manifest upstream — so it is safe to show before anything
+ * is installed and cannot drift from what gets installed. A built-in is read
+ * from the manifest already in the process.
+ */
+export function listingDetails(
+  listing: ConnectorListing,
+  builtIns: BuiltInConnector[] = []
+): ConnectorDetails {
+  if (listing.source === 'catalog') {
+    const entry = listing.catalogItem
+    // An entry from a catalog published before these fields existed says
+    // nothing rather than saying "no triggers", which would be a lie.
+    if (!entry?.triggers && !entry?.actions) return EMPTY_DETAILS
+    return {
+      triggers: entry.triggers ?? [],
+      actions: entry.actions ?? [],
+      settings: (entry.env ?? []).map((variable) => ({
+        name: variable.name,
+        required: variable.required,
+        ...(variable.description && { description: variable.description })
+      })),
+      known: true
+    }
+  }
+
+  const builtIn = builtIns.find((connector) => connector.id === listing.id)
+  if (!builtIn?.manifest) return EMPTY_DETAILS
+  return {
+    triggers: builtIn.manifest.triggers ?? [],
+    actions: builtIn.manifest.actions ?? [],
+    settings: (builtIn.manifest.auth ?? []).map((field) => ({
+      name: field.label ?? field.key ?? '',
+      required: field.required ?? false
+    })),
+    known: true
+  }
 }
 
 const UNCATEGORIZED = 'Other'
 
 /**
- * Merge the built-in connectors, the catalog and anything already installed
- * into a single list.
+ * The connectors that can be added: the built-ins and the catalog.
  *
- * Connected connectors sort first — the list is also how you find something
- * already set up — and the rest sort by name so position is stable as the
- * catalog grows rather than depending on registration order.
+ * Only kinds of connector, never the connections someone already made — those
+ * are a different noun with a list of their own, and mixing them is how one
+ * connector ends up on a page three times.
+ *
+ * Connected ones sort first, since a connector you already use is the one you
+ * are most likely to want another of, and the rest sort by name so position is
+ * stable as the catalog grows rather than depending on registration order.
  */
 export function buildConnectorListings(
   builtIns: BuiltInConnector[],
@@ -76,11 +149,7 @@ export function buildConnectorListings(
       keywords: entry.keywords ?? [],
       connectedCount: countFor(entry.id),
       catalogItem: entry
-    })),
-    // A connector installed by package name, or one dropped from the catalog,
-    // still has working connections. Without a row of its own it would be
-    // missing from the list that is meant to show what is set up.
-    ...installedListings(builtIns, catalog, connections)
+    }))
   ]
 
   return listings.sort((a, b) => {
@@ -89,36 +158,58 @@ export function buildConnectorListings(
   })
 }
 
-function installedListings(
-  builtIns: BuiltInConnector[],
-  catalog: ConnectorCatalogItem[],
+/** A connector someone actually uses, with the connections they made to it. */
+export interface ConnectionGroup {
+  connectorId: string
+  name: string
+  icon?: SdkConnectorIcon
+  version?: string
+  /** Absent for a package installed by name, or one the catalog has dropped. */
+  listing?: ConnectorListing
   connections: SourceConnection[]
-): ConnectorListing[] {
-  const known = new Set([...builtIns.map((c) => c.id), ...catalog.map((c) => c.id)])
-  const seen = new Map<string, ConnectorListing>()
+}
+
+/**
+ * Group connections under the connector they belong to.
+ *
+ * Two connections to the same connector are one heading with two rows under it,
+ * which is the only place a count belongs — beside the things it counts, rather
+ * than on a card in the catalog that is trying to sell you a third.
+ *
+ * A connection whose connector is in neither the catalog nor the built-ins is
+ * still a connection: it polls, it fails, it can be deleted. It gets a group
+ * named after its connector id, with the icon the connection itself stored.
+ * Groups keep the order the connections arrive in, which is the order the
+ * server returns them.
+ */
+export function groupConnections(
+  connections: SourceConnection[],
+  listings: ConnectorListing[] = []
+): ConnectionGroup[] {
+  const byConnector = new Map<string, ConnectionGroup>()
 
   for (const conn of connections) {
     const id = connectionConnectorId(conn)
-    if (known.has(id)) continue
-    const existing = seen.get(id)
+    const existing = byConnector.get(id)
     if (existing) {
-      existing.connectedCount += 1
+      existing.connections.push(conn)
       continue
     }
-    seen.set(id, {
-      key: `installed:${id}`,
-      id,
-      name: id,
-      capabilities: [],
-      category: 'Installed',
-      source: 'installed' as const,
-      keywords: [],
-      connectedCount: 1,
-      icon: connectionIcon(conn)
+
+    const listing = listings.find((entry) => entry.id === id)
+    byConnector.set(id, {
+      connectorId: id,
+      name: listing?.name ?? id,
+      ...((listing?.catalogItem?.icon ?? connectionIcon(conn))
+        ? { icon: listing?.catalogItem?.icon ?? connectionIcon(conn) }
+        : {}),
+      ...(listing?.catalogItem?.version && { version: listing.catalogItem.version }),
+      ...(listing && { listing }),
+      connections: [conn]
     })
   }
 
-  return [...seen.values()]
+  return [...byConnector.values()]
 }
 
 /**
@@ -150,15 +241,63 @@ export function filterConnectorListings(
   })
 }
 
-/** Listings grouped under their category, in the order the listings arrive. */
-export function groupConnectorListings(
-  listings: ConnectorListing[]
-): Array<{ category: string; listings: ConnectorListing[] }> {
-  const groups = new Map<string, ConnectorListing[]>()
-  for (const listing of listings) {
-    const existing = groups.get(listing.category)
-    if (existing) existing.push(listing)
-    else groups.set(listing.category, [listing])
+/**
+ * The facets the list offers, in the order they are worth offering.
+ *
+ * Derived from what is actually present rather than a fixed list, so a category
+ * arriving with a new connector shows up without an app release — the whole
+ * point of fetching the catalog. "Callable" and "Connected" are not categories
+ * but answer the two questions people bring to this page most often: can a step
+ * use it, and what do I already have.
+ */
+export const CALLABLE_FILTER = 'Can be called from a step'
+export const CONNECTED_FILTER = 'Connected'
+
+export function connectorCategories(listings: ConnectorListing[]): string[] {
+  const categories = [...new Set(listings.map((listing) => listing.category))].sort()
+  const facets: string[] = []
+  if (listings.some((listing) => listing.capabilities.includes('actions'))) {
+    facets.push(CALLABLE_FILTER)
   }
-  return [...groups].map(([category, entries]) => ({ category, listings: entries }))
+  if (listings.some((listing) => listing.connectedCount > 0)) facets.push(CONNECTED_FILTER)
+  return [...categories, ...facets]
+}
+
+/** Narrow to one category, or to one of the two derived facets. */
+export function filterByCategory(
+  listings: ConnectorListing[],
+  category: string | undefined
+): ConnectorListing[] {
+  if (!category) return listings
+  if (category === CALLABLE_FILTER) {
+    return listings.filter((listing) => listing.capabilities.includes('actions'))
+  }
+  if (category === CONNECTED_FILTER) {
+    return listings.filter((listing) => listing.connectedCount > 0)
+  }
+  return listings.filter((listing) => listing.category === category)
+}
+
+/**
+ * How current the catalog is, in the terms someone would ask it.
+ *
+ * Never fetched is worth saying plainly rather than dressing up: the list is
+ * then whatever shipped with the app, which may be missing everything published
+ * since, and a soothing timestamp would hide that.
+ */
+export function describeCatalogAge(
+  fetchedAt: number | undefined,
+  now: number = Date.now()
+): string {
+  if (fetchedAt === undefined) return 'Showing the connectors that shipped with Vorn'
+  const minutes = Math.floor((now - fetchedAt) / 60_000)
+  if (minutes < 1) return 'Updated just now'
+  if (minutes < 60) return `Updated ${plural(minutes, 'minute')} ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `Updated ${plural(hours, 'hour')} ago`
+  return `Updated ${plural(Math.floor(hours / 24), 'day')} ago`
+}
+
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
 }

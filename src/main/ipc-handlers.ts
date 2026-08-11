@@ -244,6 +244,9 @@ export function registerIpcHandlers(): void {
     requireBridge().request(IPC.CONNECTOR_PROBE_SDK, request)
   )
   safeHandle(IPC.CONNECTOR_CATALOG, () => requireBridge().request(IPC.CONNECTOR_CATALOG))
+  safeHandle(IPC.CONNECTOR_CATALOG_REFRESH, () =>
+    requireBridge().request(IPC.CONNECTOR_CATALOG_REFRESH)
+  )
   safeHandle(IPC.CONNECTION_GET_SOURCE_LINK, (_, taskId) =>
     requireBridge().request(IPC.CONNECTION_GET_SOURCE_LINK, taskId)
   )

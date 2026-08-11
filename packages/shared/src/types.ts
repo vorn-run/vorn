@@ -1368,7 +1368,8 @@ export const IPC = {
   CONNECTION_LIST_MCP_TOOLS: 'connection:listMcpTools',
   CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
   CONNECTOR_PROBE_SDK: 'connector:probeSdk',
-  CONNECTOR_CATALOG: 'connector:catalog'
+  CONNECTOR_CATALOG: 'connector:catalog',
+  CONNECTOR_CATALOG_REFRESH: 'connector:catalogRefresh'
 } as const
 
 /**
@@ -1422,12 +1423,20 @@ export interface SdkConnectorIcon {
  * install time, so this cannot become a stale second copy of the connector's
  * own definition.
  */
+export interface ConnectorCatalogSummary {
+  type: string
+  label: string
+  description?: string
+}
+
 export interface ConnectorCatalogEntry {
   id: string
   name: string
   description: string
   /** npm package the connector is published as. */
   packageName: string
+  /** Published version, so a listing can say what would be installed. */
+  version?: string
   capabilities: Array<'tasks' | 'triggers' | 'actions'>
   /** One line on how it authenticates, shown before anyone commits to install. */
   auth?: string
@@ -1436,6 +1445,15 @@ export interface ConnectorCatalogEntry {
   category?: string
   /** Extra search terms, so it is findable by what it talks to. */
   keywords?: string[]
+  /**
+   * What the connector fires on, what a workflow can ask it to do, and what it
+   * will want configured — generated upstream from the connector's own
+   * manifest, so a listing can answer "will this do what I need" before
+   * anything is downloaded. Absent on an older catalog.
+   */
+  triggers?: ConnectorCatalogSummary[]
+  actions?: ConnectorCatalogSummary[]
+  env?: Array<{ name: string; required: boolean; description?: string }>
 }
 
 /**
@@ -1444,6 +1462,18 @@ export interface ConnectorCatalogEntry {
  */
 export interface ConnectorCatalogItem extends ConnectorCatalogEntry {
   launch: { command: string; args: string[] }
+}
+
+/**
+ * The catalog plus when it was last fetched.
+ *
+ * `fetchedAt` is absent when nothing has ever been fetched — a first run, or
+ * every attempt so far has failed — so the UI can say that rather than showing
+ * a timestamp for a list that may be missing everything published since.
+ */
+export interface ConnectorCatalogSnapshot {
+  items: ConnectorCatalogItem[]
+  fetchedAt?: number
 }
 
 export interface SdkConnectorManifest {

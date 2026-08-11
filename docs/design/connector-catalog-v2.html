@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vorn — Rows, not cards</title>
+  <style>
+    :root {
+      --night: #000000;
+      --ink: #f3f1ea;
+      --ink-2: rgba(243, 241, 234, 0.55);
+      --ink-3: rgba(243, 241, 234, 0.34);
+      --hairline: rgba(243, 241, 234, 0.14);
+      --hairline-soft: rgba(243, 241, 234, 0.07);
+      --brass: #c9a227;
+      --serif: ui-serif, 'New York', 'Iowan Old Style', Georgia, serif;
+      --sans: -apple-system, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+      --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+      --canvas: #0f0f11;
+      --green: #4ade80;
+      --red: #f87171;
+    }
+    html,
+    body {
+      background: var(--night);
+    }
+    body {
+      color: var(--ink);
+      font-family: var(--serif);
+      line-height: 1.6;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 88px 28px 120px;
+    }
+    .eyebrow {
+      font-family: var(--sans);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+    }
+    h1 {
+      font-size: clamp(38px, 6.6vw, 54px);
+      font-weight: 500;
+      line-height: 1.08;
+      letter-spacing: -0.01em;
+      margin: 18px 0 0;
+      text-wrap: balance;
+    }
+    .thesis {
+      font-size: 21px;
+      line-height: 1.5;
+      color: var(--ink-2);
+      margin: 26px 0 0;
+      max-width: 34em;
+      text-wrap: balance;
+    }
+    section {
+      margin: 76px 0 0;
+      border-top: 1px solid var(--hairline-soft);
+      padding-top: 44px;
+    }
+    h2 {
+      font-size: 27px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      margin: 10px 0 0;
+    }
+    p {
+      margin: 18px 0 0;
+      max-width: 34em;
+    }
+    .muted {
+      color: var(--ink-2);
+    }
+    code {
+      font-family: var(--mono);
+      font-size: 0.86em;
+      background: rgba(243, 241, 234, 0.06);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .caption {
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--ink-3);
+      max-width: 32em;
+      margin-top: 16px;
+    }
+    figure {
+      margin: 34px 0 0;
+    }
+    ul,
+    ol {
+      max-width: 34em;
+      color: var(--ink-2);
+    }
+    li {
+      margin: 9px 0;
+    }
+    li strong {
+      color: var(--ink);
+      font-weight: 500;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 26px;
+      font-family: var(--sans);
+      font-size: 12.5px;
+    }
+    th {
+      text-align: left;
+      font-weight: 500;
+      color: var(--ink-3);
+      font-size: 10.5px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 0 12px 8px 0;
+      border-bottom: 1px solid var(--hairline-soft);
+    }
+    td {
+      padding: 10px 12px 10px 0;
+      border-bottom: 1px solid var(--hairline-soft);
+      color: var(--ink-2);
+      vertical-align: top;
+    }
+    td:first-child {
+      color: var(--ink);
+      white-space: nowrap;
+    }
+
+    /* ---- mockup ---- */
+    .app {
+      font-family: var(--sans);
+      background: var(--canvas);
+      border: 1px solid var(--hairline);
+      border-radius: 14px;
+      overflow: hidden;
+      line-height: 1.45;
+    }
+    .head {
+      padding: 20px 22px 0;
+    }
+    .h-title {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+    }
+    .h-sub {
+      font-size: 12px;
+      color: var(--ink-3);
+      margin-top: 3px;
+    }
+    .seg {
+      display: inline-flex;
+      background: rgba(243, 241, 234, 0.05);
+      border-radius: 8px;
+      padding: 2px;
+      margin-top: 16px;
+    }
+    .seg span {
+      font-size: 12px;
+      padding: 5px 13px;
+      border-radius: 6px;
+      color: var(--ink-3);
+    }
+    .seg span.on {
+      background: rgba(243, 241, 234, 0.1);
+      color: var(--ink);
+    }
+    .tools {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 22px 14px;
+    }
+    .search {
+      flex: 1;
+      background: rgba(243, 241, 234, 0.05);
+      border: 1px solid var(--hairline-soft);
+      border-radius: 8px;
+      padding: 7px 11px;
+      font-size: 12.5px;
+      color: var(--ink-3);
+    }
+    .drop {
+      font-size: 12px;
+      color: var(--ink-2);
+      border: 1px solid var(--hairline-soft);
+      border-radius: 8px;
+      padding: 7px 11px;
+      white-space: nowrap;
+    }
+
+    /* the row — the whole point of this note */
+    .row {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 16px 22px;
+      border-top: 1px solid var(--hairline-soft);
+    }
+    .row.sel {
+      background: rgba(243, 241, 234, 0.03);
+    }
+    .ico {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: rgba(243, 241, 234, 0.06);
+      display: grid;
+      place-items: center;
+      flex: none;
+      margin-top: 1px;
+    }
+    .ico svg {
+      width: 18px;
+      height: 18px;
+      fill: rgba(243, 241, 234, 0.75);
+    }
+    .body {
+      flex: 1;
+      min-width: 0;
+    }
+    .nm {
+      font-size: 13.5px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .de {
+      font-size: 12.5px;
+      color: var(--ink-2);
+      margin-top: 3px;
+      line-height: 1.45;
+    }
+    .fx {
+      font-size: 11.5px;
+      color: var(--ink-3);
+      margin-top: 7px;
+    }
+    .act {
+      flex: none;
+      align-self: center;
+    }
+    .btn {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 14px;
+      border-radius: 7px;
+      background: rgba(243, 241, 234, 0.1);
+      color: var(--ink);
+      border: 1px solid transparent;
+    }
+    .btn.quiet {
+      background: transparent;
+      color: var(--ink-3);
+      border-color: var(--hairline);
+    }
+    .state {
+      font-size: 11.5px;
+      color: var(--ink-3);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--green);
+      display: inline-block;
+    }
+    .dot.err {
+      background: var(--red);
+    }
+    .sub {
+      padding: 0 22px 14px 70px;
+    }
+    .subrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-top: 1px solid var(--hairline-soft);
+      font-size: 12.5px;
+    }
+    .subrow .meta {
+      color: var(--ink-3);
+      font-size: 11.5px;
+    }
+    .subrow .r {
+      margin-left: auto;
+      color: var(--ink-3);
+      font-size: 11.5px;
+    }
+    .foot {
+      padding: 13px 22px;
+      border-top: 1px solid var(--hairline-soft);
+      font-size: 11px;
+      color: var(--ink-3);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    /* detail view */
+    .back {
+      font-size: 12px;
+      color: var(--ink-3);
+      padding: 14px 22px 0;
+    }
+    .dhead {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      padding: 14px 22px 0;
+    }
+    .dtitle {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+    }
+    .dmeta {
+      font-size: 11.5px;
+      color: var(--ink-3);
+      margin-top: 3px;
+    }
+    .dbody {
+      padding: 18px 22px 20px;
+    }
+    .lbl {
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-top: 20px;
+    }
+    .lbl:first-child {
+      margin-top: 0;
+    }
+    .item {
+      font-size: 12.5px;
+      margin-top: 9px;
+    }
+    .item .t {
+      color: var(--ink);
+    }
+    .item .d {
+      color: var(--ink-3);
+      margin-top: 1px;
+    }
+    .kv {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-2);
+      margin-top: 8px;
+    }
+    .kv .opt {
+      color: var(--ink-3);
+    }
+    .cta {
+      display: flex;
+      gap: 9px;
+      align-items: center;
+      margin-top: 24px;
+    }
+    .flag {
+      font-family: var(--sans);
+      font-size: 11.5px;
+      color: var(--red);
+      margin-top: 12px;
+    }
+  </style>
+
+  <body>
+    <div class="page">
+      <p class="eyebrow">Vorn · design note</p>
+      <h1>Rows, not cards</h1>
+      <p class="thesis">
+        The card grid was the wrong shape. I went and looked at four catalogs people actually like,
+        and three of them are a single column of rows. The fourth is a marketing page with four
+        columns of screenshots and no idea which integrations you already use.
+      </p>
+
+      <section>
+        <p class="eyebrow">What the good ones do</p>
+        <h2>Nobody puts a card grid in a settings panel</h2>
+
+        <table>
+          <tr>
+            <th>Catalog</th>
+            <th>Shape</th>
+            <th>What a row carries</th>
+          </tr>
+          <tr>
+            <td>Raycast Store</td>
+            <td>One column of rows</td>
+            <td>
+              64px icon, name, one-line description, author with avatar, then plain facts — “8
+              Commands”, “502,900” — and one Install button
+            </td>
+          </tr>
+          <tr>
+            <td>VS Code Extensions</td>
+            <td>One column of rows</td>
+            <td>
+              Name, publisher, one-line description, downloads, rating, and a right-aligned Install
+              — which becomes a gear once installed
+            </td>
+          </tr>
+          <tr>
+            <td>GitHub Marketplace</td>
+            <td>One column, generous spacing</td>
+            <td>Logo, name heading, one line of 80–120 characters. Categories live in a sidebar</td>
+          </tr>
+          <tr>
+            <td>Linear integrations</td>
+            <td>Four-column card grid</td>
+            <td>
+              Icon, name, “By …”, one line. A marketing page — it does not show which ones you have
+              connected at all
+            </td>
+          </tr>
+        </table>
+
+        <p>Three things fall out of that, and my mockup got all three wrong.</p>
+        <ul>
+          <li>
+            <strong>Rows, not cards.</strong> A settings panel is narrow. Two columns of cards
+            halves the width available for a description and doubles the chrome around it. Every
+            catalog built for a panel uses full-width rows.
+          </li>
+          <li>
+            <strong>Facts as plain text, not coloured pills.</strong> Raycast writes “8 Commands”. I
+            wrote a cyan pill, an amber pill and a green pill, on every card. Colour stops meaning
+            anything when everything has some.
+          </li>
+          <li>
+            <strong>Filters get out of the way.</strong> GitHub uses a sidebar, VS Code a dropdown
+            and search tokens. I used a row of chips that wraps to two lines and pushes the content
+            down.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <p class="eyebrow">Your connections</p>
+        <h2>What you run, with what it is doing</h2>
+        <p>
+          The connector is the row; its connections nest under it. One heading per kind, indented
+          rows for the instances — which is the only place a count belongs, next to the things it
+          counts.
+        </p>
+
+        <figure>
+          <div class="app">
+            <div class="head">
+              <div class="h-title">Connections</div>
+              <div class="h-sub">
+                Vorn watches these and starts workflows when something happens.
+              </div>
+              <div class="seg"><span class="on">Your connections</span><span>Browse</span></div>
+            </div>
+
+            <div class="row" style="border-top-width: 1px; margin-top: 14px">
+              <span class="ico"
+                ><svg viewBox="0 0 24 24">
+                  <path d="M4 4h5v16H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+                  <path d="M10.5 4h3v9h-3z" />
+                  <path d="M15 4h5a1 1 0 011 1v14a1 1 0 01-1 1h-5z" /></svg
+              ></span>
+              <span class="body">
+                <span class="nm">Azure DevOps</span>
+                <div class="fx">2 connections · v0.1.0</div>
+              </span>
+              <span class="act"><span class="btn quiet">Add another</span></span>
+            </div>
+            <div class="sub">
+              <div class="subrow">
+                <span class="state"><span class="dot"></span></span>
+                <span>
+                  Platform board
+                  <div class="meta">contoso / Platform · every 5 min · ran 3 min ago</div>
+                </span>
+                <span class="r">Run · Backfill · Delete</span>
+              </div>
+              <div class="subrow">
+                <span class="state"><span class="dot err"></span></span>
+                <span>
+                  Escalations
+                  <div class="meta">contoso / Support · sign-in expired</div>
+                </span>
+                <span class="r">Fix · Delete</span>
+              </div>
+            </div>
+
+            <div class="row">
+              <span class="ico"
+                ><svg viewBox="0 0 24 24">
+                  <path
+                    d="M12 2C7.6 2 4 3.6 4 5.5S7.6 9 12 9s8-1.6 8-3.5S16.4 2 12 2zm0 5.5c-3.6 0-6-1.2-6-2s2.4-2 6-2 6 1.2 6 2-2.4 2-6 2z"
+                  />
+                  <path
+                    d="M4 9.4v2.1c0 1.9 3.6 3.5 8 3.5.5 0 1 0 1.4-.1a5.6 5.6 0 01.8-1.9c-.7.1-1.5.2-2.2.2-3.6 0-6-1.2-6-2V9.4z"
+                  />
+                  <path
+                    d="M17.5 13a4.5 4.5 0 103.1 7.7l1.6 1.6a1 1 0 001.4-1.4l-1.6-1.6A4.5 4.5 0 0017.5 13zm0 2a2.5 2.5 0 110 5 2.5 2.5 0 010-5z"
+                  /></svg
+              ></span>
+              <span class="body">
+                <span class="nm">Azure Data Explorer</span>
+                <div class="fx">1 connection · v0.6.0</div>
+              </span>
+              <span class="act"><span class="btn quiet">Add another</span></span>
+            </div>
+            <div class="sub">
+              <div class="subrow">
+                <span class="state"><span class="dot"></span></span>
+                <span>
+                  Alert rows
+                  <div class="meta">help / Samples · every 10 min · ran 8 min ago</div>
+                </span>
+                <span class="r">Run · Backfill · Delete</span>
+              </div>
+            </div>
+          </div>
+          <p class="caption">
+            A failing connection says so in the row, with the action that fixes it. Today that is a
+            banner at the top of the page, nowhere near the thing it is about.
+          </p>
+        </figure>
+      </section>
+
+      <section>
+        <p class="eyebrow">Browse</p>
+        <h2>One column, one action, no confetti</h2>
+        <p>
+          The same row shape, so the eye does not have to relearn the page. Facts in one muted line
+          the way Raycast writes them. One button on the right, which says <em>Add</em> or, for
+          something you already use, <em>Add another</em> — the only distinction that needs making.
+        </p>
+
+        <figure>
+          <div class="app">
+            <div class="head">
+              <div class="h-title">Connections</div>
+              <div class="h-sub">
+                Vorn watches these and starts workflows when something happens.
+              </div>
+              <div class="seg"><span>Your connections</span><span class="on">Browse</span></div>
+            </div>
+
+            <div class="tools">
+              <span class="search">Search connectors</span>
+              <span class="drop">All categories ▾</span>
+            </div>
+
+            <div class="row">
+              <span class="ico"
+                ><svg viewBox="0 0 24 24">
+                  <path d="M4 4h5v16H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+                  <path d="M10.5 4h3v9h-3z" />
+                  <path d="M15 4h5a1 1 0 011 1v14a1 1 0 01-1 1h-5z" /></svg
+              ></span>
+              <span class="body">
+                <span class="nm">Azure DevOps</span>
+                <div class="de">Start a workflow when a work item matches your query.</div>
+                <div class="fx">Development · 1 trigger · v0.1.0 · in use</div>
+              </span>
+              <span class="act"><span class="btn">Add another</span></span>
+            </div>
+
+            <div class="row">
+              <span class="ico"
+                ><svg viewBox="0 0 24 24">
+                  <path
+                    d="M12 2C7.6 2 4 3.6 4 5.5S7.6 9 12 9s8-1.6 8-3.5S16.4 2 12 2zm0 5.5c-3.6 0-6-1.2-6-2s2.4-2 6-2 6 1.2 6 2-2.4 2-6 2z"
+                  />
+                  <path
+                    d="M4 9.4v2.1c0 1.9 3.6 3.5 8 3.5.5 0 1 0 1.4-.1a5.6 5.6 0 01.8-1.9c-.7.1-1.5.2-2.2.2-3.6 0-6-1.2-6-2V9.4z"
+                  />
+                  <path
+                    d="M17.5 13a4.5 4.5 0 103.1 7.7l1.6 1.6a1 1 0 001.4-1.4l-1.6-1.6A4.5 4.5 0 0017.5 13zm0 2a2.5 2.5 0 110 5 2.5 2.5 0 010-5z"
+                  /></svg
+              ></span>
+              <span class="body">
+                <span class="nm">Azure Data Explorer</span>
+                <div class="de">
+                  Start a workflow when a KQL query returns a row, or run one from a step.
+                </div>
+                <div class="fx">
+                  Data &amp; observability · 1 trigger, 1 action · v0.6.0 · in use
+                </div>
+              </span>
+              <span class="act"><span class="btn">Add another</span></span>
+            </div>
+
+            <div class="row">
+              <span class="ico"
+                ><svg viewBox="0 0 16 16">
+                  <path
+                    d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+                  /></svg
+              ></span>
+              <span class="body">
+                <span class="nm">GitHub</span>
+                <div class="de">Start a workflow from issues and pull requests.</div>
+                <div class="fx">Built in · 3 triggers, 4 actions</div>
+              </span>
+              <span class="act"><span class="btn">Add</span></span>
+            </div>
+
+            <div class="foot">Updated 2 hours ago · Check now</div>
+          </div>
+          <p class="caption">
+            Built-ins sit in the same list under their own category. Nothing on this page needs to
+            know which connectors run in-process.
+          </p>
+        </figure>
+      </section>
+
+      <section>
+        <p class="eyebrow">Detail</p>
+        <h2>The list gets out of the way</h2>
+        <p>
+          Both references open a page, not a panel wedged under a grid. Clicking a row replaces the
+          list, with a way back. Nothing reflows, nothing has to fit beside anything else, and it
+          reads the same at any width.
+        </p>
+
+        <figure>
+          <div class="app">
+            <div class="back">← All connectors</div>
+            <div class="dhead">
+              <span class="ico" style="width: 40px; height: 40px"
+                ><svg viewBox="0 0 24 24" style="width: 21px; height: 21px">
+                  <path d="M4 4h5v16H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+                  <path d="M10.5 4h3v9h-3z" />
+                  <path d="M15 4h5a1 1 0 011 1v14a1 1 0 01-1 1h-5z" /></svg
+              ></span>
+              <span>
+                <div class="dtitle">Azure DevOps</div>
+                <div class="dmeta">@vornrun/connector-ado · v0.1.0 · 2 connections</div>
+              </span>
+            </div>
+            <div class="dbody">
+              <p style="font-size: 12.5px; color: var(--ink-2); margin: 14px 0 0; max-width: none">
+                Start a workflow when a work item matches your query.
+              </p>
+
+              <div class="lbl" style="margin-top: 22px">Starts a workflow when</div>
+              <div class="item">
+                <div class="t">Work item matches the query</div>
+                <div class="d">Fires once per work item the WIQL query newly returns.</div>
+              </div>
+
+              <div class="lbl">A step can ask it to</div>
+              <div class="item"><div class="d">Nothing — this one only watches.</div></div>
+
+              <div class="lbl">You will need</div>
+              <div class="kv">
+                ADO_ORGANIZATION &nbsp; ADO_PROJECT &nbsp; ADO_QUERY
+                <span class="opt">&nbsp; ADO_TOP (optional)</span>
+              </div>
+              <p style="font-size: 12.5px; color: var(--ink-2); margin-top: 10px; max-width: none">
+                Signs in with your Azure identity — <code>az login</code> is usually all it needs.
+              </p>
+
+              <div class="cta">
+                <span class="btn">Add a connection</span>
+                <span class="btn quiet">View on npm</span>
+              </div>
+            </div>
+          </div>
+          <p class="caption">
+            No pills. The two facts that were pills are a line of text under the title, where they
+            read faster and take a third of the space.
+          </p>
+        </figure>
+      </section>
+
+      <section>
+        <p class="eyebrow">What changes from the last note</p>
+        <h2>The split stands; the shape does not</h2>
+        <ul>
+          <li>
+            <strong>Kept:</strong> connections and connectors are different nouns and never share a
+            list; <code>installedListings</code> goes away; a card says “in use” rather than
+            repeating the connections above it; sign-in failure moves into the row it concerns.
+          </li>
+          <li>
+            <strong>Changed:</strong> one column of rows instead of a card grid. Facts as one muted
+            line instead of three coloured pills. A category dropdown instead of a wrapping chip
+            row. Detail replaces the list instead of appearing beneath it. A segmented control makes
+            the two nouns switchable rather than stacked, so neither is a wall you scroll past.
+          </li>
+        </ul>
+        <p class="muted">
+          The data layer built for the last version does not change at all —
+          <code>listingDetails</code>, the catalog fetch, the freshness line and their tests are all
+          still right. This is a rewrite of two components.
+        </p>
+      </section>
+    </div>
+  </body>
+</html>

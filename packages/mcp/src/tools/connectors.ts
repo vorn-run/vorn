@@ -17,7 +17,8 @@ import { V } from '../validation'
 import type {
   ActionResult,
   ConnectorActionDef,
-  ConnectorCatalogItem,
+  ConnectorCatalogSnapshot,
+  ConnectorCatalogSummary,
   ConnectorManifest,
   SdkProbeResult,
   SourceConnection
@@ -54,6 +55,11 @@ const failure = (message: string) => ({
   isError: true
 })
 
+/** An agent needs the label to decide and the type to call it; the rest is prose. */
+function summarize(entry: ConnectorCatalogSummary): { type: string; label: string } {
+  return { type: entry.type, label: entry.label }
+}
+
 export function registerConnectorTools(server: McpServer): void {
   server.tool(
     'list_connectors',
@@ -64,9 +70,9 @@ export function registerConnectorTools(server: McpServer): void {
       installable_only: z.boolean().optional().describe('Only connectors that are not set up yet')
     },
     async (args) => {
-      const [builtIns, catalog, connections, statuses] = await Promise.all([
+      const [builtIns, snapshot, connections, statuses] = await Promise.all([
         rpcCall<ConnectorListEntry[]>('connector:list'),
-        rpcCall<ConnectorCatalogItem[]>('connector:catalog'),
+        rpcCall<ConnectorCatalogSnapshot>('connector:catalog'),
         rpcCall<SourceConnection[]>('connection:list', { connectorId: undefined }),
         rpcCall<ConnectorStatus[]>('connector:status')
       ])
@@ -89,15 +95,22 @@ export function registerConnectorTools(server: McpServer): void {
             ...(statusFor(c.id)!.message && { authMessage: statusFor(c.id)!.message })
           })
         })),
-        ...catalog.map((entry) => ({
+        ...snapshot.items.map((entry) => ({
           id: entry.id,
           name: entry.name,
           source: 'package' as const,
           description: entry.description,
           package: entry.packageName,
+          ...(entry.version && { version: entry.version }),
           capabilities: entry.capabilities,
           connections: countFor(entry.id),
-          ...(entry.auth && { auth: entry.auth })
+          ...(entry.auth && { auth: entry.auth }),
+          // Generated upstream from the connector's own manifest, so an agent
+          // can tell whether a connector is worth installing without launching
+          // it — which for a list of twenty would be twenty npx processes.
+          ...(entry.triggers && { triggers: entry.triggers.map(summarize) }),
+          ...(entry.actions && { actions: entry.actions.map(summarize) }),
+          ...(entry.env && { env: entry.env.map((e) => e.name) })
         }))
       ]
 
@@ -200,7 +213,7 @@ export function registerConnectorTools(server: McpServer): void {
       sync_interval_minutes: z.number().int().min(1).max(1440).optional()
     },
     async (args) => {
-      const catalog = await rpcCall<ConnectorCatalogItem[]>('connector:catalog')
+      const { items: catalog } = await rpcCall<ConnectorCatalogSnapshot>('connector:catalog')
       const entry = args.connector_id ? catalog.find((c) => c.id === args.connector_id) : undefined
 
       if (args.connector_id && !entry) {
