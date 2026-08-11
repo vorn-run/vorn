@@ -211,7 +211,11 @@ export function RunStepsList({
           // output yet (a trigger, a pending step) still shows its configured
           // body, so a card is never blank.
           const preview = stepOutputPreview(ns) ?? stepPreview(node)
-          const timeline = stepTimeline(ns.logs, ns.diagnostics)
+          // Only for the open card: stepTimeline slices a tail out of every
+          // step's logs, and a run with a dozen noisy steps would pay for all
+          // of them on every render to show one.
+          const isExpanded = expandedNodeId === ns.nodeId
+          const timeline = isExpanded ? stepTimeline(ns.logs, ns.diagnostics) : []
 
           const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
           const approvalMessage =
@@ -233,7 +237,7 @@ export function RunStepsList({
               )}
               <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] overflow-hidden">
                 <button
-                  onClick={() => setExpandedNodeId(expandedNodeId === ns.nodeId ? null : ns.nodeId)}
+                  onClick={() => setExpandedNodeId(isExpanded ? null : ns.nodeId)}
                   className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
                 >
                   <StatusDot status={ns.status} />
@@ -271,7 +275,7 @@ export function RunStepsList({
                   <ChevronDown
                     size={12}
                     className={`text-gray-600 shrink-0 transition-transform ${
-                      expandedNodeId === ns.nodeId ? '' : '-rotate-90'
+                      isExpanded ? '' : '-rotate-90'
                     }`}
                   />
                 </button>
@@ -328,7 +332,7 @@ export function RunStepsList({
                     the agent running, what the agent said, then how it ended.
                     Engine lines are dimmed and marked so the agent's own words
                     stay the foreground, without splitting them across panels. */}
-                {expandedNodeId === ns.nodeId && timeline.length > 0 && (
+                {isExpanded && timeline.length > 0 && (
                   <div className="px-3 pb-2">
                     <div className="bg-black/30 rounded-md overflow-auto max-h-[280px]">
                       {timeline.map((entry, ti) =>
@@ -379,7 +383,7 @@ export function RunStepsList({
                   </div>
                 )}
 
-                {expandedNodeId === ns.nodeId && timeline.length === 0 && (
+                {isExpanded && timeline.length === 0 && (
                   <div className="px-3 pb-2">
                     {ns.error ? (
                       <>

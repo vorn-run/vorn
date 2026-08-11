@@ -89,8 +89,8 @@ export function WorkflowFilterToolbar() {
       {open && (
         <div
           ref={dropdownRef}
-          className="fixed z-50 w-[160px] border border-white/[0.08] rounded-lg shadow-xl overflow-hidden"
-          style={{ background: 'var(--color-surface-base)', top: pos.top, left: pos.left }}
+          className="fixed z-50 w-[160px] bg-surface-base border border-white/[0.08] rounded-lg shadow-xl overflow-hidden"
+          style={{ top: pos.top, left: pos.left }}
         >
           <div className="py-1.5">
             <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">

@@ -6,7 +6,9 @@
   --color-bronzo-dark: #b8862a;
 
   /* Surface ladder — the app field and the surfaces that lift off it.
-     Depth comes from these steps plus a hairline, never from a shadow. */
+     Depth within the page comes from a step plus a hairline, not a shadow.
+     A shadow means something is floating over the page rather than part of
+     it: menus, dialogs, the selection bar. */
   --color-surface-base: #1a1a1e; /* app background (see html/body below) */
   --color-surface-sunken: #141416; /* context menus */
   --color-surface-raised: #1e1e22; /* dialogs */
