@@ -320,28 +320,29 @@ function LoopRenderer({
 
   return (
     <div
-      className={`w-[300px] rounded-lg border transition-all
-                  ${selected ? 'border-cyan-400/60 shadow-[0_0_0_3px_rgba(34,211,238,0.08)]' : 'border-cyan-400/25'}
-                  bg-cyan-500/[0.03]`}
+      data-loop-rail
+      className={`w-[312px] rounded-lg border transition-all
+                  ${selected ? 'border-blue-500/60 shadow-[0_0_0_3px_rgba(59,130,246,0.08)]' : 'border-white/[0.08]'}
+                  bg-surface-node`}
     >
       <div
         onClick={(e) => {
           e.stopPropagation()
           onNodeClick(row.loopNode.id)
         }}
-        className="flex items-center gap-2 px-3 py-2 border-b border-cyan-400/15 cursor-pointer
+        className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.06] cursor-pointer
                    hover:bg-white/[0.02] rounded-t-lg"
       >
-        <Repeat size={13} className="shrink-0 text-cyan-400" strokeWidth={2} />
+        <Repeat size={13} className="shrink-0 text-gray-300" strokeWidth={2} />
         <span className="text-[12.5px] font-semibold text-white truncate flex-1">
           {row.loopNode.label}
         </span>
-        <span className="shrink-0 text-[10px] font-mono text-cyan-300/90 bg-cyan-500/10 rounded px-1.5 py-0.5">
+        <span className="shrink-0 text-[10px] font-mono text-gray-400 bg-white/[0.06] rounded px-1.5 py-0.5">
           max {config.maxIterations ?? 1}
         </span>
       </div>
 
-      <div className="px-3 pt-3 flex flex-col items-center">
+      <div className="px-4 pt-4 flex flex-col items-center">
         {row.body.length === 0 ? (
           <div
             className="w-full rounded-md border border-dashed border-white/[0.12] px-3 py-4
@@ -385,7 +386,7 @@ function LoopRenderer({
         />
       </div>
 
-      <div className="px-3 pt-2 pb-2.5 text-[10px] font-mono text-cyan-300/70 text-center truncate">
+      <div className="px-4 pt-2.5 pb-3 text-[10px] font-mono text-gray-500 text-center truncate">
         ↻ {until}
       </div>
     </div>

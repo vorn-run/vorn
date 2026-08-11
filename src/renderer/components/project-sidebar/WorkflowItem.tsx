@@ -108,7 +108,7 @@ export function WorkflowItem({
         )}
         {dot && !isCollapsed && (
           <span
-            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[#1a1a2e] ${DOT_CLASSES[dot]}`}
+            className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[#1a1a1e] ${DOT_CLASSES[dot]}`}
             aria-hidden="true"
           />
         )}

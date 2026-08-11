@@ -33,7 +33,7 @@ export const NODE_TYPE_VISUAL: Record<
     color: 'text-gray-300',
     bg: 'bg-white/[0.06]'
   },
-  loop: { icon: Repeat, label: 'Loop', color: 'text-cyan-400', bg: 'bg-cyan-500/10' }
+  loop: { icon: Repeat, label: 'Loop', color: 'text-gray-300', bg: 'bg-white/[0.06]' }
 }
 
 /**
@@ -172,4 +172,47 @@ export function inlineLogTail(logs: string): string {
   if (logs.length <= INLINE_LOG_CHARS) return logs
   const elided = logs.length - INLINE_LOG_CHARS
   return `… ${elided.toLocaleString()} earlier characters hidden — use View full output\n\n${logs.slice(-INLINE_LOG_CHARS)}`
+}
+
+/** One line of a step's timeline. `engine` is what vorn did; `agent` is what the agent said. */
+export interface StepTimelineEntry {
+  kind: 'engine' | 'agent'
+  text: string
+}
+
+/**
+ * The engine notes the moment the agent first writes, so that line is the seam
+ * between "getting the agent running" and "the agent talking". Splitting there
+ * lets one ordered view read the way the step actually happened — setup, then
+ * the agent, then how it ended — instead of asking the reader to correlate two
+ * panels by timestamp.
+ *
+ * `logs` and `diagnostics` stay separate in the model on purpose: a typed step
+ * parses `logs` for its declared JSON payload, and folding engine prose into it
+ * would corrupt that parse.
+ */
+const FIRST_OUTPUT_NOTE = /^\[\+[\d.]+s\] First output from the agent\b/
+
+export function stepTimeline(
+  logs: string | undefined,
+  diagnostics: string | undefined
+): StepTimelineEntry[] {
+  const notes = diagnostics ? diagnostics.split('\n').filter(Boolean) : []
+  const agentText = logs?.trim() ? inlineLogTail(logs) : ''
+
+  if (!agentText) {
+    return notes.map((text) => ({ kind: 'engine' as const, text }))
+  }
+
+  // Everything up to and including the first-output note describes the launch;
+  // whatever follows describes how the step ended.
+  const seam = notes.findIndex((n) => FIRST_OUTPUT_NOTE.test(n))
+  const before = seam === -1 ? notes : notes.slice(0, seam + 1)
+  const after = seam === -1 ? [] : notes.slice(seam + 1)
+
+  return [
+    ...before.map((text) => ({ kind: 'engine' as const, text })),
+    { kind: 'agent' as const, text: agentText },
+    ...after.map((text) => ({ kind: 'engine' as const, text }))
+  ]
 }

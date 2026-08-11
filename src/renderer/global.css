@@ -4,6 +4,14 @@
 @theme {
   --color-bronzo: #c9972a;
   --color-bronzo-dark: #b8862a;
+
+  /* Surface ladder — the app field and the surfaces that lift off it.
+     Depth comes from these steps plus a hairline, never from a shadow. */
+  --color-surface-base: #1a1a1e; /* app background (see html/body below) */
+  --color-surface-sunken: #141416; /* context menus */
+  --color-surface-raised: #1e1e22; /* dialogs */
+  --color-surface-overlay: #26262b; /* selection bars, floating chrome */
+  --color-surface-node: #1d1d20; /* workflow canvas node cards */
 }
 
 html,

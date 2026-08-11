@@ -139,7 +139,7 @@ export function RunDetailPane({
             {formatRelativeTime(run.startedAt)}
           </p>
           {summary && (
-            <pre className="mt-2.5 text-[11.5px] text-gray-300 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-[160px] overflow-auto">
+            <pre className="mt-2.5 text-[12px] text-gray-300 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-[160px] overflow-auto">
               {summary}
             </pre>
           )}

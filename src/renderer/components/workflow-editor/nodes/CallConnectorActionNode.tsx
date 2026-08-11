@@ -31,7 +31,7 @@ export function CallConnectorActionNode({
       }}
       className={`relative px-3 py-2.5 rounded-sm border w-[280px] transition-all cursor-pointer
                   ${selected ? 'border-blue-500/60' : 'border-white/[0.08]'}
-                  bg-[#1d1d20] hover:bg-white/[0.02]`}
+                  bg-surface-node hover:bg-white/[0.02]`}
     >
       {executionStatus && STATUS_DOT_CLASSES[executionStatus] && (
         <span

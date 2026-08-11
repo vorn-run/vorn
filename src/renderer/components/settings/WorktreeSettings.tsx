@@ -34,8 +34,8 @@ type Pending = 'reclaim' | 'remove' | null
 const VERDICT_STYLES: Record<WorktreeVerdictLevel, { label: string; className: string }> = {
   keep: { label: 'Keep', className: 'text-gray-400 bg-white/[0.05]' },
   review: { label: 'Review', className: 'text-amber-300 bg-amber-500/[0.12]' },
-  reclaim: { label: 'Build output only', className: 'text-teal-300 bg-teal-500/[0.12]' },
-  remove: { label: 'Removable', className: 'text-teal-300 bg-teal-500/[0.12]' },
+  reclaim: { label: 'Build output only', className: 'text-blue-300 bg-blue-500/[0.12]' },
+  remove: { label: 'Removable', className: 'text-blue-300 bg-blue-500/[0.12]' },
   orphan: { label: 'Orphan directory', className: 'text-red-300 bg-red-500/[0.12]' }
 }
 
@@ -249,7 +249,7 @@ export function WorktreeSettings() {
           <button
             onClick={rescan}
             disabled={loading || busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-300 bg-white/[0.04]
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-gray-300 bg-white/[0.04]
                        hover:bg-white/[0.08] rounded-lg transition-colors disabled:opacity-50"
           >
             {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
@@ -271,14 +271,14 @@ export function WorktreeSettings() {
       />
 
       {loading && !inventory && (
-        <div className="flex items-center gap-2 py-10 text-sm text-gray-500 justify-center">
+        <div className="flex items-center gap-2 py-10 text-[13px] text-gray-500 justify-center">
           <Loader2 size={15} className="animate-spin" />
           Measuring worktrees…
         </div>
       )}
 
       {!loading && !hasAnything && (
-        <div className="py-10 text-center text-sm text-gray-500">
+        <div className="py-10 text-center text-[13px] text-gray-500">
           No worktrees yet. They appear here as soon as you create one.
         </div>
       )}
@@ -307,7 +307,7 @@ export function WorktreeSettings() {
       {allEntries.some((e) => isSelectable(e) && e.verdict.autoSelect) && (
         <button
           onClick={selectSuggested}
-          className="mt-4 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          className="mt-4 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
         >
           Select everything merged and idle
         </button>
@@ -370,7 +370,7 @@ function SummaryCard({
             <HardDrive size={12} />
             On disk
           </div>
-          <div className="text-3xl font-semibold text-white tabular-nums mt-1">
+          <div className="text-[30px] leading-[38px] font-semibold text-white tabular-nums mt-1">
             {formatBytes(onDisk)}
           </div>
         </div>
@@ -378,15 +378,15 @@ function SummaryCard({
           <div className="text-[11px] uppercase tracking-wider text-gray-500">
             Build output — rebuilt by a reinstall
           </div>
-          <div className="text-xl font-semibold text-teal-300 tabular-nums mt-1">
+          <div className="text-[20px] leading-[28px] font-semibold text-blue-300 tabular-nums mt-1">
             {formatBytes(artifacts)}
           </div>
         </div>
       </div>
 
       <div className="mt-4 h-2 rounded-full bg-white/[0.06] overflow-hidden flex">
-        <div className="h-full bg-teal-400/70" style={{ width: `${artifactPct}%` }} />
-        <div className="h-full bg-teal-400/25" style={{ width: `${removablePct}%` }} />
+        <div className="h-full bg-blue-400/70" style={{ width: `${artifactPct}%` }} />
+        <div className="h-full bg-blue-400/25" style={{ width: `${removablePct}%` }} />
       </div>
       <div className="mt-2 flex gap-4 text-[11px] text-gray-500">
         <span>Build output</span>
@@ -399,11 +399,11 @@ function SummaryCard({
           <button
             onClick={confirming ? onConfirm : onAsk}
             disabled={loading || busy}
-            className={`flex items-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors
+            className={`flex items-center gap-2 px-3 py-2 text-[11px] rounded-md transition-colors
                         disabled:opacity-50 ${
                           confirming
-                            ? 'text-white bg-teal-500/25 hover:bg-teal-500/35 border border-teal-400/40'
-                            : 'text-teal-200 bg-teal-500/[0.12] hover:bg-teal-500/20'
+                            ? 'text-white bg-blue-500/25 hover:bg-blue-500/35 border border-blue-500/30'
+                            : 'text-blue-300 bg-blue-500/[0.12] hover:bg-blue-500/20'
                         }`}
           >
             <Trash2 size={13} />
@@ -414,7 +414,7 @@ function SummaryCard({
           {confirming && (
             <button
               onClick={onAsk}
-              className="px-3 py-2 text-xs text-gray-400 hover:text-white transition-colors"
+              className="px-3 py-2 text-[11px] text-gray-400 hover:text-white transition-colors"
             >
               Cancel
             </button>
@@ -455,7 +455,9 @@ function ProjectGroup({
     <div className="mb-6">
       <div className="flex items-baseline justify-between gap-3 pb-2 border-b border-white/[0.06]">
         <div className="flex items-baseline gap-2 min-w-0">
-          <span className="text-sm font-medium text-gray-200 truncate">{project.projectName}</span>
+          <span className="text-[13px] font-medium text-gray-200 truncate">
+            {project.projectName}
+          </span>
           {project.defaultBranch && (
             <span className="text-[11px] text-gray-600 font-mono shrink-0">
               vs {project.defaultBranch}
@@ -465,14 +467,16 @@ function ProjectGroup({
             <span className="text-[11px] text-gray-600 shrink-0">remote</span>
           )}
         </div>
-        <span className="text-xs text-gray-500 tabular-nums shrink-0">{formatBytes(total)}</span>
+        <span className="text-[11px] text-gray-500 tabular-nums shrink-0">
+          {formatBytes(total)}
+        </span>
       </div>
 
       {project.error && (
-        <div className="py-3 text-xs text-gray-500">Could not scan — {project.error}</div>
+        <div className="py-3 text-[11px] text-gray-500">Could not scan — {project.error}</div>
       )}
 
-      <div className="divide-y divide-white/[0.04]">
+      <div>
         {entries.map((entry) => (
           <WorktreeRow
             key={entry.path}
@@ -511,14 +515,18 @@ function WorktreeRow({
   const artifactPct = entry.sizeBytes > 0 ? (entry.artifactBytes / entry.sizeBytes) * 100 : 0
 
   return (
-    <div className={`flex items-center gap-3 py-2.5 ${selectable ? '' : 'opacity-50'}`}>
+    <div
+      className={`flex items-center gap-3 py-2.5 border-b border-white/[0.04] last:border-b-0 ${
+        selectable ? '' : 'opacity-50'
+      }`}
+    >
       <input
         type="checkbox"
         checked={checked}
         disabled={!selectable}
         onChange={onToggle}
         aria-label={`Select ${entry.name}`}
-        className="shrink-0 accent-teal-400 disabled:cursor-not-allowed"
+        className="shrink-0 accent-blue-500 disabled:cursor-not-allowed"
       />
 
       <div className="min-w-0 flex-1">
@@ -543,12 +551,12 @@ function WorktreeRow({
       </div>
 
       <div className="shrink-0 w-[86px] text-right">
-        <div className="text-xs text-gray-300 tabular-nums">
+        <div className="text-[11px] text-gray-300 tabular-nums">
           {entry.sizeMeasured ? formatBytes(entry.sizeBytes) : '—'}
         </div>
         {entry.artifactBytes > 0 && (
           <div className="mt-1 h-1 rounded-full bg-white/[0.06] overflow-hidden">
-            <div className="h-full bg-teal-400/60" style={{ width: `${artifactPct}%` }} />
+            <div className="h-full bg-blue-400/60" style={{ width: `${artifactPct}%` }} />
           </div>
         )}
       </div>
@@ -581,7 +589,7 @@ function StaleBranchStrip({
     <div className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
       <div className="flex items-center gap-2 flex-wrap">
         <GitBranch size={13} className="text-gray-600 shrink-0" />
-        <span className="text-xs text-gray-400">
+        <span className="text-[11px] text-gray-400">
           {branches.length} branch{branches.length === 1 ? '' : 'es'} left behind by removed
           worktrees
           {merged.length > 0 && ` — ${merged.length} already merged`}
@@ -701,8 +709,7 @@ function SelectionBar({
       exit={{ opacity: 0, y: 12 }}
       transition={{ type: 'spring', stiffness: 400, damping: 32 }}
       className="fixed bottom-6 left-1/2 -translate-x-1/2 z-10 w-[min(560px,calc(100vw-4rem))]
-                 rounded-xl border border-white/[0.1] shadow-2xl px-4 py-3"
-      style={{ background: '#26262b' }}
+                 rounded-xl border border-white/[0.1] shadow-2xl px-4 py-3 bg-surface-overlay"
     >
       <div className="flex items-center gap-3">
         <div className="min-w-0">
@@ -721,14 +728,14 @@ function SelectionBar({
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <button
             onClick={onClear}
-            className="px-2.5 py-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+            className="px-2.5 py-1.5 text-[11px] text-gray-400 hover:text-white transition-colors"
           >
             Clear
           </button>
           <button
             onClick={confirming ? onConfirm : onAsk}
             disabled={busy}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-md transition-colors
                         disabled:opacity-50 ${
                           confirming
                             ? 'text-white bg-red-500/30 hover:bg-red-500/45 border border-red-400/40'

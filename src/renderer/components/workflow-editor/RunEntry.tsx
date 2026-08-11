@@ -21,7 +21,7 @@ import {
   NODE_TYPE_VISUAL,
   nodeConnectionId,
   stepMeta,
-  inlineLogTail,
+  stepTimeline,
   stepOutputPreview,
   stepPreview
 } from './node-visuals'
@@ -211,6 +211,7 @@ export function RunStepsList({
           // output yet (a trigger, a pending step) still shows its configured
           // body, so a card is never blank.
           const preview = stepOutputPreview(ns) ?? stepPreview(node)
+          const timeline = stepTimeline(ns.logs, ns.diagnostics)
 
           const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
           const approvalMessage =
@@ -286,7 +287,7 @@ export function RunStepsList({
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-left border-t
                                border-white/[0.05] bg-black/20 hover:bg-black/30 transition-colors"
                   >
-                    <p className="flex-1 min-w-0 text-[11px] text-gray-500 font-mono truncate">
+                    <p className="flex-1 min-w-0 text-[12px] text-gray-500 font-mono truncate">
                       {preview}
                     </p>
                     <ChevronDown size={11} className="text-gray-600 shrink-0" />
@@ -323,16 +324,35 @@ export function RunStepsList({
                   </div>
                 )}
 
-                {expandedNodeId === ns.nodeId && ns.logs && (
+                {/* One ordered account of the step: what the engine did to get
+                    the agent running, what the agent said, then how it ended.
+                    Engine lines are dimmed and marked so the agent's own words
+                    stay the foreground, without splitting them across panels. */}
+                {expandedNodeId === ns.nodeId && timeline.length > 0 && (
                   <div className="px-3 pb-2">
-                    <pre
-                      className="text-[11px] text-gray-400 bg-black/30 rounded-md p-2 max-h-[200px] overflow-auto
-                                font-mono whitespace-pre-wrap break-all leading-relaxed"
-                    >
-                      {inlineLogTail(ns.logs)}
-                    </pre>
+                    <div className="bg-black/30 rounded-md overflow-auto max-h-[280px]">
+                      {timeline.map((entry, ti) =>
+                        entry.kind === 'agent' ? (
+                          <pre
+                            key={ti}
+                            className="text-[12px] text-gray-300 px-2 py-1.5
+                                       font-mono whitespace-pre-wrap break-all leading-relaxed"
+                          >
+                            {entry.text}
+                          </pre>
+                        ) : (
+                          <p
+                            key={ti}
+                            className="text-[12px] text-gray-500 font-mono px-2 py-0.5
+                                       bg-white/[0.02] whitespace-pre-wrap break-all leading-relaxed"
+                          >
+                            {entry.text}
+                          </p>
+                        )
+                      )}
+                    </div>
                     <div className="flex items-center gap-1 mt-1.5">
-                      {onViewFullOutput && (
+                      {onViewFullOutput && ns.logs && (
                         <Tooltip label="View full output">
                           <button
                             onClick={() => onViewFullOutput(ns.logs!)}
@@ -359,53 +379,36 @@ export function RunStepsList({
                   </div>
                 )}
 
-                {expandedNodeId === ns.nodeId && !ns.logs && ns.error && (
+                {expandedNodeId === ns.nodeId && timeline.length === 0 && (
                   <div className="px-3 pb-2">
-                    <p className="text-[11px] text-red-400">{ns.error}</p>
-                    {canResume && (
-                      <div className="mt-1.5">
-                        <Tooltip label="Resume session">
-                          <button
-                            onClick={handleResume}
-                            aria-label="Resume session"
-                            className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
-                          >
-                            <RotateCcw size={12} strokeWidth={2} />
-                          </button>
-                        </Tooltip>
-                      </div>
+                    {ns.error ? (
+                      <>
+                        <p className="text-[11px] text-red-400">{ns.error}</p>
+                        {canResume && (
+                          <div className="mt-1.5">
+                            <Tooltip label="Resume session">
+                              <button
+                                onClick={handleResume}
+                                aria-label="Resume session"
+                                className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+                              >
+                                <RotateCcw size={12} strokeWidth={2} />
+                              </button>
+                            </Tooltip>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-gray-600 italic">
+                        {ns.status === 'running'
+                          ? 'No output captured yet…'
+                          : ns.status === 'pending'
+                            ? "Step hasn't started yet."
+                            : ns.status === 'skipped'
+                              ? 'Step was skipped.'
+                              : 'No output recorded.'}
+                      </p>
                     )}
-                  </div>
-                )}
-
-                {expandedNodeId === ns.nodeId && !ns.logs && !ns.error && !ns.diagnostics && (
-                  <div className="px-3 pb-2">
-                    <p className="text-[11px] text-gray-600 italic">
-                      {ns.status === 'running'
-                        ? 'No output captured yet…'
-                        : ns.status === 'pending'
-                          ? "Step hasn't started yet."
-                          : ns.status === 'skipped'
-                            ? 'Step was skipped.'
-                            : 'No output recorded.'}
-                    </p>
-                  </div>
-                )}
-
-                {/* What the engine did, as distinct from what the agent said. This
-                is the only thing left to read when a step produced no output,
-                so it renders even — especially — when the log is empty. */}
-                {expandedNodeId === ns.nodeId && ns.diagnostics && (
-                  <div className="px-3 pb-2">
-                    <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-1">
-                      Diagnostics
-                    </p>
-                    <pre
-                      className="text-[11px] text-gray-500 bg-black/20 rounded p-2 max-h-[160px] overflow-auto
-                             font-mono whitespace-pre-wrap break-all leading-relaxed"
-                    >
-                      {ns.diagnostics}
-                    </pre>
                   </div>
                 )}
               </div>
