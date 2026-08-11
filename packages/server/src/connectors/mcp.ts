@@ -408,7 +408,7 @@ export async function pollMcpConnection(
   return cfg.timestampField ? { events, nextCursor: newest ?? cursor } : { events }
 }
 
-/** Everything a backfill drains out of one poll page. */
+/** Runaway guard: a tool that keeps handing back fresh cursors stops here. */
 const MAX_BACKFILL_PAGES = 1_000
 
 /**
@@ -448,6 +448,27 @@ function eventToExternalItem(event: TriggerEvent): ExternalItem {
  * A connection with no `pollTool` is not a task source and says so, rather than
  * reporting that it imported nothing.
  */
+/**
+ * The same connection with any pre-seeded cursor removed from its poll args.
+ *
+ * Returned as a copy: the stored connection is not ours to edit, and the seed
+ * still has to apply to ordinary polling.
+ */
+function withoutSeedCursor(conn: SourceConnection, cursorArg: string): SourceConnection {
+  const raw = conn.filters.pollArgs
+  if (typeof raw !== 'string' || !raw.includes(cursorArg)) return conn
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return conn
+    const { [cursorArg]: _seed, ...rest } = parsed
+    return { ...conn, filters: { ...conn.filters, pollArgs: JSON.stringify(rest) } }
+  } catch {
+    // Unparseable pollArgs is pollMcpConnection's error to report, with its
+    // own message; swallowing it here would turn it into a confusing one.
+    return conn
+  }
+}
+
 export async function backfillMcpConnection(
   conn: SourceConnection,
   visit: (item: ExternalItem) => void
@@ -459,9 +480,17 @@ export async function backfillMcpConnection(
     )
   }
 
+  // Backfill means "from the beginning", and a connection may carry a starting
+  // cursor in its pollArgs — pollMcpConnection deliberately leaves that in
+  // place when it has no stored cursor, treating it as the seed for the very
+  // first poll. Honouring it here would start the import from that point and
+  // silently skip everything before it, which is precisely what a backfill is
+  // for.
+  const fromTheStart = cfg.cursorArg ? withoutSeedCursor(conn, cfg.cursorArg) : conn
+
   let cursor: string | undefined
   for (let page = 0; page < MAX_BACKFILL_PAGES; page++) {
-    const result = await pollMcpConnection(conn, cursor)
+    const result = await pollMcpConnection(cursor === undefined ? fromTheStart : conn, cursor)
     result.events.forEach((event) => visit(eventToExternalItem(event)))
 
     // Only a tool that takes the cursor is paging. Without `cursorArg` the

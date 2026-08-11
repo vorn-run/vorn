@@ -79,6 +79,41 @@ describe('backfillMcpConnection', () => {
     expect(callTool.mock.calls[1][0].arguments).toMatchObject({ cursor: 'page-2' })
   })
 
+  it('starts from the beginning even when the connection seeds a cursor', async () => {
+    // pollMcpConnection treats a cursor already in pollArgs as the seed for
+    // the very first poll, which is right for ordinary polling and wrong here:
+    // honouring it would start the import partway through and silently skip
+    // everything before it, which is the whole thing a backfill is for.
+    toolReturns({ items: [{ externalId: '1', updatedAt: '2026-01-01T00:00:00Z' }] })
+
+    await drain(makeConn({ ...CURSORED, pollArgs: '{"cursor":"2026-06-01","limit":10}' }))
+
+    const args = callTool.mock.calls[0][0].arguments
+    expect(args).not.toHaveProperty('cursor')
+    // Everything else the connection configured still goes through.
+    expect(args).toMatchObject({ limit: 10 })
+  })
+
+  it('leaves the seed alone once it is following the tool own cursor', async () => {
+    toolReturns({
+      items: [{ externalId: '1', updatedAt: '2026-01-01T00:00:00Z' }],
+      nextCursor: 'p2'
+    })
+    toolReturns({ items: [] })
+
+    await drain(makeConn({ ...CURSORED, pollArgs: '{"cursor":"2026-06-01"}' }))
+
+    expect(callTool.mock.calls[1][0].arguments).toMatchObject({ cursor: 'p2' })
+  })
+
+  it('leaves unparseable poll args for the poll itself to report', async () => {
+    // Swallowing it here would replace pollMcpConnection's specific message
+    // with a confusing one about backfill.
+    await expect(
+      backfillMcpConnection(makeConn({ ...CURSORED, pollArgs: '{not json' }), () => {})
+    ).rejects.toThrow(/pollArgs/i)
+  })
+
   it('stops when the tool stops moving its cursor', async () => {
     // Otherwise a tool that answers the same page forever would drain until the
     // page cap, thousands of calls later.

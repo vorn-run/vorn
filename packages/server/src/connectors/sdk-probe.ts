@@ -238,16 +238,15 @@ function toManifest(payload: Record<string, unknown>): SdkConnectorManifest {
     const setup = isRecord(raw.setup) ? raw.setup : {}
     const filters = isRecord(setup.filters) ? setup.filters : {}
 
+    const statusMapping = readStatusMapping(raw.statusMapping)
+    const defaultWorkflow = readDefaultWorkflow(raw.defaultWorkflow)
+
     triggers.push({
       type,
       label: str(raw.label, type),
       ...(typeof raw.description === 'string' && { description: raw.description }),
-      ...(readStatusMapping(raw.statusMapping) && {
-        statusMapping: readStatusMapping(raw.statusMapping)
-      }),
-      ...(readDefaultWorkflow(raw.defaultWorkflow) && {
-        defaultWorkflow: readDefaultWorkflow(raw.defaultWorkflow)
-      }),
+      ...(statusMapping && { statusMapping }),
+      ...(defaultWorkflow && { defaultWorkflow }),
       filters: {
         pollTool: str(filters.pollTool, `poll_${type}`),
         itemsPath: str(filters.itemsPath, 'items'),

@@ -729,7 +729,10 @@ export function registerAllMethods(): void {
     const manifest = connector?.describe()
     const seeded: Array<NonNullable<ConnectorManifest['defaultWorkflows']>[number]> = [
       ...(manifest?.defaultWorkflows ?? []),
-      ...(params.seedWorkflow
+      // Only for MCP: the event seeded is MCP_POLL_EVENT, which no other
+      // connector emits — seeding it for one would leave a workflow polling on
+      // a schedule for something that never fires.
+      ...(params.seedWorkflow && params.connectorId === MCP_CONNECTOR_ID
         ? [
             {
               name: params.seedWorkflow.name,
