@@ -79,8 +79,13 @@ export function buildDefaultTaskWorkflow(): WorkflowDefinition {
 export function cronEveryMinutes(minutes: number): string {
   if (minutes <= 1) return '* * * * *'
   if (minutes < 60) return `*/${minutes} * * * *`
-  const hours = Math.min(23, Math.round(minutes / 60))
-  return hours <= 1 ? '0 * * * *' : `0 */${hours} * * *`
+  const hours = Math.round(minutes / 60)
+  if (hours <= 1) return '0 * * * *'
+  // A day is its own expression, not a 24-step in a field that counts 0-23.
+  // Capping to 23 instead would fire every 23 hours and drift a full hour
+  // earlier each day, which nobody asking for "daily" wants.
+  if (hours >= 24) return '0 0 * * *'
+  return `0 */${hours} * * *`
 }
 
 /**

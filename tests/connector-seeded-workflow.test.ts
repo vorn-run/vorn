@@ -149,8 +149,12 @@ describe('cronEveryMinutes', () => {
     expect(cronEveryMinutes(70)).toBe('0 * * * *')
   })
 
-  it('caps at what the hour field can express', () => {
-    // A day is 24 hours and the field counts 0-23, so `*/24` would never fire.
-    expect(cronEveryMinutes(1440)).toBe('0 */23 * * *')
+  it('treats a day as a day rather than every 23 hours', () => {
+    // The hour field counts 0-23, so a 24-step never fires. Capping to 23
+    // instead would drift a full hour earlier every day, which is not what
+    // anybody asking for "daily" means.
+    expect(cronEveryMinutes(1440)).toBe('0 0 * * *')
+    expect(cronEveryMinutes(1439)).toBe('0 0 * * *')
+    expect(cronEveryMinutes(23 * 60)).toBe('0 */23 * * *')
   })
 })
