@@ -158,6 +158,12 @@ describe('the connector list', () => {
     fireEvent.click(getByText('Azure DevOps'))
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'ado' }))
   })
+
+  it('says a row opens something, rather than leaving Add as the only clue', () => {
+    const { getAllByText, onSelect } = setup()
+    fireEvent.click(getAllByText('Details')[0])
+    expect(onSelect).toHaveBeenCalled()
+  })
 })
 
 describe('the connector detail panel', () => {

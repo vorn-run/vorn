@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Search, Plus, RefreshCw } from 'lucide-react'
+import { Search, Plus, RefreshCw, ChevronRight } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
 import {
   describeCatalogAge,
@@ -163,6 +163,11 @@ function ConnectorRow({
             </span>
           )}
           <span className="block text-[11px] text-gray-600 mt-1.5">{facts(listing, details)}</span>
+          {/* Without this nothing says the row opens anything, and the Add
+              button next to it reads as the only thing that does. */}
+          <span className="inline-flex items-center gap-0.5 text-[11px] text-gray-500 group-hover:text-gray-300 transition-colors mt-1.5">
+            Details <ChevronRight size={11} />
+          </span>
         </span>
       </button>
 
