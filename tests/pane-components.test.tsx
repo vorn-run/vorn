@@ -33,6 +33,11 @@ Object.defineProperty(window, 'api', {
 })
 
 const { useAppStore } = await import('../src/renderer/stores')
+const { activeBrowserUrl } = await import('../src/renderer/stores/types')
+
+/** The page a session's browser is showing, i.e. its active tab. */
+const browserUrl = (id: string): string | null =>
+  activeBrowserUrl(useAppStore.getState().browserPanes.get(id))
 const { FilesCard } = await import('../src/renderer/components/FilesCard')
 const { EditorCard } = await import('../src/renderer/components/EditorCard')
 const { PaneRenderer } = await import('../src/renderer/components/PaneRenderer')
@@ -328,6 +333,38 @@ describe('panes travel with their session into focus mode', () => {
     expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
   })
 
+  it('gives a maximized pane the whole stage and hides its siblings', async () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().openBrowserPane('t1', 'localhost:5173')
+      useAppStore.getState().setMaximizedPane('browser:t1')
+    })
+
+    render(<FocusedTerminal />)
+
+    // Focus mode used to render panes in a fixed rail and ignore the maximize
+    // entirely, so the button looked dead once a card was expanded.
+    expect(screen.getByLabelText('Address')).toBeInTheDocument()
+    expect(screen.queryByText('Files')).not.toBeInTheDocument()
+    // The terminal gives up its space too — a maximized pane covering only the
+    // rail is not a maximize.
+    expect(screen.getByTestId('focused-terminal-column')).toHaveClass('hidden')
+  })
+
+  it("ignores another session's maximized pane", () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      // t1 owns a browser too, so only the *owner* check can keep this stage
+      // whole — matching on kind alone would blank it.
+      useAppStore.getState().openBrowserPane('t1', 'localhost:5173')
+      useAppStore.getState().setMaximizedPane('browser:t2')
+    })
+
+    render(<FocusedTerminal />)
+    // A stale or foreign id must not blank the stage of the session in focus.
+    expect(screen.getByText('Files')).toBeInTheDocument()
+  })
+
   it('shows no pane column when the session has none open', () => {
     render(<FocusedTerminal />)
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
@@ -345,9 +382,38 @@ describe('BrowserCard', () => {
     act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
     render(<BrowserCard sessionId="t1" />)
 
-    // Headers are narrow, so the host is what earns the space.
-    expect(screen.getByText('localhost:5173')).toBeInTheDocument()
+    // Headers and tabs are both narrow, so the host is what earns the space —
+    // it shows in the pane header and on the tab.
+    expect(screen.getAllByText('localhost:5173')).toHaveLength(2)
     expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
+  it('opens a second tab and switches between them without losing either page', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('New tab'))
+    act(() => useAppStore.getState().openBrowserPane('t1', 'example.com'))
+
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs).toHaveLength(2)
+    expect(tabs[1]).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(tabs[0])
+    // Switching tabs must put the address bar on the page you switched to.
+    expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+
+    // Both pages stay mounted so a switch back doesn't reload them.
+    expect(document.querySelectorAll('webview')).toHaveLength(2)
+  })
+
+  it('closes a tab from its own button', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    act(() => useAppStore.getState().addBrowserTab('t1', 'example.com'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Close tab example.com'))
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['http://localhost:5173/'])
   })
 
   it('navigates on submit, normalizing what was typed', () => {
@@ -358,7 +424,7 @@ describe('BrowserCard', () => {
     fireEvent.change(input, { target: { value: 'example.com/docs' } })
     fireEvent.submit(input)
 
-    expect(useAppStore.getState().browserPanes.get('t1')?.url).toBe('https://example.com/docs')
+    expect(browserUrl('t1')).toBe('https://example.com/docs')
   })
 
   it('explains a rejected address instead of silently doing nothing', () => {
@@ -371,7 +437,7 @@ describe('BrowserCard', () => {
 
     expect(screen.getByText(/does not look like a web address/)).toBeInTheDocument()
     // The pane keeps the page it had.
-    expect(useAppStore.getState().browserPanes.get('t1')?.url).toBe('https://example.com/')
+    expect(browserUrl('t1')).toBe('https://example.com/')
   })
 
   it('closes its own pane', () => {
@@ -406,7 +472,7 @@ describe('MinimizedPill fallback labels', () => {
   it('names a browser with no page yet, and an editor with no file', () => {
     act(() => {
       useAppStore.setState({
-        browserPanes: new Map([['t1', { url: '' }]]),
+        browserPanes: new Map([['t1', { tabs: [], activeTab: 0 }]]),
         editorPanes: new Map([['t1', { filePath: '' }]]),
         minimizedTerminals: new Set(['browser:t1', 'editor:t1'])
       })

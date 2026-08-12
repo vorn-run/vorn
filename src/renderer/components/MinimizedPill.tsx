@@ -6,6 +6,7 @@ import { STATUS_DOT } from '../lib/status-colors'
 import { GitBranch, FolderGit2, FolderTree, FileCode, Globe } from 'lucide-react'
 import { parsePaneId } from '../lib/pane-id'
 import { displayHost } from '../lib/browser-url'
+import { activeBrowserUrl } from '../stores/types'
 
 /**
  * Dock pill for a minimized file-tree, editor or browser pane. Labelled with
@@ -17,7 +18,7 @@ function ChildPanePill({ paneId }: { paneId: string }) {
     useShallow((s) => ({
       terminal: s.terminals.get(sessionId),
       filePath: s.editorPanes.get(sessionId)?.filePath ?? null,
-      browserUrl: s.browserPanes.get(sessionId)?.url ?? null,
+      browserUrl: activeBrowserUrl(s.browserPanes.get(sessionId)),
       toggleMinimized: s.toggleMinimized
     }))
   )

@@ -79,18 +79,38 @@ function loadPanes(): {
     const parsed = JSON.parse(raw) as {
       files?: string[]
       editors?: Record<string, string>
-      browsers?: Record<string, string>
+      browsers?: Record<string, string | { tabs: string[]; activeTab: number }>
     }
     return {
       filesPanes: new Set(parsed.files ?? []),
       editorPanes: new Map(
         Object.entries(parsed.editors ?? {}).map(([id, filePath]) => [id, { filePath }])
       ),
-      browserPanes: new Map(Object.entries(parsed.browsers ?? {}).map(([id, url]) => [id, { url }]))
+      browserPanes: parsePersistedBrowsers(parsed.browsers)
     }
   } catch {
     return { filesPanes: new Set(), editorPanes: new Map(), browserPanes: new Map() }
   }
+}
+
+/**
+ * Read the persisted browser panes.
+ *
+ * Older builds stored a single url string per session, before a pane could
+ * hold tabs. Those are read as a one-tab pane rather than discarded, so
+ * upgrading doesn't silently close the page someone had open.
+ */
+export function parsePersistedBrowsers(
+  saved: Record<string, string | { tabs?: string[]; activeTab?: number }> | undefined
+): Map<string, BrowserPaneState> {
+  return new Map(
+    Object.entries(saved ?? {}).map(([id, entry]) => {
+      if (typeof entry === 'string') return [id, { tabs: [entry], activeTab: 0 }]
+      const tabs = entry.tabs?.length ? entry.tabs : [DEFAULT_BROWSER_URL]
+      const activeTab = Math.min(Math.max(entry.activeTab ?? 0, 0), tabs.length - 1)
+      return [id, { tabs, activeTab }]
+    })
+  )
 }
 
 function savePanes(
@@ -104,7 +124,9 @@ function savePanes(
       JSON.stringify({
         files: [...filesPanes],
         editors: Object.fromEntries([...editorPanes].map(([id, s]) => [id, s.filePath])),
-        browsers: Object.fromEntries([...browserPanes].map(([id, s]) => [id, s.url]))
+        browsers: Object.fromEntries(
+          [...browserPanes].map(([id, s]) => [id, { tabs: s.tabs, activeTab: s.activeTab }])
+        )
       })
     )
   } catch {
@@ -409,12 +431,21 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // No url means "show me this session's browser" — keep whatever page it
       // already had rather than resetting it to blank.
       const next = new Map(state.browserPanes)
+      const existing = next.get(sessionId)
       if (url !== undefined) {
         const normalized = normalizeUrl(url)
         if (!normalized) return wasHidden ? { minimizedTerminals: minimized } : {}
-        next.set(sessionId, { url: normalized })
-      } else if (!next.has(sessionId)) {
-        next.set(sessionId, { url: DEFAULT_BROWSER_URL })
+        if (existing) {
+          // Navigating replaces the page in the tab the user is looking at,
+          // the way an address bar does — it does not spawn a tab.
+          const tabs = [...existing.tabs]
+          tabs[existing.activeTab] = normalized
+          next.set(sessionId, { ...existing, tabs })
+        } else {
+          next.set(sessionId, { tabs: [normalized], activeTab: 0 })
+        }
+      } else if (!existing) {
+        next.set(sessionId, { tabs: [DEFAULT_BROWSER_URL], activeTab: 0 })
       } else if (!wasHidden) {
         return {}
       }
@@ -447,6 +478,56 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     if (browserPanes.has(sessionId) && !isHidden) closeBrowserPane(sessionId)
     else openBrowserPane(sessionId)
   },
+
+  addBrowserTab: (sessionId, url) =>
+    set((state) => {
+      const existing = state.browserPanes.get(sessionId)
+      if (!existing) return {}
+      const normalized = url === undefined ? DEFAULT_BROWSER_URL : normalizeUrl(url)
+      if (!normalized) return {}
+      const next = new Map(state.browserPanes)
+      const tabs = [...existing.tabs, normalized]
+      next.set(sessionId, { tabs, activeTab: tabs.length - 1 })
+      savePanes(state.filesPanes, state.editorPanes, next)
+      return { browserPanes: next }
+    }),
+
+  closeBrowserTab: (sessionId, index) => {
+    const existing = get().browserPanes.get(sessionId)
+    if (!existing || index < 0 || index >= existing.tabs.length) return
+    // The last tab going means the pane itself goes; an empty browser is just
+    // a box taking up a grid cell.
+    if (existing.tabs.length === 1) {
+      get().closeBrowserPane(sessionId)
+      return
+    }
+    set((state) => {
+      const pane = state.browserPanes.get(sessionId)
+      if (!pane) return {}
+      const tabs = pane.tabs.filter((_, i) => i !== index)
+      // Closing a tab left of the active one shifts it; closing the active one
+      // lands on its neighbour rather than jumping to the far end.
+      const activeTab = Math.min(
+        index <= pane.activeTab ? pane.activeTab - 1 : pane.activeTab,
+        tabs.length - 1
+      )
+      const next = new Map(state.browserPanes)
+      next.set(sessionId, { tabs, activeTab: Math.max(activeTab, 0) })
+      savePanes(state.filesPanes, state.editorPanes, next)
+      return { browserPanes: next }
+    })
+  },
+
+  setActiveBrowserTab: (sessionId, index) =>
+    set((state) => {
+      const existing = state.browserPanes.get(sessionId)
+      if (!existing || index < 0 || index >= existing.tabs.length) return {}
+      if (existing.activeTab === index) return {}
+      const next = new Map(state.browserPanes)
+      next.set(sessionId, { ...existing, activeTab: index })
+      savePanes(state.filesPanes, state.editorPanes, next)
+      return { browserPanes: next }
+    }),
 
   setMaximizedPane: (paneId) =>
     set((state) => (state.maximizedPaneId === paneId ? {} : { maximizedPaneId: paneId })),

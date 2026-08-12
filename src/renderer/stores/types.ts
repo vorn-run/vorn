@@ -62,10 +62,21 @@ export interface EditorPaneState {
 /**
  * State of a session's browser pane. One per session, so a session can keep a
  * dev server or a doc page beside its agent.
+ *
+ * A pane holds several tabs, like any browser — a dev server and the docs you
+ * are reading against it are the common pair, and forcing one to replace the
+ * other made the pane far less useful than the space it costs.
  */
 export interface BrowserPaneState {
-  /** Normalized absolute URL currently loaded. */
-  url: string
+  /** Normalized absolute URLs, one per tab. Never empty while the pane exists. */
+  tabs: string[]
+  /** Index into `tabs`. Always in range. */
+  activeTab: number
+}
+
+/** The page a browser pane is currently showing. */
+export function activeBrowserUrl(pane: BrowserPaneState | undefined): string | null {
+  return pane ? (pane.tabs[pane.activeTab] ?? null) : null
 }
 
 export interface TerminalState {
@@ -264,6 +275,14 @@ export interface UISlice {
   openBrowserPane: (sessionId: string, url?: string) => void
   closeBrowserPane: (sessionId: string) => void
   toggleBrowserPane: (sessionId: string) => void
+  /** Add a tab to the session's browser and make it active. */
+  addBrowserTab: (sessionId: string, url?: string) => void
+  /**
+   * Close one tab. Closing the last one closes the pane, since a browser with
+   * no page is just an empty box.
+   */
+  closeBrowserTab: (sessionId: string, index: number) => void
+  setActiveBrowserTab: (sessionId: string, index: number) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void
   toggleSessionDockCollapsed: () => void

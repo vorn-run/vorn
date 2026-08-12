@@ -17,6 +17,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
+import { parsePaneId } from '../lib/pane-id'
 import { isMac } from '../lib/platform'
 import { ArrowDown, FolderGit2, GitBranch, Minimize2, Pencil } from 'lucide-react'
 
@@ -40,9 +41,25 @@ export function FocusedTerminal() {
   const hasFilesPane = useAppStore((s) => (effectiveId ? s.filesPanes.has(effectiveId) : false))
   const hasEditorPane = useAppStore((s) => (effectiveId ? s.editorPanes.has(effectiveId) : false))
   const hasBrowserPane = useAppStore((s) => (effectiveId ? s.browserPanes.has(effectiveId) : false))
+  // Maximize is session-scoped in the grid; expanded mode is that same session
+  // filling the stage, so a maximized pane has to take the whole body here too.
+  // Reading it only for panes this session owns keeps a stale id inert.
+  const maximizedPaneId = useAppStore((s) => s.maximizedPaneId)
   useTerminalPinchZoom(terminalContainerRef)
 
   if (!effectiveId || !terminal) return null
+
+  // Which of this session's panes, if any, is maximized. A pane belonging to
+  // another session must not take over this stage, hence the owner check.
+  const maximized = maximizedPaneId ? parsePaneId(maximizedPaneId) : null
+  const maximizedKind =
+    maximized && maximized.sessionId === effectiveId && maximized.kind !== 'terminal'
+      ? maximized.kind
+      : null
+  const hasMaximizedPane =
+    (maximizedKind === 'files' && hasFilesPane) ||
+    (maximizedKind === 'editor' && hasEditorPane) ||
+    (maximizedKind === 'browser' && hasBrowserPane)
 
   const handleContract = (): void => {
     if (isPreview) {
@@ -173,7 +190,10 @@ export function FocusedTerminal() {
 
         {/* Terminal, plus this session's file panes riding along beside it. */}
         <div className="flex-1 min-h-0 flex">
-          <div className="flex-1 min-w-0 flex flex-col">
+          <div
+            data-testid="focused-terminal-column"
+            className={`flex-1 min-w-0 flex-col ${hasMaximizedPane ? 'hidden' : 'flex'}`}
+          >
             <div
               ref={terminalContainerRef}
               className="relative flex-1 p-1 min-h-0"
@@ -214,20 +234,26 @@ export function FocusedTerminal() {
             {!isMobile && <CardStatusBar terminalId={effectiveId} />}
           </div>
 
-          {/* The expanded session keeps its own Files / File panes. */}
+          {/* The expanded session keeps its own Files / File / Browser panes.
+              While one of them is maximized it takes the whole stage, matching
+              the grid's session-scoped maximize. */}
           {!isMobile && (hasFilesPane || hasEditorPane || hasBrowserPane) && (
-            <div className="w-[420px] shrink-0 flex flex-col gap-px border-l border-white/[0.06]">
-              {hasFilesPane && (
+            <div
+              className={`shrink-0 flex flex-col gap-px ${
+                hasMaximizedPane ? 'flex-1 min-w-0' : 'w-[420px] border-l border-white/[0.06]'
+              }`}
+            >
+              {hasFilesPane && (!hasMaximizedPane || maximizedKind === 'files') && (
                 <div className="flex-1 min-h-0">
                   <FilesCard sessionId={effectiveId} />
                 </div>
               )}
-              {hasEditorPane && (
+              {hasEditorPane && (!hasMaximizedPane || maximizedKind === 'editor') && (
                 <div className="flex-1 min-h-0">
                   <EditorCard sessionId={effectiveId} />
                 </div>
               )}
-              {hasBrowserPane && (
+              {hasBrowserPane && (!hasMaximizedPane || maximizedKind === 'browser') && (
                 <div className="flex-1 min-h-0">
                   <BrowserCard sessionId={effectiveId} />
                 </div>

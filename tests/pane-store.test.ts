@@ -2,6 +2,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
+import { activeBrowserUrl } from '../src/renderer/stores/types'
+import { parsePersistedBrowsers } from '../src/renderer/stores/ui-slice'
+
+/** The page a session's browser is showing, i.e. its active tab. */
+const browserUrl = (id: string): string | null =>
+  activeBrowserUrl(useAppStore.getState().browserPanes.get(id))
 
 const session = (id: string) =>
   ({
@@ -139,10 +145,10 @@ describe('pane store actions', () => {
     const s = () => useAppStore.getState()
 
     act(() => s().openBrowserPane('t1'))
-    expect(s().browserPanes.get('t1')?.url).toBe('about:blank')
+    expect(browserUrl('t1')).toBe('about:blank')
 
     act(() => s().openBrowserPane('t1', 'localhost:5173'))
-    expect(s().browserPanes.get('t1')?.url).toBe('http://localhost:5173/')
+    expect(browserUrl('t1')).toBe('http://localhost:5173/')
   })
 
   it('ignores an unloadable url rather than blanking the pane', () => {
@@ -151,7 +157,7 @@ describe('pane store actions', () => {
 
     act(() => s().openBrowserPane('t1', 'javascript:alert(1)'))
     // The pane keeps the page it had; a rejected scheme must not clear it.
-    expect(s().browserPanes.get('t1')?.url).toBe('https://example.com/')
+    expect(browserUrl('t1')).toBe('https://example.com/')
   })
 
   it('re-opening without a url keeps the current page', () => {
@@ -159,7 +165,7 @@ describe('pane store actions', () => {
     act(() => s().openBrowserPane('t1', 'example.com'))
     act(() => s().openBrowserPane('t1'))
 
-    expect(s().browserPanes.get('t1')?.url).toBe('https://example.com/')
+    expect(browserUrl('t1')).toBe('https://example.com/')
   })
 
   it('restores a minimized browser instead of leaving it hidden', () => {
@@ -183,18 +189,74 @@ describe('pane store actions', () => {
       s().openBrowserPane('t2', 'localhost:3000')
     })
 
-    expect(s().browserPanes.get('t1')?.url).toBe('http://localhost:5173/')
-    expect(s().browserPanes.get('t2')?.url).toBe('http://localhost:3000/')
+    expect(browserUrl('t1')).toBe('http://localhost:5173/')
+    expect(browserUrl('t2')).toBe('http://localhost:3000/')
   })
 
   it('persists the open page and drops it with its session', () => {
     const s = () => useAppStore.getState()
     act(() => s().openBrowserPane('t1', 'example.com'))
     expect(JSON.parse(localStorage.getItem('vorn:panes') as string).browsers).toEqual({
-      t1: 'https://example.com/'
+      t1: { tabs: ['https://example.com/'], activeTab: 0 }
     })
 
     act(() => s().removeTerminal('t1'))
+    expect(s().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('reads a pane persisted by an older build that stored one url', () => {
+    // Shipping the tab strip must not silently drop the page people already
+    // had open when they upgrade.
+    const panes = parsePersistedBrowsers({ t1: 'https://old.example/' })
+    expect(panes.get('t1')).toEqual({ tabs: ['https://old.example/'], activeTab: 0 })
+  })
+
+  it('clamps a persisted active tab that points past the end', () => {
+    const panes = parsePersistedBrowsers({ t1: { tabs: ['https://a/'], activeTab: 4 } })
+    expect(panes.get('t1')?.activeTab).toBe(0)
+  })
+
+  it('opens a tab, switches to it, and navigates only the active tab', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => s().addBrowserTab('t1', 'localhost:5173'))
+
+    // A new tab is the one you are looking at — otherwise the button appears
+    // to do nothing.
+    expect(s().browserPanes.get('t1')?.activeTab).toBe(1)
+    expect(browserUrl('t1')).toBe('http://localhost:5173/')
+
+    act(() => s().openBrowserPane('t1', 'example.org'))
+    // Typing an address replaces the current page rather than spawning a tab.
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([
+      'https://example.com/',
+      'https://example.org/'
+    ])
+  })
+
+  it('lands on a neighbour when the active tab closes', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'a.com'))
+    act(() => {
+      s().addBrowserTab('t1', 'b.com')
+      s().addBrowserTab('t1', 'c.com')
+    })
+
+    act(() => s().closeBrowserTab('t1', 2))
+    expect(browserUrl('t1')).toBe('https://b.com/')
+
+    // Closing a tab to the left shifts the active index, or the user would
+    // find themselves on a different page than the one they were reading.
+    act(() => s().setActiveBrowserTab('t1', 1))
+    act(() => s().closeBrowserTab('t1', 0))
+    expect(browserUrl('t1')).toBe('https://b.com/')
+  })
+
+  it('closing the last tab closes the pane rather than leaving an empty box', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'a.com'))
+    act(() => s().closeBrowserTab('t1', 0))
+
     expect(s().browserPanes.has('t1')).toBe(false)
   })
 
