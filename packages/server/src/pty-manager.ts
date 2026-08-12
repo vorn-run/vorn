@@ -217,7 +217,13 @@ class PtyManager extends EventEmitter {
       // and is never drawn as command blocks. Installing the shim anyway made
       // the wrapper shell emit boundaries, which hid the terminal cursor and
       // drew block decorations into a card with no spine or input bar.
-      env: getLaunchEnv()
+      //
+      // VORN_SESSION_ID is spread in *here*, at the spawn site, never set on the
+      // ambient process env: `filterEnv` only strips keys, so an ambient value
+      // would be inherited by every child of every session and the browser tools
+      // — which resolve their session from this variable alone — would silently
+      // lose their isolation.
+      env: { ...getLaunchEnv(), VORN_SESSION_ID: id }
     })
 
     // Session ID pinning: agents that support it (supportsSessionIdPinning) get a
@@ -451,7 +457,9 @@ class PtyManager extends EventEmitter {
       cwd: workingDir,
       env: {
         ...getSafeEnv(),
-        ...integration.env
+        ...integration.env,
+        // Spawn-site only — see the note in createLocalPty.
+        VORN_SESSION_ID: id
       }
     })
     this.setupPtyEvents(id, ptyProcess)

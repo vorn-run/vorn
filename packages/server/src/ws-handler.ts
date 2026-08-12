@@ -1,7 +1,13 @@
 import type { WebSocket } from 'ws'
-import type { RpcRequest, RequestMethod, RequestMethods } from '@vornrun/shared/protocol'
+import type {
+  RpcRequest,
+  RpcResponse,
+  RequestMethod,
+  RequestMethods
+} from '@vornrun/shared/protocol'
 import { createResponse, createErrorResponse } from '@vornrun/shared/protocol'
 import { clientRegistry } from './broadcast'
+import { browserBridge } from './browser-bridge'
 import log from './logger'
 
 // Handler registry: method name → async handler function
@@ -46,6 +52,22 @@ export function handleConnection(ws: WebSocket): void {
 
     const { id, method, params } = msg
 
+    // A reply to something *we* asked main (browser:* reverse RPC). Responses
+    // carry no `method`, so they must be recognised before the notification
+    // branch below treats a method-less frame as junk.
+    if (method === undefined && id !== undefined && id !== null) {
+      if (browserBridge.handleResponse(msg as unknown as RpcResponse)) return
+    }
+
+    // Main identifying itself, so the reverse bridge knows which socket to use.
+    if (method === 'bridge:identify') {
+      browserBridge.setSocket(ws)
+      if (id !== undefined && id !== null) {
+        ws.send(JSON.stringify(createResponse(id, { ok: true })))
+      }
+      return
+    }
+
     // Fire-and-forget notification (no id)
     if (id === undefined || id === null) {
       const notifHandler = handlers.get(`notify:${method}`)
@@ -78,10 +100,12 @@ export function handleConnection(ws: WebSocket): void {
 
   ws.on('close', () => {
     clientRegistry.remove(ws)
+    browserBridge.clearSocket(ws)
   })
 
   ws.on('error', (err) => {
     log.error({ err }, '[ws] socket error')
     clientRegistry.remove(ws)
+    browserBridge.clearSocket(ws)
   })
 }

@@ -26,7 +26,10 @@ import {
   InstalledShell,
   WorktreeInventory,
   WorktreeActionResult,
-  BranchDeleteResult
+  BranchDeleteResult,
+  BrowserSelection,
+  BrowserStroke,
+  BrowserAnnotation
 } from '../shared/types'
 
 const api = {
@@ -298,6 +301,39 @@ const api = {
     }
   },
 
+  /**
+   * Main asking for a browser pane to open, on the agent's behalf.
+   *
+   * Panes live in renderer state, so this is the only way an agent can get one
+   * without a person clicking. Fire-and-forget; main waits for the attach
+   * report that follows rather than for a reply here.
+   */
+  onBrowserOpenPane: (callback: (p: { sessionId: string; url?: string }) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, p: { sessionId: string; url?: string }): void =>
+      callback(p)
+    ipcRenderer.on(IPC.BROWSER_OPEN_PANE, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.BROWSER_OPEN_PANE, listener)
+    }
+  },
+
+  /** Main asking to add, close, or switch a tab in a pane. */
+  onBrowserTabCommand: (
+    callback: (p: {
+      sessionId: string
+      action: 'add' | 'close' | 'select'
+      url?: string
+      index?: number
+    }) => void
+  ) => {
+    const listener = (_: Electron.IpcRendererEvent, p: Parameters<typeof callback>[0]): void =>
+      callback(p)
+    ipcRenderer.on(IPC.BROWSER_TAB_COMMAND, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.BROWSER_TAB_COMMAND, listener)
+    }
+  },
+
   onSessionUpdated: (callback: (session: TerminalSession) => void) => {
     const listener = (_: Electron.IpcRendererEvent, session: TerminalSession): void =>
       callback(session)
@@ -481,6 +517,22 @@ const api = {
     host: RemoteHost
   ): Promise<{ success: boolean; message: string; durationMs: number }> =>
     ipcRenderer.invoke(IPC.SSH_TEST_CONNECTION, host),
+
+  // Browser pane — tells main which guest belongs to which session, so the
+  // agent's browser tools can reach it. Fire-and-forget in both directions.
+  attachBrowser: (sessionId: string, webContentsId: number): void =>
+    ipcRenderer.send(IPC.BROWSER_ATTACH, { sessionId, webContentsId }),
+  detachBrowser: (sessionId: string): void => ipcRenderer.send(IPC.BROWSER_DETACH, sessionId),
+  /** Arm the element picker. Resolves with the pick, or null if cancelled. */
+  startBrowserPick: (sessionId: string): Promise<BrowserSelection | null> =>
+    ipcRenderer.invoke(IPC.BROWSER_PICK_START, sessionId),
+  cancelBrowserPick: (sessionId: string): void =>
+    ipcRenderer.send(IPC.BROWSER_PICK_CANCEL, sessionId),
+  /** Resolve freehand ink (in *page* coordinates) to the elements under it. */
+  annotateBrowser: (params: {
+    sessionId: string
+    strokes: BrowserStroke[]
+  }): Promise<BrowserAnnotation> => ipcRenderer.invoke(IPC.BROWSER_ANNOTATE, params),
 
   // Shell
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),

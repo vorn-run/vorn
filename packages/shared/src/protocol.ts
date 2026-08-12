@@ -24,7 +24,12 @@ import type {
   TaskStatus,
   WorktreeInventory,
   WorktreeActionResult,
-  BranchDeleteResult
+  BranchDeleteResult,
+  BrowserPageRead,
+  BrowserConsoleMessage,
+  BrowserNetworkRequest,
+  BrowserNode,
+  BrowserTarget
 } from './types'
 
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
@@ -359,6 +364,64 @@ export interface RequestMethods {
   'connector:status': {
     params: void
     result: Array<{ connectorId: string; authed: boolean; message?: string }>
+  }
+
+  // ─── Agent-controllable browser pane ──────────────────────────
+  //
+  // These are the one family of methods the server does not itself implement.
+  // A `<webview>` guest is only reachable from the Electron main process, so
+  // the server forwards each call back over the same bridge main uses to reach
+  // it (see `browserBridge` in packages/server) and main answers from its CDP
+  // registry. Every one is session-scoped by the *caller's* identity —
+  // `VORN_SESSION_ID`, resolved in the MCP layer — and none of them accepts a
+  // session argument, so one session cannot address another's pane.
+  'browser:readPage': {
+    params: { sessionId: string; filter?: 'interactive' | 'all'; cursor?: string; limit?: number }
+    result: BrowserPageRead
+  }
+  'browser:getText': {
+    params: { sessionId: string; cursor?: string }
+    result: { url: string; text: string; nextCursor?: string }
+  }
+  'browser:consoleMessages': {
+    params: { sessionId: string; limit?: number }
+    result: BrowserConsoleMessage[]
+  }
+  'browser:networkRequests': {
+    params: { sessionId: string; limit?: number }
+    result: BrowserNetworkRequest[]
+  }
+  'browser:screenshot': {
+    params: { sessionId: string; fullPage?: boolean }
+    /** Base64 PNG. Deliberately the last resort — every other read is cheaper. */
+    result: { data: string }
+  }
+  'browser:interact': {
+    params: {
+      sessionId: string
+      action: 'click' | 'hover' | 'type' | 'key' | 'scroll'
+      target?: BrowserTarget
+      /** Text for `type`, key name for `key`, pixel delta for `scroll`. */
+      text?: string
+      deltaY?: number
+    }
+    result: { ok: true }
+  }
+  'browser:tabs': {
+    params: { sessionId: string; action: 'add' | 'close' | 'select'; url?: string; index?: number }
+    result: { ok: true }
+  }
+  'browser:openPane': {
+    params: { sessionId: string; url?: string }
+    result: { url: string }
+  }
+  'browser:navigate': {
+    params: { sessionId: string; url: string }
+    result: { url: string }
+  }
+  'browser:find': {
+    params: { sessionId: string; text: string; limit?: number }
+    result: BrowserNode[]
   }
 }
 

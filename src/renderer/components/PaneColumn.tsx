@@ -66,9 +66,30 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
     // No grow factor of its own: the frame around it (card body or tab rail)
     // owns the sizing, and a `flex-1` here would fight the terminal's stored
     // ratio — two grow factors that no longer sum to 1.
-    <div ref={containerRef} className="flex flex-col min-h-0 min-w-0 w-full gap-px">
+    <div ref={containerRef} className="relative flex flex-col min-h-0 min-w-0 w-full gap-px">
       {kinds.map((kind, i) => {
-        if (hasMaximized && kind !== maximizedKind) return null
+        const hidden = hasMaximized && kind !== maximizedKind
+        if (hidden) {
+          // Hidden, not unmounted. Unmounting destroys the browser pane's
+          // <webview> guest, which loses the page, its scroll position and any
+          // half-filled form the moment a sibling is maximized — and detaches
+          // the session agent's CDP handle, leaving it told "no pane open"
+          // while the store still says one exists. This is the same rule the
+          // browser's own tabs already follow one level down.
+          //
+          // Taken out of flow rather than `display: none`, so it keeps a real
+          // size: a webview collapsed to zero does not reliably come back.
+          return (
+            <div
+              key={kind}
+              aria-hidden
+              data-testid={`pane-hidden-${sessionId}-${kind}`}
+              className="absolute inset-0 pointer-events-none invisible"
+            >
+              {render(kind)}
+            </div>
+          )
+        }
         return (
           <div key={kind} className="contents">
             {i > 0 && !hasMaximized && (

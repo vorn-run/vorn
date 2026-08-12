@@ -6,6 +6,7 @@ import { registerWorkflowTools } from './tools/workflows'
 import { registerConfigTools } from './tools/config'
 import { registerWorkspaceTools } from './tools/workspaces'
 import { registerConnectorTools } from './tools/connectors'
+import { registerBrowserTools } from './tools/browser'
 
 export function createMcpServer(version: string): McpServer {
   const server = new McpServer({ name: 'vorn', version }, { capabilities: { tools: {} } })
@@ -17,6 +18,7 @@ export function createMcpServer(version: string): McpServer {
   registerWorkflowTools(server)
   registerWorkspaceTools(server)
   registerConnectorTools(server)
+  registerBrowserTools(server)
 
   return server
 }
