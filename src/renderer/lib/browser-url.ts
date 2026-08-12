@@ -17,11 +17,10 @@ export { normalizeUrl, displayHost } from '../../shared/browser-url'
  * moment they point at it. Control bytes go too: they would otherwise reach the
  * terminal emulator as escape sequences rather than as text.
  */
-export function flattenPageText(raw: string, max = 400): string {
+export function flattenPageText(raw: string, max: number = 400): string {
+  // Matching control characters is the entire point here.
   // eslint-disable-next-line no-control-regex
-  const oneLine = raw
-    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const CONTROL = /[\u0000-\u001f\u007f-\u009f]+/g
+  const oneLine = raw.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()
   return oneLine.length > max ? oneLine.slice(0, max) + '…' : oneLine
 }
