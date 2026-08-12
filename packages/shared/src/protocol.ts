@@ -285,6 +285,13 @@ export interface RequestMethods {
     params: { workflowId: string; inputs?: Record<string, unknown> }
     result: void
   }
+  /** Ask whichever instance owns this run to stop it. Broadcast, not
+   *  addressed: runs execute in the renderer, so the server cannot end one
+   *  itself and does not know which window holds it. */
+  'workflow:stopRun': {
+    params: { runId: string }
+    result: void
+  }
   /** Main→server push of decrypted credential fields. Called after main
    *  decrypts values (via Electron safeStorage) on boot and on config
    *  changes. Plaintext lives in server memory only — never persisted. */

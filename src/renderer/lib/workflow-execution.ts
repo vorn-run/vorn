@@ -645,7 +645,9 @@ async function executeLoop(
       const state = execution.nodeStates.find((s) => s.nodeId === step.id)
       updateNodeState(execution, step.id, { iteration })
       summary.push(`  ${step.label}: ${state?.status ?? 'unknown'}`)
-      if (state?.status === 'error') {
+      // Same policy as the main graph: a body step that fails ends the pass
+      // unless it declared its failure survivable.
+      if (state?.status === 'error' && stopsRunOnError(step)) {
         failedStep = step
         break
       }
@@ -672,8 +674,12 @@ async function executeLoop(
     }
   }
 
+  // A step that declared its failure survivable does not fail the loop either,
+  // otherwise `continue` would stop the run one level up and mean nothing.
   const failed = body.some(
-    (step) => execution.nodeStates.find((s) => s.nodeId === step.id)?.status === 'error'
+    (step) =>
+      execution.nodeStates.find((s) => s.nodeId === step.id)?.status === 'error' &&
+      stopsRunOnError(step)
   )
   summary.push(`Stopped after ${passes} pass(es): ${stopReason}.`)
 
@@ -1329,7 +1335,17 @@ async function executeNode(
   }
 }
 
-function buildGraph(edges: readonly { source: string; target: string }[]): {
+/**
+ * Whether a node's failure ends the run.
+ *
+ * Absent means stop — see WorkflowNodeErrorPolicy for why that is the default
+ * rather than the continue-everything behaviour this replaced.
+ */
+export function stopsRunOnError(node: Pick<WorkflowNode, 'onError'>): boolean {
+  return (node.onError ?? 'stop') === 'stop'
+}
+
+export function buildGraph(edges: readonly { source: string; target: string }[]): {
   successors: Map<string, string[]>
   predecessors: Map<string, string[]>
 } {
@@ -1343,7 +1359,7 @@ function buildGraph(edges: readonly { source: string; target: string }[]): {
 }
 
 /** Stops at join points whose other predecessors aren't already terminal/skipped. */
-function collectSkippedBranch(
+export function collectSkippedBranch(
   startNodeId: string,
   successors: Map<string, string[]>,
   predecessors: Map<string, string[]>,
@@ -1670,6 +1686,29 @@ async function runExecution(
         if (postState?.status === 'waiting') return
 
         completed.add(node.id)
+
+        // A failed node stops the run unless it opted out. Marking the branch
+        // it feeds as skipped is what actually halts things: nothing downstream
+        // becomes ready, so the wave loop runs dry on its own. Nodes reachable
+        // by another live path are left alone — collectSkippedBranch only takes
+        // those whose remaining predecessors are already settled.
+        if (postState?.status === 'error' && stopsRunOnError(node)) {
+          for (const edge of workflow.edges) {
+            if (edge.source !== node.id) continue
+            markSkippedBranch(edge.target)
+          }
+          for (const skippedId of skippedByCondition) {
+            const ns = execution.nodeStates.find((s) => s.nodeId === skippedId)
+            if (ns?.status !== 'pending') continue
+            updateNodeState(execution, skippedId, {
+              status: 'skipped',
+              completedAt: new Date().toISOString(),
+              error: `Skipped: "${node.label}" failed`
+            })
+          }
+          persistExecution(execution)
+          return
+        }
 
         // After a condition node completes, skip the non-matching branch
         if (node.type === 'condition') {

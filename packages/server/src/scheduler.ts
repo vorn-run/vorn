@@ -435,6 +435,18 @@ class Scheduler extends EventEmitter {
     this.executeWorkflow(workflowId, inputs)
   }
 
+  /**
+   * Ask the instance running `runId` to stop it.
+   *
+   * No lock and no lookup: unlike a trigger, this must not be claimed by one
+   * instance, because the one that answers may not be the one holding the run.
+   * Every instance gets the message and only the owner acts on it.
+   */
+  stopRun(runId: string): void {
+    log.info(`[scheduler] broadcasting stop for run ${runId}`)
+    this.emit('client-message', IPC.SCHEDULER_STOP_RUN, { runId })
+  }
+
   stopAll(): void {
     for (const [, job] of this.cronJobs) job.stop()
     for (const [, timer] of this.timeouts) clearTimeout(timer)

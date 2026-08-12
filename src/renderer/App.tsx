@@ -22,7 +22,8 @@ import {
   adoptConnectorInboxLease,
   executeWorkflow as runWorkflow,
   rescheduleWaitingGateTimers,
-  reconcileRunningExecutions
+  reconcileRunningExecutions,
+  stopWorkflowRun
 } from './lib/workflow-execution'
 import type { WorkflowExecution } from '../shared/types'
 import { CommandPalette } from './components/CommandPalette'
@@ -353,6 +354,15 @@ export function App() {
       }
     )
 
+    // Stop requests are broadcast to every instance, so most arrive here for a
+    // run this window has never heard of. stopWorkflowRun already treats an
+    // unknown id as a no-op, which is what makes the broadcast safe.
+    const removeStopRunListener = window.api.onSchedulerStopRun(({ runId }) => {
+      void stopWorkflowRun(runId).catch((err) =>
+        console.warn(`[workflow] stop request for ${runId} failed:`, err)
+      )
+    })
+
     const removeUpdateListener = window.api.onUpdateDownloaded(({ version }) => {
       useAppStore.getState().setUpdateVersion(version)
     })
@@ -472,6 +482,7 @@ export function App() {
       removeSessionUpdatedListener()
       removeHeadlessExitListener()
       removeHeadlessDataListener()
+      removeStopRunListener()
       clearInterval(headlessPollInterval)
       clearInterval(pruneInterval)
     }

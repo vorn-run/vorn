@@ -19,6 +19,7 @@ import {
   dbDeleteWorkflow,
   listWorkflowRuns,
   listWorkflowRunsByTask,
+  listAllWorkflowRuns,
   dbSignalChange
 } from '@vornrun/server/database'
 import { rpcCall } from '../ws-client'
@@ -189,7 +190,11 @@ const nodeSchema = z
     // node whose output a later node consumes.
     slug: V.shortText.optional(),
     config: z.record(z.string(), z.unknown()),
-    position: z.object({ x: z.number(), y: z.number() })
+    position: z.object({ x: z.number(), y: z.number() }),
+    // Omitted means stop. Declared here because the object strips what it does
+    // not name: without it a workflow authored over MCP could never say a step
+    // is survivable, and the field would be dropped without complaint.
+    onError: z.enum(['stop', 'continue']).optional()
   })
   // `config` is a passthrough for every other node type, but a loop that
   // declares no body or a nonsense budget cannot run at all — and the failure
@@ -636,6 +641,62 @@ export function registerWorkflowTools(server: McpServer): void {
       return {
         content: [{ type: 'text', text: 'Error: provide either workflow_id or task_id' }],
         isError: true
+      }
+    }
+  )
+
+  server.tool(
+    'stop_workflow_run',
+    'Stop a workflow run that is still going, including one parked on an approval gate. Kills the agents it started, marks its unfinished nodes, and closes the run as cancelled. Requires the Vorn app to be running. A workflow will not start a new run while an old one sits waiting for approval, so this is how you clear that.',
+    {
+      run_id: V.id.describe('Run ID (from list_workflow_runs)')
+    },
+    async (args) => {
+      // Scanning recent runs beats broadcasting a typo that nothing answers:
+      // the stop is fire-and-forget, so an id that matches nothing would
+      // otherwise report success and do nothing at all.
+      const run = listAllWorkflowRuns(undefined, 500).find((r) => r.runId === args.run_id)
+      if (!run) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: no run "${args.run_id}" in the last 500. Check list_workflow_runs.`
+            }
+          ],
+          isError: true
+        }
+      }
+      if (run.status !== 'running') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Run ${args.run_id} already finished (${run.status}) — nothing to stop.`
+            }
+          ]
+        }
+      }
+
+      try {
+        await rpcCall('workflow:stopRun', { runId: args.run_id })
+      } catch (err) {
+        return {
+          content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : err}` }],
+          isError: true
+        }
+      }
+
+      const live = run.nodeStates.filter(
+        (n) => n.status === 'running' || n.status === 'waiting'
+      ).length
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Asked to stop run ${args.run_id}${run.workflowName ? ` of "${run.workflowName}"` : ''} — ${live} node(s) were still live.\n\nThe run is stopped by the instance holding it, so confirm with list_workflow_runs.`
+          }
+        ]
       }
     }
   )
