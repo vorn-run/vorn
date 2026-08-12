@@ -1,9 +1,8 @@
 import { memo, forwardRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { PaneCard } from './PaneCard'
+import { PaneCard, PaneControls } from './PaneCard'
 import { FileEditorPane } from './FileTreeExplorer'
-import { FileTypeIcon } from './file-icons'
 import { editorPaneId } from '../lib/pane-id'
 import { dirtyRefFor, confirmDiscard, clearDirty } from '../lib/editor-dirty'
 
@@ -48,18 +47,25 @@ export const EditorCard = memo(
       closeEditorPane(sessionId)
     }
 
+    const paneId = editorPaneId(sessionId)
+    const toggleMaximize = (): void => {
+      const state = useAppStore.getState()
+      state.setMaximizedPane(state.maximizedPaneId === paneId ? null : paneId)
+    }
+
     return (
       <PaneCard
         ref={ref}
-        paneId={editorPaneId(sessionId)}
-        // No subtitle: the editor's own path strip below already shows the
-        // relative path, alongside the dirty dot and the find/edit toolbar.
+        paneId={paneId}
         title={fileName}
-        icon={<FileTypeIcon name={fileName} size={12} />}
         onClose={handleClose}
         isDragTarget={isDragTarget}
         onDragStart={onDragStart}
         flexible={flexible}
+        // The path strip already names the file — with its icon, dirty dot and
+        // toolbar. A title row above it printed the filename twice over, so
+        // the controls join the strip instead.
+        headerless
       >
         <FileEditorPane
           key={filePath}
@@ -68,6 +74,20 @@ export const EditorCard = memo(
           remoteHostId={remoteHostId}
           dirtyRef={dirtyRefFor(sessionId)}
           onClose={handleClose}
+          controls={
+            <PaneControls
+              paneId={paneId}
+              title={fileName}
+              onClose={handleClose}
+              className="shrink-0"
+            />
+          }
+          headerClassName={
+            onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''
+          }
+          onHeaderPointerDown={onDragStart ? (e) => onDragStart(paneId, e) : undefined}
+          onHeaderDoubleClick={toggleMaximize}
+          headerTestId="editor-pane-header"
         />
       </PaneCard>
     )

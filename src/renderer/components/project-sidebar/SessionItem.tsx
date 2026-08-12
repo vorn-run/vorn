@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect } from 'react'
-import { X, FolderTree } from 'lucide-react'
+import { X, FolderTree, Globe } from 'lucide-react'
 import { useAppStore } from '../../stores'
 import { AgentStatusIcon } from '../AgentStatusIcon'
 import { closeTerminalSession } from '../../lib/terminal-close'
@@ -26,6 +26,8 @@ export function SessionItem({
   const enableHoverPreview = useAppStore((s) => s.config?.defaults?.enableHoverPreview ?? false)
   const hasFilesPane = useAppStore((s) => s.filesPanes.has(session.id))
   const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
+  const hasBrowserPane = useAppStore((s) => s.browserPanes.has(session.id))
+  const toggleBrowserPane = useAppStore((s) => s.toggleBrowserPane)
   const isActive =
     layoutMode === 'tabs' ? activeTabId === session.id : focusedTerminalId === session.id
   const isPreviewing = previewTerminalId === session.id
@@ -105,6 +107,22 @@ export function SessionItem({
         } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
       >
         <FolderTree size={12} strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        aria-label={`${hasBrowserPane ? 'Hide' : 'Show'} browser for ${session.name}`}
+        title={hasBrowserPane ? 'Hide browser' : 'Show browser'}
+        onClick={(e) => {
+          e.stopPropagation()
+          toggleBrowserPane(session.id)
+        }}
+        className={`${
+          hasBrowserPane
+            ? 'opacity-100 text-amber-400/80'
+            : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
+        } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
+      >
+        <Globe size={12} strokeWidth={2} />
       </button>
       <button
         type="button"

@@ -4,7 +4,7 @@ import '@testing-library/jest-dom/vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import type { FileEntry } from '../src/shared/types'
 
-// AgentCard (pulled in by PaneRenderer) reads matchMedia at module load, so it
+// AgentCard (pulled in by focus mode) reads matchMedia at module load, so it
 // must exist before the dynamic imports below.
 Object.defineProperty(window, 'matchMedia', {
   value: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
@@ -33,10 +33,14 @@ Object.defineProperty(window, 'api', {
 })
 
 const { useAppStore } = await import('../src/renderer/stores')
+const { activeBrowserUrl } = await import('../src/renderer/stores/types')
+
+/** The page a session's browser is showing, i.e. its active tab. */
+const browserUrl = (id: string): string | null =>
+  activeBrowserUrl(useAppStore.getState().browserPanes.get(id))
 const { FilesCard } = await import('../src/renderer/components/FilesCard')
 const { EditorCard } = await import('../src/renderer/components/EditorCard')
-const { PaneRenderer } = await import('../src/renderer/components/PaneRenderer')
-const { MinimizedPill } = await import('../src/renderer/components/MinimizedPill')
+const { BrowserCard } = await import('../src/renderer/components/BrowserCard')
 const { FocusedTerminal } = await import('../src/renderer/components/FocusedTerminal')
 const { dirtyRefFor, clearDirty } = await import('../src/renderer/lib/editor-dirty')
 
@@ -67,6 +71,7 @@ function seed(ids = ['t1']): void {
       terminals,
       filesPanes: new Set(),
       editorPanes: new Map(),
+      browserPanes: new Map(),
       minimizedTerminals: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids
@@ -187,7 +192,7 @@ describe('EditorCard', () => {
 })
 
 describe('PaneCard chrome', () => {
-  it('maximizes, restores and minimizes through the store', async () => {
+  it('maximizes and restores through the store', async () => {
     act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
@@ -197,9 +202,40 @@ describe('PaneCard chrome', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Restore Files/ }))
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: /Minimize Files/ }))
-    expect(useAppStore.getState().minimizedTerminals.has('files:t1')).toBe(true)
+  it('seats the tree pane controls in its filter row, not a second bar', async () => {
+    // The filter row is already a full-width bar. A title row above it is
+    // chrome stacked on chrome, and costs a line of tree.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    render(<FilesCard sessionId="t1" />)
+    await screen.findByText('a.ts')
+
+    const header = screen.getByTestId('files-pane-header')
+    expect(header).toContainElement(screen.getByLabelText('Maximize Files'))
+    expect(header).toContainElement(screen.getByLabelText('Close Files'))
+    expect(screen.getByPlaceholderText('Filter files…')).toBeInTheDocument()
+  })
+
+  it('names the open file once, in the path strip that carries its controls', async () => {
+    // The strip already shows the path, icon and dirty dot; a header above it
+    // repeated the filename directly over itself.
+    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
+    render(<EditorCard sessionId="t1" />)
+
+    const header = await screen.findByTestId('editor-pane-header')
+    expect(header).toContainElement(screen.getByLabelText('Maximize a.ts'))
+    expect(screen.getAllByText('a.ts')).toHaveLength(1)
+  })
+
+  it('offers no minimize, because a minimized pane had nowhere to go', async () => {
+    // The dock only surfaces sessions and expanded mode ignores the minimized
+    // set entirely, so the button silently discarded the pane.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    render(<FilesCard sessionId="t1" />)
+    await screen.findByText('a.ts')
+
+    expect(screen.queryByRole('button', { name: /Minimize Files/ })).toBeNull()
   })
 })
 
@@ -210,7 +246,7 @@ describe('PaneCard drag and double-click', () => {
     render(<FilesCard sessionId="t1" onDragStart={onDragStart} />)
     await screen.findByText('a.ts')
 
-    fireEvent.pointerDown(screen.getByText('Files'))
+    fireEvent.pointerDown(screen.getByTestId('files-pane-header'))
     expect(onDragStart).toHaveBeenCalledWith('files:t1', expect.anything())
   })
 
@@ -219,10 +255,10 @@ describe('PaneCard drag and double-click', () => {
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
-    fireEvent.doubleClick(screen.getByText('Files'))
+    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
     expect(useAppStore.getState().maximizedPaneId).toBe('files:t1')
 
-    fireEvent.doubleClick(screen.getByText('Files'))
+    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
   })
 })
@@ -237,55 +273,6 @@ describe('BrowseFilesButton', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Browse files' }))
     expect(useAppStore.getState().filesPanes.has('t1')).toBe(false)
-  })
-})
-
-describe('PaneRenderer', () => {
-  it('dispatches on pane kind', async () => {
-    act(() => {
-      useAppStore.getState().openFilesPane('t1')
-      useAppStore.getState().openEditorPane('t1', '/repo/a.ts')
-    })
-
-    const files = render(<PaneRenderer paneId="files:t1" />)
-    expect(await files.findByText('Files')).toBeInTheDocument()
-    files.unmount()
-
-    const editor = render(<PaneRenderer paneId="editor:t1" />)
-    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
-    editor.unmount()
-  })
-})
-
-describe('MinimizedPill for child panes', () => {
-  it('labels a minimized tree with its owner and restores on click', () => {
-    act(() => {
-      useAppStore.getState().openFilesPane('t1')
-      useAppStore.getState().toggleMinimized('files:t1')
-    })
-
-    render(<MinimizedPill terminalId="files:t1" />)
-    // Without the kind branch this pill renders nothing and the pane is lost.
-    expect(screen.getByText('Files')).toBeInTheDocument()
-    expect(screen.getByText('t1')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button'))
-    expect(useAppStore.getState().minimizedTerminals.has('files:t1')).toBe(false)
-  })
-
-  it('labels a minimized editor with its filename', () => {
-    act(() => {
-      useAppStore.getState().openEditorPane('t1', '/repo/a.ts')
-      useAppStore.getState().toggleMinimized('editor:t1')
-    })
-
-    render(<MinimizedPill terminalId="editor:t1" />)
-    expect(screen.getByText('a.ts')).toBeInTheDocument()
-  })
-
-  it('renders nothing for a pane whose session is gone', () => {
-    const { container } = render(<MinimizedPill terminalId="files:ghost" />)
-    expect(container).toBeEmptyDOMElement()
   })
 })
 
@@ -309,20 +296,170 @@ describe('panes travel with their session into focus mode', () => {
     render(<FocusedTerminal />)
 
     // Expanding a card used to hide whatever the session had open next to it.
-    expect(await screen.findByText('Files')).toBeInTheDocument()
+    expect(await screen.findByTestId('files-pane-header')).toBeInTheDocument()
     await waitFor(() =>
       expect(mockReadFileContent).toHaveBeenCalledWith('/repo/a.ts', undefined, undefined)
     )
   })
 
+  it("carries the session's browser into focus mode too", () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<FocusedTerminal />)
+    expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
+  it('gives a maximized pane the whole stage and hides its siblings', async () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().openBrowserPane('t1', 'localhost:5173')
+      useAppStore.getState().setMaximizedPane('browser:t1')
+    })
+
+    render(<FocusedTerminal />)
+
+    // Focus mode used to render panes in a fixed rail and ignore the maximize
+    // entirely, so the button looked dead once a card was expanded.
+    expect(screen.getByLabelText('Address')).toBeInTheDocument()
+    expect(screen.queryByTestId('files-pane-header')).not.toBeInTheDocument()
+    // The terminal gives up its space too — a maximized pane covering only the
+    // rail is not a maximize.
+    expect(screen.getByTestId('focused-terminal-column')).toHaveClass('hidden')
+  })
+
+  it("ignores another session's maximized pane", async () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      // t1 owns a browser too, so only the *owner* check can keep this stage
+      // whole — matching on kind alone would blank it.
+      useAppStore.getState().openBrowserPane('t1', 'localhost:5173')
+      useAppStore.getState().setMaximizedPane('browser:t2')
+    })
+
+    render(<FocusedTerminal />)
+    // A stale or foreign id must not blank the stage of the session in focus.
+    expect(await screen.findByTestId('files-pane-header')).toBeInTheDocument()
+  })
+
   it('shows no pane column when the session has none open', () => {
     render(<FocusedTerminal />)
-    expect(screen.queryByText('Files')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('files-pane-header')).not.toBeInTheDocument()
   })
 
   it('renders nothing when no session is focused', () => {
     act(() => useAppStore.setState({ focusedTerminalId: null }))
     const { container } = render(<FocusedTerminal />)
+    expect(container).toBeEmptyDOMElement()
+  })
+})
+
+describe('BrowserCard', () => {
+  it('renders the page host on its tab and the url in the address bar', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    // The tab strip is this pane's only title bar — a second header above it
+    // would be chrome stacked on chrome, so the host is named exactly once.
+    expect(screen.getAllByText('localhost:5173')).toHaveLength(1)
+    expect(screen.getByRole('tab')).toHaveTextContent('localhost:5173')
+    expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
+  it('calls an unvisited tab "New tab" and leaves its address bar empty', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1'))
+    render(<BrowserCard sessionId="t1" />)
+
+    // "about:blank" is jargon, and pre-filling it gives the user a string to
+    // delete before they can type the address they actually want.
+    expect(screen.getByRole('tab')).toHaveTextContent('New tab')
+    expect(screen.getByLabelText('Address')).toHaveValue('')
+  })
+
+  it('seats the pane controls in the tab strip rather than a second header', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    // Maximize / close still have to be reachable once the pane's own header
+    // is gone.
+    expect(screen.getByLabelText('Maximize localhost:5173')).toBeInTheDocument()
+    expect(screen.getByLabelText('Close localhost:5173')).toBeInTheDocument()
+  })
+
+  it('opens a second tab and switches between them without losing either page', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('New tab'))
+    act(() => useAppStore.getState().openBrowserPane('t1', 'example.com'))
+
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs).toHaveLength(2)
+    expect(tabs[1]).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(tabs[0])
+    // Switching tabs must put the address bar on the page you switched to.
+    expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+
+    // Both pages stay mounted so a switch back doesn't reload them.
+    expect(document.querySelectorAll('webview')).toHaveLength(2)
+  })
+
+  it('closes a tab from its own button', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    act(() => useAppStore.getState().addBrowserTab('t1', 'example.com'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Close tab example.com'))
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['http://localhost:5173/'])
+  })
+
+  it('navigates on submit, normalizing what was typed', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const input = screen.getByLabelText('Address')
+    fireEvent.change(input, { target: { value: 'example.com/docs' } })
+    fireEvent.submit(input)
+
+    expect(browserUrl('t1')).toBe('https://example.com/docs')
+  })
+
+  it('explains a rejected address instead of silently doing nothing', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'example.com'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const input = screen.getByLabelText('Address')
+    fireEvent.change(input, { target: { value: 'file:///etc/passwd' } })
+    fireEvent.submit(input)
+
+    expect(screen.getByText(/does not look like a web address/)).toBeInTheDocument()
+    // The pane keeps the page it had.
+    expect(browserUrl('t1')).toBe('https://example.com/')
+  })
+
+  it('closes its own pane', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'example.com'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Close example\.com/ }))
+    expect(useAppStore.getState().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('starts with navigation disabled until the guest reports history', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'example.com'))
+    render(<BrowserCard sessionId="t1" />)
+
+    expect(screen.getByRole('button', { name: 'Go back' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Go forward' })).toBeDisabled()
+  })
+
+  it('renders nothing when the session has no browser open', () => {
+    const { container } = render(<BrowserCard sessionId="t1" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('renders nothing when its owner session is gone', () => {
+    act(() => useAppStore.getState().openBrowserPane('ghost', 'example.com'))
+    const { container } = render(<BrowserCard sessionId="ghost" />)
     expect(container).toBeEmptyDOMElement()
   })
 })

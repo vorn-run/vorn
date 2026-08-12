@@ -628,6 +628,17 @@ describe('TabView merged toolbar controls', () => {
     expect(tabs[1].className).toContain('text-gray-500')
   })
 
+  it("shows the active session's browser pane beside its terminal", () => {
+    act(() => {
+      useAppStore.setState({ activeTabId: 'term-1' })
+      useAppStore.getState().openBrowserPane('term-1', 'localhost:5173')
+    })
+    render(<TabView />)
+
+    // Tab mode shows one session at a time, but that session keeps its panes.
+    expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
   it('clicks browse files button on a tab', () => {
     const toggleFilesPane = vi.fn()
     act(() => {

@@ -4,8 +4,7 @@ import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
 import { isTerminalPane } from '../lib/pane-id'
-import { FilesCard } from './FilesCard'
-import { EditorCard } from './EditorCard'
+import { PaneColumn } from './PaneColumn'
 import { AgentStatusIcon } from './AgentStatusIcon'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
@@ -20,7 +19,7 @@ import { buildTooltip } from '../lib/tab-tooltip'
 import { ConfirmPopover } from './ConfirmPopover'
 import { Tooltip } from './Tooltip'
 import { toast } from './Toast'
-import { ChevronDown, FolderOpen, GripVertical, Pencil, Plus, X } from 'lucide-react'
+import { ChevronDown, FolderOpen, Globe, GripVertical, Pencil, Plus, X } from 'lucide-react'
 import { GridContextMenu } from './GridContextMenu'
 import { GridToolbar } from './GridToolbar'
 import { WindowControls } from './WindowControls'
@@ -139,6 +138,7 @@ export function TabView() {
   const renameTerminal = useAppStore((s) => s.renameTerminal)
   const reorderTerminals = useAppStore((s) => s.reorderTerminals)
   const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
+  const toggleBrowserPane = useAppStore((s) => s.toggleBrowserPane)
   const tasks = useAppStore((s) => s.config?.tasks)
   const isSidebarOpen = useAppStore((s) => s.isSidebarOpen)
   const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
@@ -265,6 +265,9 @@ export function TabView() {
   const activeTerminal = activeTabId ? terminals.get(activeTabId) : null
   const activeHasFiles = useAppStore((s) => (activeTabId ? s.filesPanes.has(activeTabId) : false))
   const activeHasEditor = useAppStore((s) => (activeTabId ? s.editorPanes.has(activeTabId) : false))
+  const activeHasBrowser = useAppStore((s) =>
+    activeTabId ? s.browserPanes.has(activeTabId) : false
+  )
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -402,6 +405,11 @@ export function TabView() {
                         label="Browse files"
                         icon={<FolderOpen size={13} />}
                         onClick={() => toggleFilesPane(id)}
+                      />
+                      <TabIconButton
+                        label="Open browser"
+                        icon={<Globe size={13} />}
+                        onClick={() => toggleBrowserPane(id)}
                       />
                       <TabIconButton
                         label="Rename session"
@@ -564,20 +572,13 @@ export function TabView() {
           </div>
 
           {/* The active session's file panes, alongside its terminal. */}
-          {activeTabId && activeTerminal && (activeHasFiles || activeHasEditor) && (
-            <div className="w-[380px] shrink-0 flex flex-col gap-px border-l border-white/[0.06]">
-              {activeHasFiles && (
-                <div className="flex-1 min-h-0">
-                  <FilesCard sessionId={activeTabId} />
-                </div>
-              )}
-              {activeHasEditor && (
-                <div className="flex-1 min-h-0">
-                  <EditorCard sessionId={activeTabId} />
-                </div>
-              )}
-            </div>
-          )}
+          {activeTabId &&
+            activeTerminal &&
+            (activeHasFiles || activeHasEditor || activeHasBrowser) && (
+              <div className="w-[380px] shrink-0 flex flex-col border-l border-white/[0.06]">
+                <PaneColumn sessionId={activeTabId} />
+              </div>
+            )}
         </div>
       )}
 

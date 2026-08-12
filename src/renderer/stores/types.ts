@@ -51,12 +51,45 @@ export interface FlexibleLayoutRect {
 }
 
 /**
+ * How one session card divides its interior.
+ *
+ * `terminal` is the fraction of the card's width the terminal keeps, the rest
+ * going to the pane column. `panes` holds the fraction of that column's height
+ * each stacked pane keeps, in render order — a pane with no entry falls back to
+ * an even share, so opening a third pane never needs a migration.
+ */
+export interface CardSplit {
+  terminal: number
+  panes: number[]
+}
+
+/**
  * State of a session's file-editor pane. Independent of that session's tree
  * pane — the editor can be open, maximized, and closed on its own.
  */
 export interface EditorPaneState {
   /** Absolute path of the open file. */
   filePath: string
+}
+
+/**
+ * State of a session's browser pane. One per session, so a session can keep a
+ * dev server or a doc page beside its agent.
+ *
+ * A pane holds several tabs, like any browser — a dev server and the docs you
+ * are reading against it are the common pair, and forcing one to replace the
+ * other made the pane far less useful than the space it costs.
+ */
+export interface BrowserPaneState {
+  /** Normalized absolute URLs, one per tab. Never empty while the pane exists. */
+  tabs: string[]
+  /** Index into `tabs`. Always in range. */
+  activeTab: number
+}
+
+/** The page a browser pane is currently showing. */
+export function activeBrowserUrl(pane: BrowserPaneState | undefined): string | null {
+  return pane ? (pane.tabs[pane.activeTab] ?? null) : null
 }
 
 export interface TerminalState {
@@ -164,6 +197,8 @@ export interface UISlice {
   gridColumns: number // 0 = auto, -1 = flexible (react-grid-layout)
   rowHeight: number
   flexibleLayouts: Record<string, FlexibleLayoutRect>
+  /** How each session card divides its interior, keyed by session id. */
+  cardSplits: Record<string, CardSplit>
   sortMode: SortMode
   statusFilter: StatusFilter
   terminalOrder: string[]
@@ -174,6 +209,8 @@ export interface UISlice {
   filesPanes: Set<string>
   /** Session id → the file its editor pane is showing. One editor per session. */
   editorPanes: Map<string, EditorPaneState>
+  /** Session id → the page its browser pane is showing. One browser per session. */
+  browserPanes: Map<string, BrowserPaneState>
   /**
    * Pane id currently maximized, or null. At most one app-wide. A maximized
    * pane covers only its owner session's footprint — other sessions are
@@ -227,6 +264,11 @@ export interface UISlice {
   setGridColumns: (cols: number) => void
   setRowHeight: (height: number) => void
   setFlexibleLayouts: (layouts: Record<string, FlexibleLayoutRect>) => void
+  /**
+   * Commit one session card's interior split. Called on pointerup only — the
+   * live drag drives local state, so a resize writes to storage once.
+   */
+  setCardSplit: (sessionId: string, split: CardSplit) => void
   setTerminalOrder: (order: string[]) => void
   setVisibleTerminalIds: (ids: string[]) => void
   setFocusableTerminalIds: (ids: string[]) => void
@@ -242,6 +284,25 @@ export interface UISlice {
    */
   openEditorPane: (sessionId: string, filePath: string) => void
   closeEditorPane: (sessionId: string) => void
+  /**
+   * Show `url` in the session's browser pane, creating it if needed.
+   *
+   * Accepts whatever the user typed — it is normalized here, so `localhost:5173`
+   * works. A url that cannot be loaded (a refused scheme, or nonsense) leaves
+   * the pane on its current page rather than blanking it. Omitting `url`
+   * reveals the session's browser without changing the page it is showing.
+   */
+  openBrowserPane: (sessionId: string, url?: string) => void
+  closeBrowserPane: (sessionId: string) => void
+  toggleBrowserPane: (sessionId: string) => void
+  /** Add a tab to the session's browser and make it active. */
+  addBrowserTab: (sessionId: string, url?: string) => void
+  /**
+   * Close one tab. Closing the last one closes the pane, since a browser with
+   * no page is just an empty box.
+   */
+  closeBrowserTab: (sessionId: string, index: number) => void
+  setActiveBrowserTab: (sessionId: string, index: number) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void
   toggleSessionDockCollapsed: () => void

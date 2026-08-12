@@ -2,6 +2,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
+import { activeBrowserUrl } from '../src/renderer/stores/types'
+import { parsePersistedBrowsers } from '../src/renderer/stores/ui-slice'
+
+/** The page a session's browser is showing, i.e. its active tab. */
+const browserUrl = (id: string): string | null =>
+  activeBrowserUrl(useAppStore.getState().browserPanes.get(id))
 
 const session = (id: string) =>
   ({
@@ -23,6 +29,7 @@ function seed(ids: string[] = ['t1']): void {
       terminals,
       filesPanes: new Set(),
       editorPanes: new Map(),
+      browserPanes: new Map(),
       minimizedTerminals: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids,
@@ -83,40 +90,11 @@ describe('pane store actions', () => {
     expect(s().editorPanes.get('t1')?.filePath).toBe('/p/b.ts')
   })
 
-  it('re-opening a file un-minimizes the editor instead of updating it unseen', () => {
+  it('toggling the tree opens then closes it', () => {
     const s = () => useAppStore.getState()
-    act(() => s().openEditorPane('t1', '/p/a.ts'))
-    act(() => s().toggleMinimized('editor:t1'))
-    expect(s().minimizedTerminals.has('editor:t1')).toBe(true)
-
-    act(() => s().openEditorPane('t1', '/p/b.ts'))
-    expect(s().minimizedTerminals.has('editor:t1')).toBe(false)
-  })
-
-  it('restores a minimized tree instead of leaving it hidden', () => {
-    const s = () => useAppStore.getState()
-    act(() => s().openFilesPane('t1'))
-    act(() => s().toggleMinimized('files:t1'))
-    expect(s().minimizedTerminals.has('files:t1')).toBe(true)
-
-    // "Browse files" on a session whose tree is minimized must bring it back —
-    // returning early here made the button look dead.
-    act(() => s().openFilesPane('t1'))
-    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
-    expect(s().filesPanes.has('t1')).toBe(true)
-  })
-
-  it('toggling a minimized tree restores it rather than closing it', () => {
-    const s = () => useAppStore.getState()
-    act(() => s().openFilesPane('t1'))
-    act(() => s().toggleMinimized('files:t1'))
-
-    // Closing something the user cannot see is never the intent.
     act(() => s().toggleFilesPane('t1'))
     expect(s().filesPanes.has('t1')).toBe(true)
-    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
 
-    // Once visible, the toggle closes as usual.
     act(() => s().toggleFilesPane('t1'))
     expect(s().filesPanes.has('t1')).toBe(false)
   })
@@ -134,21 +112,135 @@ describe('pane store actions', () => {
     expect(isEditorDirty('t1')).toBe(false)
   })
 
-  it('closing a pane clears its minimized and maximized state', () => {
+  it('opens a browser with a default page and normalizes typed urls', () => {
     const s = () => useAppStore.getState()
-    act(() => {
-      s().openFilesPane('t1')
-      s().setMaximizedPane('files:t1')
-      s().toggleMinimized('files:t1')
-    })
-    // Minimizing a maximized pane already drops the maximize.
-    expect(s().maximizedPaneId).toBeNull()
 
-    act(() => s().closeFilesPane('t1'))
-    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
+    act(() => s().openBrowserPane('t1'))
+    expect(browserUrl('t1')).toBe('about:blank')
+
+    act(() => s().openBrowserPane('t1', 'localhost:5173'))
+    expect(browserUrl('t1')).toBe('http://localhost:5173/')
   })
 
-  it('minimizing a maximized pane clears the maximize', () => {
+  it('ignores an unloadable url rather than blanking the pane', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+
+    act(() => s().openBrowserPane('t1', 'javascript:alert(1)'))
+    // The pane keeps the page it had; a rejected scheme must not clear it.
+    expect(browserUrl('t1')).toBe('https://example.com/')
+  })
+
+  it('re-opening without a url keeps the current page', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => s().openBrowserPane('t1'))
+
+    expect(browserUrl('t1')).toBe('https://example.com/')
+  })
+
+  it('toggling the browser opens then closes it', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().toggleBrowserPane('t1'))
+    expect(s().browserPanes.has('t1')).toBe(true)
+
+    // Once visible, the toggle closes as usual.
+    act(() => s().toggleBrowserPane('t1'))
+    expect(s().browserPanes.has('t1')).toBe(false)
+
+    expect(s().maximizedPaneId).toBeNull()
+  })
+
+  it('keeps each session on its own page', () => {
+    const s = () => useAppStore.getState()
+    act(() => {
+      s().openBrowserPane('t1', 'localhost:5173')
+      s().openBrowserPane('t2', 'localhost:3000')
+    })
+
+    expect(browserUrl('t1')).toBe('http://localhost:5173/')
+    expect(browserUrl('t2')).toBe('http://localhost:3000/')
+  })
+
+  it('persists the open page and drops it with its session', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    expect(JSON.parse(localStorage.getItem('vorn:panes') as string).browsers).toEqual({
+      t1: { tabs: ['https://example.com/'], activeTab: 0 }
+    })
+
+    act(() => s().removeTerminal('t1'))
+    expect(s().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('reads a pane persisted by an older build that stored one url', () => {
+    // Shipping the tab strip must not silently drop the page people already
+    // had open when they upgrade.
+    const panes = parsePersistedBrowsers({ t1: 'https://old.example/' })
+    expect(panes.get('t1')).toEqual({ tabs: ['https://old.example/'], activeTab: 0 })
+  })
+
+  it('clamps a persisted active tab that points past the end', () => {
+    const panes = parsePersistedBrowsers({ t1: { tabs: ['https://a/'], activeTab: 4 } })
+    expect(panes.get('t1')?.activeTab).toBe(0)
+  })
+
+  it('opens a tab, switches to it, and navigates only the active tab', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => s().addBrowserTab('t1', 'localhost:5173'))
+
+    // A new tab is the one you are looking at — otherwise the button appears
+    // to do nothing.
+    expect(s().browserPanes.get('t1')?.activeTab).toBe(1)
+    expect(browserUrl('t1')).toBe('http://localhost:5173/')
+
+    act(() => s().openBrowserPane('t1', 'example.org'))
+    // Typing an address replaces the current page rather than spawning a tab.
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([
+      'https://example.com/',
+      'https://example.org/'
+    ])
+  })
+
+  it('lands on a neighbour when the active tab closes', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'a.com'))
+    act(() => {
+      s().addBrowserTab('t1', 'b.com')
+      s().addBrowserTab('t1', 'c.com')
+    })
+
+    act(() => s().closeBrowserTab('t1', 2))
+    expect(browserUrl('t1')).toBe('https://b.com/')
+
+    // Closing a tab to the left shifts the active index, or the user would
+    // find themselves on a different page than the one they were reading.
+    act(() => s().setActiveBrowserTab('t1', 1))
+    act(() => s().closeBrowserTab('t1', 0))
+    expect(browserUrl('t1')).toBe('https://b.com/')
+  })
+
+  it('closing the last tab closes the pane rather than leaving an empty box', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'a.com'))
+    act(() => s().closeBrowserTab('t1', 0))
+
+    expect(s().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('closing a browser clears a maximize that pointed at it', () => {
+    const s = () => useAppStore.getState()
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().setMaximizedPane('browser:t1')
+    })
+    act(() => s().closeBrowserPane('t1'))
+
+    expect(s().maximizedPaneId).toBeNull()
+  })
+
+  it('closing a pane clears its maximized state', () => {
     const s = () => useAppStore.getState()
     act(() => {
       s().openFilesPane('t1')
@@ -156,11 +248,7 @@ describe('pane store actions', () => {
     })
     expect(s().maximizedPaneId).toBe('files:t1')
 
-    act(() => s().toggleMinimized('files:t1'))
-    expect(s().maximizedPaneId).toBeNull()
-
-    // Restoring does not silently re-maximize it.
-    act(() => s().toggleMinimized('files:t1'))
+    act(() => s().closeFilesPane('t1'))
     expect(s().maximizedPaneId).toBeNull()
   })
 
@@ -202,7 +290,8 @@ describe('pane store actions', () => {
     expect(raw).toBeTruthy()
     expect(JSON.parse(raw as string)).toEqual({
       files: ['t1'],
-      editors: { t1: '/p/a.ts' }
+      editors: { t1: '/p/a.ts' },
+      browsers: {}
     })
 
     act(() => s().closeFilesPane('t1'))

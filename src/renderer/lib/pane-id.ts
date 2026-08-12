@@ -4,17 +4,19 @@
  * The grid, tab strip, dock and layout persistence all address panes by opaque
  * string id. Historically that id was always a terminal id, and every consumer
  * did `terminals.get(id)` and bailed on a miss. To let a session own additional
- * panes (its file tree, its open file) without rewriting that machinery, child
+ * panes (its file tree, its open file, its browser) without rewriting that
+ * machinery, child
  * panes get a prefixed id derived from their owner session's id.
  *
  * Ids stay opaque strings, so ordering, drag/resize and minimize keep working
  * untouched — only the components that *render* a pane need to branch on kind.
  */
 
-export type PaneKind = 'terminal' | 'files' | 'editor'
+export type PaneKind = 'terminal' | 'files' | 'editor' | 'browser'
 
 const FILES_PREFIX = 'files:'
 const EDITOR_PREFIX = 'editor:'
+const BROWSER_PREFIX = 'browser:'
 
 /** Id of the file-tree pane owned by `sessionId`. */
 export function filesPaneId(sessionId: string): string {
@@ -24,6 +26,11 @@ export function filesPaneId(sessionId: string): string {
 /** Id of the file-editor pane owned by `sessionId`. */
 export function editorPaneId(sessionId: string): string {
   return `${EDITOR_PREFIX}${sessionId}`
+}
+
+/** Id of the browser pane owned by `sessionId`. */
+export function browserPaneId(sessionId: string): string {
+  return `${BROWSER_PREFIX}${sessionId}`
 }
 
 /**
@@ -40,6 +47,9 @@ export function parsePaneId(paneId: string): { kind: PaneKind; sessionId: string
   if (paneId.startsWith(EDITOR_PREFIX)) {
     return { kind: 'editor', sessionId: paneId.slice(EDITOR_PREFIX.length) }
   }
+  if (paneId.startsWith(BROWSER_PREFIX)) {
+    return { kind: 'browser', sessionId: paneId.slice(BROWSER_PREFIX.length) }
+  }
   return { kind: 'terminal', sessionId: paneId }
 }
 
@@ -47,6 +57,7 @@ export function parsePaneId(paneId: string): { kind: PaneKind; sessionId: string
 export function paneKind(paneId: string): PaneKind {
   if (paneId.startsWith(FILES_PREFIX)) return 'files'
   if (paneId.startsWith(EDITOR_PREFIX)) return 'editor'
+  if (paneId.startsWith(BROWSER_PREFIX)) return 'browser'
   return 'terminal'
 }
 

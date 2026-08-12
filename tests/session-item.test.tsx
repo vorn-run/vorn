@@ -108,6 +108,25 @@ describe('SessionItem', () => {
     expect(setActiveTabId).not.toHaveBeenCalled()
   })
 
+  it("toggles this session's browser pane without selecting the session", () => {
+    const setActiveTabId = vi.fn()
+    act(() => useAppStore.setState({ setActiveTabId }))
+
+    render(<SessionItem session={session} />)
+    fireEvent.click(screen.getByRole('button', { name: /Show browser for/ }))
+
+    expect(useAppStore.getState().browserPanes.has(session.id)).toBe(true)
+    expect(setActiveTabId).not.toHaveBeenCalled()
+  })
+
+  it('reflects and clears an open browser pane', () => {
+    act(() => useAppStore.getState().openBrowserPane(session.id, 'example.com'))
+    render(<SessionItem session={session} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Hide browser for/ }))
+    expect(useAppStore.getState().browserPanes.has(session.id)).toBe(false)
+  })
+
   it('reflects and clears an open files pane', () => {
     act(() => useAppStore.getState().openFilesPane(session.id))
     render(<SessionItem session={session} />)
