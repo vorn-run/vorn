@@ -473,7 +473,8 @@ export async function navigate(params: {
 /** How much of an element's markup travels. Enough to identify, not to dump. */
 const HTML_BUDGET = 2000
 
-const pickers = new Map<string, (sel: BrowserSelection) => void>()
+/** Session → how to disarm its in-progress pick. */
+const pickers = new Map<string, () => void>()
 
 /**
  * Read everything identifying about one node, in the page.
