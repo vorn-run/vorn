@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
 import { useVisibleTerminals } from '../src/renderer/hooks/useVisibleTerminals'
+import { sessionPositionForGridIndex } from '../src/renderer/lib/pane-order'
 
 const session = (id: string) =>
   ({
@@ -95,6 +96,19 @@ describe('useVisibleTerminals — session-owned panes', () => {
     expect(result.current.minimizedIds).toEqual(['files:t1'])
   })
 
+  it('keeps visibleTerminalIds sessions-only, so Cmd+N navigation stays valid', () => {
+    renderHook(() => useVisibleTerminals())
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().openEditorPane('t1', '/p/a.ts')
+    })
+
+    // Cmd+], Cmd+[ and Cmd+1-9 index into this list and hand the result to
+    // setActiveTabId / setSelectedTerminal — a pane id there lands on a tab no
+    // terminals.get() can resolve.
+    expect(useAppStore.getState().visibleTerminalIds).toEqual(['t1'])
+  })
+
   it('drops a session-owned pane when the session closes', () => {
     const { result } = renderHook(() => useVisibleTerminals())
     act(() => {
@@ -107,5 +121,32 @@ describe('useVisibleTerminals — session-owned panes', () => {
     expect(result.current.orderedIds).toEqual([])
     expect(useAppStore.getState().filesPanes.has('t1')).toBe(false)
     expect(useAppStore.getState().editorPanes.has('t1')).toBe(false)
+  })
+})
+
+describe('sessionPositionForGridIndex', () => {
+  // The grid interleaves each session's panes; terminalOrder holds sessions
+  // only. Reordering with a raw grid index splices the wrong element — or an
+  // undefined one — and corrupts the persisted session order.
+  const grid = ['t1', 'files:t1', 'editor:t1', 't2', 't3', 'files:t3']
+
+  it('maps a grid drop position to a session position', () => {
+    expect(sessionPositionForGridIndex(grid, 0)).toBe(0) // before t1
+    expect(sessionPositionForGridIndex(grid, 3)).toBe(1) // before t2
+    expect(sessionPositionForGridIndex(grid, 4)).toBe(2) // before t3
+    expect(sessionPositionForGridIndex(grid, 6)).toBe(3) // past the end
+  })
+
+  it('never exceeds the session count, whatever the grid index', () => {
+    const sessions = grid.filter((id) => !id.includes(':')).length
+    for (let i = 0; i <= grid.length + 2; i++) {
+      expect(sessionPositionForGridIndex(grid, i)).toBeLessThanOrEqual(sessions)
+    }
+  })
+
+  it('is an identity when no panes are open', () => {
+    const plain = ['t1', 't2', 't3']
+    expect(sessionPositionForGridIndex(plain, 0)).toBe(0)
+    expect(sessionPositionForGridIndex(plain, 2)).toBe(2)
   })
 })

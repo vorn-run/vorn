@@ -5,6 +5,7 @@ import { PaneCard } from './PaneCard'
 import { FileEditorPane } from './FileTreeExplorer'
 import { FileTypeIcon } from './file-icons'
 import { editorPaneId } from '../lib/pane-id'
+import { dirtyRefFor, confirmDiscard, clearDirty } from '../lib/editor-dirty'
 
 interface Props {
   /** Session that owns this editor. */
@@ -39,6 +40,14 @@ export const EditorCard = memo(
     const remoteHostId = terminal.session.remoteHostId
     const fileName = filePath.split(/[/\\]/).pop() ?? filePath
 
+    // Closing discards the buffer, so confirm first. The editor's own state is
+    // out of reach from here — it reports dirtiness through the shared ref.
+    const handleClose = (): void => {
+      if (!confirmDiscard(sessionId)) return
+      clearDirty(sessionId)
+      closeEditorPane(sessionId)
+    }
+
     return (
       <PaneCard
         ref={ref}
@@ -47,7 +56,7 @@ export const EditorCard = memo(
         // relative path, alongside the dirty dot and the find/edit toolbar.
         title={fileName}
         icon={<FileTypeIcon name={fileName} size={12} />}
-        onClose={() => closeEditorPane(sessionId)}
+        onClose={handleClose}
         isDragTarget={isDragTarget}
         onDragStart={onDragStart}
         flexible={flexible}
@@ -57,7 +66,8 @@ export const EditorCard = memo(
           cwd={cwd}
           filePath={filePath}
           remoteHostId={remoteHostId}
-          onClose={() => closeEditorPane(sessionId)}
+          dirtyRef={dirtyRefFor(sessionId)}
+          onClose={handleClose}
         />
       </PaneCard>
     )

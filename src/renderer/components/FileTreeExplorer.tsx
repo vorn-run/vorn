@@ -1254,18 +1254,26 @@ export function FileEditorPane({
   cwd,
   filePath,
   remoteHostId,
-  onClose
+  onClose,
+  dirtyRef: externalDirtyRef
 }: {
   cwd: string
   filePath: string
   remoteHostId?: string
   onClose?: () => void
+  /**
+   * Set while the buffer has unsaved edits. The hosting pane reads it to
+   * confirm before swapping files or closing — in the split-pane layout those
+   * actions are driven from the tree and the card header, not from here.
+   */
+  dirtyRef?: React.MutableRefObject<boolean>
 }): JSX.Element {
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [isBinary, setIsBinary] = useState(false)
   const activeRequestRef = useRef<string | null>(null)
-  const dirtyRef = useRef(false)
+  const localDirtyRef = useRef(false)
+  const dirtyRef = externalDirtyRef ?? localDirtyRef
 
   useEffect(() => {
     let stale = false

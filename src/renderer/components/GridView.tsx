@@ -7,7 +7,8 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { useAppStore } from '../stores'
 import { PaneRenderer } from './PaneRenderer'
-import { parsePaneId } from '../lib/pane-id'
+import { parsePaneId, isTerminalPane } from '../lib/pane-id'
+import { sessionPositionForGridIndex } from '../lib/pane-order'
 import { PromptLauncher } from './PromptLauncher'
 import { GridContextMenu } from './GridContextMenu'
 import { AgentIcon } from './AgentIcon'
@@ -175,6 +176,9 @@ export const GridView = memo(function GridView() {
   const handleDragStart = useCallback(
     (terminalId: string, e: React.PointerEvent) => {
       if (sortMode !== 'manual') return
+      // Manual sort reorders sessions, so only session cards start a drag —
+      // a child pane travels with its owner rather than moving on its own.
+      if (!isTerminalPane(terminalId)) return
       if (e.button !== 0) return
       const el = cardRefs.current.get(terminalId)
       const rect = el?.getBoundingClientRect()
@@ -220,9 +224,15 @@ export const GridView = memo(function GridView() {
 
   const handlePointerUp = useCallback(() => {
     if (dragState?.isDragging && dropTargetIndex !== null) {
-      const fromIndex = orderedIds.indexOf(dragState.draggingId)
-      if (fromIndex !== -1 && fromIndex !== dropTargetIndex) {
-        reorderTerminals(fromIndex, dropTargetIndex)
+      // `orderedIds` interleaves each session's child panes, but `terminalOrder`
+      // holds sessions only — so grid positions must be translated into
+      // session positions before reordering, or the splice targets the wrong
+      // element (or none at all) and corrupts the persisted order.
+      const sessionIds = orderedIds.filter(isTerminalPane)
+      const fromIndex = sessionIds.indexOf(dragState.draggingId)
+      const toIndex = sessionPositionForGridIndex(orderedIds, dropTargetIndex)
+      if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
+        reorderTerminals(fromIndex, toIndex)
       }
     }
     setDragState(null)
@@ -315,7 +325,11 @@ export const GridView = memo(function GridView() {
               className="min-w-0 min-h-0"
               style={
                 id === maximizedPaneId && maximizedSpan > 1
-                  ? { gridColumn: `span ${maximizedSpan}` }
+                  ? {
+                      // Clamp to the track count: spanning past it makes CSS
+                      // Grid add an implicit column and skews every row.
+                      gridColumn: `span ${gridColumns > 0 ? Math.min(maximizedSpan, gridColumns) : maximizedSpan}`
+                    }
                   : undefined
               }
             >
@@ -446,20 +460,31 @@ function FlexibleGrid({
     return items
   }, [orderedIds, allOrderedIds, stableKeys, flexibleLayouts, maximizedPaneId])
 
+  // A maximized pane only renders as a computed bounding box when its owner
+  // actually has siblings to span. Deriving the skip from that condition (rather
+  // than from `maximizedPaneId` alone) means a stale id can never permanently
+  // stop a pane's rect from being saved.
+  const boundingBoxPaneId = useMemo(() => {
+    if (!maximizedPaneId || !orderedIds.includes(maximizedPaneId)) return null
+    const owner = parsePaneId(maximizedPaneId).sessionId
+    const siblings = allOrderedIds.filter((id) => parsePaneId(id).sessionId === owner)
+    return siblings.length > 1 ? maximizedPaneId : null
+  }, [maximizedPaneId, orderedIds, allOrderedIds])
+
   const persistLayout = useCallback(
     (updatedLayout: Layout) => {
       const merged: Record<string, FlexibleLayoutRect> = { ...flexibleLayouts }
       for (const item of updatedLayout) {
         // While maximized, the pane's rect is a computed bounding box over its
         // siblings — persisting it would destroy their saved positions.
-        if (item.i === maximizedPaneId) continue
+        if (item.i === boundingBoxPaneId) continue
         const key = stableKeys[item.i]
         if (!key) continue
         merged[key] = { x: item.x, y: item.y, w: item.w, h: item.h }
       }
       setFlexibleLayouts(merged)
     },
-    [stableKeys, flexibleLayouts, setFlexibleLayouts, maximizedPaneId]
+    [stableKeys, flexibleLayouts, setFlexibleLayouts, boundingBoxPaneId]
   )
 
   const handleDragStop: EventCallback = useCallback(

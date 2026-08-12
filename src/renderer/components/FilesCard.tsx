@@ -5,6 +5,7 @@ import { useAppStore } from '../stores'
 import { PaneCard } from './PaneCard'
 import { FileTreePane } from './FileTreeExplorer'
 import { filesPaneId } from '../lib/pane-id'
+import { confirmDiscard } from '../lib/editor-dirty'
 
 interface Props {
   /** Session that owns this tree. */
@@ -56,7 +57,11 @@ export const FilesCard = memo(
           cwd={cwd}
           remoteHostId={remoteHostId}
           selectedFile={selectedFile}
-          onSelectFile={(path) => openEditorPane(sessionId, path)}
+          onSelectFile={(path) => {
+            // Swapping the editor's file discards its buffer — confirm first.
+            if (path !== selectedFile && !confirmDiscard(sessionId)) return
+            openEditorPane(sessionId, path)
+          }}
         />
       </PaneCard>
     )

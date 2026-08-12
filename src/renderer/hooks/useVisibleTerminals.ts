@@ -2,7 +2,7 @@ import { useMemo, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
-import { filesPaneId, editorPaneId } from '../lib/pane-id'
+import { filesPaneId, editorPaneId, isTerminalPane } from '../lib/pane-id'
 
 /**
  * Stable comparator for terminal ids under the active sortMode. Manual mode
@@ -139,7 +139,10 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
   ])
 
   useEffect(() => {
-    setVisibleTerminalIds(orderedIds)
+    // `visibleTerminalIds` drives session navigation (Cmd+], Cmd+[, Cmd+1-9),
+    // so it stays sessions-only — a pane id here would send those shortcuts to
+    // a tab that no `terminals.get()` can resolve.
+    setVisibleTerminalIds(orderedIds.filter(isTerminalPane))
     const sel = useAppStore.getState().selectedTerminalId
     if (sel && !orderedIds.includes(sel)) {
       useAppStore.getState().setSelectedTerminal(null)

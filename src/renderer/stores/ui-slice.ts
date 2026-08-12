@@ -91,6 +91,26 @@ function savePanes(filesPanes: Set<string>, editorPanes: Map<string, EditorPaneS
   }
 }
 
+/**
+ * Drop persisted pane entries whose session no longer exists.
+ *
+ * `removeTerminal` prunes sessions closed during a run, but a session that
+ * simply never came back after a restart leaves its entry behind. Reconciling
+ * against the live set keeps localStorage from growing without bound and stops
+ * a recycled id from inheriting a stale pane.
+ */
+function reconcilePanes(
+  filesPanes: Set<string>,
+  editorPanes: Map<string, EditorPaneState>,
+  liveSessionIds: Set<string>
+): { filesPanes: Set<string>; editorPanes: Map<string, EditorPaneState> } | null {
+  const nextFiles = new Set([...filesPanes].filter((id) => liveSessionIds.has(id)))
+  const nextEditors = new Map([...editorPanes].filter(([id]) => liveSessionIds.has(id)))
+  if (nextFiles.size === filesPanes.size && nextEditors.size === editorPanes.size) return null
+  savePanes(nextFiles, nextEditors)
+  return { filesPanes: nextFiles, editorPanes: nextEditors }
+}
+
 function loadSidebarSettings(): Record<string, string> {
   try {
     const raw = localStorage.getItem(SIDEBAR_STORAGE_KEY)
@@ -243,7 +263,16 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   },
 
   setTerminalOrder: (order) => set({ terminalOrder: order }),
-  setVisibleTerminalIds: (ids) => set({ visibleTerminalIds: ids }),
+  setVisibleTerminalIds: (ids) =>
+    set((state) => {
+      // Sessions restore by their persisted id, so pane entries stay valid across
+      // restarts — but a session that never comes back would leave its entry
+      // behind forever. Reconcile against the live set as it settles.
+      const live = new Set(state.terminals.keys())
+      const reconciled =
+        live.size > 0 ? reconcilePanes(state.filesPanes, state.editorPanes, live) : null
+      return { visibleTerminalIds: ids, ...(reconciled ?? {}) }
+    }),
   setFocusableTerminalIds: (ids) => set({ focusableTerminalIds: ids }),
 
   reorderTerminals: (fromIndex, toIndex) =>
