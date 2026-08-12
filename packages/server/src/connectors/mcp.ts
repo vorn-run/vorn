@@ -1,7 +1,7 @@
 /**
  * Generic MCP (Model Context Protocol) connector.
  *
- * Where the github / linear connectors wrap a single upstream API, the MCP
+ * Where the github connector wraps a single upstream API, the MCP
  * connector is polymorphic: each connection points at some MCP server (any
  * stdio process — Filesystem, Azure DevOps, custom) and inherits that
  * server's tool surface dynamically via `tools/list`. Tool definitions are
@@ -10,7 +10,8 @@
  *
  * Auth model for the spike: static env vars. A non-secret `env` JSON object
  * is stored plaintext in `filters.env`, and a `secretEnv` JSON object is
- * encrypted through the same safeStorage path used by Linear's `apiKey`.
+ * encrypted through the same safeStorage path used by the github connector's
+ * token.
  * The decrypted values are merged in at spawn time via `getOrStartClient`.
  */
 import type {

@@ -1,6 +1,5 @@
 export { connectorRegistry } from './registry'
 export { githubConnector, detectRepoSlug } from './github'
-export { linearConnector } from './linear'
 export { mcpConnector, invokeMcpTool, discoverTools, mcpConnectionActions } from './mcp'
 export type { McpDiscoveredTool } from './mcp'
 export { stopClient as stopMcpClient, stopAllClients as stopAllMcpClients } from './mcp-clients'
