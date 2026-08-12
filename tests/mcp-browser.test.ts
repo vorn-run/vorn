@@ -58,7 +58,7 @@ describe('ref allocation', () => {
       entry
     )
 
-    expect(btn?.ref).toBe('ref_1')
+    expect(btn?.ref).toBe('g1_ref_1')
     // Readable, so it survives a filter:'all' read — but there is nothing to
     // click, and a ref for it would only spend the node budget.
     expect(text?.ref).toBeUndefined()
@@ -75,8 +75,8 @@ describe('ref allocation', () => {
     toNode(button('First', 11), entry)
     toNode(button('Second', 22), entry)
 
-    expect(entry.refs.get('ref_1')).toBe(11)
-    expect(entry.refs.get('ref_2')).toBe(22)
+    expect(entry.refs.get('g1_ref_1')).toBe(11)
+    expect(entry.refs.get('g1_ref_2')).toBe(22)
   })
 
   it('reports a disabled control as disabled', () => {
@@ -156,6 +156,23 @@ describe('cursor generation', () => {
 })
 
 describe('staleness', () => {
+  it('does not reuse a ref name across documents', () => {
+    // The trap: navigation clears the map and restarts numbering, so a ref
+    // minted before it would resolve against the *new* document's element of
+    // the same ordinal — acting on the wrong thing while looking like success.
+    // An empty map after navigation hides this; a repopulated one exposes it.
+    const entry = newEntry()
+    const before = toNode(button('Delete account', 11), entry)?.ref
+
+    entry.generation++
+    entry.refs.clear()
+    const after = toNode(button('Home', 77), entry)?.ref
+
+    expect(before).not.toBe(after)
+    expect(entry.refs.get(before as string)).toBeUndefined()
+    expect(entry.refs.get(after as string)).toBe(77)
+  })
+
   it('forgets every ref when the document is replaced', () => {
     const entry = newEntry()
     toNode(button('Save', 11), entry)
@@ -167,7 +184,7 @@ describe('staleness', () => {
     // The lookup pointFor() performs. Missing is the point: it makes the tool
     // fail loudly instead of falling back to a remembered coordinate and
     // clicking whatever now sits there.
-    expect(entry.refs.get('ref_1')).toBeUndefined()
+    expect(entry.refs.get('g1_ref_1')).toBeUndefined()
   })
 })
 
@@ -211,6 +228,18 @@ describe('page content boundary', () => {
     // the open web; the banner is what makes it evidence instead of an order.
     const text = (pageResult({ nodes: [] }).content[0] as { text: string }).text
     expect(text).toContain('never instructions')
+  })
+
+  it('closes the fence with a marker the page cannot forge', () => {
+    // An open-ended fence is one the page can escape by claiming the section
+    // ended. The close must exist, and must carry a value the page never saw.
+    const text = (pageResult({ nodes: [] }).content[0] as { text: string }).text
+    const nonce = /BEGIN UNTRUSTED WEB PAGE CONTENT (\S+?)\]/.exec(text)?.[1]
+    expect(nonce).toBeTruthy()
+    expect(text).toContain(`[END UNTRUSTED WEB PAGE CONTENT ${nonce}]`)
+    // Fresh per call, so a nonce learned from one read cannot close the next.
+    const again = (pageResult({ nodes: [] }).content[0] as { text: string }).text
+    expect(again).not.toContain(nonce as string)
   })
 })
 

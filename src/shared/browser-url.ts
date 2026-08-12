@@ -45,6 +45,10 @@ export function normalizeUrl(input: string): string | null {
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
     try {
       const parsed = new URL(raw)
+      // `about:` is allowed only as `about:blank`. The scheme as a whole
+      // covers `about:srcdoc`, `about:cache` and friends, which are browser
+      // internals rather than pages anyone meant to open.
+      if (parsed.protocol === 'about:') return raw === 'about:blank' ? 'about:blank' : null
       return ALLOWED_PROTOCOLS.has(parsed.protocol) ? parsed.toString() : null
     } catch {
       return null

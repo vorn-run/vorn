@@ -362,7 +362,13 @@ app.whenReady().then(async () => {
   // Lets the browser registry ask the renderer for a pane, so an agent can
   // open one itself instead of waiting on a human click.
   browserRegistry.setRendererSend((channel, params) => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, params)
+    // Throwing rather than dropping: a swallowed send leaves the caller to
+    // burn its attach timeout and then report "the pane did not open in
+    // time", when the truth is there was no window to open one in.
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error('The Vorn window is not open, so a browser pane cannot be shown.')
+    }
+    mainWindow.webContents.send(channel, params)
   })
   registerIpcHandlers()
 

@@ -49,6 +49,8 @@ export interface Entry {
   /** Held so `detach` can remove it. An anonymous listener would accumulate one
    *  copy per re-attach, each closing over an orphaned entry. */
   onCdpMessage?: (e: unknown, method: string, params: unknown) => void
+  /** Held for the same reason, for the debugger's own detach event. */
+  onDebuggerDetach?: () => void
   console: BrowserConsoleMessage[]
   network: BrowserNetworkRequest[]
 }
@@ -144,6 +146,15 @@ function contentsFor(sessionId: string): { wc: WebContents; entry: Entry } {
     entries.delete(sessionId)
     throw new Error('This session’s browser pane is no longer available.')
   }
+  if (!entry.attached) {
+    // The guest is alive but we are no longer driving it — it crashed and
+    // reloaded, or DevTools took the debugger. Saying so beats every
+    // subsequent command failing with a CDP transport error.
+    throw new Error(
+      'This session’s browser pane is not currently driveable (it may have crashed or have ' +
+        'DevTools open). Reload the pane and retry.'
+    )
+  }
   return { wc, entry }
 }
 
@@ -185,8 +196,24 @@ export function attach(sessionId: string, webContentsId: number): void {
     entry.attached = true
   } catch (err) {
     log.warn({ err }, `[browser] could not attach debugger for session ${sessionId}`)
+    // Leaving the entry behind would make `contentsFor` hand every tool a
+    // handle to a debugger that was never attached, and each command would
+    // reject with something far less clear than "no pane".
+    entries.delete(sessionId)
     return
   }
+
+  // Chromium drops our CDP session when the guest crashes, and when the user
+  // opens DevTools on it. Neither tells us through `message`, so without this
+  // the entry keeps claiming to be attached: the re-attach on the next
+  // `dom-ready` early-returns, and every command rejects forever.
+  const onDetach = (): void => {
+    entry.attached = false
+    entry.refs.clear()
+    entry.generation++
+  }
+  entry.onDebuggerDetach = onDetach
+  wc.debugger.on('detach', onDetach)
 
   const onCdpMessage = (_e: unknown, method: string, params: unknown): void => {
     const p = params as Record<string, unknown>
@@ -210,9 +237,16 @@ export function attach(sessionId: string, webContentsId: number): void {
       const res = p.response as { url?: string; status?: number } | undefined
       const hit = entry.network.find((r) => r.url === res?.url && r.status === undefined)
       if (hit) hit.status = res?.status
-    } else if (method === 'Page.frameNavigated') {
+    } else if (method === 'Page.frameNavigated' || method === 'Page.navigatedWithinDocument') {
+      // Subframes navigate on their own schedule — a refreshing ad iframe must
+      // not spend the main document's refs and send the agent round a re-read
+      // loop for a page that never changed.
+      const frame = p.frame as { parentId?: string } | undefined
+      if (method === 'Page.frameNavigated' && frame?.parentId) return
       // The document the refs pointed into is gone. Bumping here is what makes
       // a stale ref fail loudly instead of resolving against a fresh tree.
+      // `navigatedWithinDocument` counts: an SPA route change tears down the
+      // DOM just as thoroughly while firing no frameNavigated.
       // Deliberately not on `Page.loadEventFired`: that fires for the document
       // the refs were *just* read from, which would spend them on a page that
       // never changed and send the agent round the re-read loop for nothing.
@@ -244,6 +278,7 @@ export function detach(sessionId: string): void {
   if (!wc || wc.isDestroyed()) return
   try {
     if (entry.onCdpMessage) wc.debugger.off('message', entry.onCdpMessage)
+    if (entry.onDebuggerDetach) wc.debugger.off('detach', entry.onDebuggerDetach)
     if (wc.debugger.isAttached()) wc.debugger.detach()
   } catch (err) {
     // A crashed or already-gone guest detaches itself; nothing left to release.
@@ -305,7 +340,12 @@ export function toNode(ax: AXNode, entry: Entry): BrowserNode | null {
   if (disabled === true) node.disabled = true
 
   if (interactive && ax.backendDOMNodeId !== undefined) {
-    const ref = `ref_${entry.refs.size + 1}`
+    // The generation is part of the name, not just a field alongside it.
+    // Navigation clears the map and restarts numbering at 1, so a bare
+    // `ref_7` held across a navigation would land on the *new* document's
+    // seventh element and resolve cleanly — acting on the wrong thing while
+    // looking like it worked. Carrying the generation makes that a miss.
+    const ref = `g${entry.generation}_ref_${entry.refs.size + 1}`
     entry.refs.set(ref, ax.backendDOMNodeId)
     node.ref = ref
   }
@@ -331,7 +371,15 @@ export async function readPage(params: {
   limit?: number
 }): Promise<BrowserPageRead> {
   const { wc, entry } = contentsFor(params.sessionId)
+  // Snapshot before the await: if a navigation lands while the tree is in
+  // flight, these nodes describe a document that is already gone, and minting
+  // refs for them would stamp document A's nodes with document B's generation
+  // — stale in a way no later check could detect.
+  const readAt = entry.generation
   const { nodes: ax } = await send<{ nodes: AXNode[] }>(wc, 'Accessibility.getFullAXTree')
+  if (entry.generation !== readAt) {
+    throw new Error('The page navigated while it was being read. Call read_page again.')
+  }
 
   const start = parseCursor(params.cursor, entry.generation)
   const budget = Math.min(params.limit ?? PAGE_BUDGET, PAGE_BUDGET)
@@ -700,7 +748,7 @@ async function describe(
 
   // A ref alongside the description, so the agent can act on what was picked
   // without a round trip through read_page.
-  const ref = `ref_${entry.refs.size + 1}`
+  const ref = `g${entry.generation}_ref_${entry.refs.size + 1}`
   entry.refs.set(ref, backendNodeId)
   ;(selection as BrowserSelection & { ref?: string }).ref = ref
 
