@@ -11,6 +11,7 @@ import type {
   BrowserNetworkRequest,
   BrowserTarget
 } from '../shared/types'
+import { IPC } from '../shared/types'
 import log from './logger'
 
 /**
@@ -53,6 +54,83 @@ export interface Entry {
 }
 
 const entries = new Map<string, Entry>()
+
+/**
+ * How main asks the renderer to do something to a pane.
+ *
+ * Panes are renderer state — a `<webview>` element in a React tree — so main
+ * can create a guest for a session only by asking. Injected rather than
+ * imported from `index.ts` to keep the dependency pointing one way.
+ */
+type RendererSend = (channel: string, params: unknown) => void
+let sendToRenderer: RendererSend = () => {}
+export function setRendererSend(fn: RendererSend): void {
+  sendToRenderer = fn
+}
+
+/** Wait for a session's guest to attach, or give up. */
+function waitForAttach(sessionId: string, timeoutMs = 8000): Promise<void> {
+  const start = Date.now()
+  return new Promise((resolve, reject) => {
+    const tick = (): void => {
+      const entry = entries.get(sessionId)
+      if (entry?.attached) return resolve()
+      if (Date.now() - start > timeoutMs) {
+        // Better a stated timeout than a tool that hangs until the agent's own
+        // deadline fires with nothing to say about why.
+        return reject(new Error('The browser pane did not finish opening in time.'))
+      }
+      setTimeout(tick, 100)
+    }
+    tick()
+  })
+}
+
+/**
+ * Open the session's browser pane, or point the existing one at `url`.
+ *
+ * This is what makes the agent self-sufficient: before it existed, every
+ * browser tool depended on a person having clicked the pane open first, so an
+ * agent told "go read this page" could only ask for help.
+ */
+export async function openPane(
+  params: { sessionId: string; url?: string },
+  timeoutMs?: number
+): Promise<{ url: string }> {
+  const normalized = params.url === undefined ? undefined : normalizeUrl(params.url)
+  if (params.url !== undefined && !normalized) {
+    throw new Error(`Refusing to open "${params.url}" — not an allowed web address.`)
+  }
+  sendToRenderer(IPC.BROWSER_OPEN_PANE, { sessionId: params.sessionId, url: normalized })
+  await waitForAttach(params.sessionId, timeoutMs)
+  return { url: normalized ?? '' }
+}
+
+/**
+ * Add, close, or switch a tab.
+ *
+ * Tab bookkeeping lives entirely in the renderer store, so this forwards and
+ * does not try to mirror it here — two copies of that state would drift the
+ * first time a person clicked a tab themselves.
+ */
+export async function tabs(params: {
+  sessionId: string
+  action: 'add' | 'close' | 'select'
+  url?: string
+  index?: number
+}): Promise<{ ok: true }> {
+  // Throws if the session has no pane, which is the honest answer for a tab
+  // command: there is nothing to add a tab to.
+  contentsFor(params.sessionId)
+  if (params.action === 'add' && params.url !== undefined && !normalizeUrl(params.url)) {
+    throw new Error(`Refusing to open "${params.url}" — not an allowed web address.`)
+  }
+  if (params.action !== 'add' && typeof params.index !== 'number') {
+    throw new Error(`A tab index is required to ${params.action} a tab.`)
+  }
+  sendToRenderer(IPC.BROWSER_TAB_COMMAND, params)
+  return { ok: true }
+}
 
 function contentsFor(sessionId: string): { wc: WebContents; entry: Entry } {
   const entry = entries.get(sessionId)
@@ -455,11 +533,17 @@ export async function navigate(params: {
   sessionId: string
   url: string
 }): Promise<{ url: string }> {
-  const { wc } = contentsFor(params.sessionId)
   const normalized = normalizeUrl(params.url)
   if (!normalized) {
     throw new Error(`Refusing to navigate to "${params.url}" — not an allowed web address.`)
   }
+  // No pane yet is not a failure — it is the first navigation. Opening it with
+  // the url in hand also avoids a visible blank-page flash.
+  if (!entries.get(params.sessionId)?.attached) {
+    await openPane({ sessionId: params.sessionId, url: normalized })
+    return { url: normalized }
+  }
+  const { wc } = contentsFor(params.sessionId)
   await send(wc, 'Page.navigate', { url: normalized })
   return { url: normalized }
 }

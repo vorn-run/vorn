@@ -1,5 +1,35 @@
-import { describe, it, expect } from 'vitest'
-import { toNode, parseCursor, newEntry, samplePoints } from '../src/main/browser-registry'
+import { describe, it, expect, vi } from 'vitest'
+
+// The registry keys off real Electron guests. Only `attach` touches them, and
+// only to hold a debugger handle, so a stub that records nothing is enough to
+// exercise the pane/tab logic that sits above it.
+vi.mock('electron', () => ({
+  webContents: {
+    fromId: () => ({
+      isDestroyed: () => false,
+      debugger: {
+        isAttached: () => false,
+        attach: () => {},
+        detach: () => {},
+        on: () => {},
+        off: () => {},
+        removeListener: () => {},
+        sendCommand: async () => ({})
+      }
+    })
+  }
+}))
+import {
+  toNode,
+  parseCursor,
+  newEntry,
+  samplePoints,
+  openPane,
+  tabs,
+  setRendererSend,
+  attach,
+  detach
+} from '../src/main/browser-registry'
 import { sessionId, noSessionResult, pageResult, toTarget } from '../packages/mcp/src/tools/browser'
 import { normalizeUrl } from '../src/shared/browser-url'
 import { flattenPageText } from '../src/renderer/lib/browser-url'
@@ -56,6 +86,54 @@ describe('ref allocation', () => {
     )
     // So the agent stops rather than clicking and inferring failure from silence.
     expect(node?.disabled).toBe(true)
+  })
+})
+
+describe('opening a pane the agent has no hands to click', () => {
+  it('asks the renderer for a pane and waits for the guest to attach', async () => {
+    const sent: Array<{ channel: string; params: unknown }> = []
+    setRendererSend((channel: string, params: unknown) => {
+      sent.push({ channel, params })
+      // What the renderer does once the guest mounts and reports itself.
+      attach('sess-open', 1)
+    })
+
+    await expect(openPane({ sessionId: 'sess-open', url: 'example.com' })).resolves.toEqual({
+      url: 'https://example.com/'
+    })
+    // Normalized before it leaves main, so the renderer never has to guess.
+    expect(sent[0]).toEqual({
+      channel: 'browser:openPane',
+      params: { sessionId: 'sess-open', url: 'https://example.com/' }
+    })
+    detach('sess-open')
+  })
+
+  it('refuses a url the address bar would refuse, before any pane appears', async () => {
+    const sent: unknown[] = []
+    setRendererSend((c: string) => sent.push(c))
+    await expect(openPane({ sessionId: 'sess-bad', url: 'javascript:1' })).rejects.toThrow(
+      /not an allowed web address/
+    )
+    // The point of checking first: no pane flashes open on a refused address.
+    expect(sent).toHaveLength(0)
+  })
+
+  it('gives up with a reason rather than hanging when no guest ever attaches', async () => {
+    setRendererSend(() => {})
+    // An agent tool that never returns is worse than one that says why.
+    await expect(openPane({ sessionId: 'sess-never' }, 20)).rejects.toThrow(/did not finish/)
+  })
+})
+
+describe('tab commands', () => {
+  it('needs an index to close or select, since there is no sensible default', async () => {
+    setRendererSend(() => {})
+    attach('sess-tabs', 1)
+    await expect(tabs({ sessionId: 'sess-tabs', action: 'close' })).rejects.toThrow(
+      /index is required/
+    )
+    detach('sess-tabs')
   })
 })
 
@@ -141,6 +219,13 @@ describe('agent navigation', () => {
     expect(normalizeUrl('javascript:alert(1)')).toBeNull()
     expect(normalizeUrl('file:///etc/passwd')).toBeNull()
     expect(normalizeUrl('data:text/html,<h1>hi')).toBeNull()
+  })
+
+  it('does not let a scheme sneak through the host:port shortcut', () => {
+    // `javascript:1` has the exact shape of `localhost:5173`. Read as a host,
+    // it rebuilds into https://javascript:1/ — a refusal that became an allow.
+    expect(normalizeUrl('javascript:1')).toBeNull()
+    expect(normalizeUrl('file:80')).toBeNull()
   })
 
   it('still allows ordinary web addresses', () => {

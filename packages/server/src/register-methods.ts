@@ -1100,6 +1100,8 @@ export function registerAllMethods(): void {
   )
   registerMethod('browser:screenshot', (p) => browserBridge.request('browser:screenshot', p))
   registerMethod('browser:interact', (p) => browserBridge.request('browser:interact', p))
+  registerMethod('browser:tabs', (p) => browserBridge.request('browser:tabs', p))
+  registerMethod('browser:openPane', (p) => browserBridge.request('browser:openPane', p))
   registerMethod('browser:navigate', (p) => browserBridge.request('browser:navigate', p))
   registerMethod('browser:find', (p) => browserBridge.request('browser:find', p))
 

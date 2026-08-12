@@ -112,13 +112,26 @@ export const BrowserCard = memo(
 
       // The guest only has a webContentsId once it has attached. Reporting it
       // is what lets the agent's browser tools find this session's pane at all.
+      // Switching to a tab whose guest is already loaded fires no further
+      // `dom-ready`, so a single synchronous attempt is the only one that tab
+      // ever gets — and it loses the race whenever the guest has not finished
+      // attaching. Retry briefly so the registry ends up on the tab the person
+      // is actually looking at rather than the one they left.
+      let cancelled = false
+      let retry = 0
       const onAttached = (): void => {
+        if (cancelled) return
+        let id: number
         try {
-          window.api.attachBrowser(sessionId, view.getWebContentsId())
+          id = view.getWebContentsId()
         } catch {
-          // A guest that died before we could read its id simply stays
-          // undriveable; the agent's tools say so rather than acting blind.
+          // Not attached yet, or the guest died. Try again shortly; if it is
+          // truly gone the retries lapse and the tools say so rather than
+          // acting on a stale guest.
+          retry = window.setTimeout(onAttached, 50)
+          return
         }
+        window.api.attachBrowser(sessionId, id)
       }
       onAttached()
 
@@ -127,6 +140,8 @@ export const BrowserCard = memo(
       view.addEventListener('did-stop-loading', onStop)
       view.addEventListener('did-fail-load', onFail)
       return () => {
+        cancelled = true
+        window.clearTimeout(retry)
         view.removeEventListener('dom-ready', onAttached)
         view.removeEventListener('did-start-loading', onStart)
         view.removeEventListener('did-stop-loading', onStop)

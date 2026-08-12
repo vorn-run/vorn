@@ -1314,6 +1314,11 @@ export const IPC = {
   BROWSER_PICKED: 'browser:picked',
   /** Freehand ink over the page, resolved to the elements it covers. */
   BROWSER_ANNOTATE: 'browser:annotate',
+  /** Main asks the renderer to open (or retarget) a session's browser pane.
+   *  The pane lives in renderer state, so main cannot create one itself. */
+  BROWSER_OPEN_PANE: 'browser:openPane',
+  /** Main asks the renderer to add, close, or switch a tab in that pane. */
+  BROWSER_TAB_COMMAND: 'browser:tabCommand',
   UPDATE_DOWNLOADED: 'update:downloaded',
   UPDATE_INSTALL: 'update:install',
   UPDATE_SET_CHANNEL: 'update:set-channel',

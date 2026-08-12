@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, nativeImage, screen, globalShortcut } from 'electron'
 import path from 'node:path'
 import { registerIpcHandlers, setBridge } from './ipc-handlers'
+import * as browserRegistry from './browser-registry'
 import { installConnectorCredentialsSync } from './connector-credentials-sync'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
@@ -229,6 +230,7 @@ function wireServerNotifications(bridge: ServerBridge): void {
       case IPC.SCRIPT_DATA:
       case IPC.SCRIPT_EXIT:
       case IPC.WORKTREE_CONFIRM_CLEANUP:
+      case IPC.SESSION_CREATED:
       case IPC.SESSION_UPDATED:
       case IPC.SESSION_REORDERED:
       case IPC.CONFIG_CHANGED:
@@ -357,6 +359,11 @@ app.whenReady().then(async () => {
   }
 
   setBridge(bridge)
+  // Lets the browser registry ask the renderer for a pane, so an agent can
+  // open one itself instead of waiting on a human click.
+  browserRegistry.setRendererSend((channel, params) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, params)
+  })
   registerIpcHandlers()
 
   // Window control IPC handlers (Electron-only)

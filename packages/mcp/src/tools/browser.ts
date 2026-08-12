@@ -273,9 +273,43 @@ export function registerBrowserTools(server: McpServer): void {
   )
 
   server.tool(
+    'open_browser_pane',
+    'Open the browser pane for your session, optionally at a URL. You do not need a person to ' +
+      'open it for you. Opening a pane that already exists just points it at the URL.',
+    { url: V.url.optional().describe("URL to open (defaults to the pane's start page)") },
+    async (args) =>
+      withSession(async (id) => {
+        await rpcCall<{ url: string }>('browser:openPane', { sessionId: id, url: args.url })
+        return { content: [{ type: 'text', text: 'Browser pane open.' }] }
+      })
+  )
+
+  server.tool(
+    'browser_tabs',
+    'Add, close, or switch tabs in your session browser pane. "close" and "select" take a ' +
+      'zero-based index; closing the last remaining tab closes the pane.',
+    {
+      action: z.enum(['add', 'close', 'select']).describe('What to do with tabs'),
+      url: V.url.optional().describe('URL for "add"'),
+      index: z.number().int().min(0).optional().describe('Zero-based tab index for close/select')
+    },
+    async (args) =>
+      withSession(async (id) => {
+        await rpcCall<{ ok: true }>('browser:tabs', {
+          sessionId: id,
+          action: args.action,
+          url: args.url,
+          index: args.index
+        })
+        return { content: [{ type: 'text', text: 'ok' }] }
+      })
+  )
+
+  server.tool(
     'browser_navigate',
-    'Navigate your session browser pane to a URL. Only http and https are allowed — the same ' +
-      'restriction the address bar enforces for the person using the app.',
+    'Navigate your session browser pane to a URL. Opens the pane first if none is open. Only ' +
+      'http and https are allowed — the same restriction the address bar enforces for the ' +
+      'person using the app.',
     { url: V.url.describe('URL to open') },
     async (args) =>
       withSession(async (id) => {

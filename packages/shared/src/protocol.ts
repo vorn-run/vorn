@@ -407,6 +407,14 @@ export interface RequestMethods {
     }
     result: { ok: true }
   }
+  'browser:tabs': {
+    params: { sessionId: string; action: 'add' | 'close' | 'select'; url?: string; index?: number }
+    result: { ok: true }
+  }
+  'browser:openPane': {
+    params: { sessionId: string; url?: string }
+    result: { url: string }
+  }
   'browser:navigate': {
     params: { sessionId: string; url: string }
     result: { url: string }

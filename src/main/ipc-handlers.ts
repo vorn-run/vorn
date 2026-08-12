@@ -35,6 +35,8 @@ function registerInboundHandlers(b: ServerBridge): void {
   )
   b.handle('browser:screenshot', (p) => browserRegistry.screenshot(p as P<'browser:screenshot'>))
   b.handle('browser:interact', (p) => browserRegistry.interact(p as P<'browser:interact'>))
+  b.handle('browser:tabs', (p) => browserRegistry.tabs(p as P<'browser:tabs'>))
+  b.handle('browser:openPane', (p) => browserRegistry.openPane(p as P<'browser:openPane'>))
   b.handle('browser:navigate', (p) => browserRegistry.navigate(p as P<'browser:navigate'>))
   b.handle('browser:find', (p) => browserRegistry.find(p as P<'browser:find'>))
 }

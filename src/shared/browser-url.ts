@@ -12,6 +12,16 @@
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'about:'])
 
 /**
+ * Scheme names that must never be read as a bare host.
+ *
+ * `javascript:1` is indistinguishable from `myhost:1` by shape alone, so the
+ * host:port fast path below would happily turn it into `https://javascript:1/`
+ * — a refusal that silently became an allow. These names are not registrable
+ * hostnames, so excluding them costs nothing real.
+ */
+const SCHEME_NAMES = new Set(['javascript', 'file', 'data', 'blob', 'vbscript', 'about', 'chrome'])
+
+/**
  * Turn whatever the user typed into a loadable URL, or null if it can't be one.
  *
  * Bare hosts and `host:port` get `http://` when they look local and `https://`
@@ -25,7 +35,11 @@ export function normalizeUrl(input: string): string | null {
   // `localhost:5173` and `myapp.local:3000` are valid URLs whose *scheme* is
   // `localhost:` / `myapp.local:`. They must be recognised as host:port before
   // the scheme check below, or the most common input a dev types is rejected.
-  if (/^[a-z0-9.-]+:\d+(\/.*)?$/i.test(raw)) return buildUrl(raw)
+  if (/^[a-z0-9.-]+:\d+(\/.*)?$/i.test(raw)) {
+    const name = raw.slice(0, raw.indexOf(':')).toLowerCase()
+    if (!SCHEME_NAMES.has(name)) return buildUrl(raw)
+    return null
+  }
 
   // Already absolute: accept only schemes we're willing to render.
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
