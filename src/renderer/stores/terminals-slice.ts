@@ -1,6 +1,7 @@
 import { StateCreator } from 'zustand'
 import { AppStore, TerminalsSlice, TerminalState } from './types'
 import { filesPaneId, editorPaneId } from '../lib/pane-id'
+import { clearDirty } from '../lib/editor-dirty'
 
 export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set) => ({
   terminals: new Map(),
@@ -29,6 +30,10 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       // A session owns its file-tree and editor panes: they die with it, and so
       // does any minimized or maximized state pointing at them.
       const childIds = [filesPaneId(id), editorPaneId(id)]
+      // The dirty registry lives outside the store, so it needs explicit
+      // teardown — otherwise a session closed with unsaved edits leaves a flag
+      // that a recycled id would inherit.
+      clearDirty(id)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(id)
       for (const child of childIds) minimized.delete(child)

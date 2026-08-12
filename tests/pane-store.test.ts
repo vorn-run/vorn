@@ -93,6 +93,47 @@ describe('pane store actions', () => {
     expect(s().minimizedTerminals.has('editor:t1')).toBe(false)
   })
 
+  it('restores a minimized tree instead of leaving it hidden', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openFilesPane('t1'))
+    act(() => s().toggleMinimized('files:t1'))
+    expect(s().minimizedTerminals.has('files:t1')).toBe(true)
+
+    // "Browse files" on a session whose tree is minimized must bring it back —
+    // returning early here made the button look dead.
+    act(() => s().openFilesPane('t1'))
+    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
+    expect(s().filesPanes.has('t1')).toBe(true)
+  })
+
+  it('toggling a minimized tree restores it rather than closing it', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openFilesPane('t1'))
+    act(() => s().toggleMinimized('files:t1'))
+
+    // Closing something the user cannot see is never the intent.
+    act(() => s().toggleFilesPane('t1'))
+    expect(s().filesPanes.has('t1')).toBe(true)
+    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
+
+    // Once visible, the toggle closes as usual.
+    act(() => s().toggleFilesPane('t1'))
+    expect(s().filesPanes.has('t1')).toBe(false)
+  })
+
+  it('clears the editor dirty flag when its session closes', async () => {
+    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    const s = () => useAppStore.getState()
+    act(() => s().openEditorPane('t1', '/p/a.ts'))
+    dirtyRefFor('t1').current = true
+
+    act(() => s().removeTerminal('t1'))
+
+    // The registry lives outside the store; a leaked flag would make a recycled
+    // session id prompt about edits that no longer exist.
+    expect(isEditorDirty('t1')).toBe(false)
+  })
+
   it('closing a pane clears its minimized and maximized state', () => {
     const s = () => useAppStore.getState()
     act(() => {

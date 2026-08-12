@@ -297,7 +297,15 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 
   openFilesPane: (sessionId) =>
     set((state) => {
-      if (state.filesPanes.has(sessionId)) return {}
+      const paneId = filesPaneId(sessionId)
+      // Opening an already-open pane focuses it, which for a minimized pane
+      // means bringing it back rather than doing nothing.
+      if (state.filesPanes.has(sessionId)) {
+        if (!state.minimizedTerminals.has(paneId)) return {}
+        const minimized = new Set(state.minimizedTerminals)
+        minimized.delete(paneId)
+        return { minimizedTerminals: minimized }
+      }
       const next = new Set(state.filesPanes)
       next.add(sessionId)
       savePanes(next, state.editorPanes)
@@ -321,8 +329,11 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     }),
 
   toggleFilesPane: (sessionId) => {
-    const { filesPanes, openFilesPane, closeFilesPane } = get()
-    if (filesPanes.has(sessionId)) closeFilesPane(sessionId)
+    const { filesPanes, minimizedTerminals, openFilesPane, closeFilesPane } = get()
+    // A minimized pane is open but out of sight, so the toggle restores it
+    // instead of closing something the user cannot currently see.
+    const isHidden = minimizedTerminals.has(filesPaneId(sessionId))
+    if (filesPanes.has(sessionId) && !isHidden) closeFilesPane(sessionId)
     else openFilesPane(sessionId)
   },
 
