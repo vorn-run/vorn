@@ -1,8 +1,7 @@
 import { memo, forwardRef } from 'react'
-import { FolderTree } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { PaneCard } from './PaneCard'
+import { PaneCard, PaneControls } from './PaneCard'
 import { FileTreePane } from './FileTreeExplorer'
 import { filesPaneId } from '../lib/pane-id'
 import { confirmDiscard } from '../lib/editor-dirty'
@@ -41,22 +40,45 @@ export const FilesCard = memo(
     const cwd = terminal.session.worktreePath || terminal.session.projectPath
     const remoteHostId = terminal.session.remoteHostId
 
+    const paneId = filesPaneId(sessionId)
+    const handleClose = (): void => closeFilesPane(sessionId)
+    const toggleMaximize = (): void => {
+      const state = useAppStore.getState()
+      state.setMaximizedPane(state.maximizedPaneId === paneId ? null : paneId)
+    }
+
     return (
       <PaneCard
         ref={ref}
-        paneId={filesPaneId(sessionId)}
+        paneId={paneId}
         title="Files"
-        icon={<FolderTree size={12} className="text-gray-500 shrink-0" />}
-        onClose={() => closeFilesPane(sessionId)}
+        onClose={handleClose}
         isDragTarget={isDragTarget}
         onDragStart={onDragStart}
         flexible={flexible}
+        // The filter row is already a full-width bar; a title row above it
+        // would be chrome on chrome, so the controls sit in the filter row.
+        headerless
       >
         <FileTreePane
           key={cwd}
           cwd={cwd}
           remoteHostId={remoteHostId}
           selectedFile={selectedFile}
+          controls={
+            <PaneControls
+              paneId={paneId}
+              title="Files"
+              onClose={handleClose}
+              className="shrink-0"
+            />
+          }
+          headerClassName={
+            onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''
+          }
+          onHeaderPointerDown={onDragStart ? (e) => onDragStart(paneId, e) : undefined}
+          onHeaderDoubleClick={toggleMaximize}
+          headerTestId="files-pane-header"
           onSelectFile={(path) => {
             // Swapping the editor's file discards its buffer — confirm first.
             if (path !== selectedFile && !confirmDiscard(sessionId)) return

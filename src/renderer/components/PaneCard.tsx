@@ -1,8 +1,9 @@
 import { forwardRef, type ReactNode } from 'react'
-import { Maximize2, Minimize2, Minus, X } from 'lucide-react'
+import { Maximize2, Minimize2, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { Tooltip } from './Tooltip'
+import { PANE_SURFACE } from '../lib/pane-surface'
 
 // On touch devices, always show action buttons (no hover available). Evaluated
 // lazily rather than at module load so importing this file stays safe in
@@ -34,10 +35,14 @@ export interface PaneCardProps {
 }
 
 /**
- * Minimize / maximize / close for one pane.
+ * Maximize / close for one pane.
  *
  * Split out of the header so a headerless pane can seat the same controls in a
  * bar of its own making, rather than growing a second one.
+ *
+ * There is deliberately no minimize here. A minimized pane had nowhere to go —
+ * the dock only surfaces sessions, and expanded mode ignores the state
+ * entirely — so the button silently discarded the pane.
  */
 export function PaneControls({
   paneId,
@@ -50,11 +55,10 @@ export function PaneControls({
   onClose: () => void
   className?: string
 }): ReactNode {
-  const { isMaximized, setMaximizedPane, toggleMinimized } = useAppStore(
+  const { isMaximized, setMaximizedPane } = useAppStore(
     useShallow((s) => ({
       isMaximized: s.maximizedPaneId === paneId,
-      setMaximizedPane: s.setMaximizedPane,
-      toggleMinimized: s.toggleMinimized
+      setMaximizedPane: s.setMaximizedPane
     }))
   )
 
@@ -64,15 +68,6 @@ export function PaneControls({
         isTouchDevice() ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'
       } ${className}`}
     >
-      <Tooltip label="Minimize">
-        <button
-          onClick={() => toggleMinimized(paneId)}
-          className="text-gray-500 hover:text-white p-0.5 rounded transition-colors"
-          aria-label={`Minimize ${title}`}
-        >
-          <Minus size={12} strokeWidth={2} />
-        </button>
-      </Tooltip>
       <Tooltip label={isMaximized ? 'Restore' : 'Maximize'}>
         <button
           onClick={() => setMaximizedPane(isMaximized ? null : paneId)}
@@ -99,7 +94,7 @@ export function PaneControls({
  * Chrome shared by the non-terminal panes a session owns (its file tree and its
  * open file). Mirrors `AgentCard`'s outer shape so grid drag/resize and the
  * flexible layout treat every pane the same, but carries its own header with
- * maximize / minimize / close.
+ * maximize / close.
  *
  * Maximize here is session-scoped: `GridView` reads `maximizedPaneId` and gives
  * the pane its owner session's whole footprint, leaving other sessions alone.
@@ -141,13 +136,12 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
                      : 'border-white/[0.06] hover:border-white/[0.12]'
                  }
                  ${flexible ? '' : 'hover:z-10 focus-within:z-10'}`}
-      style={{ background: background ?? '#1a1a1e' }}
+      style={{ background: background ?? PANE_SURFACE }}
     >
       {!headerless && (
         <div
-          className={`flex items-center gap-1.5 px-2 py-1 shrink-0 border-b border-white/[0.06]
+          className={`flex items-center gap-1.5 px-2 py-1 shrink-0
                     ${onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''}`}
-          style={{ background: '#1e1e22' }}
           onPointerDown={onDragStart ? handleDragStart : undefined}
           onDoubleClick={() => setMaximizedPane(isMaximized ? null : paneId)}
         >
@@ -168,7 +162,10 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
         </div>
       )}
 
-      <div className="flex-1 min-h-0 flex flex-col" style={{ background: background ?? '#141416' }}>
+      <div
+        className="flex-1 min-h-0 flex flex-col"
+        style={{ background: background ?? PANE_SURFACE }}
+      >
         {children}
       </div>
     </div>

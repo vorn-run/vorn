@@ -194,7 +194,7 @@ describe('EditorCard', () => {
 })
 
 describe('PaneCard chrome', () => {
-  it('maximizes, restores and minimizes through the store', async () => {
+  it('maximizes and restores through the store', async () => {
     act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
@@ -204,9 +204,40 @@ describe('PaneCard chrome', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Restore Files/ }))
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: /Minimize Files/ }))
-    expect(useAppStore.getState().minimizedTerminals.has('files:t1')).toBe(true)
+  it('seats the tree pane controls in its filter row, not a second bar', async () => {
+    // The filter row is already a full-width bar. A title row above it is
+    // chrome stacked on chrome, and costs a line of tree.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    render(<FilesCard sessionId="t1" />)
+    await screen.findByText('a.ts')
+
+    const header = screen.getByTestId('files-pane-header')
+    expect(header).toContainElement(screen.getByLabelText('Maximize Files'))
+    expect(header).toContainElement(screen.getByLabelText('Close Files'))
+    expect(screen.getByPlaceholderText('Filter files…')).toBeInTheDocument()
+  })
+
+  it('names the open file once, in the path strip that carries its controls', async () => {
+    // The strip already shows the path, icon and dirty dot; a header above it
+    // repeated the filename directly over itself.
+    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
+    render(<EditorCard sessionId="t1" />)
+
+    const header = await screen.findByTestId('editor-pane-header')
+    expect(header).toContainElement(screen.getByLabelText('Maximize a.ts'))
+    expect(screen.getAllByText('a.ts')).toHaveLength(1)
+  })
+
+  it('offers no minimize, because a minimized pane had nowhere to go', async () => {
+    // The dock only surfaces sessions and expanded mode ignores the minimized
+    // set entirely, so the button silently discarded the pane.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    render(<FilesCard sessionId="t1" />)
+    await screen.findByText('a.ts')
+
+    expect(screen.queryByRole('button', { name: /Minimize Files/ })).toBeNull()
   })
 })
 
@@ -217,7 +248,7 @@ describe('PaneCard drag and double-click', () => {
     render(<FilesCard sessionId="t1" onDragStart={onDragStart} />)
     await screen.findByText('a.ts')
 
-    fireEvent.pointerDown(screen.getByText('Files'))
+    fireEvent.pointerDown(screen.getByTestId('files-pane-header'))
     expect(onDragStart).toHaveBeenCalledWith('files:t1', expect.anything())
   })
 
@@ -226,10 +257,10 @@ describe('PaneCard drag and double-click', () => {
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
-    fireEvent.doubleClick(screen.getByText('Files'))
+    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
     expect(useAppStore.getState().maximizedPaneId).toBe('files:t1')
 
-    fireEvent.doubleClick(screen.getByText('Files'))
+    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
   })
 })
@@ -255,7 +286,7 @@ describe('PaneRenderer', () => {
     })
 
     const files = render(<PaneRenderer paneId="files:t1" />)
-    expect(await files.findByText('Files')).toBeInTheDocument()
+    expect(await files.findByTestId('files-pane-header')).toBeInTheDocument()
     files.unmount()
 
     const editor = render(<PaneRenderer paneId="editor:t1" />)
@@ -321,7 +352,7 @@ describe('panes travel with their session into focus mode', () => {
     render(<FocusedTerminal />)
 
     // Expanding a card used to hide whatever the session had open next to it.
-    expect(await screen.findByText('Files')).toBeInTheDocument()
+    expect(await screen.findByTestId('files-pane-header')).toBeInTheDocument()
     await waitFor(() =>
       expect(mockReadFileContent).toHaveBeenCalledWith('/repo/a.ts', undefined, undefined)
     )
@@ -345,13 +376,13 @@ describe('panes travel with their session into focus mode', () => {
     // Focus mode used to render panes in a fixed rail and ignore the maximize
     // entirely, so the button looked dead once a card was expanded.
     expect(screen.getByLabelText('Address')).toBeInTheDocument()
-    expect(screen.queryByText('Files')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('files-pane-header')).not.toBeInTheDocument()
     // The terminal gives up its space too — a maximized pane covering only the
     // rail is not a maximize.
     expect(screen.getByTestId('focused-terminal-column')).toHaveClass('hidden')
   })
 
-  it("ignores another session's maximized pane", () => {
+  it("ignores another session's maximized pane", async () => {
     act(() => {
       useAppStore.getState().openFilesPane('t1')
       // t1 owns a browser too, so only the *owner* check can keep this stage
@@ -362,12 +393,12 @@ describe('panes travel with their session into focus mode', () => {
 
     render(<FocusedTerminal />)
     // A stale or foreign id must not blank the stage of the session in focus.
-    expect(screen.getByText('Files')).toBeInTheDocument()
+    expect(await screen.findByTestId('files-pane-header')).toBeInTheDocument()
   })
 
   it('shows no pane column when the session has none open', () => {
     render(<FocusedTerminal />)
-    expect(screen.queryByText('Files')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('files-pane-header')).not.toBeInTheDocument()
   })
 
   it('renders nothing when no session is focused', () => {
@@ -403,10 +434,9 @@ describe('BrowserCard', () => {
     act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
     render(<BrowserCard sessionId="t1" />)
 
-    // Minimize / maximize / close still have to be reachable once the pane's
-    // own header is gone.
+    // Maximize / close still have to be reachable once the pane's own header
+    // is gone.
     expect(screen.getByLabelText('Maximize localhost:5173')).toBeInTheDocument()
-    expect(screen.getByLabelText('Minimize localhost:5173')).toBeInTheDocument()
     expect(screen.getByLabelText('Close localhost:5173')).toBeInTheDocument()
   })
 

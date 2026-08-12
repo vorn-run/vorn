@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo, useRef, type JSX } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type JSX, type ReactNode } from 'react'
 import type { FileEntry } from '../../shared/types'
 import { ChevronRight, Loader2, X, Search, Pencil, Save } from 'lucide-react'
 import { FileTypeIcon } from './file-icons'
+import { PANE_SURFACE } from '../lib/pane-surface'
 
 const MAX_PREVIEW_LINES = 2000
 const ROW_HEIGHT = 22 // px — matches VS Code's tree item height
@@ -583,7 +584,12 @@ function FilePanel({
   onContentSaved,
   remoteHostId,
   dirtyRef,
-  showHeader = true
+  showHeader = true,
+  controls,
+  onHeaderPointerDown,
+  onHeaderDoubleClick,
+  headerTestId,
+  headerClassName = ''
 }: {
   cwd: string
   filePath: string
@@ -596,6 +602,16 @@ function FilePanel({
   dirtyRef: React.MutableRefObject<boolean>
   /** False when hosted in a pane card that draws its own header. */
   showHeader?: boolean
+  /**
+   * Pane chrome (maximize / close) seated in the path strip. A hosting card
+   * that passes this drops its own header row: the path strip already names
+   * the file, and two stacked bars read as chrome on chrome.
+   */
+  controls?: ReactNode
+  onHeaderPointerDown?: (e: React.PointerEvent) => void
+  onHeaderDoubleClick?: () => void
+  headerTestId?: string
+  headerClassName?: string
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -695,10 +711,14 @@ function FilePanel({
     <div className="flex-1 flex flex-col min-h-0">
       {showHeader && <PanelHeader title="File" onClose={onClose} />}
 
-      {/* Path strip + toolbar */}
+      {/* Path strip + toolbar — doubles as the pane's title bar when the
+          hosting card goes headerless. */}
       <div
-        className="flex items-center gap-2 px-3 py-1 text-[11px] font-mono border-b border-white/[0.06] shrink-0"
-        style={{ background: '#1e1e22' }}
+        className={`flex items-center gap-2 px-2 py-1 text-[11px] font-mono shrink-0 ${headerClassName}`}
+        style={{ background: PANE_SURFACE }}
+        onPointerDown={onHeaderPointerDown}
+        onDoubleClick={onHeaderDoubleClick}
+        data-testid={headerTestId}
       >
         <FileTypeIcon name={fileName} size={12} />
         <span className="text-gray-400 flex-1 min-w-0 truncate" title={filePath} dir="rtl">
@@ -730,13 +750,14 @@ function FilePanel({
         ) : (
           <ToolbarBtn icon={Pencil} label="Edit" disabled={!canEdit} onClick={handleStartEdit} />
         )}
+        {controls}
       </div>
 
       {/* Find bar */}
       {findOpen && canFind && (
         <div
-          className="flex items-center gap-2 px-3 py-1 text-[11px] border-b border-white/[0.06] shrink-0"
-          style={{ background: '#1a1a1d' }}
+          className="flex items-center gap-2 px-3 py-1 text-[11px] shrink-0"
+          style={{ background: PANE_SURFACE }}
         >
           <Search size={12} className="text-gray-500 shrink-0" />
           <input
@@ -859,8 +880,8 @@ function ToolbarBtn({
 function PanelHeader({ title, onClose }: { title: string; onClose?: () => void }) {
   return (
     <div
-      className="flex items-center px-3 py-1.5 border-b border-white/[0.06] shrink-0 text-[12px]"
-      style={{ background: '#17171a' }}
+      className="flex items-center px-3 py-1.5 shrink-0 text-[12px]"
+      style={{ background: PANE_SURFACE }}
     >
       <span className="flex-1 text-gray-300 font-medium">{title}</span>
       {onClose && (
@@ -885,7 +906,12 @@ function FilesPanel({
   loadDir,
   selectedFile,
   onSelectFile,
-  showHeader = true
+  showHeader = true,
+  controls,
+  onHeaderPointerDown,
+  onHeaderDoubleClick,
+  headerTestId,
+  headerClassName = ''
 }: {
   rootEntries: FileEntry[]
   dirCache: Map<string, FileEntry[]>
@@ -894,6 +920,16 @@ function FilesPanel({
   onSelectFile: (path: string) => void
   /** False when hosted in a pane card that draws its own header. */
   showHeader?: boolean
+  /**
+   * Pane chrome (maximize / close) seated in the filter row. A hosting card
+   * that passes this drops its own header row — the filter row is already a
+   * full-width bar, and a second one above it is chrome on chrome.
+   */
+  controls?: ReactNode
+  onHeaderPointerDown?: (e: React.PointerEvent) => void
+  onHeaderDoubleClick?: () => void
+  headerTestId?: string
+  headerClassName?: string
 }) {
   const [filter, setFilter] = useState('')
   const { matched, expand } = useMemo(
@@ -904,8 +940,13 @@ function FilesPanel({
   return (
     <div className="flex flex-col min-h-0 h-full">
       {showHeader && <PanelHeader title="Files" />}
-      <div className="px-2 py-1.5 border-b border-white/[0.06] shrink-0">
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-white/[0.04] focus-within:bg-white/[0.06]">
+      <div
+        className={`flex items-center gap-1 px-1.5 py-1.5 shrink-0 ${headerClassName}`}
+        onPointerDown={onHeaderPointerDown}
+        onDoubleClick={onHeaderDoubleClick}
+        data-testid={headerTestId}
+      >
+        <div className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1 rounded-md bg-white/[0.04] focus-within:bg-white/[0.06]">
           <Search size={12} className="text-gray-600 shrink-0" />
           <input
             value={filter}
@@ -926,6 +967,7 @@ function FilesPanel({
             </button>
           )}
         </div>
+        {controls}
       </div>
       <div className="flex-1 overflow-y-auto py-0.5">
         {rootEntries.map((entry) => (
@@ -1174,12 +1216,23 @@ export function FileTreePane({
   cwd,
   remoteHostId,
   selectedFile,
-  onSelectFile
+  onSelectFile,
+  controls,
+  onHeaderPointerDown,
+  onHeaderDoubleClick,
+  headerTestId,
+  headerClassName
 }: {
   cwd: string
   remoteHostId?: string
   selectedFile: string | null
   onSelectFile: (path: string) => void
+  /** Pane chrome seated in the filter row; see `FilesPanel`. */
+  controls?: ReactNode
+  onHeaderPointerDown?: (e: React.PointerEvent) => void
+  onHeaderDoubleClick?: () => void
+  headerTestId?: string
+  headerClassName?: string
 }): JSX.Element {
   const [rootEntries, setRootEntries] = useState<FileEntry[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1242,6 +1295,11 @@ export function FileTreePane({
       selectedFile={selectedFile}
       onSelectFile={onSelectFile}
       showHeader={false}
+      controls={controls}
+      onHeaderPointerDown={onHeaderPointerDown}
+      onHeaderDoubleClick={onHeaderDoubleClick}
+      headerTestId={headerTestId}
+      headerClassName={headerClassName}
     />
   )
 }
@@ -1255,12 +1313,23 @@ export function FileEditorPane({
   filePath,
   remoteHostId,
   onClose,
-  dirtyRef: externalDirtyRef
+  dirtyRef: externalDirtyRef,
+  controls,
+  onHeaderPointerDown,
+  onHeaderDoubleClick,
+  headerTestId,
+  headerClassName
 }: {
   cwd: string
   filePath: string
   remoteHostId?: string
   onClose?: () => void
+  /** Pane chrome seated in the path strip; see `FilePanel`. */
+  controls?: ReactNode
+  onHeaderPointerDown?: (e: React.PointerEvent) => void
+  onHeaderDoubleClick?: () => void
+  headerTestId?: string
+  headerClassName?: string
   /**
    * Set while the buffer has unsaved edits. The hosting pane reads it to
    * confirm before swapping files or closing — in the split-pane layout those
@@ -1319,6 +1388,11 @@ export function FileEditorPane({
       remoteHostId={remoteHostId}
       dirtyRef={dirtyRef}
       showHeader={false}
+      controls={controls}
+      onHeaderPointerDown={onHeaderPointerDown}
+      onHeaderDoubleClick={onHeaderDoubleClick}
+      headerTestId={headerTestId}
+      headerClassName={headerClassName}
     />
   )
 }

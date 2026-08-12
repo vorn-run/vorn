@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { ArrowLeft, ArrowRight, Plus, RotateCw, X } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { PaneCard, PaneControls } from './PaneCard'
+import { PANE_SURFACE } from '../lib/pane-surface'
 import { browserPaneId } from '../lib/pane-id'
 import { normalizeUrl, displayHost } from '../lib/browser-url'
 
@@ -147,7 +148,6 @@ export const BrowserCard = memo(
         // The tab strip is this pane's title bar; a second one above it would be
         // chrome stacked on chrome, and browsers don't have one.
         headerless
-        background="#0d0d0f"
       >
         {/* Tab strip — doubles as the pane's header, so it carries the drag
             handle and the minimize / maximize / close cluster. */}
@@ -272,7 +272,7 @@ export const BrowserCard = memo(
 
         {/* Every tab stays mounted so switching back keeps the page and its
             scroll position; only the active one is visible. */}
-        <div className="flex-1 min-h-0 relative" style={{ background: '#0d0d0f' }}>
+        <div className="flex-1 min-h-0 relative" style={{ background: PANE_SURFACE }}>
           {pane.tabs.map((tabUrl, i) => (
             <webview
               key={i}
