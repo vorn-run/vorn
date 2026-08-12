@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { useAppStore } from '../src/renderer/stores'
 import { SessionItem } from '../src/renderer/components/project-sidebar/SessionItem'
@@ -93,5 +93,27 @@ describe('SessionItem', () => {
     const { container } = render(<SessionItem session={session} />)
     const closeBtn = container.querySelector('button[type="button"]')
     expect(closeBtn).toBeInTheDocument()
+  })
+
+  it("toggles this session's files pane without selecting the session", () => {
+    const setActiveTabId = vi.fn()
+    act(() => useAppStore.setState({ setActiveTabId }))
+
+    render(<SessionItem session={session} />)
+    fireEvent.click(screen.getByRole('button', { name: /Show files for/ }))
+
+    expect(useAppStore.getState().filesPanes.has(session.id)).toBe(true)
+    // The row is itself a button; the toggle must stop propagation or opening
+    // files would also switch the active session.
+    expect(setActiveTabId).not.toHaveBeenCalled()
+  })
+
+  it('reflects and clears an open files pane', () => {
+    act(() => useAppStore.getState().openFilesPane(session.id))
+    render(<SessionItem session={session} />)
+
+    const btn = screen.getByRole('button', { name: /Hide files for/ })
+    fireEvent.click(btn)
+    expect(useAppStore.getState().filesPanes.has(session.id)).toBe(false)
   })
 })

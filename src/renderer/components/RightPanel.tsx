@@ -17,11 +17,11 @@ import {
   FolderGit2
 } from 'lucide-react'
 import { ProjectIcon } from './project-sidebar/ProjectIcon'
-import { FileTreeExplorer } from './FileTreeExplorer'
 
-const TABS: PanelTab[] = ['all-files', 'changes']
+// The rail is diff review only. Browsing files happens in a session's own Files
+// pane, where several sessions' trees can be open side by side.
+const TABS: PanelTab[] = ['changes']
 const TAB_LABELS: Record<PanelTab, string> = {
-  'all-files': 'All files',
   changes: 'Changes'
 }
 
@@ -71,6 +71,7 @@ export function RightPanel() {
 
   useEffect(() => {
     if (terminalId && cwd) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: load the diff for the newly selected session
       fetchDiff()
     } else {
       setDiffResult(null)
@@ -319,10 +320,6 @@ export function RightPanel() {
             onCancelComment={() => setCommentingLine(null)}
             onRemoveComment={handleRemoveComment}
           />
-        )}
-
-        {activeTab === 'all-files' && (
-          <FileTreeExplorer key={cwd} cwd={cwd} remoteHostId={terminal?.session.remoteHostId} />
         )}
       </div>
 

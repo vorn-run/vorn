@@ -14,6 +14,8 @@ import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { useTerminalScrollButton } from '../hooks/useTerminalScrollButton'
 import { useTerminalPinchZoom } from '../hooks/useTerminalPinchZoom'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { FilesCard } from './FilesCard'
+import { EditorCard } from './EditorCard'
 import { isMac } from '../lib/platform'
 import { ArrowDown, FolderGit2, GitBranch, Minimize2, Pencil } from 'lucide-react'
 
@@ -32,6 +34,10 @@ export function FocusedTerminal() {
   const terminalContainerRef = useRef<HTMLDivElement>(null)
   const isMobile = useIsMobile()
   const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
+  // The expanded session's own panes come with it, so maximizing a card doesn't
+  // hide the tree or file you had open next to it.
+  const hasFilesPane = useAppStore((s) => (effectiveId ? s.filesPanes.has(effectiveId) : false))
+  const hasEditorPane = useAppStore((s) => (effectiveId ? s.editorPanes.has(effectiveId) : false))
   useTerminalPinchZoom(terminalContainerRef)
 
   if (!effectiveId || !terminal) return null
@@ -163,45 +169,65 @@ export function FocusedTerminal() {
           </div>
         )}
 
-        {/* Terminal */}
-        <div
-          ref={terminalContainerRef}
-          className="relative flex-1 p-1 min-h-0"
-          style={{ background: 'rgba(0, 0, 0, 0.3)' }}
-        >
-          <TerminalPane
-            terminalId={effectiveId}
-            agentType={terminal.session.agentType}
-            isFocused={!isRenaming && !isPreview}
-            domBlocks={domBlocks}
-          />
-          {/* Mobile: floating controls (font size + scroll) */}
-          <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2 z-50">
-            {isMobile && <MobileFontSizeControl />}
-            {showScrollBtn && (
-              <button
-                className="w-8 h-8 flex items-center justify-center
+        {/* Terminal, plus this session's file panes riding along beside it. */}
+        <div className="flex-1 min-h-0 flex">
+          <div className="flex-1 min-w-0 flex flex-col">
+            <div
+              ref={terminalContainerRef}
+              className="relative flex-1 p-1 min-h-0"
+              style={{ background: 'rgba(0, 0, 0, 0.3)' }}
+            >
+              <TerminalPane
+                terminalId={effectiveId}
+                agentType={terminal.session.agentType}
+                isFocused={!isRenaming && !isPreview}
+                domBlocks={domBlocks}
+              />
+              {/* Mobile: floating controls (font size + scroll) */}
+              <div className="absolute bottom-4 right-4 flex flex-col items-end gap-2 z-50">
+                {isMobile && <MobileFontSizeControl />}
+                {showScrollBtn && (
+                  <button
+                    className="w-8 h-8 flex items-center justify-center
                            rounded bg-white/[0.08] hover:bg-white/[0.15] text-gray-400 hover:text-white
                            transition-colors"
-                onClick={handleScrollToBottom}
-                title="Scroll to bottom"
-              >
-                <ArrowDown size={14} />
-              </button>
-            )}
-          </div>
-        </div>
+                    onClick={handleScrollToBottom}
+                    title="Scroll to bottom"
+                  >
+                    <ArrowDown size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
 
-        {/* +4 for this pane's own container padding, so the caret lands in
+            {/* +4 for this pane's own container padding, so the caret lands in
             the terminal's text column. */}
-        {!isMobile && (
-          <IntentBar
-            terminalId={effectiveId}
-            indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks) + 4}
-          />
-        )}
+            {!isMobile && (
+              <IntentBar
+                terminalId={effectiveId}
+                indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks) + 4}
+              />
+            )}
 
-        {!isMobile && <CardStatusBar terminalId={effectiveId} />}
+            {!isMobile && <CardStatusBar terminalId={effectiveId} />}
+          </div>
+
+          {/* The expanded session keeps its own Files / File panes. */}
+          {!isMobile && (hasFilesPane || hasEditorPane) && (
+            <div className="w-[420px] shrink-0 flex flex-col gap-px border-l border-white/[0.06]">
+              {hasFilesPane && (
+                <div className="flex-1 min-h-0">
+                  <FilesCard sessionId={effectiveId} />
+                </div>
+              )}
+              {hasEditorPane && (
+                <div className="flex-1 min-h-0">
+                  <EditorCard sessionId={effectiveId} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {isMobile && <MobileTerminalKeybar terminalId={effectiveId} />}
       </motion.div>

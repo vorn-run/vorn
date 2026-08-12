@@ -582,7 +582,8 @@ function FilePanel({
   onClose,
   onContentSaved,
   remoteHostId,
-  dirtyRef
+  dirtyRef,
+  showHeader = true
 }: {
   cwd: string
   filePath: string
@@ -593,6 +594,8 @@ function FilePanel({
   onContentSaved: (next: string) => void
   remoteHostId?: string
   dirtyRef: React.MutableRefObject<boolean>
+  /** False when hosted in a pane card that draws its own header. */
+  showHeader?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -607,6 +610,7 @@ function FilePanel({
 
   // Reset transient state when file changes
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clear per-file edit/find state when the file changes
     setEditing(false)
     setDraft('')
     setSaveError(null)
@@ -689,7 +693,7 @@ function FilePanel({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <PanelHeader title="File" onClose={onClose} />
+      {showHeader && <PanelHeader title="File" onClose={onClose} />}
 
       {/* Path strip + toolbar */}
       <div
@@ -880,13 +884,16 @@ function FilesPanel({
   dirCache,
   loadDir,
   selectedFile,
-  onSelectFile
+  onSelectFile,
+  showHeader = true
 }: {
   rootEntries: FileEntry[]
   dirCache: Map<string, FileEntry[]>
   loadDir: (path: string) => Promise<void>
   selectedFile: string | null
   onSelectFile: (path: string) => void
+  /** False when hosted in a pane card that draws its own header. */
+  showHeader?: boolean
 }) {
   const [filter, setFilter] = useState('')
   const { matched, expand } = useMemo(
@@ -896,7 +903,7 @@ function FilesPanel({
 
   return (
     <div className="flex flex-col min-h-0 h-full">
-      <PanelHeader title="Files" />
+      {showHeader && <PanelHeader title="Files" />}
       <div className="px-2 py-1.5 border-b border-white/[0.06] shrink-0">
         <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-white/[0.04] focus-within:bg-white/[0.06]">
           <Search size={12} className="text-gray-600 shrink-0" />
@@ -1150,5 +1157,168 @@ export function FileTreeExplorer({ cwd, remoteHostId }: { cwd: string; remoteHos
         </>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Standalone panes
+//
+// `FileTreeExplorer` above stacks the tree and the editor in one component with
+// an internal divider. When each lives in its own grid pane, the grid provides
+// the split instead, so these two exports own their state independently — a
+// session can have either open, maximized, or closed without the other.
+// ---------------------------------------------------------------------------
+
+/** The file tree on its own. Selecting a file is reported via `onSelectFile`. */
+export function FileTreePane({
+  cwd,
+  remoteHostId,
+  selectedFile,
+  onSelectFile
+}: {
+  cwd: string
+  remoteHostId?: string
+  selectedFile: string | null
+  onSelectFile: (path: string) => void
+}): JSX.Element {
+  const [rootEntries, setRootEntries] = useState<FileEntry[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [dirCache, setDirCache] = useState(() => new Map<string, FileEntry[]>())
+
+  useEffect(() => {
+    let stale = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset cache when cwd/host changes
+    setDirCache(new Map())
+    setLoading(true)
+    window.api
+      .listDir(cwd, remoteHostId)
+      .then((entries) => {
+        if (stale) return
+        setRootEntries(entries)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (!stale) setLoading(false)
+      })
+    return () => {
+      stale = true
+    }
+  }, [cwd, remoteHostId])
+
+  const loadDir = useCallback(
+    async (dirPath: string) => {
+      const entries = await window.api.listDir(dirPath, remoteHostId)
+      setDirCache((prev) => {
+        if (prev.has(dirPath)) return prev
+        const next = new Map(prev)
+        next.set(dirPath, entries)
+        return next
+      })
+    },
+    [remoteHostId]
+  )
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 size={20} className="text-gray-500 animate-spin" />
+      </div>
+    )
+  }
+
+  if (!rootEntries || rootEntries.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
+        Empty directory
+      </div>
+    )
+  }
+
+  return (
+    <FilesPanel
+      rootEntries={rootEntries}
+      dirCache={dirCache}
+      loadDir={loadDir}
+      selectedFile={selectedFile}
+      onSelectFile={onSelectFile}
+      showHeader={false}
+    />
+  )
+}
+
+/**
+ * The file editor on its own, owning the load of `filePath`. Independent of the
+ * tree: it renders whatever path it is given, whether or not a tree is open.
+ */
+export function FileEditorPane({
+  cwd,
+  filePath,
+  remoteHostId,
+  onClose,
+  dirtyRef: externalDirtyRef
+}: {
+  cwd: string
+  filePath: string
+  remoteHostId?: string
+  onClose?: () => void
+  /**
+   * Set while the buffer has unsaved edits. The hosting pane reads it to
+   * confirm before swapping files or closing — in the split-pane layout those
+   * actions are driven from the tree and the card header, not from here.
+   */
+  dirtyRef?: React.MutableRefObject<boolean>
+}): JSX.Element {
+  const [content, setContent] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [isBinary, setIsBinary] = useState(false)
+  const activeRequestRef = useRef<string | null>(null)
+  const localDirtyRef = useRef(false)
+  const dirtyRef = externalDirtyRef ?? localDirtyRef
+
+  useEffect(() => {
+    let stale = false
+    activeRequestRef.current = filePath
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset to a loading state when the file changes
+    setLoading(true)
+    setContent(null)
+    setIsBinary(false)
+    window.api
+      .readFileContent(filePath, undefined, remoteHostId)
+      .then((next) => {
+        if (stale || activeRequestRef.current !== filePath) return
+        if (next === null) {
+          setIsBinary(true)
+          setContent(null)
+        } else {
+          setIsBinary(false)
+          setContent(next)
+        }
+        setLoading(false)
+      })
+      .catch(() => {
+        if (!stale) setLoading(false)
+      })
+    return () => {
+      stale = true
+    }
+  }, [filePath, remoteHostId])
+
+  const handleContentSaved = useCallback((next: string) => {
+    setContent(next)
+  }, [])
+
+  return (
+    <FilePanel
+      cwd={cwd}
+      filePath={filePath}
+      content={content}
+      loading={loading}
+      isBinary={isBinary}
+      onClose={onClose ?? (() => {})}
+      onContentSaved={handleContentSaved}
+      remoteHostId={remoteHostId}
+      dirtyRef={dirtyRef}
+      showHeader={false}
+    />
   )
 }

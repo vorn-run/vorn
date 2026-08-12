@@ -6,7 +6,16 @@ import { GridLayout, noCompactor, type EventCallback, type Layout } from 'react-
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { useAppStore } from '../stores'
-import { AgentCard } from './AgentCard'
+import { PaneRenderer } from './PaneRenderer'
+import { parsePaneId, isTerminalPane } from '../lib/pane-id'
+import {
+  sessionPositionForGridIndex,
+  visiblePanesWhileMaximized,
+  maximizedCellSpan,
+  maximizedBoundingRect,
+  paneLayoutKey,
+  boundingBoxPaneFor
+} from '../lib/pane-order'
 import { PromptLauncher } from './PromptLauncher'
 import { GridContextMenu } from './GridContextMenu'
 import { AgentIcon } from './AgentIcon'
@@ -88,7 +97,22 @@ export const GridView = memo(function GridView() {
   const { size: wrapperSize, setNode: setGridWrapperNode } = useContainerSize()
 
   const terminals = useAppStore((s) => s.terminals)
-  const { orderedIds } = useVisibleTerminals()
+  const { orderedIds: allOrderedIds } = useVisibleTerminals()
+  const maximizedPaneId = useAppStore((s) => s.maximizedPaneId)
+
+  // Session-scoped maximize: the maximized pane takes over its *owner session's*
+  // footprint, so only that session's sibling panes drop out. Other sessions keep
+  // rendering, which is what makes maximize usable for side-by-side comparison.
+  const orderedIds = useMemo(
+    () => visiblePanesWhileMaximized(allOrderedIds, maximizedPaneId),
+    [allOrderedIds, maximizedPaneId]
+  )
+
+  // How many grid cells the maximized pane absorbs, so it can span them.
+  const maximizedSpan = useMemo(
+    () => maximizedCellSpan(allOrderedIds, maximizedPaneId),
+    [allOrderedIds, maximizedPaneId]
+  )
 
   const isMobile = useIsMobile()
 
@@ -155,6 +179,9 @@ export const GridView = memo(function GridView() {
   const handleDragStart = useCallback(
     (terminalId: string, e: React.PointerEvent) => {
       if (sortMode !== 'manual') return
+      // Manual sort reorders sessions, so only session cards start a drag —
+      // a child pane travels with its owner rather than moving on its own.
+      if (!isTerminalPane(terminalId)) return
       if (e.button !== 0) return
       const el = cardRefs.current.get(terminalId)
       const rect = el?.getBoundingClientRect()
@@ -200,9 +227,15 @@ export const GridView = memo(function GridView() {
 
   const handlePointerUp = useCallback(() => {
     if (dragState?.isDragging && dropTargetIndex !== null) {
-      const fromIndex = orderedIds.indexOf(dragState.draggingId)
-      if (fromIndex !== -1 && fromIndex !== dropTargetIndex) {
-        reorderTerminals(fromIndex, dropTargetIndex)
+      // `orderedIds` interleaves each session's child panes, but `terminalOrder`
+      // holds sessions only — so grid positions must be translated into
+      // session positions before reordering, or the splice targets the wrong
+      // element (or none at all) and corrupts the persisted order.
+      const sessionIds = orderedIds.filter(isTerminalPane)
+      const fromIndex = sessionIds.indexOf(dragState.draggingId)
+      const toIndex = sessionPositionForGridIndex(orderedIds, dropTargetIndex)
+      if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
+        reorderTerminals(fromIndex, toIndex)
       }
     }
     setDragState(null)
@@ -276,6 +309,8 @@ export const GridView = memo(function GridView() {
       ) : gridColumns === -1 ? (
         <FlexibleGrid
           orderedIds={orderedIds}
+          allOrderedIds={allOrderedIds}
+          maximizedPaneId={maximizedPaneId}
           onCreateSession={createNewSession}
           onShowContextMenu={setGridContextMenu}
         />
@@ -288,17 +323,30 @@ export const GridView = memo(function GridView() {
           onContextMenu={handleGridContextMenu}
         >
           {orderedIds.map((id, index) => (
-            <AgentCard
+            <div
               key={id}
-              ref={(el) => {
-                if (el) cardRefs.current.set(id, el)
-                else cardRefs.current.delete(id)
-              }}
-              terminalId={id}
-              index={index}
-              isDragTarget={dragState?.isDragging === true && dropTargetIndex === index}
-              onDragStart={sortMode === 'manual' ? handleDragStart : undefined}
-            />
+              className="min-w-0 min-h-0"
+              style={
+                id === maximizedPaneId && maximizedSpan > 1
+                  ? {
+                      // Clamp to the track count: spanning past it makes CSS
+                      // Grid add an implicit column and skews every row.
+                      gridColumn: `span ${gridColumns > 0 ? Math.min(maximizedSpan, gridColumns) : maximizedSpan}`
+                    }
+                  : undefined
+              }
+            >
+              <PaneRenderer
+                ref={(el) => {
+                  if (el) cardRefs.current.set(id, el)
+                  else cardRefs.current.delete(id)
+                }}
+                paneId={id}
+                index={index}
+                isDragTarget={dragState?.isDragging === true && dropTargetIndex === index}
+                onDragStart={sortMode === 'manual' ? handleDragStart : undefined}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -326,23 +374,34 @@ function getStableKey(session: TerminalState['session']): string {
 
 function FlexibleGrid({
   orderedIds,
+  allOrderedIds,
+  maximizedPaneId,
   onCreateSession,
   onShowContextMenu
 }: {
   orderedIds: string[]
+  /** Includes panes hidden by maximize — needed to compute the group's footprint. */
+  allOrderedIds: string[]
+  maximizedPaneId: string | null
   onCreateSession: () => void
   onShowContextMenu: (pos: { x: number; y: number } | null) => void
 }) {
   const { size: containerSize, setNode: setContainerNode } = useContainerSize()
   const containerWidth = containerSize?.width ?? 0
 
-  // Narrow selector: only extract the stable keys we need, not the full terminals Map
+  // Narrow selector: only extract the stable keys we need, not the full terminals Map.
+  // Child panes key off their owner session's stable key, prefixed by kind, so a
+  // session's tree and file keep independent saved rects that survive restarts
+  // alongside the terminal's.
   const stableKeys = useAppStore(
     useShallow((s) => {
       const keys: Record<string, string> = {}
-      for (const id of orderedIds) {
-        const t = s.terminals.get(id)
-        if (t) keys[id] = getStableKey(t.session) || id
+      for (const id of allOrderedIds) {
+        const { sessionId } = parsePaneId(id)
+        const t = s.terminals.get(sessionId)
+        if (!t) continue
+        const base = getStableKey(t.session) || sessionId
+        keys[id] = paneLayoutKey(id, base)
       }
       return keys
     })
@@ -361,7 +420,7 @@ function FlexibleGrid({
     }
 
     let autoIndex = 0
-    return orderedIds.map((id) => {
+    const items = orderedIds.map((id) => {
       const key = stableKeys[id]
       if (!key) return { i: id, x: 0, y: 0, w: FLEX_DEFAULT_W, h: FLEX_DEFAULT_H }
       const saved = flexibleLayouts[key]
@@ -374,19 +433,51 @@ function FlexibleGrid({
       autoIndex++
       return { i: id, x, y, w: FLEX_DEFAULT_W, h: FLEX_DEFAULT_H }
     })
-  }, [orderedIds, stableKeys, flexibleLayouts])
+
+    // Maximized pane takes the bounding box of its owner session's rects. This is
+    // computed for render only and never written back to `flexibleLayouts`, so
+    // restoring returns every sibling to its own saved position.
+    if (maximizedPaneId) {
+      const box = maximizedBoundingRect(
+        allOrderedIds,
+        maximizedPaneId,
+        (id) => flexibleLayouts[stableKeys[id]]
+      )
+      const target = box ? items.find((it) => it.i === maximizedPaneId) : undefined
+      if (box && target) {
+        target.x = box.x
+        target.y = box.y
+        target.w = box.w
+        target.h = box.h
+      }
+    }
+
+    return items
+  }, [orderedIds, allOrderedIds, stableKeys, flexibleLayouts, maximizedPaneId])
+
+  // A maximized pane only renders as a computed bounding box when its owner
+  // actually has siblings to span. Deriving the skip from that condition (rather
+  // than from `maximizedPaneId` alone) means a stale id can never permanently
+  // stop a pane's rect from being saved.
+  const boundingBoxPaneId = useMemo(
+    () => boundingBoxPaneFor(orderedIds, allOrderedIds, maximizedPaneId),
+    [maximizedPaneId, orderedIds, allOrderedIds]
+  )
 
   const persistLayout = useCallback(
     (updatedLayout: Layout) => {
       const merged: Record<string, FlexibleLayoutRect> = { ...flexibleLayouts }
       for (const item of updatedLayout) {
+        // While maximized, the pane's rect is a computed bounding box over its
+        // siblings — persisting it would destroy their saved positions.
+        if (item.i === boundingBoxPaneId) continue
         const key = stableKeys[item.i]
         if (!key) continue
         merged[key] = { x: item.x, y: item.y, w: item.w, h: item.h }
       }
       setFlexibleLayouts(merged)
     },
-    [stableKeys, flexibleLayouts, setFlexibleLayouts]
+    [stableKeys, flexibleLayouts, setFlexibleLayouts, boundingBoxPaneId]
   )
 
   const handleDragStop: EventCallback = useCallback(
@@ -445,7 +536,7 @@ function FlexibleGrid({
       >
         {orderedIds.map((id, index) => (
           <div key={id} className="h-full">
-            <AgentCard terminalId={id} index={index} flexible />
+            <PaneRenderer paneId={id} index={index} flexible />
           </div>
         ))}
       </GridLayout>

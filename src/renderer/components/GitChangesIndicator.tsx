@@ -31,11 +31,11 @@ export function GitChangesIndicator({ terminalId }: Props) {
 }
 
 export function BrowseFilesButton({ terminalId }: Props) {
-  const setDiffSidebar = useAppStore((s) => s.setDiffSidebarTerminalId)
+  const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
 
   const handleClick = (e: React.MouseEvent): void => {
     e.stopPropagation()
-    setDiffSidebar(terminalId, 'all-files')
+    toggleFilesPane(terminalId)
   }
 
   return (
