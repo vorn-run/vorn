@@ -3,7 +3,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
 import { useVisibleTerminals } from '../src/renderer/hooks/useVisibleTerminals'
-import { sessionPositionForGridIndex } from '../src/renderer/lib/pane-order'
+import {
+  sessionPositionForGridIndex,
+  visiblePanesWhileMaximized,
+  maximizedCellSpan,
+  maximizedBoundingRect,
+  paneLayoutKey,
+  boundingBoxPaneFor
+} from '../src/renderer/lib/pane-order'
 
 const session = (id: string) =>
   ({
@@ -148,5 +155,79 @@ describe('sessionPositionForGridIndex', () => {
     const plain = ['t1', 't2', 't3']
     expect(sessionPositionForGridIndex(plain, 0)).toBe(0)
     expect(sessionPositionForGridIndex(plain, 2)).toBe(2)
+  })
+})
+
+describe('session-scoped maximize', () => {
+  // t1 owns a tree and a file; t2 is a plain session. Maximizing must collapse
+  // only t1's group — t2 keeps rendering, which is the entire point.
+  const grid = ['t1', 'files:t1', 'editor:t1', 't2']
+
+  it("hides the maximized pane's siblings and nothing else", () => {
+    expect(visiblePanesWhileMaximized(grid, 'editor:t1')).toEqual(['editor:t1', 't2'])
+    expect(visiblePanesWhileMaximized(grid, 't1')).toEqual(['t1', 't2'])
+  })
+
+  it('is a no-op with nothing maximized, or a pane not on screen', () => {
+    expect(visiblePanesWhileMaximized(grid, null)).toEqual(grid)
+    expect(visiblePanesWhileMaximized(grid, 'files:ghost')).toEqual(grid)
+  })
+
+  it('spans exactly the cells its owner gave up', () => {
+    expect(maximizedCellSpan(grid, 'editor:t1')).toBe(3)
+    expect(maximizedCellSpan(grid, 't2')).toBe(1)
+    expect(maximizedCellSpan(grid, null)).toBe(1)
+    expect(maximizedCellSpan(grid, 'files:ghost')).toBe(1)
+  })
+
+  it("unions the owner group's rects in flexible mode", () => {
+    const rects: Record<string, { x: number; y: number; w: number; h: number }> = {
+      t1: { x: 0, y: 0, w: 4, h: 3 },
+      'files:t1': { x: 4, y: 0, w: 2, h: 3 },
+      'editor:t1': { x: 0, y: 3, w: 6, h: 2 },
+      t2: { x: 8, y: 0, w: 4, h: 3 }
+    }
+    expect(maximizedBoundingRect(grid, 'editor:t1', (id) => rects[id])).toEqual({
+      x: 0,
+      y: 0,
+      w: 6,
+      h: 5
+    })
+    // t2's rect sits outside the group and must not widen the box.
+    expect(maximizedBoundingRect(grid, 't2', (id) => rects[id])).toBeNull()
+  })
+
+  it('returns null when there is nothing to span', () => {
+    // A lone session has no siblings to absorb, and a group with no saved rects
+    // has no box — in both cases the pane keeps its own rect.
+    expect(maximizedBoundingRect(['t2'], 't2', () => undefined)).toBeNull()
+    expect(maximizedBoundingRect(grid, 'editor:t1', () => undefined)).toBeNull()
+  })
+})
+
+describe('flexible-layout keys and the persist guard', () => {
+  const grid = ['t1', 'files:t1', 'editor:t1', 't2']
+
+  it('namespaces child pane keys so siblings keep independent rects', () => {
+    // All three share one owner stable key; without the kind prefix they would
+    // overwrite each other's saved position.
+    expect(paneLayoutKey('t1', 'stable-1')).toBe('stable-1')
+    expect(paneLayoutKey('files:t1', 'stable-1')).toBe('files:stable-1')
+    expect(paneLayoutKey('editor:t1', 'stable-1')).toBe('editor:stable-1')
+  })
+
+  it('flags a pane only while it actually renders as a bounding box', () => {
+    expect(boundingBoxPaneFor(['editor:t1', 't2'], grid, 'editor:t1')).toBe('editor:t1')
+    // Nothing maximized.
+    expect(boundingBoxPaneFor(grid, grid, null)).toBeNull()
+    // A lone session spans nothing, so its own rect is still the real one.
+    expect(boundingBoxPaneFor(grid, grid, 't2')).toBeNull()
+  })
+
+  it('never flags a stale id, so a pane cannot be frozen out of persistence', () => {
+    // If a stale `maximizedPaneId` suppressed persistence forever, that pane's
+    // position would silently stop being saved.
+    expect(boundingBoxPaneFor(grid, grid, 'files:ghost')).toBeNull()
+    expect(boundingBoxPaneFor(['t2'], grid, 'editor:t1')).toBeNull()
   })
 })

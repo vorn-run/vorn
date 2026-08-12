@@ -8,7 +8,14 @@ import 'react-resizable/css/styles.css'
 import { useAppStore } from '../stores'
 import { PaneRenderer } from './PaneRenderer'
 import { parsePaneId, isTerminalPane } from '../lib/pane-id'
-import { sessionPositionForGridIndex } from '../lib/pane-order'
+import {
+  sessionPositionForGridIndex,
+  visiblePanesWhileMaximized,
+  maximizedCellSpan,
+  maximizedBoundingRect,
+  paneLayoutKey,
+  boundingBoxPaneFor
+} from '../lib/pane-order'
 import { PromptLauncher } from './PromptLauncher'
 import { GridContextMenu } from './GridContextMenu'
 import { AgentIcon } from './AgentIcon'
@@ -96,20 +103,16 @@ export const GridView = memo(function GridView() {
   // Session-scoped maximize: the maximized pane takes over its *owner session's*
   // footprint, so only that session's sibling panes drop out. Other sessions keep
   // rendering, which is what makes maximize usable for side-by-side comparison.
-  const orderedIds = useMemo(() => {
-    if (!maximizedPaneId || !allOrderedIds.includes(maximizedPaneId)) return allOrderedIds
-    const owner = parsePaneId(maximizedPaneId).sessionId
-    return allOrderedIds.filter(
-      (id) => id === maximizedPaneId || parsePaneId(id).sessionId !== owner
-    )
-  }, [allOrderedIds, maximizedPaneId])
+  const orderedIds = useMemo(
+    () => visiblePanesWhileMaximized(allOrderedIds, maximizedPaneId),
+    [allOrderedIds, maximizedPaneId]
+  )
 
   // How many grid cells the maximized pane absorbs, so it can span them.
-  const maximizedSpan = useMemo(() => {
-    if (!maximizedPaneId || !allOrderedIds.includes(maximizedPaneId)) return 1
-    const owner = parsePaneId(maximizedPaneId).sessionId
-    return allOrderedIds.filter((id) => parsePaneId(id).sessionId === owner).length
-  }, [allOrderedIds, maximizedPaneId])
+  const maximizedSpan = useMemo(
+    () => maximizedCellSpan(allOrderedIds, maximizedPaneId),
+    [allOrderedIds, maximizedPaneId]
+  )
 
   const isMobile = useIsMobile()
 
@@ -394,11 +397,11 @@ function FlexibleGrid({
     useShallow((s) => {
       const keys: Record<string, string> = {}
       for (const id of allOrderedIds) {
-        const { kind, sessionId } = parsePaneId(id)
+        const { sessionId } = parsePaneId(id)
         const t = s.terminals.get(sessionId)
         if (!t) continue
         const base = getStableKey(t.session) || sessionId
-        keys[id] = kind === 'terminal' ? base : `${kind}:${base}`
+        keys[id] = paneLayoutKey(id, base)
       }
       return keys
     })
@@ -435,25 +438,17 @@ function FlexibleGrid({
     // computed for render only and never written back to `flexibleLayouts`, so
     // restoring returns every sibling to its own saved position.
     if (maximizedPaneId) {
-      const owner = parsePaneId(maximizedPaneId).sessionId
-      const group = allOrderedIds.filter((id) => parsePaneId(id).sessionId === owner)
-      if (group.length > 1) {
-        const rects = group
-          .map((id) => flexibleLayouts[stableKeys[id]])
-          .filter((r): r is FlexibleLayoutRect => Boolean(r))
-        if (rects.length > 0) {
-          const x = Math.min(...rects.map((r) => r.x))
-          const y = Math.min(...rects.map((r) => r.y))
-          const right = Math.max(...rects.map((r) => r.x + r.w))
-          const bottom = Math.max(...rects.map((r) => r.y + r.h))
-          const target = items.find((it) => it.i === maximizedPaneId)
-          if (target) {
-            target.x = x
-            target.y = y
-            target.w = right - x
-            target.h = bottom - y
-          }
-        }
+      const box = maximizedBoundingRect(
+        allOrderedIds,
+        maximizedPaneId,
+        (id) => flexibleLayouts[stableKeys[id]]
+      )
+      const target = box ? items.find((it) => it.i === maximizedPaneId) : undefined
+      if (box && target) {
+        target.x = box.x
+        target.y = box.y
+        target.w = box.w
+        target.h = box.h
       }
     }
 
@@ -464,12 +459,10 @@ function FlexibleGrid({
   // actually has siblings to span. Deriving the skip from that condition (rather
   // than from `maximizedPaneId` alone) means a stale id can never permanently
   // stop a pane's rect from being saved.
-  const boundingBoxPaneId = useMemo(() => {
-    if (!maximizedPaneId || !orderedIds.includes(maximizedPaneId)) return null
-    const owner = parsePaneId(maximizedPaneId).sessionId
-    const siblings = allOrderedIds.filter((id) => parsePaneId(id).sessionId === owner)
-    return siblings.length > 1 ? maximizedPaneId : null
-  }, [maximizedPaneId, orderedIds, allOrderedIds])
+  const boundingBoxPaneId = useMemo(
+    () => boundingBoxPaneFor(orderedIds, allOrderedIds, maximizedPaneId),
+    [maximizedPaneId, orderedIds, allOrderedIds]
+  )
 
   const persistLayout = useCallback(
     (updatedLayout: Layout) => {

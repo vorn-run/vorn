@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { forwardRef } from 'react'
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 Object.defineProperty(window, 'api', {
@@ -140,6 +140,10 @@ beforeEach(() => {
     focusedTerminalId: null,
     previewTerminalId: null,
     minimizedTerminals: new Set<string>(),
+    filesPanes: new Set<string>(),
+    editorPanes: new Map(),
+    maximizedPaneId: null,
+    flexibleLayouts: {},
     rowHeight: 208,
     terminalOrder: ['term-a', 'term-b']
   })
@@ -339,5 +343,60 @@ describe('fitMaxRows', () => {
 
   it('caps at the hard max (4) on very tall viewports', () => {
     expect(fitMaxRows(5000)).toBe(4)
+  })
+})
+
+describe('GridView — session-owned panes', () => {
+  it("renders a session's panes next to it", () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('term-a')
+      useAppStore.getState().openEditorPane('term-a', '/repo/a.ts')
+    })
+    render(<GridView />)
+
+    expect(screen.getByTestId('card-term-a')).toBeInTheDocument()
+    expect(screen.getByTestId('card-files:term-a')).toBeInTheDocument()
+    expect(screen.getByTestId('card-editor:term-a')).toBeInTheDocument()
+    expect(screen.getByTestId('card-term-b')).toBeInTheDocument()
+  })
+
+  it('collapses only the owner session while one of its panes is maximized', () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('term-a')
+      useAppStore.getState().setMaximizedPane('files:term-a')
+    })
+    render(<GridView />)
+
+    // term-a's terminal yields its cell to the maximized tree...
+    expect(screen.queryByTestId('card-term-a')).not.toBeInTheDocument()
+    expect(screen.getByTestId('card-files:term-a')).toBeInTheDocument()
+    // ...while the other session keeps rendering, which is the compare case.
+    expect(screen.getByTestId('card-term-b')).toBeInTheDocument()
+  })
+
+  it('clamps the maximized span to the configured column count', () => {
+    act(() => {
+      useAppStore.setState({ gridColumns: 2 })
+      useAppStore.getState().openFilesPane('term-a')
+      useAppStore.getState().openEditorPane('term-a', '/repo/a.ts')
+      useAppStore.getState().setMaximizedPane('files:term-a')
+    })
+    render(<GridView />)
+
+    // The owner has 3 panes but only 2 tracks exist; spanning 3 would make CSS
+    // Grid add an implicit column and skew every row.
+    const cell = screen.getByTestId('card-files:term-a').parentElement
+    expect(cell?.style.gridColumn).toBe('span 2')
+  })
+
+  it('renders panes in the flexible layout too', () => {
+    act(() => {
+      useAppStore.setState({ gridColumns: -1 })
+      useAppStore.getState().openFilesPane('term-a')
+    })
+    render(<GridView />)
+
+    expect(screen.getByTestId('card-term-a')).toBeInTheDocument()
+    expect(screen.getByTestId('card-files:term-a')).toBeInTheDocument()
   })
 })
