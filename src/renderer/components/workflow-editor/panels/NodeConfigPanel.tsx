@@ -225,8 +225,14 @@ export function NodeConfigPanel({
         {/* A trigger has nothing downstream of its own failure to govern. */}
         {node.type !== 'trigger' && onErrorChange && (
           <div className="pt-4 border-t border-gray-800">
-            <label className="block text-[11px] text-gray-500 mb-1.5">If this step fails</label>
+            <label
+              htmlFor={`onError-${node.id}`}
+              className="block text-[11px] text-gray-500 mb-1.5"
+            >
+              If this step fails
+            </label>
             <select
+              id={`onError-${node.id}`}
               value={node.onError ?? 'stop'}
               onChange={(e) => onErrorChange(node.id, e.target.value as WorkflowNodeErrorPolicy)}
               className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200"
