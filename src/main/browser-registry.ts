@@ -468,16 +468,53 @@ export async function screenshot(params: {
   return { data }
 }
 
+/**
+ * The matches for `needle` across a whole accessibility tree.
+ *
+ * Separate from `find` so it can be tested without a live guest, and pure so
+ * the budget question stays visible: `limit` bounds the matches returned, not
+ * the nodes searched.
+ */
+export function matchNodes(
+  ax: AXNode[],
+  entry: Entry,
+  needle: string,
+  limit: number
+): BrowserNode[] {
+  const q = needle.toLowerCase()
+  const out: BrowserNode[] = []
+  for (const raw of ax) {
+    if (out.length >= limit) break
+    // Matched before minting a ref, so a search does not hand out handles to
+    // every interactive node on the page as a side effect of looking.
+    if (!(raw.name?.value ?? '').toLowerCase().includes(q)) continue
+    const node = toNode(raw, entry)
+    if (node) out.push(node)
+  }
+  return out
+}
+
+/**
+ * Search the whole page for matching text.
+ *
+ * Deliberately not built on `readPage`: that paginates to a node budget, so a
+ * search through it would only ever see the top of the document and report
+ * "not found" for text sitting plainly further down. Since long pages are the
+ * exact case an agent reaches for `find` to handle, the budget has to apply to
+ * what comes *back* — the matches — rather than to what gets searched.
+ */
 export async function find(params: {
   sessionId: string
   text: string
   limit?: number
 }): Promise<BrowserNode[]> {
-  const page = await readPage({ sessionId: params.sessionId, filter: 'all' })
-  const needle = params.text.toLowerCase()
-  return page.nodes
-    .filter((n) => (n.name ?? '').toLowerCase().includes(needle))
-    .slice(0, params.limit ?? 20)
+  const { wc, entry } = contentsFor(params.sessionId)
+  const readAt = entry.generation
+  const { nodes: ax } = await send<{ nodes: AXNode[] }>(wc, 'Accessibility.getFullAXTree')
+  if (entry.generation !== readAt) {
+    throw new Error('The page navigated while it was being searched. Call find again.')
+  }
+  return matchNodes(ax, entry, params.text, params.limit ?? 20)
 }
 
 // ─── Interaction ────────────────────────────────────────────────

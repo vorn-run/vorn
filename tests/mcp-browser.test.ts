@@ -21,6 +21,7 @@ vi.mock('electron', () => ({
 }))
 import {
   toNode,
+  matchNodes,
   parseCursor,
   newEntry,
   samplePoints,
@@ -134,6 +135,41 @@ describe('tab commands', () => {
       /index is required/
     )
     detach('sess-tabs')
+  })
+})
+
+describe('searching a page', () => {
+  it('finds a match far past the size of one read_page window', () => {
+    // The bug this replaced: `find` was built on `readPage`, which stops at a
+    // 200-node budget. A match at node 500 came back "not found" — on the very
+    // long pages that are the whole reason to reach for a search instead of a
+    // read.
+    const ax = Array.from({ length: 600 }, (_, i) => button(`Item ${i}`, i + 1))
+    const hits = matchNodes(ax, newEntry(), 'Item 500', 20)
+    expect(hits).toHaveLength(1)
+    expect(hits[0].name).toBe('Item 500')
+  })
+
+  it('bounds what it returns, not what it searches', () => {
+    const ax = Array.from({ length: 600 }, (_, i) => button(`Save ${i}`, i + 1))
+    expect(matchNodes(ax, newEntry(), 'save', 5)).toHaveLength(5)
+  })
+
+  it('mints refs only for what matched', () => {
+    // Searching is a read. If looking handed out a handle for every button on
+    // the page, ref numbering would race ahead of anything the agent was told
+    // about, and the map would grow without bound on repeated searches.
+    const entry = newEntry()
+    const ax = [button('Save', 11), button('Cancel', 22), button('Delete', 33)]
+    const hits = matchNodes(ax, entry, 'cancel', 20)
+    expect(hits).toHaveLength(1)
+    expect(entry.refs.size).toBe(1)
+    expect(entry.refs.get(hits[0].ref!)).toBe(22)
+  })
+
+  it('matches case-insensitively and on a substring', () => {
+    const hits = matchNodes([button('Save changes', 11)], newEntry(), 'VE CHA', 20)
+    expect(hits).toHaveLength(1)
   })
 })
 
