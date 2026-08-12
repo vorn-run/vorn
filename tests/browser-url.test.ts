@@ -16,6 +16,18 @@ describe('normalizeUrl', () => {
     expect(normalizeUrl('myapp.local:3000')).toBe('http://myapp.local:3000/')
   })
 
+  it('recognises a bracketed IPv6 loopback as local', () => {
+    // The port can only be split off after the closing bracket — splitting on
+    // the first colon yields `[`, which reads as public and picks https, a
+    // scheme no local dev server speaks.
+    expect(normalizeUrl('[::1]:5173')).toBe('http://[::1]:5173/')
+    expect(normalizeUrl('[::1]')).toBe('http://[::1]/')
+  })
+
+  it('still treats a routable IPv6 address as public', () => {
+    expect(normalizeUrl('[2001:db8::1]:8080')).toBe('https://[2001:db8::1]:8080/')
+  })
+
   it('defaults public hosts to https', () => {
     expect(normalizeUrl('example.com')).toBe('https://example.com/')
     expect(normalizeUrl('example.com/docs?a=1')).toBe('https://example.com/docs?a=1')

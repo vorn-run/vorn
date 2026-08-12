@@ -54,7 +54,12 @@ function buildUrl(hostAndPath: string): string | null {
 
 /** Localhost, loopback, and `.local` — the things a dev server listens on. */
 function isLocalHost(value: string): boolean {
-  const host = value.split('/')[0].split(':')[0].toLowerCase()
+  const authority = value.split('/')[0]
+  // IPv6 literals are bracketed and full of colons, so the port can only be
+  // split off after the closing bracket — `[::1]:5173` must not become `[`.
+  const host = authority.startsWith('[')
+    ? authority.slice(0, authority.indexOf(']') + 1).toLowerCase()
+    : authority.split(':')[0].toLowerCase()
   return (
     host === 'localhost' ||
     host === '127.0.0.1' ||

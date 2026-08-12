@@ -254,8 +254,12 @@ export interface UISlice {
   openEditorPane: (sessionId: string, filePath: string) => void
   closeEditorPane: (sessionId: string) => void
   /**
-   * Show `url` in the session's browser pane, creating it if needed. `url` is
-   * normalized by the caller; an unloadable one is ignored.
+   * Show `url` in the session's browser pane, creating it if needed.
+   *
+   * Accepts whatever the user typed — it is normalized here, so `localhost:5173`
+   * works. A url that cannot be loaded (a refused scheme, or nonsense) leaves
+   * the pane on its current page rather than blanking it. Omitting `url`
+   * reveals the session's browser without changing the page it is showing.
    */
   openBrowserPane: (sessionId: string, url?: string) => void
   closeBrowserPane: (sessionId: string) => void

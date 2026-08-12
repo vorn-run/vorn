@@ -19,7 +19,11 @@ const GRID_STORAGE_KEY = 'vorn:gridSettings'
 const SIDEBAR_STORAGE_KEY = 'vorn:sidebarSettings'
 const FLEXIBLE_STORAGE_KEY = 'vorn:flexibleLayouts'
 const PANES_STORAGE_KEY = 'vorn:panes'
-/** Opening a browser with no url lands here rather than a blank page. */
+/**
+ * Where a browser pane opened with no url starts. Deliberately blank: guessing
+ * a page would be wrong more often than not, and the address bar is focused
+ * and empty, which is the prompt to type one.
+ */
 const DEFAULT_BROWSER_URL = 'about:blank'
 
 function loadGridSettings(): { gridColumns?: number; sortMode?: string; statusFilter?: string } {
@@ -59,8 +63,10 @@ function saveFlexibleLayouts(layouts: Record<string, FlexibleLayoutRect>): void 
 
 /**
  * Open child panes, persisted so a reload restores the same workspace.
- * Shape: `{ files: sessionId[], editors: { [sessionId]: filePath } }`.
- * Entries whose session no longer exists are pruned lazily by `removeTerminal`.
+ *
+ * Shape: `{ files: sessionId[], editors: { [id]: filePath }, browsers: { [id]: url } }`.
+ * Entries whose session no longer exists are pruned by `removeTerminal` when it
+ * closes, and by `reconcilePanes` for sessions that never came back.
  */
 function loadPanes(): {
   filesPanes: Set<string>
