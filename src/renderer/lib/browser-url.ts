@@ -75,10 +75,14 @@ function isLocalHost(value: string): boolean {
  * part. Used in pane headers and dock pills where the full URL never fits.
  */
 export function displayHost(url: string): string {
+  // A blank page has no host, and "about:blank" is jargon. Every browser calls
+  // that tab "New tab", which reads as a place to type rather than as a page
+  // that failed to load.
+  if (url === 'about:blank') return 'New tab'
   try {
     const parsed = new URL(url)
-    // `about:blank` and friends parse cleanly but have no hostname; showing an
-    // empty header is worse than showing the url itself.
+    // Other schemes without a hostname parse cleanly but have nothing to show;
+    // an empty header is worse than showing the url itself.
     if (!parsed.hostname) return url
     return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname
   } catch {

@@ -23,6 +23,76 @@ export interface PaneCardProps {
   isDragTarget?: boolean
   onDragStart?: (paneId: string, e: React.PointerEvent) => void
   flexible?: boolean
+  /**
+   * Drop the card's own header row. For panes like the browser, whose tab strip
+   * is already a title bar — two stacked bars cost vertical space and read as
+   * chrome-on-chrome. Such a pane renders `PaneControls` inside its own bar.
+   */
+  headerless?: boolean
+  /** Card background. Defaults to the shared pane surface. */
+  background?: string
+}
+
+/**
+ * Minimize / maximize / close for one pane.
+ *
+ * Split out of the header so a headerless pane can seat the same controls in a
+ * bar of its own making, rather than growing a second one.
+ */
+export function PaneControls({
+  paneId,
+  title,
+  onClose,
+  className = ''
+}: {
+  paneId: string
+  title: string
+  onClose: () => void
+  className?: string
+}): ReactNode {
+  const { isMaximized, setMaximizedPane, toggleMinimized } = useAppStore(
+    useShallow((s) => ({
+      isMaximized: s.maximizedPaneId === paneId,
+      setMaximizedPane: s.setMaximizedPane,
+      toggleMinimized: s.toggleMinimized
+    }))
+  )
+
+  return (
+    <div
+      className={`flex items-center gap-0.5 transition-opacity ${
+        isTouchDevice() ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'
+      } ${className}`}
+    >
+      <Tooltip label="Minimize">
+        <button
+          onClick={() => toggleMinimized(paneId)}
+          className="text-gray-500 hover:text-white p-0.5 rounded transition-colors"
+          aria-label={`Minimize ${title}`}
+        >
+          <Minus size={12} strokeWidth={2} />
+        </button>
+      </Tooltip>
+      <Tooltip label={isMaximized ? 'Restore' : 'Maximize'}>
+        <button
+          onClick={() => setMaximizedPane(isMaximized ? null : paneId)}
+          className="text-gray-500 hover:text-white p-0.5 rounded transition-colors"
+          aria-label={isMaximized ? `Restore ${title}` : `Maximize ${title}`}
+        >
+          {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+        </button>
+      </Tooltip>
+      <Tooltip label="Close">
+        <button
+          onClick={onClose}
+          className="text-gray-500 hover:text-white p-0.5 rounded transition-colors"
+          aria-label={`Close ${title}`}
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      </Tooltip>
+    </div>
+  )
 }
 
 /**
@@ -35,14 +105,25 @@ export interface PaneCardProps {
  * the pane its owner session's whole footprint, leaving other sessions alone.
  */
 export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneCard(
-  { paneId, title, subtitle, icon, onClose, children, isDragTarget, onDragStart, flexible },
+  {
+    paneId,
+    title,
+    subtitle,
+    icon,
+    onClose,
+    children,
+    isDragTarget,
+    onDragStart,
+    flexible,
+    headerless,
+    background
+  },
   ref
 ) {
-  const { isMaximized, setMaximizedPane, toggleMinimized } = useAppStore(
+  const { isMaximized, setMaximizedPane } = useAppStore(
     useShallow((s) => ({
       isMaximized: s.maximizedPaneId === paneId,
-      setMaximizedPane: s.setMaximizedPane,
-      toggleMinimized: s.toggleMinimized
+      setMaximizedPane: s.setMaximizedPane
     }))
   )
 
@@ -60,64 +141,34 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
                      : 'border-white/[0.06] hover:border-white/[0.12]'
                  }
                  ${flexible ? '' : 'hover:z-10 focus-within:z-10'}`}
-      style={{ background: '#1a1a1e' }}
+      style={{ background: background ?? '#1a1a1e' }}
     >
-      <div
-        className={`flex items-center gap-1.5 px-2 py-1 shrink-0 border-b border-white/[0.06]
-                    ${onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''}`}
-        style={{ background: '#1e1e22' }}
-        onPointerDown={onDragStart ? handleDragStart : undefined}
-        onDoubleClick={() => setMaximizedPane(isMaximized ? null : paneId)}
-      >
-        {icon}
-        <span className="text-[11px] text-gray-300 font-medium shrink-0">{title}</span>
-        {subtitle && (
-          <span
-            className="text-[10px] text-gray-500 font-mono flex-1 min-w-0 truncate"
-            title={subtitle}
-            dir="rtl"
-          >
-            {subtitle}
-          </span>
-        )}
-        {!subtitle && <span className="flex-1" />}
-
+      {!headerless && (
         <div
-          className={`flex items-center gap-0.5 transition-opacity ${
-            isTouchDevice() ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'
-          }`}
+          className={`flex items-center gap-1.5 px-2 py-1 shrink-0 border-b border-white/[0.06]
+                    ${onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''}`}
+          style={{ background: '#1e1e22' }}
+          onPointerDown={onDragStart ? handleDragStart : undefined}
+          onDoubleClick={() => setMaximizedPane(isMaximized ? null : paneId)}
         >
-          <Tooltip label="Minimize">
-            <button
-              onClick={() => toggleMinimized(paneId)}
-              className="text-gray-500 hover:text-white p-0.5 rounded transition-colors"
-              aria-label={`Minimize ${title}`}
+          {icon}
+          <span className="text-[11px] text-gray-300 font-medium shrink-0">{title}</span>
+          {subtitle && (
+            <span
+              className="text-[10px] text-gray-500 font-mono flex-1 min-w-0 truncate"
+              title={subtitle}
+              dir="rtl"
             >
-              <Minus size={12} strokeWidth={2} />
-            </button>
-          </Tooltip>
-          <Tooltip label={isMaximized ? 'Restore' : 'Maximize'}>
-            <button
-              onClick={() => setMaximizedPane(isMaximized ? null : paneId)}
-              className="text-gray-500 hover:text-white p-0.5 rounded transition-colors"
-              aria-label={isMaximized ? `Restore ${title}` : `Maximize ${title}`}
-            >
-              {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-            </button>
-          </Tooltip>
-          <Tooltip label="Close">
-            <button
-              onClick={onClose}
-              className="text-gray-500 hover:text-white p-0.5 rounded transition-colors"
-              aria-label={`Close ${title}`}
-            >
-              <X size={12} strokeWidth={2} />
-            </button>
-          </Tooltip>
-        </div>
-      </div>
+              {subtitle}
+            </span>
+          )}
+          {!subtitle && <span className="flex-1" />}
 
-      <div className="flex-1 min-h-0 flex flex-col" style={{ background: '#141416' }}>
+          <PaneControls paneId={paneId} title={title} onClose={onClose} />
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 flex flex-col" style={{ background: background ?? '#141416' }}>
         {children}
       </div>
     </div>

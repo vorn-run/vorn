@@ -66,10 +66,15 @@ describe('displayHost', () => {
     expect(displayHost('https://example.com/a/b')).toBe('example.com')
   })
 
+  it('names a blank page "New tab" rather than showing the scheme', () => {
+    // `about:blank` parses cleanly but has an empty hostname, and the raw
+    // string is jargon — a tab you have not navigated yet should read as a
+    // place to type, the way every browser labels it.
+    expect(displayHost('about:blank')).toBe('New tab')
+  })
+
   it('falls back to the raw string when there is no host to show', () => {
-    // `about:blank` parses cleanly but has an empty hostname — rendering that
-    // would leave the pane header blank.
-    expect(displayHost('about:blank')).toBe('about:blank')
+    // Anything else unparseable still beats rendering a blank header.
     expect(displayHost('nonsense')).toBe('nonsense')
   })
 })

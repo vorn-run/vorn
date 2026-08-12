@@ -378,14 +378,36 @@ describe('panes travel with their session into focus mode', () => {
 })
 
 describe('BrowserCard', () => {
-  it('renders the page host in its header and the url in the address bar', () => {
+  it('renders the page host on its tab and the url in the address bar', () => {
     act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
     render(<BrowserCard sessionId="t1" />)
 
-    // Headers and tabs are both narrow, so the host is what earns the space —
-    // it shows in the pane header and on the tab.
-    expect(screen.getAllByText('localhost:5173')).toHaveLength(2)
+    // The tab strip is this pane's only title bar — a second header above it
+    // would be chrome stacked on chrome, so the host is named exactly once.
+    expect(screen.getAllByText('localhost:5173')).toHaveLength(1)
+    expect(screen.getByRole('tab')).toHaveTextContent('localhost:5173')
     expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
+  it('calls an unvisited tab "New tab" and leaves its address bar empty', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1'))
+    render(<BrowserCard sessionId="t1" />)
+
+    // "about:blank" is jargon, and pre-filling it gives the user a string to
+    // delete before they can type the address they actually want.
+    expect(screen.getByRole('tab')).toHaveTextContent('New tab')
+    expect(screen.getByLabelText('Address')).toHaveValue('')
+  })
+
+  it('seats the pane controls in the tab strip rather than a second header', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    // Minimize / maximize / close still have to be reachable once the pane's
+    // own header is gone.
+    expect(screen.getByLabelText('Maximize localhost:5173')).toBeInTheDocument()
+    expect(screen.getByLabelText('Minimize localhost:5173')).toBeInTheDocument()
+    expect(screen.getByLabelText('Close localhost:5173')).toBeInTheDocument()
   })
 
   it('opens a second tab and switches between them without losing either page', () => {
