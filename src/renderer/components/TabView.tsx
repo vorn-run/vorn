@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
+import { isTerminalPane } from '../lib/pane-id'
+import { FilesCard } from './FilesCard'
+import { EditorCard } from './EditorCard'
 import { AgentStatusIcon } from './AgentStatusIcon'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
@@ -120,7 +123,11 @@ export function TabView() {
   // minimizedTerminals set is preserved so switching back to grid restores
   // the dock pills.
   const allTabIds = useMemo(() => {
-    const merged = [...orderedIds, ...minimizedIds]
+    // Tab mode shows one pane at a time, and its strip/context menu are built
+    // around sessions (rename, status, assigned task). A session's file panes
+    // ride along with it here rather than claiming tabs of their own — they get
+    // their own cells in grid mode, where side-by-side actually means something.
+    const merged = [...orderedIds, ...minimizedIds].filter(isTerminalPane)
     return merged.sort((a, b) => compareTerminalIds(a, b, terminals, sortMode, terminalOrder))
   }, [orderedIds, minimizedIds, terminalOrder, terminals, sortMode])
   const activeTabId = useAppStore((s) => s.activeTabId)
@@ -131,7 +138,7 @@ export function TabView() {
   const setRenamingTerminalId = useAppStore((s) => s.setRenamingTerminalId)
   const renameTerminal = useAppStore((s) => s.renameTerminal)
   const reorderTerminals = useAppStore((s) => s.reorderTerminals)
-  const setDiffSidebar = useAppStore((s) => s.setDiffSidebarTerminalId)
+  const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
   const tasks = useAppStore((s) => s.config?.tasks)
   const isSidebarOpen = useAppStore((s) => s.isSidebarOpen)
   const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
@@ -256,6 +263,8 @@ export function TabView() {
 
   const hasTabs = allTabIds.length > 0
   const activeTerminal = activeTabId ? terminals.get(activeTabId) : null
+  const activeHasFiles = useAppStore((s) => (activeTabId ? s.filesPanes.has(activeTabId) : false))
+  const activeHasEditor = useAppStore((s) => (activeTabId ? s.editorPanes.has(activeTabId) : false))
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -392,7 +401,7 @@ export function TabView() {
                       <TabIconButton
                         label="Browse files"
                         icon={<FolderOpen size={13} />}
-                        onClick={() => setDiffSidebar(id, 'all-files')}
+                        onClick={() => toggleFilesPane(id)}
                       />
                       <TabIconButton
                         label="Rename session"
@@ -512,45 +521,63 @@ export function TabView() {
           )}
         </div>
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col" style={{ background: '#141416' }}>
-          <div className="relative flex-1 min-h-0">
+        <div className="flex-1 min-h-0 flex" style={{ background: '#141416' }}>
+          <div className="flex-1 min-w-0 flex flex-col">
+            <div className="relative flex-1 min-h-0">
+              {activeTabId && activeTerminal && (
+                <TerminalPane
+                  key={activeTabId}
+                  terminalId={activeTabId}
+                  agentType={activeTerminal.session.agentType}
+                  isFocused={true}
+                  domBlocks={domBlocks}
+                />
+              )}
+              {activeTabId && activeTerminal && activeTerminal.lastOutputTimestamp === 0 && (
+                <div
+                  className="absolute inset-0 p-3 space-y-2 pointer-events-none"
+                  style={{ background: '#141416' }}
+                >
+                  <div className="h-3 w-3/4 rounded bg-white/[0.04] animate-pulse" />
+                  <div
+                    className="h-3 w-1/2 rounded bg-white/[0.04] animate-pulse"
+                    style={{ animationDelay: '0.15s' }}
+                  />
+                  <div
+                    className="h-3 w-5/6 rounded bg-white/[0.04] animate-pulse"
+                    style={{ animationDelay: '0.3s' }}
+                  />
+                  <div
+                    className="h-3 w-2/3 rounded bg-white/[0.04] animate-pulse"
+                    style={{ animationDelay: '0.45s' }}
+                  />
+                </div>
+              )}
+            </div>
             {activeTabId && activeTerminal && (
-              <TerminalPane
-                key={activeTabId}
+              <IntentBar
                 terminalId={activeTabId}
-                agentType={activeTerminal.session.agentType}
-                isFocused={true}
-                domBlocks={domBlocks}
+                indentPx={terminalTextIndentPx(activeTerminal.session.agentType, domBlocks)}
               />
             )}
-            {activeTabId && activeTerminal && activeTerminal.lastOutputTimestamp === 0 && (
-              <div
-                className="absolute inset-0 p-3 space-y-2 pointer-events-none"
-                style={{ background: '#141416' }}
-              >
-                <div className="h-3 w-3/4 rounded bg-white/[0.04] animate-pulse" />
-                <div
-                  className="h-3 w-1/2 rounded bg-white/[0.04] animate-pulse"
-                  style={{ animationDelay: '0.15s' }}
-                />
-                <div
-                  className="h-3 w-5/6 rounded bg-white/[0.04] animate-pulse"
-                  style={{ animationDelay: '0.3s' }}
-                />
-                <div
-                  className="h-3 w-2/3 rounded bg-white/[0.04] animate-pulse"
-                  style={{ animationDelay: '0.45s' }}
-                />
-              </div>
-            )}
+            {activeTabId && activeTerminal && <CardStatusBar terminalId={activeTabId} />}
           </div>
-          {activeTabId && activeTerminal && (
-            <IntentBar
-              terminalId={activeTabId}
-              indentPx={terminalTextIndentPx(activeTerminal.session.agentType, domBlocks)}
-            />
+
+          {/* The active session's file panes, alongside its terminal. */}
+          {activeTabId && activeTerminal && (activeHasFiles || activeHasEditor) && (
+            <div className="w-[380px] shrink-0 flex flex-col gap-px border-l border-white/[0.06]">
+              {activeHasFiles && (
+                <div className="flex-1 min-h-0">
+                  <FilesCard sessionId={activeTabId} />
+                </div>
+              )}
+              {activeHasEditor && (
+                <div className="flex-1 min-h-0">
+                  <EditorCard sessionId={activeTabId} />
+                </div>
+              )}
+            </div>
           )}
-          {activeTabId && activeTerminal && <CardStatusBar terminalId={activeTabId} />}
         </div>
       )}
 

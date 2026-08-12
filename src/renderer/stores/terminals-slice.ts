@@ -1,5 +1,7 @@
 import { StateCreator } from 'zustand'
 import { AppStore, TerminalsSlice, TerminalState } from './types'
+import { filesPaneId, editorPaneId } from '../lib/pane-id'
+import { clearDirty } from '../lib/editor-dirty'
 
 export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set) => ({
   terminals: new Map(),
@@ -25,17 +27,34 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       const next = new Map(state.terminals)
       next.delete(id)
       const order = state.terminalOrder.filter((tid) => tid !== id)
+      // A session owns its file-tree and editor panes: they die with it, and so
+      // does any minimized or maximized state pointing at them.
+      const childIds = [filesPaneId(id), editorPaneId(id)]
+      // The dirty registry lives outside the store, so it needs explicit
+      // teardown — otherwise a session closed with unsaved edits leaves a flag
+      // that a recycled id would inherit.
+      clearDirty(id)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(id)
+      for (const child of childIds) minimized.delete(child)
+      const filesPanes = new Set(state.filesPanes)
+      filesPanes.delete(id)
+      const editorPanes = new Map(state.editorPanes)
+      editorPanes.delete(id)
       const gitDiffStats = new Map(state.gitDiffStats)
       gitDiffStats.delete(id)
       window.api.notifyWidgetStatus()
       const extra = state.diffSidebarTerminalId === id ? { diffSidebarTerminalId: null } : {}
+      const maxOwned =
+        state.maximizedPaneId === id || childIds.includes(state.maximizedPaneId ?? '')
       return {
         terminals: next,
         terminalOrder: order,
         minimizedTerminals: minimized,
+        filesPanes,
+        editorPanes,
         gitDiffStats,
+        ...(maxOwned ? { maximizedPaneId: null } : {}),
         ...extra
       }
     }),

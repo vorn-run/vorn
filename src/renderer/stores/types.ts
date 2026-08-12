@@ -41,13 +41,22 @@ export type RunBucket = 'all' | 'running' | 'waiting' | 'success' | 'error'
 export type WorktreeSortMode = 'name' | 'recent'
 export type WorktreeFilter = 'all' | 'active'
 export type SidebarViewMode = 'worktrees' | 'worktrees-sessions' | 'sessions' | 'sessions-flat'
-export type PanelTab = 'changes' | 'all-files'
+export type PanelTab = 'changes'
 
 export interface FlexibleLayoutRect {
   x: number
   y: number
   w: number
   h: number
+}
+
+/**
+ * State of a session's file-editor pane. Independent of that session's tree
+ * pane — the editor can be open, maximized, and closed on its own.
+ */
+export interface EditorPaneState {
+  /** Absolute path of the open file. */
+  filePath: string
 }
 
 export interface TerminalState {
@@ -161,6 +170,16 @@ export interface UISlice {
   visibleTerminalIds: string[]
   focusableTerminalIds: string[]
   minimizedTerminals: Set<string>
+  /** Session ids whose file-tree pane is open. Keyed by owner, one per session. */
+  filesPanes: Set<string>
+  /** Session id → the file its editor pane is showing. One editor per session. */
+  editorPanes: Map<string, EditorPaneState>
+  /**
+   * Pane id currently maximized, or null. At most one app-wide. A maximized
+   * pane covers only its owner session's footprint — other sessions are
+   * unaffected, which is what makes it usable for side-by-side comparison.
+   */
+  maximizedPaneId: string | null
   sessionDockCollapsed: boolean
   isOnboardingOpen: boolean
   diffSidebarTerminalId: string | null
@@ -213,6 +232,18 @@ export interface UISlice {
   setFocusableTerminalIds: (ids: string[]) => void
   reorderTerminals: (fromIndex: number, toIndex: number) => void
   toggleMinimized: (id: string) => void
+  /** Open (or focus) the file-tree pane owned by `sessionId`. */
+  openFilesPane: (sessionId: string) => void
+  closeFilesPane: (sessionId: string) => void
+  toggleFilesPane: (sessionId: string) => void
+  /**
+   * Show `filePath` in the session's editor pane, creating it if needed.
+   * Independent of the tree pane — the editor works with Files closed.
+   */
+  openEditorPane: (sessionId: string, filePath: string) => void
+  closeEditorPane: (sessionId: string) => void
+  /** Maximize a pane over its owner session's footprint, or null to restore. */
+  setMaximizedPane: (paneId: string | null) => void
   toggleSessionDockCollapsed: () => void
   setOnboardingOpen: (open: boolean) => void
   setDiffSidebarTerminalId: (id: string | null, tab?: PanelTab) => void
