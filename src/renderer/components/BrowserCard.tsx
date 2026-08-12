@@ -364,24 +364,6 @@ export const BrowserCard = memo(
         {/* Address bar */}
         <div className="flex items-center gap-0.5 px-1.5 py-1 shrink-0">
           <button
-            onClick={pickElement}
-            aria-label="Pick an element for the agent"
-            aria-pressed={picking}
-            title="Point at an element to describe it to this session's agent"
-            className={`${btn} ${picking ? 'text-sky-400 bg-white/[0.06]' : ''}`}
-          >
-            <MousePointerClick size={14} strokeWidth={2} />
-          </button>
-          <button
-            onClick={() => (annotating ? void sendInk() : setAnnotating(true))}
-            aria-label={annotating ? 'Send the annotation' : 'Draw on the page for the agent'}
-            aria-pressed={annotating}
-            title="Draw over the page, then click again to send it to this session's agent"
-            className={`${btn} ${annotating ? 'text-sky-400 bg-white/[0.06]' : ''}`}
-          >
-            <Pencil size={14} strokeWidth={2} />
-          </button>
-          <button
             onClick={() => viewRef.current?.goBack()}
             disabled={!nav.back}
             aria-label="Go back"
@@ -428,6 +410,28 @@ export const BrowserCard = memo(
                          transition-colors"
             />
           </form>
+
+          {/* The two agent-facing tools sit after the address bar, away from
+              back/forward: they arm a mode over the page rather than navigate,
+              and next to an arrow they read as one more history control. */}
+          <button
+            onClick={pickElement}
+            aria-label="Pick an element for the agent"
+            aria-pressed={picking}
+            title="Point at an element to describe it to this session's agent"
+            className={`${btn} ml-1 ${picking ? 'text-sky-400 bg-white/[0.06]' : ''}`}
+          >
+            <MousePointerClick size={14} strokeWidth={2} />
+          </button>
+          <button
+            onClick={() => (annotating ? void sendInk() : setAnnotating(true))}
+            aria-label={annotating ? 'Send the annotation' : 'Draw on the page for the agent'}
+            aria-pressed={annotating}
+            title="Draw over the page, then click again to send it to this session's agent"
+            className={`${btn} ${annotating ? 'text-sky-400 bg-white/[0.06]' : ''}`}
+          >
+            <Pencil size={14} strokeWidth={2} />
+          </button>
         </div>
 
         {failed && <div className="px-2 py-1 text-[10px] text-amber-400/90 shrink-0">{failed}</div>}
