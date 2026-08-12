@@ -138,13 +138,13 @@ export function registerBrowserTools(server: McpServer): void {
     'read_page',
     'Read your session browser pane as an accessibility tree. Interactive elements carry a ' +
       '"ref" you can pass to browser_interact. Prefer this over screenshot: it is far cheaper ' +
-      'and gives you actionable handles. Long pages paginate — pass back next_cursor.',
+      'and gives you actionable handles. Long pages paginate — pass the returned nextCursor back as `cursor`.',
     {
       filter: z
         .enum(['interactive', 'all'])
         .optional()
         .describe('"interactive" (default) returns only actionable elements; "all" adds text'),
-      cursor: V.shortText.optional().describe('next_cursor from a previous read_page call'),
+      cursor: V.shortText.optional().describe('nextCursor from a previous read_page result'),
       limit: z.number().int().min(1).max(200).optional().describe('Max nodes (default 200)')
     },
     async (args) =>
@@ -163,9 +163,9 @@ export function registerBrowserTools(server: McpServer): void {
   server.tool(
     'get_page_text',
     'Read the visible text of your session browser pane. Use when you want to read an article ' +
-      'or verify copy, rather than act on controls. Long pages paginate via next_cursor.',
+      'or verify copy, rather than act on controls. Long pages paginate — pass the returned nextCursor back as `cursor`.',
     {
-      cursor: V.shortText.optional().describe('next_cursor from a previous get_page_text call')
+      cursor: V.shortText.optional().describe('nextCursor from a previous get_page_text result')
     },
     async (args) =>
       withSession(async (id) =>

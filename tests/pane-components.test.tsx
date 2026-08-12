@@ -476,6 +476,82 @@ describe('BrowserCard', () => {
     expect(screen.queryByTestId('browser-ink')).toBeNull()
   })
 
+  it('tells main which guest belongs to this session once it attaches', async () => {
+    // jsdom renders <webview> as an unknown element, so the guest API has to be
+    // supplied. It arrives late on purpose: the first read throws, which is the
+    // real race — a tab whose guest has not finished attaching fires no further
+    // `dom-ready`, so without the retry the registry would keep pointing at the
+    // tab the person just left.
+    const attach = (window as unknown as { api: { attachBrowser: ReturnType<typeof vi.fn> } }).api
+      .attachBrowser
+    attach.mockClear()
+    let ready = false
+    const proto = window.HTMLElement.prototype as unknown as { getWebContentsId?: () => number }
+    proto.getWebContentsId = () => {
+      if (!ready) throw new Error('not attached yet')
+      return 42
+    }
+    try {
+      act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+      render(<BrowserCard sessionId="t1" />)
+      expect(attach).not.toHaveBeenCalled()
+
+      ready = true
+      // Without an id in the registry the session's agent is told "no pane
+      // open" while the person is looking straight at one.
+      await waitFor(() => expect(attach).toHaveBeenCalledWith('t1', 42))
+    } finally {
+      delete proto.getWebContentsId
+    }
+  })
+
+  it('reports a pick it could not read instead of sending a half-formed one', async () => {
+    mockStartPick.mockRejectedValueOnce(new Error('guest went away'))
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Pick an element for the agent'))
+
+    // The agent must not be handed a partial description of the thing the
+    // person pointed at — it would act on it as if it were whole. The person
+    // is told instead, since only they can point again.
+    expect(await screen.findByText('Could not read the selected element')).toBeInTheDocument()
+    expect(mockWriteTerminal).not.toHaveBeenCalled()
+    // And the picker disarms, rather than leaving the button stuck lit with no
+    // overlay behind it.
+    expect(screen.getByLabelText('Pick an element for the agent')).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+  })
+
+  it('reports ink it could not resolve instead of guessing at what it covered', async () => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      clearRect: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn()
+    })) as unknown as HTMLCanvasElement['getContext']
+    mockAnnotate.mockRejectedValueOnce(new Error('scroll offset unavailable'))
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Draw on the page for the agent'))
+    const ink = screen.getByTestId('browser-ink')
+    ink.setPointerCapture = vi.fn()
+    fireEvent.pointerDown(ink, { clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(ink, { clientX: 40, clientY: 40 })
+    fireEvent.pointerUp(ink)
+    fireEvent.click(screen.getByLabelText('Send the annotation'))
+
+    // "I drew on something" with no elements resolved is worse than silence:
+    // the agent would go looking for what the person meant and settle on
+    // whatever it found.
+    expect(await screen.findByText('Could not resolve the annotation')).toBeInTheDocument()
+    expect(mockWriteTerminal).not.toHaveBeenCalled()
+  })
+
   it('calls an unvisited tab "New tab" and leaves its address bar empty', () => {
     act(() => useAppStore.getState().openBrowserPane('t1'))
     render(<BrowserCard sessionId="t1" />)

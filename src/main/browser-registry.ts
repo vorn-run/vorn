@@ -785,11 +785,16 @@ async function describe(
 /**
  * Resolve freehand ink to the elements it covers.
  *
- * Strokes arrive in **page** coordinates, not window ones. That distinction is
- * the whole trap here: on a layout with an inner scrolling container, window
- * coordinates resolve to whatever happens to be scrolled into that position at
- * lookup time, and it fails *silently* — you get plausible elements that are
- * simply the wrong ones. The renderer converts before sending.
+ * Strokes arrive in **viewport** coordinates — ink is drawn on a canvas laid
+ * over the pane, so that is the only space the renderer knows. Main converts
+ * to page coordinates once, here, by reading the scroll offset itself.
+ *
+ * The distinction is the whole trap: on a layout with an inner scrolling
+ * container, resolving a stroke against the wrong space returns whatever
+ * happens to be scrolled into that position at lookup time, and it fails
+ * *silently* — plausible elements that are simply the wrong ones. Reading the
+ * offset here rather than threading it through the renderer keeps it from
+ * drifting out of date between the last stroke and the send.
  */
 export async function annotate(params: {
   sessionId: string
