@@ -26,7 +26,10 @@ import {
   InstalledShell,
   WorktreeInventory,
   WorktreeActionResult,
-  BranchDeleteResult
+  BranchDeleteResult,
+  BrowserSelection,
+  BrowserStroke,
+  BrowserAnnotation
 } from '../shared/types'
 
 const api = {
@@ -481,6 +484,22 @@ const api = {
     host: RemoteHost
   ): Promise<{ success: boolean; message: string; durationMs: number }> =>
     ipcRenderer.invoke(IPC.SSH_TEST_CONNECTION, host),
+
+  // Browser pane — tells main which guest belongs to which session, so the
+  // agent's browser tools can reach it. Fire-and-forget in both directions.
+  attachBrowser: (sessionId: string, webContentsId: number): void =>
+    ipcRenderer.send(IPC.BROWSER_ATTACH, { sessionId, webContentsId }),
+  detachBrowser: (sessionId: string): void => ipcRenderer.send(IPC.BROWSER_DETACH, sessionId),
+  /** Arm the element picker. Resolves with the pick, or null if cancelled. */
+  startBrowserPick: (sessionId: string): Promise<BrowserSelection | null> =>
+    ipcRenderer.invoke(IPC.BROWSER_PICK_START, sessionId),
+  cancelBrowserPick: (sessionId: string): void =>
+    ipcRenderer.send(IPC.BROWSER_PICK_CANCEL, sessionId),
+  /** Resolve freehand ink (in *page* coordinates) to the elements under it. */
+  annotateBrowser: (params: {
+    sessionId: string
+    strokes: BrowserStroke[]
+  }): Promise<BrowserAnnotation> => ipcRenderer.invoke(IPC.BROWSER_ANNOTATE, params),
 
   // Shell
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),

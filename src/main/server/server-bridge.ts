@@ -26,6 +26,7 @@ export class ServerBridge extends EventEmitter {
   private url: string
   private reconnectTimer: NodeJS.Timeout | null = null
   private shouldReconnect = true
+  private inbound = new Map<string, (params: unknown) => unknown>()
 
   constructor(url: string) {
     super()
@@ -39,13 +40,21 @@ export class ServerBridge extends EventEmitter {
 
     this.ws.on('open', () => {
       log.info('[bridge] connected to server')
+      // Tell the server which socket is main's. Browser tools arrive at the
+      // server but can only be answered here — a `<webview>` guest is
+      // unreachable from that process — so it needs to know where to relay them.
+      this.notify('bridge:identify')
       this.emit('connected')
     })
 
     this.ws.on('message', (raw: Buffer) => {
       try {
         const msg = JSON.parse(raw.toString())
-        if ('id' in msg && msg.id !== undefined) {
+        if ('method' in msg && 'id' in msg && msg.id !== undefined && msg.id !== null) {
+          // An inbound *request*: the server asking us something only main can
+          // answer. Distinguished from a response by carrying a method.
+          void this.handleInbound(msg as { id: number | string; method: string; params?: unknown })
+        } else if ('id' in msg && msg.id !== undefined) {
           this.handleResponse(msg as RpcResponse)
         } else if ('method' in msg) {
           this.emit('server-notification', msg.method, (msg as RpcNotification).params)
@@ -116,6 +125,41 @@ export class ServerBridge extends EventEmitter {
 
   get isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  /**
+   * Answer a method only main can answer.
+   *
+   * Registered by `registerInboundHandlers` at startup. Anything unregistered
+   * is refused rather than ignored: a silent drop would leave the server's
+   * caller waiting out its full timeout for a method that will never exist.
+   */
+  handle(method: string, handler: (params: unknown) => unknown): void {
+    this.inbound.set(method, handler)
+  }
+
+  private async handleInbound(msg: {
+    id: number | string
+    method: string
+    params?: unknown
+  }): Promise<void> {
+    const send = (body: Record<string, unknown>): void => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, ...body }))
+      }
+    }
+    const handler = this.inbound.get(msg.method)
+    if (!handler) {
+      send({ error: { code: -32601, message: `Method not found in main: ${msg.method}` } })
+      return
+    }
+    try {
+      send({ result: await handler(msg.params) })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log.warn({ err, method: msg.method }, '[bridge] inbound handler error')
+      send({ error: { code: -32000, message } })
+    }
   }
 
   private handleResponse(msg: RpcResponse): void {

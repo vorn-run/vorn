@@ -3,12 +3,40 @@ import { ipcMain } from 'electron'
 import { safeHandle } from './ipc-safe-handle'
 import { IPC, ResizePayload } from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
+import type { RequestMethods } from '@vornrun/shared/protocol'
+import * as browserRegistry from './browser-registry'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
 
 let bridge: ServerBridge | null = null
 
 export function setBridge(b: ServerBridge): void {
   bridge = b
+  registerInboundHandlers(b)
+}
+
+/**
+ * Answer the `browser:*` methods the server relays to us.
+ *
+ * These flow the opposite way from everything else in this file: an agent calls
+ * an MCP tool, the MCP server asks the Vorn server, and the Vorn server asks
+ * *us*, because the guest `<webview>` and its CDP debugger only exist in this
+ * process. Params arrive already carrying the session id the MCP layer resolved
+ * from `VORN_SESSION_ID`.
+ */
+function registerInboundHandlers(b: ServerBridge): void {
+  type P<M extends keyof RequestMethods> = RequestMethods[M]['params']
+  b.handle('browser:readPage', (p) => browserRegistry.readPage(p as P<'browser:readPage'>))
+  b.handle('browser:getText', (p) => browserRegistry.getText(p as P<'browser:getText'>))
+  b.handle('browser:consoleMessages', (p) =>
+    browserRegistry.consoleMessages(p as P<'browser:consoleMessages'>)
+  )
+  b.handle('browser:networkRequests', (p) =>
+    browserRegistry.networkRequests(p as P<'browser:networkRequests'>)
+  )
+  b.handle('browser:screenshot', (p) => browserRegistry.screenshot(p as P<'browser:screenshot'>))
+  b.handle('browser:interact', (p) => browserRegistry.interact(p as P<'browser:interact'>))
+  b.handle('browser:navigate', (p) => browserRegistry.navigate(p as P<'browser:navigate'>))
+  b.handle('browser:find', (p) => browserRegistry.find(p as P<'browser:find'>))
 }
 
 function requireBridge(): ServerBridge {
@@ -311,6 +339,34 @@ export function registerIpcHandlers(): void {
     }
     return shell.openExternal(parsed.toString())
   })
+
+  // ─── Browser pane (Electron-only: guests live here) ────────────
+  //
+  // A `<webview>` carries no session identity — only a partition string — so
+  // the renderer tells us which guest belongs to which session as soon as it
+  // attaches. Everything the agent does to the pane keys off that mapping.
+  ipcMain.on(IPC.BROWSER_ATTACH, (_, { sessionId, webContentsId }) => {
+    browserRegistry.attach(sessionId, webContentsId)
+  })
+  ipcMain.on(IPC.BROWSER_DETACH, (_, sessionId: string) => {
+    browserRegistry.detach(sessionId)
+  })
+
+  // The picker is user-initiated and answers back to the renderer that armed
+  // it, not to an agent. A cancel resolves as `null` rather than an error: the
+  // person changing their mind is an ordinary outcome, not a failure.
+  safeHandle(IPC.BROWSER_PICK_START, async (_, sessionId: string) => {
+    try {
+      return await browserRegistry.startPick({ sessionId })
+    } catch (err) {
+      if (err instanceof Error && err.message === 'Selection cancelled') return null
+      throw err
+    }
+  })
+  ipcMain.on(IPC.BROWSER_PICK_CANCEL, (_, sessionId: string) => {
+    browserRegistry.cancelPick(sessionId)
+  })
+  safeHandle(IPC.BROWSER_ANNOTATE, (_, params) => browserRegistry.annotate(params))
 
   // ─── Fire-and-forget → bridge notifications ────────────────────
 

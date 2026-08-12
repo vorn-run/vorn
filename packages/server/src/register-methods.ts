@@ -11,6 +11,7 @@ import { getRecentSessions } from './agent-history'
 import { detectIDEs, openInIDE } from './ide-detector'
 import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
 import { clientRegistry } from './broadcast'
+import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
 import { installHooks } from './hook-installer'
@@ -1081,6 +1082,26 @@ export function registerAllMethods(): void {
     }
     return results
   })
+
+  // ─── Browser pane (relayed to Electron main) ──────────────────
+  //
+  // The guest `<webview>` and its CDP debugger only exist in main, so these
+  // are the one method family this process does not answer itself. Each is a
+  // straight relay over the reverse bridge; the session scoping that makes
+  // them safe happens in the MCP layer, which resolves the caller from
+  // VORN_SESSION_ID and never accepts a session as an argument.
+  registerMethod('browser:readPage', (p) => browserBridge.request('browser:readPage', p))
+  registerMethod('browser:getText', (p) => browserBridge.request('browser:getText', p))
+  registerMethod('browser:consoleMessages', (p) =>
+    browserBridge.request('browser:consoleMessages', p)
+  )
+  registerMethod('browser:networkRequests', (p) =>
+    browserBridge.request('browser:networkRequests', p)
+  )
+  registerMethod('browser:screenshot', (p) => browserBridge.request('browser:screenshot', p))
+  registerMethod('browser:interact', (p) => browserBridge.request('browser:interact', p))
+  registerMethod('browser:navigate', (p) => browserBridge.request('browser:navigate', p))
+  registerMethod('browser:find', (p) => browserBridge.request('browser:find', p))
 
   // Wire manager events → broadcast to WS clients
   ptyManager.on('client-message', (channel: string, payload: unknown) => {

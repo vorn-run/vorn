@@ -1304,6 +1304,16 @@ export const IPC = {
   WIDGET_PERMISSION_RESPONSE: 'widget:permission-response',
   WIDGET_PERMISSION_CANCELLED: 'widget:permission-cancelled',
   SHELL_CREATE: 'shell:create',
+  /** Renderer reports a browser guest's webContentsId once it attaches, which
+   *  is the only thread tying a `<webview>` back to the session that owns it. */
+  BROWSER_ATTACH: 'browser:attach',
+  BROWSER_DETACH: 'browser:detach',
+  /** Renderer arms the element picker; main pushes the result back on pick. */
+  BROWSER_PICK_START: 'browser:pickStart',
+  BROWSER_PICK_CANCEL: 'browser:pickCancel',
+  BROWSER_PICKED: 'browser:picked',
+  /** Freehand ink over the page, resolved to the elements it covers. */
+  BROWSER_ANNOTATE: 'browser:annotate',
   UPDATE_DOWNLOADED: 'update:downloaded',
   UPDATE_INSTALL: 'update:install',
   UPDATE_SET_CHANNEL: 'update:set-channel',
@@ -1570,4 +1580,106 @@ export interface ScheduleLogEntry {
   status: 'success' | 'error' | 'missed'
   sessionsLaunched: number
   error?: string
+}
+
+// ─── Agent-controllable browser pane ────────────────────────────
+
+/**
+ * One node of a page as the agent sees it.
+ *
+ * Derived from the accessibility tree rather than the DOM: the AX tree already
+ * collapses presentational wrappers and carries the computed name a user would
+ * read, so it is both smaller and closer to what "the page says" than raw HTML.
+ */
+export interface BrowserNode {
+  /** Opaque handle for `interact`. Only interactive nodes carry one. */
+  ref?: string
+  role: string
+  name?: string
+  value?: string
+  /** Set when the node is not currently actionable, so the agent stops early. */
+  disabled?: boolean
+}
+
+export interface BrowserPageRead {
+  url: string
+  title: string
+  nodes: BrowserNode[]
+  /** Pass back as `cursor` to continue. Absent when the page is exhausted. */
+  nextCursor?: string
+  /** Bumped on every navigation; refs from an older generation are refused. */
+  generation: number
+}
+
+export interface BrowserConsoleMessage {
+  level: string
+  text: string
+  timestamp: number
+}
+
+export interface BrowserNetworkRequest {
+  method: string
+  url: string
+  status?: number
+  timestamp: number
+}
+
+/** Where an interaction lands: a ref from `read_page`, or raw viewport coords. */
+export type BrowserTarget = { ref: string } | { x: number; y: number }
+
+/**
+ * What the user pointed at, packaged for the agent.
+ *
+ * The picker exists because "this button" is trivial for a person to indicate
+ * and expensive for an agent to locate. Everything here answers "which element
+ * is it" from a different angle, so a mismatch in one is recoverable.
+ */
+export interface BrowserSelection {
+  /** Where it was: page url and the element's viewport rect. */
+  url: string
+  rect: { x: number; y: number; width: number; height: number }
+  /** What it says. Usually the fastest way to recognise it in a page read. */
+  text: string
+  /** CSS-ish path from the document root, for a targeted re-lookup. */
+  selector: string
+  /** The element's own markup, truncated — attributes often carry the intent. */
+  outerHTML: string
+  /** Tag plus id and classes, split out so they need not be parsed back. */
+  tagName: string
+  id?: string
+  classes?: string[]
+  /**
+   * React component name, when the page is a dev build carrying fiber data.
+   * A bonus: production builds mangle or drop it, so nothing may depend on it.
+   */
+  componentName?: string
+  /** `file:line` from React's `_debugSource`. Dev builds only, never required. */
+  source?: string
+  /** PNG of just this element, base64. Small by construction — it's one node. */
+  screenshot?: string
+}
+
+/** One freehand stroke, in the coordinate space of what it was drawn over. */
+export interface BrowserStroke {
+  points: Array<{ x: number; y: number }>
+}
+
+/**
+ * Ink over a page, resolved to the things underneath it.
+ *
+ * Both halves ship because neither is sufficient. The image carries intent that
+ * geometry cannot — a circle round three items, an arrow from one to another,
+ * a scribble that means "this bit" — while the elements carry identity the
+ * image cannot, since a picture of a button is not a handle on it.
+ */
+export interface BrowserAnnotation {
+  url: string
+  /** Elements found under the ink, nearest-first, with refs where actionable. */
+  elements: BrowserNode[]
+  /** Full-page PNG with the ink drawn on, base64. */
+  image: string
+  /** Tight crop around the strokes' bounding box, base64. Usually the useful one. */
+  crop?: string
+  /** The ink's bounding box, in page coordinates. */
+  bounds: { x: number; y: number; width: number; height: number }
 }

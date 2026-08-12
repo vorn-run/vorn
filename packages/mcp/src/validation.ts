@@ -35,6 +35,10 @@ const safeDescription = z.string().max(5000, 'Description must be 5000 character
 /** Bounded short text (branch names, display names, icon names). */
 const safeShortText = z.string().max(200, 'Value must be 200 characters or less')
 
+/** Bounded URL-ish input. Scheme filtering happens in the main process, which
+ *  applies the same allowlist the address bar does; this only bounds length. */
+const safeUrl = z.string().min(1, 'URL must not be empty').max(2048, 'URL is too long')
+
 /** Bounded prompt text. */
 const safePrompt = z.string().max(10000, 'Prompt must be 10000 characters or less')
 
@@ -58,5 +62,6 @@ export const V = {
   shortText: safeShortText,
   prompt: safePrompt,
   absolutePath: safeAbsolutePath,
-  hexColor: safeHexColor
+  hexColor: safeHexColor,
+  url: safeUrl
 }

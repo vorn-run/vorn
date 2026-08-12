@@ -14,6 +14,9 @@ Object.defineProperty(window, 'matchMedia', {
 
 const mockListDir = vi.fn<(path: string) => Promise<FileEntry[]>>()
 const mockReadFileContent = vi.fn<(path: string) => Promise<string | null>>()
+const mockStartPick = vi.fn<(sessionId: string) => Promise<unknown>>()
+const mockWriteTerminal = vi.fn()
+const mockAnnotate = vi.fn<(p: unknown) => Promise<unknown>>()
 
 Object.defineProperty(window, 'api', {
   value: {
@@ -21,6 +24,13 @@ Object.defineProperty(window, 'api', {
     readFileContent: (...args: unknown[]) => mockReadFileContent(...(args as [string])),
     writeFileContent: vi.fn().mockResolvedValue({ success: true }),
     notifyWidgetStatus: vi.fn(),
+    // The browser pane reports its guest to main so the agent can drive it.
+    attachBrowser: vi.fn(),
+    detachBrowser: vi.fn(),
+    startBrowserPick: (...args: unknown[]) => mockStartPick(...(args as [string])),
+    cancelBrowserPick: vi.fn(),
+    annotateBrowser: (...args: unknown[]) => mockAnnotate(args[0]),
+    writeTerminal: (...args: unknown[]) => mockWriteTerminal(...args),
     // FocusedTerminal pulls in the full card header, which probes the host.
     detectInstalledAgents: vi.fn().mockResolvedValue([]),
     detectIDEs: vi.fn().mockResolvedValue([]),
@@ -362,6 +372,88 @@ describe('BrowserCard', () => {
     expect(screen.getAllByText('localhost:5173')).toHaveLength(1)
     expect(screen.getByRole('tab')).toHaveTextContent('localhost:5173')
     expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
+  it("sends what the user picked to the session's agent", async () => {
+    mockStartPick.mockResolvedValueOnce({
+      url: 'http://localhost:5173/',
+      rect: { x: 0, y: 0, width: 80, height: 24 },
+      text: 'Save',
+      selector: 'form > button.primary',
+      outerHTML: '<button class="primary">Save</button>',
+      tagName: 'button',
+      componentName: 'SaveButton',
+      source: 'src/Save.tsx:12'
+    })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Pick an element for the agent'))
+
+    // It goes in as a message, not as a command: the person is saying "this
+    // one", and what to do about it is still the agent's call.
+    await waitFor(() => expect(mockWriteTerminal).toHaveBeenCalled())
+    const sent = mockWriteTerminal.mock.calls[0][1] as string
+    expect(sent).toContain('form > button.primary')
+    expect(sent).toContain('SaveButton')
+    expect(sent).toContain('src/Save.tsx:12')
+  })
+
+  it('says nothing to the agent when the pick is cancelled', async () => {
+    mockStartPick.mockResolvedValueOnce(null)
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Pick an element for the agent'))
+
+    // Escaping out of a picker is an ordinary thing to do; interrupting the
+    // agent with an empty selection would punish it.
+    await waitFor(() => expect(mockStartPick).toHaveBeenCalledWith('t1'))
+    expect(mockWriteTerminal).not.toHaveBeenCalled()
+  })
+
+  it('sends the ink and what it covers to the agent', async () => {
+    // jsdom has no 2d context; the drawing is cosmetic, the stroke record is not.
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      clearRect: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn()
+    })) as unknown as HTMLCanvasElement['getContext']
+    mockAnnotate.mockResolvedValueOnce({
+      url: 'http://localhost:5173/',
+      elements: [{ role: 'button', name: 'Save' }],
+      image: '',
+      bounds: { x: 0, y: 0, width: 10, height: 10 }
+    })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Draw on the page for the agent'))
+    const ink = screen.getByTestId('browser-ink')
+    ink.setPointerCapture = vi.fn()
+    fireEvent.pointerDown(ink, { clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(ink, { clientX: 40, clientY: 40 })
+    fireEvent.pointerUp(ink)
+    fireEvent.click(screen.getByLabelText('Send the annotation'))
+
+    await waitFor(() => expect(mockWriteTerminal).toHaveBeenCalled())
+    expect((mockAnnotate.mock.calls[0][0] as { strokes: unknown[] }).strokes).toHaveLength(1)
+    expect(mockWriteTerminal.mock.calls[0][1] as string).toContain('Save')
+  })
+
+  it('does not interrupt the agent when the pencil is armed and nothing is drawn', async () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    // Arming and thinking better of it is an ordinary thing to do.
+    fireEvent.click(screen.getByLabelText('Draw on the page for the agent'))
+    fireEvent.click(screen.getByLabelText('Send the annotation'))
+
+    expect(mockAnnotate).not.toHaveBeenCalled()
+    expect(mockWriteTerminal).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('browser-ink')).toBeNull()
   })
 
   it('calls an unvisited tab "New tab" and leaves its address bar empty', () => {

@@ -1,6 +1,6 @@
 import { memo, forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowLeft, ArrowRight, Plus, RotateCw, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, MousePointerClick, Pencil, Plus, RotateCw, X } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { PaneCard, PaneControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
@@ -31,6 +31,9 @@ interface WebviewElement extends HTMLElement {
   reload(): void
   stop(): void
   getURL(): string
+  /** Identifies this guest to the main process, which is the only place that
+   *  can drive it. A `<webview>` carries no session identity of its own. */
+  getWebContentsId(): number
 }
 
 /**
@@ -107,15 +110,133 @@ export const BrowserCard = memo(
         setFailed(detail.errorDescription || 'Failed to load')
       }
 
+      // The guest only has a webContentsId once it has attached. Reporting it
+      // is what lets the agent's browser tools find this session's pane at all.
+      const onAttached = (): void => {
+        try {
+          window.api.attachBrowser(sessionId, view.getWebContentsId())
+        } catch {
+          // A guest that died before we could read its id simply stays
+          // undriveable; the agent's tools say so rather than acting blind.
+        }
+      }
+      onAttached()
+
+      view.addEventListener('dom-ready', onAttached)
       view.addEventListener('did-start-loading', onStart)
       view.addEventListener('did-stop-loading', onStop)
       view.addEventListener('did-fail-load', onFail)
       return () => {
+        view.removeEventListener('dom-ready', onAttached)
         view.removeEventListener('did-start-loading', onStart)
         view.removeEventListener('did-stop-loading', onStop)
         view.removeEventListener('did-fail-load', onFail)
       }
-    }, [pane?.activeTab])
+    }, [pane?.activeTab, sessionId])
+
+    // Closing the pane or the session unmounts this card; either way the CDP
+    // session must be released, or main keeps a debugger attached to a guest
+    // nobody can reach.
+    useEffect(() => {
+      return () => window.api.detachBrowser(sessionId)
+    }, [sessionId])
+
+    const [picking, setPicking] = useState(false)
+
+    /**
+     * Hand the agent whatever the person points at.
+     *
+     * "This button" costs a person one click and costs an agent a page read
+     * plus a guess. The selection goes in as a message to the session's
+     * terminal — the same channel a typed request uses — so the agent decides
+     * what to do with it rather than having an action forced on it.
+     */
+    const pickElement = useCallback(async () => {
+      setPicking(true)
+      try {
+        const sel = await window.api.startBrowserPick(sessionId)
+        // Null is the person pressing escape, which is an ordinary outcome.
+        if (!sel) return
+        const lines = [
+          `[browser selection from ${sel.url}]`,
+          `element: ${sel.selector}`,
+          sel.componentName ? `component: ${sel.componentName}` : null,
+          sel.source ? `source: ${sel.source}` : null,
+          sel.text ? `text: ${sel.text}` : null,
+          `html: ${sel.outerHTML}`
+        ].filter(Boolean)
+        window.api.writeTerminal(sessionId, lines.join('\n') + '\n')
+      } catch {
+        setFailed('Could not read the selected element')
+      } finally {
+        setPicking(false)
+      }
+    }, [sessionId])
+
+    // Leaving the pane with the picker armed would strand an inspect overlay
+    // on a page nobody is looking at.
+    useEffect(() => {
+      return () => window.api.cancelBrowserPick(sessionId)
+    }, [sessionId])
+
+    const [annotating, setAnnotating] = useState(false)
+    const strokesRef = useRef<Array<{ points: Array<{ x: number; y: number }> }>>([])
+    const inkRef = useRef<HTMLCanvasElement | null>(null)
+    const drawingRef = useRef(false)
+
+    /**
+     * Send the ink, and what it covers, to the session's agent.
+     *
+     * The drawing is the point: a circle round three rows or an arrow from one
+     * thing to another carries intent no list of elements can. The elements go
+     * with it because a picture of a button is not a handle on one.
+     */
+    const sendInk = useCallback(async () => {
+      const strokes = strokesRef.current
+      strokesRef.current = []
+      const canvas = inkRef.current
+      canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height)
+      setAnnotating(false)
+      if (strokes.length === 0) return
+      try {
+        const note = await window.api.annotateBrowser({ sessionId, strokes })
+        const names = note.elements.map((e) => e.name).filter(Boolean)
+        window.api.writeTerminal(
+          sessionId,
+          [
+            `[browser annotation on ${note.url}]`,
+            names.length ? `marked: ${names.join(', ')}` : 'marked: (no elements under the ink)'
+          ].join('\n') + '\n'
+        )
+      } catch {
+        setFailed('Could not resolve the annotation')
+      }
+    }, [sessionId])
+
+    const draw = useCallback((e: React.PointerEvent<HTMLCanvasElement>, start: boolean) => {
+      const canvas = inkRef.current
+      const ctx = canvas?.getContext('2d')
+      if (!canvas || !ctx) return
+      const rect = canvas.getBoundingClientRect()
+      // The canvas is sized to its own box, so client coords map straight onto
+      // the page's viewport coords — no scaling step to get wrong.
+      const point = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+      if (start) {
+        canvas.width = rect.width
+        canvas.height = rect.height
+        strokesRef.current.push({ points: [point] })
+        ctx.strokeStyle = '#38bdf8'
+        ctx.lineWidth = 3
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        ctx.beginPath()
+        ctx.moveTo(point.x, point.y)
+        return
+      }
+      strokesRef.current[strokesRef.current.length - 1]?.points.push(point)
+      ctx.lineTo(point.x, point.y)
+      ctx.stroke()
+    }, [])
 
     const commitUrl = useCallback(
       (raw: string) => {
@@ -220,6 +341,24 @@ export const BrowserCard = memo(
         {/* Address bar */}
         <div className="flex items-center gap-0.5 px-1.5 py-1 shrink-0">
           <button
+            onClick={pickElement}
+            aria-label="Pick an element for the agent"
+            aria-pressed={picking}
+            title="Point at an element to describe it to this session's agent"
+            className={`${btn} ${picking ? 'text-sky-400 bg-white/[0.06]' : ''}`}
+          >
+            <MousePointerClick size={14} strokeWidth={2} />
+          </button>
+          <button
+            onClick={() => (annotating ? void sendInk() : setAnnotating(true))}
+            aria-label={annotating ? 'Send the annotation' : 'Draw on the page for the agent'}
+            aria-pressed={annotating}
+            title="Draw over the page, then click again to send it to this session's agent"
+            className={`${btn} ${annotating ? 'text-sky-400 bg-white/[0.06]' : ''}`}
+          >
+            <Pencil size={14} strokeWidth={2} />
+          </button>
+          <button
             onClick={() => viewRef.current?.goBack()}
             disabled={!nav.back}
             aria-label="Go back"
@@ -287,6 +426,22 @@ export const BrowserCard = memo(
               style={i === pane.activeTab ? undefined : { visibility: 'hidden' }}
             />
           ))}
+          {/* Only mounted while armed: an always-present overlay would eat
+              every click meant for the page. */}
+          {annotating && (
+            <canvas
+              ref={inkRef}
+              data-testid="browser-ink"
+              onPointerDown={(e) => {
+                drawingRef.current = true
+                e.currentTarget.setPointerCapture(e.pointerId)
+                draw(e, true)
+              }}
+              onPointerMove={(e) => drawingRef.current && draw(e, false)}
+              onPointerUp={() => (drawingRef.current = false)}
+              className="absolute inset-0 w-full h-full cursor-crosshair z-10"
+            />
+          )}
         </div>
       </PaneCard>
     )

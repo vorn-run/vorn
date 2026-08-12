@@ -98,7 +98,14 @@ Object.defineProperty(window, 'api', {
     listRemoteBranches: vi.fn().mockResolvedValue([]),
     checkoutBranch: vi.fn().mockResolvedValue({ ok: true }),
     detectIDEs: vi.fn().mockResolvedValue([]),
-    openInIDE: vi.fn()
+    openInIDE: vi.fn(),
+    // The browser pane reports its guest to main so the agent can drive it.
+    attachBrowser: vi.fn(),
+    detachBrowser: vi.fn(),
+    startBrowserPick: vi.fn().mockResolvedValue(null),
+    cancelBrowserPick: vi.fn(),
+    annotateBrowser: vi.fn(),
+    writeTerminal: vi.fn()
   },
   writable: true
 })
