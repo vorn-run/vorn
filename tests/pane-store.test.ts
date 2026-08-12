@@ -90,40 +90,11 @@ describe('pane store actions', () => {
     expect(s().editorPanes.get('t1')?.filePath).toBe('/p/b.ts')
   })
 
-  it('re-opening a file un-minimizes the editor instead of updating it unseen', () => {
+  it('toggling the tree opens then closes it', () => {
     const s = () => useAppStore.getState()
-    act(() => s().openEditorPane('t1', '/p/a.ts'))
-    act(() => s().toggleMinimized('editor:t1'))
-    expect(s().minimizedTerminals.has('editor:t1')).toBe(true)
-
-    act(() => s().openEditorPane('t1', '/p/b.ts'))
-    expect(s().minimizedTerminals.has('editor:t1')).toBe(false)
-  })
-
-  it('restores a minimized tree instead of leaving it hidden', () => {
-    const s = () => useAppStore.getState()
-    act(() => s().openFilesPane('t1'))
-    act(() => s().toggleMinimized('files:t1'))
-    expect(s().minimizedTerminals.has('files:t1')).toBe(true)
-
-    // "Browse files" on a session whose tree is minimized must bring it back —
-    // returning early here made the button look dead.
-    act(() => s().openFilesPane('t1'))
-    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
-    expect(s().filesPanes.has('t1')).toBe(true)
-  })
-
-  it('toggling a minimized tree restores it rather than closing it', () => {
-    const s = () => useAppStore.getState()
-    act(() => s().openFilesPane('t1'))
-    act(() => s().toggleMinimized('files:t1'))
-
-    // Closing something the user cannot see is never the intent.
     act(() => s().toggleFilesPane('t1'))
     expect(s().filesPanes.has('t1')).toBe(true)
-    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
 
-    // Once visible, the toggle closes as usual.
     act(() => s().toggleFilesPane('t1'))
     expect(s().filesPanes.has('t1')).toBe(false)
   })
@@ -168,18 +139,16 @@ describe('pane store actions', () => {
     expect(browserUrl('t1')).toBe('https://example.com/')
   })
 
-  it('restores a minimized browser instead of leaving it hidden', () => {
+  it('toggling the browser opens then closes it', () => {
     const s = () => useAppStore.getState()
-    act(() => s().openBrowserPane('t1', 'example.com'))
-    act(() => s().toggleMinimized('browser:t1'))
-
     act(() => s().toggleBrowserPane('t1'))
-    expect(s().minimizedTerminals.has('browser:t1')).toBe(false)
     expect(s().browserPanes.has('t1')).toBe(true)
 
     // Once visible, the toggle closes as usual.
     act(() => s().toggleBrowserPane('t1'))
     expect(s().browserPanes.has('t1')).toBe(false)
+
+    expect(s().maximizedPaneId).toBeNull()
   })
 
   it('keeps each session on its own page', () => {
@@ -271,21 +240,7 @@ describe('pane store actions', () => {
     expect(s().maximizedPaneId).toBeNull()
   })
 
-  it('closing a pane clears its minimized and maximized state', () => {
-    const s = () => useAppStore.getState()
-    act(() => {
-      s().openFilesPane('t1')
-      s().setMaximizedPane('files:t1')
-      s().toggleMinimized('files:t1')
-    })
-    // Minimizing a maximized pane already drops the maximize.
-    expect(s().maximizedPaneId).toBeNull()
-
-    act(() => s().closeFilesPane('t1'))
-    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
-  })
-
-  it('minimizing a maximized pane clears the maximize', () => {
+  it('closing a pane clears its maximized state', () => {
     const s = () => useAppStore.getState()
     act(() => {
       s().openFilesPane('t1')
@@ -293,11 +248,7 @@ describe('pane store actions', () => {
     })
     expect(s().maximizedPaneId).toBe('files:t1')
 
-    act(() => s().toggleMinimized('files:t1'))
-    expect(s().maximizedPaneId).toBeNull()
-
-    // Restoring does not silently re-maximize it.
-    act(() => s().toggleMinimized('files:t1'))
+    act(() => s().closeFilesPane('t1'))
     expect(s().maximizedPaneId).toBeNull()
   })
 

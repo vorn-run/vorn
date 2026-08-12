@@ -4,9 +4,7 @@ import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
 import { isTerminalPane } from '../lib/pane-id'
-import { FilesCard } from './FilesCard'
-import { EditorCard } from './EditorCard'
-import { BrowserCard } from './BrowserCard'
+import { PaneColumn } from './PaneColumn'
 import { AgentStatusIcon } from './AgentStatusIcon'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
@@ -21,7 +19,7 @@ import { buildTooltip } from '../lib/tab-tooltip'
 import { ConfirmPopover } from './ConfirmPopover'
 import { Tooltip } from './Tooltip'
 import { toast } from './Toast'
-import { ChevronDown, FolderOpen, GripVertical, Pencil, Plus, X } from 'lucide-react'
+import { ChevronDown, FolderOpen, Globe, GripVertical, Pencil, Plus, X } from 'lucide-react'
 import { GridContextMenu } from './GridContextMenu'
 import { GridToolbar } from './GridToolbar'
 import { WindowControls } from './WindowControls'
@@ -140,6 +138,7 @@ export function TabView() {
   const renameTerminal = useAppStore((s) => s.renameTerminal)
   const reorderTerminals = useAppStore((s) => s.reorderTerminals)
   const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
+  const toggleBrowserPane = useAppStore((s) => s.toggleBrowserPane)
   const tasks = useAppStore((s) => s.config?.tasks)
   const isSidebarOpen = useAppStore((s) => s.isSidebarOpen)
   const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
@@ -408,6 +407,11 @@ export function TabView() {
                         onClick={() => toggleFilesPane(id)}
                       />
                       <TabIconButton
+                        label="Open browser"
+                        icon={<Globe size={13} />}
+                        onClick={() => toggleBrowserPane(id)}
+                      />
+                      <TabIconButton
                         label="Rename session"
                         icon={<Pencil size={13} />}
                         onClick={() => setRenamingTerminalId(id)}
@@ -571,22 +575,8 @@ export function TabView() {
           {activeTabId &&
             activeTerminal &&
             (activeHasFiles || activeHasEditor || activeHasBrowser) && (
-              <div className="w-[380px] shrink-0 flex flex-col gap-px border-l border-white/[0.06]">
-                {activeHasFiles && (
-                  <div className="flex-1 min-h-0">
-                    <FilesCard sessionId={activeTabId} />
-                  </div>
-                )}
-                {activeHasEditor && (
-                  <div className="flex-1 min-h-0">
-                    <EditorCard sessionId={activeTabId} />
-                  </div>
-                )}
-                {activeHasBrowser && (
-                  <div className="flex-1 min-h-0">
-                    <BrowserCard sessionId={activeTabId} />
-                  </div>
-                )}
+              <div className="w-[380px] shrink-0 flex flex-col border-l border-white/[0.06]">
+                <PaneColumn sessionId={activeTabId} />
               </div>
             )}
         </div>

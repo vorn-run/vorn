@@ -7,10 +7,12 @@ import {
   FlexibleLayoutRect,
   TaskSourceFilter,
   EditorPaneState,
-  BrowserPaneState
+  BrowserPaneState,
+  CardSplit
 } from './types'
-import { filesPaneId, editorPaneId, browserPaneId } from '../lib/pane-id'
+import { filesPaneId, editorPaneId, browserPaneId, isTerminalPane } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
+import { clampSplitRatio, sanitizePaneWeights } from '../lib/split-ratio'
 
 const EMPTY_SESSIONS: TerminalSession[] = []
 const WORKTREE_CACHE_TTL = 5_000
@@ -18,6 +20,7 @@ const worktreeCacheTimestamps = new Map<string, number>()
 const GRID_STORAGE_KEY = 'vorn:gridSettings'
 const SIDEBAR_STORAGE_KEY = 'vorn:sidebarSettings'
 const FLEXIBLE_STORAGE_KEY = 'vorn:flexibleLayouts'
+const CARD_SPLITS_STORAGE_KEY = 'vorn:cardSplits'
 const PANES_STORAGE_KEY = 'vorn:panes'
 /**
  * Where a browser pane opened with no url starts. Deliberately blank: guessing
@@ -44,10 +47,22 @@ function saveGridSettings(patch: Record<string, unknown>): void {
   }
 }
 
+/**
+ * Saved card rects, keyed by each session's stable id.
+ *
+ * An older build gave every child pane its own grid cell and so its own rect,
+ * under a `files:` / `editor:` / `browser:` prefixed key. Panes now live inside
+ * their owner's card, leaving those keys unreachable — dropping them on read
+ * keeps the store from carrying dead weight forward forever.
+ */
 function loadFlexibleLayouts(): Record<string, FlexibleLayoutRect> {
   try {
     const raw = localStorage.getItem(FLEXIBLE_STORAGE_KEY)
-    return raw ? JSON.parse(raw) : {}
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, FlexibleLayoutRect>
+    const live = Object.fromEntries(Object.entries(parsed).filter(([key]) => isTerminalPane(key)))
+    if (Object.keys(live).length !== Object.keys(parsed).length) saveFlexibleLayouts(live)
+    return live
   } catch {
     return {}
   }
@@ -56,6 +71,40 @@ function loadFlexibleLayouts(): Record<string, FlexibleLayoutRect> {
 function saveFlexibleLayouts(layouts: Record<string, FlexibleLayoutRect>): void {
   try {
     localStorage.setItem(FLEXIBLE_STORAGE_KEY, JSON.stringify(layouts))
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * How each session card divides its interior, keyed by session id.
+ *
+ * Ratios are clamped and non-finite values dropped on read: a corrupted entry
+ * would otherwise render a card with a zero-width terminal, which no amount of
+ * dragging can recover because the divider itself would be off-screen.
+ */
+function loadCardSplits(): Record<string, CardSplit> {
+  try {
+    const raw = localStorage.getItem(CARD_SPLITS_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, Partial<CardSplit>>
+    const out: Record<string, CardSplit> = {}
+    for (const [id, split] of Object.entries(parsed)) {
+      if (!split || typeof split !== 'object') continue
+      out[id] = {
+        terminal: clampSplitRatio(Number(split.terminal)),
+        panes: sanitizePaneWeights(split.panes)
+      }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveCardSplits(splits: Record<string, CardSplit>): void {
+  try {
+    localStorage.setItem(CARD_SPLITS_STORAGE_KEY, JSON.stringify(splits))
   } catch {
     /* ignore */
   }
@@ -135,35 +184,49 @@ function savePanes(
 }
 
 /**
- * Drop persisted pane entries whose session no longer exists.
+ * Drop persisted pane and card-split entries whose session no longer exists.
  *
  * `removeTerminal` prunes sessions closed during a run, but a session that
  * simply never came back after a restart leaves its entry behind. Reconciling
  * against the live set keeps localStorage from growing without bound and stops
- * a recycled id from inheriting a stale pane.
+ * a recycled id from inheriting a stale pane or a mysteriously wrong divider
+ * position.
  */
 function reconcilePanes(
   filesPanes: Set<string>,
   editorPanes: Map<string, EditorPaneState>,
   browserPanes: Map<string, BrowserPaneState>,
+  cardSplits: Record<string, CardSplit>,
   liveSessionIds: Set<string>
 ): {
   filesPanes: Set<string>
   editorPanes: Map<string, EditorPaneState>
   browserPanes: Map<string, BrowserPaneState>
+  cardSplits: Record<string, CardSplit>
 } | null {
   const nextFiles = new Set([...filesPanes].filter((id) => liveSessionIds.has(id)))
   const nextEditors = new Map([...editorPanes].filter(([id]) => liveSessionIds.has(id)))
   const nextBrowsers = new Map([...browserPanes].filter(([id]) => liveSessionIds.has(id)))
+  const nextSplits = Object.fromEntries(
+    Object.entries(cardSplits).filter(([id]) => liveSessionIds.has(id))
+  )
+  const splitsChanged = Object.keys(nextSplits).length !== Object.keys(cardSplits).length
   if (
     nextFiles.size === filesPanes.size &&
     nextEditors.size === editorPanes.size &&
-    nextBrowsers.size === browserPanes.size
+    nextBrowsers.size === browserPanes.size &&
+    !splitsChanged
   ) {
     return null
   }
   savePanes(nextFiles, nextEditors, nextBrowsers)
-  return { filesPanes: nextFiles, editorPanes: nextEditors, browserPanes: nextBrowsers }
+  if (splitsChanged) saveCardSplits(nextSplits)
+  return {
+    filesPanes: nextFiles,
+    editorPanes: nextEditors,
+    browserPanes: nextBrowsers,
+    cardSplits: nextSplits
+  }
 }
 
 function loadSidebarSettings(): Record<string, string> {
@@ -209,6 +272,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   gridColumns: (savedGrid.gridColumns as number) ?? 0,
   rowHeight: 208,
   flexibleLayouts: loadFlexibleLayouts(),
+  cardSplits: loadCardSplits(),
   sortMode: (savedGrid.sortMode as 'manual' | 'created' | 'recent') ?? 'manual',
   statusFilter:
     (savedGrid.statusFilter as 'all' | 'running' | 'waiting' | 'idle' | 'error') ?? 'all',
@@ -317,6 +381,19 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     set({ flexibleLayouts: layouts })
   },
 
+  setCardSplit: (sessionId, split) =>
+    set((state) => {
+      const next = {
+        ...state.cardSplits,
+        [sessionId]: {
+          terminal: clampSplitRatio(split.terminal),
+          panes: sanitizePaneWeights(split.panes)
+        }
+      }
+      saveCardSplits(next)
+      return { cardSplits: next }
+    }),
+
   setTerminalOrder: (order) => set({ terminalOrder: order }),
   setVisibleTerminalIds: (ids) =>
     set((state) => {
@@ -326,7 +403,13 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const live = new Set(state.terminals.keys())
       const reconciled =
         live.size > 0
-          ? reconcilePanes(state.filesPanes, state.editorPanes, state.browserPanes, live)
+          ? reconcilePanes(
+              state.filesPanes,
+              state.editorPanes,
+              state.browserPanes,
+              state.cardSplits,
+              live
+            )
           : null
       return { visibleTerminalIds: ids, ...(reconciled ?? {}) }
     }),
@@ -354,15 +437,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 
   openFilesPane: (sessionId) =>
     set((state) => {
-      const paneId = filesPaneId(sessionId)
-      // Opening an already-open pane focuses it, which for a minimized pane
-      // means bringing it back rather than doing nothing.
-      if (state.filesPanes.has(sessionId)) {
-        if (!state.minimizedTerminals.has(paneId)) return {}
-        const minimized = new Set(state.minimizedTerminals)
-        minimized.delete(paneId)
-        return { minimizedTerminals: minimized }
-      }
+      if (state.filesPanes.has(sessionId)) return {}
       const next = new Set(state.filesPanes)
       next.add(sessionId)
       savePanes(next, state.editorPanes, state.browserPanes)
@@ -375,22 +450,15 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const next = new Set(state.filesPanes)
       next.delete(sessionId)
       savePanes(next, state.editorPanes, state.browserPanes)
-      const paneId = filesPaneId(sessionId)
-      const minimized = new Set(state.minimizedTerminals)
-      minimized.delete(paneId)
       return {
         filesPanes: next,
-        minimizedTerminals: minimized,
-        ...(state.maximizedPaneId === paneId ? { maximizedPaneId: null } : {})
+        ...(state.maximizedPaneId === filesPaneId(sessionId) ? { maximizedPaneId: null } : {})
       }
     }),
 
   toggleFilesPane: (sessionId) => {
-    const { filesPanes, minimizedTerminals, openFilesPane, closeFilesPane } = get()
-    // A minimized pane is open but out of sight, so the toggle restores it
-    // instead of closing something the user cannot currently see.
-    const isHidden = minimizedTerminals.has(filesPaneId(sessionId))
-    if (filesPanes.has(sessionId) && !isHidden) closeFilesPane(sessionId)
+    const { filesPanes, openFilesPane, closeFilesPane } = get()
+    if (filesPanes.has(sessionId)) closeFilesPane(sessionId)
     else openFilesPane(sessionId)
   },
 
@@ -399,11 +467,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const next = new Map(state.editorPanes)
       next.set(sessionId, { filePath })
       savePanes(state.filesPanes, next, state.browserPanes)
-      // Re-opening into a minimized editor should surface it again.
-      const paneId = editorPaneId(sessionId)
-      const minimized = new Set(state.minimizedTerminals)
-      minimized.delete(paneId)
-      return { editorPanes: next, minimizedTerminals: minimized }
+      return { editorPanes: next }
     }),
 
   closeEditorPane: (sessionId) =>
@@ -412,29 +476,21 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const next = new Map(state.editorPanes)
       next.delete(sessionId)
       savePanes(state.filesPanes, next, state.browserPanes)
-      const paneId = editorPaneId(sessionId)
-      const minimized = new Set(state.minimizedTerminals)
-      minimized.delete(paneId)
       return {
         editorPanes: next,
-        minimizedTerminals: minimized,
-        ...(state.maximizedPaneId === paneId ? { maximizedPaneId: null } : {})
+        ...(state.maximizedPaneId === editorPaneId(sessionId) ? { maximizedPaneId: null } : {})
       }
     }),
 
   openBrowserPane: (sessionId, url) =>
     set((state) => {
-      const paneId = browserPaneId(sessionId)
-      const minimized = new Set(state.minimizedTerminals)
-      const wasHidden = minimized.delete(paneId)
-
       // No url means "show me this session's browser" — keep whatever page it
       // already had rather than resetting it to blank.
       const next = new Map(state.browserPanes)
       const existing = next.get(sessionId)
       if (url !== undefined) {
         const normalized = normalizeUrl(url)
-        if (!normalized) return wasHidden ? { minimizedTerminals: minimized } : {}
+        if (!normalized) return {}
         if (existing) {
           // Navigating replaces the page in the tab the user is looking at,
           // the way an address bar does — it does not spawn a tab.
@@ -446,12 +502,12 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
         }
       } else if (!existing) {
         next.set(sessionId, { tabs: [DEFAULT_BROWSER_URL], activeTab: 0 })
-      } else if (!wasHidden) {
+      } else {
         return {}
       }
 
       savePanes(state.filesPanes, state.editorPanes, next)
-      return { browserPanes: next, minimizedTerminals: minimized }
+      return { browserPanes: next }
     }),
 
   closeBrowserPane: (sessionId) =>
@@ -460,22 +516,15 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const next = new Map(state.browserPanes)
       next.delete(sessionId)
       savePanes(state.filesPanes, state.editorPanes, next)
-      const paneId = browserPaneId(sessionId)
-      const minimized = new Set(state.minimizedTerminals)
-      minimized.delete(paneId)
       return {
         browserPanes: next,
-        minimizedTerminals: minimized,
-        ...(state.maximizedPaneId === paneId ? { maximizedPaneId: null } : {})
+        ...(state.maximizedPaneId === browserPaneId(sessionId) ? { maximizedPaneId: null } : {})
       }
     }),
 
   toggleBrowserPane: (sessionId) => {
-    const { browserPanes, minimizedTerminals, openBrowserPane, closeBrowserPane } = get()
-    // A minimized pane is open but out of sight, so the toggle restores it
-    // instead of closing something the user cannot currently see.
-    const isHidden = minimizedTerminals.has(browserPaneId(sessionId))
-    if (browserPanes.has(sessionId) && !isHidden) closeBrowserPane(sessionId)
+    const { browserPanes, openBrowserPane, closeBrowserPane } = get()
+    if (browserPanes.has(sessionId)) closeBrowserPane(sessionId)
     else openBrowserPane(sessionId)
   },
 

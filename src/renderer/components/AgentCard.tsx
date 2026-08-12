@@ -1,4 +1,4 @@
-import { memo, forwardRef } from 'react'
+import { memo, forwardRef, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { TerminalPane } from './TerminalPane'
@@ -6,6 +6,10 @@ import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { CardHeader } from './card/CardHeader'
 import { CardStatusBar } from './card/CardStatusBar'
 import { IntentBar } from './IntentBar'
+import { PaneColumn } from './PaneColumn'
+import { SplitDivider } from './SplitDivider'
+import { parsePaneId } from '../lib/pane-id'
+import { DEFAULT_SPLIT_RATIO } from '../lib/split-ratio'
 import { useTerminalScrollButton } from '../hooks/useTerminalScrollButton'
 
 // On touch devices, always show action buttons (no hover available)
@@ -63,6 +67,22 @@ export const AgentCard = memo(
         setFocused: s.setFocusedTerminal
       }))
     )
+    const { hasPanes, maximizedPaneId, storedRatio, setCardSplit, storedPanes } = useAppStore(
+      useShallow((s) => ({
+        hasPanes:
+          s.filesPanes.has(terminalId) ||
+          s.editorPanes.has(terminalId) ||
+          s.browserPanes.has(terminalId),
+        maximizedPaneId: s.maximizedPaneId,
+        storedRatio: s.cardSplits[terminalId]?.terminal,
+        storedPanes: s.cardSplits[terminalId]?.panes,
+        setCardSplit: s.setCardSplit
+      }))
+    )
+    const bodyRef = useRef<HTMLDivElement | null>(null)
+    // The live drag drives local state; the store is written once, on pointerup,
+    // so one resize is one localStorage write rather than dozens.
+    const [dragRatio, setDragRatio] = useState<number | null>(null)
     const { showScrollBtn, handleScrollToBottom } = useTerminalScrollButton(terminalId)
     const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
 
@@ -74,6 +94,19 @@ export const AgentCard = memo(
     // every *other* card so the active one stands out by relative brightness,
     // without painting a border that fights with the terminal contents.
     const isChromeDimmed = selectedId !== null && !isSelected && !isFocused
+
+    // Which of this session's panes, if any, is maximized. A pane belonging to
+    // another session must not blank this card, hence the owner check.
+    const maximized = maximizedPaneId ? parsePaneId(maximizedPaneId) : null
+    const hasMaximizedPane =
+      hasPanes &&
+      maximized !== null &&
+      maximized.sessionId === terminalId &&
+      maximized.kind !== 'terminal'
+    // With no pane column beside it the terminal is a lone flex child, and a
+    // grow factor under 1 would leave the rest of the row as dead space — the
+    // ratio only means anything when there is a sibling to share with.
+    const terminalRatio = hasPanes ? (dragRatio ?? storedRatio ?? DEFAULT_SPLIT_RATIO) : 1
 
     const handleExpand = (): void => {
       setFocused(terminalId)
@@ -114,60 +147,102 @@ export const AgentCard = memo(
           dimmed={isChromeDimmed}
         />
 
-        {/* Terminal */}
-        <div className="relative flex-1 min-h-0 pt-0.5" style={{ background: '#141416' }}>
-          {!isFocused && (
-            <TerminalPane
-              terminalId={terminalId}
-              agentType={terminal.session.agentType}
-              isFocused={isSelected}
-              flexible={flexible}
-              domBlocks={domBlocks}
-            />
-          )}
-          {isFocused && (
-            <div className="flex items-center justify-center h-full text-gray-600 text-xs">
-              Expanded
-            </div>
-          )}
-          {!isFocused && terminal.lastOutputTimestamp === 0 && (
-            <div
-              className="absolute inset-0 p-3 space-y-2 pointer-events-none"
-              style={{ background: '#141416' }}
-            >
-              <div className="h-3 w-3/4 rounded bg-white/[0.04] animate-pulse" />
-              <div
-                className="h-3 w-1/2 rounded bg-white/[0.04] animate-pulse"
-                style={{ animationDelay: '0.15s' }}
+        {/* Terminal, plus this session's panes stacked beside it. `relative`
+            stays on the terminal itself: it hosts absolutely-positioned
+            overlays that would otherwise stretch across the panes. */}
+        <div ref={bodyRef} className="flex flex-row flex-1 min-h-0">
+          <div
+            data-testid={`card-terminal-${terminalId}`}
+            className={`relative min-h-0 min-w-0 pt-0.5 ${hasMaximizedPane ? 'hidden' : ''}`}
+            style={{
+              flexGrow: terminalRatio,
+              flexShrink: 1,
+              flexBasis: 0,
+              background: '#141416'
+            }}
+          >
+            {!isFocused && (
+              <TerminalPane
+                terminalId={terminalId}
+                agentType={terminal.session.agentType}
+                isFocused={isSelected}
+                flexible={flexible}
+                domBlocks={domBlocks}
               />
+            )}
+            {isFocused && (
+              <div className="flex items-center justify-center h-full text-gray-600 text-xs">
+                Expanded
+              </div>
+            )}
+            {!isFocused && terminal.lastOutputTimestamp === 0 && (
               <div
-                className="h-3 w-5/6 rounded bg-white/[0.04] animate-pulse"
-                style={{ animationDelay: '0.3s' }}
-              />
-              <div
-                className="h-3 w-2/3 rounded bg-white/[0.04] animate-pulse"
-                style={{ animationDelay: '0.45s' }}
-              />
-            </div>
-          )}
-          {!isFocused && showScrollBtn && (
-            <button
-              className="absolute bottom-2 right-2 w-8 h-8 flex items-center justify-center
+                className="absolute inset-0 p-3 space-y-2 pointer-events-none"
+                style={{ background: '#141416' }}
+              >
+                <div className="h-3 w-3/4 rounded bg-white/[0.04] animate-pulse" />
+                <div
+                  className="h-3 w-1/2 rounded bg-white/[0.04] animate-pulse"
+                  style={{ animationDelay: '0.15s' }}
+                />
+                <div
+                  className="h-3 w-5/6 rounded bg-white/[0.04] animate-pulse"
+                  style={{ animationDelay: '0.3s' }}
+                />
+                <div
+                  className="h-3 w-2/3 rounded bg-white/[0.04] animate-pulse"
+                  style={{ animationDelay: '0.45s' }}
+                />
+              </div>
+            )}
+            {!isFocused && showScrollBtn && (
+              <button
+                className="absolute bottom-2 right-2 w-8 h-8 flex items-center justify-center
                            rounded bg-white/[0.08] hover:bg-white/[0.15] active:bg-white/[0.2]
                            text-gray-400 hover:text-white transition-colors z-50"
-              onClick={handleScrollToBottom}
-              title="Scroll to bottom"
+                onClick={handleScrollToBottom}
+                title="Scroll to bottom"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path
+                    d="M6 2.5V9.5M3 7L6 10L9 7"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {hasPanes && !hasMaximizedPane && (
+            <SplitDivider
+              axis="x"
+              containerRef={bodyRef}
+              onRatioChange={setDragRatio}
+              onRatioCommit={(r) => {
+                setCardSplit(terminalId, { terminal: r, panes: storedPanes ?? [] })
+                setDragRatio(null)
+              }}
+              label="Resize terminal and panels"
+              testId={`card-divider-${terminalId}`}
+            />
+          )}
+          {hasPanes && (
+            // The two grow factors must sum to 1, or the stored ratio is not
+            // the fraction of the card it claims to be and the divider lags
+            // behind the cursor for the whole drag.
+            <div
+              className="flex min-h-0 min-w-0"
+              style={{
+                flexGrow: hasMaximizedPane ? 1 : 1 - terminalRatio,
+                flexShrink: 1,
+                flexBasis: 0
+              }}
             >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path
-                  d="M6 2.5V9.5M3 7L6 10L9 7"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
+              <PaneColumn sessionId={terminalId} />
+            </div>
           )}
         </div>
 

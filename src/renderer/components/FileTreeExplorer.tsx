@@ -3,15 +3,14 @@ import type { FileEntry } from '../../shared/types'
 import { ChevronRight, Loader2, X, Search, Pencil, Save } from 'lucide-react'
 import { FileTypeIcon } from './file-icons'
 import { PANE_SURFACE } from '../lib/pane-surface'
+import { SplitDivider } from './SplitDivider'
+import { clampSplitRatio, DEFAULT_SPLIT_RATIO } from '../lib/split-ratio'
 
 const MAX_PREVIEW_LINES = 2000
 const ROW_HEIGHT = 22 // px — matches VS Code's tree item height
 const INDENT_WIDTH = 16 // px per depth level
 const BASE_LEFT = 8 // px left gutter
 const SPLIT_RATIO_KEY = 'vorn:files-split-ratio'
-const MIN_RATIO = 0.15
-const MAX_RATIO = 0.85
-const DEFAULT_RATIO = 0.5
 
 // ---------------------------------------------------------------------------
 // Filter helpers
@@ -993,51 +992,6 @@ function FilesPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Stacked split divider
-// ---------------------------------------------------------------------------
-function SplitDivider({
-  containerRef,
-  onRatioChange,
-  onRatioCommit
-}: {
-  containerRef: React.RefObject<HTMLDivElement | null>
-  onRatioChange: (ratio: number) => void
-  onRatioCommit: (ratio: number) => void
-}) {
-  const handlePointerDown = (e: React.PointerEvent): void => {
-    e.preventDefault()
-    const container = containerRef.current
-    if (!container) return
-    const rect = container.getBoundingClientRect()
-    let lastRatio: number | null = null
-
-    const onMove = (ev: PointerEvent): void => {
-      const y = ev.clientY - rect.top
-      const ratio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, y / rect.height))
-      lastRatio = ratio
-      onRatioChange(ratio)
-    }
-    const onUp = (): void => {
-      document.removeEventListener('pointermove', onMove)
-      document.removeEventListener('pointerup', onUp)
-      if (lastRatio !== null) onRatioCommit(lastRatio)
-    }
-    document.addEventListener('pointermove', onMove)
-    document.addEventListener('pointerup', onUp)
-  }
-
-  return (
-    <div
-      onPointerDown={handlePointerDown}
-      className="h-1 cursor-row-resize hover:bg-blue-500/30 transition-colors shrink-0"
-      style={{ background: 'rgba(255,255,255,0.06)' }}
-      aria-label="Resize files / file panels"
-      role="separator"
-    />
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Top-level orchestrator
 // ---------------------------------------------------------------------------
 export function FileTreeExplorer({ cwd, remoteHostId }: { cwd: string; remoteHostId?: string }) {
@@ -1053,11 +1007,11 @@ export function FileTreeExplorer({ cwd, remoteHostId }: { cwd: string; remoteHos
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [splitRatio, setSplitRatio] = useState<number>(() => {
-    if (typeof localStorage === 'undefined') return DEFAULT_RATIO
+    if (typeof localStorage === 'undefined') return DEFAULT_SPLIT_RATIO
     const stored = localStorage.getItem(SPLIT_RATIO_KEY)
     const n = stored ? Number(stored) : NaN
-    if (!Number.isFinite(n)) return DEFAULT_RATIO
-    return Math.max(MIN_RATIO, Math.min(MAX_RATIO, n))
+    if (!Number.isFinite(n)) return DEFAULT_SPLIT_RATIO
+    return clampSplitRatio(n)
   })
 
   const persistRatio = useCallback((next: number): void => {
@@ -1176,6 +1130,8 @@ export function FileTreeExplorer({ cwd, remoteHostId }: { cwd: string; remoteHos
       {showFilePanel && (
         <>
           <SplitDivider
+            axis="y"
+            label="Resize files / file panels"
             containerRef={containerRef}
             onRatioChange={setSplitRatio}
             onRatioCommit={persistRatio}

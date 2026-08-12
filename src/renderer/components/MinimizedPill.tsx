@@ -3,66 +3,9 @@ import { useShallow } from 'zustand/react/shallow'
 import { AgentIcon } from './AgentIcon'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { STATUS_DOT } from '../lib/status-colors'
-import { GitBranch, FolderGit2, FolderTree, FileCode, Globe } from 'lucide-react'
-import { parsePaneId } from '../lib/pane-id'
-import { displayHost } from '../lib/browser-url'
-import { activeBrowserUrl } from '../stores/types'
-
-/**
- * Dock pill for a minimized file-tree, editor or browser pane. Labelled with
- * its owner session so several sessions' panes stay tellable apart in the dock.
- */
-function ChildPanePill({ paneId }: { paneId: string }) {
-  const { kind, sessionId } = parsePaneId(paneId)
-  const { terminal, filePath, browserUrl, toggleMinimized } = useAppStore(
-    useShallow((s) => ({
-      terminal: s.terminals.get(sessionId),
-      filePath: s.editorPanes.get(sessionId)?.filePath ?? null,
-      browserUrl: activeBrowserUrl(s.browserPanes.get(sessionId)),
-      toggleMinimized: s.toggleMinimized
-    }))
-  )
-
-  if (!terminal) return null
-
-  const owner = getDisplayName(terminal.session)
-  // Each fallback matters: an empty basename or url would render a pill with no
-  // label at all, leaving a minimized pane you cannot identify in the dock.
-  const label =
-    kind === 'editor'
-      ? filePath?.split(/[/\\]/).pop() || 'File'
-      : kind === 'browser'
-        ? browserUrl
-          ? displayHost(browserUrl)
-          : 'Browser'
-        : 'Files'
-
-  return (
-    <button
-      type="button"
-      className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.06] bg-[#1a1a1e]
-                 px-2.5 py-1 cursor-pointer transition-[border-color] select-none
-                 hover:border-white/[0.12]"
-      onClick={() => toggleMinimized(paneId)}
-      title={`Click to restore — ${owner}`}
-    >
-      {kind === 'editor' ? (
-        <FileCode size={13} strokeWidth={1.5} className="text-gray-400 shrink-0" />
-      ) : kind === 'browser' ? (
-        <Globe size={13} strokeWidth={1.5} className="text-gray-400 shrink-0" />
-      ) : (
-        <FolderTree size={13} strokeWidth={1.5} className="text-gray-400 shrink-0" />
-      )}
-      <span className="text-[11px] font-medium text-gray-200 truncate max-w-[120px]">{label}</span>
-      <span className="text-[10px] text-gray-600 shrink-0">&middot;</span>
-      <span className="text-[10px] text-gray-500 truncate max-w-[90px]">{owner}</span>
-    </button>
-  )
-}
+import { GitBranch, FolderGit2 } from 'lucide-react'
 
 export function MinimizedPill({ terminalId }: { terminalId: string }) {
-  const isChildPane = parsePaneId(terminalId).kind !== 'terminal'
-
   const { terminal, toggleMinimized, setActiveTabId } = useAppStore(
     useShallow((s) => ({
       terminal: s.terminals.get(terminalId),
@@ -70,8 +13,6 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
       setActiveTabId: s.setActiveTabId
     }))
   )
-
-  if (isChildPane) return <ChildPanePill paneId={terminalId} />
 
   if (!terminal) return null
 

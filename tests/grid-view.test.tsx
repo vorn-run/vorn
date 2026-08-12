@@ -50,18 +50,18 @@ afterAll(() => {
   Element.prototype.getBoundingClientRect = originalGetBoundingClientRect
 })
 
-// Stub PaneRenderer with forwardRef so GridView's ref callback (which calls
-// cardRefs.current.set(id, el)) actually fires. GridView renders every pane —
-// terminal, files, editor — through this one seam.
-vi.mock('../src/renderer/components/PaneRenderer', () => ({
-  PaneRenderer: forwardRef<
+// Stub AgentCard with forwardRef so GridView's ref callback (which calls
+// cardRefs.current.set(id, el)) actually fires. Sessions are the grid's only
+// layout unit now — a session's panes render inside its own card.
+vi.mock('../src/renderer/components/AgentCard', () => ({
+  AgentCard: forwardRef<
     HTMLDivElement,
-    { paneId: string; index: number; isDragTarget: boolean }
-  >(function MockPaneRenderer({ paneId, index, isDragTarget }, ref) {
+    { terminalId: string; index: number; isDragTarget: boolean }
+  >(function MockAgentCard({ terminalId, index, isDragTarget }, ref) {
     return (
       <div
         ref={ref}
-        data-testid={`card-${paneId}`}
+        data-testid={`card-${terminalId}`}
         data-index={index}
         data-drag-target={isDragTarget ? 'yes' : 'no'}
       />
@@ -347,49 +347,36 @@ describe('fitMaxRows', () => {
 })
 
 describe('GridView — session-owned panes', () => {
-  it("renders a session's panes next to it", () => {
+  it('gives a session one cell no matter how many panes it owns', () => {
     act(() => {
       useAppStore.getState().openFilesPane('term-a')
       useAppStore.getState().openEditorPane('term-a', '/repo/a.ts')
     })
     render(<GridView />)
 
+    // Panes render inside their owner's card, so they never claim grid cells.
     expect(screen.getByTestId('card-term-a')).toBeInTheDocument()
-    expect(screen.getByTestId('card-files:term-a')).toBeInTheDocument()
-    expect(screen.getByTestId('card-editor:term-a')).toBeInTheDocument()
+    expect(screen.queryByTestId('card-files:term-a')).not.toBeInTheDocument()
     expect(screen.getByTestId('card-term-b')).toBeInTheDocument()
+    expect(screen.getByTestId('card-term-a').dataset.index).toBe('0')
+    expect(screen.getByTestId('card-term-b').dataset.index).toBe('1')
   })
 
-  it('collapses only the owner session while one of its panes is maximized', () => {
+  it('leaves the grid untouched while a pane is maximized', () => {
     act(() => {
       useAppStore.getState().openFilesPane('term-a')
       useAppStore.getState().setMaximizedPane('files:term-a')
     })
     render(<GridView />)
 
-    // term-a's terminal yields its cell to the maximized tree...
-    expect(screen.queryByTestId('card-term-a')).not.toBeInTheDocument()
-    expect(screen.getByTestId('card-files:term-a')).toBeInTheDocument()
-    // ...while the other session keeps rendering, which is the compare case.
+    // A maximized pane fills its own card; the grid neither hides cells nor
+    // spans them, so the compare case (other sessions visible) always holds.
+    expect(screen.getByTestId('card-term-a')).toBeInTheDocument()
     expect(screen.getByTestId('card-term-b')).toBeInTheDocument()
+    expect(screen.getByTestId('card-term-a').parentElement?.style.gridColumn).toBe('')
   })
 
-  it('clamps the maximized span to the configured column count', () => {
-    act(() => {
-      useAppStore.setState({ gridColumns: 2 })
-      useAppStore.getState().openFilesPane('term-a')
-      useAppStore.getState().openEditorPane('term-a', '/repo/a.ts')
-      useAppStore.getState().setMaximizedPane('files:term-a')
-    })
-    render(<GridView />)
-
-    // The owner has 3 panes but only 2 tracks exist; spanning 3 would make CSS
-    // Grid add an implicit column and skew every row.
-    const cell = screen.getByTestId('card-files:term-a').parentElement
-    expect(cell?.style.gridColumn).toBe('span 2')
-  })
-
-  it('renders panes in the flexible layout too', () => {
+  it('renders sessions in the flexible layout too', () => {
     act(() => {
       useAppStore.setState({ gridColumns: -1 })
       useAppStore.getState().openFilesPane('term-a')
@@ -397,6 +384,6 @@ describe('GridView — session-owned panes', () => {
     render(<GridView />)
 
     expect(screen.getByTestId('card-term-a')).toBeInTheDocument()
-    expect(screen.getByTestId('card-files:term-a')).toBeInTheDocument()
+    expect(screen.queryByTestId('card-files:term-a')).not.toBeInTheDocument()
   })
 })

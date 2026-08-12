@@ -51,6 +51,19 @@ export interface FlexibleLayoutRect {
 }
 
 /**
+ * How one session card divides its interior.
+ *
+ * `terminal` is the fraction of the card's width the terminal keeps, the rest
+ * going to the pane column. `panes` holds the fraction of that column's height
+ * each stacked pane keeps, in render order — a pane with no entry falls back to
+ * an even share, so opening a third pane never needs a migration.
+ */
+export interface CardSplit {
+  terminal: number
+  panes: number[]
+}
+
+/**
  * State of a session's file-editor pane. Independent of that session's tree
  * pane — the editor can be open, maximized, and closed on its own.
  */
@@ -184,6 +197,8 @@ export interface UISlice {
   gridColumns: number // 0 = auto, -1 = flexible (react-grid-layout)
   rowHeight: number
   flexibleLayouts: Record<string, FlexibleLayoutRect>
+  /** How each session card divides its interior, keyed by session id. */
+  cardSplits: Record<string, CardSplit>
   sortMode: SortMode
   statusFilter: StatusFilter
   terminalOrder: string[]
@@ -249,6 +264,11 @@ export interface UISlice {
   setGridColumns: (cols: number) => void
   setRowHeight: (height: number) => void
   setFlexibleLayouts: (layouts: Record<string, FlexibleLayoutRect>) => void
+  /**
+   * Commit one session card's interior split. Called on pointerup only — the
+   * live drag drives local state, so a resize writes to storage once.
+   */
+  setCardSplit: (sessionId: string, split: CardSplit) => void
   setTerminalOrder: (order: string[]) => void
   setVisibleTerminalIds: (ids: string[]) => void
   setFocusableTerminalIds: (ids: string[]) => void
