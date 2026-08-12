@@ -3,8 +3,9 @@ import { useShallow } from 'zustand/react/shallow'
 import { AgentIcon } from './AgentIcon'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { STATUS_DOT } from '../lib/status-colors'
-import { GitBranch, FolderGit2, FolderTree, FileCode } from 'lucide-react'
+import { GitBranch, FolderGit2, FolderTree, FileCode, Globe } from 'lucide-react'
 import { parsePaneId } from '../lib/pane-id'
+import { displayHost } from '../lib/browser-url'
 
 /**
  * Dock pill for a minimized file-tree or editor pane. Labelled with its owner
@@ -12,10 +13,11 @@ import { parsePaneId } from '../lib/pane-id'
  */
 function ChildPanePill({ paneId }: { paneId: string }) {
   const { kind, sessionId } = parsePaneId(paneId)
-  const { terminal, filePath, toggleMinimized } = useAppStore(
+  const { terminal, filePath, browserUrl, toggleMinimized } = useAppStore(
     useShallow((s) => ({
       terminal: s.terminals.get(sessionId),
       filePath: s.editorPanes.get(sessionId)?.filePath ?? null,
+      browserUrl: s.browserPanes.get(sessionId)?.url ?? null,
       toggleMinimized: s.toggleMinimized
     }))
   )
@@ -23,7 +25,16 @@ function ChildPanePill({ paneId }: { paneId: string }) {
   if (!terminal) return null
 
   const owner = getDisplayName(terminal.session)
-  const label = kind === 'editor' && filePath ? (filePath.split(/[/\\]/).pop() ?? 'File') : 'Files'
+  // Each fallback matters: an empty basename or url would render a pill with no
+  // label at all, leaving a minimized pane you cannot identify in the dock.
+  const label =
+    kind === 'editor'
+      ? filePath?.split(/[/\\]/).pop() || 'File'
+      : kind === 'browser'
+        ? browserUrl
+          ? displayHost(browserUrl)
+          : 'Browser'
+        : 'Files'
 
   return (
     <button
@@ -36,6 +47,8 @@ function ChildPanePill({ paneId }: { paneId: string }) {
     >
       {kind === 'editor' ? (
         <FileCode size={13} strokeWidth={1.5} className="text-gray-400 shrink-0" />
+      ) : kind === 'browser' ? (
+        <Globe size={13} strokeWidth={1.5} className="text-gray-400 shrink-0" />
       ) : (
         <FolderTree size={13} strokeWidth={1.5} className="text-gray-400 shrink-0" />
       )}

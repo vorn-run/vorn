@@ -2,7 +2,7 @@ import { useMemo, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
-import { filesPaneId, editorPaneId, isTerminalPane } from '../lib/pane-id'
+import { filesPaneId, editorPaneId, browserPaneId, isTerminalPane } from '../lib/pane-id'
 
 /**
  * Stable comparator for terminal ids under the active sortMode. Manual mode
@@ -52,6 +52,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     minimizedTerminals,
     filesPanes,
     editorPanes,
+    browserPanes,
     setVisibleTerminalIds,
     setFocusableTerminalIds
   } = useAppStore(
@@ -67,6 +68,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       minimizedTerminals: s.minimizedTerminals,
       filesPanes: s.filesPanes,
       editorPanes: s.editorPanes,
+      browserPanes: s.browserPanes,
       setVisibleTerminalIds: s.setVisibleTerminalIds,
       setFocusableTerminalIds: s.setFocusableTerminalIds
     }))
@@ -115,6 +117,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       pushPane(id)
       if (filesPanes.has(id)) pushPane(filesPaneId(id))
       if (editorPanes.has(id)) pushPane(editorPaneId(id))
+      if (browserPanes.has(id)) pushPane(browserPaneId(id))
     }
 
     // Focused-mode nav spans the active project (or workspace) regardless of
@@ -135,7 +138,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     terminalOrder,
     minimizedTerminals,
     filesPanes,
-    editorPanes
+    editorPanes,
+    browserPanes
   ])
 
   useEffect(() => {

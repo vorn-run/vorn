@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   filesPaneId,
   editorPaneId,
+  browserPaneId,
   parsePaneId,
   paneKind,
   paneOwnerId,
@@ -26,6 +27,8 @@ describe('pane-id', () => {
     expect(editorPaneId('abc')).toBe('editor:abc')
     expect(parsePaneId('files:abc')).toEqual({ kind: 'files', sessionId: 'abc' })
     expect(parsePaneId('editor:abc')).toEqual({ kind: 'editor', sessionId: 'abc' })
+    expect(browserPaneId('abc')).toBe('browser:abc')
+    expect(parsePaneId('browser:abc')).toEqual({ kind: 'browser', sessionId: 'abc' })
   })
 
   it('treats a bare terminal id as its own owner', () => {
@@ -35,11 +38,13 @@ describe('pane-id', () => {
     expect(paneOwnerId('abc')).toBe('abc')
     expect(paneOwnerId('files:abc')).toBe('abc')
     expect(paneOwnerId('editor:abc')).toBe('abc')
+    expect(paneOwnerId('browser:abc')).toBe('abc')
   })
 
   it('reports kind without allocating the owner string', () => {
     expect(paneKind('files:abc')).toBe('files')
     expect(paneKind('editor:abc')).toBe('editor')
+    expect(paneKind('browser:abc')).toBe('browser')
     expect(paneKind('abc')).toBe('terminal')
   })
 
@@ -47,6 +52,7 @@ describe('pane-id', () => {
     expect(isTerminalPane('abc')).toBe(true)
     expect(isTerminalPane('files:abc')).toBe(false)
     expect(isTerminalPane('editor:abc')).toBe(false)
+    expect(isTerminalPane('browser:abc')).toBe(false)
   })
 
   it('survives session ids that themselves contain a colon', () => {
@@ -56,6 +62,7 @@ describe('pane-id', () => {
     expect(parsePaneId(weird)).toEqual({ kind: 'terminal', sessionId: weird })
     expect(parsePaneId(filesPaneId(weird))).toEqual({ kind: 'files', sessionId: weird })
     expect(paneOwnerId(editorPaneId(weird))).toBe(weird)
+    expect(paneOwnerId(browserPaneId(weird))).toBe(weird)
   })
 })
 

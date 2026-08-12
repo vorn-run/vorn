@@ -16,6 +16,7 @@ import { useTerminalPinchZoom } from '../hooks/useTerminalPinchZoom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
+import { BrowserCard } from './BrowserCard'
 import { isMac } from '../lib/platform'
 import { ArrowDown, FolderGit2, GitBranch, Minimize2, Pencil } from 'lucide-react'
 
@@ -38,6 +39,7 @@ export function FocusedTerminal() {
   // hide the tree or file you had open next to it.
   const hasFilesPane = useAppStore((s) => (effectiveId ? s.filesPanes.has(effectiveId) : false))
   const hasEditorPane = useAppStore((s) => (effectiveId ? s.editorPanes.has(effectiveId) : false))
+  const hasBrowserPane = useAppStore((s) => (effectiveId ? s.browserPanes.has(effectiveId) : false))
   useTerminalPinchZoom(terminalContainerRef)
 
   if (!effectiveId || !terminal) return null
@@ -213,7 +215,7 @@ export function FocusedTerminal() {
           </div>
 
           {/* The expanded session keeps its own Files / File panes. */}
-          {!isMobile && (hasFilesPane || hasEditorPane) && (
+          {!isMobile && (hasFilesPane || hasEditorPane || hasBrowserPane) && (
             <div className="w-[420px] shrink-0 flex flex-col gap-px border-l border-white/[0.06]">
               {hasFilesPane && (
                 <div className="flex-1 min-h-0">
@@ -223,6 +225,11 @@ export function FocusedTerminal() {
               {hasEditorPane && (
                 <div className="flex-1 min-h-0">
                   <EditorCard sessionId={effectiveId} />
+                </div>
+              )}
+              {hasBrowserPane && (
+                <div className="flex-1 min-h-0">
+                  <BrowserCard sessionId={effectiveId} />
                 </div>
               )}
             </div>

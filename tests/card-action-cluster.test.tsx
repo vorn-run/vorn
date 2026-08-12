@@ -57,12 +57,14 @@ const mockTerminal = {
 const initialState = useAppStore.getState()
 
 let toggleFilesPane: ReturnType<typeof vi.fn>
+let toggleBrowserPane: ReturnType<typeof vi.fn>
 let setFocused: ReturnType<typeof vi.fn>
 let toggleMinimized: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   vi.clearAllMocks()
   toggleFilesPane = vi.fn()
+  toggleBrowserPane = vi.fn()
   setFocused = vi.fn()
   toggleMinimized = vi.fn()
   const terminals = new Map()
@@ -72,6 +74,7 @@ beforeEach(() => {
       terminals,
       focusedTerminalId: null,
       toggleFilesPane,
+      toggleBrowserPane,
       setFocusedTerminal: setFocused,
       toggleMinimized
     })

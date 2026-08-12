@@ -59,6 +59,15 @@ export interface EditorPaneState {
   filePath: string
 }
 
+/**
+ * State of a session's browser pane. One per session, so a session can keep a
+ * dev server or a doc page beside its agent.
+ */
+export interface BrowserPaneState {
+  /** Normalized absolute URL currently loaded. */
+  url: string
+}
+
 export interface TerminalState {
   id: string
   session: TerminalSession
@@ -174,6 +183,8 @@ export interface UISlice {
   filesPanes: Set<string>
   /** Session id → the file its editor pane is showing. One editor per session. */
   editorPanes: Map<string, EditorPaneState>
+  /** Session id → the page its browser pane is showing. One browser per session. */
+  browserPanes: Map<string, BrowserPaneState>
   /**
    * Pane id currently maximized, or null. At most one app-wide. A maximized
    * pane covers only its owner session's footprint — other sessions are
@@ -242,6 +253,13 @@ export interface UISlice {
    */
   openEditorPane: (sessionId: string, filePath: string) => void
   closeEditorPane: (sessionId: string) => void
+  /**
+   * Show `url` in the session's browser pane, creating it if needed. `url` is
+   * normalized by the caller; an unloadable one is ignored.
+   */
+  openBrowserPane: (sessionId: string, url?: string) => void
+  closeBrowserPane: (sessionId: string) => void
+  toggleBrowserPane: (sessionId: string) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void
   toggleSessionDockCollapsed: () => void

@@ -6,6 +6,7 @@ import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerm
 import { isTerminalPane } from '../lib/pane-id'
 import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
+import { BrowserCard } from './BrowserCard'
 import { AgentStatusIcon } from './AgentStatusIcon'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
@@ -265,6 +266,9 @@ export function TabView() {
   const activeTerminal = activeTabId ? terminals.get(activeTabId) : null
   const activeHasFiles = useAppStore((s) => (activeTabId ? s.filesPanes.has(activeTabId) : false))
   const activeHasEditor = useAppStore((s) => (activeTabId ? s.editorPanes.has(activeTabId) : false))
+  const activeHasBrowser = useAppStore((s) =>
+    activeTabId ? s.browserPanes.has(activeTabId) : false
+  )
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -564,20 +568,27 @@ export function TabView() {
           </div>
 
           {/* The active session's file panes, alongside its terminal. */}
-          {activeTabId && activeTerminal && (activeHasFiles || activeHasEditor) && (
-            <div className="w-[380px] shrink-0 flex flex-col gap-px border-l border-white/[0.06]">
-              {activeHasFiles && (
-                <div className="flex-1 min-h-0">
-                  <FilesCard sessionId={activeTabId} />
-                </div>
-              )}
-              {activeHasEditor && (
-                <div className="flex-1 min-h-0">
-                  <EditorCard sessionId={activeTabId} />
-                </div>
-              )}
-            </div>
-          )}
+          {activeTabId &&
+            activeTerminal &&
+            (activeHasFiles || activeHasEditor || activeHasBrowser) && (
+              <div className="w-[380px] shrink-0 flex flex-col gap-px border-l border-white/[0.06]">
+                {activeHasFiles && (
+                  <div className="flex-1 min-h-0">
+                    <FilesCard sessionId={activeTabId} />
+                  </div>
+                )}
+                {activeHasEditor && (
+                  <div className="flex-1 min-h-0">
+                    <EditorCard sessionId={activeTabId} />
+                  </div>
+                )}
+                {activeHasBrowser && (
+                  <div className="flex-1 min-h-0">
+                    <BrowserCard sessionId={activeTabId} />
+                  </div>
+                )}
+              </div>
+            )}
         </div>
       )}
 

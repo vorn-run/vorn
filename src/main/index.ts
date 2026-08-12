@@ -61,7 +61,11 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // Session browser panes render remote pages in a <webview>, which is a
+      // separate process with its own sandbox — the renderer never runs that
+      // content itself.
+      webviewTag: true
     }
   })
 
@@ -299,7 +303,50 @@ app.on('second-instance', () => {
   }
 })
 
+/**
+ * Guards for the pages a session's browser pane loads.
+ *
+ * `webviewTag` lets the renderer embed arbitrary remote content, so each guest
+ * gets locked down as it attaches: no node integration, no popping out into new
+ * windows, and no privileged permissions granted by default. A page opening a
+ * window becomes a navigation in the same pane instead, which is what a user
+ * expects from a pane that shows one url at a time.
+ */
+function hardenWebviews(): void {
+  app.on('web-contents-created', (_event, contents) => {
+    // Strip anything privileged off a guest before it attaches.
+    contents.on('will-attach-webview', (_e, webPreferences) => {
+      delete webPreferences.preload
+      webPreferences.nodeIntegration = false
+      webPreferences.contextIsolation = true
+    })
+
+    if (contents.getType() !== 'webview') return
+
+    // A page asking for a new window navigates this pane instead — the pane
+    // shows one url at a time, and popping out a real BrowserWindow would
+    // escape every guard set here.
+    contents.setWindowOpenHandler(({ url }) => {
+      try {
+        if (/^https?:$/.test(new URL(url).protocol)) {
+          void contents.loadURL(url).catch(() => {})
+        }
+      } catch {
+        /* unparseable url — deny */
+      }
+      return { action: 'deny' }
+    })
+
+    contents.session.setPermissionRequestHandler((_wc, permission, callback) => {
+      // Camera, mic, geolocation and clipboard reads are not things an embedded
+      // preview needs; allowlist more only if something real requires it.
+      callback(permission === 'fullscreen')
+    })
+  })
+}
+
 app.whenReady().then(async () => {
+  hardenWebviews()
   let bridge: ServerBridge
   try {
     bridge = await launchServer()

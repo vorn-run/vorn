@@ -23,6 +23,7 @@ function seed(ids: string[] = ['t1']): void {
       terminals,
       filesPanes: new Set(),
       editorPanes: new Map(),
+      browserPanes: new Map(),
       minimizedTerminals: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids,
@@ -134,6 +135,80 @@ describe('pane store actions', () => {
     expect(isEditorDirty('t1')).toBe(false)
   })
 
+  it('opens a browser with a default page and normalizes typed urls', () => {
+    const s = () => useAppStore.getState()
+
+    act(() => s().openBrowserPane('t1'))
+    expect(s().browserPanes.get('t1')?.url).toBe('about:blank')
+
+    act(() => s().openBrowserPane('t1', 'localhost:5173'))
+    expect(s().browserPanes.get('t1')?.url).toBe('http://localhost:5173/')
+  })
+
+  it('ignores an unloadable url rather than blanking the pane', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+
+    act(() => s().openBrowserPane('t1', 'javascript:alert(1)'))
+    // The pane keeps the page it had; a rejected scheme must not clear it.
+    expect(s().browserPanes.get('t1')?.url).toBe('https://example.com/')
+  })
+
+  it('re-opening without a url keeps the current page', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => s().openBrowserPane('t1'))
+
+    expect(s().browserPanes.get('t1')?.url).toBe('https://example.com/')
+  })
+
+  it('restores a minimized browser instead of leaving it hidden', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => s().toggleMinimized('browser:t1'))
+
+    act(() => s().toggleBrowserPane('t1'))
+    expect(s().minimizedTerminals.has('browser:t1')).toBe(false)
+    expect(s().browserPanes.has('t1')).toBe(true)
+
+    // Once visible, the toggle closes as usual.
+    act(() => s().toggleBrowserPane('t1'))
+    expect(s().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('keeps each session on its own page', () => {
+    const s = () => useAppStore.getState()
+    act(() => {
+      s().openBrowserPane('t1', 'localhost:5173')
+      s().openBrowserPane('t2', 'localhost:3000')
+    })
+
+    expect(s().browserPanes.get('t1')?.url).toBe('http://localhost:5173/')
+    expect(s().browserPanes.get('t2')?.url).toBe('http://localhost:3000/')
+  })
+
+  it('persists the open page and drops it with its session', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    expect(JSON.parse(localStorage.getItem('vorn:panes') as string).browsers).toEqual({
+      t1: 'https://example.com/'
+    })
+
+    act(() => s().removeTerminal('t1'))
+    expect(s().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('closing a browser clears a maximize that pointed at it', () => {
+    const s = () => useAppStore.getState()
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().setMaximizedPane('browser:t1')
+    })
+    act(() => s().closeBrowserPane('t1'))
+
+    expect(s().maximizedPaneId).toBeNull()
+  })
+
   it('closing a pane clears its minimized and maximized state', () => {
     const s = () => useAppStore.getState()
     act(() => {
@@ -202,7 +277,8 @@ describe('pane store actions', () => {
     expect(raw).toBeTruthy()
     expect(JSON.parse(raw as string)).toEqual({
       files: ['t1'],
-      editors: { t1: '/p/a.ts' }
+      editors: { t1: '/p/a.ts' },
+      browsers: {}
     })
 
     act(() => s().closeFilesPane('t1'))

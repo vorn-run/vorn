@@ -36,6 +36,7 @@ const { useAppStore } = await import('../src/renderer/stores')
 const { FilesCard } = await import('../src/renderer/components/FilesCard')
 const { EditorCard } = await import('../src/renderer/components/EditorCard')
 const { PaneRenderer } = await import('../src/renderer/components/PaneRenderer')
+const { BrowserCard } = await import('../src/renderer/components/BrowserCard')
 const { MinimizedPill } = await import('../src/renderer/components/MinimizedPill')
 const { FocusedTerminal } = await import('../src/renderer/components/FocusedTerminal')
 const { dirtyRefFor, clearDirty } = await import('../src/renderer/lib/editor-dirty')
@@ -67,6 +68,7 @@ function seed(ids = ['t1']): void {
       terminals,
       filesPanes: new Set(),
       editorPanes: new Map(),
+      browserPanes: new Map(),
       minimizedTerminals: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids
@@ -254,6 +256,11 @@ describe('PaneRenderer', () => {
     const editor = render(<PaneRenderer paneId="editor:t1" />)
     await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
     editor.unmount()
+
+    act(() => useAppStore.getState().openBrowserPane('t1', 'example.com'))
+    const browser = render(<PaneRenderer paneId="browser:t1" />)
+    expect(browser.getByLabelText('Address')).toBeInTheDocument()
+    browser.unmount()
   })
 })
 
@@ -315,6 +322,12 @@ describe('panes travel with their session into focus mode', () => {
     )
   })
 
+  it("carries the session's browser into focus mode too", () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<FocusedTerminal />)
+    expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
   it('shows no pane column when the session has none open', () => {
     render(<FocusedTerminal />)
     expect(screen.queryByText('Files')).not.toBeInTheDocument()
@@ -324,5 +337,101 @@ describe('panes travel with their session into focus mode', () => {
     act(() => useAppStore.setState({ focusedTerminalId: null }))
     const { container } = render(<FocusedTerminal />)
     expect(container).toBeEmptyDOMElement()
+  })
+})
+
+describe('BrowserCard', () => {
+  it('renders the page host in its header and the url in the address bar', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    // Headers are narrow, so the host is what earns the space.
+    expect(screen.getByText('localhost:5173')).toBeInTheDocument()
+    expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
+  it('navigates on submit, normalizing what was typed', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const input = screen.getByLabelText('Address')
+    fireEvent.change(input, { target: { value: 'example.com/docs' } })
+    fireEvent.submit(input)
+
+    expect(useAppStore.getState().browserPanes.get('t1')?.url).toBe('https://example.com/docs')
+  })
+
+  it('explains a rejected address instead of silently doing nothing', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'example.com'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const input = screen.getByLabelText('Address')
+    fireEvent.change(input, { target: { value: 'file:///etc/passwd' } })
+    fireEvent.submit(input)
+
+    expect(screen.getByText(/does not look like a web address/)).toBeInTheDocument()
+    // The pane keeps the page it had.
+    expect(useAppStore.getState().browserPanes.get('t1')?.url).toBe('https://example.com/')
+  })
+
+  it('closes its own pane', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'example.com'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Close example\.com/ }))
+    expect(useAppStore.getState().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('starts with navigation disabled until the guest reports history', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'example.com'))
+    render(<BrowserCard sessionId="t1" />)
+
+    expect(screen.getByRole('button', { name: 'Go back' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Go forward' })).toBeDisabled()
+  })
+
+  it('renders nothing when the session has no browser open', () => {
+    const { container } = render(<BrowserCard sessionId="t1" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('renders nothing when its owner session is gone', () => {
+    act(() => useAppStore.getState().openBrowserPane('ghost', 'example.com'))
+    const { container } = render(<BrowserCard sessionId="ghost" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+})
+
+describe('MinimizedPill fallback labels', () => {
+  it('names a browser with no page yet, and an editor with no file', () => {
+    act(() => {
+      useAppStore.setState({
+        browserPanes: new Map([['t1', { url: '' }]]),
+        editorPanes: new Map([['t1', { filePath: '' }]]),
+        minimizedTerminals: new Set(['browser:t1', 'editor:t1'])
+      })
+    })
+
+    const browser = render(<MinimizedPill terminalId="browser:t1" />)
+    expect(browser.getByText('Browser')).toBeInTheDocument()
+    browser.unmount()
+
+    const editor = render(<MinimizedPill terminalId="editor:t1" />)
+    expect(editor.getByText('File')).toBeInTheDocument()
+  })
+})
+
+describe('MinimizedPill for a browser pane', () => {
+  it('labels the pill with the page host', () => {
+    act(() => {
+      useAppStore.getState().openBrowserPane('t1', 'localhost:5173')
+      useAppStore.getState().toggleMinimized('browser:t1')
+    })
+
+    render(<MinimizedPill terminalId="browser:t1" />)
+    expect(screen.getByText('localhost:5173')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button'))
+    expect(useAppStore.getState().minimizedTerminals.has('browser:t1')).toBe(false)
   })
 })

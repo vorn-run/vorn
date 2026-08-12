@@ -2,6 +2,7 @@ import { forwardRef } from 'react'
 import { AgentCard } from './AgentCard'
 import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
+import { BrowserCard } from './BrowserCard'
 import { parsePaneId } from '../lib/pane-id'
 
 interface Props {
@@ -28,6 +29,18 @@ export const PaneRenderer = forwardRef<HTMLDivElement, Props>(function PaneRende
   if (kind === 'files') {
     return (
       <FilesCard
+        ref={ref}
+        sessionId={sessionId}
+        isDragTarget={isDragTarget}
+        onDragStart={onDragStart}
+        flexible={flexible}
+      />
+    )
+  }
+
+  if (kind === 'browser') {
+    return (
+      <BrowserCard
         ref={ref}
         sessionId={sessionId}
         isDragTarget={isDragTarget}

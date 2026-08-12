@@ -1,4 +1,4 @@
-import { FolderOpen, Maximize2, Minimize2, Minus, MoreHorizontal, X } from 'lucide-react'
+import { FolderOpen, Globe, Maximize2, Minimize2, Minus, MoreHorizontal, X } from 'lucide-react'
 import { useState, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../stores'
@@ -18,12 +18,13 @@ interface Props {
 }
 
 export function CardActionCluster({ terminalId, variant }: Props) {
-  const { terminal, setFocused, toggleMinimized, toggleFilesPane } = useAppStore(
+  const { terminal, setFocused, toggleMinimized, toggleFilesPane, toggleBrowserPane } = useAppStore(
     useShallow((s) => ({
       terminal: s.terminals.get(terminalId),
       setFocused: s.setFocusedTerminal,
       toggleMinimized: s.toggleMinimized,
-      toggleFilesPane: s.toggleFilesPane
+      toggleFilesPane: s.toggleFilesPane,
+      toggleBrowserPane: s.toggleBrowserPane
     }))
   )
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
@@ -34,6 +35,11 @@ export function CardActionCluster({ terminalId, variant }: Props) {
   const handleBrowseFiles = (e: React.MouseEvent): void => {
     e.stopPropagation()
     toggleFilesPane(terminalId)
+  }
+
+  const handleOpenBrowser = (e: React.MouseEvent): void => {
+    e.stopPropagation()
+    toggleBrowserPane(terminalId)
   }
 
   const handleMinimize = (e: React.MouseEvent): void => {
@@ -101,6 +107,18 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           aria-label="Browse files"
         >
           <FolderOpen size={14} strokeWidth={2} />
+        </button>
+      </Tooltip>
+
+      <Tooltip label="Open browser" position={tooltipPos}>
+        <button
+          type="button"
+          onClick={handleOpenBrowser}
+          onPointerDown={(e) => e.stopPropagation()}
+          className={btn}
+          aria-label="Open browser"
+        >
+          <Globe size={14} strokeWidth={2} />
         </button>
       </Tooltip>
 

@@ -6,9 +6,11 @@ import {
   SidebarViewMode,
   FlexibleLayoutRect,
   TaskSourceFilter,
-  EditorPaneState
+  EditorPaneState,
+  BrowserPaneState
 } from './types'
-import { filesPaneId, editorPaneId } from '../lib/pane-id'
+import { filesPaneId, editorPaneId, browserPaneId } from '../lib/pane-id'
+import { normalizeUrl } from '../lib/browser-url'
 
 const EMPTY_SESSIONS: TerminalSession[] = []
 const WORKTREE_CACHE_TTL = 5_000
@@ -17,6 +19,8 @@ const GRID_STORAGE_KEY = 'vorn:gridSettings'
 const SIDEBAR_STORAGE_KEY = 'vorn:sidebarSettings'
 const FLEXIBLE_STORAGE_KEY = 'vorn:flexibleLayouts'
 const PANES_STORAGE_KEY = 'vorn:panes'
+/** Opening a browser with no url lands here rather than a blank page. */
+const DEFAULT_BROWSER_URL = 'about:blank'
 
 function loadGridSettings(): { gridColumns?: number; sortMode?: string; statusFilter?: string } {
   try {
@@ -58,32 +62,43 @@ function saveFlexibleLayouts(layouts: Record<string, FlexibleLayoutRect>): void 
  * Shape: `{ files: sessionId[], editors: { [sessionId]: filePath } }`.
  * Entries whose session no longer exists are pruned lazily by `removeTerminal`.
  */
-function loadPanes(): { filesPanes: Set<string>; editorPanes: Map<string, EditorPaneState> } {
+function loadPanes(): {
+  filesPanes: Set<string>
+  editorPanes: Map<string, EditorPaneState>
+  browserPanes: Map<string, BrowserPaneState>
+} {
   try {
     const raw = localStorage.getItem(PANES_STORAGE_KEY)
-    if (!raw) return { filesPanes: new Set(), editorPanes: new Map() }
+    if (!raw) return { filesPanes: new Set(), editorPanes: new Map(), browserPanes: new Map() }
     const parsed = JSON.parse(raw) as {
       files?: string[]
       editors?: Record<string, string>
+      browsers?: Record<string, string>
     }
     return {
       filesPanes: new Set(parsed.files ?? []),
       editorPanes: new Map(
         Object.entries(parsed.editors ?? {}).map(([id, filePath]) => [id, { filePath }])
-      )
+      ),
+      browserPanes: new Map(Object.entries(parsed.browsers ?? {}).map(([id, url]) => [id, { url }]))
     }
   } catch {
-    return { filesPanes: new Set(), editorPanes: new Map() }
+    return { filesPanes: new Set(), editorPanes: new Map(), browserPanes: new Map() }
   }
 }
 
-function savePanes(filesPanes: Set<string>, editorPanes: Map<string, EditorPaneState>): void {
+function savePanes(
+  filesPanes: Set<string>,
+  editorPanes: Map<string, EditorPaneState>,
+  browserPanes: Map<string, BrowserPaneState>
+): void {
   try {
     localStorage.setItem(
       PANES_STORAGE_KEY,
       JSON.stringify({
         files: [...filesPanes],
-        editors: Object.fromEntries([...editorPanes].map(([id, s]) => [id, s.filePath]))
+        editors: Object.fromEntries([...editorPanes].map(([id, s]) => [id, s.filePath])),
+        browsers: Object.fromEntries([...browserPanes].map(([id, s]) => [id, s.url]))
       })
     )
   } catch {
@@ -102,13 +117,25 @@ function savePanes(filesPanes: Set<string>, editorPanes: Map<string, EditorPaneS
 function reconcilePanes(
   filesPanes: Set<string>,
   editorPanes: Map<string, EditorPaneState>,
+  browserPanes: Map<string, BrowserPaneState>,
   liveSessionIds: Set<string>
-): { filesPanes: Set<string>; editorPanes: Map<string, EditorPaneState> } | null {
+): {
+  filesPanes: Set<string>
+  editorPanes: Map<string, EditorPaneState>
+  browserPanes: Map<string, BrowserPaneState>
+} | null {
   const nextFiles = new Set([...filesPanes].filter((id) => liveSessionIds.has(id)))
   const nextEditors = new Map([...editorPanes].filter(([id]) => liveSessionIds.has(id)))
-  if (nextFiles.size === filesPanes.size && nextEditors.size === editorPanes.size) return null
-  savePanes(nextFiles, nextEditors)
-  return { filesPanes: nextFiles, editorPanes: nextEditors }
+  const nextBrowsers = new Map([...browserPanes].filter(([id]) => liveSessionIds.has(id)))
+  if (
+    nextFiles.size === filesPanes.size &&
+    nextEditors.size === editorPanes.size &&
+    nextBrowsers.size === browserPanes.size
+  ) {
+    return null
+  }
+  savePanes(nextFiles, nextEditors, nextBrowsers)
+  return { filesPanes: nextFiles, editorPanes: nextEditors, browserPanes: nextBrowsers }
 }
 
 function loadSidebarSettings(): Record<string, string> {
@@ -270,7 +297,9 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // behind forever. Reconcile against the live set as it settles.
       const live = new Set(state.terminals.keys())
       const reconciled =
-        live.size > 0 ? reconcilePanes(state.filesPanes, state.editorPanes, live) : null
+        live.size > 0
+          ? reconcilePanes(state.filesPanes, state.editorPanes, state.browserPanes, live)
+          : null
       return { visibleTerminalIds: ids, ...(reconciled ?? {}) }
     }),
   setFocusableTerminalIds: (ids) => set({ focusableTerminalIds: ids }),
@@ -308,7 +337,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       }
       const next = new Set(state.filesPanes)
       next.add(sessionId)
-      savePanes(next, state.editorPanes)
+      savePanes(next, state.editorPanes, state.browserPanes)
       return { filesPanes: next }
     }),
 
@@ -317,7 +346,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       if (!state.filesPanes.has(sessionId)) return {}
       const next = new Set(state.filesPanes)
       next.delete(sessionId)
-      savePanes(next, state.editorPanes)
+      savePanes(next, state.editorPanes, state.browserPanes)
       const paneId = filesPaneId(sessionId)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(paneId)
@@ -341,7 +370,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     set((state) => {
       const next = new Map(state.editorPanes)
       next.set(sessionId, { filePath })
-      savePanes(state.filesPanes, next)
+      savePanes(state.filesPanes, next, state.browserPanes)
       // Re-opening into a minimized editor should surface it again.
       const paneId = editorPaneId(sessionId)
       const minimized = new Set(state.minimizedTerminals)
@@ -354,7 +383,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       if (!state.editorPanes.has(sessionId)) return {}
       const next = new Map(state.editorPanes)
       next.delete(sessionId)
-      savePanes(state.filesPanes, next)
+      savePanes(state.filesPanes, next, state.browserPanes)
       const paneId = editorPaneId(sessionId)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(paneId)
@@ -364,6 +393,54 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
         ...(state.maximizedPaneId === paneId ? { maximizedPaneId: null } : {})
       }
     }),
+
+  openBrowserPane: (sessionId, url) =>
+    set((state) => {
+      const paneId = browserPaneId(sessionId)
+      const minimized = new Set(state.minimizedTerminals)
+      const wasHidden = minimized.delete(paneId)
+
+      // No url means "show me this session's browser" — keep whatever page it
+      // already had rather than resetting it to blank.
+      const next = new Map(state.browserPanes)
+      if (url !== undefined) {
+        const normalized = normalizeUrl(url)
+        if (!normalized) return wasHidden ? { minimizedTerminals: minimized } : {}
+        next.set(sessionId, { url: normalized })
+      } else if (!next.has(sessionId)) {
+        next.set(sessionId, { url: DEFAULT_BROWSER_URL })
+      } else if (!wasHidden) {
+        return {}
+      }
+
+      savePanes(state.filesPanes, state.editorPanes, next)
+      return { browserPanes: next, minimizedTerminals: minimized }
+    }),
+
+  closeBrowserPane: (sessionId) =>
+    set((state) => {
+      if (!state.browserPanes.has(sessionId)) return {}
+      const next = new Map(state.browserPanes)
+      next.delete(sessionId)
+      savePanes(state.filesPanes, state.editorPanes, next)
+      const paneId = browserPaneId(sessionId)
+      const minimized = new Set(state.minimizedTerminals)
+      minimized.delete(paneId)
+      return {
+        browserPanes: next,
+        minimizedTerminals: minimized,
+        ...(state.maximizedPaneId === paneId ? { maximizedPaneId: null } : {})
+      }
+    }),
+
+  toggleBrowserPane: (sessionId) => {
+    const { browserPanes, minimizedTerminals, openBrowserPane, closeBrowserPane } = get()
+    // A minimized pane is open but out of sight, so the toggle restores it
+    // instead of closing something the user cannot currently see.
+    const isHidden = minimizedTerminals.has(browserPaneId(sessionId))
+    if (browserPanes.has(sessionId) && !isHidden) closeBrowserPane(sessionId)
+    else openBrowserPane(sessionId)
+  },
 
   setMaximizedPane: (paneId) =>
     set((state) => (state.maximizedPaneId === paneId ? {} : { maximizedPaneId: paneId })),
