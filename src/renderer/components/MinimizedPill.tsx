@@ -8,8 +8,8 @@ import { parsePaneId } from '../lib/pane-id'
 import { displayHost } from '../lib/browser-url'
 
 /**
- * Dock pill for a minimized file-tree or editor pane. Labelled with its owner
- * session so several sessions' panes stay tellable apart in the dock.
+ * Dock pill for a minimized file-tree, editor or browser pane. Labelled with
+ * its owner session so several sessions' panes stay tellable apart in the dock.
  */
 function ChildPanePill({ paneId }: { paneId: string }) {
   const { kind, sessionId } = parsePaneId(paneId)
