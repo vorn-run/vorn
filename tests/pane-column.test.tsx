@@ -126,10 +126,31 @@ describe('PaneColumn', () => {
     })
     render(<PaneColumn sessionId="t1" />)
 
-    expect(screen.queryByTestId('files-t1')).not.toBeInTheDocument()
+    // Out of sight, but still mounted — see below.
+    expect(screen.getByTestId('files-t1').closest('[aria-hidden]')).not.toBeNull()
     expect(screen.getByTestId('browser-t1')).toBeInTheDocument()
+    expect(screen.getByTestId('browser-t1').closest('[aria-hidden]')).toBeNull()
     // Nothing to drag while one pane owns the column.
     expect(screen.queryByRole('separator')).not.toBeInTheDocument()
+  })
+
+  it('keeps a hidden pane mounted rather than tearing it down', () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().openBrowserPane('t1')
+      useAppStore.getState().setMaximizedPane('files:t1')
+    })
+    render(<PaneColumn sessionId="t1" />)
+
+    // Unmounting to hide destroys the browser's <webview> guest: the person
+    // loses the page and scroll position, and the session's agent loses its
+    // CDP attachment — after which it is told "no pane open" while the store
+    // still holds one, so it cannot even reopen its way out.
+    const browser = screen.getByTestId('browser-t1')
+    expect(browser).toBeInTheDocument()
+    // Inert while hidden, so it cannot swallow clicks aimed at the maximized
+    // pane sitting on top of it.
+    expect(browser.closest('.pointer-events-none')).not.toBeNull()
   })
 
   it("ignores another session's maximized pane", () => {

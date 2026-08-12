@@ -21,6 +21,29 @@ import { parsePaneId } from '../lib/pane-id'
 import { isMac } from '../lib/platform'
 import { ArrowDown, FolderGit2, GitBranch, Minimize2, Pencil } from 'lucide-react'
 
+/**
+ * One pane's slot on the expanded stage, kept mounted while hidden.
+ *
+ * Taken out of flow rather than `display: none` so the pane keeps a real size
+ * — a webview collapsed to zero does not reliably come back.
+ */
+function PaneSlot({
+  hidden,
+  children
+}: {
+  hidden: boolean
+  children: React.ReactNode
+}): React.ReactNode {
+  if (hidden) {
+    return (
+      <div aria-hidden className="absolute inset-0 pointer-events-none invisible">
+        {children}
+      </div>
+    )
+  }
+  return <div className="flex-1 min-h-0">{children}</div>
+}
+
 export function FocusedTerminal() {
   const focusedId = useAppStore((s) => s.focusedTerminalId)
   const previewId = useAppStore((s) => s.previewTerminalId)
@@ -236,27 +259,31 @@ export function FocusedTerminal() {
 
           {/* The expanded session keeps its own Files / File / Browser panes.
               While one of them is maximized it takes the whole stage, matching
-              the grid's session-scoped maximize. */}
+              the grid's session-scoped maximize.
+
+              A pane the maximize hides is hidden, not unmounted — see the note
+              in PaneColumn: unmounting costs the browser its live guest, the
+              page, and the agent's CDP handle. */}
           {!isMobile && (hasFilesPane || hasEditorPane || hasBrowserPane) && (
             <div
-              className={`shrink-0 flex flex-col gap-px ${
+              className={`relative shrink-0 flex flex-col gap-px ${
                 hasMaximizedPane ? 'flex-1 min-w-0' : 'w-[420px] border-l border-white/[0.06]'
               }`}
             >
-              {hasFilesPane && (!hasMaximizedPane || maximizedKind === 'files') && (
-                <div className="flex-1 min-h-0">
+              {hasFilesPane && (
+                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'files'}>
                   <FilesCard sessionId={effectiveId} />
-                </div>
+                </PaneSlot>
               )}
-              {hasEditorPane && (!hasMaximizedPane || maximizedKind === 'editor') && (
-                <div className="flex-1 min-h-0">
+              {hasEditorPane && (
+                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'editor'}>
                   <EditorCard sessionId={effectiveId} />
-                </div>
+                </PaneSlot>
               )}
-              {hasBrowserPane && (!hasMaximizedPane || maximizedKind === 'browser') && (
-                <div className="flex-1 min-h-0">
+              {hasBrowserPane && (
+                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'browser'}>
                   <BrowserCard sessionId={effectiveId} />
-                </div>
+                </PaneSlot>
               )}
             </div>
           )}

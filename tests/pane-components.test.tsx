@@ -330,10 +330,30 @@ describe('panes travel with their session into focus mode', () => {
     // Focus mode used to render panes in a fixed rail and ignore the maximize
     // entirely, so the button looked dead once a card was expanded.
     expect(screen.getByLabelText('Address')).toBeInTheDocument()
-    expect(screen.queryByTestId('files-pane-header')).not.toBeInTheDocument()
+    // Hidden, but still mounted: unmounting a pane to hide it costs the browser
+    // its live guest and the agent its CDP handle. Visually gone is enough.
+    const files = await screen.findByTestId('files-pane-header')
+    expect(files.closest('[aria-hidden]')).not.toBeNull()
     // The terminal gives up its space too — a maximized pane covering only the
     // rail is not a maximize.
     expect(screen.getByTestId('focused-terminal-column')).toHaveClass('hidden')
+  })
+
+  it('keeps the browser guest alive when a sibling pane is maximized', () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().openBrowserPane('t1', 'localhost:5173')
+      useAppStore.getState().setMaximizedPane('files:t1')
+    })
+
+    render(<FocusedTerminal />)
+
+    // The <webview> must survive. Unmounting it destroys the guest, which loses
+    // the page and scroll position for the person and detaches CDP for the
+    // agent — which is then told "no pane open" while the store still says one
+    // exists, with no way to recover until the person un-maximizes.
+    expect(document.querySelectorAll('webview')).toHaveLength(1)
+    expect(screen.getByLabelText('Address').closest('[aria-hidden]')).not.toBeNull()
   })
 
   it("ignores another session's maximized pane", async () => {
