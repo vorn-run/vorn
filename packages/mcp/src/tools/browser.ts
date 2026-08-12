@@ -15,9 +15,17 @@ import { rpcCall } from '../ws-client'
  *
  * Every tool here is scoped to the session the *caller* runs in, resolved from
  * `VORN_SESSION_ID` which the PTY spawn site injects. Deliberately, none of them
- * takes a session argument: cross-session browsing is then structurally
- * impossible rather than merely discouraged, and the model cannot be talked into
- * reaching another session's logged-in pane by a page it just read.
+ * takes a session argument, so the model cannot be talked into reaching another
+ * session's logged-in pane by a page it just read — there is no argument to talk
+ * it into filling in.
+ *
+ * That removes the realistic path, not every path. Below this layer the session
+ * id is an ordinary parameter on the local WS socket, which is unauthenticated
+ * and whose port sits in `~/.vorn/ws-port`, exactly as it is for every other
+ * session-scoped tool. An agent that goes around its own tools and speaks to
+ * that socket directly can still address another session. Closing that off is a
+ * per-connection auth change to the WS server, worth doing once for all tools
+ * rather than pretending here that it is already done.
  */
 
 type ToolResult = {

@@ -45,6 +45,9 @@ export interface Entry {
    */
   generation: number
   refs: Map<string, number>
+  /** Held so `detach` can remove it. An anonymous listener would accumulate one
+   *  copy per re-attach, each closing over an orphaned entry. */
+  onCdpMessage?: (e: unknown, method: string, params: unknown) => void
   console: BrowserConsoleMessage[]
   network: BrowserNetworkRequest[]
 }
@@ -107,7 +110,7 @@ export function attach(sessionId: string, webContentsId: number): void {
     return
   }
 
-  wc.debugger.on('message', (_e, method, params) => {
+  const onCdpMessage = (_e: unknown, method: string, params: unknown): void => {
     const p = params as Record<string, unknown>
     if (method === 'Runtime.consoleAPICalled') {
       const args = (p.args as Array<{ value?: unknown; description?: string }>) ?? []
@@ -129,13 +132,18 @@ export function attach(sessionId: string, webContentsId: number): void {
       const res = p.response as { url?: string; status?: number } | undefined
       const hit = entry.network.find((r) => r.url === res?.url && r.status === undefined)
       if (hit) hit.status = res?.status
-    } else if (method === 'Page.frameNavigated' || method === 'Page.loadEventFired') {
+    } else if (method === 'Page.frameNavigated') {
       // The document the refs pointed into is gone. Bumping here is what makes
       // a stale ref fail loudly instead of resolving against a fresh tree.
+      // Deliberately not on `Page.loadEventFired`: that fires for the document
+      // the refs were *just* read from, which would spend them on a page that
+      // never changed and send the agent round the re-read loop for nothing.
       entry.generation++
       entry.refs.clear()
     }
-  })
+  }
+  entry.onCdpMessage = onCdpMessage
+  wc.debugger.on('message', onCdpMessage)
 
   for (const domain of ['DOM', 'Runtime', 'Page', 'Network', 'Accessibility']) {
     send(wc, `${domain}.enable`).catch((err) => {
@@ -157,6 +165,7 @@ export function detach(sessionId: string): void {
   const wc = webContents.fromId(entry.webContentsId)
   if (!wc || wc.isDestroyed()) return
   try {
+    if (entry.onCdpMessage) wc.debugger.off('message', entry.onCdpMessage)
     if (wc.debugger.isAttached()) wc.debugger.detach()
   } catch (err) {
     // A crashed or already-gone guest detaches itself; nothing left to release.
@@ -547,11 +556,22 @@ export async function startPick(params: { sessionId: string }): Promise<BrowserS
       void describe(wc, entry, backendNodeId).then(resolve, reject)
       void send(wc, 'Overlay.setInspectMode', { mode: 'none', highlightConfig: {} })
     }
-    wc.debugger.on('message', onMessage)
-    pickers.set(params.sessionId, () => {
+    // A guest that dies or navigates while the picker is armed will never send
+    // `inspectNodeRequested`. Without this the promise never settles: the
+    // renderer's invoke hangs forever and the button stays lit with no error.
+    const abandon = (why: string) => (): void => {
       wc.debugger.off('message', onMessage)
-      reject(new Error('Selection cancelled'))
-    })
+      wc.off('destroyed', onGone)
+      wc.off('did-start-navigation', onGone)
+      pickers.delete(params.sessionId)
+      reject(new Error(why))
+    }
+    const onGone = abandon('The page changed before anything was picked.')
+    wc.once('destroyed', onGone)
+    wc.once('did-start-navigation', onGone)
+
+    wc.debugger.on('message', onMessage)
+    pickers.set(params.sessionId, abandon('Selection cancelled'))
   })
 }
 
@@ -567,6 +587,16 @@ export function cancelPick(sessionId: string): void {
   send(wc, 'Overlay.setInspectMode', { mode: 'none', highlightConfig: {} }).catch(() => {
     // The guest went away mid-pick; there is no overlay left to turn off.
   })
+}
+
+/** The guest's current scroll offset, for turning viewport coords into page ones. */
+async function pageScroll(wc: WebContents): Promise<{ x: number; y: number }> {
+  const { result } = await send<{ result: { value: { x: number; y: number } } }>(
+    wc,
+    'Runtime.evaluate',
+    { expression: '({x: scrollX, y: scrollY})', returnByValue: true }
+  )
+  return result.value
 }
 
 async function describe(
@@ -593,9 +623,21 @@ async function describe(
   // A crop of just this element. Cheap — one node, not a page — and it settles
   // questions about rendering that markup alone cannot.
   try {
+    // `rect` came from getBoundingClientRect — viewport coordinates — while
+    // `clip` is page-relative. On any scrolled page the difference is a crop of
+    // whatever sits scrollY pixels above the picked element: plausible, and
+    // silently the wrong thing.
+    const scroll = await pageScroll(wc)
     const { data } = await send<{ data: string }>(wc, 'Page.captureScreenshot', {
       format: 'png',
-      clip: { ...selection.rect, scale: 1 }
+      captureBeyondViewport: true,
+      clip: {
+        x: selection.rect.x + scroll.x,
+        y: selection.rect.y + scroll.y,
+        width: Math.max(1, selection.rect.width),
+        height: Math.max(1, selection.rect.height),
+        scale: 1
+      }
     })
     selection.screenshot = data
   } catch (err) {
@@ -630,21 +672,22 @@ export async function annotate(params: {
   // moment of drawing — so read it once, here, rather than threading a scroll
   // offset through the renderer where it would drift out of date between the
   // last stroke and the send.
-  const { result: sc } = await send<{ result: { value: { x: number; y: number } } }>(
-    wc,
-    'Runtime.evaluate',
-    { expression: '({x: scrollX, y: scrollY})', returnByValue: true }
-  )
-  const points = viewport.map((p) => ({ x: p.x + sc.value.x, y: p.y + sc.value.y }))
+  const sc = await pageScroll(wc)
+  const points = viewport.map((p) => ({ x: p.x + sc.x, y: p.y + sc.y }))
 
-  const xs = points.map((p) => p.x)
-  const ys = points.map((p) => p.y)
-  const bounds = {
-    x: Math.min(...xs),
-    y: Math.min(...ys),
-    width: Math.max(1, Math.max(...xs) - Math.min(...xs)),
-    height: Math.max(1, Math.max(...ys) - Math.min(...ys))
+  // Reduced rather than spread: a freehand stroke can carry thousands of
+  // points, and `Math.min(...pts)` passes every one as an argument.
+  let x0 = Infinity
+  let y0 = Infinity
+  let x1 = -Infinity
+  let y1 = -Infinity
+  for (const p of points) {
+    if (p.x < x0) x0 = p.x
+    if (p.x > x1) x1 = p.x
+    if (p.y < y0) y0 = p.y
+    if (p.y > y1) y1 = p.y
   }
+  const bounds = { x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0) }
 
   // Sampled rather than exhaustive: a stroke can carry hundreds of points and
   // consecutive ones almost always land on the same element.
