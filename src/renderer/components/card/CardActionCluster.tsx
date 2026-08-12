@@ -18,12 +18,12 @@ interface Props {
 }
 
 export function CardActionCluster({ terminalId, variant }: Props) {
-  const { terminal, setDiffSidebar, setFocused, toggleMinimized } = useAppStore(
+  const { terminal, setFocused, toggleMinimized, toggleFilesPane } = useAppStore(
     useShallow((s) => ({
       terminal: s.terminals.get(terminalId),
-      setDiffSidebar: s.setDiffSidebarTerminalId,
       setFocused: s.setFocusedTerminal,
-      toggleMinimized: s.toggleMinimized
+      toggleMinimized: s.toggleMinimized,
+      toggleFilesPane: s.toggleFilesPane
     }))
   )
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
@@ -33,7 +33,7 @@ export function CardActionCluster({ terminalId, variant }: Props) {
 
   const handleBrowseFiles = (e: React.MouseEvent): void => {
     e.stopPropagation()
-    setDiffSidebar(terminalId, 'all-files')
+    toggleFilesPane(terminalId)
   }
 
   const handleMinimize = (e: React.MouseEvent): void => {

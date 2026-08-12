@@ -6,7 +6,8 @@ import { GridLayout, noCompactor, type EventCallback, type Layout } from 'react-
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { useAppStore } from '../stores'
-import { AgentCard } from './AgentCard'
+import { PaneRenderer } from './PaneRenderer'
+import { parsePaneId } from '../lib/pane-id'
 import { PromptLauncher } from './PromptLauncher'
 import { GridContextMenu } from './GridContextMenu'
 import { AgentIcon } from './AgentIcon'
@@ -88,7 +89,26 @@ export const GridView = memo(function GridView() {
   const { size: wrapperSize, setNode: setGridWrapperNode } = useContainerSize()
 
   const terminals = useAppStore((s) => s.terminals)
-  const { orderedIds } = useVisibleTerminals()
+  const { orderedIds: allOrderedIds } = useVisibleTerminals()
+  const maximizedPaneId = useAppStore((s) => s.maximizedPaneId)
+
+  // Session-scoped maximize: the maximized pane takes over its *owner session's*
+  // footprint, so only that session's sibling panes drop out. Other sessions keep
+  // rendering, which is what makes maximize usable for side-by-side comparison.
+  const orderedIds = useMemo(() => {
+    if (!maximizedPaneId || !allOrderedIds.includes(maximizedPaneId)) return allOrderedIds
+    const owner = parsePaneId(maximizedPaneId).sessionId
+    return allOrderedIds.filter(
+      (id) => id === maximizedPaneId || parsePaneId(id).sessionId !== owner
+    )
+  }, [allOrderedIds, maximizedPaneId])
+
+  // How many grid cells the maximized pane absorbs, so it can span them.
+  const maximizedSpan = useMemo(() => {
+    if (!maximizedPaneId || !allOrderedIds.includes(maximizedPaneId)) return 1
+    const owner = parsePaneId(maximizedPaneId).sessionId
+    return allOrderedIds.filter((id) => parsePaneId(id).sessionId === owner).length
+  }, [allOrderedIds, maximizedPaneId])
 
   const isMobile = useIsMobile()
 
@@ -276,6 +296,8 @@ export const GridView = memo(function GridView() {
       ) : gridColumns === -1 ? (
         <FlexibleGrid
           orderedIds={orderedIds}
+          allOrderedIds={allOrderedIds}
+          maximizedPaneId={maximizedPaneId}
           onCreateSession={createNewSession}
           onShowContextMenu={setGridContextMenu}
         />
@@ -288,17 +310,26 @@ export const GridView = memo(function GridView() {
           onContextMenu={handleGridContextMenu}
         >
           {orderedIds.map((id, index) => (
-            <AgentCard
+            <div
               key={id}
-              ref={(el) => {
-                if (el) cardRefs.current.set(id, el)
-                else cardRefs.current.delete(id)
-              }}
-              terminalId={id}
-              index={index}
-              isDragTarget={dragState?.isDragging === true && dropTargetIndex === index}
-              onDragStart={sortMode === 'manual' ? handleDragStart : undefined}
-            />
+              className="min-w-0 min-h-0"
+              style={
+                id === maximizedPaneId && maximizedSpan > 1
+                  ? { gridColumn: `span ${maximizedSpan}` }
+                  : undefined
+              }
+            >
+              <PaneRenderer
+                ref={(el) => {
+                  if (el) cardRefs.current.set(id, el)
+                  else cardRefs.current.delete(id)
+                }}
+                paneId={id}
+                index={index}
+                isDragTarget={dragState?.isDragging === true && dropTargetIndex === index}
+                onDragStart={sortMode === 'manual' ? handleDragStart : undefined}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -326,23 +357,34 @@ function getStableKey(session: TerminalState['session']): string {
 
 function FlexibleGrid({
   orderedIds,
+  allOrderedIds,
+  maximizedPaneId,
   onCreateSession,
   onShowContextMenu
 }: {
   orderedIds: string[]
+  /** Includes panes hidden by maximize — needed to compute the group's footprint. */
+  allOrderedIds: string[]
+  maximizedPaneId: string | null
   onCreateSession: () => void
   onShowContextMenu: (pos: { x: number; y: number } | null) => void
 }) {
   const { size: containerSize, setNode: setContainerNode } = useContainerSize()
   const containerWidth = containerSize?.width ?? 0
 
-  // Narrow selector: only extract the stable keys we need, not the full terminals Map
+  // Narrow selector: only extract the stable keys we need, not the full terminals Map.
+  // Child panes key off their owner session's stable key, prefixed by kind, so a
+  // session's tree and file keep independent saved rects that survive restarts
+  // alongside the terminal's.
   const stableKeys = useAppStore(
     useShallow((s) => {
       const keys: Record<string, string> = {}
-      for (const id of orderedIds) {
-        const t = s.terminals.get(id)
-        if (t) keys[id] = getStableKey(t.session) || id
+      for (const id of allOrderedIds) {
+        const { kind, sessionId } = parsePaneId(id)
+        const t = s.terminals.get(sessionId)
+        if (!t) continue
+        const base = getStableKey(t.session) || sessionId
+        keys[id] = kind === 'terminal' ? base : `${kind}:${base}`
       }
       return keys
     })
@@ -361,7 +403,7 @@ function FlexibleGrid({
     }
 
     let autoIndex = 0
-    return orderedIds.map((id) => {
+    const items = orderedIds.map((id) => {
       const key = stableKeys[id]
       if (!key) return { i: id, x: 0, y: 0, w: FLEX_DEFAULT_W, h: FLEX_DEFAULT_H }
       const saved = flexibleLayouts[key]
@@ -374,19 +416,50 @@ function FlexibleGrid({
       autoIndex++
       return { i: id, x, y, w: FLEX_DEFAULT_W, h: FLEX_DEFAULT_H }
     })
-  }, [orderedIds, stableKeys, flexibleLayouts])
+
+    // Maximized pane takes the bounding box of its owner session's rects. This is
+    // computed for render only and never written back to `flexibleLayouts`, so
+    // restoring returns every sibling to its own saved position.
+    if (maximizedPaneId) {
+      const owner = parsePaneId(maximizedPaneId).sessionId
+      const group = allOrderedIds.filter((id) => parsePaneId(id).sessionId === owner)
+      if (group.length > 1) {
+        const rects = group
+          .map((id) => flexibleLayouts[stableKeys[id]])
+          .filter((r): r is FlexibleLayoutRect => Boolean(r))
+        if (rects.length > 0) {
+          const x = Math.min(...rects.map((r) => r.x))
+          const y = Math.min(...rects.map((r) => r.y))
+          const right = Math.max(...rects.map((r) => r.x + r.w))
+          const bottom = Math.max(...rects.map((r) => r.y + r.h))
+          const target = items.find((it) => it.i === maximizedPaneId)
+          if (target) {
+            target.x = x
+            target.y = y
+            target.w = right - x
+            target.h = bottom - y
+          }
+        }
+      }
+    }
+
+    return items
+  }, [orderedIds, allOrderedIds, stableKeys, flexibleLayouts, maximizedPaneId])
 
   const persistLayout = useCallback(
     (updatedLayout: Layout) => {
       const merged: Record<string, FlexibleLayoutRect> = { ...flexibleLayouts }
       for (const item of updatedLayout) {
+        // While maximized, the pane's rect is a computed bounding box over its
+        // siblings — persisting it would destroy their saved positions.
+        if (item.i === maximizedPaneId) continue
         const key = stableKeys[item.i]
         if (!key) continue
         merged[key] = { x: item.x, y: item.y, w: item.w, h: item.h }
       }
       setFlexibleLayouts(merged)
     },
-    [stableKeys, flexibleLayouts, setFlexibleLayouts]
+    [stableKeys, flexibleLayouts, setFlexibleLayouts, maximizedPaneId]
   )
 
   const handleDragStop: EventCallback = useCallback(
@@ -445,7 +518,7 @@ function FlexibleGrid({
       >
         {orderedIds.map((id, index) => (
           <div key={id} className="h-full">
-            <AgentCard terminalId={id} index={index} flexible />
+            <PaneRenderer paneId={id} index={index} flexible />
           </div>
         ))}
       </GridLayout>

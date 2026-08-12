@@ -1,6 +1,14 @@
 import { StateCreator } from 'zustand'
 import { TerminalSession } from '../../shared/types'
-import { AppStore, UISlice, SidebarViewMode, FlexibleLayoutRect, TaskSourceFilter } from './types'
+import {
+  AppStore,
+  UISlice,
+  SidebarViewMode,
+  FlexibleLayoutRect,
+  TaskSourceFilter,
+  EditorPaneState
+} from './types'
+import { filesPaneId, editorPaneId } from '../lib/pane-id'
 
 const EMPTY_SESSIONS: TerminalSession[] = []
 const WORKTREE_CACHE_TTL = 5_000
@@ -8,6 +16,7 @@ const worktreeCacheTimestamps = new Map<string, number>()
 const GRID_STORAGE_KEY = 'vorn:gridSettings'
 const SIDEBAR_STORAGE_KEY = 'vorn:sidebarSettings'
 const FLEXIBLE_STORAGE_KEY = 'vorn:flexibleLayouts'
+const PANES_STORAGE_KEY = 'vorn:panes'
 
 function loadGridSettings(): { gridColumns?: number; sortMode?: string; statusFilter?: string } {
   try {
@@ -39,6 +48,44 @@ function loadFlexibleLayouts(): Record<string, FlexibleLayoutRect> {
 function saveFlexibleLayouts(layouts: Record<string, FlexibleLayoutRect>): void {
   try {
     localStorage.setItem(FLEXIBLE_STORAGE_KEY, JSON.stringify(layouts))
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Open child panes, persisted so a reload restores the same workspace.
+ * Shape: `{ files: sessionId[], editors: { [sessionId]: filePath } }`.
+ * Entries whose session no longer exists are pruned lazily by `removeTerminal`.
+ */
+function loadPanes(): { filesPanes: Set<string>; editorPanes: Map<string, EditorPaneState> } {
+  try {
+    const raw = localStorage.getItem(PANES_STORAGE_KEY)
+    if (!raw) return { filesPanes: new Set(), editorPanes: new Map() }
+    const parsed = JSON.parse(raw) as {
+      files?: string[]
+      editors?: Record<string, string>
+    }
+    return {
+      filesPanes: new Set(parsed.files ?? []),
+      editorPanes: new Map(
+        Object.entries(parsed.editors ?? {}).map(([id, filePath]) => [id, { filePath }])
+      )
+    }
+  } catch {
+    return { filesPanes: new Set(), editorPanes: new Map() }
+  }
+}
+
+function savePanes(filesPanes: Set<string>, editorPanes: Map<string, EditorPaneState>): void {
+  try {
+    localStorage.setItem(
+      PANES_STORAGE_KEY,
+      JSON.stringify({
+        files: [...filesPanes],
+        editors: Object.fromEntries([...editorPanes].map(([id, s]) => [id, s.filePath]))
+      })
+    )
   } catch {
     /* ignore */
   }
@@ -94,6 +141,8 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   visibleTerminalIds: [],
   focusableTerminalIds: [],
   minimizedTerminals: new Set(),
+  ...loadPanes(),
+  maximizedPaneId: null,
   sessionDockCollapsed: false,
   isOnboardingOpen: false,
   diffSidebarTerminalId: null,
@@ -209,13 +258,75 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   toggleMinimized: (id) =>
     set((state) => {
       const next = new Set(state.minimizedTerminals)
-      if (next.has(id)) {
-        next.delete(id)
-      } else {
-        next.add(id)
-      }
-      return { minimizedTerminals: next }
+      const nowMinimized = !next.has(id)
+      if (nowMinimized) next.add(id)
+      else next.delete(id)
+      // A pane that just got minimized can't stay maximized.
+      const clearMax = nowMinimized && state.maximizedPaneId === id
+      return { minimizedTerminals: next, ...(clearMax ? { maximizedPaneId: null } : {}) }
     }),
+
+  openFilesPane: (sessionId) =>
+    set((state) => {
+      if (state.filesPanes.has(sessionId)) return {}
+      const next = new Set(state.filesPanes)
+      next.add(sessionId)
+      savePanes(next, state.editorPanes)
+      return { filesPanes: next }
+    }),
+
+  closeFilesPane: (sessionId) =>
+    set((state) => {
+      if (!state.filesPanes.has(sessionId)) return {}
+      const next = new Set(state.filesPanes)
+      next.delete(sessionId)
+      savePanes(next, state.editorPanes)
+      const paneId = filesPaneId(sessionId)
+      const minimized = new Set(state.minimizedTerminals)
+      minimized.delete(paneId)
+      return {
+        filesPanes: next,
+        minimizedTerminals: minimized,
+        ...(state.maximizedPaneId === paneId ? { maximizedPaneId: null } : {})
+      }
+    }),
+
+  toggleFilesPane: (sessionId) => {
+    const { filesPanes, openFilesPane, closeFilesPane } = get()
+    if (filesPanes.has(sessionId)) closeFilesPane(sessionId)
+    else openFilesPane(sessionId)
+  },
+
+  openEditorPane: (sessionId, filePath) =>
+    set((state) => {
+      const next = new Map(state.editorPanes)
+      next.set(sessionId, { filePath })
+      savePanes(state.filesPanes, next)
+      // Re-opening into a minimized editor should surface it again.
+      const paneId = editorPaneId(sessionId)
+      const minimized = new Set(state.minimizedTerminals)
+      minimized.delete(paneId)
+      return { editorPanes: next, minimizedTerminals: minimized }
+    }),
+
+  closeEditorPane: (sessionId) =>
+    set((state) => {
+      if (!state.editorPanes.has(sessionId)) return {}
+      const next = new Map(state.editorPanes)
+      next.delete(sessionId)
+      savePanes(state.filesPanes, next)
+      const paneId = editorPaneId(sessionId)
+      const minimized = new Set(state.minimizedTerminals)
+      minimized.delete(paneId)
+      return {
+        editorPanes: next,
+        minimizedTerminals: minimized,
+        ...(state.maximizedPaneId === paneId ? { maximizedPaneId: null } : {})
+      }
+    }),
+
+  setMaximizedPane: (paneId) =>
+    set((state) => (state.maximizedPaneId === paneId ? {} : { maximizedPaneId: paneId })),
 
   toggleSessionDockCollapsed: () =>
     set((state) => ({ sessionDockCollapsed: !state.sessionDockCollapsed })),

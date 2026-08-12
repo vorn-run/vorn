@@ -52,6 +52,10 @@ export function useKeyboardShortcuts() {
           state.setSettingsOpen(false)
           return
         }
+        if (state.maximizedPaneId) {
+          state.setMaximizedPane(null)
+          return
+        }
         if (state.diffSidebarTerminalId) {
           state.setDiffSidebarTerminalId(null)
           return

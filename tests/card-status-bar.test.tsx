@@ -629,13 +629,13 @@ describe('TabView merged toolbar controls', () => {
   })
 
   it('clicks browse files button on a tab', () => {
-    const setDiffSidebar = vi.fn()
+    const toggleFilesPane = vi.fn()
     act(() => {
-      useAppStore.setState({ setDiffSidebarTerminalId: setDiffSidebar })
+      useAppStore.setState({ toggleFilesPane })
     })
     render(<TabView />)
     fireEvent.click(screen.getByRole('button', { name: 'Browse files' }))
-    expect(setDiffSidebar).toHaveBeenCalledWith('term-1', 'all-files')
+    expect(toggleFilesPane).toHaveBeenCalledWith('term-1')
   })
 
   it('clicks rename button on a tab', () => {

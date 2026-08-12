@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect } from 'react'
-import { X } from 'lucide-react'
+import { X, FolderTree } from 'lucide-react'
 import { useAppStore } from '../../stores'
 import { AgentStatusIcon } from '../AgentStatusIcon'
 import { closeTerminalSession } from '../../lib/terminal-close'
@@ -24,6 +24,8 @@ export function SessionItem({
   const previewTerminalId = useAppStore((s) => s.previewTerminalId)
   const layoutMode = useAppStore((s) => s.config?.defaults?.layoutMode ?? 'grid')
   const enableHoverPreview = useAppStore((s) => s.config?.defaults?.enableHoverPreview ?? false)
+  const hasFilesPane = useAppStore((s) => s.filesPanes.has(session.id))
+  const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
   const isActive =
     layoutMode === 'tabs' ? activeTabId === session.id : focusedTerminalId === session.id
   const isPreviewing = previewTerminalId === session.id
@@ -88,6 +90,22 @@ export function SessionItem({
           <div className="text-[10px] text-gray-600 truncate">{session.branch}</div>
         )}
       </div>
+      <button
+        type="button"
+        aria-label={`${hasFilesPane ? 'Hide' : 'Show'} files for ${session.name}`}
+        title={hasFilesPane ? 'Hide files' : 'Show files'}
+        onClick={(e) => {
+          e.stopPropagation()
+          toggleFilesPane(session.id)
+        }}
+        className={`${
+          hasFilesPane
+            ? 'opacity-100 text-amber-400/80'
+            : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
+        } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
+      >
+        <FolderTree size={12} strokeWidth={2} />
+      </button>
       <button
         type="button"
         aria-label={`Close session ${session.name}`}

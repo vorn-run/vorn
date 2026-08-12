@@ -2,6 +2,7 @@ import { useMemo, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
+import { filesPaneId, editorPaneId } from '../lib/pane-id'
 
 /**
  * Stable comparator for terminal ids under the active sortMode. Manual mode
@@ -49,6 +50,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     statusFilter,
     terminalOrder,
     minimizedTerminals,
+    filesPanes,
+    editorPanes,
     setVisibleTerminalIds,
     setFocusableTerminalIds
   } = useAppStore(
@@ -62,6 +65,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       statusFilter: s.statusFilter,
       terminalOrder: s.terminalOrder,
       minimizedTerminals: s.minimizedTerminals,
+      filesPanes: s.filesPanes,
+      editorPanes: s.editorPanes,
       setVisibleTerminalIds: s.setVisibleTerminalIds,
       setFocusableTerminalIds: s.setFocusableTerminalIds
     }))
@@ -97,14 +102,19 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       })
       .sort(sortFn)
 
+    // Expand each visible session into its pane group: the terminal followed by
+    // whichever child panes it owns. Keeping children adjacent to their owner is
+    // what lets session-scoped maximize span a contiguous run of grid cells.
     const ordered: string[] = []
     const minimized: string[] = []
+    const pushPane = (paneId: string): void => {
+      if (minimizedTerminals.has(paneId)) minimized.push(paneId)
+      else ordered.push(paneId)
+    }
     for (const [id] of filtered) {
-      if (minimizedTerminals.has(id)) {
-        minimized.push(id)
-      } else {
-        ordered.push(id)
-      }
+      pushPane(id)
+      if (filesPanes.has(id)) pushPane(filesPaneId(id))
+      if (editorPanes.has(id)) pushPane(editorPaneId(id))
     }
 
     // Focused-mode nav spans the active project (or workspace) regardless of
@@ -123,7 +133,9 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     statusFilter,
     sortMode,
     terminalOrder,
-    minimizedTerminals
+    minimizedTerminals,
+    filesPanes,
+    editorPanes
   ])
 
   useEffect(() => {

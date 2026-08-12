@@ -56,13 +56,13 @@ const mockTerminal = {
 
 const initialState = useAppStore.getState()
 
-let setDiffSidebar: ReturnType<typeof vi.fn>
+let toggleFilesPane: ReturnType<typeof vi.fn>
 let setFocused: ReturnType<typeof vi.fn>
 let toggleMinimized: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   vi.clearAllMocks()
-  setDiffSidebar = vi.fn()
+  toggleFilesPane = vi.fn()
   setFocused = vi.fn()
   toggleMinimized = vi.fn()
   const terminals = new Map()
@@ -71,7 +71,7 @@ beforeEach(() => {
     useAppStore.setState({
       terminals,
       focusedTerminalId: null,
-      setDiffSidebarTerminalId: setDiffSidebar,
+      toggleFilesPane,
       setFocusedTerminal: setFocused,
       toggleMinimized
     })
@@ -93,10 +93,10 @@ describe('CardActionCluster — mini variant (grid, hover-revealed)', () => {
     expect(screen.getByRole('button', { name: /Close/ })).toBeInTheDocument()
   })
 
-  it('Browse files opens the diff sidebar in all-files mode', () => {
+  it("Browse files toggles the session's own Files pane", () => {
     render(<CardActionCluster terminalId="term-1" variant="mini" />)
     fireEvent.click(screen.getByRole('button', { name: /Browse files/ }))
-    expect(setDiffSidebar).toHaveBeenCalledWith('term-1', 'all-files')
+    expect(toggleFilesPane).toHaveBeenCalledWith('term-1')
   })
 
   it('Minimize toggles the minimized state for this terminal', () => {
@@ -150,7 +150,7 @@ describe('CardActionCluster guards', () => {
     fireEvent.pointerDown(screen.getByRole('button', { name: /Expand/ }))
     fireEvent.pointerDown(screen.getByRole('button', { name: /Close/ }))
     // onPointerDown calls stopPropagation only — none of the click-triggered store actions fire.
-    expect(setDiffSidebar).not.toHaveBeenCalled()
+    expect(toggleFilesPane).not.toHaveBeenCalled()
     expect(toggleMinimized).not.toHaveBeenCalled()
     expect(setFocused).not.toHaveBeenCalled()
   })

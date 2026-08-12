@@ -1,0 +1,64 @@
+import { memo, forwardRef } from 'react'
+import { FolderTree } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
+import { useAppStore } from '../stores'
+import { PaneCard } from './PaneCard'
+import { FileTreePane } from './FileTreeExplorer'
+import { filesPaneId } from '../lib/pane-id'
+
+interface Props {
+  /** Session that owns this tree. */
+  sessionId: string
+  isDragTarget?: boolean
+  onDragStart?: (paneId: string, e: React.PointerEvent) => void
+  flexible?: boolean
+}
+
+/**
+ * A session's file tree, as its own grid pane.
+ *
+ * Independent of that session's editor pane: closing this leaves an open file
+ * open. Selecting a file here routes through the store (`openEditorPane`) rather
+ * than a prop, so the two panes have no parent/child relationship.
+ */
+export const FilesCard = memo(
+  forwardRef<HTMLDivElement, Props>(function FilesCard(
+    { sessionId, isDragTarget, onDragStart, flexible },
+    ref
+  ) {
+    const { terminal, selectedFile, openEditorPane, closeFilesPane } = useAppStore(
+      useShallow((s) => ({
+        terminal: s.terminals.get(sessionId),
+        selectedFile: s.editorPanes.get(sessionId)?.filePath ?? null,
+        openEditorPane: s.openEditorPane,
+        closeFilesPane: s.closeFilesPane
+      }))
+    )
+
+    if (!terminal) return null
+
+    const cwd = terminal.session.worktreePath || terminal.session.projectPath
+    const remoteHostId = terminal.session.remoteHostId
+
+    return (
+      <PaneCard
+        ref={ref}
+        paneId={filesPaneId(sessionId)}
+        title="Files"
+        icon={<FolderTree size={12} className="text-gray-500 shrink-0" />}
+        onClose={() => closeFilesPane(sessionId)}
+        isDragTarget={isDragTarget}
+        onDragStart={onDragStart}
+        flexible={flexible}
+      >
+        <FileTreePane
+          key={cwd}
+          cwd={cwd}
+          remoteHostId={remoteHostId}
+          selectedFile={selectedFile}
+          onSelectFile={(path) => openEditorPane(sessionId, path)}
+        />
+      </PaneCard>
+    )
+  })
+)

@@ -50,17 +50,18 @@ afterAll(() => {
   Element.prototype.getBoundingClientRect = originalGetBoundingClientRect
 })
 
-// Stub AgentCard with forwardRef so GridView's ref callback (which calls
-// cardRefs.current.set(id, el)) actually fires.
-vi.mock('../src/renderer/components/AgentCard', () => ({
-  AgentCard: forwardRef<
+// Stub PaneRenderer with forwardRef so GridView's ref callback (which calls
+// cardRefs.current.set(id, el)) actually fires. GridView renders every pane —
+// terminal, files, editor — through this one seam.
+vi.mock('../src/renderer/components/PaneRenderer', () => ({
+  PaneRenderer: forwardRef<
     HTMLDivElement,
-    { terminalId: string; index: number; isDragTarget: boolean }
-  >(function MockAgentCard({ terminalId, index, isDragTarget }, ref) {
+    { paneId: string; index: number; isDragTarget: boolean }
+  >(function MockPaneRenderer({ paneId, index, isDragTarget }, ref) {
     return (
       <div
         ref={ref}
-        data-testid={`card-${terminalId}`}
+        data-testid={`card-${paneId}`}
         data-index={index}
         data-drag-target={isDragTarget ? 'yes' : 'no'}
       />
