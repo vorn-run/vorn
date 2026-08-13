@@ -17,6 +17,7 @@ import { StopRunButton } from './StopRunButton'
 import { workflowRunId, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
 import { WORKFLOW_STATUS_TEXT } from '../../lib/workflow-status'
+import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
 
 export function RunDetailEmptyState() {
   return (
@@ -145,8 +146,7 @@ export function RunDetailPane({
           <button
             type="button"
             onClick={() => void approveWorkflowGate(run, waitingGate.nodeId)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-md border border-blue-500/40 bg-blue-500/10
-                       text-[13px] text-blue-300 hover:bg-blue-500/20 hover:text-blue-200 transition-colors"
+            className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE}`}
           >
             <Check size={14} strokeWidth={2} />
             Approve &amp; continue
@@ -158,8 +158,7 @@ export function RunDetailPane({
           <button
             type="button"
             onClick={() => void rejectWorkflowGate(run, waitingGate.nodeId)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-md border border-white/[0.06]
-                       text-[13px] text-gray-300 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 transition-colors"
+            className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_REJECT}`}
           >
             <X size={14} strokeWidth={2} />
             Reject run

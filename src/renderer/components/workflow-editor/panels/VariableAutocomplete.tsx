@@ -292,7 +292,7 @@ export function VariableAutocomplete({
               }
             }}
             className={`absolute top-1.5 right-1.5 p-1 rounded transition-colors
-                       ${showDropdown ? 'bg-blue-500/20 text-blue-400' : 'bg-white/[0.06] text-gray-500 hover:text-gray-300 hover:bg-white/[0.1]'}`}
+                       ${showDropdown ? 'bg-white/[0.10] text-ink' : 'bg-white/[0.06] text-gray-500 hover:text-gray-300 hover:bg-white/[0.1]'}`}
             title="Insert variable (or type {{ in the editor)"
           >
             <Braces size={13} />
@@ -361,9 +361,9 @@ export function VariableAutocomplete({
                           disabled={item.disabled}
                           className={`w-full flex items-center gap-2 px-3 pl-6 py-1.5 text-left transition-colors
                                      ${item.disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
-                                     ${isHighlighted && !item.disabled ? 'bg-blue-500/15' : 'hover:bg-white/[0.04]'}`}
+                                     ${isHighlighted && !item.disabled ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'}`}
                         >
-                          <span className="text-[12px] text-cyan-400 font-mono min-w-[50px]">
+                          <span className="text-[12px] text-ink-secondary font-mono min-w-[50px]">
                             {item.key === item.pattern ? item.label : item.key}
                           </span>
                           {item.description && (

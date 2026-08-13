@@ -1,3 +1,4 @@
+import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
 import { describe, it, expect } from 'vitest'
 import {
   bucketOf,
@@ -187,6 +188,19 @@ describe('runStages', () => {
       nodes
     )
     expect(stages.map((s) => s.label)).toEqual(['Manual Trigger', 'Execute Script', 'Say Hello'])
+  })
+
+  it('falls back to the pending dot for a status it does not know', () => {
+    // A status added on the server before the renderer learns about it would
+    // otherwise render a segment with no class at all — an invisible stage,
+    // which reads as a shorter run rather than an unknown one.
+    const stages = runStages(
+      run({
+        nodeStates: [{ nodeId: 'a', status: 'teleported' }] as unknown as NodeExecutionState[]
+      }),
+      nodes
+    )
+    expect(stages[0].dotClass).toBe(WORKFLOW_STATUS_DOT.pending)
   })
 
   it('falls back to a short node id when the workflow is gone', () => {

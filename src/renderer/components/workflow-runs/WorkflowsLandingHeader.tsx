@@ -37,9 +37,7 @@ export function WorkflowsLandingHeader() {
       >
         Needs review
         {waiting.length > 0 && (
-          <span className="font-mono text-[10px] text-amber-400 tabular-nums">
-            {waiting.length}
-          </span>
+          <span className="font-mono text-[10px] text-bronzo tabular-nums">{waiting.length}</span>
         )}
       </button>
 

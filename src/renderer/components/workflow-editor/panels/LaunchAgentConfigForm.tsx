@@ -306,7 +306,7 @@ export function LaunchAgentConfigForm({
                       })
                     }
                     className={`shrink-0 p-0.5 rounded hover:bg-white/[0.08] transition-colors ${
-                      branchIsFromContext ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'
+                      branchIsFromContext ? 'text-ink' : 'text-gray-500 hover:text-gray-300'
                     }`}
                   >
                     <Zap size={11} />
@@ -632,12 +632,12 @@ function OutputSchemaField({
         className={`w-full px-3 py-2 text-[12px] bg-white/[0.06] border rounded-md text-white
                     placeholder:text-gray-600 focus:outline-none font-mono resize-y ${
                       error
-                        ? 'border-red-500/50 focus:border-red-500/70'
+                        ? 'border-danger/50 focus:border-danger/70'
                         : 'border-white/[0.1] focus:border-white/[0.2]'
                     }`}
       />
       {error ? (
-        <p className="text-[11px] text-red-400 mt-1">{error}</p>
+        <p className="text-[11px] text-danger mt-1">{error}</p>
       ) : (
         <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
           Agent must return a JSON object matching this schema. Its fields become{' '}

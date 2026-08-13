@@ -129,7 +129,7 @@ export function WorkflowsSection({
             <>
               <span className="min-w-0 flex-1 truncate">All runs</span>
               {waitingCount > 0 && (
-                <span className="font-mono text-[10px] text-amber-400 tabular-nums">
+                <span className="font-mono text-[10px] text-bronzo tabular-nums">
                   {waitingCount}
                 </span>
               )}
@@ -157,7 +157,7 @@ export function WorkflowsSection({
               onDragEnd={canReorder ? handleDragEnd : undefined}
               className={`${canReorder ? 'cursor-grab active:cursor-grabbing' : ''} ${
                 dragOverIndex === fullIndex && dragSourceIndex !== fullIndex
-                  ? 'border-t border-blue-500'
+                  ? 'border-t border-white/40'
                   : ''
               }`}
             >

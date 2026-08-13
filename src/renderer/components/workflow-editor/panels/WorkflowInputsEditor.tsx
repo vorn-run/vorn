@@ -70,13 +70,13 @@ export function WorkflowInputsEditor({ inputs, onChange }: Props) {
                 aria-label="Input key"
                 aria-invalid={duplicateKeys.has(input.key) || undefined}
                 className={`${FIELD_CLASS} font-mono flex-1 ${
-                  duplicateKeys.has(input.key) ? 'border-red-500/60' : ''
+                  duplicateKeys.has(input.key) ? 'border-danger/60' : ''
                 }`}
               />
               <button
                 onClick={() => onChange(inputs.filter((_, i) => i !== index))}
                 aria-label={`Remove input ${input.key}`}
-                className="p-1.5 text-gray-500 hover:text-red-400 rounded-md hover:bg-white/[0.06]
+                className="p-1.5 text-gray-500 hover:text-danger rounded-md hover:bg-white/[0.06]
                            transition-colors shrink-0"
               >
                 <Trash2 size={12} />
@@ -84,7 +84,7 @@ export function WorkflowInputsEditor({ inputs, onChange }: Props) {
             </div>
 
             {duplicateKeys.has(input.key) && (
-              <p className="text-[11px] text-red-400">
+              <p className="text-[11px] text-danger">
                 Duplicate key — only one input named <code className="font-mono">{input.key}</code>{' '}
                 will reach the run.
               </p>

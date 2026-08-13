@@ -95,7 +95,7 @@ export function WorkflowContextMenu({
           onDelete()
           onClose()
         }}
-        className="w-full px-3 py-2 text-left text-[12px] text-red-400 hover:text-red-300
+        className="w-full px-3 py-2 text-left text-[12px] text-danger hover:text-danger/80
                    hover:bg-white/[0.06] active:bg-white/[0.1] flex items-center gap-2 transition-colors"
       >
         <Trash2 size={12} strokeWidth={1.5} />

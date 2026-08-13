@@ -41,7 +41,7 @@ export function RunsList({ runs, workflowsById, filter, selectedId, onSelect }: 
           {visible.length}
         </span>
         {waitingCount > 0 && (
-          <span className="font-mono text-[11px] text-amber-400 tabular-nums px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+          <span className="font-mono text-[11px] text-bronzo tabular-nums px-1.5 py-0.5 rounded bg-bronzo/10 border border-bronzo/20">
             {waitingCount} waiting
           </span>
         )}
