@@ -8,7 +8,7 @@ import {
   type RunStage,
   type RunWorkflowRef
 } from '../../lib/run-presentation'
-import { STATUS_DOT_CLASSES } from '../workflow-editor/statusDot'
+import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import { RunIcon } from './RunIcon'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
 
@@ -73,7 +73,7 @@ function RunListRowImpl({
         <span
           role="img"
           aria-label={dotStatus}
-          className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT_CLASSES[dotStatus] ?? 'bg-gray-600'}`}
+          className={`w-1.5 h-1.5 rounded-full shrink-0 ${WORKFLOW_STATUS_DOT_PULSE[dotStatus] ?? WORKFLOW_STATUS_DOT.pending}`}
         />
         <RunIcon presentation={presentation} />
         <span

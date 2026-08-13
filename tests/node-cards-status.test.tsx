@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
+import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
@@ -32,7 +33,7 @@ describe('node cards — executionStatus dot', () => {
         onClick={vi.fn()}
       />
     )
-    expect(container.querySelector('.bg-green-400')).toBeInTheDocument()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.success}`)).toBeInTheDocument()
   })
 
   it('renders an error dot on ConditionNode', () => {
@@ -44,10 +45,10 @@ describe('node cards — executionStatus dot', () => {
         onClick={vi.fn()}
       />
     )
-    expect(container.querySelector('.bg-red-500')).toBeInTheDocument()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.error}`)).toBeInTheDocument()
   })
 
-  it('renders a running (yellow, pulsing) dot on LaunchAgentNode', () => {
+  it('renders a running, pulsing dot on LaunchAgentNode', () => {
     const { container } = render(
       <LaunchAgentNode
         label="Agent"
@@ -56,7 +57,7 @@ describe('node cards — executionStatus dot', () => {
         onClick={vi.fn()}
       />
     )
-    expect(container.querySelector('.bg-yellow-400')).toBeInTheDocument()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.running}`)).toBeInTheDocument()
     expect(container.querySelector('.animate-pulse')).toBeInTheDocument()
   })
 
@@ -64,7 +65,7 @@ describe('node cards — executionStatus dot', () => {
     const { container } = render(
       <TriggerNode label="T" config={{ triggerType: 'manual' }} onClick={vi.fn()} />
     )
-    expect(container.querySelector('.bg-green-400')).not.toBeInTheDocument()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.success}`)).not.toBeInTheDocument()
   })
 
   it('highlights selected node with blue border glow', () => {

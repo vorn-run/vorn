@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { WorkflowDefinition } from '../src/shared/types'
@@ -146,7 +147,7 @@ describe('WorkflowItem', () => {
         onContextMenu={vi.fn()}
       />
     )
-    expect(container.querySelector('.bg-blue-400')).toBeInTheDocument()
+    expect(container.querySelector('.bg-ink-secondary')).toBeInTheDocument()
   })
 
   it('renders a gray dot and dims the row for scheduled + disabled workflows', () => {
@@ -158,7 +159,7 @@ describe('WorkflowItem', () => {
         onContextMenu={vi.fn()}
       />
     )
-    expect(container.querySelector('.bg-gray-600')).toBeInTheDocument()
+    expect(container.querySelector('.bg-ink-ghost')).toBeInTheDocument()
     expect(container.querySelector('.opacity-40')).toBeInTheDocument()
   })
 
@@ -167,7 +168,7 @@ describe('WorkflowItem', () => {
     const { container } = render(
       <WorkflowItem workflow={wf} isCollapsed={false} iconSize={14} onContextMenu={vi.fn()} />
     )
-    expect(container.querySelector('.bg-red-500')).toBeInTheDocument()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.error}`)).toBeInTheDocument()
   })
 
   it('hides the name and action buttons when collapsed', () => {
@@ -236,7 +237,7 @@ describe('a gate waiting for approval', () => {
         onContextMenu={vi.fn()}
       />
     )
-    expect(container.querySelector('.bg-amber-400')).toBeInTheDocument()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.waiting}`)).toBeInTheDocument()
   })
 
   it('finds a gate in an older run, not only the newest', () => {
@@ -254,7 +255,7 @@ describe('a gate waiting for approval', () => {
         onContextMenu={vi.fn()}
       />
     )
-    expect(container.querySelector('.bg-amber-400')).toBeInTheDocument()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.waiting}`)).toBeInTheDocument()
   })
 
   it('ignores a gate belonging to a different workflow', () => {
@@ -267,6 +268,6 @@ describe('a gate waiting for approval', () => {
         onContextMenu={vi.fn()}
       />
     )
-    expect(container.querySelector('.bg-amber-400')).toBeNull()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.waiting}`)).toBeNull()
   })
 })

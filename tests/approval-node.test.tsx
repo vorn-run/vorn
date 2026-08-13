@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
+import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { ApprovalNode } from '../src/renderer/components/workflow-editor/nodes/ApprovalNode'
@@ -53,7 +54,7 @@ describe('ApprovalNode', () => {
     const { container } = render(
       <ApprovalNode label="Gate" config={{}} executionStatus="waiting" onClick={vi.fn()} />
     )
-    expect(container.querySelector('.bg-amber-400')).toBeTruthy()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.waiting}`)).toBeTruthy()
   })
 
   it('applies selected border when selected', () => {

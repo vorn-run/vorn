@@ -16,13 +16,7 @@ import { RunIcon } from './RunIcon'
 import { StopRunButton } from './StopRunButton'
 import { workflowRunId, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
-
-const RUN_STATUS_TEXT = {
-  running: 'text-blue-400',
-  success: 'text-green-400',
-  error: 'text-red-400',
-  cancelled: 'text-gray-400'
-} as const
+import { WORKFLOW_STATUS_TEXT } from '../../lib/workflow-status'
 
 export function RunDetailEmptyState() {
   return (
@@ -124,7 +118,7 @@ export function RunDetailPane({
           <div className="flex items-center gap-2">
             <StatusDot status={waitingGate ? 'waiting' : run.status} />
             <span
-              className={`text-[12.5px] ${waitingGate ? 'text-amber-400' : RUN_STATUS_TEXT[run.status]}`}
+              className={`text-[12.5px] ${waitingGate ? WORKFLOW_STATUS_TEXT.waiting : WORKFLOW_STATUS_TEXT[run.status]}`}
             >
               {waitingGate ? 'waiting for approval' : outcome.label}
             </span>

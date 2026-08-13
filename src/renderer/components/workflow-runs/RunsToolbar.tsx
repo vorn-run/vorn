@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { SlidersHorizontal } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
 import { OptionRow } from '../OptionRow'
-import { STATUS_DOT_STATIC } from '../workflow-editor/statusDot'
+import { WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import type { RunBucket } from '../../stores/types'
 
 const RUN_FILTERS: { key: RunBucket; label: string }[] = [
@@ -15,10 +15,10 @@ const RUN_FILTERS: { key: RunBucket; label: string }[] = [
 
 const RUN_FILTER_DOT: Record<RunBucket, string> = {
   all: 'bg-gray-400',
-  running: STATUS_DOT_STATIC.running,
-  waiting: STATUS_DOT_STATIC.waiting,
-  error: STATUS_DOT_STATIC.error,
-  success: STATUS_DOT_STATIC.success
+  running: WORKFLOW_STATUS_DOT.running,
+  waiting: WORKFLOW_STATUS_DOT.waiting,
+  error: WORKFLOW_STATUS_DOT.error,
+  success: WORKFLOW_STATUS_DOT.success
 }
 
 interface Props {

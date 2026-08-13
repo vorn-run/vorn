@@ -11,7 +11,10 @@ import {
 } from '../../../shared/types'
 
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
-import { STATUS_DOT_CLASSES as SHARED_STATUS_DOTS } from './statusDot'
+import {
+  WORKFLOW_STATUS_DOT_PULSE as SHARED_STATUS_DOTS,
+  WORKFLOW_STATUS_DOT
+} from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
 import { approveWorkflowGate, rejectWorkflowGate } from '../../lib/workflow-execution'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
@@ -47,7 +50,7 @@ export function StatusDot({
       role="img"
       aria-label={label}
       title={label}
-      className={`w-2 h-2 rounded-full shrink-0 ${SHARED_STATUS_DOTS[status] ?? 'bg-gray-600'}`}
+      className={`w-2 h-2 rounded-full shrink-0 ${SHARED_STATUS_DOTS[status] ?? WORKFLOW_STATUS_DOT.pending}`}
     />
   )
 }

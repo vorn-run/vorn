@@ -1,6 +1,6 @@
 import { Repeat } from 'lucide-react'
 import type { LoopConfig, NodeExecutionStatus, WorkflowNode } from '../../../../shared/types'
-import { STATUS_DOT_CLASSES } from '../statusDot'
+import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
 
 interface Props {
   label: string
@@ -47,9 +47,9 @@ export function LoopNode({
                   ${body.length === 0 ? 'border-dashed' : ''}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
-      {executionStatus && STATUS_DOT_CLASSES[executionStatus] && (
+      {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (
         <span
-          className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${STATUS_DOT_CLASSES[executionStatus]}`}
+          className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[executionStatus]}`}
         />
       )}
       <div className="flex items-center gap-2">

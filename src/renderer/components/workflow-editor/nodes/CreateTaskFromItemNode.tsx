@@ -1,6 +1,6 @@
 import { ListPlus } from 'lucide-react'
 import type { CreateTaskFromItemConfig, NodeExecutionStatus } from '../../../../shared/types'
-import { STATUS_DOT_CLASSES } from '../statusDot'
+import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
 
 interface Props {
   label: string
@@ -30,9 +30,9 @@ export function CreateTaskFromItemNode({
                   ${selected ? 'border-blue-500/60' : 'border-white/[0.08]'}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
-      {executionStatus && STATUS_DOT_CLASSES[executionStatus] && (
+      {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (
         <span
-          className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${STATUS_DOT_CLASSES[executionStatus]}`}
+          className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[executionStatus]}`}
         />
       )}
       <div className="flex items-center gap-2">

@@ -2,7 +2,7 @@ import { AgentIcon } from '../../AgentIcon'
 import type { LaunchAgentConfig, AiAgentType, NodeExecutionStatus } from '../../../../shared/types'
 import { useAppStore } from '../../../stores'
 import { ClipboardList, Server } from 'lucide-react'
-import { STATUS_DOT_CLASSES } from '../statusDot'
+import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
 
 interface Props {
   label: string
@@ -39,9 +39,9 @@ export function LaunchAgentNode({ label, config, selected, executionStatus, onCl
                   ${selected ? 'border-blue-500/60 shadow-[0_0_0_3px_rgba(59,130,246,0.08)]' : 'border-white/[0.08]'}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
-      {executionStatus && STATUS_DOT_CLASSES[executionStatus] && (
+      {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (
         <span
-          className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${STATUS_DOT_CLASSES[executionStatus]}`}
+          className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[executionStatus]}`}
         />
       )}
       <div className="flex items-center gap-2">

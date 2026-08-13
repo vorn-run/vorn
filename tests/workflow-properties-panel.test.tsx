@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
+import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
 import { WorkflowPropertiesPanel } from '../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel'
 import type { WorkflowNode, WorkflowExecution } from '../src/shared/types'
 
@@ -96,7 +97,7 @@ describe('WorkflowPropertiesPanel', () => {
     }
     const { container } = render(<WorkflowPropertiesPanel {...baseProps} lastRun={lastRun} />)
     expect(screen.getByText('Last run')).toBeInTheDocument()
-    expect(container.querySelector('.bg-green-400')).toBeInTheDocument()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.success}`)).toBeInTheDocument()
   })
 
   it('hides the Last run row when there is no lastRun', () => {

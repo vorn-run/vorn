@@ -2,7 +2,7 @@ import { X } from 'lucide-react'
 import { ToggleSwitch } from '../../settings/ToggleSwitch'
 import { PropertyRow } from './PropertyRow'
 import { formatRelativeTime } from '../../../lib/format-time'
-import { STATUS_DOT_CLASSES } from '../statusDot'
+import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../../lib/workflow-status'
 import type { WorkflowNode, TriggerConfig, WorkflowExecution } from '../../../../shared/types'
 
 function formatTriggerSummary(node: WorkflowNode | null): string {
@@ -123,7 +123,7 @@ export function WorkflowPropertiesPanel({
           <PropertyRow label="Last run">
             <div className="flex items-center gap-2">
               <span
-                className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT_CLASSES[lastRun.status] ?? 'bg-gray-500'}`}
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${WORKFLOW_STATUS_DOT_PULSE[lastRun.status] ?? WORKFLOW_STATUS_DOT.pending}`}
               />
               <span
                 className="text-[12px] text-gray-300"
