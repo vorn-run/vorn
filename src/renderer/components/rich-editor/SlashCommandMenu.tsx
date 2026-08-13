@@ -168,7 +168,7 @@ export function SlashCommandMenuPortal() {
       <div
         ref={containerRef}
         className="min-w-[220px] max-h-[280px] overflow-y-auto rounded-lg border border-white/[0.08] shadow-2xl py-1"
-        style={{ background: '#1e1e22' }}
+        style={{ background: 'var(--color-surface-overlay)' }}
       >
         {state.items.map((item, index) => {
           const Icon = item.icon

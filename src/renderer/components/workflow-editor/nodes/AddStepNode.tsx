@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Plus, Play, GitBranch, Terminal, Split, Hand, Zap, Repeat } from 'lucide-react'
+import { Plus, Play, GitFork, Terminal, Split, Hand, Zap, Repeat } from 'lucide-react'
+import { NODE_GLYPH, NODE_SELECTED } from '../node-visuals'
 
 interface Props {
   onAddAction: () => void
@@ -45,7 +46,7 @@ export function ConnectorButton({
                     border transition-all z-10
                     ${
                       open
-                        ? 'bg-white/[0.08] border-blue-500/40 text-white'
+                        ? `bg-white/[0.08] ${NODE_SELECTED} text-white`
                         : 'bg-surface-node border-white/[0.1] text-gray-500 hover:border-white/[0.2] hover:text-white'
                     }`}
       >
@@ -54,7 +55,7 @@ export function ConnectorButton({
 
       {open && (
         <div
-          className="absolute top-full mt-2 z-50 bg-[#2a2a2e] border border-white/[0.12]
+          className="absolute top-full mt-2 z-50 bg-surface-overlay border border-white/[0.12]
                      rounded-lg shadow-xl shadow-black/40 py-1.5 min-w-[200px]
                      animate-in fade-in-0 zoom-in-95 duration-100"
           style={{ left: '50%', transform: 'translateX(-50%)' }}
@@ -68,7 +69,7 @@ export function ConnectorButton({
             className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
                        hover:bg-white/[0.06] hover:text-white transition-colors text-left"
           >
-            <Play size={14} className="text-green-400 shrink-0" />
+            <Play size={14} className={`${NODE_GLYPH} shrink-0`} />
             Add an agent
           </button>
 
@@ -82,7 +83,7 @@ export function ConnectorButton({
               className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
                          hover:bg-white/[0.06] hover:text-white transition-colors text-left"
             >
-              <Terminal size={14} className="text-yellow-400 shrink-0" />
+              <Terminal size={14} className={`${NODE_GLYPH} shrink-0`} />
               Add a script
             </button>
           )}
@@ -97,7 +98,7 @@ export function ConnectorButton({
               className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
                          hover:bg-white/[0.06] hover:text-white transition-colors text-left"
             >
-              <Split size={14} className="text-purple-400 shrink-0" />
+              <GitFork size={14} className={`${NODE_GLYPH} shrink-0`} />
               Add a condition
             </button>
           )}
@@ -112,7 +113,7 @@ export function ConnectorButton({
               className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
                          hover:bg-white/[0.06] hover:text-white transition-colors text-left"
             >
-              <Hand size={14} className="text-gray-400 shrink-0" />
+              <Hand size={14} className={`${NODE_GLYPH} shrink-0`} />
               Add an approval gate
             </button>
           )}
@@ -127,7 +128,7 @@ export function ConnectorButton({
               className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
                          hover:bg-white/[0.06] hover:text-white transition-colors text-left"
             >
-              <Repeat size={14} className="text-gray-400 shrink-0" />
+              <Repeat size={14} className={`${NODE_GLYPH} shrink-0`} />
               Repeat steps until…
             </button>
           )}
@@ -142,7 +143,7 @@ export function ConnectorButton({
               className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
                          hover:bg-white/[0.06] hover:text-white transition-colors text-left"
             >
-              <Zap size={14} className="text-gray-400 shrink-0" />
+              <Zap size={14} className={`${NODE_GLYPH} shrink-0`} />
               Call a connector action
             </button>
           )}
@@ -159,7 +160,7 @@ export function ConnectorButton({
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
                            hover:bg-white/[0.06] hover:text-white transition-colors text-left"
               >
-                <GitBranch size={14} className="text-purple-400 shrink-0" />
+                <Split size={14} className={`${NODE_GLYPH} shrink-0`} />
                 Add a parallel branch
               </button>
             </>

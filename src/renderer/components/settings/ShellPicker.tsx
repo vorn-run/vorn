@@ -207,7 +207,7 @@ export function ShellPicker({ value, onChange }: Props) {
               bottom: position.bottom,
               left: position.left,
               minWidth: Math.max(288, position.width),
-              background: '#1e1e22'
+              background: 'var(--color-surface-overlay)'
             }}
           >
             {shells === null && (

@@ -138,7 +138,7 @@ export function CallConnectorActionNodeForm({
               <div key={field.key}>
                 <label className="block text-xs text-gray-500 mb-1">
                   {field.label}
-                  {field.required && <span className="text-red-400 ml-0.5">*</span>}
+                  {field.required && <span className="text-danger ml-0.5">*</span>}
                 </label>
                 {field.type === 'select' ? (
                   <SelectPicker

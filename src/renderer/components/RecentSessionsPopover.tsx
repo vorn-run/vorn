@@ -71,7 +71,7 @@ export function RecentSessionsPopover({ isOpen, onClose }: Props) {
           <motion.div
             className="absolute top-full right-0 mt-2 z-50 w-[380px] max-h-[400px]
                        border border-white/[0.08] rounded-xl shadow-2xl overflow-hidden flex flex-col"
-            style={{ background: '#1e1e22' }}
+            style={{ background: 'var(--color-surface-overlay)' }}
             initial={{ opacity: 0, y: -4, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}

@@ -3,7 +3,9 @@ import type { AgentStatus } from '../../shared/types'
 /**
  * Only `waiting` takes the accent — it is the one status blocked on the person.
  * Running is the commonest state, so painting it would put bronzo across most
- * of the screen most of the time; it reads white, and STATUS_GLYPH shimmers it.
+ * of the screen most of the time; it reads white and animates instead. Motion
+ * is reserved for work actually in progress, so a waiting dot stays still and
+ * lets the accent do the calling — the rule `workflow-status.ts` follows too.
  */
 export const STATUS_DOT: Record<AgentStatus, string> = {
   running: 'bg-ink',
@@ -17,17 +19,6 @@ export const STATUS_LABEL: Record<AgentStatus, string> = {
   waiting: 'Waiting',
   idle: 'Idle',
   error: 'Error'
-}
-
-export type StatusGlyph = 'shimmer' | 'circle-empty' | 'dot-solid'
-
-// Only "running" shimmers — pulse is reserved for the one state where
-// the agent is actively doing work. Waiting shows a static amber dot.
-export const STATUS_GLYPH: Record<AgentStatus, StatusGlyph> = {
-  running: 'shimmer',
-  waiting: 'dot-solid',
-  idle: 'circle-empty',
-  error: 'dot-solid'
 }
 
 export const STATUS_TEXT: Record<AgentStatus, string> = {

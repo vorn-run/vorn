@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
 import { ChevronDown, ChevronRight, Maximize2, RotateCcw, Check, X } from 'lucide-react'
 import {
   WorkflowExecution,
@@ -11,14 +12,15 @@ import {
 } from '../../../shared/types'
 
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
-import { STATUS_DOT_CLASSES as SHARED_STATUS_DOTS } from './statusDot'
+import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
 import { approveWorkflowGate, rejectWorkflowGate } from '../../lib/workflow-execution'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { useConnections } from '../../lib/use-connections'
 import {
-  NODE_TYPE_VISUAL,
+  NODE_TYPE_ICON,
+  TASK_CHIP,
   nodeConnectionId,
   stepMeta,
   stepTimeline,
@@ -47,7 +49,7 @@ export function StatusDot({
       role="img"
       aria-label={label}
       title={label}
-      className={`w-2 h-2 rounded-full shrink-0 ${SHARED_STATUS_DOTS[status] ?? 'bg-gray-600'}`}
+      className={`w-2 h-2 rounded-full shrink-0 ${WORKFLOW_STATUS_DOT_PULSE[status] ?? WORKFLOW_STATUS_DOT.pending}`}
     />
   )
 }
@@ -72,9 +74,9 @@ function StepIcon({
   if (connectorId) {
     return <ConnectorIcon connectorId={connectorId} size={12} className="text-gray-400 shrink-0" />
   }
-  const visual = node ? NODE_TYPE_VISUAL[node.type] : undefined
+  const visual = node ? NODE_TYPE_ICON[node.type] : undefined
   if (!visual) return null
-  const Icon = visual.icon
+  const Icon = visual
   // Deliberately neutral: a trace is read for its status dots, and tinting
   // every step by node type turns the list into a rainbow that competes with
   // them. The glyph carries the type; the colour carries the outcome.
@@ -250,7 +252,7 @@ export function RunStepsList({
                       </span>
                       {nodeTask && (
                         <span
-                          className="text-[10px] px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded text-blue-400 truncate max-w-[80px] cursor-pointer hover:bg-blue-500/20 transition-colors"
+                          className={`${TASK_CHIP} max-w-[80px]`}
                           onClick={(e) => {
                             e.stopPropagation()
                             onClickTask?.(nodeTask.id)
@@ -300,16 +302,14 @@ export function RunStepsList({
 
                 {isWaitingGate && (
                   <div className="px-3 pb-3 -mt-0.5 flex items-start gap-2">
-                    <div className="flex-1 min-w-0 text-[11px] text-amber-300/90">
+                    <div className="flex-1 min-w-0 text-[11px] text-bronzo">
                       {approvalMessage || 'Waiting for approval.'}
                     </div>
                     <button
                       onClick={() => {
                         void approveWorkflowGate(execution, ns.nodeId)
                       }}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-[11px]
-                             text-green-300 hover:text-green-200 hover:bg-green-500/10
-                             border border-green-500/30 transition-colors shrink-0"
+                      className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_APPROVE}`}
                     >
                       <Check size={11} strokeWidth={2.5} />
                       Approve
@@ -318,9 +318,7 @@ export function RunStepsList({
                       onClick={() => {
                         void rejectWorkflowGate(execution, ns.nodeId)
                       }}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-[11px]
-                             text-red-300 hover:text-red-200 hover:bg-red-500/10
-                             border border-red-500/30 transition-colors shrink-0"
+                      className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_REJECT}`}
                     >
                       <X size={11} strokeWidth={2.5} />
                       Reject
@@ -379,7 +377,7 @@ export function RunStepsList({
                         </Tooltip>
                       )}
                     </div>
-                    {ns.error && <p className="text-[11px] text-red-400 mt-1">{ns.error}</p>}
+                    {ns.error && <p className="text-[11px] text-danger mt-1">{ns.error}</p>}
                   </div>
                 )}
 
@@ -387,7 +385,7 @@ export function RunStepsList({
                   <div className="px-3 pb-2">
                     {ns.error ? (
                       <>
-                        <p className="text-[11px] text-red-400">{ns.error}</p>
+                        <p className="text-[11px] text-danger">{ns.error}</p>
                         {canResume && (
                           <div className="mt-1.5">
                             <Tooltip label="Resume session">
@@ -484,7 +482,7 @@ export function RunEntry({
           </span>
           {triggerTask && (
             <span
-              className="text-[10px] px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 rounded text-violet-400 truncate max-w-[100px] shrink-0 cursor-pointer hover:bg-violet-500/20 transition-colors"
+              className={`${TASK_CHIP} max-w-[100px] shrink-0`}
               onClick={(e) => {
                 e.stopPropagation()
                 onClickTask?.(triggerTask.id)

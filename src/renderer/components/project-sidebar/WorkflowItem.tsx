@@ -9,25 +9,36 @@ import { useConnectorIdFor } from '../../lib/use-connections'
 import { Workflow, Play, MoreHorizontal } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
 import { ConnectorIcon } from '../ConnectorIcon'
+import { WORKFLOW_STATUS_DOT, WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
 
-type DotColor = 'blue' | 'gray' | 'red' | 'amber' | null
+/**
+ * Named for what the dot means, not what colour it used to be. The old type was
+ * `'blue' | 'gray' | 'red' | 'amber'`, which is how the sidebar ended up with a
+ * palette of its own that nothing reconciled against the run statuses.
+ */
+type DotState = 'waiting' | 'scheduled' | 'disabled' | 'error' | null
 
-function statusDotColor(
+function statusDotState(
   workflow: WorkflowDefinition,
   scheduled: boolean,
   hasWaitingGate: boolean
-): DotColor {
-  if (hasWaitingGate) return 'amber'
-  if (scheduled) return workflow.enabled ? 'blue' : 'gray'
-  if (workflow.lastRunStatus === 'error') return 'red'
+): DotState {
+  if (hasWaitingGate) return 'waiting'
+  if (scheduled) return workflow.enabled ? 'scheduled' : 'disabled'
+  if (workflow.lastRunStatus === 'error') return 'error'
   return null
 }
 
-const DOT_CLASSES: Record<Exclude<DotColor, null>, string> = {
-  blue: 'bg-blue-400',
-  gray: 'bg-gray-600',
-  red: 'bg-red-500',
-  amber: 'bg-amber-400 animate-pulse'
+const DOT_CLASSES: Record<Exclude<DotState, null>, string> = {
+  waiting: WORKFLOW_STATUS_DOT_PULSE.waiting,
+  error: WORKFLOW_STATUS_DOT.error,
+  // Having a schedule is a property of the workflow, not a state it is in, so
+  // it stays off the accent: bright for live, receded for switched off.
+  scheduled: 'bg-ink-secondary',
+  // The row itself is at opacity-40, so whatever goes here composites down to
+  // under half its alpha — ghost vanished outright. Faint survives the dimming
+  // while still reading as the quieter of the two schedule states.
+  disabled: 'bg-ink-faint'
 }
 
 export function WorkflowItem({
@@ -65,7 +76,7 @@ export function WorkflowItem({
     }
     return false
   })
-  const dot = statusDotColor(workflow, isScheduled, hasWaitingGate)
+  const dot = statusDotState(workflow, isScheduled, hasWaitingGate)
 
   const handleEdit = () => {
     setEditingWorkflowId(workflow.id)

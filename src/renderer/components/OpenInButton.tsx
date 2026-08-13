@@ -161,7 +161,7 @@ export function OpenInButton({ projectPath, direction = 'down' }: Props) {
             ref={menuRef}
             className="fixed z-[150] py-1 border border-white/[0.08] rounded-lg shadow-xl"
             style={{
-              background: '#1e1e22',
+              background: 'var(--color-surface-overlay)',
               top: menuPos.top,
               left: menuPos.left,
               width: MENU_WIDTH

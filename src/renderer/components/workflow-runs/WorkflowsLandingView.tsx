@@ -86,7 +86,7 @@ export function WorkflowsLandingView() {
         onPointerDown={handleResizeStart}
         onDoubleClick={resetWidth}
         className={`w-px shrink-0 cursor-col-resize relative transition-colors ${
-          isResizing ? 'bg-blue-500/60' : 'bg-white/[0.06] hover:bg-white/[0.16]'
+          isResizing ? 'bg-white/40' : 'bg-white/[0.06] hover:bg-white/[0.16]'
         }`}
       >
         <span className="absolute inset-y-0 -left-1 -right-1" />

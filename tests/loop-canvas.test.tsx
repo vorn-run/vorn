@@ -17,6 +17,7 @@ vi.mock('../src/renderer/lib/use-connections', () => ({
 }))
 
 import { WorkflowCanvas } from '../src/renderer/components/workflow-editor/WorkflowCanvas'
+import { NODE_SELECTED } from '../src/renderer/components/workflow-editor/node-visuals'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 afterEach(cleanup)
@@ -56,18 +57,35 @@ const edges: WorkflowEdge[] = [
   { id: 'e5', source: 'review', target: 'gate' }
 ]
 
-function renderWith(list: WorkflowNode[]) {
+function renderWith(
+  list: WorkflowNode[],
+  selectedNodeId: string | null = null,
+  edgeList: WorkflowEdge[] = edges
+) {
   return render(
     <WorkflowCanvas
       nodes={list}
-      edges={edges}
-      selectedNodeId={null}
+      edges={edgeList}
+      selectedNodeId={selectedNodeId}
       onNodeClick={() => {}}
       onInsertNode={() => {}}
       onAddParallelBranch={() => {}}
     />
   )
 }
+
+const forkEdges: WorkflowEdge[] = [
+  { id: 'f1', source: 'trigger', target: 'cond' },
+  { id: 'f2', source: 'cond', target: 'yes', conditionBranch: 'true' },
+  { id: 'f3', source: 'cond', target: 'no', conditionBranch: 'false' }
+]
+
+const forkNodes: WorkflowNode[] = [
+  node('trigger', 'trigger', 'Manual', { triggerType: 'manual' }),
+  node('cond', 'condition', 'Ready?', { variable: 'status', operator: 'equals', value: 'ok' }),
+  node('yes', 'script', 'Ship it', { scriptType: 'bash', scriptContent: '' }),
+  node('no', 'script', 'Hold', { scriptType: 'bash', scriptContent: '' })
+]
 
 const withLoopConfig = (config: Record<string, unknown>): WorkflowNode[] =>
   nodes.map((n) => (n.id === 'loop' ? { ...n, config: config as WorkflowNode['config'] } : n))
@@ -177,5 +195,30 @@ describe('where a loop can be added', () => {
     const buttons = container.querySelectorAll('button')
     fireEvent.click(buttons[buttons.length - 1])
     expect(screen.queryByText(/Repeat steps/)).not.toBeNull()
+  })
+})
+
+describe('the canvas reads in one colour', () => {
+  it('marks a selected loop the same way a selected step is marked', () => {
+    // The enclosure carried its own copy of the selection string and had to be
+    // kept in step with eight cards by hand.
+    const { container } = renderWith(nodes, 'loop')
+    const rail = container.querySelector('[data-loop-rail]') as HTMLElement
+    expect(rail.className).toContain(NODE_SELECTED)
+    expect(rail.className).not.toContain('bronzo')
+  })
+
+  it('gives both sides of a fork the same label treatment', () => {
+    // True was green and False red, which said one path is the good one and
+    // the other a failure. A condition is a fork; the word says which way.
+    const { container } = renderWith(forkNodes, null, forkEdges)
+    const labels = [...container.querySelectorAll('div')].filter(
+      (el) => el.textContent === 'True' || el.textContent === 'False'
+    )
+    expect(labels).toHaveLength(2)
+    expect(labels[0].className).toBe(labels[1].className)
+    for (const el of labels) {
+      expect(el.className).not.toMatch(/green|red|bronzo|danger/)
+    }
   })
 })

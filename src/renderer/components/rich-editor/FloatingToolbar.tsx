@@ -95,7 +95,7 @@ export function FloatingToolbar({ editor }: FloatingToolbarProps) {
     >
       <div
         className="flex items-center rounded-lg border border-white/[0.1] shadow-2xl overflow-hidden"
-        style={{ background: '#1e1e22' }}
+        style={{ background: 'var(--color-surface-overlay)' }}
       >
         {showLinkInput ? (
           <div className="flex items-center px-1.5 py-1 gap-1">

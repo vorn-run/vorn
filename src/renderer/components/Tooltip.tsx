@@ -77,7 +77,7 @@ export function Tooltip({ label, shortcut, children, position = 'top', delay = 4
             className="fixed z-[100] px-2 py-1 rounded-md text-[11px] text-gray-200 whitespace-nowrap
                      border border-white/[0.08] shadow-lg pointer-events-none"
             style={{
-              background: '#1e1e22',
+              background: 'var(--color-surface-overlay)',
               transform: getTransform(position)
             }}
           >

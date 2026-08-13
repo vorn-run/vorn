@@ -22,7 +22,7 @@ import { ApprovalConfigForm } from './ApprovalConfigForm'
 import { LoopConfigForm } from './LoopConfigForm'
 import { CreateTaskFromItemNodeForm } from './CreateTaskFromItemNodeForm'
 import { CallConnectorActionNodeForm } from './CallConnectorActionNodeForm'
-import { NODE_TYPE_VISUAL } from '../node-visuals'
+import { NODE_TYPE_ICON, NODE_GLYPH } from '../node-visuals'
 import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 
 interface Props {
@@ -67,8 +67,8 @@ export function NodeConfigPanel({
     return () => document.removeEventListener('pointerdown', handler)
   }, [showMenu])
 
-  const tc = NODE_TYPE_VISUAL[node.type]
-  const Icon = tc.icon
+  const tc = NODE_TYPE_ICON[node.type]
+  const Icon = tc
   const canDelete = node.type !== 'trigger'
 
   // For connector-action nodes the generic Zap is uninformative — show the
@@ -80,17 +80,17 @@ export function NodeConfigPanel({
   const headerConnectorIcon = useConnectionIconFor(connectorConfig?.connectionId)
 
   return (
-    <div className="w-[420px] border-l border-white/[0.08] bg-[#1e1e22] flex flex-col h-full overflow-hidden titlebar-no-drag">
+    <div className="w-[420px] border-l border-white/[0.08] bg-surface-overlay flex flex-col h-full overflow-hidden titlebar-no-drag">
       <div className="flex items-center gap-2 px-5 py-3 border-b border-white/[0.08]">
         {headerConnectorId ? (
           <ConnectorIcon
             connectorId={headerConnectorId}
             icon={headerConnectorIcon}
             size={14}
-            className="text-gray-300 shrink-0"
+            className={`${NODE_GLYPH} shrink-0`}
           />
         ) : (
-          <Icon size={14} className={`${tc.color} shrink-0`} />
+          <Icon size={14} className={`${NODE_GLYPH} shrink-0`} />
         )}
         <input
           type="text"
@@ -116,14 +116,14 @@ export function NodeConfigPanel({
                 <div
                   ref={menuRef}
                   className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1 border border-white/[0.08] rounded-lg shadow-xl"
-                  style={{ background: '#141416' }}
+                  style={{ background: 'var(--color-surface-overlay)' }}
                 >
                   <button
                     onClick={() => {
                       setShowMenu(false)
                       onDelete(node.id)
                     }}
-                    className="w-full px-3 py-2 text-left text-[12px] text-red-400 hover:text-red-300
+                    className="w-full px-3 py-2 text-left text-[12px] text-danger/80 hover:text-danger
                                hover:bg-white/[0.06] flex items-center gap-2 transition-colors"
                   >
                     <Trash2 size={12} strokeWidth={1.5} />

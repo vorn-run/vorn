@@ -26,6 +26,7 @@ vi.mock('lucide-react', async (importOriginal) => ({
   Square: (p: Record<string, unknown>) => <svg data-testid="square" {...p} />
 }))
 
+import type { TaskConfig } from '../src/shared/types'
 import { RunEntry, RunStepsList } from '../src/renderer/components/workflow-editor/RunEntry'
 import { __resetConnectionsCacheForTests } from '../src/renderer/lib/use-connections'
 import type { WorkflowExecution, WorkflowNode, NodeExecutionState } from '../src/shared/types'
@@ -93,6 +94,30 @@ describe('RunEntry', () => {
     const resumeBtn = getByLabelText('Resume session')
     fireEvent.click(resumeBtn)
     expect(onResume).toHaveBeenCalledWith('agent-abc', 'claude', 'test', '/test', 'main', true)
+  })
+
+  it('reads a link to a task the same way wherever it appears', () => {
+    // The chip on a step and the chip on the run header were blue and violet:
+    // two colours for one kind of thing, a link to a task. They now share one
+    // constant, and this is what keeps them from drifting apart again.
+    const exec = makeExec({
+      triggerTaskId: 'task-1',
+      nodeStates: [makeState({ taskId: 'task-2' })]
+    })
+    const tasks = [
+      { id: 'task-1', title: 'Triggering task' },
+      { id: 'task-2', title: 'Created task' }
+    ] as TaskConfig[]
+    const { getByText, getByTitle } = render(
+      <RunEntry execution={exec} nodes={[makeNode()]} tasks={tasks} />
+    )
+    const triggerChip = getByTitle('Triggering task')
+    fireEvent.click(getByText(/ago|just now|seconds/i).closest('button')!)
+    const stepChip = getByTitle('Created task')
+
+    const shared = (el: Element): string[] =>
+      el.className.split(' ').filter((c) => !c.startsWith('max-w-') && c !== 'shrink-0')
+    expect(shared(stepChip)).toEqual(shared(triggerChip))
   })
 
   it('calls onViewFullOutput with node logs', () => {

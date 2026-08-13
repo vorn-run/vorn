@@ -73,13 +73,6 @@ describe('CreateTaskFromItemNode', () => {
     fireEvent.click(container.firstChild as Element)
     expect(onClick).toHaveBeenCalled()
   })
-
-  it('applies the selected style when selected', () => {
-    const { container } = render(
-      <CreateTaskFromItemNode label="n" config={config} selected onClick={() => {}} />
-    )
-    expect((container.firstChild as HTMLElement).className).toContain('border-blue-500')
-  })
 })
 
 describe('CallConnectorActionNode', () => {

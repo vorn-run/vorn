@@ -112,7 +112,7 @@ export function TerminalContextMenu({ terminalId, position, onClose }: Props) {
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: 'spring', stiffness: 500, damping: 30 }}
         className="fixed z-[150] rounded-lg border border-white/[0.1] py-1 shadow-2xl"
-        style={{ top, left, background: '#1e1e22', minWidth: menuWidth }}
+        style={{ top, left, background: 'var(--color-surface-overlay)', minWidth: menuWidth }}
       >
         <button
           role="menuitem"
@@ -177,7 +177,7 @@ export function TerminalContextMenu({ terminalId, position, onClose }: Props) {
           style={{
             top: submenuTop,
             left: submenuLeft,
-            background: '#1e1e22',
+            background: 'var(--color-surface-overlay)',
             minWidth: submenuWidth
           }}
           onMouseEnter={clearHideTimeout}

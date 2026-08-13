@@ -1,5 +1,6 @@
 import { Zap, Clock, Play, ListPlus, ArrowRightLeft, Terminal } from 'lucide-react'
 import type { TriggerConfig } from '../../../../shared/types'
+import { NODE_GLYPH } from '../node-visuals'
 
 interface Props {
   onAddTrigger: (type: TriggerConfig['triggerType']) => void
@@ -10,7 +11,7 @@ interface Props {
 
 export function NodePalette({ onAddTrigger, onAddLaunchAgent, onAddScript, hasTrigger }: Props) {
   return (
-    <div className="w-[180px] border-r border-white/[0.08] bg-[#1e1e22] flex flex-col h-full overflow-hidden titlebar-no-drag">
+    <div className="w-[180px] border-r border-white/[0.08] bg-surface-overlay flex flex-col h-full overflow-hidden titlebar-no-drag">
       <div className="px-3 py-3 border-b border-white/[0.08]">
         <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">
           Add Nodes
@@ -26,22 +27,22 @@ export function NodePalette({ onAddTrigger, onAddLaunchAgent, onAddScript, hasTr
             </span>
             <div className="space-y-1">
               <PaletteItem
-                icon={<Zap size={14} className="text-blue-400" />}
+                icon={<Zap size={14} className={NODE_GLYPH} />}
                 label="Manual"
                 onClick={() => onAddTrigger('manual')}
               />
               <PaletteItem
-                icon={<Clock size={14} className="text-blue-400" />}
+                icon={<Clock size={14} className={NODE_GLYPH} />}
                 label="Schedule"
                 onClick={() => onAddTrigger('recurring')}
               />
               <PaletteItem
-                icon={<ListPlus size={14} className="text-purple-400" />}
+                icon={<ListPlus size={14} className={NODE_GLYPH} />}
                 label="Task Created"
                 onClick={() => onAddTrigger('taskCreated')}
               />
               <PaletteItem
-                icon={<ArrowRightLeft size={14} className="text-purple-400" />}
+                icon={<ArrowRightLeft size={14} className={NODE_GLYPH} />}
                 label="Task Status Change"
                 onClick={() => onAddTrigger('taskStatusChanged')}
               />
@@ -56,12 +57,12 @@ export function NodePalette({ onAddTrigger, onAddLaunchAgent, onAddScript, hasTr
           </span>
           <div className="space-y-1">
             <PaletteItem
-              icon={<Play size={14} className="text-green-400" />}
+              icon={<Play size={14} className={NODE_GLYPH} />}
               label="Launch Agent"
               onClick={onAddLaunchAgent}
             />
             <PaletteItem
-              icon={<Terminal size={14} className="text-yellow-400" />}
+              icon={<Terminal size={14} className={NODE_GLYPH} />}
               label="Run Script"
               onClick={onAddScript}
             />

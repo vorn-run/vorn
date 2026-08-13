@@ -164,7 +164,7 @@ export function ProjectsSection({
               onDragEnd={handleDragEnd}
               className={`${isManual && !isCollapsed ? 'cursor-grab active:cursor-grabbing' : ''} ${
                 dragOverIndex === index && dragSourceIndex !== index
-                  ? 'border-t-2 border-blue-500'
+                  ? 'border-t-2 border-white/40'
                   : 'border-t-2 border-transparent'
               }`}
             >

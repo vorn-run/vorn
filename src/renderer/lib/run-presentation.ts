@@ -6,7 +6,7 @@ import type {
   WorkflowExecution,
   WorkflowNode
 } from '../../shared/types'
-import { STATUS_DOT_STATIC, type StatusDotKey } from '../components/workflow-editor/statusDot'
+import { WORKFLOW_STATUS_DOT, type WorkflowStatusKey, type RunOutcomeTone } from './workflow-status'
 import type { RunBucket } from '../stores/types'
 
 /**
@@ -172,7 +172,7 @@ export function runStages(execution: WorkflowExecution, nodes: WorkflowNode[]): 
       nodeId: ns.nodeId,
       status: ns.status,
       label: node?.label || ns.nodeId.slice(0, 8),
-      dotClass: STATUS_DOT_STATIC[ns.status as StatusDotKey] ?? 'bg-gray-600'
+      dotClass: WORKFLOW_STATUS_DOT[ns.status as WorkflowStatusKey] ?? WORKFLOW_STATUS_DOT.pending
     }
   })
 }
@@ -209,23 +209,12 @@ function verdictOf(execution: WorkflowExecution): string | undefined {
   return undefined
 }
 
-export type RunOutcomeTone = 'success' | 'error' | 'waiting' | 'running' | 'neutral'
+export type { RunOutcomeTone } from './workflow-status'
+export { outcomeToneClass } from './workflow-status'
 
 export interface RunOutcome {
   label: string
   tone: RunOutcomeTone
-}
-
-const OUTCOME_TONE_CLASS: Record<RunOutcomeTone, string> = {
-  success: 'text-gray-500',
-  error: 'text-red-400',
-  waiting: 'text-amber-400',
-  running: 'text-blue-400',
-  neutral: 'text-gray-500'
-}
-
-export function outcomeToneClass(tone: RunOutcomeTone): string {
-  return OUTCOME_TONE_CLASS[tone]
 }
 
 /**

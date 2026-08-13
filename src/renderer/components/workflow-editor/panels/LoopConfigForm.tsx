@@ -44,7 +44,7 @@ export function LoopConfigForm({ config, onChange }: Props) {
             onChange({ ...config, maxIterations: clamped })
           }}
           className="w-full px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-md
-                     text-[13px] text-gray-200 focus:outline-none focus:border-blue-500/50"
+                     text-[13px] text-gray-200 focus:outline-none focus:border-white/[0.2]"
         />
         <div className="mt-1.5 text-[11px] text-gray-500">
           This is what ends the loop, not a safety net: an agent asked whether its own work is good
@@ -73,7 +73,7 @@ export function LoopConfigForm({ config, onChange }: Props) {
             placeholder="{{steps.review.approved}}"
             className="w-full px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-md
                        text-[13px] text-gray-200 placeholder:text-gray-600 font-mono
-                       focus:outline-none focus:border-blue-500/50"
+                       focus:outline-none focus:border-white/[0.2]"
           />
           <div className="flex gap-2">
             <select
@@ -89,7 +89,7 @@ export function LoopConfigForm({ config, onChange }: Props) {
                 })
               }
               className="px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-md
-                         text-[13px] text-gray-200 focus:outline-none focus:border-blue-500/50"
+                         text-[13px] text-gray-200 focus:outline-none focus:border-white/[0.2]"
             >
               {OPERATORS.map((op) => (
                 <option key={op.value} value={op.value}>
@@ -113,7 +113,7 @@ export function LoopConfigForm({ config, onChange }: Props) {
               placeholder="true"
               className="flex-1 px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-md
                          text-[13px] text-gray-200 placeholder:text-gray-600
-                         focus:outline-none focus:border-blue-500/50"
+                         focus:outline-none focus:border-white/[0.2]"
             />
           </div>
         </div>

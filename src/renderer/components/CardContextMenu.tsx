@@ -195,7 +195,7 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
         style={{
           top,
           left,
-          background: isMobile ? 'var(--glass-bg)' : '#1e1e22',
+          background: isMobile ? 'var(--glass-bg)' : 'var(--color-surface-overlay)',
           backdropFilter: isMobile ? 'var(--glass-blur)' : undefined,
           WebkitBackdropFilter: isMobile ? 'var(--glass-blur)' : undefined,
           boxShadow: isMobile ? 'var(--glass-shadow)' : undefined,
@@ -261,7 +261,7 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
           style={{
             top: submenuTop,
             left: submenuLeft,
-            background: '#1e1e22',
+            background: 'var(--color-surface-overlay)',
             minWidth: submenuWidth
           }}
           onMouseEnter={clearHideTimeout}

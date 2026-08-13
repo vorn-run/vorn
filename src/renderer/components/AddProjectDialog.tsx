@@ -154,7 +154,7 @@ export function AddProjectDialog() {
           <motion.div
             className="fixed top-1/2 left-1/2 z-50 w-[520px] border border-white/[0.08]
                        rounded-xl shadow-2xl overflow-hidden"
-            style={{ background: '#1e1e22' }}
+            style={{ background: 'var(--color-surface-overlay)' }}
             initial={{ opacity: 0, scale: 0.95, x: '-50%', y: '-50%' }}
             animate={{ opacity: 1, scale: 1, x: '-50%', y: '-50%' }}
             exit={{ opacity: 0, scale: 0.95, x: '-50%', y: '-50%' }}
