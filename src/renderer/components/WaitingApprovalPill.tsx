@@ -63,10 +63,9 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
                  cursor-pointer transition-colors select-none
                  border-bronzo/40 hover:border-bronzo/70"
     >
-      <div className="relative flex-shrink-0">
-        <div className="w-1.5 h-1.5 rounded-full bg-bronzo" />
-        <div style={{ animationDuration: '2s' }} />
-      </div>
+      {/* No halo behind it. Motion is a report of work in progress, and a gate
+          is waiting rather than working — the bronzo is what calls you to it. */}
+      <div className="w-1.5 h-1.5 rounded-full bg-bronzo flex-shrink-0" />
 
       <WfIcon size={12} strokeWidth={1.5} color={wfIconColor || undefined} />
 
