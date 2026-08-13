@@ -3,9 +3,18 @@
  *
  * Both sit in the chrome of the same card, so a difference in size or weight
  * between them reads as two unrelated toolbars rather than one.
+ *
+ * The danger variant is a separate string rather than an override appended to
+ * `ICON_BUTTON`: two `hover:text-*` classes on one element are resolved by the
+ * order they appear in the stylesheet, not the order they are written, so the
+ * override would win or lose depending on how Tailwind happened to emit them.
  */
-export const ICON_BUTTON =
-  'p-1 rounded text-gray-200 hover:text-white hover:bg-white/[0.10] transition-colors'
+const BASE = 'p-1 rounded transition-colors hover:bg-white/[0.10]'
 
-/** Icon size to pair with `ICON_BUTTON`. */
+export const ICON_BUTTON = `${BASE} text-ink`
+
+/** For an action that discards something — closing a session, deleting. */
+export const ICON_BUTTON_DANGER = `${BASE} text-ink hover:text-danger`
+
+/** Icon size to pair with either button style. */
 export const ICON_BUTTON_SIZE = 14

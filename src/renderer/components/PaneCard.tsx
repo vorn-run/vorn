@@ -10,9 +10,6 @@ export interface PaneCardProps {
   /** This pane's id — `files:<sessionId>` or `editor:<sessionId>`. */
   paneId: string
   title: string
-  /** Secondary line under the title, e.g. a relative file path. */
-  subtitle?: string
-  icon?: ReactNode
   onClose: () => void
   children: ReactNode
   isDragTarget?: boolean
@@ -24,8 +21,6 @@ export interface PaneCardProps {
    * chrome-on-chrome. Such a pane renders `PaneControls` inside its own bar.
    */
   headerless?: boolean
-  /** Card background. Defaults to the shared pane surface. */
-  background?: string
 }
 
 /**
@@ -92,19 +87,7 @@ export function PaneControls({
  * the pane its owner session's whole footprint, leaving other sessions alone.
  */
 export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneCard(
-  {
-    paneId,
-    title,
-    subtitle,
-    icon,
-    onClose,
-    children,
-    isDragTarget,
-    onDragStart,
-    flexible,
-    headerless,
-    background
-  },
+  { paneId, title, onClose, children, isDragTarget, onDragStart, flexible, headerless },
   ref
 ) {
   const { isMaximized, setMaximizedPane } = useAppStore(
@@ -123,11 +106,11 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
       ref={ref}
       // Square and borderless, filling the card. The step down to PANE_SURFACE
       // is the whole separation — see that module for why.
-      className={`group/card relative overflow-hidden flex flex-col h-full
+      className={`relative overflow-hidden flex flex-col h-full
                  transition-shadow
                  ${isDragTarget ? 'card-drop-target' : ''}
                  ${flexible ? '' : 'hover:z-10 focus-within:z-10'}`}
-      style={{ background: background ?? PANE_SURFACE }}
+      style={{ background: PANE_SURFACE }}
     >
       {!headerless && (
         <div
@@ -135,28 +118,15 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
                     ${onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''}`}
           onPointerDown={onDragStart ? handleDragStart : undefined}
           onDoubleClick={() => setMaximizedPane(isMaximized ? null : paneId)}
+          data-testid={`pane-header-${paneId}`}
         >
-          {icon}
           <span className="text-[12px] text-gray-300 font-medium shrink-0">{title}</span>
-          {subtitle && (
-            <span
-              className="text-[11px] text-gray-500 font-mono flex-1 min-w-0 truncate"
-              title={subtitle}
-              dir="rtl"
-            >
-              {subtitle}
-            </span>
-          )}
-          {!subtitle && <span className="flex-1" />}
-
+          <span className="flex-1" />
           <PaneControls paneId={paneId} title={title} onClose={onClose} />
         </div>
       )}
 
-      <div
-        className="flex-1 min-h-0 flex flex-col"
-        style={{ background: background ?? PANE_SURFACE }}
-      >
+      <div className="flex-1 min-h-0 flex flex-col" style={{ background: PANE_SURFACE }}>
         {children}
       </div>
     </div>

@@ -11,4 +11,4 @@
  * own reads as a doubled edge, and a gutter exposes a lighter band of card that
  * pulls harder than either surface.
  */
-export const PANE_SURFACE = '#101012'
+export const PANE_SURFACE = 'var(--color-surface-panel)'

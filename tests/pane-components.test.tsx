@@ -256,7 +256,9 @@ describe('PaneCard drag and double-click', () => {
     render(<FilesCard sessionId="t1" onDragStart={onDragStart} />)
     await screen.findByText('a.ts')
 
-    fireEvent.pointerDown(screen.getByTestId('files-pane-header'))
+    // The title row carries drag and maximize, not the filter row below it —
+    // wiring both meant two drag handles and two paths to the same action.
+    fireEvent.pointerDown(screen.getByTestId('pane-header-files:t1'))
     expect(onDragStart).toHaveBeenCalledWith('files:t1', expect.anything())
   })
 
@@ -265,10 +267,10 @@ describe('PaneCard drag and double-click', () => {
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
-    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
+    fireEvent.doubleClick(screen.getByTestId('pane-header-files:t1'))
     expect(useAppStore.getState().maximizedPaneId).toBe('files:t1')
 
-    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
+    fireEvent.doubleClick(screen.getByTestId('pane-header-files:t1'))
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
   })
 })

@@ -906,11 +906,7 @@ function FilesPanel({
   selectedFile,
   onSelectFile,
   showHeader = true,
-  controls,
-  onHeaderPointerDown,
-  onHeaderDoubleClick,
-  headerTestId,
-  headerClassName = ''
+  headerTestId
 }: {
   rootEntries: FileEntry[]
   dirCache: Map<string, FileEntry[]>
@@ -919,16 +915,7 @@ function FilesPanel({
   onSelectFile: (path: string) => void
   /** False when hosted in a pane card that draws its own header. */
   showHeader?: boolean
-  /**
-   * Pane chrome (maximize / close) seated in the filter row. A hosting card
-   * that passes this drops its own header row — the filter row is already a
-   * full-width bar, and a second one above it is chrome on chrome.
-   */
-  controls?: ReactNode
-  onHeaderPointerDown?: (e: React.PointerEvent) => void
-  onHeaderDoubleClick?: () => void
   headerTestId?: string
-  headerClassName?: string
 }) {
   const [filter, setFilter] = useState('')
   const { matched, expand } = useMemo(
@@ -939,12 +926,7 @@ function FilesPanel({
   return (
     <div className="flex flex-col min-h-0 h-full">
       {showHeader && <PanelHeader title="Files" />}
-      <div
-        className={`flex items-center gap-1 px-1.5 py-1.5 shrink-0 ${headerClassName}`}
-        onPointerDown={onHeaderPointerDown}
-        onDoubleClick={onHeaderDoubleClick}
-        data-testid={headerTestId}
-      >
+      <div className="flex items-center gap-1 px-1.5 py-1.5 shrink-0" data-testid={headerTestId}>
         {/* A search field has to read as somewhere you can type before anything
             is in it; at 4% over a near-black pane it was very nearly the pane. */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1 rounded-md bg-white/[0.09] focus-within:bg-white/[0.13] transition-colors">
@@ -968,7 +950,6 @@ function FilesPanel({
             </button>
           )}
         </div>
-        {controls}
       </div>
       <div className="flex-1 overflow-y-auto py-0.5">
         {rootEntries.map((entry) => (
@@ -1175,22 +1156,13 @@ export function FileTreePane({
   remoteHostId,
   selectedFile,
   onSelectFile,
-  controls,
-  onHeaderPointerDown,
-  onHeaderDoubleClick,
-  headerTestId,
-  headerClassName
+  headerTestId
 }: {
   cwd: string
   remoteHostId?: string
   selectedFile: string | null
   onSelectFile: (path: string) => void
-  /** Pane chrome seated in the filter row; see `FilesPanel`. */
-  controls?: ReactNode
-  onHeaderPointerDown?: (e: React.PointerEvent) => void
-  onHeaderDoubleClick?: () => void
   headerTestId?: string
-  headerClassName?: string
 }): JSX.Element {
   const [rootEntries, setRootEntries] = useState<FileEntry[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1253,11 +1225,7 @@ export function FileTreePane({
       selectedFile={selectedFile}
       onSelectFile={onSelectFile}
       showHeader={false}
-      controls={controls}
-      onHeaderPointerDown={onHeaderPointerDown}
-      onHeaderDoubleClick={onHeaderDoubleClick}
       headerTestId={headerTestId}
-      headerClassName={headerClassName}
     />
   )
 }

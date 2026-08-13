@@ -297,7 +297,7 @@ export function RightPanel() {
             <button
               onClick={handleSendFeedback}
               className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium
-                         bg-blue-500/20 hover:bg-white/[0.14] border border-blue-500/20
+                         bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/20
                          rounded-md transition-colors text-blue-300 hover:text-blue-200"
             >
               <Send size={11} strokeWidth={2} />

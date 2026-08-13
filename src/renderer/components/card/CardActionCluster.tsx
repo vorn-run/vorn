@@ -12,7 +12,7 @@ import {
 import { useState, useRef, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../stores'
-import { ICON_BUTTON } from '../../lib/icon-button'
+import { ICON_BUTTON, ICON_BUTTON_DANGER, ICON_BUTTON_SIZE } from '../../lib/icon-button'
 import { Tooltip } from '../Tooltip'
 import { ConfirmPopover } from '../ConfirmPopover'
 import { CardContextMenu } from '../CardContextMenu'
@@ -125,8 +125,6 @@ export function CardActionCluster({ terminalId, variant }: Props) {
   // tooltips get clipped off-screen. Drop them below the buttons instead.
   const tooltipPos = isFocused ? 'bottom' : 'top'
 
-  const btn = ICON_BUTTON
-
   const showDevice = shouldShowDeviceButton(
     mobileProjectCache.get(terminal.session.projectPath),
     hasDevicePane
@@ -140,10 +138,10 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           type="button"
           onClick={handleMore}
           onPointerDown={(e) => e.stopPropagation()}
-          className={btn}
+          className={ICON_BUTTON}
           aria-label="More actions"
         >
-          <MoreHorizontal size={14} strokeWidth={2} />
+          <MoreHorizontal size={ICON_BUTTON_SIZE} strokeWidth={2} />
         </button>
       </Tooltip>
 
@@ -152,10 +150,10 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           type="button"
           onClick={handleBrowseFiles}
           onPointerDown={(e) => e.stopPropagation()}
-          className={btn}
+          className={ICON_BUTTON}
           aria-label="Browse files"
         >
-          <FolderOpen size={14} strokeWidth={2} />
+          <FolderOpen size={ICON_BUTTON_SIZE} strokeWidth={2} />
         </button>
       </Tooltip>
 
@@ -164,10 +162,10 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           type="button"
           onClick={handleOpenBrowser}
           onPointerDown={(e) => e.stopPropagation()}
-          className={btn}
+          className={ICON_BUTTON}
           aria-label="Open browser"
         >
-          <Globe size={14} strokeWidth={2} />
+          <Globe size={ICON_BUTTON_SIZE} strokeWidth={2} />
         </button>
       </Tooltip>
 
@@ -195,14 +193,14 @@ export function CardActionCluster({ terminalId, variant }: Props) {
             // could start a second, concurrent claim on a different device,
             // leaving the pane labelled one simulator while driving another.
             disabled={claiming}
-            className={`${btn} ${claiming ? 'opacity-50 cursor-wait' : ''}`}
+            className={` ${claiming ? 'opacity-50 cursor-wait' : ''}`}
             aria-busy={claiming}
             aria-label={hasDevicePane ? 'Hide device' : claiming ? 'Opening device' : 'Open device'}
           >
             {claiming ? (
-              <Loader2 size={14} strokeWidth={2} className="animate-spin" />
+              <Loader2 size={ICON_BUTTON_SIZE} strokeWidth={2} className="animate-spin" />
             ) : (
-              <Smartphone size={14} strokeWidth={2} />
+              <Smartphone size={ICON_BUTTON_SIZE} strokeWidth={2} />
             )}
           </button>
         </Tooltip>
@@ -233,10 +231,10 @@ export function CardActionCluster({ terminalId, variant }: Props) {
             type="button"
             onClick={handleMinimize}
             onPointerDown={(e) => e.stopPropagation()}
-            className={btn}
+            className={ICON_BUTTON}
             aria-label="Minimize session"
           >
-            <Minus size={14} strokeWidth={2} />
+            <Minus size={ICON_BUTTON_SIZE} strokeWidth={2} />
           </button>
         </Tooltip>
       )}
@@ -250,13 +248,13 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           type="button"
           onClick={isFocused ? handleCollapse : handleExpand}
           onPointerDown={(e) => e.stopPropagation()}
-          className={btn}
+          className={ICON_BUTTON}
           aria-label={isFocused ? 'Collapse session' : 'Expand session'}
         >
           {isFocused ? (
-            <Minimize2 size={14} strokeWidth={2} />
+            <Minimize2 size={ICON_BUTTON_SIZE} strokeWidth={2} />
           ) : (
-            <Maximize2 size={14} strokeWidth={2} />
+            <Maximize2 size={ICON_BUTTON_SIZE} strokeWidth={2} />
           )}
         </button>
       </Tooltip>
@@ -266,10 +264,10 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           <button
             type="button"
             onPointerDown={(e) => e.stopPropagation()}
-            className="p-1 rounded text-gray-500 hover:text-danger hover:bg-white/[0.08] transition-colors"
+            className={ICON_BUTTON_DANGER}
             aria-label="Close session"
           >
-            <X size={14} strokeWidth={2} />
+            <X size={ICON_BUTTON_SIZE} strokeWidth={2} />
           </button>
         </Tooltip>
       </ConfirmPopover>

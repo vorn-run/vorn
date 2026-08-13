@@ -210,6 +210,7 @@ function reconcilePanes(
   filesPanes: Set<string>,
   editorPanes: Map<string, EditorPaneState>,
   browserPanes: Map<string, BrowserPaneState>,
+  browserMemory: Map<string, BrowserPaneState>,
   devicePanes: Map<string, DevicePaneState>,
   cardSplits: Record<string, CardSplit>,
   liveSessionIds: Set<string>
@@ -217,12 +218,17 @@ function reconcilePanes(
   filesPanes: Set<string>
   editorPanes: Map<string, EditorPaneState>
   browserPanes: Map<string, BrowserPaneState>
+  browserMemory: Map<string, BrowserPaneState>
   devicePanes: Map<string, DevicePaneState>
   cardSplits: Record<string, CardSplit>
 } | null {
   const nextFiles = new Set([...filesPanes].filter((id) => liveSessionIds.has(id)))
   const nextEditors = new Map([...editorPanes].filter(([id]) => liveSessionIds.has(id)))
   const nextBrowsers = new Map([...browserPanes].filter(([id]) => liveSessionIds.has(id)))
+  // Tabs remembered for a closed pane die with their session as well. This is
+  // the path `removeTerminal` cannot cover: a session that simply never came
+  // back leaves no removal to hang the cleanup off.
+  const nextMemory = new Map([...browserMemory].filter(([id]) => liveSessionIds.has(id)))
   // Device panes are in-memory only, but a dead session's pane still keeps a
   // card mounted against a device nobody can drive — the same leak, minus the
   // localStorage growth.
@@ -235,6 +241,7 @@ function reconcilePanes(
     nextFiles.size === filesPanes.size &&
     nextEditors.size === editorPanes.size &&
     nextBrowsers.size === browserPanes.size &&
+    nextMemory.size === browserMemory.size &&
     nextDevices.size === devicePanes.size &&
     !splitsChanged
   ) {
@@ -246,6 +253,7 @@ function reconcilePanes(
     filesPanes: nextFiles,
     editorPanes: nextEditors,
     browserPanes: nextBrowsers,
+    browserMemory: nextMemory,
     devicePanes: nextDevices,
     cardSplits: nextSplits
   }
@@ -435,6 +443,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
               state.filesPanes,
               state.editorPanes,
               state.browserPanes,
+              state.browserMemory,
               state.devicePanes,
               state.cardSplits,
               live

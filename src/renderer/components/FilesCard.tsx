@@ -42,11 +42,6 @@ export const FilesCard = memo(
 
     const paneId = filesPaneId(sessionId)
     const handleClose = (): void => closeFilesPane(sessionId)
-    // Used by the filter row: double-clicking it still maximizes.
-    const toggleMaximize = (): void => {
-      const state = useAppStore.getState()
-      state.setMaximizedPane(state.maximizedPaneId === paneId ? null : paneId)
-    }
 
     return (
       <PaneCard
@@ -60,17 +55,13 @@ export const FilesCard = memo(
       >
         {/* The pane keeps its own title row. Folding the controls into the
             filter made that field the title bar: full width, buttons reading as
-            part of the input. */}
+            part of the input. Drag and double-click-to-maximize live on that
+            title row now, so the filter row carries neither. */}
         <FileTreePane
           key={cwd}
           cwd={cwd}
           remoteHostId={remoteHostId}
           selectedFile={selectedFile}
-          headerClassName={
-            onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''
-          }
-          onHeaderPointerDown={onDragStart ? (e) => onDragStart(paneId, e) : undefined}
-          onHeaderDoubleClick={toggleMaximize}
           headerTestId="files-pane-header"
           onSelectFile={(path) => {
             // Swapping the editor's file discards its buffer — confirm first.

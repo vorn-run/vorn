@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAppStore } from '../../stores'
 import { Tooltip } from '../Tooltip'
 import { MOD } from '../../lib/platform'
+import { ICON_BUTTON } from '../../lib/icon-button'
 
 interface Props {
   terminalId: string
@@ -25,8 +26,6 @@ export function FocusedNavHint({ terminalId }: Props) {
   const prevId = focusableTerminalIds[(index - 1 + total) % total]
   const nextId = focusableTerminalIds[(index + 1) % total]
 
-  const btn = 'p-1 rounded text-gray-500 hover:text-white hover:bg-white/[0.08] transition-colors'
-
   return (
     <div className="flex items-center gap-1 shrink-0 pr-1">
       <span className="text-[11px] font-mono text-gray-500 tabular-nums select-none">
@@ -39,7 +38,7 @@ export function FocusedNavHint({ terminalId }: Props) {
           type="button"
           onClick={() => setFocusedTerminal(prevId)}
           onPointerDown={(e) => e.stopPropagation()}
-          className={btn}
+          className={ICON_BUTTON}
           aria-label="Previous session"
         >
           <ChevronLeft size={14} strokeWidth={2} />
@@ -50,7 +49,7 @@ export function FocusedNavHint({ terminalId }: Props) {
           type="button"
           onClick={() => setFocusedTerminal(nextId)}
           onPointerDown={(e) => e.stopPropagation()}
-          className={btn}
+          className={ICON_BUTTON}
           aria-label="Next session"
         >
           <ChevronRight size={14} strokeWidth={2} />
