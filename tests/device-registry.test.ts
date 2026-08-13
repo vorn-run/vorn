@@ -52,6 +52,8 @@ import {
   entryForTests,
   resetForTests,
   EDGE_BAND_POINTS,
+  formatRuntime,
+  keycodesFor,
   type AXElement
 } from '../src/main/device-registry'
 
@@ -339,5 +341,37 @@ describe('the swipe guard fails closed', () => {
         systemGesture: true
       })
     ).resolves.toMatchObject({ ok: true })
+  })
+})
+
+describe('runtime formatting', () => {
+  it('keeps the version readable', () => {
+    // "iOS 26 2" reads as a typo and cannot be matched against what Xcode
+    // reports, which is the whole point of showing the runtime at all.
+    expect(formatRuntime('com.apple.CoreSimulator.SimRuntime.iOS-26-2')).toBe('iOS 26.2')
+  })
+
+  it('handles a runtime with no version suffix', () => {
+    expect(formatRuntime('com.apple.CoreSimulator.SimRuntime.iOS')).toBe('iOS')
+  })
+})
+
+describe('typing keycodes', () => {
+  it('maps the characters it claims to support', () => {
+    expect(keycodesFor('a')).toEqual([4])
+    expect(keycodesFor('0')).toEqual([39])
+    expect(keycodesFor('\n')).toEqual([40])
+  })
+
+  it('refuses a character it cannot type rather than typing another one', () => {
+    // The failure this guards is silent: '@' previously mapped to the keycode
+    // for '2', so typing an email address reported success and entered
+    // something else. An error naming the character costs a turn; a wrongly
+    // typed password costs far more.
+    expect(() => keycodesFor('user@example.com')).toThrow(/@/)
+  })
+
+  it('refuses upper case rather than silently lower-casing it', () => {
+    expect(() => keycodesFor('Hello')).toThrow(/H/)
   })
 })

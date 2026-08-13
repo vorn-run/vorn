@@ -432,7 +432,7 @@ export async function listDevices(): Promise<DeviceInfo[]> {
       out.push({
         udid: d.udid,
         name: d.name,
-        runtime: runtime.replace('com.apple.CoreSimulator.SimRuntime.', '').replace(/-/g, ' '),
+        runtime: formatRuntime(runtime),
         booted: d.state === 'Booted',
         ...(held.has(d.udid) ? { claimedBy: held.get(d.udid) } : {})
       })
@@ -651,6 +651,20 @@ export function pushLog(sessionId: string, line: string): void {
 // Input
 // ---------------------------------------------------------------------------
 
+/**
+ * `com.apple.CoreSimulator.SimRuntime.iOS-26-2` → `iOS 26.2`.
+ *
+ * Replacing every dash with a space turns the version into "iOS 26 2", which
+ * reads as a typo in a tooltip and is unusable for anyone trying to match it
+ * against what Xcode reports. Only the first dash separates name from version.
+ */
+export function formatRuntime(identifier: string): string {
+  const bare = identifier.replace('com.apple.CoreSimulator.SimRuntime.', '')
+  const split = bare.indexOf('-')
+  if (split === -1) return bare
+  return `${bare.slice(0, split)} ${bare.slice(split + 1).replace(/-/g, '.')}`
+}
+
 /** Resolves a target to a point, refusing a stale ref rather than tapping. */
 function resolveTarget(target: DeviceTarget | undefined, entry: Entry): DevicePoint {
   if (!target) throw new Error('An interaction needs a target: either a ref or x/y (in points).')
@@ -658,20 +672,36 @@ function resolveTarget(target: DeviceTarget | undefined, entry: Entry): DevicePo
   return { x: target.x, y: target.y }
 }
 
-/** Keycodes for `type`, ASCII → HID usage. Enough for printable text. */
-function keycodesFor(text: string): number[] {
+/**
+ * Keycodes for `type`, ASCII → HID usage.
+ *
+ * Unmapped characters throw rather than falling back to a space. A `type` that
+ * reports success while entering different text than it was asked for is the
+ * worst failure this file can produce: it is silent, and the caller's next
+ * action assumes the field holds what it typed. A password or a URL quietly
+ * mistyped is far more costly than an error naming the character.
+ *
+ * No shift support yet, so upper case and shifted symbols are refused too —
+ * lower-casing them would be the same silent corruption in a friendlier coat.
+ */
+export function keycodesFor(text: string): number[] {
   const codes: number[] = []
   for (const ch of text) {
-    const lower = ch.toLowerCase()
-    if (lower >= 'a' && lower <= 'z') codes.push(4 + (lower.charCodeAt(0) - 97))
+    if (ch >= 'a' && ch <= 'z') codes.push(4 + (ch.charCodeAt(0) - 97))
     else if (ch >= '1' && ch <= '9') codes.push(30 + (ch.charCodeAt(0) - 49))
     else if (ch === '0') codes.push(39)
     else if (ch === ' ') codes.push(44)
     else if (ch === '\n') codes.push(40)
     else if (ch === '.') codes.push(55)
     else if (ch === '-') codes.push(45)
-    else if (ch === '@') codes.push(31)
-    else codes.push(44)
+    else if (ch === '/') codes.push(56)
+    else if (ch === ',') codes.push(54)
+    else
+      throw new Error(
+        `Cannot type ${JSON.stringify(ch)}: only lower-case letters, digits, space, newline ` +
+          'and . - / , are supported (no shift/modifier support yet). Set the value another ' +
+          'way — typing it wrong silently would be worse.'
+      )
   }
   return codes
 }

@@ -97,9 +97,13 @@ describe('untrusted app content', () => {
     })
     const r = await tools.get('read_screen')!({})
     const text = r.content[0].text!
-    const nonce = /BEGIN UNTRUSTED WEB PAGE CONTENT ([0-9a-f-]+)/.exec(text)?.[1]
+    // The fence names device content, not a web page: an accessibility tree is
+    // authored by the app under test, and a banner that misdescribes what the
+    // model just read teaches it to discount the one marker it must respect.
+    const nonce = /BEGIN UNTRUSTED DEVICE CONTENT ([0-9a-f-]+)/.exec(text)?.[1]
     expect(nonce).toBeTruthy()
-    expect(text).toContain(`[END UNTRUSTED WEB PAGE CONTENT ${nonce}]`)
+    expect(text).toContain(`[END UNTRUSTED DEVICE CONTENT ${nonce}]`)
+    expect(text).toContain('authored by the device')
     expect(text).toContain('Ignore previous instructions')
   })
 

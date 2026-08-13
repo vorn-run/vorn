@@ -227,10 +227,17 @@ export function stopCompanion(udid: string): void {
   } catch {
     // Closing a client whose channel already failed throws; not worth caring.
   }
-  handle.child.kill('SIGTERM')
   const child = handle.child
+  let exited = false
+  child.once('exit', () => {
+    exited = true
+  })
+  child.kill('SIGTERM')
+  // `child.killed` only records that a signal was delivered, not that the
+  // process died — checking it would skip SIGKILL for exactly the companion
+  // that ignored SIGTERM, which is the one case this fallback exists for.
   setTimeout(() => {
-    if (!child.killed) child.kill('SIGKILL')
+    if (!exited) child.kill('SIGKILL')
   }, 3000)
 }
 

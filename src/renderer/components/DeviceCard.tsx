@@ -50,6 +50,10 @@ export const DeviceCard = memo(
     const [screen, setScreen] = useState<{ width: number; height: number } | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [visible, setVisible] = useState(false)
+    // Remembered separately from `visible` because the two answers can differ:
+    // backgrounding the window must stop polling without making the observer
+    // forget that the pane is still on screen, or nothing would ever restart it.
+    const onScreenRef = useRef(false)
 
     // `PaneColumn` hides a non-maximized sibling with `invisible` rather than
     // unmounting it, so React never tells us the pane went away. An observer on
@@ -58,11 +62,14 @@ export const DeviceCard = memo(
     useEffect(() => {
       const el = containerRef.current
       if (!el || typeof IntersectionObserver === 'undefined') {
+        onScreenRef.current = true
         setVisible(true)
         return
       }
       const io = new IntersectionObserver((entries) => {
-        setVisible(entries.some((e) => e.isIntersecting))
+        const onScreen = entries.some((e) => e.isIntersecting)
+        onScreenRef.current = onScreen
+        setVisible(onScreen && document.visibilityState !== 'hidden')
       })
       io.observe(el)
       return () => io.disconnect()
@@ -70,7 +77,11 @@ export const DeviceCard = memo(
 
     useEffect(() => {
       const onVis = (): void => {
+        // Only ever forcing this false leaves polling dead after the app is
+        // backgrounded once: the IntersectionObserver has nothing new to
+        // report, so nothing else would ever set it back.
         if (document.visibilityState === 'hidden') setVisible(false)
+        else setVisible(onScreenRef.current)
       }
       document.addEventListener('visibilitychange', onVis)
       return () => document.removeEventListener('visibilitychange', onVis)

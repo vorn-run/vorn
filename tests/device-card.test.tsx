@@ -130,6 +130,55 @@ describe('polling', () => {
     })
   })
 
+  it('resumes polling when the window comes back', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await waitFor(() => expect(deviceScreenshot).toHaveBeenCalled())
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    const whileHidden = deviceScreenshot.mock.calls.length
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200)
+    })
+
+    // Stopping on hide is only half the contract. The pane is still on screen,
+    // so the observer has nothing new to report — without restoring from the
+    // remembered on-screen state, backgrounding the app once would kill the
+    // feed for good and read as a frozen simulator.
+    expect(deviceScreenshot.mock.calls.length).toBeGreaterThan(whileHidden)
+  })
+
+  it('stays stopped if the pane is off screen when the window returns', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await waitFor(() => expect(deviceScreenshot).toHaveBeenCalled())
+    hide()
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    const seen = deviceScreenshot.mock.calls.length
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    // Refocusing the window must not resurrect a pane nobody can see.
+    expect(deviceScreenshot.mock.calls.length).toBe(seen)
+  })
+
   it('surfaces a failing poll instead of leaving a stale frame unexplained', async () => {
     deviceScreenshot.mockRejectedValue(new Error('the connection to the device dropped'))
     render(<DeviceCard sessionId="t1" />)

@@ -11,6 +11,13 @@ import { rpcCall } from '../ws-client'
 import { noSessionResult, errorResult, pageResult, sessionId } from './browser'
 
 /**
+ * Device-derived text is as untrusted as a web page — an app screen can carry
+ * "ignore your instructions" just as readily — but it is not a web page, and
+ * a fence that misnames its own contents is one the model learns to discount.
+ */
+const DEVICE_FENCE = 'DEVICE CONTENT'
+
+/**
  * The agent's half of the session device pane — an iOS simulator claimed by
  * this session.
  *
@@ -90,7 +97,7 @@ export function registerDeviceTools(server: McpServer): void {
     {},
     async () =>
       withSession(async (id) =>
-        pageResult(await rpcCall<DeviceInfo[]>('device:list', { sessionId: id }))
+        pageResult(await rpcCall<DeviceInfo[]>('device:list', { sessionId: id }), DEVICE_FENCE)
       )
   )
 
@@ -146,7 +153,8 @@ export function registerDeviceTools(server: McpServer): void {
             filter: args.filter,
             cursor: args.cursor,
             limit: args.limit
-          })
+          }),
+          DEVICE_FENCE
         )
       )
   )
@@ -166,7 +174,8 @@ export function registerDeviceTools(server: McpServer): void {
             sessionId: id,
             query: args.text,
             limit: args.limit
-          })
+          }),
+          DEVICE_FENCE
         )
       )
   )
@@ -319,7 +328,8 @@ export function registerDeviceTools(server: McpServer): void {
     async (args) =>
       withSession(async (id) =>
         pageResult(
-          await rpcCall<{ lines: string[] }>('device:logs', { sessionId: id, limit: args.limit })
+          await rpcCall<{ lines: string[] }>('device:logs', { sessionId: id, limit: args.limit }),
+          DEVICE_FENCE
         )
       )
   )

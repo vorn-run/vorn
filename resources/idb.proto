@@ -1,8 +1,13 @@
 /*
+ * Vendored from facebook/idb (https://github.com/facebook/idb), which ships no
+ * server reflection — so the schema has to travel with us. See
+ * THIRD_PARTY_NOTICES.md at the repo root for the full MIT license text; the
+ * upstream header's "LICENSE file in the root directory of this source tree"
+ * refers to idb's tree, not this one.
+ *
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
+ * This source code is licensed under the MIT license.
  */
 
 syntax = "proto3";
@@ -30,7 +35,7 @@ service CompanionService {
       returns (AccessibilityActionResponse) {}
   rpc focus(FocusRequest) returns (FocusResponse) {}
   rpc hid(stream HIDEvent) returns (HIDResponse) {}
-  rpc open_url(OpenUrlRequest) returns (OpenUrlRequest) {}
+  rpc open_url(OpenUrlRequest) returns (OpenUrlResponse) {}
   rpc set_location(SetLocationRequest) returns (SetLocationResponse) {}
   rpc send_notification(SendNotificationRequest)
       returns (SendNotificationResponse) {}
