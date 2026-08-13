@@ -4871,7 +4871,7 @@ __metadata:
     fastify: "npm:^5.11.0"
     libsql: "npm:^0.5.29"
     node-cron: "npm:^4.2.1"
-    node-pty: "npm:1.2.0-beta.14"
+    node-pty: "npm:1.2.0-beta.15"
     pino: "npm:^10.3.1"
     tsup: "npm:^8.5.1"
     tsx: "npm:^4.23.1"
@@ -9565,13 +9565,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"node-pty@npm:1.2.0-beta.14":
-  version: 1.2.0-beta.14
-  resolution: "node-pty@npm:1.2.0-beta.14"
+"node-pty@npm:1.2.0-beta.15":
+  version: 1.2.0-beta.15
+  resolution: "node-pty@npm:1.2.0-beta.15"
   dependencies:
     node-addon-api: "npm:^7.1.0"
     node-gyp: "npm:latest"
-  checksum: 10c0/4ba300fadf4fa6917eccbd25de1ab5ee1adca05cfd47ec2b9a09049d5b34407b0f7f9977d01acd32e44ca78c08928548da8be7e352a5a91d5a57569f8265bda5
+  checksum: 10c0/2f2bcca18efe94f56fd5c9fc9611164f63af912b96286ea4d858f4886e3b25aa9c529e3d7680d47e5ddefc6c3e799786ed11dc4b80947e40438e00a67dbc2fbf
   languageName: node
   linkType: hard
 
