@@ -80,7 +80,7 @@ export function CommitDialog({ cwd, branch, stat, onClose, onCommitted }: Props)
       <motion.div
         className="fixed z-[70] rounded-xl border border-white/[0.08] shadow-2xl w-[440px]"
         style={{
-          background: '#1e1e22',
+          background: 'var(--color-surface-overlay)',
           top: '50%',
           left: '50%',
           x: '-50%',

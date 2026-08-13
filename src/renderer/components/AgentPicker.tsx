@@ -142,7 +142,7 @@ export function AgentPicker({
                 bottom: position.bottom,
                 left: position.left,
                 minWidth: Math.max(180, position.width),
-                background: '#1e1e22'
+                background: 'var(--color-surface-overlay)'
               }}
             >
               {allowNone && (

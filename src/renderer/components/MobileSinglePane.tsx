@@ -48,7 +48,7 @@ function MobileSessionCard({
           isSelected ? 'border-white/20 ring-1 ring-white/10' : 'border-white/[0.06]'
         }`}
         style={{
-          background: 'var(--glass-bg, #1e1e22)',
+          background: 'var(--glass-bg, var(--color-surface-overlay))',
           backdropFilter: 'var(--glass-blur, none)',
           WebkitBackdropFilter: 'var(--glass-blur, none)',
           boxShadow: isSelected ? 'var(--glass-shadow-thumb, none)' : 'var(--glass-shadow, none)',

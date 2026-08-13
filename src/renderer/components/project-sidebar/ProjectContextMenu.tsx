@@ -61,7 +61,7 @@ export function ProjectContextMenu({
       ) : (
         <button
           onClick={() => setConfirmDelete(true)}
-          className="w-full px-3 py-2.5 text-left text-[13px] text-danger hover:text-danger/80
+          className="w-full px-3 py-2.5 text-left text-[13px] text-danger/80 hover:text-danger
                      hover:bg-white/[0.06] active:bg-white/[0.1] flex items-center gap-2 transition-colors"
         >
           <Trash2 size={12} strokeWidth={1.5} />

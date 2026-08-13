@@ -63,9 +63,12 @@ export const WORKFLOW_STATUS_TEXT: Record<WorkflowStatusKey, string> = {
   error: 'text-danger',
   running: 'text-ink',
   success: 'text-ink-faint',
-  pending: 'text-ink-ghost',
-  skipped: 'text-ink-ghost',
-  cancelled: 'text-ink-ghost'
+  // Deliberately a step brighter than the matching dots. Ghost is legible as a
+  // 1.5px disc of solid colour and illegible as a word — a stopped run's
+  // headline verdict rendered at about 1.7:1 against the pane behind it.
+  pending: 'text-ink-faint',
+  skipped: 'text-ink-faint',
+  cancelled: 'text-ink-faint'
 }
 
 /**

@@ -11,7 +11,6 @@ import { useAppStore } from '../stores'
 import { ICON_MAP } from './project-sidebar/icon-map'
 import { approveWorkflowGate, rejectWorkflowGate } from '../lib/workflow-execution'
 import { Tooltip } from './Tooltip'
-import { ICON_BUTTON, ICON_BUTTON_DANGER } from '../lib/icon-button'
 
 interface Props {
   execution: WorkflowExecution
@@ -66,10 +65,7 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
     >
       <div className="relative flex-shrink-0">
         <div className="w-1.5 h-1.5 rounded-full bg-bronzo" />
-        <div
-          className="absolute inset-[-1px] rounded-full bg-bronzo opacity-40 animate-ping"
-          style={{ animationDuration: '2s' }}
-        />
+        <div style={{ animationDuration: '2s' }} />
       </div>
 
       <WfIcon size={12} strokeWidth={1.5} color={wfIconColor || undefined} />
@@ -87,12 +83,20 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
 
       <div className="flex items-center gap-0.5 ml-1 flex-shrink-0">
         <Tooltip label="Approve">
-          <button onClick={handleApprove} aria-label="Approve" className={ICON_BUTTON}>
+          <button
+            onClick={handleApprove}
+            aria-label="Approve"
+            className="p-0.5 rounded text-ink-secondary hover:text-ink hover:bg-white/[0.08] transition-colors"
+          >
             <Check size={12} strokeWidth={2.5} />
           </button>
         </Tooltip>
         <Tooltip label="Reject">
-          <button onClick={handleReject} aria-label="Reject" className={ICON_BUTTON_DANGER}>
+          <button
+            onClick={handleReject}
+            aria-label="Reject"
+            className="p-0.5 rounded text-ink-faint hover:text-danger hover:bg-danger/10 transition-colors"
+          >
             <X size={12} strokeWidth={2.5} />
           </button>
         </Tooltip>

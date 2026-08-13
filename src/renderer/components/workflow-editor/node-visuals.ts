@@ -3,10 +3,13 @@ import type { LucideIcon } from 'lucide-react'
 import type { NodeExecutionState, WorkflowNode } from '../../../shared/types'
 
 /**
- * The glyph for each node type, shared by the canvas, the config panel and the
- * run trace so a step looks the same wherever it is read. The label that used
- * to ride along here had no readers — every call site takes its wording from
- * the node's own `label`.
+ * The glyph for each node type, read by the config panel header and the run
+ * trace. The canvas cards still import their own icons — they are the one
+ * place a node is drawn at full size, and they were left alone deliberately —
+ * so a type's glyph has to be kept in step by hand between here and there.
+ *
+ * The label that used to ride along here had no readers; every call site takes
+ * its wording from the node's own `label`.
  */
 export const NODE_TYPE_ICON: Record<WorkflowNode['type'], LucideIcon> = {
   trigger: Zap,

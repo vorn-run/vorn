@@ -649,7 +649,7 @@ export function CommandPalette() {
           <motion.div
             className="fixed top-[20%] left-1/2 z-[60] w-[560px] max-h-[420px] border border-white/[0.08]
                        rounded-xl shadow-2xl overflow-hidden flex flex-col"
-            style={{ background: '#1e1e22' }}
+            style={{ background: 'var(--color-surface-overlay)' }}
             initial={{ opacity: 0, scale: 0.98, x: '-50%', y: -8 }}
             animate={{ opacity: 1, scale: 1, x: '-50%', y: 0 }}
             exit={{ opacity: 0, scale: 0.98, x: '-50%', y: -8 }}
@@ -691,7 +691,7 @@ export function CommandPalette() {
                       key={`header-${item.label}`}
                       className="px-3 py-1.5 text-[11px] font-medium text-gray-500
                                  uppercase tracking-wider sticky top-0"
-                      style={{ background: '#1e1e22' }}
+                      style={{ background: 'var(--color-surface-overlay)' }}
                     >
                       {item.label}
                     </div>

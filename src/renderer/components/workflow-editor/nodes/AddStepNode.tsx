@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Plus, Play, GitBranch, Terminal, Split, Hand, Zap, Repeat } from 'lucide-react'
+import { Plus, Play, GitFork, Terminal, Split, Hand, Zap, Repeat } from 'lucide-react'
 import { NODE_GLYPH, NODE_SELECTED } from '../node-visuals'
 
 interface Props {
@@ -98,7 +98,7 @@ export function ConnectorButton({
               className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
                          hover:bg-white/[0.06] hover:text-white transition-colors text-left"
             >
-              <Split size={14} className={`${NODE_GLYPH} shrink-0`} />
+              <GitFork size={14} className={`${NODE_GLYPH} shrink-0`} />
               Add a condition
             </button>
           )}
@@ -160,7 +160,7 @@ export function ConnectorButton({
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-gray-300
                            hover:bg-white/[0.06] hover:text-white transition-colors text-left"
               >
-                <GitBranch size={14} className={`${NODE_GLYPH} shrink-0`} />
+                <Split size={14} className={`${NODE_GLYPH} shrink-0`} />
                 Add a parallel branch
               </button>
             </>

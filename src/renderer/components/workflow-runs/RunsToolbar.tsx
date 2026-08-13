@@ -14,7 +14,7 @@ const RUN_FILTERS: { key: RunBucket; label: string }[] = [
 ]
 
 const RUN_FILTER_DOT: Record<RunBucket, string> = {
-  all: 'bg-gray-400',
+  all: 'bg-ink-secondary',
   running: WORKFLOW_STATUS_DOT.running,
   waiting: WORKFLOW_STATUS_DOT.waiting,
   error: WORKFLOW_STATUS_DOT.error,

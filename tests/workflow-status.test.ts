@@ -50,8 +50,21 @@ describe('workflow status colours', () => {
   it('says the same thing as a dot and as a word', () => {
     // These were separate maps that disagreed: running was a yellow dot but a
     // blue word, success a green dot but a grey outcome.
+    //
+    // Sameness is the tone, not the exact value. A dot is a solid disc and a
+    // word is a thin stroke, so the settled statuses sit a step brighter as
+    // text — asserting strict equality here is what let a stopped run's verdict
+    // ship at roughly 1.7:1.
+    const tone = (c: string): string => c.replace(/^(bg|text)-/, '').replace(/-(faint|ghost)$/, '')
     for (const s of EVERY_STATUS) {
-      expect(WORKFLOW_STATUS_TEXT[s]).toBe(WORKFLOW_STATUS_DOT[s].replace('bg-', 'text-'))
+      expect(tone(WORKFLOW_STATUS_TEXT[s])).toBe(tone(WORKFLOW_STATUS_DOT[s]))
+    }
+  })
+
+  it('keeps a status legible as a word even where the dot may recede', () => {
+    // ink-ghost reads fine as a 1.5px disc and not at all as a label.
+    for (const s of EVERY_STATUS) {
+      expect(WORKFLOW_STATUS_TEXT[s]).not.toContain('ghost')
     }
   })
 

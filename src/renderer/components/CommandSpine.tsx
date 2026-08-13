@@ -218,7 +218,7 @@ export function CommandSpine({ terminalId, className }: Props) {
             className="fixed z-[100] px-2 py-1 rounded-md text-[11px] text-gray-200 whitespace-nowrap
                        border border-white/[0.08] pointer-events-none flex items-center gap-2"
             style={{
-              background: '#1e1e22',
+              background: 'var(--color-surface-overlay)',
               top: hovered.top,
               left: hovered.left,
               transform: 'translate(0, -50%)'

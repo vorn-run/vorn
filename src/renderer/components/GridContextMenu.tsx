@@ -288,7 +288,7 @@ export function GridContextMenu({ position, onClose }: Props) {
         exit={{ opacity: 0, y: -4, scale: 0.96 }}
         transition={{ type: 'spring', stiffness: 500, damping: 30 }}
         className="fixed z-[150] rounded-lg border border-white/[0.1] shadow-2xl py-1"
-        style={{ top, left, background: '#1e1e22', minWidth: MENU_WIDTH }}
+        style={{ top, left, background: 'var(--color-surface-overlay)', minWidth: MENU_WIDTH }}
       >
         {items.map((item, i) => {
           const itemHasSubmenu = hasSubmenu(item)
@@ -361,7 +361,7 @@ export function GridContextMenu({ position, onClose }: Props) {
           style={{
             top: submenuTop,
             left: submenuLeft,
-            background: '#1e1e22',
+            background: 'var(--color-surface-overlay)',
             minWidth: SUBMENU_WIDTH
           }}
           onMouseEnter={clearHideTimeout}

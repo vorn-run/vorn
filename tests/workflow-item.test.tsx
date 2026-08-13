@@ -150,7 +150,7 @@ describe('WorkflowItem', () => {
     expect(container.querySelector('.bg-ink-secondary')).toBeInTheDocument()
   })
 
-  it('renders a gray dot and dims the row for scheduled + disabled workflows', () => {
+  it('keeps the dot visible on a dimmed, disabled row', () => {
     const { container } = render(
       <WorkflowItem
         workflow={makeScheduled(false)}
@@ -159,7 +159,8 @@ describe('WorkflowItem', () => {
         onContextMenu={vi.fn()}
       />
     )
-    expect(container.querySelector('.bg-ink-ghost')).toBeInTheDocument()
+    // The row is at opacity-40; a ghost dot composited away to nothing there.
+    expect(container.querySelector('.bg-ink-faint')).toBeInTheDocument()
     expect(container.querySelector('.opacity-40')).toBeInTheDocument()
   })
 

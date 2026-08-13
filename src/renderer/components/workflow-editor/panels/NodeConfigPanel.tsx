@@ -123,7 +123,7 @@ export function NodeConfigPanel({
                       setShowMenu(false)
                       onDelete(node.id)
                     }}
-                    className="w-full px-3 py-2 text-left text-[12px] text-danger hover:text-danger/80
+                    className="w-full px-3 py-2 text-left text-[12px] text-danger/80 hover:text-danger
                                hover:bg-white/[0.06] flex items-center gap-2 transition-colors"
                   >
                     <Trash2 size={12} strokeWidth={1.5} />

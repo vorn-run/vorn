@@ -35,7 +35,10 @@ const DOT_CLASSES: Record<Exclude<DotState, null>, string> = {
   // Having a schedule is a property of the workflow, not a state it is in, so
   // it stays off the accent: bright for live, receded for switched off.
   scheduled: 'bg-ink-secondary',
-  disabled: 'bg-ink-ghost'
+  // The row itself is at opacity-40, so whatever goes here composites down to
+  // under half its alpha — ghost vanished outright. Faint survives the dimming
+  // while still reading as the quieter of the two schedule states.
+  disabled: 'bg-ink-faint'
 }
 
 export function WorkflowItem({

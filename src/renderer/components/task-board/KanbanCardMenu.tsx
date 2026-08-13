@@ -214,7 +214,7 @@ export function KanbanCardMenu({
               style={{
                 top: position.top,
                 left: position.left,
-                background: '#1e1e22',
+                background: 'var(--color-surface-overlay)',
                 minWidth: 180
               }}
             >

@@ -1,4 +1,4 @@
-import { GitBranch } from 'lucide-react'
+import { GitFork } from 'lucide-react'
 import type {
   ConditionConfig,
   ConditionOperator,
@@ -51,7 +51,7 @@ export function ConditionNode({ label, config, selected, executionStatus, onClic
         />
       )}
       <div className="flex items-center gap-2">
-        <GitBranch size={14} strokeWidth={2} className={`${NODE_GLYPH} shrink-0`} />
+        <GitFork size={14} strokeWidth={2} className={`${NODE_GLYPH} shrink-0`} />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-white truncate">{label}</div>
           <div className="text-[11px] text-gray-500 truncate">

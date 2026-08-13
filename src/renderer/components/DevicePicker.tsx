@@ -119,7 +119,7 @@ export function DevicePicker({
       aria-label="Choose a device"
       className="fixed border border-white/[0.08] rounded-lg shadow-xl z-[150] max-h-[280px] overflow-hidden flex flex-col"
       style={{
-        background: '#1e1e22',
+        background: 'var(--color-surface-overlay)',
         minWidth,
         top: position?.top ?? 0,
         left: position?.left ?? 0,

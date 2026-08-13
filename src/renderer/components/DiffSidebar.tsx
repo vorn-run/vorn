@@ -184,7 +184,7 @@ export function DiffContent({
             <div
               className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 text-[12px] font-mono
                             border-b border-white/[0.06]"
-              style={{ background: '#1e1e22' }}
+              style={{ background: 'var(--color-surface-overlay)' }}
             >
               <FileTypeIcon name={fileName} size={14} />
               <span className="text-gray-300 flex-1 min-w-0 truncate">{file.filePath}</span>

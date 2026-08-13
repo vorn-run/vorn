@@ -180,7 +180,7 @@ export function ProjectPicker({
               style={{
                 top: position.top,
                 left: position.left,
-                background: '#1e1e22',
+                background: 'var(--color-surface-overlay)',
                 minWidth: Math.max(180, position.width)
               }}
             >

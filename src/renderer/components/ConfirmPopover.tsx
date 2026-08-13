@@ -143,7 +143,7 @@ export function ConfirmPopover({
                 top: position.top,
                 left: position.left,
                 transformOrigin: position.placement === 'top' ? 'bottom center' : 'top center',
-                background: isMobile ? 'var(--glass-bg)' : '#1e1e22',
+                background: isMobile ? 'var(--glass-bg)' : 'var(--color-surface-overlay)',
                 backdropFilter: isMobile ? 'var(--glass-blur)' : undefined,
                 WebkitBackdropFilter: isMobile ? 'var(--glass-blur)' : undefined,
                 boxShadow: isMobile ? 'var(--glass-shadow)' : undefined,
