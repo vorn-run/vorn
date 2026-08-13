@@ -805,6 +805,25 @@ export async function interact(params: {
 
 /** Long edge, in pixels, of a screenshot handed to an agent. */
 const AGENT_MAX_EDGE = 1000
+/**
+ * Ceiling on the caller's requested edge.
+ *
+ * `maxEdge` arrives from the renderer, which derives it from a window the
+ * person can drag as large as they like. Trusted as-is, a maximised pane on a
+ * retina display asks for an image larger than the raw capture, so the resize
+ * is skipped and a full ~2.9 MB PNG crosses IPC twice a second — the exact cost
+ * downscaling exists to avoid. 2000px is comfortably above any pane worth
+ * showing and well under a raw iPhone capture.
+ */
+const HARD_MAX_EDGE = 2000
+
+/** The edge to actually render at: the caller's ask, bounded and sane. */
+export function clampMaxEdge(requested: number | undefined): number {
+  if (requested === undefined || !Number.isFinite(requested) || requested <= 0) {
+    return AGENT_MAX_EDGE
+  }
+  return Math.min(Math.round(requested), HARD_MAX_EDGE)
+}
 
 /**
  * A downscaled still.
@@ -833,7 +852,7 @@ export async function screenshot(params: {
   // only honest source for this ratio.
   if (screen.width > 0) entry.scale = size.width / screen.width
 
-  const maxEdge = params.maxEdge ?? AGENT_MAX_EDGE
+  const maxEdge = clampMaxEdge(params.maxEdge)
   const longest = Math.max(size.width, size.height)
   const out =
     longest > maxEdge

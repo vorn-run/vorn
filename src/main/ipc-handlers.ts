@@ -72,7 +72,15 @@ export function registerIpcHandlers(): void {
     const enriched = await enrichPayloadWithCredentials(payload, requireBridge())
     return requireBridge().request(IPC.TERMINAL_CREATE, enriched)
   })
-  safeHandle(IPC.TERMINAL_KILL, (_, id) => requireBridge().request(IPC.TERMINAL_KILL, id))
+  safeHandle(IPC.TERMINAL_KILL, (_, id) => {
+    // Killing the session hands its device back. Nothing else does: closing the
+    // pane releases, but a session killed with the pane already shut — or never
+    // opened, because an agent claimed it headlessly — would otherwise strand a
+    // running companion and a claim no session owns, locking that simulator out
+    // of every other session until the app quits.
+    deviceRegistry.releaseForSession(id as string)
+    return requireBridge().request(IPC.TERMINAL_KILL, id)
+  })
   safeHandle(IPC.SHELL_CREATE, (_, cwd) => requireBridge().request(IPC.SHELL_CREATE, cwd))
 
   // Config

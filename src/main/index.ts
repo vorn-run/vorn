@@ -3,6 +3,7 @@ import path from 'node:path'
 import { registerIpcHandlers, setBridge } from './ipc-handlers'
 import * as browserRegistry from './browser-registry'
 import * as deviceRegistry from './device-registry'
+import { installCompanionQuitHook } from './device-companion'
 import { installConnectorCredentialsSync } from './connector-credentials-sync'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
@@ -379,6 +380,9 @@ app.whenReady().then(async () => {
     }
   browserRegistry.setRendererSend(paneSend('browser'))
   deviceRegistry.setRendererSend(paneSend('device'))
+  // A companion outlives the app otherwise: it holds a unix socket and a booted
+  // simulator, and nothing reaps it once Vorn is gone.
+  installCompanionQuitHook()
   registerIpcHandlers()
 
   // Window control IPC handlers (Electron-only)

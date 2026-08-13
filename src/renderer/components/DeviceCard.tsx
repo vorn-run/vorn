@@ -98,7 +98,13 @@ export const DeviceCard = memo(
       const tick = async (): Promise<void> => {
         try {
           const box = containerRef.current?.getBoundingClientRect()
-          const maxEdge = box ? Math.ceil(Math.max(box.width, box.height) * 2) : undefined
+          // The real ratio, not a hard-coded 2: on a non-retina display that
+          // constant fetches four times the pixels the pane can show, and on a
+          // 3× display it under-fetches and shows a soft image. Main clamps
+          // whatever this asks for, so a dragged-large window cannot turn the
+          // 2fps poll into a multi-megabyte one.
+          const dpr = window.devicePixelRatio || 1
+          const maxEdge = box ? Math.ceil(Math.max(box.width, box.height) * dpr) : undefined
           const shot = await window.api.deviceScreenshot(sessionId, maxEdge)
           if (cancelled) return
           setFrame(shot.data)

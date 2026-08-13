@@ -321,13 +321,6 @@ export interface UISlice {
   closeBrowserTab: (sessionId: string, index: number) => void
   setActiveBrowserTab: (sessionId: string, index: number) => void
   /**
-   * Show the session's claimed simulator in a pane.
-   *
-   * The pane is a viewer, not the claim: the agent's tools work with it closed,
-   * and closing it releases nothing. That separation is why closing this pane
-   * is safe to do casually.
-   */
-  /**
    * Open the pane for a device main already holds. Used when main itself asks
    * for the pane (the agent claimed the device), where the claim is a
    * precondition rather than something the renderer arranges.

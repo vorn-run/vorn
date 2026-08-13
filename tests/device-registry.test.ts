@@ -54,6 +54,7 @@ import {
   EDGE_BAND_POINTS,
   formatRuntime,
   keycodesFor,
+  clampMaxEdge,
   type AXElement
 } from '../src/main/device-registry'
 
@@ -373,5 +374,30 @@ describe('typing keycodes', () => {
 
   it('refuses upper case rather than silently lower-casing it', () => {
     expect(() => keycodesFor('Hello')).toThrow(/H/)
+  })
+})
+
+describe('screenshot edge clamping', () => {
+  it('honours a sane request from the pane', () => {
+    expect(clampMaxEdge(600)).toBe(600)
+  })
+
+  it('caps a window dragged large, so the poll cannot balloon', () => {
+    // maxEdge comes from a rect the person can drag as big as they like. Above
+    // the raw capture the resize is skipped entirely and a ~2.9MB PNG crosses
+    // IPC twice a second — the exact cost the downscale exists to avoid.
+    expect(clampMaxEdge(9000)).toBe(2000)
+  })
+
+  it('falls back to the agent default when the pane has no box yet', () => {
+    expect(clampMaxEdge(undefined)).toBe(1000)
+  })
+
+  it('ignores a nonsense edge rather than resizing to nothing', () => {
+    // A zero or NaN reaches resize() as a 0-width image: a blank pane that
+    // looks like the device died, with nothing naming the cause.
+    expect(clampMaxEdge(0)).toBe(1000)
+    expect(clampMaxEdge(Number.NaN)).toBe(1000)
+    expect(clampMaxEdge(-50)).toBe(1000)
   })
 })
