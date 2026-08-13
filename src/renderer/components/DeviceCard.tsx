@@ -145,6 +145,13 @@ export const DeviceCard = memo(
           setFrame(shot.data)
           setScreen(shot.screen)
           setError(null)
+          // Forget what was waved away, too. Dismissal silences one message
+          // while it keeps recurring; a frame that arrives means the condition
+          // behind it cleared, so the next occurrence is new news. Left set,
+          // the dismissal outlived its cause and the pane would go silent
+          // forever about the one failure the person had already seen once —
+          // which is exactly the failure most likely to come back.
+          setDismissed(null)
         } catch (err) {
           if (cancelled) return
           setError(err instanceof Error ? err.message : String(err))

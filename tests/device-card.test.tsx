@@ -230,6 +230,31 @@ describe('polling', () => {
     expect(screen.queryByText(/connection to the device dropped/)).not.toBeInTheDocument()
   })
 
+  it('shows a dismissed error again if it recurs after the feed recovered', async () => {
+    // Dismissal silences one message while it keeps recurring. Once a frame
+    // arrives the condition behind it cleared, so a later recurrence is new
+    // news — and it is the failure the person already saw once that is most
+    // likely to come back. Left dismissed, the pane goes quiet about it
+    // forever and the next outage looks like a frozen picture with no cause.
+    deviceScreenshot.mockRejectedValue(new Error('the connection to the device dropped'))
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    fireEvent.click(await screen.findByLabelText('Dismiss error'))
+    expect(screen.queryByText(/connection to the device dropped/)).not.toBeInTheDocument()
+
+    deviceScreenshot.mockResolvedValue({
+      data: 'AAAA',
+      scale: 1,
+      screen: { width: 402, height: 874 }
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200)
+    })
+
+    deviceScreenshot.mockRejectedValue(new Error('the connection to the device dropped'))
+    expect(await screen.findByText(/connection to the device dropped/)).toBeInTheDocument()
+  })
+
   it('still shows a different failure after one was dismissed', async () => {
     // Dismissal is per-message, not a mute button: silencing every later error
     // would hide the one that finally explains the pane.
