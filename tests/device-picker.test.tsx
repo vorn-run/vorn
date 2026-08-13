@@ -6,6 +6,24 @@ import '@testing-library/jest-dom/vitest'
 
 const deviceList = vi.fn()
 
+/**
+ * jsdom ships no ResizeObserver. This one records its callbacks so a test can
+ * fire them, which is the only way to exercise the reposition-on-growth path:
+ * jsdom never lays anything out, so nothing would ever trigger it naturally.
+ */
+const roCallbacks: Array<() => void> = []
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    constructor(cb: () => void) {
+      roCallbacks.push(cb)
+    }
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+)
+
 Object.defineProperty(window, 'api', {
   value: { deviceList: (...args: unknown[]) => deviceList(...args) },
   writable: true,
@@ -113,6 +131,52 @@ describe('DevicePicker', () => {
     deviceList.mockResolvedValue([])
     render(<Harness />)
     expect(await screen.findByText('No simulators found')).toBeInTheDocument()
+  })
+
+  it('repositions when it grows from a spinner into a list', async () => {
+    // The flip-above-the-anchor decision keys off the popover's height, and on
+    // mount that height is a spinner's. Anchored near the bottom of the screen
+    // the grown list is clipped, and the devices that scroll off are exactly
+    // the ones the person opened it to reach. jsdom never lays out, so the
+    // observer callback is fired by hand.
+    render(<Harness />)
+    await screen.findByText('iPhone 17')
+    const box = screen.getByRole('listbox')
+    const before = box.style.top
+
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      top: 700,
+      left: 200,
+      right: 260,
+      bottom: 720,
+      width: 60,
+      height: 400,
+      x: 200,
+      y: 700,
+      toJSON: () => ({})
+    } as DOMRect)
+    act(() => {
+      roCallbacks.forEach((cb) => cb())
+    })
+    expect(box.style.top).not.toBe(before)
+  })
+
+  it('stops observing when it closes', () => {
+    // An observer left attached to a removed node keeps the popover's whole
+    // closure alive for as long as the session lasts, and the picker is opened
+    // and closed constantly.
+    const disconnect = vi.fn()
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect = disconnect
+      }
+    )
+    const { unmount } = render(<Harness />)
+    unmount()
+    expect(disconnect).toHaveBeenCalled()
   })
 
   it('closes on Escape', async () => {

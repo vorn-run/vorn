@@ -26,6 +26,17 @@ vi.mock('../src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
+// jsdom ships no ResizeObserver, and the picker uses one to reposition when it
+// grows from a spinner into a device list.
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+)
+
 Object.defineProperty(window, 'api', {
   value: { killTerminal: vi.fn() },
   writable: true
@@ -171,6 +182,23 @@ describe('CardActionCluster device control', () => {
       })
     })
   }
+
+  it('probes the project itself rather than waiting for the sidebar', () => {
+    // The cache was only ever warmed by SessionItem, so with the sidebar
+    // hidden or collapsed this button never appeared at all — and a control
+    // that is absent rather than disabled gives the person nothing to ask
+    // about, on exactly the mobile project it exists for.
+    const loadMobileProject = vi.fn().mockResolvedValue(undefined)
+    act(() => {
+      useAppStore.setState({
+        devicePanes: new Map(),
+        mobileProjectCache: new Map(),
+        loadMobileProject
+      })
+    })
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    expect(loadMobileProject).toHaveBeenCalledWith('/tmp/vorn')
+  })
 
   it('offers a device on a mobile project', () => {
     seed(MOBILE)

@@ -55,9 +55,18 @@ export function DevicePicker({
       )
     }
     updatePosition()
+    // The popover is a spinner when this first runs and a device list a moment
+    // later, and `calculatePopoverPosition` flips it above the anchor based on
+    // height. Positioning only on mount means the flip decision is made against
+    // the spinner's height, so a list that opens near the bottom of the screen
+    // is clipped — with the devices that scrolled off being exactly the ones
+    // the person opened it to reach.
+    const ro = new ResizeObserver(() => updatePosition())
+    if (ref.current) ro.observe(ref.current)
     window.addEventListener('resize', updatePosition)
     window.addEventListener('scroll', updatePosition, true)
     return () => {
+      ro.disconnect()
       window.removeEventListener('resize', updatePosition)
       window.removeEventListener('scroll', updatePosition, true)
     }

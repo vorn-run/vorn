@@ -446,8 +446,13 @@ export interface RequestMethods {
   //
   // Forwarded to main over the same bridge and for a sharper version of the
   // same reason: a simulator is driven by a child `idb_companion` process
-  // speaking gRPC over a unix socket, which only main owns. Session-scoped the
-  // same way — no method takes a session argument.
+  // speaking gRPC over a unix socket, which only main owns.
+  //
+  // Every method here carries `sessionId` explicitly. That is the opposite of
+  // the MCP tool surface, where no tool takes a session argument because the
+  // MCP layer resolves it from `VORN_SESSION_ID` before calling in. By the
+  // time a request reaches this contract the resolution has already happened,
+  // so callers must pass the id rather than expect it to be inferred.
   //
   // `device:list` is the one method that works without a claim; it is how a
   // session discovers what there is to claim without leaving Vorn.

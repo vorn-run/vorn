@@ -8,7 +8,7 @@ import {
   Smartphone,
   X
 } from 'lucide-react'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../stores'
 import { Tooltip } from '../Tooltip'
@@ -38,7 +38,8 @@ export function CardActionCluster({ terminalId, variant }: Props) {
     hasDevicePane,
     claimAndOpenDevicePane,
     closeDevicePane,
-    mobileProjectCache
+    mobileProjectCache,
+    loadMobileProject
   } = useAppStore(
     useShallow((s) => ({
       terminal: s.terminals.get(terminalId),
@@ -49,13 +50,24 @@ export function CardActionCluster({ terminalId, variant }: Props) {
       hasDevicePane: s.devicePanes.has(terminalId),
       claimAndOpenDevicePane: s.claimAndOpenDevicePane,
       closeDevicePane: s.closeDevicePane,
-      mobileProjectCache: s.mobileProjectCache
+      mobileProjectCache: s.mobileProjectCache,
+      loadMobileProject: s.loadMobileProject
     }))
   )
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [isPickerOpen, setIsPickerOpen] = useState(false)
   const moreRef = useRef<HTMLButtonElement>(null)
   const deviceRef = useRef<HTMLButtonElement>(null)
+
+  // Probe from here rather than relying on the sidebar having done it. The
+  // cache is only ever warmed by SessionItem, so with the sidebar hidden or
+  // collapsed the device button never appears on the card at all — and a
+  // control that is missing rather than disabled gives the person nothing to
+  // ask about. Above the early return because hooks cannot be conditional.
+  const projectPath = terminal?.session.projectPath
+  useEffect(() => {
+    if (projectPath) void loadMobileProject(projectPath)
+  }, [projectPath, loadMobileProject])
 
   if (!terminal) return null
 
