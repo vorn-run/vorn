@@ -18,6 +18,18 @@ import { noSessionResult, errorResult, pageResult, sessionId } from './browser'
 const DEVICE_FENCE = 'DEVICE CONTENT'
 
 /**
+ * A bounded string that must actually say something.
+ *
+ * `V.shortText` is shared with fields where blank is a legitimate answer, so it
+ * carries no minimum. For a udid, a bundle id or a search needle it is never a
+ * legitimate answer, and passing one through costs a round trip to reach a
+ * failure that reads as the device misbehaving rather than as the empty
+ * argument it is. Rejecting it here says so in the tool call that caused it.
+ */
+const required = (description: string) =>
+  V.shortText.min(1, 'Value must not be empty').describe(description)
+
+/**
  * The agent's half of the session device pane — an iOS simulator claimed by
  * this session.
  *
@@ -106,7 +118,7 @@ export function registerDeviceTools(server: McpServer): void {
     'Claim a simulator for your session, booting it if needed. Every other device tool acts on ' +
       'your claimed device. Claiming one another session holds fails and names the holder — ' +
       'two agents driving one screen produce results that look like app bugs.',
-    { udid: V.shortText.describe('Simulator UDID from device_list') },
+    { udid: required('Simulator UDID from device_list') },
     async (args) =>
       withSession(async (id) => {
         const r = await rpcCall<{ udid: string; name: string; booted: boolean }>('device:claim', {
@@ -164,7 +176,7 @@ export function registerDeviceTools(server: McpServer): void {
     'Find elements on your claimed simulator whose label or accessibility identifier contains ' +
       'some text. Searches the whole screen, not just the first page read_screen would return.',
     {
-      text: V.shortText.describe('Text to match against labels and identifiers (case-insensitive)'),
+      text: required('Text to match against labels and identifiers (case-insensitive)'),
       limit: z.number().int().min(1).max(50).optional().describe('Max matches (default 20)')
     },
     async (args) =>
@@ -191,7 +203,7 @@ export function registerDeviceTools(server: McpServer): void {
       action: z
         .enum(['tap', 'swipe', 'type', 'button', 'press'])
         .describe('"press" is a long press; "button" takes a name in `text`'),
-      ref: V.shortText.optional().describe('Element ref from read_screen or device_find'),
+      ref: required('Element ref from read_screen or device_find').optional(),
       x: z.number().optional().describe('Screen x in points, when no ref is available'),
       y: z.number().optional().describe('Screen y in points, when no ref is available'),
       to_x: z.number().optional().describe('Swipe destination x, in points'),
@@ -278,7 +290,7 @@ export function registerDeviceTools(server: McpServer): void {
   server.tool(
     'device_launch',
     'Launch an installed app on your claimed simulator by bundle id.',
-    { bundle_id: V.shortText.describe('e.g. com.apple.Preferences') },
+    { bundle_id: required('e.g. com.apple.Preferences') },
     async (args) =>
       withSession(async (id) => {
         await rpcCall<{ ok: true }>('device:launch', { sessionId: id, bundleId: args.bundle_id })
@@ -289,7 +301,7 @@ export function registerDeviceTools(server: McpServer): void {
   server.tool(
     'device_terminate',
     'Terminate a running app on your claimed simulator by bundle id.',
-    { bundle_id: V.shortText.describe('e.g. com.apple.Preferences') },
+    { bundle_id: required('e.g. com.apple.Preferences') },
     async (args) =>
       withSession(async (id) => {
         await rpcCall<{ ok: true }>('device:terminate', { sessionId: id, bundleId: args.bundle_id })
@@ -338,7 +350,7 @@ export function registerDeviceTools(server: McpServer): void {
     'open_device_pane',
     'Open the device pane for your session so the person can watch. You do not need this to ' +
       'drive a simulator — every other device tool works with the pane closed.',
-    { udid: V.shortText.optional().describe('Simulator to show (defaults to your claimed one)') },
+    { udid: required('Simulator to show (defaults to your claimed one)').optional() },
     async (args) =>
       withSession(async (id) => {
         const r = await rpcCall<{ udid: string }>('device:openPane', {

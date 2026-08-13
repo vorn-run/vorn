@@ -15,12 +15,19 @@ type ToolResult = {
 }
 type Handler = (args: Record<string, unknown>) => Promise<ToolResult>
 
+type Shape = Record<string, { safeParse: (v: unknown) => { success: boolean } }>
+
+/** Each tool's declared input schema, by tool name. */
+const schemas = new Map<string, Shape>()
+
 /** A stand-in for the MCP server that keeps each tool's handler callable. */
 function collect(): Map<string, Handler> {
   const tools = new Map<string, Handler>()
   const server = {
-    tool: (name: string, _desc: string, _schema: unknown, handler: Handler) =>
+    tool: (name: string, _desc: string, schema: Shape, handler: Handler) => {
+      schemas.set(name, schema)
       tools.set(name, handler)
+    }
   }
   registerDeviceTools(server as unknown as McpServer)
   return tools
@@ -144,5 +151,30 @@ describe('target resolution', () => {
     expect(toDeviceTarget({ x: 10, y: 20 })).toEqual({ x: 10, y: 20 })
     expect(toDeviceTarget({ x: 10 })).toBeUndefined()
     expect(toDeviceTarget({})).toBeUndefined()
+  })
+})
+
+describe('arguments that cannot mean anything', () => {
+  // An empty udid or bundle id is never a real request. Left to the schema's
+  // shared bound it would sail through to an RPC and come back as a device
+  // failure — the model reads that as the simulator misbehaving and retries,
+  // rather than as the blank argument it actually sent.
+  it.each([
+    ['device_claim', 'udid'],
+    ['device_launch', 'bundle_id'],
+    ['device_terminate', 'bundle_id'],
+    ['device_find', 'text']
+  ])('%s rejects an empty %s', (tool, field) => {
+    const schema = schemas.get(tool)!
+    expect(schema[field].safeParse('').success).toBe(false)
+    expect(schema[field].safeParse('x').success).toBe(true)
+  })
+
+  it('still lets an optional identifier be omitted entirely', () => {
+    // `open_device_pane` defaults to the claimed device, so absent is a real
+    // answer — but a present-and-empty udid still is not.
+    const udid = schemas.get('open_device_pane')!.udid
+    expect(udid.safeParse(undefined).success).toBe(true)
+    expect(udid.safeParse('').success).toBe(false)
   })
 })
