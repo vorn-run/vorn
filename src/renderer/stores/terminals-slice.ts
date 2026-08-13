@@ -42,6 +42,10 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       editorPanes.delete(id)
       const browserPanes = new Map(state.browserPanes)
       browserPanes.delete(id)
+      // The remembered tabs go with the session too. A recycled id would
+      // otherwise reopen its browser onto a previous session's pages.
+      const browserMemory = new Map(state.browserMemory)
+      browserMemory.delete(id)
       // The claim itself is released by main when the session closes; this is
       // only the viewer. Leaving it behind would keep a frame of a device this
       // session no longer holds, and block a later pane from opening.
@@ -64,6 +68,7 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         filesPanes,
         editorPanes,
         browserPanes,
+        browserMemory,
         devicePanes,
         cardSplits,
         gitDiffStats,
