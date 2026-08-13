@@ -19,6 +19,23 @@ interface Props {
 const POLL_MS = 500
 
 /**
+ * True when `visibility: hidden` is in force on `el` or anything above it.
+ *
+ * The one hidden-ness an IntersectionObserver structurally cannot report: the
+ * element keeps its box and keeps intersecting, so the observer calls it on
+ * screen. Walking ancestors because `visibility` inherits — the hide is applied
+ * to the pane wrapper, not to the element being polled. Deliberately not
+ * `checkVisibility()`/`offsetParent`, both of which need layout that jsdom
+ * never performs, and would report every pane hidden under test.
+ */
+function isCssHidden(el: HTMLElement): boolean {
+  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+    if (getComputedStyle(node).visibility === 'hidden') return true
+  }
+  return false
+}
+
+/**
  * A session's claimed simulator, as its own pane.
  *
  * Unlike the browser pane there is no guest to embed: a simulator lives outside
@@ -29,8 +46,10 @@ const POLL_MS = 500
  * underneath them.
  *
  * Polling is expensive (a full-device PNG per frame before downscaling), so it
- * runs only while the pane is actually on screen and stops the moment it is
- * hidden — by a maximized sibling, a background tab, or a minimized window.
+ * runs only while the pane is actually on screen: an observer covers unmount,
+ * scroll and background-tab, and a per-tick visibility check covers the case an
+ * observer structurally cannot see — a sibling maximized over a pane that is
+ * still full-size and intersecting, just `visibility: hidden`.
  */
 export const DeviceCard = memo(
   forwardRef<HTMLDivElement, Props>(function DeviceCard(
@@ -49,6 +68,9 @@ export const DeviceCard = memo(
     const [frame, setFrame] = useState<string | null>(null)
     const [screen, setScreen] = useState<{ width: number; height: number } | null>(null)
     const [error, setError] = useState<string | null>(null)
+    // The error message the person has already waved away. Compared by text so
+    // a new, different failure still surfaces.
+    const [dismissed, setDismissed] = useState<string | null>(null)
     const [visible, setVisible] = useState(false)
     // Remembered separately from `visible` because the two answers can differ:
     // backgrounding the window must stop polling without making the observer
@@ -97,7 +119,20 @@ export const DeviceCard = memo(
       // unbounded backlog of screenshot RPCs.
       const tick = async (): Promise<void> => {
         try {
-          const box = containerRef.current?.getBoundingClientRect()
+          const el = containerRef.current
+          // An IntersectionObserver cannot see this. Both hide paths render the
+          // pane `invisible` — CSS `visibility: hidden` — which keeps the
+          // element full-size and intersecting, so the observer happily reports
+          // it on screen while a maximized sibling covers it completely. Left to
+          // that signal alone, a hidden pane keeps pulling a full-device PNG
+          // twice a second: fan spin and battery drain with no visible cause.
+          // Rescheduling rather than returning matters — bailing outright would
+          // kill the loop for good, since un-hiding fires no event either.
+          if (el && isCssHidden(el)) {
+            if (!cancelled) timer = setTimeout(() => void tick(), POLL_MS)
+            return
+          }
+          const box = el?.getBoundingClientRect()
           // The real ratio, not a hard-coded 2: on a non-retina display that
           // constant fetches four times the pixels the pane can show, and on a
           // 3× display it under-fetches and shows a soft image. Main clamps
@@ -317,12 +352,17 @@ export const DeviceCard = memo(
           />
         </div>
 
-        {error && (
+        {error && error !== dismissed && (
           <div className="flex items-start gap-1 px-2 py-1 text-[10px] text-amber-400/90 shrink-0">
             <span className="flex-1 min-w-0 break-words">{error}</span>
             <button
               type="button"
-              onClick={() => setError(null)}
+              // Dismiss the message, not the state. These errors are sticky —
+              // no claim, a dropped companion — and the poll re-sets the same
+              // string every 500ms, so clearing `error` would put the identical
+              // bar back within half a second and make the control look broken.
+              // A *different* failure still gets through.
+              onClick={() => setDismissed(error)}
               aria-label="Dismiss error"
               className="shrink-0 p-0.5 rounded text-gray-500 hover:text-gray-200"
             >
@@ -344,9 +384,13 @@ export const DeviceCard = memo(
               alt={`Screen of ${pane.name}`}
               data-testid={`device-frame-${sessionId}`}
               onClick={(e) => void onClickFrame(e)}
-              className={`max-w-full max-h-full object-contain select-none ${
-                picking ? 'cursor-crosshair' : 'cursor-pointer'
-              }`}
+              // Dimmed once a poll fails: the frame is the last one that
+              // arrived, and rendering a dead screen at full strength makes a
+              // frozen device look live. The person taps it, every tap throws,
+              // and nothing on screen ever said the picture had stopped.
+              className={`max-w-full max-h-full object-contain select-none transition-opacity ${
+                error ? 'opacity-40' : ''
+              } ${picking ? 'cursor-crosshair' : 'cursor-pointer'}`}
               draggable={false}
             />
           ) : (

@@ -1,6 +1,7 @@
 import {
   FolderOpen,
   Globe,
+  Loader2,
   Maximize2,
   Minimize2,
   Minus,
@@ -56,6 +57,9 @@ export function CardActionCluster({ terminalId, variant }: Props) {
   )
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [isPickerOpen, setIsPickerOpen] = useState(false)
+  // A claim in flight. Boot plus `bootstatus -b` can run tens of seconds, and
+  // until this existed nothing on screen said so.
+  const [claiming, setClaiming] = useState(false)
   const moreRef = useRef<HTMLButtonElement>(null)
   const deviceRef = useRef<HTMLButtonElement>(null)
 
@@ -167,20 +171,38 @@ export function CardActionCluster({ terminalId, variant }: Props) {
       </Tooltip>
 
       {showDevice && (
-        <Tooltip label={hasDevicePane ? 'Hide device' : 'Open device'} position={tooltipPos}>
+        <Tooltip
+          label={
+            hasDevicePane ? 'Hide device' : claiming ? 'Booting the simulator…' : 'Open device'
+          }
+          position={tooltipPos}
+        >
           <button
             ref={deviceRef}
             type="button"
             onClick={(e) => {
               e.stopPropagation()
+              if (claiming) return
               if (hasDevicePane) closeDevicePane(terminalId)
               else setIsPickerOpen((v) => !v)
             }}
             onPointerDown={(e) => e.stopPropagation()}
-            className={btn}
-            aria-label={hasDevicePane ? 'Hide device' : 'Open device'}
+            // Claiming boots the simulator and waits on `bootstatus -b`, which
+            // is tens of seconds on a cold device. With no in-flight state the
+            // button still read "Open device" and nothing appeared, so the only
+            // reasonable move was to click again — which reopened the picker and
+            // could start a second, concurrent claim on a different device,
+            // leaving the pane labelled one simulator while driving another.
+            disabled={claiming}
+            className={`${btn} ${claiming ? 'opacity-50 cursor-wait' : ''}`}
+            aria-busy={claiming}
+            aria-label={hasDevicePane ? 'Hide device' : claiming ? 'Opening device' : 'Open device'}
           >
-            <Smartphone size={14} strokeWidth={2} />
+            {claiming ? (
+              <Loader2 size={14} strokeWidth={2} className="animate-spin" />
+            ) : (
+              <Smartphone size={14} strokeWidth={2} />
+            )}
           </button>
         </Tooltip>
       )}
@@ -192,7 +214,9 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           onClose={() => setIsPickerOpen(false)}
           onSelect={(device) => {
             setIsPickerOpen(false)
+            setClaiming(true)
             void claimAndOpenDevicePane(terminalId, device).then((err) => {
+              setClaiming(false)
               // The likeliest failure is another session holding the device,
               // and that message names the holder. A toast rather than inline
               // state because the picker has already closed by now.

@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
-import { X, FolderTree, Globe, Smartphone } from 'lucide-react'
+import { X, FolderTree, Globe, Loader2, Smartphone } from 'lucide-react'
 import { useAppStore } from '../../stores'
 import { AgentStatusIcon } from '../AgentStatusIcon'
 import { closeTerminalSession } from '../../lib/terminal-close'
@@ -37,6 +37,9 @@ export function SessionItem({
   const mobile = useAppStore((s) => s.mobileProjectCache.get(projectPath))
   const loadMobileProject = useAppStore((s) => s.loadMobileProject)
   const [isPickerOpen, setIsPickerOpen] = useState(false)
+  // A claim in flight. Boot plus `bootstatus -b` can run tens of seconds, and
+  // until this existed nothing on screen said so.
+  const [claiming, setClaiming] = useState(false)
   const deviceButtonRef = useRef<HTMLButtonElement>(null)
 
   // Probing is a readdir behind an IPC hop, so it runs off the render path and
@@ -148,9 +151,14 @@ export function SessionItem({
           ref={deviceButtonRef}
           type="button"
           aria-label={`${hasDevicePane ? 'Hide' : 'Show'} device for ${session.name}`}
-          title={hasDevicePane ? 'Hide device' : 'Show device'}
+          title={
+            hasDevicePane ? 'Hide device' : claiming ? 'Booting the simulator…' : 'Show device'
+          }
+          disabled={claiming}
+          aria-busy={claiming}
           onClick={(e) => {
             e.stopPropagation()
+            if (claiming) return
             if (hasDevicePane) closeDevicePane(session.id)
             else setIsPickerOpen((v) => !v)
           }}
@@ -158,9 +166,19 @@ export function SessionItem({
             hasDevicePane
               ? 'opacity-100 text-amber-400/80'
               : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
+          } ${
+            claiming ? 'opacity-100 cursor-wait' : ''
           } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
         >
-          <Smartphone size={12} strokeWidth={2} />
+          {/* Boot plus `bootstatus -b` runs tens of seconds on a cold
+              simulator. Without a spinner the row looked inert and the natural
+              response was to click again, which could start a second claim on a
+              different device. */}
+          {claiming ? (
+            <Loader2 size={12} strokeWidth={2} className="animate-spin" />
+          ) : (
+            <Smartphone size={12} strokeWidth={2} />
+          )}
         </button>
       )}
       {isPickerOpen && (
@@ -170,7 +188,9 @@ export function SessionItem({
           onClose={() => setIsPickerOpen(false)}
           onSelect={(device) => {
             setIsPickerOpen(false)
+            setClaiming(true)
             void claimAndOpenDevicePane(session.id, device).then((err) => {
+              setClaiming(false)
               // The likeliest failure is another session holding the device,
               // and that message names the holder. A toast rather than inline
               // state because the picker has already closed by now.

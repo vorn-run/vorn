@@ -185,6 +185,75 @@ describe('polling', () => {
     show()
     expect(await screen.findByText(/connection to the device dropped/)).toBeInTheDocument()
   })
+
+  it('stops polling when a maximized sibling hides it, which the observer cannot see', async () => {
+    // Both hide paths use `visibility: hidden`, which keeps the element
+    // full-size and intersecting — so the IntersectionObserver goes on
+    // reporting it visible and never fires. Left to that signal the pane pulls
+    // a full-device PNG twice a second behind a maximized sibling: fan spin and
+    // battery drain the person has no way to attribute to anything.
+    const { container } = render(<DeviceCard sessionId="t1" />)
+    show()
+    await waitFor(() => expect(deviceScreenshot).toHaveBeenCalled())
+
+    const wrapper = container.firstElementChild as HTMLElement
+    wrapper.style.visibility = 'hidden'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200)
+    })
+    const whileHidden = deviceScreenshot.mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(deviceScreenshot.mock.calls.length).toBe(whileHidden)
+
+    // And it must come back on its own: un-hiding fires no event either, so a
+    // loop that returned instead of rescheduling would stay dead forever.
+    wrapper.style.visibility = 'visible'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200)
+    })
+    expect(deviceScreenshot.mock.calls.length).toBeGreaterThan(whileHidden)
+  })
+
+  it('keeps a dismissed error dismissed while it keeps recurring', async () => {
+    // These errors are sticky and the poll re-sets the same string every
+    // 500ms, so clearing the state put the identical bar back within half a
+    // second — the X read as a broken control.
+    deviceScreenshot.mockRejectedValue(new Error('the connection to the device dropped'))
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    fireEvent.click(await screen.findByLabelText('Dismiss error'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(screen.queryByText(/connection to the device dropped/)).not.toBeInTheDocument()
+  })
+
+  it('still shows a different failure after one was dismissed', async () => {
+    // Dismissal is per-message, not a mute button: silencing every later error
+    // would hide the one that finally explains the pane.
+    deviceScreenshot.mockRejectedValue(new Error('the connection to the device dropped'))
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    fireEvent.click(await screen.findByLabelText('Dismiss error'))
+    deviceScreenshot.mockRejectedValue(new Error('No device is claimed for this session'))
+    expect(await screen.findByText(/No device is claimed/)).toBeInTheDocument()
+  })
+
+  it('dims the last frame once a poll fails, so a dead screen cannot look live', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    const img = await screen.findByTestId('device-frame-t1')
+    expect(img.className).not.toMatch(/opacity-40/)
+
+    deviceScreenshot.mockRejectedValue(new Error('the connection to the device dropped'))
+    await screen.findByText(/connection to the device dropped/)
+    // The frame is kept on purpose — it is the last thing the device showed —
+    // but at full strength it invites taps that all throw, with nothing on
+    // screen saying the picture had stopped.
+    expect(screen.getByTestId('device-frame-t1').className).toMatch(/opacity-40/)
+  })
 })
 
 describe('clicking the still', () => {

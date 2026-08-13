@@ -12,17 +12,58 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
  */
 
 const execCalls: string[][] = []
+/** Whether `simctl shutdown` should take its real, slow time to answer. */
+const slowShutdown = { on: false }
+/** Args of each exec call, in the order it *completed*. */
+const execCompletions: string[][] = []
+/** What `simctl list` returns. A test can swap this to change the fixture. */
+const simctlList = {
+  value: JSON.stringify({
+    devices: {
+      'com.apple.CoreSimulator.SimRuntime.iOS-26-2': [
+        { udid: 'udid-1', name: 'iPhone 17', state: 'Shutdown', isAvailable: true },
+        { udid: 'udid-2', name: 'iPad Pro', state: 'Booted', isAvailable: true }
+      ]
+    }
+  })
+}
 vi.mock('node:child_process', () => ({
-  execFile: (cmd: string, args: string[], cb: (e: unknown, out: string) => void) => {
+  execFile: (cmd: string, args: string[], cb: (e: unknown, out: unknown) => void) => {
     execCalls.push([cmd, ...args])
-    cb(null, '')
+    // `promisify` hands the callback value straight through as the resolved
+    // value, and callers destructure `{ stdout }` off it.
+    const done = (): void => {
+      // Completion order, not invocation order: what matters is when the
+      // simulator actually goes down relative to the new boot, and a slow
+      // shutdown is dispatched long before it lands.
+      execCompletions.push(args)
+      cb(null, { stdout: args.includes('list') ? simctlList.value : '' })
+    }
+    // `shutdown` is deliberately slow to answer. A synchronous mock makes every
+    // ordering test vacuous — nothing can interleave — and the real hazard is
+    // precisely that shutdown takes seconds while a new boot starts underneath
+    // it. `slowShutdown` lets one test model that and stay honest.
+    if (slowShutdown.on && args.includes('shutdown')) setTimeout(done, 20)
+    else done()
   }
 }))
 
 const stopped: string[] = []
 const treeJson = { value: JSON.stringify([{ role: 'AXWindow' }]) }
+/**
+ * A distinct handle per spawn, and the exit callback kept.
+ *
+ * Both matter for the reopen race: a shared handle object cannot express the
+ * difference between a companion and its replacement, which is exactly the
+ * distinction the registry has to draw when the old one's exit arrives late.
+ */
+const spawned: Array<{ handle: { client: object }; onExit: (u: string, h: unknown) => void }> = []
 vi.mock('../src/main/device-companion', () => ({
-  startCompanion: async () => ({ client: {} }),
+  startCompanion: async (udid: string, onExit: (u: string, h: unknown) => void) => {
+    const handle = { client: {}, udid }
+    spawned.push({ handle, onExit })
+    return handle
+  },
   stopCompanion: (udid: string) => stopped.push(udid),
   call: async () => ({ json: treeJson.value }),
   callStreaming: async () => ({})
@@ -46,6 +87,7 @@ import {
   pixelsToPoints,
   interact,
   release,
+  claim,
   openPane,
   setRendererSend,
   setEntryForTests,
@@ -62,6 +104,9 @@ beforeEach(() => {
   resetForTests()
   execCalls.length = 0
   stopped.length = 0
+  spawned.length = 0
+  slowShutdown.on = false
+  execCompletions.length = 0
 })
 
 const button = (label: string, frame: AXElement['frame']): AXElement => ({
@@ -399,5 +444,72 @@ describe('screenshot edge clamping', () => {
     expect(clampMaxEdge(0)).toBe(1000)
     expect(clampMaxEdge(Number.NaN)).toBe(1000)
     expect(clampMaxEdge(-50)).toBe(1000)
+  })
+})
+
+describe('closing a device pane and reopening it straight away', () => {
+  /**
+   * `stopCompanion` drops its handle and sends SIGTERM, but the child can take
+   * seconds to die. Reopen the same device inside that window and a second
+   * companion is already running when the first one's exit finally lands — so
+   * the registry has to tell them apart. Keyed on udid alone, the corpse's exit
+   * marks the *live* entry unattached, and the freshly opened pane sits on
+   * "the connection dropped" forever while a perfectly healthy companion runs
+   * on, orphaned. Closing and reopening again is the only escape, and only if
+   * you happen to do it slowly.
+   */
+  it('ignores a dead companion’s exit once its replacement is running', async () => {
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    const first = spawned[0]
+    void release({ sessionId: 's1' })
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    expect(spawned).toHaveLength(2)
+
+    // The first companion finally dies, long after it was replaced.
+    first.onExit('udid-1', first.handle)
+
+    const entry = entryForTests('s1')
+    expect(entry?.companion).toBe(spawned[1].handle)
+  })
+
+  it('still marks the entry unattached when its own companion dies', async () => {
+    // The identity check must not become a way of ignoring real drops: a
+    // companion killed from outside has to leave the entry detached, or the
+    // next call hangs on a dead socket instead of saying so.
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    const live = spawned[0]
+    live.onExit('udid-1', live.handle)
+    expect(entryForTests('s1')?.companion).toBeNull()
+  })
+
+  it('forgets every ref when the connection really drops', async () => {
+    // Refs are coordinates that were correct at read time. Surviving a
+    // reconnect they would tap whatever has since animated into that frame.
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    const entry = entryForTests('s1')!
+    entry.refs.set('g0_el_1', { x: 10, y: 10, label: 'Settings' })
+    const before = entry.generation
+    spawned[0].onExit('udid-1', spawned[0].handle)
+    expect(entry.refs.size).toBe(0)
+    expect(entry.generation).toBeGreaterThan(before)
+  })
+
+  it('does not shut down the simulator the reopened pane just booted', async () => {
+    // Release runs `simctl shutdown` for a Vorn-booted device and claim runs
+    // `boot` — both slow. Unordered, the outgoing shutdown lands after the new
+    // boot and takes down the simulator the pane is already showing, which
+    // reads as the device dying for no reason at all.
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    // The shutdown takes its real, slow time. Without this nothing can
+    // interleave and the assertion holds with or without the lock.
+    slowShutdown.on = true
+    const pending = release({ sessionId: 's1' })
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    await pending
+
+    const order = execCompletions
+      .filter((c) => c.includes('shutdown') || c.includes('boot'))
+      .map((c) => (c.includes('shutdown') ? 'shutdown' : 'boot'))
+    expect(order[order.length - 1]).toBe('boot')
   })
 })

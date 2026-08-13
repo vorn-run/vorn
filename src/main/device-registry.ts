@@ -74,6 +74,29 @@ export interface Entry {
 
 const entries = new Map<string, Entry>()
 
+/**
+ * Serializes claim/release per device.
+ *
+ * Both take seconds — `simctl boot` plus `bootstatus -b` on one side, SIGTERM
+ * and `simctl shutdown` on the other — and a person closing a device pane and
+ * reopening the same device runs them concurrently. Unordered, the outgoing
+ * release's shutdown lands *after* the new claim's boot and takes down the
+ * simulator the pane is already showing, which reads as the device dying for
+ * no reason. Chaining per udid makes the second operation wait for the first.
+ */
+const deviceLocks = new Map<string, Promise<unknown>>()
+
+function withDeviceLock<T>(udid: string, fn: () => Promise<T>): Promise<T> {
+  const prior = deviceLocks.get(udid) ?? Promise.resolve()
+  // `catch` so one failed claim does not poison every later op on this device.
+  const next = prior.then(fn, fn)
+  deviceLocks.set(
+    udid,
+    next.catch(() => {})
+  )
+  return next
+}
+
 /** A blank entry. Exported so tests can drive the pure helpers directly, since
  *  `src/main/**` is outside the coverage include. */
 export function newEntry(sessionId = 's', udid = 'udid-0'): Entry {
@@ -466,7 +489,14 @@ function explainSimctl(err: unknown): Error {
 // Claim / release
 // ---------------------------------------------------------------------------
 
-export async function claim(params: {
+export function claim(params: {
+  sessionId: string
+  udid: string
+}): Promise<{ udid: string; name: string; booted: boolean }> {
+  return withDeviceLock(params.udid, () => claimLocked(params))
+}
+
+async function claimLocked(params: {
   sessionId: string
   udid: string
 }): Promise<{ udid: string; name: string; booted: boolean }> {
@@ -519,10 +549,16 @@ export async function claim(params: {
  * The browser registry's debugger-detach analogue: clear the client, forget
  * every ref and bump the generation, so the next call says the connection
  * dropped instead of hanging on a dead socket or tapping a remembered point.
+ *
+ * Matched on the handle, not just the udid: a companion killed by `release`
+ * can outlive the call by seconds, and a person who reopens the same device in
+ * that window already has a replacement running. Clearing by udid alone would
+ * make the corpse's exit mark the *new* entry unattached, leaving a pane that
+ * reports a dropped connection forever while its companion is alive and well.
  */
-function onCompanionExit(udid: string): void {
+function onCompanionExit(udid: string, handle: CompanionHandle): void {
   for (const entry of entries.values()) {
-    if (entry.udid !== udid) continue
+    if (entry.udid !== udid || entry.companion !== handle) continue
     entry.companion = null
     entry.refs.clear()
     entry.generation++
@@ -530,16 +566,21 @@ function onCompanionExit(udid: string): void {
   }
 }
 
-export async function release(params: { sessionId: string }): Promise<{ released: boolean }> {
+export function release(params: { sessionId: string }): Promise<{ released: boolean }> {
   const entry = entries.get(params.sessionId)
-  if (!entry) return { released: false }
+  if (!entry) return Promise.resolve({ released: false })
+  // Drop the claim now rather than inside the lock: the device is free the
+  // moment the session lets go of it, and making that wait behind a slow
+  // shutdown would refuse a re-claim for a device nobody holds any more.
   entries.delete(params.sessionId)
-  stopCompanion(entry.udid)
-  // Only ours to shut down. A simulator the person booted stays up.
-  if (entry.bootedByVorn) {
-    await exec('xcrun', ['simctl', 'shutdown', entry.udid]).catch(() => {})
-  }
-  return { released: true }
+  return withDeviceLock(entry.udid, async () => {
+    stopCompanion(entry.udid)
+    // Only ours to shut down. A simulator the person booted stays up.
+    if (entry.bootedByVorn) {
+      await exec('xcrun', ['simctl', 'shutdown', entry.udid]).catch(() => {})
+    }
+    return { released: true }
+  })
 }
 
 /** Called when a session closes, so a claim cannot outlive its owner. */

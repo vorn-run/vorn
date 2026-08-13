@@ -160,7 +160,7 @@ function connect(socketPath: string): CompanionClient {
  */
 export async function startCompanion(
   udid: string,
-  onExit: (udid: string) => void
+  onExit: (udid: string, handle: CompanionHandle) => void
 ): Promise<CompanionHandle> {
   const existing = running.get(udid)
   if (existing) return existing
@@ -205,13 +205,25 @@ export async function startCompanion(
 
   child.on('exit', (code, signal) => {
     log.warn(`[idb ${udid.slice(0, 8)}] companion exited (code=${code}, signal=${signal})`)
-    running.delete(udid)
-    try {
-      fs.unlinkSync(socketPath)
-    } catch {
-      // Best effort; the socket may already be gone.
+    // Identity, not udid. `stopCompanion` drops the handle and sends SIGTERM,
+    // but the child can take seconds to actually die — and a person who closes
+    // a device pane and immediately reopens the same device has by then spawned
+    // a *replacement* companion under this same udid. Deleting and reporting by
+    // udid alone would let the corpse's exit tear down its live successor: the
+    // new pane would sit on "connection dropped" forever while a perfectly
+    // healthy companion ran on, orphaned from both the map and the entry.
+    if (running.get(udid) === handle) {
+      running.delete(udid)
+      try {
+        // Only ours to remove, for the same reason: a replacement companion
+        // binds this exact path, and unlinking it out from under one leaves a
+        // live process nobody can connect to.
+        fs.unlinkSync(socketPath)
+      } catch {
+        // Best effort; the socket may already be gone.
+      }
     }
-    onExit(udid)
+    onExit(udid, handle)
   })
 
   return handle
