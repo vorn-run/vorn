@@ -107,3 +107,67 @@ describe('handleConnection', () => {
     expect(response.error.message).toBe('boom')
   })
 })
+
+/**
+ * The reverse-RPC bridge's half of the socket handler.
+ *
+ * `browser:*` calls are answered by Electron main, not here, so this file has
+ * to recognise two extra kinds of frame: main introducing itself, and main's
+ * reply to something the server asked it.
+ */
+describe('bridge frames', () => {
+  it('registers the socket main identifies itself on, and acknowledges', async () => {
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const ws = createMockWs()
+    handleConnection(ws)
+
+    sendMessage(ws, { jsonrpc: '2.0', id: 7, method: 'bridge:identify' })
+
+    await vi.waitFor(() => expect(ws.send).toHaveBeenCalled())
+    // Acknowledged, so main knows the bridge is live rather than assuming it.
+    const response = JSON.parse((ws.send as ReturnType<typeof vi.fn>).mock.calls[0][0])
+    expect(response.id).toBe(7)
+    expect(response.result).toEqual({ ok: true })
+    expect(browserBridge.isConnected).toBe(true)
+  })
+
+  it('routes a reply from main to the bridge instead of treating it as junk', async () => {
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const ws = createMockWs()
+    handleConnection(ws)
+    sendMessage(ws, { jsonrpc: '2.0', method: 'bridge:identify' })
+
+    const inflight = browserBridge.request('browser:readPage', { sessionId: 's1' })
+    const asked = JSON.parse((ws.send as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0])
+
+    // A response carries no `method`. Without the bridge branch running first,
+    // the notification branch below it reads a method-less frame as garbage and
+    // the caller waits out its whole timeout for a reply already in hand.
+    sendMessage(ws, { jsonrpc: '2.0', id: asked.id, result: { nodes: [] } })
+    await expect(inflight).resolves.toEqual({ nodes: [] })
+  })
+
+  it('drops the bridge when main’s socket closes', async () => {
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const ws = createMockWs()
+    handleConnection(ws)
+    sendMessage(ws, { jsonrpc: '2.0', method: 'bridge:identify' })
+    expect(browserBridge.isConnected).toBe(true)
+    ;(ws as unknown as EventEmitter).emit('close')
+
+    // Left registered, every later browser call would be sent into a dead
+    // socket and time out rather than saying the app is not running.
+    expect(browserBridge.isConnected).toBe(false)
+  })
+
+  it('drops the bridge when main’s socket errors', async () => {
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const ws = createMockWs()
+    handleConnection(ws)
+    sendMessage(ws, { jsonrpc: '2.0', method: 'bridge:identify' })
+    ;(ws as unknown as EventEmitter).emit('error', new Error('reset'))
+
+    expect(browserBridge.isConnected).toBe(false)
+    expect(clientRegistry.remove).toHaveBeenCalledWith(ws)
+  })
+})

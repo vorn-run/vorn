@@ -1,10 +1,12 @@
-import { useRef, useCallback, useEffect } from 'react'
-import { X, FolderTree, Globe } from 'lucide-react'
+import { useRef, useCallback, useEffect, useState } from 'react'
+import { X, FolderTree, Globe, Loader2, Smartphone } from 'lucide-react'
 import { useAppStore } from '../../stores'
 import { AgentStatusIcon } from '../AgentStatusIcon'
 import { closeTerminalSession } from '../../lib/terminal-close'
 import { toast } from '../Toast'
 import { STATUS_LABEL } from '../../lib/status-colors'
+import { DevicePicker } from '../DevicePicker'
+import { shouldShowDeviceButton } from '../../lib/device-affordance'
 import type { SidebarSessionInfo } from './types'
 
 const PREVIEW_DELAY_MS = 300
@@ -28,6 +30,26 @@ export function SessionItem({
   const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
   const hasBrowserPane = useAppStore((s) => s.browserPanes.has(session.id))
   const toggleBrowserPane = useAppStore((s) => s.toggleBrowserPane)
+  const hasDevicePane = useAppStore((s) => s.devicePanes.has(session.id))
+  const claimAndOpenDevicePane = useAppStore((s) => s.claimAndOpenDevicePane)
+  const closeDevicePane = useAppStore((s) => s.closeDevicePane)
+  const projectPath = useAppStore((s) => s.terminals.get(session.id)?.session.projectPath ?? '')
+  const mobile = useAppStore((s) => s.mobileProjectCache.get(projectPath))
+  const loadMobileProject = useAppStore((s) => s.loadMobileProject)
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
+  // A claim in flight. Boot plus `bootstatus -b` can run tens of seconds, and
+  // until this existed nothing on screen said so.
+  const [claiming, setClaiming] = useState(false)
+  const deviceButtonRef = useRef<HTMLButtonElement>(null)
+
+  // Probing is a readdir behind an IPC hop, so it runs off the render path and
+  // the button simply appears when the answer arrives. The store dedupes by
+  // project path, so every session row for one project costs a single probe.
+  useEffect(() => {
+    if (projectPath) void loadMobileProject(projectPath)
+  }, [projectPath, loadMobileProject])
+
+  const showDevice = shouldShowDeviceButton(mobile, hasDevicePane)
   const isActive =
     layoutMode === 'tabs' ? activeTabId === session.id : focusedTerminalId === session.id
   const isPreviewing = previewTerminalId === session.id
@@ -124,6 +146,59 @@ export function SessionItem({
       >
         <Globe size={12} strokeWidth={2} />
       </button>
+      {showDevice && (
+        <button
+          ref={deviceButtonRef}
+          type="button"
+          aria-label={`${hasDevicePane ? 'Hide' : 'Show'} device for ${session.name}`}
+          title={
+            hasDevicePane ? 'Hide device' : claiming ? 'Booting the simulator…' : 'Show device'
+          }
+          disabled={claiming}
+          aria-busy={claiming}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (claiming) return
+            if (hasDevicePane) closeDevicePane(session.id)
+            else setIsPickerOpen((v) => !v)
+          }}
+          className={`${
+            hasDevicePane
+              ? 'opacity-100 text-amber-400/80'
+              : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
+          } ${
+            claiming ? 'opacity-100 cursor-wait' : ''
+          } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
+        >
+          {/* Boot plus `bootstatus -b` runs tens of seconds on a cold
+              simulator. Without a spinner the row looked inert and the natural
+              response was to click again, which could start a second claim on a
+              different device. */}
+          {claiming ? (
+            <Loader2 size={12} strokeWidth={2} className="animate-spin" />
+          ) : (
+            <Smartphone size={12} strokeWidth={2} />
+          )}
+        </button>
+      )}
+      {isPickerOpen && (
+        <DevicePicker
+          sessionId={session.id}
+          anchorRef={deviceButtonRef}
+          onClose={() => setIsPickerOpen(false)}
+          onSelect={(device) => {
+            setIsPickerOpen(false)
+            setClaiming(true)
+            void claimAndOpenDevicePane(session.id, device).then((err) => {
+              setClaiming(false)
+              // The likeliest failure is another session holding the device,
+              // and that message names the holder. A toast rather than inline
+              // state because the picker has already closed by now.
+              if (err) toast.error(err)
+            })
+          }}
+        />
+      )}
       <button
         type="button"
         aria-label={`Close session ${session.name}`}

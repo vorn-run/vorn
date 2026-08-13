@@ -3,12 +3,60 @@ import { ipcMain } from 'electron'
 import { safeHandle } from './ipc-safe-handle'
 import { IPC, ResizePayload } from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
+import type { RequestMethods } from '@vornrun/shared/protocol'
+import * as browserRegistry from './browser-registry'
+import * as deviceRegistry from './device-registry'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
 
 let bridge: ServerBridge | null = null
 
 export function setBridge(b: ServerBridge): void {
   bridge = b
+  registerInboundHandlers(b)
+}
+
+/**
+ * Answer the `browser:*` methods the server relays to us.
+ *
+ * These flow the opposite way from everything else in this file: an agent calls
+ * an MCP tool, the MCP server asks the Vorn server, and the Vorn server asks
+ * *us*, because the guest `<webview>` and its CDP debugger only exist in this
+ * process. Params arrive already carrying the session id the MCP layer resolved
+ * from `VORN_SESSION_ID`.
+ */
+function registerInboundHandlers(b: ServerBridge): void {
+  type P<M extends keyof RequestMethods> = RequestMethods[M]['params']
+  b.handle('browser:readPage', (p) => browserRegistry.readPage(p as P<'browser:readPage'>))
+  b.handle('browser:getText', (p) => browserRegistry.getText(p as P<'browser:getText'>))
+  b.handle('browser:consoleMessages', (p) =>
+    browserRegistry.consoleMessages(p as P<'browser:consoleMessages'>)
+  )
+  b.handle('browser:networkRequests', (p) =>
+    browserRegistry.networkRequests(p as P<'browser:networkRequests'>)
+  )
+  b.handle('browser:screenshot', (p) => browserRegistry.screenshot(p as P<'browser:screenshot'>))
+  b.handle('browser:interact', (p) => browserRegistry.interact(p as P<'browser:interact'>))
+  b.handle('browser:tabs', (p) => browserRegistry.tabs(p as P<'browser:tabs'>))
+  b.handle('browser:openPane', (p) => browserRegistry.openPane(p as P<'browser:openPane'>))
+  b.handle('browser:navigate', (p) => browserRegistry.navigate(p as P<'browser:navigate'>))
+  b.handle('browser:find', (p) => browserRegistry.find(p as P<'browser:find'>))
+
+  // The device family answers here for a sharper version of the same reason:
+  // the simulator is driven by a child `idb_companion` process over a unix
+  // socket, and only this process owns it.
+  b.handle('device:list', () => deviceRegistry.listDevices())
+  b.handle('device:claim', (p) => deviceRegistry.claim(p as P<'device:claim'>))
+  b.handle('device:release', (p) => deviceRegistry.release(p as P<'device:release'>))
+  b.handle('device:readScreen', (p) => deviceRegistry.readScreen(p as P<'device:readScreen'>))
+  b.handle('device:find', (p) => deviceRegistry.findElements(p as P<'device:find'>))
+  b.handle('device:interact', (p) => deviceRegistry.interact(p as P<'device:interact'>))
+  b.handle('device:screenshot', (p) => deviceRegistry.screenshot(p as P<'device:screenshot'>))
+  b.handle('device:launch', (p) => deviceRegistry.launch(p as P<'device:launch'>))
+  b.handle('device:terminate', (p) => deviceRegistry.terminate(p as P<'device:terminate'>))
+  b.handle('device:install', (p) => deviceRegistry.install(p as P<'device:install'>))
+  b.handle('device:openUrl', (p) => deviceRegistry.openUrl(p as P<'device:openUrl'>))
+  b.handle('device:logs', (p) => deviceRegistry.logsFor(p as P<'device:logs'>))
+  b.handle('device:openPane', (p) => deviceRegistry.openPane(p as P<'device:openPane'>))
 }
 
 function requireBridge(): ServerBridge {
@@ -24,7 +72,15 @@ export function registerIpcHandlers(): void {
     const enriched = await enrichPayloadWithCredentials(payload, requireBridge())
     return requireBridge().request(IPC.TERMINAL_CREATE, enriched)
   })
-  safeHandle(IPC.TERMINAL_KILL, (_, id) => requireBridge().request(IPC.TERMINAL_KILL, id))
+  safeHandle(IPC.TERMINAL_KILL, (_, id) => {
+    // Killing the session hands its device back. Nothing else does: closing the
+    // pane releases, but a session killed with the pane already shut — or never
+    // opened, because an agent claimed it headlessly — would otherwise strand a
+    // running companion and a claim no session owns, locking that simulator out
+    // of every other session until the app quits.
+    deviceRegistry.releaseForSession(id as string)
+    return requireBridge().request(IPC.TERMINAL_KILL, id)
+  })
   safeHandle(IPC.SHELL_CREATE, (_, cwd) => requireBridge().request(IPC.SHELL_CREATE, cwd))
 
   // Config
@@ -169,6 +225,9 @@ export function registerIpcHandlers(): void {
 
   // Agent / IDE detection
   safeHandle(IPC.IDE_DETECT, () => requireBridge().request(IPC.IDE_DETECT))
+  safeHandle(IPC.PROJECT_DETECT_MOBILE, (_, params) =>
+    requireBridge().request(IPC.PROJECT_DETECT_MOBILE, params)
+  )
   safeHandle(IPC.AGENT_DETECT_INSTALLED, () => requireBridge().request(IPC.AGENT_DETECT_INSTALLED))
   safeHandle(IPC.IDE_OPEN, (_, params) => requireBridge().request(IPC.IDE_OPEN, params))
 
@@ -311,6 +370,53 @@ export function registerIpcHandlers(): void {
     }
     return shell.openExternal(parsed.toString())
   })
+
+  // ─── Browser pane (Electron-only: guests live here) ────────────
+  //
+  // A `<webview>` carries no session identity — only a partition string — so
+  // the renderer tells us which guest belongs to which session as soon as it
+  // attaches. Everything the agent does to the pane keys off that mapping.
+  ipcMain.on(IPC.BROWSER_ATTACH, (_, { sessionId, webContentsId }) => {
+    browserRegistry.attach(sessionId, webContentsId)
+  })
+  ipcMain.on(IPC.BROWSER_DETACH, (_, sessionId: string) => {
+    browserRegistry.detach(sessionId)
+  })
+
+  // The picker is user-initiated and answers back to the renderer that armed
+  // it, not to an agent. A cancel resolves as `null` rather than an error: the
+  // person changing their mind is an ordinary outcome, not a failure.
+  safeHandle(IPC.BROWSER_PICK_START, async (_, sessionId: string) => {
+    try {
+      return await browserRegistry.startPick({ sessionId })
+    } catch (err) {
+      if (err instanceof Error && err.message === 'Selection cancelled') return null
+      throw err
+    }
+  })
+  ipcMain.on(IPC.BROWSER_PICK_CANCEL, (_, sessionId: string) => {
+    browserRegistry.cancelPick(sessionId)
+  })
+  safeHandle(IPC.BROWSER_ANNOTATE, (_, params) => browserRegistry.annotate(params))
+
+  // ─── Device pane (Electron-only: the companion lives here) ─────
+  //
+  // The browser pane's guest renders itself; a simulator's does not. There is
+  // no `<webview>` equivalent, so the pane is a still image polled from main
+  // and every touch is relayed back the same way. These are the person's
+  // channel into the same registry the agent's tools use — same claim, same
+  // generation counter, so a person tapping the pane invalidates the agent's
+  // refs exactly as the agent's own tap would.
+  safeHandle(IPC.DEVICE_SCREENSHOT, (_, params) => deviceRegistry.screenshot(params))
+  safeHandle(IPC.DEVICE_INTERACT, (_, params) => deviceRegistry.interact(params))
+  safeHandle(IPC.DEVICE_LIST, () => deviceRegistry.listDevices())
+  safeHandle(IPC.DEVICE_CLAIM, (_, params) => deviceRegistry.claim(params))
+  safeHandle(IPC.DEVICE_RELEASE, (_, params) => deviceRegistry.release(params))
+  // Both are read-only by design: pointing at or drawing on the screen must
+  // never move it, or the person ends up describing an element the agent then
+  // finds gone.
+  safeHandle(IPC.DEVICE_PICKED, (_, params) => deviceRegistry.pickAt(params))
+  safeHandle(IPC.DEVICE_ANNOTATE, (_, params) => deviceRegistry.annotate(params))
 
   // ─── Fire-and-forget → bridge notifications ────────────────────
 

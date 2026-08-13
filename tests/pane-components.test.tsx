@@ -14,6 +14,9 @@ Object.defineProperty(window, 'matchMedia', {
 
 const mockListDir = vi.fn<(path: string) => Promise<FileEntry[]>>()
 const mockReadFileContent = vi.fn<(path: string) => Promise<string | null>>()
+const mockStartPick = vi.fn<(sessionId: string) => Promise<unknown>>()
+const mockWriteTerminal = vi.fn()
+const mockAnnotate = vi.fn<(p: unknown) => Promise<unknown>>()
 
 Object.defineProperty(window, 'api', {
   value: {
@@ -21,6 +24,13 @@ Object.defineProperty(window, 'api', {
     readFileContent: (...args: unknown[]) => mockReadFileContent(...(args as [string])),
     writeFileContent: vi.fn().mockResolvedValue({ success: true }),
     notifyWidgetStatus: vi.fn(),
+    // The browser pane reports its guest to main so the agent can drive it.
+    attachBrowser: vi.fn(),
+    detachBrowser: vi.fn(),
+    startBrowserPick: (...args: unknown[]) => mockStartPick(...(args as [string])),
+    cancelBrowserPick: vi.fn(),
+    annotateBrowser: (...args: unknown[]) => mockAnnotate(args[0]),
+    writeTerminal: (...args: unknown[]) => mockWriteTerminal(...args),
     // FocusedTerminal pulls in the full card header, which probes the host.
     detectInstalledAgents: vi.fn().mockResolvedValue([]),
     detectIDEs: vi.fn().mockResolvedValue([]),
@@ -320,10 +330,30 @@ describe('panes travel with their session into focus mode', () => {
     // Focus mode used to render panes in a fixed rail and ignore the maximize
     // entirely, so the button looked dead once a card was expanded.
     expect(screen.getByLabelText('Address')).toBeInTheDocument()
-    expect(screen.queryByTestId('files-pane-header')).not.toBeInTheDocument()
+    // Hidden, but still mounted: unmounting a pane to hide it costs the browser
+    // its live guest and the agent its CDP handle. Visually gone is enough.
+    const files = await screen.findByTestId('files-pane-header')
+    expect(files.closest('[aria-hidden]')).not.toBeNull()
     // The terminal gives up its space too — a maximized pane covering only the
     // rail is not a maximize.
     expect(screen.getByTestId('focused-terminal-column')).toHaveClass('hidden')
+  })
+
+  it('keeps the browser guest alive when a sibling pane is maximized', () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().openBrowserPane('t1', 'localhost:5173')
+      useAppStore.getState().setMaximizedPane('files:t1')
+    })
+
+    render(<FocusedTerminal />)
+
+    // The <webview> must survive. Unmounting it destroys the guest, which loses
+    // the page and scroll position for the person and detaches CDP for the
+    // agent — which is then told "no pane open" while the store still says one
+    // exists, with no way to recover until the person un-maximizes.
+    expect(document.querySelectorAll('webview')).toHaveLength(1)
+    expect(screen.getByLabelText('Address').closest('[aria-hidden]')).not.toBeNull()
   })
 
   it("ignores another session's maximized pane", async () => {
@@ -362,6 +392,164 @@ describe('BrowserCard', () => {
     expect(screen.getAllByText('localhost:5173')).toHaveLength(1)
     expect(screen.getByRole('tab')).toHaveTextContent('localhost:5173')
     expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
+  it("sends what the user picked to the session's agent", async () => {
+    mockStartPick.mockResolvedValueOnce({
+      url: 'http://localhost:5173/',
+      rect: { x: 0, y: 0, width: 80, height: 24 },
+      text: 'Save',
+      selector: 'form > button.primary',
+      outerHTML: '<button class="primary">Save</button>',
+      tagName: 'button',
+      componentName: 'SaveButton',
+      source: 'src/Save.tsx:12'
+    })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Pick an element for the agent'))
+
+    // It goes in as a message, not as a command: the person is saying "this
+    // one", and what to do about it is still the agent's call.
+    await waitFor(() => expect(mockWriteTerminal).toHaveBeenCalled())
+    const sent = mockWriteTerminal.mock.calls[0][1] as string
+    expect(sent).toContain('form > button.primary')
+    expect(sent).toContain('SaveButton')
+    expect(sent).toContain('src/Save.tsx:12')
+  })
+
+  it('says nothing to the agent when the pick is cancelled', async () => {
+    mockStartPick.mockResolvedValueOnce(null)
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Pick an element for the agent'))
+
+    // Escaping out of a picker is an ordinary thing to do; interrupting the
+    // agent with an empty selection would punish it.
+    await waitFor(() => expect(mockStartPick).toHaveBeenCalledWith('t1'))
+    expect(mockWriteTerminal).not.toHaveBeenCalled()
+  })
+
+  it('sends the ink and what it covers to the agent', async () => {
+    // jsdom has no 2d context; the drawing is cosmetic, the stroke record is not.
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      clearRect: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn()
+    })) as unknown as HTMLCanvasElement['getContext']
+    mockAnnotate.mockResolvedValueOnce({
+      url: 'http://localhost:5173/',
+      elements: [{ role: 'button', name: 'Save' }],
+      image: '',
+      bounds: { x: 0, y: 0, width: 10, height: 10 }
+    })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Draw on the page for the agent'))
+    const ink = screen.getByTestId('browser-ink')
+    ink.setPointerCapture = vi.fn()
+    fireEvent.pointerDown(ink, { clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(ink, { clientX: 40, clientY: 40 })
+    fireEvent.pointerUp(ink)
+    fireEvent.click(screen.getByLabelText('Send the annotation'))
+
+    await waitFor(() => expect(mockWriteTerminal).toHaveBeenCalled())
+    expect((mockAnnotate.mock.calls[0][0] as { strokes: unknown[] }).strokes).toHaveLength(1)
+    expect(mockWriteTerminal.mock.calls[0][1] as string).toContain('Save')
+  })
+
+  it('does not interrupt the agent when the pencil is armed and nothing is drawn', async () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    // Arming and thinking better of it is an ordinary thing to do.
+    fireEvent.click(screen.getByLabelText('Draw on the page for the agent'))
+    fireEvent.click(screen.getByLabelText('Send the annotation'))
+
+    expect(mockAnnotate).not.toHaveBeenCalled()
+    expect(mockWriteTerminal).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('browser-ink')).toBeNull()
+  })
+
+  it('tells main which guest belongs to this session once it attaches', async () => {
+    // jsdom renders <webview> as an unknown element, so the guest API has to be
+    // supplied. It arrives late on purpose: the first read throws, which is the
+    // real race — a tab whose guest has not finished attaching fires no further
+    // `dom-ready`, so without the retry the registry would keep pointing at the
+    // tab the person just left.
+    const attach = (window as unknown as { api: { attachBrowser: ReturnType<typeof vi.fn> } }).api
+      .attachBrowser
+    attach.mockClear()
+    let ready = false
+    const proto = window.HTMLElement.prototype as unknown as { getWebContentsId?: () => number }
+    proto.getWebContentsId = () => {
+      if (!ready) throw new Error('not attached yet')
+      return 42
+    }
+    try {
+      act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+      render(<BrowserCard sessionId="t1" />)
+      expect(attach).not.toHaveBeenCalled()
+
+      ready = true
+      // Without an id in the registry the session's agent is told "no pane
+      // open" while the person is looking straight at one.
+      await waitFor(() => expect(attach).toHaveBeenCalledWith('t1', 42))
+    } finally {
+      delete proto.getWebContentsId
+    }
+  })
+
+  it('reports a pick it could not read instead of sending a half-formed one', async () => {
+    mockStartPick.mockRejectedValueOnce(new Error('guest went away'))
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Pick an element for the agent'))
+
+    // The agent must not be handed a partial description of the thing the
+    // person pointed at — it would act on it as if it were whole. The person
+    // is told instead, since only they can point again.
+    expect(await screen.findByText('Could not read the selected element')).toBeInTheDocument()
+    expect(mockWriteTerminal).not.toHaveBeenCalled()
+    // And the picker disarms, rather than leaving the button stuck lit with no
+    // overlay behind it.
+    expect(screen.getByLabelText('Pick an element for the agent')).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+  })
+
+  it('reports ink it could not resolve instead of guessing at what it covered', async () => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      clearRect: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn()
+    })) as unknown as HTMLCanvasElement['getContext']
+    mockAnnotate.mockRejectedValueOnce(new Error('scroll offset unavailable'))
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByLabelText('Draw on the page for the agent'))
+    const ink = screen.getByTestId('browser-ink')
+    ink.setPointerCapture = vi.fn()
+    fireEvent.pointerDown(ink, { clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(ink, { clientX: 40, clientY: 40 })
+    fireEvent.pointerUp(ink)
+    fireEvent.click(screen.getByLabelText('Send the annotation'))
+
+    // "I drew on something" with no elements resolved is worse than silence:
+    // the agent would go looking for what the person meant and settle on
+    // whatever it found.
+    expect(await screen.findByText('Could not resolve the annotation')).toBeInTheDocument()
+    expect(mockWriteTerminal).not.toHaveBeenCalled()
   })
 
   it('calls an unvisited tab "New tab" and leaves its address bar empty', () => {

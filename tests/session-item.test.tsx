@@ -17,6 +17,28 @@ const session: SidebarSessionInfo = {
 
 const initialState = useAppStore.getState()
 
+const MOBILE = { isMobile: true, framework: 'expo' as const, needsDevClient: true }
+const WEB = { isMobile: false, framework: null, needsDevClient: false }
+
+/** A session row needs a terminal behind it for the device gate to find a project path. */
+function seedProject(mobile?: typeof MOBILE | typeof WEB): void {
+  const terminals = new Map()
+  terminals.set(session.id, {
+    id: session.id,
+    session: { id: session.id, projectPath: '/proj', projectName: 'p', agentType: 'claude' },
+    status: 'idle',
+    lastOutputTimestamp: 1
+  })
+  act(() => {
+    useAppStore.setState({
+      terminals,
+      devicePanes: new Map(),
+      mobileProjectCache: mobile ? new Map([['/proj', mobile]]) : new Map(),
+      loadMobileProject: async () => {}
+    })
+  })
+}
+
 describe('SessionItem', () => {
   beforeEach(() => {
     useAppStore.setState({ focusedTerminalId: null })
@@ -134,5 +156,52 @@ describe('SessionItem', () => {
     const btn = screen.getByRole('button', { name: /Hide files for/ })
     fireEvent.click(btn)
     expect(useAppStore.getState().filesPanes.has(session.id)).toBe(false)
+  })
+})
+
+describe('SessionItem device control', () => {
+  it('offers a device on a mobile project', () => {
+    seedProject(MOBILE)
+    render(<SessionItem session={session} />)
+    expect(screen.getByRole('button', { name: /Show device for/ })).toBeInTheDocument()
+  })
+
+  it('stays out of the way on a project with no mobile app in it', () => {
+    // A simulator button on a web or backend repo is a control that can only
+    // disappoint, sitting next to two that always work.
+    seedProject(WEB)
+    render(<SessionItem session={session} />)
+    expect(screen.queryByRole('button', { name: /device for/ })).not.toBeInTheDocument()
+  })
+
+  it('shows nothing while the project is still unprobed', () => {
+    seedProject(undefined)
+    render(<SessionItem session={session} />)
+    expect(screen.queryByRole('button', { name: /device for/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps the control while a device pane is open, whatever detection says', () => {
+    seedProject(WEB)
+    act(() => useAppStore.getState().openDevicePane(session.id, { udid: 'u1', name: 'iPhone 17' }))
+    render(<SessionItem session={session} />)
+    // Detection is a heuristic and will be wrong eventually. A control that
+    // vanishes out from under a device someone is driving leaves them no way to
+    // close it.
+    expect(screen.getByRole('button', { name: /Hide device for/ })).toBeInTheDocument()
+  })
+
+  it('closes an open device pane rather than reopening the picker', () => {
+    const deviceRelease = vi.fn().mockResolvedValue({ released: true })
+    Object.defineProperty(window, 'api', {
+      value: { ...(window as unknown as { api?: object }).api, deviceRelease },
+      writable: true,
+      configurable: true
+    })
+    seedProject(MOBILE)
+    act(() => useAppStore.getState().openDevicePane(session.id, { udid: 'u1', name: 'iPhone 17' }))
+    render(<SessionItem session={session} />)
+    fireEvent.click(screen.getByRole('button', { name: /Hide device for/ }))
+    expect(useAppStore.getState().devicePanes.has(session.id)).toBe(false)
+    expect(deviceRelease).toHaveBeenCalledWith(session.id)
   })
 })

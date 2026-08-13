@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, nativeImage, screen, globalShortcut } from 'electron'
 import path from 'node:path'
 import { registerIpcHandlers, setBridge } from './ipc-handlers'
+import * as browserRegistry from './browser-registry'
+import * as deviceRegistry from './device-registry'
+import { installCompanionQuitHook } from './device-companion'
 import { installConnectorCredentialsSync } from './connector-credentials-sync'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
@@ -229,6 +232,7 @@ function wireServerNotifications(bridge: ServerBridge): void {
       case IPC.SCRIPT_DATA:
       case IPC.SCRIPT_EXIT:
       case IPC.WORKTREE_CONFIRM_CLEANUP:
+      case IPC.SESSION_CREATED:
       case IPC.SESSION_UPDATED:
       case IPC.SESSION_REORDERED:
       case IPC.CONFIG_CHANGED:
@@ -358,6 +362,28 @@ app.whenReady().then(async () => {
   }
 
   setBridge(bridge)
+  // Lets the browser and device registries ask the renderer for a pane, so an
+  // agent can open one itself instead of waiting on a human click. Both are
+  // wired from the same helper: a registry left unwired keeps its default
+  // no-op `sendToRenderer`, which makes `openPane` return success while the
+  // renderer is never told — the pane simply never appears, with nothing to
+  // say why.
+  const paneSend =
+    (surface: string) =>
+    (channel: string, params: unknown): void => {
+      // Throwing rather than dropping: a swallowed send leaves the caller to
+      // burn its attach timeout and then report "the pane did not open in
+      // time", when the truth is there was no window to open one in.
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        throw new Error(`The Vorn window is not open, so a ${surface} pane cannot be shown.`)
+      }
+      mainWindow.webContents.send(channel, params)
+    }
+  browserRegistry.setRendererSend(paneSend('browser'))
+  deviceRegistry.setRendererSend(paneSend('device'))
+  // A companion outlives the app otherwise: it holds a unix socket and a booted
+  // simulator, and nothing reaps it once Vorn is gone.
+  installCompanionQuitHook()
   registerIpcHandlers()
 
   // Window control IPC handlers (Electron-only)

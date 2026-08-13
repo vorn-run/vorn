@@ -8,15 +8,29 @@ import {
   TaskSourceFilter,
   EditorPaneState,
   BrowserPaneState,
+  DevicePaneState,
   CardSplit
 } from './types'
-import { filesPaneId, editorPaneId, browserPaneId, isTerminalPane } from '../lib/pane-id'
+import {
+  filesPaneId,
+  editorPaneId,
+  browserPaneId,
+  devicePaneId,
+  isTerminalPane
+} from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
-import { clampSplitRatio, sanitizePaneWeights } from '../lib/split-ratio'
+import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 
 const EMPTY_SESSIONS: TerminalSession[] = []
 const WORKTREE_CACHE_TTL = 5_000
 const worktreeCacheTimestamps = new Map<string, number>()
+/**
+ * Longer than the worktree TTL because the answer changes on the timescale of
+ * adding a dependency, not of typing a command — and because a wrong answer
+ * only costs one button, whereas re-probing costs a readdir per session row.
+ */
+const MOBILE_CACHE_TTL = 60_000
+const mobileCacheTimestamps = new Map<string, number>()
 const GRID_STORAGE_KEY = 'vorn:gridSettings'
 const SIDEBAR_STORAGE_KEY = 'vorn:sidebarSettings'
 const FLEXIBLE_STORAGE_KEY = 'vorn:flexibleLayouts'
@@ -196,17 +210,23 @@ function reconcilePanes(
   filesPanes: Set<string>,
   editorPanes: Map<string, EditorPaneState>,
   browserPanes: Map<string, BrowserPaneState>,
+  devicePanes: Map<string, DevicePaneState>,
   cardSplits: Record<string, CardSplit>,
   liveSessionIds: Set<string>
 ): {
   filesPanes: Set<string>
   editorPanes: Map<string, EditorPaneState>
   browserPanes: Map<string, BrowserPaneState>
+  devicePanes: Map<string, DevicePaneState>
   cardSplits: Record<string, CardSplit>
 } | null {
   const nextFiles = new Set([...filesPanes].filter((id) => liveSessionIds.has(id)))
   const nextEditors = new Map([...editorPanes].filter(([id]) => liveSessionIds.has(id)))
   const nextBrowsers = new Map([...browserPanes].filter(([id]) => liveSessionIds.has(id)))
+  // Device panes are in-memory only, but a dead session's pane still keeps a
+  // card mounted against a device nobody can drive — the same leak, minus the
+  // localStorage growth.
+  const nextDevices = new Map([...devicePanes].filter(([id]) => liveSessionIds.has(id)))
   const nextSplits = Object.fromEntries(
     Object.entries(cardSplits).filter(([id]) => liveSessionIds.has(id))
   )
@@ -215,6 +235,7 @@ function reconcilePanes(
     nextFiles.size === filesPanes.size &&
     nextEditors.size === editorPanes.size &&
     nextBrowsers.size === browserPanes.size &&
+    nextDevices.size === devicePanes.size &&
     !splitsChanged
   ) {
     return null
@@ -225,6 +246,7 @@ function reconcilePanes(
     filesPanes: nextFiles,
     editorPanes: nextEditors,
     browserPanes: nextBrowsers,
+    devicePanes: nextDevices,
     cardSplits: nextSplits
   }
 }
@@ -281,6 +303,9 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   focusableTerminalIds: [],
   minimizedTerminals: new Set(),
   ...loadPanes(),
+  // Not part of loadPanes: a claim lives in main and dies with the app, so a
+  // device pane restored from disk would frame a simulator nobody holds.
+  devicePanes: new Map(),
   maximizedPaneId: null,
   sessionDockCollapsed: false,
   isOnboardingOpen: false,
@@ -407,6 +432,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
               state.filesPanes,
               state.editorPanes,
               state.browserPanes,
+              state.devicePanes,
               state.cardSplits,
               live
             )
@@ -578,6 +604,64 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       return { browserPanes: next }
     }),
 
+  openDevicePane: (sessionId, device) =>
+    set((state) => {
+      const existing = state.devicePanes.get(sessionId)
+      if (existing && existing.udid === device.udid && existing.name === device.name) return {}
+      const next = new Map(state.devicePanes)
+      next.set(sessionId, device)
+      // A phone is roughly 0.46 as wide as it is tall, so the even split every
+      // other pane kind wants renders it as a narrow strip of screen floating in
+      // a wide field of empty background — while the terminal, which needs the
+      // width, is squeezed to half a card. Bias the card toward the terminal the
+      // first time a device arrives. Only when the person has not already sized
+      // this card themselves: their ratio is a decision, not a default.
+      if (state.cardSplits[sessionId]) return { devicePanes: next }
+      const splits = {
+        ...state.cardSplits,
+        [sessionId]: { terminal: DEVICE_SPLIT_RATIO, panes: [] }
+      }
+      saveCardSplits(splits)
+      return { devicePanes: next, cardSplits: splits }
+    }),
+
+  claimAndOpenDevicePane: async (sessionId, device) => {
+    try {
+      // Claiming first is what makes the pane's first poll succeed. It also
+      // boots the simulator if it is not running, so the person never has to
+      // leave Vorn for Xcode.
+      const claimed = await window.api.deviceClaim(sessionId, device.udid)
+      get().openDevicePane(sessionId, { udid: claimed.udid, name: claimed.name })
+      return null
+    } catch (e) {
+      // Surfaced rather than swallowed: the likeliest failure is another
+      // session holding the device, and that message names the holder.
+      return e instanceof Error ? e.message : String(e)
+    }
+  },
+
+  closeDevicePane: (sessionId) =>
+    set((state) => {
+      if (!state.devicePanes.has(sessionId)) return {}
+      // Closing the pane hands the device back. Holding a claim for a pane
+      // nobody is looking at locks the simulator out of every other session
+      // with nothing on screen to explain why. Fire-and-forget: a failed
+      // release must not block the pane from closing, and main releases on
+      // session teardown regardless.
+      try {
+        void window.api.deviceRelease?.(sessionId)?.catch(() => {})
+      } catch {
+        // A release that throws synchronously must still not trap the pane
+        // open — main releases on session teardown regardless.
+      }
+      const next = new Map(state.devicePanes)
+      next.delete(sessionId)
+      return {
+        devicePanes: next,
+        ...(state.maximizedPaneId === devicePaneId(sessionId) ? { maximizedPaneId: null } : {})
+      }
+    }),
+
   setMaximizedPane: (paneId) =>
     set((state) => (state.maximizedPaneId === paneId ? {} : { maximizedPaneId: paneId })),
 
@@ -707,6 +791,32 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     }
   },
 
+  mobileProjectCache: new Map(),
+  loadMobileProject: async (projectPath, force) => {
+    if (!projectPath) return
+    if (!force) {
+      const lastLoaded = mobileCacheTimestamps.get(projectPath)
+      if (lastLoaded && Date.now() - lastLoaded < MOBILE_CACHE_TTL) return
+    }
+    // Stamped before the await, not after: several session rows for the same
+    // project mount at once, and without this every one of them would fire its
+    // own probe against the same directory.
+    mobileCacheTimestamps.set(projectPath, Date.now())
+
+    try {
+      const result = await window.api.detectMobileProject(projectPath)
+      set((state) => {
+        const next = new Map(state.mobileProjectCache)
+        next.set(projectPath, result)
+        return { mobileProjectCache: next }
+      })
+    } catch {
+      // Clearing the stamp is what makes a failure retry rather than pin the
+      // project as unprobed for the whole TTL.
+      mobileCacheTimestamps.delete(projectPath)
+    }
+  },
+
   sidebarProjectSort: (savedSidebar.projectSort as 'manual' | 'name' | 'recent') ?? 'manual',
   sidebarWorktreeSort: (savedSidebar.worktreeSort as 'name' | 'recent') ?? 'name',
   sidebarWorktreeFilter: (savedSidebar.worktreeFilter as 'all' | 'active') ?? 'all',
@@ -786,3 +896,24 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       return { config: updated }
     })
 })
+
+/**
+ * Which of a session's child panes are open, and whether any is.
+ *
+ * Every site that decides whether to mount a session's pane column used to
+ * spell this list out itself, and each new pane kind then had to be added to
+ * all of them. The device pane shipped with two of the four updated, so it
+ * landed in the store, reported success, and never rendered in either the card
+ * grid or tab view — a pane that opens into nothing, with no error anywhere to
+ * say why. One selector, so a new kind is added once.
+ */
+export function selectPaneFlags(
+  s: Pick<AppStore, 'filesPanes' | 'editorPanes' | 'browserPanes' | 'devicePanes'>,
+  sessionId: string | null
+): { files: boolean; editor: boolean; browser: boolean; device: boolean; any: boolean } {
+  const files = sessionId ? s.filesPanes.has(sessionId) : false
+  const editor = sessionId ? s.editorPanes.has(sessionId) : false
+  const browser = sessionId ? s.browserPanes.has(sessionId) : false
+  const device = sessionId ? s.devicePanes.has(sessionId) : false
+  return { files, editor, browser, device, any: files || editor || browser || device }
+}

@@ -367,6 +367,23 @@ export function App() {
       useAppStore.getState().setUpdateVersion(version)
     })
 
+    // The agent's browser tools reach the pane through these two: main can
+    // drive a guest, but only the renderer can create one.
+    const removeBrowserOpenListener = window.api.onBrowserOpenPane(({ sessionId, url }) => {
+      useAppStore.getState().openBrowserPane(sessionId, url)
+    })
+
+    const removeDeviceOpenListener = window.api.onDeviceOpenPane(({ sessionId, udid, name }) => {
+      useAppStore.getState().openDevicePane(sessionId, { udid, name })
+    })
+
+    const removeBrowserTabListener = window.api.onBrowserTabCommand((cmd) => {
+      const store = useAppStore.getState()
+      if (cmd.action === 'add') store.addBrowserTab(cmd.sessionId, cmd.url)
+      else if (cmd.action === 'close') store.closeBrowserTab(cmd.sessionId, cmd.index ?? -1)
+      else store.setActiveBrowserTab(cmd.sessionId, cmd.index ?? -1)
+    })
+
     const removeSessionUpdatedListener = window.api.onSessionUpdated((session) => {
       const store = useAppStore.getState()
       const existing = store.terminals.get(session.id)
@@ -479,6 +496,9 @@ export function App() {
       removeSchedulerListener()
       removeWidgetSelectListener()
       removeUpdateListener()
+      removeBrowserOpenListener()
+      removeDeviceOpenListener()
+      removeBrowserTabListener()
       removeSessionUpdatedListener()
       removeHeadlessExitListener()
       removeHeadlessDataListener()

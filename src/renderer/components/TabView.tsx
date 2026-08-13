@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
+import { selectPaneFlags } from '../stores/ui-slice'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
 import { isTerminalPane } from '../lib/pane-id'
 import { PaneColumn } from './PaneColumn'
@@ -263,11 +264,10 @@ export function TabView() {
 
   const hasTabs = allTabIds.length > 0
   const activeTerminal = activeTabId ? terminals.get(activeTabId) : null
-  const activeHasFiles = useAppStore((s) => (activeTabId ? s.filesPanes.has(activeTabId) : false))
-  const activeHasEditor = useAppStore((s) => (activeTabId ? s.editorPanes.has(activeTabId) : false))
-  const activeHasBrowser = useAppStore((s) =>
-    activeTabId ? s.browserPanes.has(activeTabId) : false
-  )
+  // One shared selector rather than a kind-per-line list: the device pane
+  // reached the store and never rendered because this gate was one of the sites
+  // that was never widened for it, and nothing anywhere reported the omission.
+  const activeHasPanes = useAppStore((s) => selectPaneFlags(s, activeTabId).any)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -572,13 +572,11 @@ export function TabView() {
           </div>
 
           {/* The active session's file panes, alongside its terminal. */}
-          {activeTabId &&
-            activeTerminal &&
-            (activeHasFiles || activeHasEditor || activeHasBrowser) && (
-              <div className="w-[380px] shrink-0 flex flex-col border-l border-white/[0.06]">
-                <PaneColumn sessionId={activeTabId} />
-              </div>
-            )}
+          {activeTabId && activeTerminal && activeHasPanes && (
+            <div className="w-[380px] shrink-0 flex flex-col border-l border-white/[0.06]">
+              <PaneColumn sessionId={activeTabId} />
+            </div>
+          )}
         </div>
       )}
 

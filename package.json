@@ -1,6 +1,6 @@
 {
   "name": "vorn",
-  "version": "0.5.7",
+  "version": "0.6.0-beta.1",
   "packageManager": "yarn@4.13.0",
   "author": "Javier Canizalez <javier-canizalez@outlook.com>",
   "description": "AI Agent Terminal Manager - Stage Manager for coding agents",
@@ -43,14 +43,16 @@
     "*.{json,css,md,html}": "prettier --write"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@tiptap/core": "^3.27.4",
     "@tiptap/extension-code-block": "^3.29.2",
-    "@tiptap/extension-code-block-lowlight": "^3.27.4",
-    "@tiptap/extension-link": "^3.27.4",
+    "@tiptap/extension-code-block-lowlight": "^3.29.2",
+    "@tiptap/extension-link": "^3.29.2",
     "@tiptap/extension-list": "^3.27.4",
     "@tiptap/extension-placeholder": "^3.29.2",
-    "@tiptap/extension-task-item": "^3.27.4",
+    "@tiptap/extension-task-item": "^3.29.2",
     "@tiptap/extension-task-list": "^3.27.4",
     "@tiptap/extensions": "^3.27.4",
     "@tiptap/pm": "^3.27.4",
@@ -116,7 +118,7 @@
   "resolutions": {
     "serialize-javascript": "^7.0.5",
     "@xmldom/xmldom": "^0.8.10",
-    "hono": "^4.12.31",
+    "hono": "^4.13.1",
     "@hono/node-server": "^2.0.11",
     "lodash": "^4.18.1",
     "flatted": "^3.4.2",

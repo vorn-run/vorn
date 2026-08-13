@@ -9,8 +9,10 @@ import { claimWorkflowRun, releaseWorkflowRun, type RunClaimRequest } from './wo
 import { scheduleLogManager } from './schedule-log'
 import { getRecentSessions } from './agent-history'
 import { detectIDEs, openInIDE } from './ide-detector'
+import { detectMobileProject } from './mobile-detector'
 import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
 import { clientRegistry } from './broadcast'
+import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
 import { installHooks } from './hook-installer'
@@ -35,6 +37,7 @@ import type {
 } from '@vornrun/shared/types'
 import { DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
+import { detectRepoSlug } from './git-utils'
 import {
   scanWorktreeInventory,
   reclaimArtifacts,
@@ -98,10 +101,14 @@ import {
   mcpConnectionActions,
   stopMcpClient
 } from './connectors'
-import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, backfillMcpConnection } from './connectors/mcp'
+import {
+  MCP_CONNECTOR_ID,
+  MCP_POLL_EVENT,
+  backfillMcpConnection,
+  preflightMcpConnection
+} from './connectors/mcp'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
-import { detectRepoSlug } from './connectors/github'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
 import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vornrun/shared/types'
@@ -578,6 +585,7 @@ export function registerAllMethods(): void {
   // Agent/IDE detection
   registerMethod('agent:detectInstalled', () => detectInstalledAgents())
   registerMethod('ide:detect', () => detectIDEs())
+  registerMethod('project:detectMobile', ({ projectPath }) => detectMobileProject(projectPath))
   registerMethod('ide:open', ({ ideId, projectPath }) => openInIDE(ideId, projectPath))
 
   // Tailscale network access
@@ -907,6 +915,34 @@ export function registerAllMethods(): void {
   })
 
   /**
+   * Ask a packaged connection whether it could run right now.
+   *
+   * `ok: null` means the connector declares no preflight, which is most of
+   * them — only the ones borrowing an external tool's login have anything to
+   * check. A connector that authenticates from config fields already fails
+   * visibly when a field is missing.
+   */
+  registerMethod('connection:preflight', async (connectionId: string) => {
+    const conn = dbGetSourceConnection(connectionId)
+    // A connection that does not exist is a caller error, not an answer about
+    // readiness. Returning `ok: null` for it would file a stale or mistyped id
+    // under "nothing to check" — the one reading a user is most likely to take
+    // as reassurance.
+    if (!conn) throw new Error(`connection ${connectionId} not found`)
+    // A built-in connector genuinely declares no preflight, so this really is
+    // "nothing to check".
+    if (conn.connectorId !== MCP_CONNECTOR_ID) return { ok: null }
+    try {
+      return await preflightMcpConnection(conn)
+    } catch (err) {
+      // Starting the connector at all is itself part of what preflight
+      // answers: a package that will not launch is exactly the state the
+      // caller wants reported, not an exception to handle.
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  /**
    * Read a connector package's self-description before any connection exists,
    * so the connection form can be filled in from the manifest rather than
    * transcribed from a README.
@@ -1089,6 +1125,44 @@ export function registerAllMethods(): void {
     }
     return results
   })
+
+  // ─── Browser pane (relayed to Electron main) ──────────────────
+  //
+  // The guest `<webview>` and its CDP debugger only exist in main, so these
+  // are the one method family this process does not answer itself. Each is a
+  // straight relay over the reverse bridge; the session scoping that makes
+  // them safe happens in the MCP layer, which resolves the caller from
+  // VORN_SESSION_ID and never accepts a session as an argument.
+  registerMethod('browser:readPage', (p) => browserBridge.request('browser:readPage', p))
+  registerMethod('browser:getText', (p) => browserBridge.request('browser:getText', p))
+  registerMethod('browser:consoleMessages', (p) =>
+    browserBridge.request('browser:consoleMessages', p)
+  )
+  registerMethod('browser:networkRequests', (p) =>
+    browserBridge.request('browser:networkRequests', p)
+  )
+  registerMethod('browser:screenshot', (p) => browserBridge.request('browser:screenshot', p))
+  registerMethod('browser:interact', (p) => browserBridge.request('browser:interact', p))
+  registerMethod('browser:tabs', (p) => browserBridge.request('browser:tabs', p))
+  registerMethod('browser:openPane', (p) => browserBridge.request('browser:openPane', p))
+  registerMethod('browser:navigate', (p) => browserBridge.request('browser:navigate', p))
+  registerMethod('browser:find', (p) => browserBridge.request('browser:find', p))
+
+  // Device pane (relayed to Electron main, same bridge, same reasoning: the
+  // idb_companion child process and its unix socket live only in main).
+  registerMethod('device:list', (p) => browserBridge.request('device:list', p))
+  registerMethod('device:claim', (p) => browserBridge.request('device:claim', p))
+  registerMethod('device:release', (p) => browserBridge.request('device:release', p))
+  registerMethod('device:readScreen', (p) => browserBridge.request('device:readScreen', p))
+  registerMethod('device:find', (p) => browserBridge.request('device:find', p))
+  registerMethod('device:interact', (p) => browserBridge.request('device:interact', p))
+  registerMethod('device:screenshot', (p) => browserBridge.request('device:screenshot', p))
+  registerMethod('device:launch', (p) => browserBridge.request('device:launch', p))
+  registerMethod('device:terminate', (p) => browserBridge.request('device:terminate', p))
+  registerMethod('device:install', (p) => browserBridge.request('device:install', p))
+  registerMethod('device:openUrl', (p) => browserBridge.request('device:openUrl', p))
+  registerMethod('device:logs', (p) => browserBridge.request('device:logs', p))
+  registerMethod('device:openPane', (p) => browserBridge.request('device:openPane', p))
 
   // Wire manager events → broadcast to WS clients
   ptyManager.on('client-message', (channel: string, payload: unknown) => {

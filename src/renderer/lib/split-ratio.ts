@@ -4,6 +4,17 @@ export const MAX_SPLIT_RATIO = 0.85
 export const DEFAULT_SPLIT_RATIO = 0.5
 
 /**
+ * Opening split for a card showing a device pane.
+ *
+ * A phone screen is about 0.46 as wide as it is tall, so it fills a pane by
+ * height and leaves the surplus width as empty background — an even split buys
+ * the device nothing and costs the terminal half a card. Two thirds to the
+ * terminal keeps the phone at full height while giving the text the width it
+ * actually uses.
+ */
+export const DEVICE_SPLIT_RATIO = 0.66
+
+/**
  * Confine a split ratio to the visible range.
  *
  * Non-finite input falls back to an even split rather than propagating NaN into

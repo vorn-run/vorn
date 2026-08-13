@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
+import { selectPaneFlags } from '../stores/ui-slice'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { AgentStatusIcon } from './AgentStatusIcon'
@@ -17,9 +18,33 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
+import { DeviceCard } from './DeviceCard'
 import { parsePaneId } from '../lib/pane-id'
 import { isMac } from '../lib/platform'
 import { ArrowDown, FolderGit2, GitBranch, Minimize2, Pencil } from 'lucide-react'
+
+/**
+ * One pane's slot on the expanded stage, kept mounted while hidden.
+ *
+ * Taken out of flow rather than `display: none` so the pane keeps a real size
+ * — a webview collapsed to zero does not reliably come back.
+ */
+function PaneSlot({
+  hidden,
+  children
+}: {
+  hidden: boolean
+  children: React.ReactNode
+}): React.ReactNode {
+  if (hidden) {
+    return (
+      <div aria-hidden className="absolute inset-0 pointer-events-none invisible">
+        {children}
+      </div>
+    )
+  }
+  return <div className="flex-1 min-h-0">{children}</div>
+}
 
 export function FocusedTerminal() {
   const focusedId = useAppStore((s) => s.focusedTerminalId)
@@ -41,6 +66,9 @@ export function FocusedTerminal() {
   const hasFilesPane = useAppStore((s) => (effectiveId ? s.filesPanes.has(effectiveId) : false))
   const hasEditorPane = useAppStore((s) => (effectiveId ? s.editorPanes.has(effectiveId) : false))
   const hasBrowserPane = useAppStore((s) => (effectiveId ? s.browserPanes.has(effectiveId) : false))
+  const hasDevicePane = useAppStore((s) => (effectiveId ? s.devicePanes.has(effectiveId) : false))
+  // Shared with the card grid and tab view, so a new pane kind is added once.
+  const hasAnyPane = useAppStore((s) => selectPaneFlags(s, effectiveId).any)
   // Maximize is session-scoped in the grid; expanded mode is that same session
   // filling the stage, so a maximized pane has to take the whole body here too.
   // Reading it only for panes this session owns keeps a stale id inert.
@@ -59,7 +87,8 @@ export function FocusedTerminal() {
   const hasMaximizedPane =
     (maximizedKind === 'files' && hasFilesPane) ||
     (maximizedKind === 'editor' && hasEditorPane) ||
-    (maximizedKind === 'browser' && hasBrowserPane)
+    (maximizedKind === 'browser' && hasBrowserPane) ||
+    (maximizedKind === 'device' && hasDevicePane)
 
   const handleContract = (): void => {
     if (isPreview) {
@@ -236,27 +265,36 @@ export function FocusedTerminal() {
 
           {/* The expanded session keeps its own Files / File / Browser panes.
               While one of them is maximized it takes the whole stage, matching
-              the grid's session-scoped maximize. */}
-          {!isMobile && (hasFilesPane || hasEditorPane || hasBrowserPane) && (
+              the grid's session-scoped maximize.
+
+              A pane the maximize hides is hidden, not unmounted — see the note
+              in PaneColumn: unmounting costs the browser its live guest, the
+              page, and the agent's CDP handle. */}
+          {!isMobile && hasAnyPane && (
             <div
-              className={`shrink-0 flex flex-col gap-px ${
+              className={`relative shrink-0 flex flex-col gap-px ${
                 hasMaximizedPane ? 'flex-1 min-w-0' : 'w-[420px] border-l border-white/[0.06]'
               }`}
             >
-              {hasFilesPane && (!hasMaximizedPane || maximizedKind === 'files') && (
-                <div className="flex-1 min-h-0">
+              {hasFilesPane && (
+                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'files'}>
                   <FilesCard sessionId={effectiveId} />
-                </div>
+                </PaneSlot>
               )}
-              {hasEditorPane && (!hasMaximizedPane || maximizedKind === 'editor') && (
-                <div className="flex-1 min-h-0">
+              {hasEditorPane && (
+                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'editor'}>
                   <EditorCard sessionId={effectiveId} />
-                </div>
+                </PaneSlot>
               )}
-              {hasBrowserPane && (!hasMaximizedPane || maximizedKind === 'browser') && (
-                <div className="flex-1 min-h-0">
+              {hasBrowserPane && (
+                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'browser'}>
                   <BrowserCard sessionId={effectiveId} />
-                </div>
+                </PaneSlot>
+              )}
+              {hasDevicePane && (
+                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'device'}>
+                  <DeviceCard sessionId={effectiveId} />
+                </PaneSlot>
               )}
             </div>
           )}

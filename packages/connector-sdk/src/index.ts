@@ -5,7 +5,13 @@ export { pollWithDedupe } from './dedupe'
 export { normalizeItem, normalizeItems } from './normalize'
 export { runPoll, drainPoll, runAction, MAX_POLL_PAGES } from './runtime'
 export type { PollPage, RunPollOptions, RunActionOptions } from './runtime'
-export { connectionSetup, connectorManifest, pollToolName, MANIFEST_TOOL } from './setup'
+export {
+  connectionSetup,
+  connectorManifest,
+  pollToolName,
+  MANIFEST_TOOL,
+  PREFLIGHT_TOOL
+} from './setup'
 export type { ConnectionSetup, ConnectorManifest } from './setup'
 export { createConnectorServer, serveConnector } from './server'
 export type { ConnectorServerOptions } from './server'
@@ -26,6 +32,7 @@ export type {
   NormalizedItem,
   PollContext,
   PollOutcome,
+  PreflightResult,
   TriggerDefinition,
   StatusSuggestion,
   DefaultWorkflow

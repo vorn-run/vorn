@@ -11,7 +11,8 @@ import {
   HeadlessSession,
   GitDiffStat,
   TaskConfig,
-  TaskStatus
+  TaskStatus,
+  MobileProject
 } from '../../shared/types'
 
 export interface WorktreeInfo {
@@ -90,6 +91,20 @@ export interface BrowserPaneState {
 /** The page a browser pane is currently showing. */
 export function activeBrowserUrl(pane: BrowserPaneState | undefined): string | null {
   return pane ? (pane.tabs[pane.activeTab] ?? null) : null
+}
+
+/**
+ * State of a session's device pane — the simulator that session has claimed.
+ *
+ * Deliberately not persisted, unlike files/editor/browser panes. A claim lives
+ * in the main process and does not survive a restart, so reviving this pane
+ * from disk would show a frame for a device this session no longer holds.
+ */
+export interface DevicePaneState {
+  /** UDID of the claimed simulator this pane is showing. */
+  udid: string
+  /** Display name, for the pane title. */
+  name: string
 }
 
 export interface TerminalState {
@@ -211,6 +226,8 @@ export interface UISlice {
   editorPanes: Map<string, EditorPaneState>
   /** Session id → the page its browser pane is showing. One browser per session. */
   browserPanes: Map<string, BrowserPaneState>
+  /** Session id → the simulator its device pane is showing. One device per session. */
+  devicePanes: Map<string, DevicePaneState>
   /**
    * Pane id currently maximized, or null. At most one app-wide. A maximized
    * pane covers only its owner session's footprint — other sessions are
@@ -303,6 +320,21 @@ export interface UISlice {
    */
   closeBrowserTab: (sessionId: string, index: number) => void
   setActiveBrowserTab: (sessionId: string, index: number) => void
+  /**
+   * Open the pane for a device main already holds. Used when main itself asks
+   * for the pane (the agent claimed the device), where the claim is a
+   * precondition rather than something the renderer arranges.
+   */
+  openDevicePane: (sessionId: string, device: DevicePaneState) => void
+  /**
+   * Claim the device, then open the pane — the path for a person picking from
+   * the picker. Opening without claiming leaves the pane polling a session
+   * main has no device for, so every frame fails with "No device is claimed"
+   * and the picker appears to have done nothing. Returns the failure message
+   * so contention can be shown where the person is looking.
+   */
+  claimAndOpenDevicePane: (sessionId: string, device: DevicePaneState) => Promise<string | null>
+  closeDevicePane: (sessionId: string) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void
   toggleSessionDockCollapsed: () => void
@@ -334,6 +366,16 @@ export interface UISlice {
   setUpdateVersion: (version: string | null) => void
   worktreeCache: Map<string, WorktreeInfo[]>
   loadWorktrees: (projectPath: string, force?: boolean) => Promise<void>
+
+  /**
+   * Per-project answer to "is this a mobile app", used only to decide whether
+   * to offer the device control. Derived and cheap to recompute, so it is
+   * deliberately kept out of the persisted pane state: a stale "not mobile"
+   * written to localStorage would hide the button after someone adds Expo to a
+   * project and never come back.
+   */
+  mobileProjectCache: Map<string, MobileProject>
+  loadMobileProject: (projectPath: string, force?: boolean) => Promise<void>
   sidebarProjectSort: ProjectSortMode
   sidebarWorktreeSort: WorktreeSortMode
   sidebarWorktreeFilter: WorktreeFilter

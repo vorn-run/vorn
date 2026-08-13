@@ -24,7 +24,18 @@ import type {
   TaskStatus,
   WorktreeInventory,
   WorktreeActionResult,
-  BranchDeleteResult
+  BranchDeleteResult,
+  BrowserPageRead,
+  BrowserConsoleMessage,
+  BrowserNetworkRequest,
+  BrowserNode,
+  BrowserTarget,
+  DeviceInfo,
+  DeviceElement,
+  DeviceScreenRead,
+  DeviceTarget,
+  DevicePoint,
+  MobileProject
 } from './types'
 
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
@@ -185,6 +196,18 @@ export interface RequestMethods {
     result: Record<string, boolean>
   }
   'ide:detect': { params: void; result: Array<{ id: string; name: string }> }
+  /**
+   * Whether a project looks like a mobile app, so the device control can be
+   * offered where it is useful and withheld where it would be noise.
+   *
+   * Advisory only: the device tools themselves are never gated on this. An
+   * agent asked to open a simulator for a project this misreads must still be
+   * able to, or a wrong guess becomes a dead end instead of a missing button.
+   */
+  'project:detectMobile': {
+    params: { projectPath: string }
+    result: MobileProject
+  }
   'ide:open': {
     params: { ideId: string; projectPath: string }
     result: void
@@ -292,6 +315,14 @@ export interface RequestMethods {
     params: { runId: string }
     result: void
   }
+  /** Ask a packaged connection whether it could run right now. `ok: null`
+   *  means the connector declares no preflight — nothing to check, which is
+   *  not the same answer as "checked, fine". Throws for a connection that does
+   *  not exist, so a stale id cannot read as "nothing to check". */
+  'connection:preflight': {
+    params: string
+    result: { ok: boolean | null; message?: string }
+  }
   /** Main→server push of decrypted credential fields. Called after main
    *  decrypts values (via Electron safeStorage) on boot and on config
    *  changes. Plaintext lives in server memory only — never persisted. */
@@ -366,6 +397,149 @@ export interface RequestMethods {
   'connector:status': {
     params: void
     result: Array<{ connectorId: string; authed: boolean; message?: string }>
+  }
+
+  // ─── Agent-controllable browser pane ──────────────────────────
+  //
+  // These are the one family of methods the server does not itself implement.
+  // A `<webview>` guest is only reachable from the Electron main process, so
+  // the server forwards each call back over the same bridge main uses to reach
+  // it (see `browserBridge` in packages/server) and main answers from its CDP
+  // registry. Every one is session-scoped by the *caller's* identity —
+  // `VORN_SESSION_ID`, resolved in the MCP layer — and none of them accepts a
+  // session argument, so one session cannot address another's pane.
+  'browser:readPage': {
+    params: { sessionId: string; filter?: 'interactive' | 'all'; cursor?: string; limit?: number }
+    result: BrowserPageRead
+  }
+  'browser:getText': {
+    params: { sessionId: string; cursor?: string }
+    result: { url: string; text: string; nextCursor?: string }
+  }
+  'browser:consoleMessages': {
+    params: { sessionId: string; limit?: number }
+    result: BrowserConsoleMessage[]
+  }
+  'browser:networkRequests': {
+    params: { sessionId: string; limit?: number }
+    result: BrowserNetworkRequest[]
+  }
+  'browser:screenshot': {
+    params: { sessionId: string; fullPage?: boolean }
+    /** Base64 PNG. Deliberately the last resort — every other read is cheaper. */
+    result: { data: string }
+  }
+  'browser:interact': {
+    params: {
+      sessionId: string
+      action: 'click' | 'hover' | 'type' | 'key' | 'scroll'
+      target?: BrowserTarget
+      /** Text for `type`, key name for `key`, pixel delta for `scroll`. */
+      text?: string
+      deltaY?: number
+    }
+    result: { ok: true }
+  }
+  'browser:tabs': {
+    params: { sessionId: string; action: 'add' | 'close' | 'select'; url?: string; index?: number }
+    result: { ok: true }
+  }
+  'browser:openPane': {
+    params: { sessionId: string; url?: string }
+    result: { url: string }
+  }
+  'browser:navigate': {
+    params: { sessionId: string; url: string }
+    result: { url: string }
+  }
+  'browser:find': {
+    params: { sessionId: string; text: string; limit?: number }
+    result: BrowserNode[]
+  }
+
+  // ─── Device (iOS simulator) ───────────────────────────────────
+  //
+  // Forwarded to main over the same bridge and for a sharper version of the
+  // same reason: a simulator is driven by a child `idb_companion` process
+  // speaking gRPC over a unix socket, which only main owns.
+  //
+  // Every method here carries `sessionId` explicitly. That is the opposite of
+  // the MCP tool surface, where no tool takes a session argument because the
+  // MCP layer resolves it from `VORN_SESSION_ID` before calling in. By the
+  // time a request reaches this contract the resolution has already happened,
+  // so callers must pass the id rather than expect it to be inferred.
+  //
+  // `device:list` is the one method that works without a claim; it is how a
+  // session discovers what there is to claim without leaving Vorn.
+  'device:list': {
+    params: { sessionId: string }
+    result: DeviceInfo[]
+  }
+  'device:claim': {
+    params: { sessionId: string; udid: string }
+    result: { udid: string; name: string; booted: boolean }
+  }
+  'device:release': {
+    params: { sessionId: string }
+    result: { released: boolean }
+  }
+  'device:readScreen': {
+    params: { sessionId: string; filter?: 'interactive' | 'all'; cursor?: string; limit?: number }
+    result: DeviceScreenRead
+  }
+  'device:find': {
+    params: { sessionId: string; query: string; limit?: number }
+    result: { elements: DeviceElement[]; generation: number }
+  }
+  'device:interact': {
+    params: {
+      sessionId: string
+      action: 'tap' | 'swipe' | 'type' | 'button' | 'press'
+      target?: DeviceTarget
+      /** Swipe destination, in points. */
+      to?: DevicePoint
+      /** Text for `type`; button name for `button` (HOME, LOCK, SIRI…). */
+      text?: string
+      /** Seconds to hold, for a long press. */
+      duration?: number
+      /**
+       * Opt in to a stroke starting inside the bezel band, which iOS claims as
+       * a system gesture. Refused by default: swallowed silently, it reads to
+       * the agent as a swipe that did nothing.
+       */
+      systemGesture?: boolean
+    }
+    result: { ok: true; generation: number }
+  }
+  'device:screenshot': {
+    params: { sessionId: string; maxEdge?: number }
+    /** Base64 PNG, downscaled in main. `scale` converts image pixels back to
+     *  the points every ref and tap is expressed in. */
+    result: { data: string; scale: number; screen: { width: number; height: number } }
+  }
+  'device:launch': {
+    params: { sessionId: string; bundleId: string }
+    result: { ok: true }
+  }
+  'device:terminate': {
+    params: { sessionId: string; bundleId: string }
+    result: { ok: true }
+  }
+  'device:install': {
+    params: { sessionId: string; path: string }
+    result: { ok: true }
+  }
+  'device:openUrl': {
+    params: { sessionId: string; url: string }
+    result: { ok: true }
+  }
+  'device:logs': {
+    params: { sessionId: string; limit?: number }
+    result: { lines: string[] }
+  }
+  'device:openPane': {
+    params: { sessionId: string; udid?: string }
+    result: { udid: string }
   }
 }
 

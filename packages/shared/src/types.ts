@@ -1277,6 +1277,7 @@ export const IPC = {
   SESSIONS_GET_RECENT: 'sessions:getRecent',
   DIALOG_OPEN_DIRECTORY: 'dialog:openDirectory',
   IDE_DETECT: 'ide:detect',
+  PROJECT_DETECT_MOBILE: 'project:detectMobile',
   IDE_OPEN: 'ide:open',
   GIT_IS_REPO: 'git:isGitRepo',
   GIT_LIST_BRANCHES: 'git:listBranches',
@@ -1323,6 +1324,42 @@ export const IPC = {
   WIDGET_PERMISSION_RESPONSE: 'widget:permission-response',
   WIDGET_PERMISSION_CANCELLED: 'widget:permission-cancelled',
   SHELL_CREATE: 'shell:create',
+  /** Renderer reports a browser guest's webContentsId once it attaches, which
+   *  is the only thread tying a `<webview>` back to the session that owns it. */
+  BROWSER_ATTACH: 'browser:attach',
+  BROWSER_DETACH: 'browser:detach',
+  /** Renderer arms the element picker; main pushes the result back on pick. */
+  BROWSER_PICK_START: 'browser:pickStart',
+  BROWSER_PICK_CANCEL: 'browser:pickCancel',
+  BROWSER_PICKED: 'browser:picked',
+  /** Freehand ink over the page, resolved to the elements it covers. */
+  BROWSER_ANNOTATE: 'browser:annotate',
+  /** Main asks the renderer to open (or retarget) a session's browser pane.
+   *  The pane lives in renderer state, so main cannot create one itself. */
+  BROWSER_OPEN_PANE: 'browser:openPane',
+  /** Main asks the renderer to add, close, or switch a tab in that pane. */
+  BROWSER_TAB_COMMAND: 'browser:tabCommand',
+  /** Main asks the renderer to open a session's device pane. As with the
+   *  browser, the pane is renderer state, so main can only ask. */
+  DEVICE_OPEN_PANE: 'device:openPane',
+  /** The pane's own poll and tap-through. A simulator has no `<webview>`, so
+   *  unlike the browser pane there is nothing the renderer can drive directly —
+   *  every frame and every touch goes through main. */
+  DEVICE_SCREENSHOT: 'device:screenshot',
+  DEVICE_INTERACT: 'device:interact',
+  DEVICE_LIST: 'device:list',
+  DEVICE_CLAIM: 'device:claim',
+  DEVICE_RELEASE: 'device:release',
+  /**
+   * Resolve a point the person picked on the device pane to the element there.
+   *
+   * Unlike the browser's picker there is nothing to arm in main: the pane is
+   * showing a still it already has, so arming and highlighting are purely
+   * renderer-local and only the point→element lookup needs the companion.
+   */
+  DEVICE_PICKED: 'device:picked',
+  /** Freehand ink over the device screen, resolved to the elements beneath. */
+  DEVICE_ANNOTATE: 'device:annotate',
   UPDATE_DOWNLOADED: 'update:downloaded',
   UPDATE_INSTALL: 'update:install',
   UPDATE_SET_CHANNEL: 'update:set-channel',
@@ -1589,4 +1626,227 @@ export interface ScheduleLogEntry {
   status: 'success' | 'error' | 'missed'
   sessionsLaunched: number
   error?: string
+}
+
+// ─── Agent-controllable browser pane ────────────────────────────
+
+/**
+ * One node of a page as the agent sees it.
+ *
+ * Derived from the accessibility tree rather than the DOM: the AX tree already
+ * collapses presentational wrappers and carries the computed name a user would
+ * read, so it is both smaller and closer to what "the page says" than raw HTML.
+ */
+export interface BrowserNode {
+  /** Opaque handle for `interact`. Only interactive nodes carry one. */
+  ref?: string
+  role: string
+  name?: string
+  value?: string
+  /** Set when the node is not currently actionable, so the agent stops early. */
+  disabled?: boolean
+}
+
+export interface BrowserPageRead {
+  url: string
+  title: string
+  nodes: BrowserNode[]
+  /** Pass back as `cursor` to continue. Absent when the page is exhausted. */
+  nextCursor?: string
+  /** Bumped on every navigation; refs from an older generation are refused. */
+  generation: number
+}
+
+export interface BrowserConsoleMessage {
+  level: string
+  text: string
+  timestamp: number
+}
+
+export interface BrowserNetworkRequest {
+  method: string
+  url: string
+  status?: number
+  timestamp: number
+}
+
+/** Where an interaction lands: a ref from `read_page`, or raw viewport coords. */
+export type BrowserTarget = { ref: string } | { x: number; y: number }
+
+/**
+ * What the user pointed at, packaged for the agent.
+ *
+ * The picker exists because "this button" is trivial for a person to indicate
+ * and expensive for an agent to locate. Everything here answers "which element
+ * is it" from a different angle, so a mismatch in one is recoverable.
+ */
+export interface BrowserSelection {
+  /** Where it was: page url and the element's viewport rect. */
+  url: string
+  rect: { x: number; y: number; width: number; height: number }
+  /** What it says. Usually the fastest way to recognise it in a page read. */
+  text: string
+  /** CSS-ish path from the document root, for a targeted re-lookup. */
+  selector: string
+  /** The element's own markup, truncated — attributes often carry the intent. */
+  outerHTML: string
+  /** Tag plus id and classes, split out so they need not be parsed back. */
+  tagName: string
+  id?: string
+  classes?: string[]
+  /**
+   * React component name, when the page is a dev build carrying fiber data.
+   * A bonus: production builds mangle or drop it, so nothing may depend on it.
+   */
+  componentName?: string
+  /** `file:line` from React's `_debugSource`. Dev builds only, never required. */
+  source?: string
+  /** PNG of just this element, base64. Small by construction — it's one node. */
+  screenshot?: string
+}
+
+/** One freehand stroke, in the coordinate space of what it was drawn over. */
+export interface BrowserStroke {
+  points: Array<{ x: number; y: number }>
+}
+
+/**
+ * Ink over a page, resolved to the things underneath it.
+ *
+ * Both halves ship because neither is sufficient. The image carries intent that
+ * geometry cannot — a circle round three items, an arrow from one to another,
+ * a scribble that means "this bit" — while the elements carry identity the
+ * image cannot, since a picture of a button is not a handle on it.
+ */
+export interface BrowserAnnotation {
+  url: string
+  /** Elements found under the ink, nearest-first, with refs where actionable. */
+  elements: BrowserNode[]
+  /** Full-page PNG with the ink drawn on, base64. */
+  image: string
+  /** Tight crop around the strokes' bounding box, base64. Usually the useful one. */
+  crop?: string
+  /** The ink's bounding box, in page coordinates. */
+  bounds: { x: number; y: number; width: number; height: number }
+}
+
+// ─── Agent-controllable device pane ─────────────────────────────
+
+/**
+ * What a project directory says about whether it is a mobile app.
+ *
+ * Detection reads declared dependencies and config, never build output. The
+ * tempting signal — an `ios/` directory — is wrong: Expo's Continuous Native
+ * Generation means a real, shipping Expo app commonly has no `ios/` at all, so
+ * gating on it hides the device control precisely where it is most wanted.
+ */
+export interface MobileProject {
+  isMobile: boolean
+  framework: 'expo' | 'react-native' | 'flutter' | 'ios-native' | null
+  /**
+   * True when a simulator cannot run this project straight from source — the
+   * managed Expo case, where a dev client (or Expo Go) must be installed first.
+   * Booting a device without saying so hands the person a clean iPhone with
+   * none of their app on it and no explanation.
+   */
+  needsDevClient: boolean
+}
+
+/** A simulator on this machine, and who currently holds it. */
+export interface DeviceInfo {
+  udid: string
+  name: string
+  runtime: string
+  booted: boolean
+  /** The session holding it. Claiming a held device fails, naming this. */
+  claimedBy?: string
+}
+
+/** A point in **points**, the accessibility tree's units — never pixels. */
+export interface DevicePoint {
+  x: number
+  y: number
+}
+
+/**
+ * One element of a screen as the agent sees it.
+ *
+ * The mobile counterpart of `BrowserNode`, with one structural difference worth
+ * knowing: a `ref` here resolves to a *coordinate that was correct when the
+ * screen was read*, not to a node identity. Nothing detects the screen moving
+ * underneath it, which is why every input bumps the generation that the ref
+ * name carries.
+ */
+export interface DeviceElement {
+  /** Opaque handle for `device_interact`. Only actionable elements carry one. */
+  ref?: string
+  role: string
+  label?: string
+  value?: string
+  /**
+   * `accessibilityIdentifier` from the app's own source — the greppable link
+   * back to the code, and unlike a web dev-build debug id it survives release.
+   * A convention rather than a guarantee, so never depend on its presence.
+   */
+  uniqueId?: string
+  disabled?: boolean
+  /** In points. */
+  frame?: { x: number; y: number; width: number; height: number }
+}
+
+export interface DeviceScreenRead {
+  udid: string
+  elements: DeviceElement[]
+  /** Pass back as `cursor` to continue. Absent when the screen is exhausted. */
+  nextCursor?: string
+  /** Bumped after every input; refs from an older generation are refused. */
+  generation: number
+  /** Screen size in points — the space every ref and frame is expressed in. */
+  screen: { width: number; height: number }
+  /**
+   * Pixels ÷ points, typically 3. Ships alongside every screenshot so a
+   * coordinate read off an image can be converted rather than guessed: tapping
+   * an image pixel directly lands at a third of the intended position.
+   */
+  scale: number
+}
+
+/** Where an interaction lands: a ref from `read_screen`, or a point (points). */
+export type DeviceTarget = { ref: string } | { x: number; y: number }
+
+/**
+ * What the person pointed at on the device screen.
+ *
+ * The mobile counterpart of `BrowserSelection`, and thinner by necessity: there
+ * is no markup, no selector and no component name behind a simulator, so the
+ * accessibility node is the whole of what can be said about an element. That
+ * makes `uniqueId` — the app's own `accessibilityIdentifier` — by far the most
+ * valuable field here, since it is the one string that greps back to source.
+ */
+export interface DeviceSelection {
+  udid: string
+  /** The element under the point, deepest match. Absent if the point hit
+   *  nothing describable, which is ordinary on blank areas. */
+  element?: DeviceElement
+  /** Where the person pointed, in points. */
+  point: DevicePoint
+  /** The screen this was read against; refs are void once it moves on. */
+  generation: number
+}
+
+/**
+ * Freehand ink over the device screen, resolved to what it covers.
+ *
+ * No image comes back, unlike the browser's annotation: the pane already holds
+ * the frame the person drew on, and shipping a second copy of a multi-megabyte
+ * screenshot through IPC to say the same thing is not worth it. The elements
+ * are the part the renderer cannot work out for itself.
+ */
+export interface DeviceAnnotation {
+  udid: string
+  /** Elements under the ink, nearest-first, with refs where actionable. */
+  elements: DeviceElement[]
+  /** The ink's bounding box, in points. */
+  bounds: { x: number; y: number; width: number; height: number }
+  generation: number
 }
