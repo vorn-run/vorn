@@ -272,8 +272,14 @@ export interface ConnectorDefinition {
    * missing, so without this the first sign that the tool is absent or signed
    * out is a poll failing some minutes after the connection was saved.
    *
-   * Answer `ok: false` for "correctable by the user"; throw for genuinely
-   * broken. Absent means there is nothing to check.
+   * Answer `ok: false` with a message saying what to do about it. Throwing is
+   * equivalent — the server catches it and reports the same shape with the
+   * error's message — so there is one result for a caller to read and no
+   * behaviour riding on which you choose. Prefer returning when the state is
+   * one you recognise, because then you get to write the sentence.
+   *
+   * Absent means there is nothing to check, which is not the same answer as a
+   * check that passed.
    */
   preflight?(): Promise<PreflightResult> | PreflightResult
 }

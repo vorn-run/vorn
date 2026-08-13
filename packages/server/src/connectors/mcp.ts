@@ -198,7 +198,11 @@ export async function preflightMcpConnection(conn: SourceConnection): Promise<Pr
   if (result.isError || !structured) {
     return {
       ok: false,
-      message: extractTextError(result.content) ?? `${PREFLIGHT_TOOL} failed`
+      // Falls back to a sentence rather than the tool's name: this reaches a
+      // user, and `vorn_connector_preflight failed` tells them nothing they
+      // can act on while naming something they never chose.
+      message:
+        extractTextError(result.content) ?? 'The connector could not report whether it is ready.'
     }
   }
 

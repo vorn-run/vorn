@@ -73,6 +73,16 @@ describe('preflightMcpConnection', () => {
     expect((await preflightMcpConnection(conn)).ok).toBe(false)
   })
 
+  // The fallback reaches a user, so it says something rather than naming an
+  // internal tool they never chose.
+  it('falls back to a sentence, not the tool name', async () => {
+    listTools.mockResolvedValue({ tools: [{ name: PREFLIGHT_TOOL }] })
+    callTool.mockResolvedValue({ content: [] })
+    const { message } = await preflightMcpConnection(conn)
+    expect(message).toBe('The connector could not report whether it is ready.')
+    expect(message).not.toContain(PREFLIGHT_TOOL)
+  })
+
   // Anything other than a literal `true` is not a pass. A connector answering
   // `{ok: "yes"}` must not be read as ready.
   it('does not accept a truthy non-boolean as passing', async () => {
