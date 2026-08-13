@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Plus, Play, GitBranch, Terminal, Split, Hand, Zap, Repeat } from 'lucide-react'
-import { NODE_GLYPH } from '../node-visuals'
+import { NODE_GLYPH, NODE_SELECTED } from '../node-visuals'
 
 interface Props {
   onAddAction: () => void
@@ -46,7 +46,7 @@ export function ConnectorButton({
                     border transition-all z-10
                     ${
                       open
-                        ? 'bg-white/[0.08] border-white/40 text-white'
+                        ? `bg-white/[0.08] ${NODE_SELECTED} text-white`
                         : 'bg-surface-node border-white/[0.1] text-gray-500 hover:border-white/[0.2] hover:text-white'
                     }`}
       >

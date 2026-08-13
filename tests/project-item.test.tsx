@@ -175,7 +175,7 @@ describe('ProjectItem progress-toast handlers', () => {
     const { container } = renderProjectItem()
     await waitFor(() => expect(mockIsGitRepo).toHaveBeenCalled())
     const buttons = Array.from(container.querySelectorAll('button[type="button"]'))
-    const wtButton = buttons.find((b) => b.querySelector('.text-amber-400\\/70')) as HTMLElement
+    const wtButton = buttons.find((b) => b.querySelector('.text-ink-secondary')) as HTMLElement
     act(() => {
       fireEvent.click(wtButton)
     })

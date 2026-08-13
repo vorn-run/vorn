@@ -22,6 +22,7 @@ import {
   NODE_SELECTED,
   NODE_UNSELECTED
 } from '../src/renderer/components/workflow-editor/node-visuals'
+import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
 
 /**
  * Every card that can be selected, rendered both ways.
@@ -90,4 +91,54 @@ describe('node card selection', () => {
       cleanup()
     })
   }
+
+  it('shows its own execution status on every card that has one', () => {
+    // The dot is how a run reports itself on the canvas. Three cards had no
+    // test rendering them mid-run at all, so a card that silently stopped
+    // showing status would have looked like a card that had not started.
+    const withStatus: [string, React.ReactElement][] = [
+      [
+        'LoopNode',
+        <LoopNode label="L" config={{}} nodes={[]} executionStatus="running" onClick={vi.fn()} />
+      ],
+      [
+        'CreateTaskFromItemNode',
+        <CreateTaskFromItemNode label="Ct" config={{}} executionStatus="error" onClick={vi.fn()} />
+      ],
+      [
+        'CallConnectorActionNode',
+        <CallConnectorActionNode
+          label="Cc"
+          config={{}}
+          executionStatus="waiting"
+          onClick={vi.fn()}
+        />
+      ]
+    ]
+    const expected = [
+      WORKFLOW_STATUS_DOT.running,
+      WORKFLOW_STATUS_DOT.error,
+      WORKFLOW_STATUS_DOT.waiting
+    ]
+    withStatus.forEach(([, element], i) => {
+      const { container } = render(element)
+      expect(container.querySelector(`.${expected[i]}`)).toBeInTheDocument()
+      cleanup()
+    })
+  })
+
+  it('gives every card the same shell', () => {
+    // Two of the eight had drifted to rounded-sm and sat visibly different
+    // beside the rest on one canvas. Selection is pinned by the constant above;
+    // nothing was watching the shape they are all drawn in.
+    const shells = CARDS.map(([, renderCard]) => {
+      const { container } = render(renderCard(false))
+      const cls = (container.firstChild as HTMLElement).className
+      cleanup()
+      return ['rounded-md', 'px-3', 'py-2.5', 'w-[280px]'].filter((c) => cls.includes(c))
+    })
+    for (const found of shells) {
+      expect(found).toEqual(['rounded-md', 'px-3', 'py-2.5', 'w-[280px]'])
+    }
+  })
 })

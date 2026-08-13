@@ -30,7 +30,7 @@ export function WorkflowInputFields({ defs, values, onChange }: Props) {
             {def.type !== 'boolean' && (
               <label className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-2 block">
                 {label}
-                {def.required && <span className="text-red-400 ml-1">*</span>}
+                {def.required && <span className="text-danger ml-1">*</span>}
               </label>
             )}
 

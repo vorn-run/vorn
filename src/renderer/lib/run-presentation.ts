@@ -6,11 +6,7 @@ import type {
   WorkflowExecution,
   WorkflowNode
 } from '../../shared/types'
-import {
-  WORKFLOW_STATUS_DOT,
-  WORKFLOW_OUTCOME_TEXT,
-  type WorkflowStatusKey
-} from './workflow-status'
+import { WORKFLOW_STATUS_DOT, type WorkflowStatusKey, type RunOutcomeTone } from './workflow-status'
 import type { RunBucket } from '../stores/types'
 
 /**
@@ -213,15 +209,12 @@ function verdictOf(execution: WorkflowExecution): string | undefined {
   return undefined
 }
 
-export type RunOutcomeTone = 'success' | 'error' | 'waiting' | 'running' | 'neutral'
+export type { RunOutcomeTone } from './workflow-status'
+export { outcomeToneClass } from './workflow-status'
 
 export interface RunOutcome {
   label: string
   tone: RunOutcomeTone
-}
-
-export function outcomeToneClass(tone: RunOutcomeTone): string {
-  return WORKFLOW_OUTCOME_TEXT[tone]
 }
 
 /**

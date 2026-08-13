@@ -1,9 +1,12 @@
 /**
  * How a run asks to be let through.
  *
- * The run pane and the inline trace both render this pair, and they disagreed:
- * approve was blue in one and green in the other, so the same decision looked
- * like two different decisions depending on where you happened to be reading.
+ * Three places render this decision — the run pane, the inline trace, and the
+ * approval pill on a session card — and they disagreed: approve was blue in
+ * one and green in another, so the same decision looked like two different
+ * decisions depending on where you happened to be reading. The pill keeps its
+ * own icon-button sizing (see `icon-button.ts`) because it sits in a 26px
+ * strip, but it takes the same two tones.
  *
  * Approve carries the accent because a waiting gate is the definition of work
  * blocked on the person — it is the one affordance in a workflow that bronzo

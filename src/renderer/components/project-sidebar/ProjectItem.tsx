@@ -309,7 +309,7 @@ export function ProjectItem({
                       }}
                       className="text-gray-500 hover:text-white p-0.5 rounded hover:bg-white/[0.08] transition-colors disabled:opacity-50"
                     >
-                      <FolderGit2 size={14} strokeWidth={1.5} className="text-amber-400/70" />
+                      <FolderGit2 size={14} strokeWidth={1.5} className="text-ink-secondary" />
                     </button>
                   </Tooltip>
                 )}

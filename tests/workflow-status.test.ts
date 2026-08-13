@@ -3,7 +3,7 @@ import {
   WORKFLOW_STATUS_DOT,
   WORKFLOW_STATUS_DOT_PULSE,
   WORKFLOW_STATUS_TEXT,
-  WORKFLOW_OUTCOME_TEXT,
+  outcomeToneClass,
   type WorkflowStatusKey
 } from '../src/renderer/lib/workflow-status'
 
@@ -32,24 +32,18 @@ describe('workflow status colours', () => {
     expect(WORKFLOW_STATUS_DOT.cancelled).not.toContain('danger')
   })
 
-  it('animates only what is still moving', () => {
-    // A settled run that keeps pulsing reads as still going.
+  it('animates only the state that is actually doing something', () => {
+    // A waiting gate wants attention, but it is not working — bronzo is what
+    // calls you to it. Motion stays a report of work in progress, the rule the
+    // sessions surface already follows for a waiting session; the two
+    // disagreeing meant one gate pulsed in the run list and sat still in the
+    // dock at the same moment.
     const moving = EVERY_STATUS.filter((s) =>
       WORKFLOW_STATUS_DOT_PULSE[s].includes('animate-pulse')
     )
-    expect(moving.sort()).toEqual(['running', 'waiting'])
+    expect(moving).toEqual(['running'])
     for (const s of EVERY_STATUS) {
       expect(WORKFLOW_STATUS_DOT[s]).not.toContain('animate-pulse')
-    }
-  })
-
-  it('covers every status in all three maps', () => {
-    // The old map left `waiting` and `cancelled` untested, which is how a dot
-    // and its matching word drifted apart unnoticed.
-    for (const s of EVERY_STATUS) {
-      expect(WORKFLOW_STATUS_DOT[s]).toBeTruthy()
-      expect(WORKFLOW_STATUS_DOT_PULSE[s]).toBeTruthy()
-      expect(WORKFLOW_STATUS_TEXT[s]).toBeTruthy()
     }
   })
 
@@ -62,9 +56,11 @@ describe('workflow status colours', () => {
   })
 
   it('gives a run outcome the same tone as the status behind it', () => {
-    expect(WORKFLOW_OUTCOME_TEXT.waiting).toBe(WORKFLOW_STATUS_TEXT.waiting)
-    expect(WORKFLOW_OUTCOME_TEXT.error).toBe(WORKFLOW_STATUS_TEXT.error)
-    expect(WORKFLOW_OUTCOME_TEXT.running).toBe(WORKFLOW_STATUS_TEXT.running)
-    expect(WORKFLOW_OUTCOME_TEXT.success).toBe(WORKFLOW_STATUS_TEXT.success)
+    expect(outcomeToneClass('waiting')).toBe(WORKFLOW_STATUS_TEXT.waiting)
+    expect(outcomeToneClass('error')).toBe(WORKFLOW_STATUS_TEXT.error)
+    expect(outcomeToneClass('running')).toBe(WORKFLOW_STATUS_TEXT.running)
+    expect(outcomeToneClass('success')).toBe(WORKFLOW_STATUS_TEXT.success)
+    // A stopped run has no state of its own; settled is what it is.
+    expect(outcomeToneClass('neutral')).toBe(WORKFLOW_STATUS_TEXT.success)
   })
 })

@@ -52,8 +52,8 @@ export function ProjectContextMenu({
             onClose()
             toast.success(`Project "${project.name}" deleted`)
           }}
-          className="w-full px-3 py-2.5 text-left text-[13px] text-red-300 bg-red-500/10
-                     hover:bg-red-500/20 active:bg-red-500/30 flex items-center gap-2 transition-colors"
+          className="w-full px-3 py-2.5 text-left text-[13px] text-danger bg-danger/10
+                     hover:bg-danger/20 active:bg-danger/30 flex items-center gap-2 transition-colors"
         >
           <Trash2 size={12} strokeWidth={1.5} />
           Confirm delete?
@@ -61,7 +61,7 @@ export function ProjectContextMenu({
       ) : (
         <button
           onClick={() => setConfirmDelete(true)}
-          className="w-full px-3 py-2.5 text-left text-[13px] text-red-400 hover:text-red-300
+          className="w-full px-3 py-2.5 text-left text-[13px] text-danger hover:text-danger/80
                      hover:bg-white/[0.06] active:bg-white/[0.1] flex items-center gap-2 transition-colors"
         >
           <Trash2 size={12} strokeWidth={1.5} />

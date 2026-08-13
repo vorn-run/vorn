@@ -22,7 +22,7 @@ import { ApprovalConfigForm } from './ApprovalConfigForm'
 import { LoopConfigForm } from './LoopConfigForm'
 import { CreateTaskFromItemNodeForm } from './CreateTaskFromItemNodeForm'
 import { CallConnectorActionNodeForm } from './CallConnectorActionNodeForm'
-import { NODE_TYPE_VISUAL, NODE_GLYPH } from '../node-visuals'
+import { NODE_TYPE_ICON, NODE_GLYPH } from '../node-visuals'
 import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 
 interface Props {
@@ -67,8 +67,8 @@ export function NodeConfigPanel({
     return () => document.removeEventListener('pointerdown', handler)
   }, [showMenu])
 
-  const tc = NODE_TYPE_VISUAL[node.type]
-  const Icon = tc.icon
+  const tc = NODE_TYPE_ICON[node.type]
+  const Icon = tc
   const canDelete = node.type !== 'trigger'
 
   // For connector-action nodes the generic Zap is uninformative — show the
@@ -87,7 +87,7 @@ export function NodeConfigPanel({
             connectorId={headerConnectorId}
             icon={headerConnectorIcon}
             size={14}
-            className="text-gray-300 shrink-0"
+            className={`${NODE_GLYPH} shrink-0`}
           />
         ) : (
           <Icon size={14} className={`${NODE_GLYPH} shrink-0`} />

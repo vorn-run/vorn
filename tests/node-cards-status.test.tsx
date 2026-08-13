@@ -3,7 +3,6 @@ import { describe, it, expect, vi } from 'vitest'
 import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
 import { render } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { NODE_SELECTED } from '../src/renderer/components/workflow-editor/node-visuals'
 
 const mockConfig = { remoteHosts: [] as Array<{ id: string; label: string }> }
 vi.mock('../src/renderer/stores', () => ({
@@ -67,14 +66,5 @@ describe('node cards — executionStatus dot', () => {
       <TriggerNode label="T" config={{ triggerType: 'manual' }} onClick={vi.fn()} />
     )
     expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.success}`)).not.toBeInTheDocument()
-  })
-
-  it('marks the selected node with a border, not the accent', () => {
-    const { container } = render(
-      <ScriptNode label="S" config={{ scriptType: 'bash' }} selected onClick={vi.fn()} />
-    )
-    // Bronzo means work is blocked on the person; selecting a node is neither.
-    expect(container.querySelector(`.${NODE_SELECTED.replace('/', '\\/')}`)).toBeInTheDocument()
-    expect(container.querySelector('[class*="bronzo"]')).toBeNull()
   })
 })

@@ -12,17 +12,15 @@ import {
 } from '../../../shared/types'
 
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
-import {
-  WORKFLOW_STATUS_DOT_PULSE as SHARED_STATUS_DOTS,
-  WORKFLOW_STATUS_DOT
-} from '../../lib/workflow-status'
+import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
 import { approveWorkflowGate, rejectWorkflowGate } from '../../lib/workflow-execution'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { useConnections } from '../../lib/use-connections'
 import {
-  NODE_TYPE_VISUAL,
+  NODE_TYPE_ICON,
+  TASK_CHIP,
   nodeConnectionId,
   stepMeta,
   stepTimeline,
@@ -51,7 +49,7 @@ export function StatusDot({
       role="img"
       aria-label={label}
       title={label}
-      className={`w-2 h-2 rounded-full shrink-0 ${SHARED_STATUS_DOTS[status] ?? WORKFLOW_STATUS_DOT.pending}`}
+      className={`w-2 h-2 rounded-full shrink-0 ${WORKFLOW_STATUS_DOT_PULSE[status] ?? WORKFLOW_STATUS_DOT.pending}`}
     />
   )
 }
@@ -76,9 +74,9 @@ function StepIcon({
   if (connectorId) {
     return <ConnectorIcon connectorId={connectorId} size={12} className="text-gray-400 shrink-0" />
   }
-  const visual = node ? NODE_TYPE_VISUAL[node.type] : undefined
+  const visual = node ? NODE_TYPE_ICON[node.type] : undefined
   if (!visual) return null
-  const Icon = visual.icon
+  const Icon = visual
   // Deliberately neutral: a trace is read for its status dots, and tinting
   // every step by node type turns the list into a rainbow that competes with
   // them. The glyph carries the type; the colour carries the outcome.
@@ -254,7 +252,7 @@ export function RunStepsList({
                       </span>
                       {nodeTask && (
                         <span
-                          className="text-[10px] px-1.5 py-0.5 border border-white/[0.08] rounded text-ink-secondary truncate max-w-[80px] cursor-pointer hover:bg-white/[0.06] transition-colors"
+                          className={`${TASK_CHIP} max-w-[80px]`}
                           onClick={(e) => {
                             e.stopPropagation()
                             onClickTask?.(nodeTask.id)
@@ -484,7 +482,7 @@ export function RunEntry({
           </span>
           {triggerTask && (
             <span
-              className="text-[10px] px-1.5 py-0.5 border border-white/[0.08] rounded text-ink-secondary truncate max-w-[100px] shrink-0 cursor-pointer hover:bg-white/[0.06] transition-colors"
+              className={`${TASK_CHIP} max-w-[100px] shrink-0`}
               onClick={(e) => {
                 e.stopPropagation()
                 onClickTask?.(triggerTask.id)

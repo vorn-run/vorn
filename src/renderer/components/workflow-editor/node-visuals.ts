@@ -3,19 +3,20 @@ import type { LucideIcon } from 'lucide-react'
 import type { NodeExecutionState, WorkflowNode } from '../../../shared/types'
 
 /**
- * How a workflow node presents itself — one glyph and label per node type,
- * shared by the canvas, the config panel and the run trace so a step looks the
- * same wherever it is read.
+ * The glyph for each node type, shared by the canvas, the config panel and the
+ * run trace so a step looks the same wherever it is read. The label that used
+ * to ride along here had no readers — every call site takes its wording from
+ * the node's own `label`.
  */
-export const NODE_TYPE_VISUAL: Record<WorkflowNode['type'], { icon: LucideIcon; label: string }> = {
-  trigger: { icon: Zap, label: 'Trigger' },
-  launchAgent: { icon: Play, label: 'Agent' },
-  script: { icon: Terminal, label: 'Script' },
-  condition: { icon: GitFork, label: 'Condition' },
-  approval: { icon: Hand, label: 'Approval' },
-  createTaskFromItem: { icon: ListPlus, label: 'Create Task' },
-  callConnectorAction: { icon: Zap, label: 'Connector Action' },
-  loop: { icon: Repeat, label: 'Loop' }
+export const NODE_TYPE_ICON: Record<WorkflowNode['type'], LucideIcon> = {
+  trigger: Zap,
+  launchAgent: Play,
+  script: Terminal,
+  condition: GitFork,
+  approval: Hand,
+  createTaskFromItem: ListPlus,
+  callConnectorAction: Zap,
+  loop: Repeat
 }
 
 /**
@@ -221,3 +222,11 @@ export function stepTimeline(
  */
 export const NODE_SELECTED = 'border-white/40'
 export const NODE_UNSELECTED = 'border-white/[0.08]'
+
+/**
+ * A link to something outside the run — the task a step created, the task that
+ * triggered it. These were blue and violet respectively, which read as two
+ * kinds of thing; they are the same kind of thing, so they read the same.
+ */
+export const TASK_CHIP =
+  'text-[10px] px-1.5 py-0.5 border border-white/[0.08] rounded text-ink-secondary truncate cursor-pointer hover:bg-white/[0.06] transition-colors'

@@ -271,7 +271,7 @@ export function LaunchAgentConfigForm({
           <div>
             <div className="flex items-center gap-1.5 px-3 py-2 bg-white/[0.06] border border-white/[0.1] rounded-md">
               {branchIsFromContext ? (
-                <Zap size={12} color="#60a5fa" className="shrink-0" />
+                <Zap size={12} className="text-ink shrink-0" />
               ) : (
                 <GitBranch size={12} strokeWidth={2} className="text-gray-500 shrink-0" />
               )}

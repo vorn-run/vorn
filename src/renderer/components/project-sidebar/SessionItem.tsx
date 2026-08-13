@@ -124,7 +124,7 @@ export function SessionItem({
         }}
         className={`${
           hasFilesPane
-            ? 'opacity-100 text-amber-400/80'
+            ? 'opacity-100 text-bronzo'
             : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
         } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
       >
@@ -140,7 +140,7 @@ export function SessionItem({
         }}
         className={`${
           hasBrowserPane
-            ? 'opacity-100 text-amber-400/80'
+            ? 'opacity-100 text-bronzo'
             : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
         } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
       >
@@ -164,7 +164,7 @@ export function SessionItem({
           }}
           className={`${
             hasDevicePane
-              ? 'opacity-100 text-amber-400/80'
+              ? 'opacity-100 text-bronzo'
               : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
           } ${
             claiming ? 'opacity-100 cursor-wait' : ''

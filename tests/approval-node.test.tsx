@@ -4,7 +4,6 @@ import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { ApprovalNode } from '../src/renderer/components/workflow-editor/nodes/ApprovalNode'
-import { NODE_SELECTED } from '../src/renderer/components/workflow-editor/node-visuals'
 
 describe('ApprovalNode', () => {
   it('renders label and default subtitle when no timeout', () => {
@@ -56,12 +55,5 @@ describe('ApprovalNode', () => {
       <ApprovalNode label="Gate" config={{}} executionStatus="waiting" onClick={vi.fn()} />
     )
     expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.waiting}`)).toBeTruthy()
-  })
-
-  it('applies selected border when selected', () => {
-    const { container } = render(
-      <ApprovalNode label="Gate" config={{}} selected onClick={vi.fn()} />
-    )
-    expect(container.querySelector(`[class*="${NODE_SELECTED}"]`)).toBeTruthy()
   })
 })
