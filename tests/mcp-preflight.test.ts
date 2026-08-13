@@ -97,3 +97,22 @@ describe('preflightMcpConnection', () => {
     expect(await preflightMcpConnection(conn)).toEqual({ ok: false })
   })
 })
+
+/**
+ * The RPC around the probe. Its `ok: null` has one meaning — "this connector
+ * declares no preflight" — and everything else has to stay distinguishable
+ * from it, because that is the reading a user takes as reassurance.
+ */
+describe('the connection:preflight contract', () => {
+  it('reserves ok: null for a connector that declares no preflight', async () => {
+    listTools.mockResolvedValue({ tools: [{ name: 'poll_issues' }] })
+    expect(await preflightMcpConnection(conn)).toEqual({ ok: null })
+  })
+
+  // Regression: a failure to start the connector at all must not be reported
+  // as a passing check, nor as "nothing to check".
+  it('reports a connector that will not launch as a failed check', async () => {
+    listTools.mockRejectedValue(new Error('spawn npx ENOENT'))
+    await expect(preflightMcpConnection(conn)).rejects.toThrow('spawn npx ENOENT')
+  })
+})

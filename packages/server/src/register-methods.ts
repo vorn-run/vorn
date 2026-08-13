@@ -916,7 +916,14 @@ export function registerAllMethods(): void {
    */
   registerMethod('connection:preflight', async (connectionId: string) => {
     const conn = dbGetSourceConnection(connectionId)
-    if (!conn || conn.connectorId !== MCP_CONNECTOR_ID) return { ok: null }
+    // A connection that does not exist is a caller error, not an answer about
+    // readiness. Returning `ok: null` for it would file a stale or mistyped id
+    // under "nothing to check" — the one reading a user is most likely to take
+    // as reassurance.
+    if (!conn) throw new Error(`connection ${connectionId} not found`)
+    // A built-in connector genuinely declares no preflight, so this really is
+    // "nothing to check".
+    if (conn.connectorId !== MCP_CONNECTOR_ID) return { ok: null }
     try {
       return await preflightMcpConnection(conn)
     } catch (err) {

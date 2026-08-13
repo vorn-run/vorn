@@ -108,7 +108,13 @@ export function createConnectorServer(
       {
         description: `Check whether ${connector.name} can run right now`,
         inputSchema: {},
-        outputSchema: z.looseObject({})
+        // Declared rather than left open like the manifest's: this shape is
+        // fixed, so a caller can validate against it. Still loose, because a
+        // connector adding a field of its own should not fail the call.
+        outputSchema: z.looseObject({
+          ok: z.boolean().describe('Whether the connector could run right now'),
+          message: z.string().optional().describe('What to do about it, when it could not')
+        })
       },
       async () => {
         // A throw is the connector saying "broken", not "not set up yet", and

@@ -310,7 +310,8 @@ export interface RequestMethods {
   }
   /** Ask a packaged connection whether it could run right now. `ok: null`
    *  means the connector declares no preflight — nothing to check, which is
-   *  not the same answer as "checked, fine". */
+   *  not the same answer as "checked, fine". Throws for a connection that does
+   *  not exist, so a stale id cannot read as "nothing to check". */
   'connection:preflight': {
     params: string
     result: { ok: boolean | null; message?: string }
