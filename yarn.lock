@@ -3786,16 +3786,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tiptap/extension-code-block-lowlight@npm:^3.27.4":
-  version: 3.27.4
-  resolution: "@tiptap/extension-code-block-lowlight@npm:3.27.4"
+"@tiptap/extension-code-block-lowlight@npm:^3.29.2":
+  version: 3.29.2
+  resolution: "@tiptap/extension-code-block-lowlight@npm:3.29.2"
   peerDependencies:
-    "@tiptap/core": 3.27.4
-    "@tiptap/extension-code-block": 3.27.4
-    "@tiptap/pm": 3.27.4
+    "@tiptap/core": 3.29.2
+    "@tiptap/extension-code-block": 3.29.2
+    "@tiptap/pm": 3.29.2
     highlight.js: ^11
     lowlight: ^2 || ^3
-  checksum: 10c0/ca68c3bd4bca4a9b6f5b4b8d5e463944a9f5c81571d9b66a57ace163b97bb3a406416d62f7ae5a710b49e76fd8cda1fbffb3e67db190d8b21cf6f26e6aff8797
+  checksum: 10c0/8b89f1a059a5cf3fbc375cd8f04f1b49b5b25d30e50c7de49be56e3bb4134e31ec2c49331e4dfd40db65f8ed267395147260e35a6f960278e8002e206a9f72ad
   languageName: node
   linkType: hard
 
@@ -12818,7 +12818,7 @@ __metadata:
     "@testing-library/user-event": "npm:^14.6.1"
     "@tiptap/core": "npm:^3.27.4"
     "@tiptap/extension-code-block": "npm:^3.29.2"
-    "@tiptap/extension-code-block-lowlight": "npm:^3.27.4"
+    "@tiptap/extension-code-block-lowlight": "npm:^3.29.2"
     "@tiptap/extension-link": "npm:^3.27.4"
     "@tiptap/extension-list": "npm:^3.27.4"
     "@tiptap/extension-placeholder": "npm:^3.29.2"
