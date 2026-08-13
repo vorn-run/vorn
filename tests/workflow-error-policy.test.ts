@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   stopsRunOnError,
   buildGraph,
-  collectSkippedBranch
+  collectSkippedBranch,
+  skipEntryPoints
 } from '../src/renderer/lib/workflow-execution'
 
 /**
@@ -88,5 +89,58 @@ describe('collectSkippedBranch', () => {
       'a'
     )
     expect([...skipped].sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('skipEntryPoints', () => {
+  // collectSkippedBranch guards every hop it takes, but not the node it is
+  // handed. The engine used to hand it each edge target directly, so a join
+  // sitting one hop below the failure was skipped no matter who else fed it —
+  // and the live path into that join died with no error anywhere.
+  const entries = (
+    edges: Array<{ source: string; target: string }>,
+    failed: string,
+    settled: string[] = []
+  ) =>
+    skipEntryPoints(failed, edges, buildGraph(edges).predecessors, (id) =>
+      settled.includes(id)
+    ).sort()
+
+  it('leaves a join one hop down alone while another predecessor is live', () => {
+    // a → join and b → join; `a` failed, `b` has not run. The join must survive.
+    expect(
+      entries(
+        [
+          { source: 'a', target: 'join' },
+          { source: 'b', target: 'join' }
+        ],
+        'a'
+      )
+    ).toEqual([])
+  })
+
+  it('takes that join once every other predecessor has settled', () => {
+    expect(
+      entries(
+        [
+          { source: 'a', target: 'join' },
+          { source: 'b', target: 'join' }
+        ],
+        'a',
+        ['b']
+      )
+    ).toEqual(['join'])
+  })
+
+  it('takes a plain successor that only the failed node feeds', () => {
+    expect(
+      entries(
+        [
+          { source: 'a', target: 'b' },
+          { source: 'a', target: 'c' }
+        ],
+        'a'
+      )
+    ).toEqual(['b', 'c'])
   })
 })

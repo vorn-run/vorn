@@ -1341,7 +1341,7 @@ async function executeNode(
  * Absent means stop — see WorkflowNodeErrorPolicy for why that is the default
  * rather than the continue-everything behaviour this replaced.
  */
-export function stopsRunOnError(node: Pick<WorkflowNode, 'onError'>): boolean {
+export function stopsRunOnError(node: Partial<Pick<WorkflowNode, 'onError'>>): boolean {
   return (node.onError ?? 'stop') === 'stop'
 }
 
@@ -1379,6 +1379,32 @@ export function collectSkippedBranch(
     }
   }
   return skipped
+}
+
+/**
+ * The entry points into the branch a failed node feeds.
+ *
+ * collectSkippedBranch applies a join guard to every hop it takes, but not to
+ * the node it is handed — so the first hop has to be filtered here. Without it,
+ * a join directly below the failure is skipped even when another predecessor is
+ * still live and about to feed it, and that path dies silently.
+ */
+export function skipEntryPoints(
+  failedNodeId: string,
+  edges: { source: string; target: string }[],
+  predecessors: Map<string, string[]>,
+  isSettled: (nodeId: string) => boolean
+): string[] {
+  const entries: string[] = []
+  for (const edge of edges) {
+    if (edge.source !== failedNodeId) continue
+    const otherPreds = (predecessors.get(edge.target) || []).filter(
+      (p) => p !== failedNodeId && !isSettled(p)
+    )
+    if (otherPreds.length > 0) continue
+    entries.push(edge.target)
+  }
+  return entries
 }
 
 export async function executeWorkflow(
@@ -1693,10 +1719,16 @@ async function runExecution(
         // by another live path are left alone — collectSkippedBranch only takes
         // those whose remaining predecessors are already settled.
         if (postState?.status === 'error' && stopsRunOnError(node)) {
-          for (const edge of workflow.edges) {
-            if (edge.source !== node.id) continue
-            markSkippedBranch(edge.target)
-          }
+          // The first hop needs the same join guard collectSkippedBranch applies
+          // to every later hop: entering a join directly would skip it even when
+          // another predecessor is still live and about to feed it.
+          const entries = skipEntryPoints(
+            node.id,
+            workflow.edges,
+            predecessorsMap,
+            (id) => completed.has(id) || skippedByCondition.has(id)
+          )
+          for (const entry of entries) markSkippedBranch(entry)
           for (const skippedId of skippedByCondition) {
             const ns = execution.nodeStates.find((s) => s.nodeId === skippedId)
             if (ns?.status !== 'pending') continue
