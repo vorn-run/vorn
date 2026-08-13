@@ -273,7 +273,7 @@ export function VariableAutocomplete({
           rows={rows}
           spellCheck={false}
           className={`w-full px-3 py-2 text-[13px] bg-white/[0.06] border border-white/[0.1] rounded-md
-                     text-white placeholder:text-gray-600 focus:outline-none focus:border-blue-500/50
+                     text-white placeholder:text-gray-600 focus:outline-none focus:border-white/[0.2]
                      resize-none ${mono ? 'font-mono text-[12px]' : ''} ${className || ''}`}
         />
 
@@ -316,7 +316,7 @@ export function VariableAutocomplete({
               placeholder="Filter variables..."
               className="w-full px-2 py-1 text-[12px] bg-white/[0.06] border border-white/[0.08]
                          rounded text-gray-300 placeholder:text-gray-600 focus:outline-none
-                         focus:border-blue-500/40"
+                         focus:border-white/[0.2]"
               autoFocus={false}
             />
           </div>

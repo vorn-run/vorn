@@ -3,6 +3,7 @@ import type { LaunchAgentConfig, AiAgentType, NodeExecutionStatus } from '../../
 import { useAppStore } from '../../../stores'
 import { ClipboardList, Server } from 'lucide-react'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
+import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from '../node-visuals'
 
 interface Props {
   label: string
@@ -36,7 +37,7 @@ export function LaunchAgentNode({ label, config, selected, executionStatus, onCl
         onClick()
       }}
       className={`relative px-3 py-2.5 rounded-md border w-[280px] transition-all cursor-pointer
-                  ${selected ? 'border-blue-500/60 shadow-[0_0_0_3px_rgba(59,130,246,0.08)]' : 'border-white/[0.08]'}
+                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
       {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (
@@ -47,7 +48,7 @@ export function LaunchAgentNode({ label, config, selected, executionStatus, onCl
       <div className="flex items-center gap-2">
         <span className="shrink-0">
           {isFromTask ? (
-            <ClipboardList size={14} className="text-blue-400" />
+            <ClipboardList size={14} className={NODE_GLYPH} />
           ) : (
             <AgentIcon agentType={config.agentType as AiAgentType} size={14} />
           )}
@@ -60,8 +61,8 @@ export function LaunchAgentNode({ label, config, selected, executionStatus, onCl
           </div>
           {remoteHost && (
             <div className="flex items-center gap-1 mt-0.5">
-              <Server size={9} className="text-blue-400" strokeWidth={1.5} />
-              <span className="text-[10px] text-blue-400 truncate">{remoteHost.label}</span>
+              <Server size={9} className="text-ink-faint" strokeWidth={1.5} />
+              <span className="text-[10px] text-ink-faint truncate">{remoteHost.label}</span>
             </div>
           )}
         </div>

@@ -1,6 +1,7 @@
 import { Terminal, Code2 } from 'lucide-react'
 import type { ScriptConfig, NodeExecutionStatus } from '../../../../shared/types'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
+import { NODE_SELECTED, NODE_UNSELECTED } from '../node-visuals'
 
 interface Props {
   label: string
@@ -42,7 +43,7 @@ export function ScriptNode({ label, config, selected, executionStatus, onClick }
         onClick()
       }}
       className={`relative px-3 py-2.5 rounded-md border w-[280px] transition-all cursor-pointer
-                  ${selected ? 'border-blue-500/60 shadow-[0_0_0_3px_rgba(59,130,246,0.08)]' : 'border-white/[0.08]'}
+                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
       {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (

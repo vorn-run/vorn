@@ -3,6 +3,7 @@ import type { CallConnectorActionConfig, NodeExecutionStatus } from '../../../..
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
 import { ConnectorIcon } from '../../ConnectorIcon'
 import { useConnectorIdFor, useConnectionIconFor } from '../../../lib/use-connections'
+import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from '../node-visuals'
 
 interface Props {
   label: string
@@ -30,7 +31,7 @@ export function CallConnectorActionNode({
         onClick()
       }}
       className={`relative px-3 py-2.5 rounded-sm border w-[280px] transition-all cursor-pointer
-                  ${selected ? 'border-blue-500/60' : 'border-white/[0.08]'}
+                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
       {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (
@@ -44,10 +45,10 @@ export function CallConnectorActionNode({
             connectorId={connectorId}
             icon={icon}
             size={14}
-            className="text-gray-400 shrink-0"
+            className={`${NODE_GLYPH} shrink-0`}
           />
         ) : (
-          <Zap size={14} className="text-gray-400 shrink-0" strokeWidth={2} />
+          <Zap size={14} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />
         )}
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-white truncate">{label}</div>

@@ -24,6 +24,7 @@ beforeEach(() => {
 import { CreateTaskFromItemNode } from '../src/renderer/components/workflow-editor/nodes/CreateTaskFromItemNode'
 import { CallConnectorActionNode } from '../src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
 import { TriggerNode } from '../src/renderer/components/workflow-editor/nodes/TriggerNode'
+import { NODE_SELECTED } from '../src/renderer/components/workflow-editor/node-visuals'
 import type {
   CreateTaskFromItemConfig,
   CallConnectorActionConfig,
@@ -78,7 +79,7 @@ describe('CreateTaskFromItemNode', () => {
     const { container } = render(
       <CreateTaskFromItemNode label="n" config={config} selected onClick={() => {}} />
     )
-    expect((container.firstChild as HTMLElement).className).toContain('border-blue-500')
+    expect((container.firstChild as HTMLElement).className).toContain(NODE_SELECTED)
   })
 })
 

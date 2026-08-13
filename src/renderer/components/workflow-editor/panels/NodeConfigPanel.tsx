@@ -22,7 +22,7 @@ import { ApprovalConfigForm } from './ApprovalConfigForm'
 import { LoopConfigForm } from './LoopConfigForm'
 import { CreateTaskFromItemNodeForm } from './CreateTaskFromItemNodeForm'
 import { CallConnectorActionNodeForm } from './CallConnectorActionNodeForm'
-import { NODE_TYPE_VISUAL } from '../node-visuals'
+import { NODE_TYPE_VISUAL, NODE_GLYPH } from '../node-visuals'
 import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 
 interface Props {
@@ -90,7 +90,7 @@ export function NodeConfigPanel({
             className="text-gray-300 shrink-0"
           />
         ) : (
-          <Icon size={14} className={`${tc.color} shrink-0`} />
+          <Icon size={14} className={`${NODE_GLYPH} shrink-0`} />
         )}
         <input
           type="text"

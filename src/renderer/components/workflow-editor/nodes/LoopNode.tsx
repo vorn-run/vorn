@@ -1,6 +1,7 @@
 import { Repeat } from 'lucide-react'
 import type { LoopConfig, NodeExecutionStatus, WorkflowNode } from '../../../../shared/types'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
+import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from '../node-visuals'
 
 interface Props {
   label: string
@@ -43,7 +44,7 @@ export function LoopNode({
         onClick()
       }}
       className={`relative px-3 py-2.5 rounded-md border w-[280px] transition-all cursor-pointer
-                  ${selected ? 'border-blue-500/60 shadow-[0_0_0_3px_rgba(59,130,246,0.08)]' : 'border-white/[0.08]'}
+                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
                   ${body.length === 0 ? 'border-dashed' : ''}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
@@ -53,7 +54,7 @@ export function LoopNode({
         />
       )}
       <div className="flex items-center gap-2">
-        <Repeat size={14} className="shrink-0 text-gray-300" strokeWidth={2} />
+        <Repeat size={14} className={`shrink-0 ${NODE_GLYPH}`} strokeWidth={2} />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-white truncate">{label}</div>
           <div className="text-[11px] text-gray-500 truncate">{subtitle}</div>

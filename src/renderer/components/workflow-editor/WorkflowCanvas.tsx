@@ -24,6 +24,7 @@ import {
   CallConnectorActionConfig
 } from '../../../shared/types'
 import { computeFlowLayout, FlowRow } from '../../lib/workflow-helpers'
+import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from './node-visuals'
 
 export type AddableNodeType =
   | 'agent'
@@ -322,7 +323,7 @@ function LoopRenderer({
     <div
       data-loop-rail
       className={`w-[312px] rounded-lg border transition-all
-                  ${selected ? 'border-blue-500/60 shadow-[0_0_0_3px_rgba(59,130,246,0.08)]' : 'border-white/[0.08]'}
+                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
                   bg-surface-node`}
     >
       <div
@@ -333,7 +334,7 @@ function LoopRenderer({
         className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.06] cursor-pointer
                    hover:bg-white/[0.02] rounded-t-lg"
       >
-        <Repeat size={13} className="shrink-0 text-gray-300" strokeWidth={2} />
+        <Repeat size={13} className={`shrink-0 ${NODE_GLYPH}`} strokeWidth={2} />
         <span className="text-[12.5px] font-semibold text-white truncate flex-1">
           {row.loopNode.label}
         </span>
@@ -447,14 +448,11 @@ function ForkRenderer({
               className="flex flex-col items-center flex-1"
               style={{ minWidth: 310 }}
             >
+              {/* Both branches read the same. True was green and False red,
+                  which said one path is the good one and the other a failure —
+                  a condition is a fork, and the word already says which. */}
               {label && (
-                <div
-                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold mb-1 ${
-                    label === 'True'
-                      ? 'bg-green-500/20 text-green-400'
-                      : 'bg-red-500/20 text-red-400'
-                  }`}
-                >
+                <div className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold mb-1 border border-white/[0.08] text-ink-secondary">
                   {label}
                 </div>
               )}

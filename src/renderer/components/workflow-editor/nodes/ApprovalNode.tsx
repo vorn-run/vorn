@@ -1,6 +1,7 @@
 import { Hand } from 'lucide-react'
 import type { ApprovalConfig, NodeExecutionStatus } from '../../../../shared/types'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
+import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from '../node-visuals'
 
 interface Props {
   label: string
@@ -22,7 +23,7 @@ export function ApprovalNode({ label, config, selected, executionStatus, onClick
         onClick()
       }}
       className={`relative px-3 py-2.5 rounded-md border w-[280px] transition-all cursor-pointer
-                  ${selected ? 'border-blue-500/60 shadow-[0_0_0_3px_rgba(59,130,246,0.08)]' : 'border-white/[0.08]'}
+                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
       {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (
@@ -31,7 +32,7 @@ export function ApprovalNode({ label, config, selected, executionStatus, onClick
         />
       )}
       <div className="flex items-center gap-2">
-        <Hand size={14} className="shrink-0 text-amber-400" strokeWidth={2} />
+        <Hand size={14} className={`shrink-0 ${NODE_GLYPH}`} strokeWidth={2} />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-white truncate">{label}</div>
           <div className="text-[11px] text-gray-500 truncate">{subtitle}</div>

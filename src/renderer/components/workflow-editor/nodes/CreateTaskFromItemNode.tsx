@@ -1,6 +1,7 @@
 import { ListPlus } from 'lucide-react'
 import type { CreateTaskFromItemConfig, NodeExecutionStatus } from '../../../../shared/types'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
+import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from '../node-visuals'
 
 interface Props {
   label: string
@@ -27,7 +28,7 @@ export function CreateTaskFromItemNode({
         onClick()
       }}
       className={`relative px-3 py-2.5 rounded-sm border w-[280px] transition-all cursor-pointer
-                  ${selected ? 'border-blue-500/60' : 'border-white/[0.08]'}
+                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
       {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (
@@ -36,7 +37,7 @@ export function CreateTaskFromItemNode({
         />
       )}
       <div className="flex items-center gap-2">
-        <ListPlus size={14} className="text-gray-400 shrink-0" strokeWidth={2} />
+        <ListPlus size={14} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-white truncate">{label}</div>
           <div className="text-[11px] text-gray-500 truncate">

@@ -20,7 +20,7 @@ export function ApprovalConfigForm({ config, onChange }: Props) {
           rows={3}
           className="w-full px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-md
                      text-[13px] text-gray-200 placeholder:text-gray-600
-                     focus:outline-none focus:border-blue-500/50 resize-none"
+                     focus:outline-none focus:border-white/[0.2] resize-none"
         />
       </div>
 
@@ -41,7 +41,7 @@ export function ApprovalConfigForm({ config, onChange }: Props) {
           placeholder="Leave blank to wait forever"
           className="w-full px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-md
                      text-[13px] text-gray-200 placeholder:text-gray-600
-                     focus:outline-none focus:border-blue-500/50"
+                     focus:outline-none focus:border-white/[0.2]"
         />
         <div className="mt-1.5 text-[11px] text-gray-500">
           Auto-rejects the gate if nobody approves in time.

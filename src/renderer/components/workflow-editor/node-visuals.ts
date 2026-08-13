@@ -3,38 +3,32 @@ import type { LucideIcon } from 'lucide-react'
 import type { NodeExecutionState, WorkflowNode } from '../../../shared/types'
 
 /**
- * How a workflow node presents itself — one glyph and colour per node type,
- * shared by the config panel and the run trace so a step looks the same
- * wherever it is read.
+ * How a workflow node presents itself — one glyph and label per node type,
+ * shared by the canvas, the config panel and the run trace so a step looks the
+ * same wherever it is read.
  */
-export const NODE_TYPE_VISUAL: Record<
-  WorkflowNode['type'],
-  { icon: LucideIcon; label: string; color: string; bg: string }
-> = {
-  trigger: { icon: Zap, label: 'Trigger', color: 'text-blue-400', bg: 'bg-blue-500/10' },
-  launchAgent: { icon: Play, label: 'Agent', color: 'text-green-400', bg: 'bg-green-500/10' },
-  script: { icon: Terminal, label: 'Script', color: 'text-amber-400', bg: 'bg-amber-500/10' },
-  condition: {
-    icon: GitFork,
-    label: 'Condition',
-    color: 'text-purple-400',
-    bg: 'bg-purple-500/10'
-  },
-  approval: { icon: Hand, label: 'Approval', color: 'text-amber-400', bg: 'bg-amber-500/10' },
-  createTaskFromItem: {
-    icon: ListPlus,
-    label: 'Create Task',
-    color: 'text-gray-300',
-    bg: 'bg-white/[0.06]'
-  },
-  callConnectorAction: {
-    icon: Zap,
-    label: 'Connector Action',
-    color: 'text-gray-300',
-    bg: 'bg-white/[0.06]'
-  },
-  loop: { icon: Repeat, label: 'Loop', color: 'text-gray-300', bg: 'bg-white/[0.06]' }
+export const NODE_TYPE_VISUAL: Record<WorkflowNode['type'], { icon: LucideIcon; label: string }> = {
+  trigger: { icon: Zap, label: 'Trigger' },
+  launchAgent: { icon: Play, label: 'Agent' },
+  script: { icon: Terminal, label: 'Script' },
+  condition: { icon: GitFork, label: 'Condition' },
+  approval: { icon: Hand, label: 'Approval' },
+  createTaskFromItem: { icon: ListPlus, label: 'Create Task' },
+  callConnectorAction: { icon: Zap, label: 'Connector Action' },
+  loop: { icon: Repeat, label: 'Loop' }
 }
+
+/**
+ * Every node glyph, one colour.
+ *
+ * A node's type was a hue — blue trigger, green agent, amber script, purple
+ * condition — spelled independently in this map, in each card, in the add-step
+ * menu and in the palette, four sets that had already drifted apart (an agent
+ * was green here and blue on its own card). The glyphs are distinct enough to
+ * carry the type on their own, and a connector-backed step shows its brand mark
+ * instead, which identifies it far better than a category colour did.
+ */
+export const NODE_GLYPH = 'text-ink-secondary'
 
 /**
  * The connection a node talks to, when it has one. Such a step is better
@@ -216,3 +210,14 @@ export function stepTimeline(
     ...after.map((text) => ({ kind: 'engine' as const, text }))
   ]
 }
+
+/**
+ * How a node card says it is selected.
+ *
+ * One constant because this string used to be copy-pasted into nine card
+ * components, two of which had already drifted (they kept the border and lost
+ * the glow). Selection is white, not bronzo: the accent means work is blocked
+ * on the person, and selecting a node is neither work nor blocking.
+ */
+export const NODE_SELECTED = 'border-white/40'
+export const NODE_UNSELECTED = 'border-white/[0.08]'
