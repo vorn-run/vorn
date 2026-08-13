@@ -308,6 +308,13 @@ export interface RequestMethods {
     params: { workflowId: string; inputs?: Record<string, unknown> }
     result: void
   }
+  /** Ask whichever instance owns this run to stop it. Broadcast, not
+   *  addressed: runs execute in the renderer, so the server cannot end one
+   *  itself and does not know which window holds it. */
+  'workflow:stopRun': {
+    params: { runId: string }
+    result: void
+  }
   /** Ask a packaged connection whether it could run right now. `ok: null`
    *  means the connector declares no preflight — nothing to check, which is
    *  not the same answer as "checked, fine". Throws for a connection that does

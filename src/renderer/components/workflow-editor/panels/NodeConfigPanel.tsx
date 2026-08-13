@@ -9,7 +9,8 @@ import {
   ConditionConfig,
   ApprovalConfig,
   CreateTaskFromItemConfig,
-  CallConnectorActionConfig
+  CallConnectorActionConfig,
+  WorkflowNodeErrorPolicy
 } from '../../../../shared/types'
 import { ConnectorIcon } from '../../ConnectorIcon'
 import { useConnectorIdFor, useConnectionIconFor } from '../../../lib/use-connections'
@@ -29,6 +30,7 @@ interface Props {
   allNodes?: WorkflowNode[]
   onChange: (nodeId: string, config: WorkflowNode['config']) => void
   onLabelChange: (nodeId: string, label: string) => void
+  onErrorChange?: (nodeId: string, policy: WorkflowNodeErrorPolicy) => void
   onDelete: (nodeId: string) => void
   onClose: () => void
   triggerType?: TriggerConfig['triggerType']
@@ -43,6 +45,7 @@ export function NodeConfigPanel({
   allNodes,
   onChange,
   onLabelChange,
+  onErrorChange,
   onDelete,
   onClose,
   triggerType,
@@ -217,6 +220,32 @@ export function NodeConfigPanel({
             triggerType={triggerType}
             stepGroups={stepGroups}
           />
+        )}
+
+        {/* A trigger has nothing downstream of its own failure to govern. */}
+        {node.type !== 'trigger' && onErrorChange && (
+          <div className="pt-4 border-t border-gray-800">
+            <label
+              htmlFor={`onError-${node.id}`}
+              className="block text-[11px] text-gray-500 mb-1.5"
+            >
+              If this step fails
+            </label>
+            <select
+              id={`onError-${node.id}`}
+              value={node.onError ?? 'stop'}
+              onChange={(e) => onErrorChange(node.id, e.target.value as WorkflowNodeErrorPolicy)}
+              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200"
+            >
+              <option value="stop">Stop the run</option>
+              <option value="continue">Carry on anyway</option>
+            </select>
+            <p className="text-[10px] text-gray-600 mt-1.5">
+              {(node.onError ?? 'stop') === 'stop'
+                ? 'Everything downstream is skipped and the run ends as failed.'
+                : 'Later steps run as if this one had succeeded — for a step whose failure does not invalidate the rest.'}
+            </p>
+          </div>
         )}
       </div>
     </div>

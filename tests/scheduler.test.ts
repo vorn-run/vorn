@@ -126,3 +126,31 @@ describe('getNextRun', () => {
     expect(scheduler.getNextRun('wf-1', [wf])).toBeNull()
   })
 })
+
+describe('scheduler.stopRun', () => {
+  it('broadcasts the run id to every connected instance', () => {
+    const seen: Array<[string, unknown]> = []
+    const listener = (method: string, params: unknown) => seen.push([method, params])
+    scheduler.on('client-message', listener)
+
+    scheduler.stopRun('run-abc')
+
+    scheduler.off('client-message', listener)
+    expect(seen).toEqual([['scheduler:stopRun', { runId: 'run-abc' }]])
+  })
+
+  // Unlike a trigger, a stop must not be claimed: the instance that would win
+  // the lock is not necessarily the one holding the run, so a claimed stop
+  // would be swallowed by a window that has never heard of it.
+  it('does not take an execution lock, so repeats still go out', () => {
+    const seen: unknown[] = []
+    const listener = (_method: string, params: unknown) => seen.push(params)
+    scheduler.on('client-message', listener)
+
+    scheduler.stopRun('run-abc')
+    scheduler.stopRun('run-abc')
+
+    scheduler.off('client-message', listener)
+    expect(seen).toEqual([{ runId: 'run-abc' }, { runId: 'run-abc' }])
+  })
+})

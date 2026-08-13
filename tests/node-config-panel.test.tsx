@@ -157,4 +157,69 @@ describe('NodeConfigPanel', () => {
     fireEvent.change(textarea, { target: { value: 'ok?' } })
     expect(onChange).toHaveBeenCalledWith('n1', expect.objectContaining({ message: 'ok?' }))
   })
+
+  describe('the error policy control', () => {
+    const policySelect = () => screen.getByLabelText('If this step fails') as HTMLSelectElement
+
+    it('shows a node that says nothing as stopping the run', () => {
+      render(
+        <NodeConfigPanel
+          node={makeNode('script')}
+          onChange={vi.fn()}
+          onLabelChange={vi.fn()}
+          onErrorChange={vi.fn()}
+          onDelete={vi.fn()}
+          onClose={vi.fn()}
+        />
+      )
+      expect(policySelect().value).toBe('stop')
+      expect(screen.getByText(/Everything downstream is skipped/)).toBeInTheDocument()
+    })
+
+    it('reflects a node that opted out', () => {
+      render(
+        <NodeConfigPanel
+          node={{ ...makeNode('script'), onError: 'continue' }}
+          onChange={vi.fn()}
+          onLabelChange={vi.fn()}
+          onErrorChange={vi.fn()}
+          onDelete={vi.fn()}
+          onClose={vi.fn()}
+        />
+      )
+      expect(policySelect().value).toBe('continue')
+      expect(screen.getByText(/Later steps run as if this one had succeeded/)).toBeInTheDocument()
+    })
+
+    it('reports a change to the policy', () => {
+      const onErrorChange = vi.fn()
+      render(
+        <NodeConfigPanel
+          node={makeNode('script')}
+          onChange={vi.fn()}
+          onLabelChange={vi.fn()}
+          onErrorChange={onErrorChange}
+          onDelete={vi.fn()}
+          onClose={vi.fn()}
+        />
+      )
+      fireEvent.change(policySelect(), { target: { value: 'continue' } })
+      expect(onErrorChange).toHaveBeenCalledWith('n1', 'continue')
+    })
+
+    // A trigger cannot fail in a way that has anything downstream to govern.
+    it('is absent for a trigger', () => {
+      render(
+        <NodeConfigPanel
+          node={makeNode('trigger')}
+          onChange={vi.fn()}
+          onLabelChange={vi.fn()}
+          onErrorChange={vi.fn()}
+          onDelete={vi.fn()}
+          onClose={vi.fn()}
+        />
+      )
+      expect(screen.queryByLabelText('If this step fails')).not.toBeInTheDocument()
+    })
+  })
 })

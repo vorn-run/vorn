@@ -422,6 +422,15 @@ const api = {
     }
   },
 
+  onSchedulerStopRun: (callback: (event: { runId: string }) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, event: { runId: string }): void =>
+      callback(event)
+    ipcRenderer.on(IPC.SCHEDULER_STOP_RUN, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.SCHEDULER_STOP_RUN, listener)
+    }
+  },
+
   onSchedulerMissed: (
     callback: (missed: { workflow: { id: string; name: string }; scheduledFor: string }[]) => void
   ) => {

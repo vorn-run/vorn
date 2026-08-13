@@ -392,6 +392,8 @@ export function createApiShim(wsUrl: string) {
         existingExecution?: import('../../shared/src/types').WorkflowExecution
       }) => void
     ) => rpc.on('scheduler:execute', callback as (p: unknown) => void),
+    onSchedulerStopRun: (callback: (event: { runId: string }) => void) =>
+      rpc.on('scheduler:stopRun', callback as (p: unknown) => void),
     onSchedulerMissed: (callback: (missed: unknown[]) => void) =>
       rpc.on('scheduler:missed', callback as (p: unknown) => void),
     completeConnectorInbox: (params: {

@@ -730,6 +730,22 @@ export interface LoopConfig {
   until?: ConditionConfig
 }
 
+/**
+ * What the run does when a node fails.
+ *
+ * `stop` ends the run and marks everything downstream skipped; `continue` lets
+ * successors run anyway, which is what you want for a step whose failure is
+ * informational — a notification that didn't send should not sink the work it
+ * was reporting on.
+ *
+ * Absent means `stop`. That is the safer reading of a failure, and it is what
+ * a graph drawn as a sequence implies: a step that prepares a branch, or
+ * fetches the input the next step parses, has nothing useful to hand on when
+ * it fails, and running the rest against missing state produces damage that
+ * looks like output.
+ */
+export type WorkflowNodeErrorPolicy = 'stop' | 'continue'
+
 export interface WorkflowNode {
   id: string
   type: WorkflowNodeType
@@ -737,6 +753,8 @@ export interface WorkflowNode {
   slug?: string
   config: WorkflowNodeConfig
   position: WorkflowNodePosition
+  /** Defaults to `stop` when absent. */
+  onError?: WorkflowNodeErrorPolicy
 }
 
 export interface WorkflowEdge {
@@ -1286,6 +1304,7 @@ export const IPC = {
   GIT_PUSH: 'git:push',
   DIALOG_OPEN_FILE: 'dialog:openFile',
   SCHEDULER_EXECUTE: 'scheduler:execute',
+  SCHEDULER_STOP_RUN: 'scheduler:stopRun',
   SCHEDULER_MISSED: 'scheduler:missed',
   SCHEDULER_GET_LOG: 'scheduler:getLog',
   SCHEDULER_GET_NEXT_RUN: 'scheduler:getNextRun',

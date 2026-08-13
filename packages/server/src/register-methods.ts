@@ -821,6 +821,14 @@ export function registerAllMethods(): void {
     scheduler.triggerWorkflow(workflowId, inputs)
   })
 
+  // Runs live in the renderer, so stopping one is a request broadcast to every
+  // connected instance rather than something this process can do itself. The
+  // instance owning the run recognises the id and tears it down; the others
+  // find no such run and ignore it.
+  registerMethod('workflow:stopRun', ({ runId }: { runId: string }) => {
+    scheduler.stopRun(runId)
+  })
+
   registerMethod('connector:inboxComplete', ({ id, leaseToken, disposition, error }) => {
     scheduler.completeConnectorInbox(id, leaseToken, disposition, error)
   })

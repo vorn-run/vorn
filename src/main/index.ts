@@ -237,6 +237,7 @@ function wireServerNotifications(bridge: ServerBridge): void {
       case IPC.SESSION_REORDERED:
       case IPC.CONFIG_CHANGED:
       case IPC.SCHEDULER_EXECUTE:
+      case IPC.SCHEDULER_STOP_RUN:
       case IPC.SCHEDULER_MISSED:
       case IPC.WORKFLOW_EXECUTION_COMPLETE:
         if (mainWindow && !mainWindow.isDestroyed()) {

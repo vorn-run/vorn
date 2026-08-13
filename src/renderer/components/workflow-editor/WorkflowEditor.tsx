@@ -21,6 +21,7 @@ import { WindowControls } from '../WindowControls'
 import {
   WorkflowDefinition,
   WorkflowNode,
+  WorkflowNodeErrorPolicy,
   WorkflowEdge,
   TriggerConfig,
   AiAgentType,
@@ -455,6 +456,20 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, config } : n)))
   }, [])
 
+  const handleNodeErrorChange = useCallback((nodeId: string, policy: WorkflowNodeErrorPolicy) => {
+    setNodes((nds) =>
+      // `stop` is the default, so store it as absent rather than writing the
+      // word into every node and making it look like an explicit choice.
+      nds.map((n) =>
+        n.id === nodeId
+          ? policy === 'stop'
+            ? (({ onError: _drop, ...rest }) => rest)(n)
+            : { ...n, onError: policy }
+          : n
+      )
+    )
+  }, [])
+
   const handleNodeLabelChange = useCallback((nodeId: string, label: string) => {
     setNodes((nds) => {
       const node = nds.find((n) => n.id === nodeId)
@@ -765,6 +780,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             allNodes={nodes}
             onChange={handleNodeConfigChange}
             onLabelChange={handleNodeLabelChange}
+            onErrorChange={handleNodeErrorChange}
             onDelete={handleDeleteNode}
             onClose={() => setSelectedNodeId(null)}
             triggerType={triggerType}
