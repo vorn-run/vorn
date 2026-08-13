@@ -262,6 +262,17 @@ describe('PaneCard drag and double-click', () => {
     expect(onDragStart).toHaveBeenCalledWith('files:t1', expect.anything())
   })
 
+  it('marks itself as the drop target while a drag is over it', async () => {
+    // The pane has no border of its own — the step down in surface is what
+    // separates it — so the drop indicator is the only thing that can say a
+    // drop would land here.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    const { container } = render(<FilesCard sessionId="t1" isDragTarget />)
+    await screen.findByText('a.ts')
+
+    expect(container.querySelector('.card-drop-target')).toBeInTheDocument()
+  })
+
   it('toggles maximize on header double-click', async () => {
     act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)

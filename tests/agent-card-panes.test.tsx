@@ -128,6 +128,33 @@ describe('AgentCard pane column', () => {
     expect(screen.getByTestId('card-terminal-t1')).toHaveClass('hidden')
   })
 
+  it('keeps the card reachable while one of its panes is maximized', () => {
+    // The session's chrome rides inside the terminal column so the panes get the
+    // card's full height — but that column hides behind a maximized pane, and
+    // the chrome must not go with it. Otherwise the card loses its name, its
+    // drag handle and the only buttons that close or minimize it, leaving a
+    // maximized browser sitting in a card you cannot identify or dismiss.
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().setMaximizedPane('files:t1')
+    })
+    render(<AgentCard terminalId="t1" />)
+
+    const close = screen.getByLabelText('Close session')
+    expect(close).toBeInTheDocument()
+    expect(screen.getByTestId('card-terminal-t1')).not.toContainElement(close)
+  })
+
+  it('swaps the terminal for a placeholder once the session is expanded', () => {
+    // The expanded stage owns the live terminal; a second mount here would
+    // fight it for the same session.
+    act(() => useAppStore.getState().setFocusedTerminal('t1'))
+    render(<AgentCard terminalId="t1" />)
+
+    expect(screen.getByText('Expanded')).toBeInTheDocument()
+    expect(screen.queryByTestId('slot-t1')).not.toBeInTheDocument()
+  })
+
   it("leaves another card's terminal alone while one card is maximized", () => {
     act(() => {
       useAppStore.getState().openFilesPane('t1')
