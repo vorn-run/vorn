@@ -158,3 +158,57 @@ describe('CardActionCluster guards', () => {
     expect(setFocused).not.toHaveBeenCalled()
   })
 })
+
+describe('CardActionCluster device control', () => {
+  const MOBILE = { isMobile: true, framework: 'expo' as const, needsDevClient: true }
+  const WEB = { isMobile: false, framework: null, needsDevClient: false }
+
+  const seed = (mobile?: typeof MOBILE | typeof WEB): void => {
+    act(() => {
+      useAppStore.setState({
+        devicePanes: new Map(),
+        mobileProjectCache: mobile ? new Map([['/tmp/vorn', mobile]]) : new Map()
+      })
+    })
+  }
+
+  it('offers a device on a mobile project', () => {
+    seed(MOBILE)
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    expect(screen.getByRole('button', { name: 'Open device' })).toBeInTheDocument()
+  })
+
+  it('stays out of the way on a project with no mobile app in it', () => {
+    seed(WEB)
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    expect(screen.queryByRole('button', { name: /device/ })).not.toBeInTheDocument()
+  })
+
+  it('shows nothing while the project is still unprobed', () => {
+    // Defaulting to visible would flash the button in and out on every mount.
+    seed(undefined)
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    expect(screen.queryByRole('button', { name: /device/ })).not.toBeInTheDocument()
+  })
+
+  it('opens the picker rather than guessing a device', () => {
+    // The picker fetches on mount; without a stub it hits the real bridge.
+    ;(window as unknown as { api: Record<string, unknown> }).api.deviceList = () =>
+      Promise.resolve([])
+    seed(MOBILE)
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open device' }))
+    expect(screen.getByRole('listbox', { name: 'Choose a device' })).toBeInTheDocument()
+  })
+
+  it('closes an open pane instead of reopening the picker', () => {
+    seed(WEB)
+    act(() => useAppStore.getState().openDevicePane('term-1', { udid: 'u1', name: 'iPhone 17' }))
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    // The control survives a WEB verdict here on purpose: a pane someone is
+    // driving must always keep its close button.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide device' }))
+    expect(useAppStore.getState().devicePanes.has('term-1')).toBe(false)
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+})
