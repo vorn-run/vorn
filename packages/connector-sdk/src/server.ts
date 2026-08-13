@@ -3,7 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z, type ZodTypeAny } from 'zod'
 import { resolveConfig } from './define'
 import { runAction, runPoll } from './runtime'
-import { MANIFEST_TOOL, connectorManifest, pollToolName } from './setup'
+import { MANIFEST_TOOL, PREFLIGHT_TOOL, connectorManifest, pollToolName } from './setup'
 import type { ActionInputField, ActionOutputField, Connector, ConnectorConfig } from './types'
 
 function json(value: Record<string, unknown>): {
@@ -98,6 +98,40 @@ export function createConnectorServer(
     },
     () => json(connectorManifest(connector) as unknown as Record<string, unknown>)
   )
+
+  // Registered only when declared, so a caller can tell "this connector has
+  // nothing to check" from "the check passed" by whether the tool exists.
+  if (connector.preflight) {
+    const preflight = connector.preflight.bind(connector)
+    server.registerTool(
+      PREFLIGHT_TOOL,
+      {
+        description: `Check whether ${connector.name} can run right now`,
+        inputSchema: {},
+        // Declared rather than left open like the manifest's: this shape is
+        // fixed, so a caller can validate against it. Still loose, because a
+        // connector adding a field of its own should not fail the call.
+        outputSchema: z.looseObject({
+          ok: z.boolean().describe('Whether the connector could run right now'),
+          message: z.string().optional().describe('What to do about it, when it could not')
+        })
+      },
+      async () => {
+        // A throw is the connector saying "broken", not "not set up yet", and
+        // it must not read to the user as a passing check. Reporting it as a
+        // failed preflight with the message keeps the distinction the caller
+        // can act on: ok:false is always something a person can fix.
+        try {
+          return json({ ...(await preflight()) })
+        } catch (error) {
+          return json({
+            ok: false,
+            message: error instanceof Error ? error.message : String(error)
+          })
+        }
+      }
+    )
+  }
 
   for (const trigger of connector.triggers) {
     server.registerTool(

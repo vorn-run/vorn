@@ -37,6 +37,7 @@ import type {
 } from '@vornrun/shared/types'
 import { DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
+import { detectRepoSlug } from './git-utils'
 import {
   scanWorktreeInventory,
   reclaimArtifacts,
@@ -100,10 +101,14 @@ import {
   mcpConnectionActions,
   stopMcpClient
 } from './connectors'
-import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, backfillMcpConnection } from './connectors/mcp'
+import {
+  MCP_CONNECTOR_ID,
+  MCP_POLL_EVENT,
+  backfillMcpConnection,
+  preflightMcpConnection
+} from './connectors/mcp'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
-import { detectRepoSlug } from './connectors/github'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
 import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vornrun/shared/types'
@@ -899,6 +904,34 @@ export function registerAllMethods(): void {
 
   registerMethod('connection:refreshMcpTools', async (connectionId: string) => {
     return runMcpDiscovery(connectionId)
+  })
+
+  /**
+   * Ask a packaged connection whether it could run right now.
+   *
+   * `ok: null` means the connector declares no preflight, which is most of
+   * them — only the ones borrowing an external tool's login have anything to
+   * check. A connector that authenticates from config fields already fails
+   * visibly when a field is missing.
+   */
+  registerMethod('connection:preflight', async (connectionId: string) => {
+    const conn = dbGetSourceConnection(connectionId)
+    // A connection that does not exist is a caller error, not an answer about
+    // readiness. Returning `ok: null` for it would file a stale or mistyped id
+    // under "nothing to check" — the one reading a user is most likely to take
+    // as reassurance.
+    if (!conn) throw new Error(`connection ${connectionId} not found`)
+    // A built-in connector genuinely declares no preflight, so this really is
+    // "nothing to check".
+    if (conn.connectorId !== MCP_CONNECTOR_ID) return { ok: null }
+    try {
+      return await preflightMcpConnection(conn)
+    } catch (err) {
+      // Starting the connector at all is itself part of what preflight
+      // answers: a package that will not launch is exactly the state the
+      // caller wants reported, not an exception to handle.
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   /**

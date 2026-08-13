@@ -165,6 +165,51 @@ export function mcpConnectionActions(conn: SourceConnection): ConnectorActionDef
   return (tools as McpDiscoveredTool[]).map(mcpToolToConnectorAction)
 }
 
+/** Tool a packaged connector registers when it can report its own readiness. */
+export const PREFLIGHT_TOOL = 'vorn_connector_preflight'
+
+export interface PreflightReport {
+  /** `null` when the connector declares no preflight — nothing to check. */
+  ok: boolean | null
+  message?: string
+}
+
+/**
+ * Ask a packaged connector whether it could run right now.
+ *
+ * Only meaningful per connection, never per catalog entry: answering needs the
+ * connector's own process, and a catalog of twenty would mean twenty of them.
+ * A connection already holds a client, so this costs nothing extra.
+ *
+ * A connector with no `preflight` reports `ok: null` rather than `true`. The
+ * two are different answers — "nothing to check" must not be shown to a user
+ * as "checked, fine" — and only the connectors borrowing an external login
+ * have anything to say here.
+ */
+export async function preflightMcpConnection(conn: SourceConnection): Promise<PreflightReport> {
+  const client = await getOrStartClient(conn)
+  const tools = await client.listTools()
+  if (!(tools.tools ?? []).some((tool) => tool.name === PREFLIGHT_TOOL)) {
+    return { ok: null }
+  }
+
+  const result = await client.callTool({ name: PREFLIGHT_TOOL, arguments: {} })
+  const structured = (result as { structuredContent?: Record<string, unknown> }).structuredContent
+  if (result.isError || !structured) {
+    return {
+      ok: false,
+      // Falls back to a sentence rather than the tool's name: this reaches a
+      // user, and `vorn_connector_preflight failed` tells them nothing they
+      // can act on while naming something they never chose.
+      message:
+        extractTextError(result.content) ?? 'The connector could not report whether it is ready.'
+    }
+  }
+
+  const message = typeof structured.message === 'string' ? structured.message : undefined
+  return { ok: structured.ok === true, ...(message && { message }) }
+}
+
 /** Invoke a single MCP tool. Separate from `VornConnector.execute` because
  *  we need the `SourceConnection` itself to start/address the per-connection
  *  client, not just the merged args the generic execute path provides. */

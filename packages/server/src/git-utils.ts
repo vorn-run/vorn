@@ -68,6 +68,48 @@ export function getGitBranch(projectPath: string, remote?: RemoteHost): string |
   }
 }
 
+/**
+ * Pull `owner/repo` out of a git remote URL, for the forms git actually
+ * stores: `git@host:owner/repo.git`, `https://host/owner/repo.git`,
+ * `ssh://git@host/owner/repo`, and any of them without the `.git`.
+ *
+ * Restricted to github.com on purpose. A GitLab or Bitbucket remote parses
+ * into the same shape, and handing that to a GitHub connection would produce a
+ * connection that looks configured and returns nothing.
+ */
+export function parseGitHubRemote(url: string): { owner: string; repo: string } | null {
+  const trimmed = url.trim()
+  if (!trimmed) return null
+  const match = trimmed.match(
+    /^(?:https?:\/\/|ssh:\/\/)?(?:[^@/]+@)?github\.com[:/]+([^/]+)\/(.+?)(?:\.git)?\/?$/i
+  )
+  if (!match) return null
+  const [, owner, repo] = match
+  // A nested path means this is not a repo URL — `github.com/owner/repo/tree/x`
+  // would otherwise yield a repo of "repo/tree/x".
+  if (!owner || !repo || repo.includes('/')) return null
+  return { owner, repo }
+}
+
+/**
+ * The GitHub repo a project points at, read from its `origin` remote.
+ *
+ * Reads git rather than `gh repo view`, so repo auto-detect works whether or
+ * not the GitHub CLI is installed — the connector that needs `gh` is packaged
+ * and separate, and this is the one place Vorn itself wanted to know.
+ */
+export function detectRepoSlug(projectPath: string): { owner: string; repo: string } | null {
+  try {
+    return parseGitHubRemote(
+      gitExec(['remote', 'get-url', 'origin'], projectPath, { timeout: 3000 })
+    )
+  } catch {
+    // No repo, no origin, or no git. All of them mean "cannot tell", which is
+    // what the caller does something useful with.
+    return null
+  }
+}
+
 export function listBranches(projectPath: string, remote?: RemoteHost): string[] {
   try {
     const output = gitExec(['branch', '--format=%(refname:short)'], projectPath, {

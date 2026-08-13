@@ -308,6 +308,14 @@ export interface RequestMethods {
     params: { workflowId: string; inputs?: Record<string, unknown> }
     result: void
   }
+  /** Ask a packaged connection whether it could run right now. `ok: null`
+   *  means the connector declares no preflight — nothing to check, which is
+   *  not the same answer as "checked, fine". Throws for a connection that does
+   *  not exist, so a stale id cannot read as "nothing to check". */
+  'connection:preflight': {
+    params: string
+    result: { ok: boolean | null; message?: string }
+  }
   /** Main→server push of decrypted credential fields. Called after main
    *  decrypts values (via Electron safeStorage) on boot and on config
    *  changes. Plaintext lives in server memory only — never persisted. */
