@@ -31,12 +31,12 @@ describe('WorkflowFilterToolbar', () => {
   it('shows the indicator dot when a non-default filter is active', () => {
     mockState.sidebarWorkflowFilter = 'manual'
     const { container } = render(<WorkflowFilterToolbar />)
-    expect(container.querySelector('.bg-blue-500')).toBeInTheDocument()
+    expect(container.querySelector('.bg-ink-secondary')).toBeInTheDocument()
   })
 
   it('does not show the indicator dot for the default "all" filter', () => {
     const { container } = render(<WorkflowFilterToolbar />)
-    expect(container.querySelector('.bg-blue-500')).not.toBeInTheDocument()
+    expect(container.querySelector('.bg-ink-secondary')).not.toBeInTheDocument()
   })
 
   it('opens a dropdown with All / Manual / Scheduled options when clicked', () => {

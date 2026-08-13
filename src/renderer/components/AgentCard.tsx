@@ -117,9 +117,9 @@ export const AgentCard = memo(
                    transition-colors
                    ${
                      isFocused
-                       ? 'border-blue-500/60 ring-1 ring-blue-500/30'
+                       ? 'border-white/40'
                        : isDragTarget
-                         ? 'card-drop-target border-blue-500/30 hover:border-white/[0.12]'
+                         ? 'card-drop-target border-white/[0.25] hover:border-white/[0.12]'
                          : 'border-white/[0.06] hover:border-white/[0.12]'
                    }
                    ${
@@ -129,89 +129,105 @@ export const AgentCard = memo(
                          ? 'z-10'
                          : 'hover:z-10 focus-within:z-10'
                    }`}
-        style={{ background: '#1a1a1e' }}
+        style={{ background: 'var(--color-surface-raised)' }}
         onPointerDown={() => {
           if (!isSelected && !isFocused) setSelected(terminalId)
         }}
       >
-        <CardHeader
-          terminalId={terminalId}
-          variant="mini"
-          index={index}
-          draggable={Boolean(onDragStart || flexible)}
-          onDragStart={onDragStart}
-          onDoubleClick={handleExpand}
-          revealActions={isTouchDevice}
-          dimmed={isChromeDimmed}
-        />
-
-        {/* Terminal, plus this session's panes stacked beside it. `relative`
-            stays on the terminal itself: it hosts absolutely-positioned
-            overlays that would otherwise stretch across the panes. */}
+        {/* Terminal, plus this session's panes beside it. The session's chrome
+            lives *inside* the terminal column rather than spanning the card: a
+            pane carries its own bar, so a full-width header above both stacked
+            two title rows and cost the panes the card's full height. */}
         <div ref={bodyRef} className="flex flex-row flex-1 min-h-0">
+          {/* The column, not the surface inside it, is what the split ratio
+              sizes and what hides behind a maximized pane. */}
           <div
             data-testid={`card-terminal-${terminalId}`}
-            className={`relative min-h-0 min-w-0 pt-0.5 ${hasMaximizedPane ? 'hidden' : ''}`}
-            style={{
-              flexGrow: terminalRatio,
-              flexShrink: 1,
-              flexBasis: 0,
-              background: '#141416'
-            }}
+            className={`flex flex-col min-h-0 min-w-0 ${hasMaximizedPane ? 'hidden' : ''}`}
+            style={{ flexGrow: terminalRatio, flexShrink: 1, flexBasis: 0 }}
           >
-            {!isFocused && (
-              <TerminalPane
-                terminalId={terminalId}
-                agentType={terminal.session.agentType}
-                isFocused={isSelected}
-                flexible={flexible}
-                domBlocks={domBlocks}
-              />
-            )}
-            {isFocused && (
-              <div className="flex items-center justify-center h-full text-gray-600 text-xs">
-                Expanded
-              </div>
-            )}
-            {!isFocused && terminal.lastOutputTimestamp === 0 && (
-              <div
-                className="absolute inset-0 p-3 space-y-2 pointer-events-none"
-                style={{ background: '#141416' }}
-              >
-                <div className="h-3 w-3/4 rounded bg-white/[0.04] animate-pulse" />
-                <div
-                  className="h-3 w-1/2 rounded bg-white/[0.04] animate-pulse"
-                  style={{ animationDelay: '0.15s' }}
+            <CardHeader
+              terminalId={terminalId}
+              variant="mini"
+              index={index}
+              draggable={Boolean(onDragStart || flexible)}
+              onDragStart={onDragStart}
+              onDoubleClick={handleExpand}
+              revealActions={isTouchDevice}
+              dimmed={isChromeDimmed}
+            />
+
+            {/* `relative` stays on the terminal surface itself: it hosts
+                absolutely-positioned overlays that would otherwise stretch
+                across the column's chrome. */}
+            <div
+              className="relative flex-1 min-h-0 min-w-0 pt-0.5"
+              style={{ background: 'var(--color-surface-sunken)' }}
+            >
+              {!isFocused && (
+                <TerminalPane
+                  terminalId={terminalId}
+                  agentType={terminal.session.agentType}
+                  isFocused={isSelected}
+                  flexible={flexible}
+                  domBlocks={domBlocks}
                 />
+              )}
+              {isFocused && (
+                <div className="flex items-center justify-center h-full text-gray-600 text-xs">
+                  Expanded
+                </div>
+              )}
+              {!isFocused && terminal.lastOutputTimestamp === 0 && (
                 <div
-                  className="h-3 w-5/6 rounded bg-white/[0.04] animate-pulse"
-                  style={{ animationDelay: '0.3s' }}
-                />
-                <div
-                  className="h-3 w-2/3 rounded bg-white/[0.04] animate-pulse"
-                  style={{ animationDelay: '0.45s' }}
-                />
-              </div>
-            )}
-            {!isFocused && showScrollBtn && (
-              <button
-                className="absolute bottom-2 right-2 w-8 h-8 flex items-center justify-center
+                  className="absolute inset-0 p-3 space-y-2 pointer-events-none"
+                  style={{ background: 'var(--color-surface-sunken)' }}
+                >
+                  <div className="h-3 w-3/4 rounded bg-white/[0.04] animate-pulse" />
+                  <div
+                    className="h-3 w-1/2 rounded bg-white/[0.04] animate-pulse"
+                    style={{ animationDelay: '0.15s' }}
+                  />
+                  <div
+                    className="h-3 w-5/6 rounded bg-white/[0.04] animate-pulse"
+                    style={{ animationDelay: '0.3s' }}
+                  />
+                  <div
+                    className="h-3 w-2/3 rounded bg-white/[0.04] animate-pulse"
+                    style={{ animationDelay: '0.45s' }}
+                  />
+                </div>
+              )}
+              {!isFocused && showScrollBtn && (
+                <button
+                  className="absolute bottom-2 right-2 w-8 h-8 flex items-center justify-center
                            rounded bg-white/[0.08] hover:bg-white/[0.15] active:bg-white/[0.2]
                            text-gray-400 hover:text-white transition-colors z-50"
-                onClick={handleScrollToBottom}
-                title="Scroll to bottom"
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path
-                    d="M6 2.5V9.5M3 7L6 10L9 7"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
+                  onClick={handleScrollToBottom}
+                  title="Scroll to bottom"
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path
+                      d="M6 2.5V9.5M3 7L6 10L9 7"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            {!isFocused && (
+              <IntentBar
+                terminalId={terminalId}
+                compact
+                indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks)}
+              />
             )}
+
+            <CardStatusBar terminalId={terminalId} dimmed={isChromeDimmed} />
           </div>
 
           {hasPanes && !hasMaximizedPane && (
@@ -243,16 +259,6 @@ export const AgentCard = memo(
             </div>
           )}
         </div>
-
-        {!isFocused && (
-          <IntentBar
-            terminalId={terminalId}
-            compact
-            indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks)}
-          />
-        )}
-
-        <CardStatusBar terminalId={terminalId} dimmed={isChromeDimmed} />
 
         {!flexible && <RowResizeHandle />}
       </div>

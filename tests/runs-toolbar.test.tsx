@@ -25,12 +25,12 @@ describe('RunsToolbar', () => {
 
   it('does not show the active-state indicator when filter is "all"', () => {
     const { container } = render(<RunsToolbar filter="all" setFilter={setFilter} />)
-    expect(container.querySelector('.bg-blue-500')).not.toBeInTheDocument()
+    expect(container.querySelector('.bg-ink-secondary')).not.toBeInTheDocument()
   })
 
   it('shows the active-state indicator when a non-default filter is active', () => {
     const { container } = render(<RunsToolbar filter="running" setFilter={setFilter} />)
-    expect(container.querySelector('.bg-blue-500')).toBeInTheDocument()
+    expect(container.querySelector('.bg-ink-secondary')).toBeInTheDocument()
   })
 
   it('opens the dropdown with All / Running / Waiting / Failed / Succeeded', () => {

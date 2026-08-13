@@ -1,7 +1,7 @@
 import { memo, forwardRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { PaneCard, PaneControls } from './PaneCard'
+import { PaneCard } from './PaneCard'
 import { FileTreePane } from './FileTreeExplorer'
 import { filesPaneId } from '../lib/pane-id'
 import { confirmDiscard } from '../lib/editor-dirty'
@@ -42,6 +42,7 @@ export const FilesCard = memo(
 
     const paneId = filesPaneId(sessionId)
     const handleClose = (): void => closeFilesPane(sessionId)
+    // Used by the filter row: double-clicking it still maximizes.
     const toggleMaximize = (): void => {
       const state = useAppStore.getState()
       state.setMaximizedPane(state.maximizedPaneId === paneId ? null : paneId)
@@ -56,23 +57,15 @@ export const FilesCard = memo(
         isDragTarget={isDragTarget}
         onDragStart={onDragStart}
         flexible={flexible}
-        // The filter row is already a full-width bar; a title row above it
-        // would be chrome on chrome, so the controls sit in the filter row.
-        headerless
       >
+        {/* The pane keeps its own title row. Folding the controls into the
+            filter made that field the title bar: full width, buttons reading as
+            part of the input. */}
         <FileTreePane
           key={cwd}
           cwd={cwd}
           remoteHostId={remoteHostId}
           selectedFile={selectedFile}
-          controls={
-            <PaneControls
-              paneId={paneId}
-              title="Files"
-              onClose={handleClose}
-              className="shrink-0"
-            />
-          }
           headerClassName={
             onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''
           }

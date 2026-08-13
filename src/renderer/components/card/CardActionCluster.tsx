@@ -12,6 +12,7 @@ import {
 import { useState, useRef, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../stores'
+import { ICON_BUTTON } from '../../lib/icon-button'
 import { Tooltip } from '../Tooltip'
 import { ConfirmPopover } from '../ConfirmPopover'
 import { CardContextMenu } from '../CardContextMenu'
@@ -124,7 +125,7 @@ export function CardActionCluster({ terminalId, variant }: Props) {
   // tooltips get clipped off-screen. Drop them below the buttons instead.
   const tooltipPos = isFocused ? 'bottom' : 'top'
 
-  const btn = 'p-1 rounded text-gray-500 hover:text-white hover:bg-white/[0.08] transition-colors'
+  const btn = ICON_BUTTON
 
   const showDevice = shouldShowDeviceButton(
     mobileProjectCache.get(terminal.session.projectPath),
@@ -265,7 +266,7 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           <button
             type="button"
             onPointerDown={(e) => e.stopPropagation()}
-            className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-white/[0.08] transition-colors"
+            className="p-1 rounded text-gray-500 hover:text-danger hover:bg-white/[0.08] transition-colors"
             aria-label="Close session"
           >
             <X size={14} strokeWidth={2} />

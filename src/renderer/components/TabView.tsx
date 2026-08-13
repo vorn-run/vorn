@@ -67,7 +67,7 @@ function getHorizontalDropIndex(
 }
 
 const TAB_ICON_BTN =
-  'w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-gray-500'
+  'w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-gray-200'
 
 export function TabIconButton({
   label,
@@ -457,7 +457,7 @@ export function TabView() {
                 )
               }}
               className="h-[36px] w-[28px] flex items-center justify-center rounded-md
-                         text-gray-500 hover:text-gray-200 hover:bg-white/[0.06] transition-colors"
+                         text-gray-200 hover:text-white hover:bg-white/[0.10] transition-colors"
               title="New session"
               aria-label="New session"
             >
@@ -480,7 +480,7 @@ export function TabView() {
                 })
               }}
               className="h-[36px] w-[22px] flex items-center justify-center rounded-md
-                         text-gray-500 hover:text-gray-200 hover:bg-white/[0.06] transition-colors"
+                         text-gray-200 hover:text-white hover:bg-white/[0.10] transition-colors"
               title="More session options"
               aria-label="More session options"
             >

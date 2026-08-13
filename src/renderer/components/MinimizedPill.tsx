@@ -47,7 +47,7 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
           <span className="text-[10px] text-gray-600 shrink-0">&middot;</span>
           <span className="flex items-center gap-0.5 text-[10px] font-mono text-gray-500 truncate max-w-[90px]">
             {session.isWorktree ? (
-              <FolderGit2 size={9} strokeWidth={1.5} className="text-amber-400/70 shrink-0" />
+              <FolderGit2 size={9} strokeWidth={1.5} className="text-ink-faint shrink-0" />
             ) : (
               <GitBranch size={9} strokeWidth={1.5} className="shrink-0" />
             )}

@@ -64,7 +64,7 @@ export function RunsToolbar({ filter, setFilter }: Props) {
         >
           <SlidersHorizontal size={16} strokeWidth={1.5} />
           {hasActiveFilters && !open && (
-            <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
+            <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-ink-secondary" />
           )}
         </button>
       </Tooltip>

@@ -57,7 +57,7 @@ export function CardHeader({
       className={`flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.04] shrink-0
                   transition-opacity duration-200 ease-out
                   ${dimmed ? 'opacity-60 group-hover/card:opacity-100' : 'opacity-100'}`}
-      style={{ background: '#141416' }}
+      style={{ background: 'var(--color-surface-panel)' }}
     >
       <div
         className={`flex-1 min-w-0 flex items-center gap-2 ${dragHandleClass}`}

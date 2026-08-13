@@ -118,7 +118,7 @@ export function FocusedTerminal() {
             : 'flex-1 flex flex-col min-h-0 overflow-hidden'
         }
         style={{
-          background: '#1a1a1e',
+          background: 'var(--color-surface-raised)',
           ...(isMobile ? { paddingTop: 'var(--safe-top, 0px)' } : {})
         }}
         {...(isMobile
@@ -182,13 +182,17 @@ export function FocusedTerminal() {
               {terminal.session.branch && (
                 <span className="flex items-center gap-1 mt-0.5">
                   {terminal.session.isWorktree ? (
-                    <FolderGit2 size={11} className="text-amber-500 shrink-0" strokeWidth={1.5} />
+                    <FolderGit2
+                      size={11}
+                      className="text-ink-secondary shrink-0"
+                      strokeWidth={1.5}
+                    />
                   ) : (
                     <GitBranch size={11} className="text-gray-600 shrink-0" strokeWidth={1.5} />
                   )}
                   <span
                     className={`text-[11px] font-mono truncate ${
-                      terminal.session.isWorktree ? 'text-amber-400' : 'text-gray-500'
+                      terminal.session.isWorktree ? 'text-ink-secondary' : 'text-gray-500'
                     }`}
                   >
                     {getBranchLabel(terminal.session)}
@@ -205,17 +209,7 @@ export function FocusedTerminal() {
               )}
             </div>
           </div>
-        ) : (
-          <div
-            className={`group/card ${isMac ? 'titlebar-drag' : 'titlebar-no-drag'}`}
-            onDoubleClick={(e) => {
-              if ((e.target as HTMLElement).closest('button, input, [role="button"]')) return
-              handleContract()
-            }}
-          >
-            <CardHeader terminalId={effectiveId} variant="focused" />
-          </div>
-        )}
+        ) : null}
 
         {/* Terminal, plus this session's file panes riding along beside it. */}
         <div className="flex-1 min-h-0 flex">
@@ -223,10 +217,24 @@ export function FocusedTerminal() {
             data-testid="focused-terminal-column"
             className={`flex-1 min-w-0 flex-col ${hasMaximizedPane ? 'hidden' : 'flex'}`}
           >
+            {/* The session's header sits in its own column rather than spanning
+                the stage, so the panes beside it keep the full height. */}
+            {!isMobile && (
+              <div
+                className={`group/card shrink-0 ${isMac ? 'titlebar-drag' : 'titlebar-no-drag'}`}
+                onDoubleClick={(e) => {
+                  if ((e.target as HTMLElement).closest('button, input, [role="button"]')) return
+                  handleContract()
+                }}
+              >
+                <CardHeader terminalId={effectiveId} variant="focused" />
+              </div>
+            )}
+
             <div
               ref={terminalContainerRef}
               className="relative flex-1 p-1 min-h-0"
-              style={{ background: 'rgba(0, 0, 0, 0.3)' }}
+              style={{ background: 'var(--color-surface-sunken)' }}
             >
               <TerminalPane
                 terminalId={effectiveId}

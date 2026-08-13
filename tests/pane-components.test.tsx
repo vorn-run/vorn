@@ -214,17 +214,17 @@ describe('PaneCard chrome', () => {
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
   })
 
-  it('seats the tree pane controls in its filter row, not a second bar', async () => {
-    // The filter row is already a full-width bar. A title row above it is
-    // chrome stacked on chrome, and costs a line of tree.
+  it('keeps the tree pane controls out of its filter row', async () => {
+    // Sharing the row made the search field the panel's title bar: it spanned
+    // the full width and the buttons read as part of the input.
     act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
-    const header = screen.getByTestId('files-pane-header')
-    expect(header).toContainElement(screen.getByLabelText('Maximize Files'))
-    expect(header).toContainElement(screen.getByLabelText('Close Files'))
-    expect(screen.getByPlaceholderText('Filter files…')).toBeInTheDocument()
+    const filterRow = screen.getByTestId('files-pane-header')
+    expect(filterRow).toContainElement(screen.getByPlaceholderText('Filter files…'))
+    expect(filterRow).not.toContainElement(screen.getByLabelText('Maximize Files'))
+    expect(filterRow).not.toContainElement(screen.getByLabelText('Close Files'))
   })
 
   it('names the open file once, in the path strip that carries its controls', async () => {

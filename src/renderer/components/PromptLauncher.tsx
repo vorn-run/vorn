@@ -219,7 +219,10 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
           <ChevronDown size={10} />
         </button>
         {showProjectPicker && (
-          <div className="absolute bottom-full left-0 mb-1" style={{ background: '#1e1e22' }}>
+          <div
+            className="absolute bottom-full left-0 mb-1"
+            style={{ background: 'var(--color-surface-overlay)' }}
+          >
             <div
               className="border border-white/[0.08] rounded-lg shadow-xl z-20 py-1
                             min-w-[240px] max-h-[280px] overflow-y-auto"
@@ -270,7 +273,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
           <div
             className="absolute bottom-full left-0 mb-1 border border-white/[0.08]
                           rounded-lg shadow-xl z-20 py-1 min-w-[160px]"
-            style={{ background: '#1e1e22' }}
+            style={{ background: 'var(--color-surface-overlay)' }}
           >
             {AGENT_LIST.map((agent) => {
               const installed = installStatus[agent.type]
@@ -329,7 +332,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
             <div
               className="absolute bottom-full left-0 mb-1 border border-white/[0.08]
                             rounded-lg shadow-xl z-20 min-w-[240px] max-h-[280px] overflow-y-auto py-1"
-              style={{ background: '#1e1e22' }}
+              style={{ background: 'var(--color-surface-overlay)' }}
             >
               {/* Project root */}
               <button
@@ -441,7 +444,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
           {settings.branchWarning && (
             <div
               className="absolute bottom-full left-0 mb-8 px-3 py-1.5 rounded-md
-                            bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px]
+                            bg-surface-overlay border border-white/[0.08] text-ink-secondary text-[10px]
                             whitespace-nowrap z-30"
             >
               {settings.branchWarning}
@@ -459,7 +462,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
         disabled={!canLaunch || launching}
         className={`p-1.5 rounded-full transition-colors ${
           canLaunch
-            ? 'bg-bronzo hover:bg-bronzo-dark text-black cursor-pointer'
+            ? 'bg-ink hover:bg-white text-surface-base cursor-pointer'
             : 'bg-white/[0.06] text-gray-600 cursor-not-allowed'
         }`}
         title="Launch (Enter)"
@@ -472,10 +475,10 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
   // --- Prompt input block (shared between inline and overlay) ---
   const promptInput = (
     <div className="w-full">
-      <div
-        className="relative rounded-xl border border-white/[0.1] bg-[#232326]
-                      focus-within:border-white/[0.18] transition-colors"
-      >
+      {/* No focus treatment on purpose: this box is auto-focused the moment the
+          empty state mounts, so focus-within is not a state change — it is just
+          how the box always looks. */}
+      <div className="relative rounded-xl border border-white/[0.06] bg-surface-raised">
         <textarea
           ref={textareaRef}
           value={prompt}
@@ -496,7 +499,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
         </p>
       ) : (
         <p className="text-[11px] text-gray-600 mt-2 text-center flex items-center justify-center gap-1.5">
-          <Lightbulb size={11} className="text-yellow-500/60 shrink-0" />
+          <Lightbulb size={11} className="text-ink-faint shrink-0" />
           {tip.shortcut && (
             <kbd className="px-1 py-0.5 rounded bg-white/[0.06] text-gray-500 font-mono text-[10px]">
               {tip.shortcut}
@@ -535,7 +538,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
           <motion.div
             className="fixed top-1/2 left-1/2 z-50 w-[92%] sm:w-[80%] max-w-[800px] border border-white/[0.08]
                        rounded-xl shadow-2xl p-4 sm:p-6"
-            style={{ background: '#1e1e22' }}
+            style={{ background: 'var(--color-surface-overlay)' }}
             initial={{ opacity: 0, scale: 0.95, x: '-50%', y: '-50%' }}
             animate={{ opacity: 1, scale: 1, x: '-50%', y: '-50%' }}
             exit={{ opacity: 0, scale: 0.95, x: '-50%', y: '-50%' }}

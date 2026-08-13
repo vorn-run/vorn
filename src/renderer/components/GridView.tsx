@@ -495,12 +495,12 @@ function GridDragGhost({
           {session.branch && (
             <div className="flex items-center gap-1 mt-0.5">
               {session.isWorktree ? (
-                <FolderGit2 size={10} className="text-amber-500 shrink-0" strokeWidth={1.5} />
+                <FolderGit2 size={10} className="text-ink-secondary shrink-0" strokeWidth={1.5} />
               ) : (
                 <GitBranch size={10} className="text-gray-600 shrink-0" strokeWidth={1.5} />
               )}
               <span
-                className={`text-[10px] font-mono truncate ${session.isWorktree ? 'text-amber-400' : 'text-gray-500'}`}
+                className={`text-[10px] font-mono truncate ${session.isWorktree ? 'text-ink-secondary' : 'text-gray-500'}`}
               >
                 {getBranchLabel(session)}
               </span>

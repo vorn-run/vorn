@@ -82,7 +82,7 @@ export function SessionDock({ includeMinimized }: Props) {
             {waitingApprovals.length > 0 && (
               <span
                 aria-hidden="true"
-                className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-400"
+                className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-bronzo"
               />
             )}
           </button>
@@ -244,7 +244,7 @@ function DockGroupedPopover({
           {groups.length > 1 && (
             <span
               className={`px-1 text-[9px] font-medium uppercase tracking-wider ${
-                group.kind === 'waiting' ? 'text-amber-400/70' : 'text-gray-500'
+                group.kind === 'waiting' ? 'text-ink-secondary' : 'text-gray-500'
               }`}
             >
               {KIND_LABEL[group.kind]}

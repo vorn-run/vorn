@@ -61,12 +61,12 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
       onClick={handleOpen}
       className="inline-flex items-center gap-1.5 rounded-md border bg-[#1a1a1e] px-2.5 py-1
                  cursor-pointer transition-colors select-none
-                 border-amber-500/30 hover:border-amber-500/50"
+                 border-bronzo/40 hover:border-bronzo/70"
     >
       <div className="relative flex-shrink-0">
-        <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+        <div className="w-1.5 h-1.5 rounded-full bg-bronzo" />
         <div
-          className="absolute inset-[-1px] rounded-full bg-amber-400 opacity-40 animate-ping"
+          className="absolute inset-[-1px] rounded-full bg-bronzo opacity-40 animate-ping"
           style={{ animationDuration: '2s' }}
         />
       </div>
@@ -89,7 +89,7 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
           <button
             onClick={handleApprove}
             aria-label="Approve"
-            className="p-0.5 rounded text-green-400 hover:text-green-300 hover:bg-green-500/10 transition-colors"
+            className="p-0.5 rounded text-ink-secondary hover:text-ink hover:bg-white/[0.08] transition-colors"
           >
             <Check size={12} strokeWidth={2.5} />
           </button>
@@ -98,7 +98,7 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
           <button
             onClick={handleReject}
             aria-label="Reject"
-            className="p-0.5 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+            className="p-0.5 rounded text-ink-faint hover:text-danger hover:bg-danger/10 transition-colors"
           >
             <X size={12} strokeWidth={2.5} />
           </button>
