@@ -69,8 +69,40 @@ describe('describeRun', () => {
     expect(p.title).toBe('Issue #84')
   })
 
-  it('treats a GitHub item with no url as an issue rather than throwing', () => {
+  // Previously this guessed "Issue #84", inferred from the connector id. The
+  // guess is gone with the id test: a packaged connector reports `mcp`, so the
+  // inference would have been wrong precisely when it was invisible. Without a
+  // url there is nothing that distinguishes an issue from a pull request, and
+  // naming it generically is better than naming it confidently wrong.
+  it('falls back to the generic form when a GitHub item carries no url', () => {
     const p = describeRun(run({ connectorItem: githubItem({ externalId: '84' }) }))
+    expect(p.title).toBe('github 84')
+  })
+
+  // The port's whole point: the same GitHub items arriving through a packaged
+  // connector, whose connection is stored as `mcp`. Titles must survive that.
+  it('still names a PR when the item arrives from a packaged connector', () => {
+    const p = describeRun(
+      run({
+        connectorItem: githubItem({
+          connectorId: 'mcp',
+          externalUrl: 'https://github.com/vorn-run/vorn/pull/309'
+        })
+      })
+    )
+    expect(p.title).toBe('PR #309')
+  })
+
+  it('still names an issue when the item arrives from a packaged connector', () => {
+    const p = describeRun(
+      run({
+        connectorItem: githubItem({
+          connectorId: 'mcp',
+          externalId: '84',
+          externalUrl: 'https://github.com/vorn-run/vorn/issues/84'
+        })
+      })
+    )
     expect(p.title).toBe('Issue #84')
   })
 

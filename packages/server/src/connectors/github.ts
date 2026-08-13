@@ -148,23 +148,6 @@ function runWithStdin(
 }
 
 /** Detect owner/repo from a git repo path using gh CLI */
-export async function detectRepoSlug(
-  projectPath: string
-): Promise<{ owner: string; repo: string } | null> {
-  try {
-    const result = await gh(
-      ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'],
-      projectPath
-    )
-    const slug = result.trim()
-    if (!slug.includes('/')) return null
-    const [owner, repo] = slug.split('/')
-    return { owner, repo }
-  } catch {
-    return null
-  }
-}
-
 /**
  * Invoke the GitHub REST API via `gh api`. For non-GET requests with a body,
  * the JSON body is piped over stdin using `--input -`, which side-steps shell

@@ -37,6 +37,7 @@ import type {
 } from '@vornrun/shared/types'
 import { DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
+import { detectRepoSlug } from './git-utils'
 import {
   scanWorktreeInventory,
   reclaimArtifacts,
@@ -108,7 +109,6 @@ import {
 } from './connectors/mcp'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
-import { detectRepoSlug } from './connectors/github'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
 import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vornrun/shared/types'
