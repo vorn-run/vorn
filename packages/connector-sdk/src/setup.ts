@@ -9,6 +9,13 @@ export function pollToolName(triggerType: string): string {
 /** Tool that reports the connector's manifest and setup hints. */
 export const MANIFEST_TOOL = 'vorn_connector_manifest'
 
+/**
+ * Tool that reports whether the connector can run right now. Present only when
+ * the connector declares a `preflight`, so its absence means "nothing to
+ * check" rather than "check passed".
+ */
+export const PREFLIGHT_TOOL = 'vorn_connector_preflight'
+
 export interface ConnectionSetup {
   connectorId: string
   triggerType: string

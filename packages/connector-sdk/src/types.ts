@@ -241,6 +241,17 @@ export interface ConnectorIcon {
   paths: string[]
 }
 
+/**
+ * What a connector reports about its own readiness.
+ *
+ * `message` is shown to the user verbatim, so it should say what to do rather
+ * than what went wrong — "run `gh auth login`" beats "not authenticated".
+ */
+export interface PreflightResult {
+  ok: boolean
+  message?: string
+}
+
 export interface ConnectorDefinition {
   /** Stable connector id, e.g. `azure-devops`. */
   id: string
@@ -251,6 +262,20 @@ export interface ConnectorDefinition {
   config?: ConnectorConfigField[]
   triggers?: TriggerDefinition[]
   actions?: ActionDefinition[]
+  /**
+   * Whether this connector could work right now, asked before anyone waits on
+   * a poll.
+   *
+   * A connector whose credentials come from config fields does not need this:
+   * a missing field is already a visible, nameable error. One that borrows an
+   * external tool's login — `gh auth login`, `az login` — has no field to be
+   * missing, so without this the first sign that the tool is absent or signed
+   * out is a poll failing some minutes after the connection was saved.
+   *
+   * Answer `ok: false` for "correctable by the user"; throw for genuinely
+   * broken. Absent means there is nothing to check.
+   */
+  preflight?(): Promise<PreflightResult> | PreflightResult
 }
 
 /** A validated definition. Every accessor below is guaranteed non-null. */
