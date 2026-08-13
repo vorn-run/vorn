@@ -590,9 +590,17 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     const existing = get().browserPanes.get(sessionId)
     if (!existing || index < 0 || index >= existing.tabs.length) return
     // The last tab going means the pane itself goes; an empty browser is just
-    // a box taking up a grid cell.
+    // a box taking up a grid cell. Closing a tab is a discard, though, not a
+    // "give me the space back" — so unlike a pane close it leaves nothing to
+    // restore, or reopening would hand back the page just thrown away.
     if (existing.tabs.length === 1) {
       get().closeBrowserPane(sessionId)
+      set((state) => {
+        if (!state.browserMemory.has(sessionId)) return {}
+        const memory = new Map(state.browserMemory)
+        memory.delete(sessionId)
+        return { browserMemory: memory }
+      })
       return
     }
     set((state) => {

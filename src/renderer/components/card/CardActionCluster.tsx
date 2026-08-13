@@ -193,7 +193,7 @@ export function CardActionCluster({ terminalId, variant }: Props) {
             // could start a second, concurrent claim on a different device,
             // leaving the pane labelled one simulator while driving another.
             disabled={claiming}
-            className={` ${claiming ? 'opacity-50 cursor-wait' : ''}`}
+            className={`${ICON_BUTTON} ${claiming ? 'opacity-50 cursor-wait' : ''}`}
             aria-busy={claiming}
             aria-label={hasDevicePane ? 'Hide device' : claiming ? 'Opening device' : 'Open device'}
           >

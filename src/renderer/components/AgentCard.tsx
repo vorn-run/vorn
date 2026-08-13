@@ -110,6 +110,25 @@ export const AgentCard = memo(
       setFocused(terminalId)
     }
 
+    // The session's chrome normally rides inside the terminal column so the
+    // panes beside it get the card's full height. A maximized pane collapses
+    // that column, though, and the chrome must not go with it: it carries the
+    // session's name, its drag handle, and the only close and minimize buttons
+    // the card has. In that one state it spans the card, as it used to.
+    const header = (
+      <CardHeader
+        terminalId={terminalId}
+        variant="mini"
+        index={index}
+        draggable={Boolean(onDragStart || flexible)}
+        onDragStart={onDragStart}
+        onDoubleClick={handleExpand}
+        revealActions={isTouchDevice}
+        dimmed={isChromeDimmed}
+      />
+    )
+    const statusBar = <CardStatusBar terminalId={terminalId} dimmed={isChromeDimmed} />
+
     return (
       <div
         ref={ref}
@@ -138,6 +157,8 @@ export const AgentCard = memo(
             lives *inside* the terminal column rather than spanning the card: a
             pane carries its own bar, so a full-width header above both stacked
             two title rows and cost the panes the card's full height. */}
+        {hasMaximizedPane && header}
+
         <div ref={bodyRef} className="flex flex-row flex-1 min-h-0">
           {/* The column, not the surface inside it, is what the split ratio
               sizes and what hides behind a maximized pane. */}
@@ -146,16 +167,7 @@ export const AgentCard = memo(
             className={`flex flex-col min-h-0 min-w-0 ${hasMaximizedPane ? 'hidden' : ''}`}
             style={{ flexGrow: terminalRatio, flexShrink: 1, flexBasis: 0 }}
           >
-            <CardHeader
-              terminalId={terminalId}
-              variant="mini"
-              index={index}
-              draggable={Boolean(onDragStart || flexible)}
-              onDragStart={onDragStart}
-              onDoubleClick={handleExpand}
-              revealActions={isTouchDevice}
-              dimmed={isChromeDimmed}
-            />
+            {!hasMaximizedPane && header}
 
             {/* `relative` stays on the terminal surface itself: it hosts
                 absolutely-positioned overlays that would otherwise stretch
@@ -227,7 +239,7 @@ export const AgentCard = memo(
               />
             )}
 
-            <CardStatusBar terminalId={terminalId} dimmed={isChromeDimmed} />
+            {!hasMaximizedPane && statusBar}
           </div>
 
           {hasPanes && !hasMaximizedPane && (
@@ -259,6 +271,8 @@ export const AgentCard = memo(
             </div>
           )}
         </div>
+
+        {hasMaximizedPane && statusBar}
 
         {!flexible && <RowResizeHandle />}
       </div>

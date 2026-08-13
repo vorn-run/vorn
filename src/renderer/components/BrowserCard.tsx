@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, MousePointerClick, Pencil, Plus, RotateCw, X } f
 import { useAppStore } from '../stores'
 import { PaneCard, PaneControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
+import { ICON_BUTTON } from '../lib/icon-button'
 import { browserPaneId } from '../lib/pane-id'
 import { normalizeUrl, displayHost, flattenPageText } from '../lib/browser-url'
 
@@ -276,9 +277,9 @@ export const BrowserCard = memo(
 
     if (!terminal || !pane || url === null) return null
 
-    const btn =
-      'p-1 rounded text-gray-500 enabled:hover:text-gray-200 enabled:hover:bg-white/[0.06] ' +
-      'disabled:opacity-25 transition-colors'
+    // Shares the card's icon-button style; the disabled states belong to this
+    // bar, since back and forward spend most of their life unavailable.
+    const btn = `${ICON_BUTTON} disabled:opacity-25 disabled:hover:bg-transparent`
 
     return (
       <PaneCard

@@ -59,7 +59,7 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
   return (
     <div
       onClick={handleOpen}
-      className="inline-flex items-center gap-1.5 rounded-md border bg-[#1a1a1e] px-2.5 py-1
+      className="inline-flex items-center gap-1.5 rounded-md border bg-surface-raised px-2.5 py-1
                  cursor-pointer transition-colors select-none
                  border-bronzo/40 hover:border-bronzo/70"
     >

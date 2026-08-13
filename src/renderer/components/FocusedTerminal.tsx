@@ -98,6 +98,23 @@ export function FocusedTerminal() {
     }
   }
 
+  // Normally this rides inside the terminal column so the panes keep the full
+  // height. A maximized pane collapses that column, and on macOS this wrapper is
+  // the window's only drag region while a session is expanded (App.tsx drops the
+  // app titlebar then) — losing it would leave the window undraggable, with no
+  // Collapse button either. So in that one state it spans the stage.
+  const desktopHeader = !isMobile && (
+    <div
+      className={`group/card shrink-0 ${isMac ? 'titlebar-drag' : 'titlebar-no-drag'}`}
+      onDoubleClick={(e) => {
+        if ((e.target as HTMLElement).closest('button, input, [role="button"]')) return
+        handleContract()
+      }}
+    >
+      <CardHeader terminalId={effectiveId} variant="focused" />
+    </div>
+  )
+
   return (
     <>
       {/* Backdrop — mobile only */}
@@ -211,25 +228,15 @@ export function FocusedTerminal() {
           </div>
         ) : null}
 
+        {hasMaximizedPane && desktopHeader}
+
         {/* Terminal, plus this session's file panes riding along beside it. */}
         <div className="flex-1 min-h-0 flex">
           <div
             data-testid="focused-terminal-column"
             className={`flex-1 min-w-0 flex-col ${hasMaximizedPane ? 'hidden' : 'flex'}`}
           >
-            {/* The session's header sits in its own column rather than spanning
-                the stage, so the panes beside it keep the full height. */}
-            {!isMobile && (
-              <div
-                className={`group/card shrink-0 ${isMac ? 'titlebar-drag' : 'titlebar-no-drag'}`}
-                onDoubleClick={(e) => {
-                  if ((e.target as HTMLElement).closest('button, input, [role="button"]')) return
-                  handleContract()
-                }}
-              >
-                <CardHeader terminalId={effectiveId} variant="focused" />
-              </div>
-            )}
+            {!hasMaximizedPane && desktopHeader}
 
             <div
               ref={terminalContainerRef}

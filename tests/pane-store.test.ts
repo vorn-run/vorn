@@ -173,6 +173,20 @@ describe('pane store actions', () => {
     expect(s().browserPanes.get('t1')?.tabs).toEqual(tabs)
   })
 
+  it('forgets a page closed by its tab, rather than the pane', () => {
+    // Closing the last tab routes through closeBrowserPane, so without this the
+    // discard gesture files the page into memory and reopening hands back
+    // exactly the page just thrown away.
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => s().closeBrowserTab('t1', 0))
+    expect(s().browserPanes.has('t1')).toBe(false)
+    expect(s().browserMemory.has('t1')).toBe(false)
+
+    act(() => s().openBrowserPane('t1'))
+    expect(browserUrl('t1')).toBe('about:blank')
+  })
+
   it("does not hand a recycled session id the previous one's pages", () => {
     // Ids are reused, and remembered tabs outliving their session would reopen
     // a browser onto pages that belonged to someone else's work. Deliberately

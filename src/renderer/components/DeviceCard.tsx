@@ -4,6 +4,7 @@ import { MousePointerClick, Pencil, Smartphone, X } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { PaneCard, PaneControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
+import { ICON_BUTTON } from '../lib/icon-button'
 import { devicePaneId } from '../lib/pane-id'
 import { flattenPageText } from '../lib/browser-url'
 
@@ -306,8 +307,7 @@ export const DeviceCard = memo(
 
     if (!pane) return null
 
-    const btn =
-      'p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-white/[0.06] transition-colors'
+    const btn = ICON_BUTTON
 
     return (
       <PaneCard
