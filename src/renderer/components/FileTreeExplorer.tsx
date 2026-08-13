@@ -113,7 +113,7 @@ function TreeNode({
       <div>
         <button
           onClick={handleToggle}
-          className="group relative w-full flex items-center gap-[5px] pr-2 text-left text-[12px] transition-colors hover:bg-white/[0.05]"
+          className="group relative w-full flex items-center gap-[5px] pr-2 text-left text-[13.5px] transition-colors hover:bg-white/[0.05]"
           style={{ height: ROW_HEIGHT, paddingLeft: `${BASE_LEFT + depth * INDENT_WIDTH}px` }}
         >
           {guides}
@@ -178,8 +178,8 @@ function TreeNode({
   return (
     <button
       onClick={() => onSelectFile(entry.path)}
-      className={`group relative w-full flex items-center gap-[5px] pr-2 text-left text-[12px] transition-colors
-        ${isSelected ? 'bg-blue-500/[0.12] text-gray-100' : 'hover:bg-white/[0.05] text-gray-400'}`}
+      className={`group relative w-full flex items-center gap-[5px] pr-2 text-left text-[13.5px] transition-colors
+        ${isSelected ? 'bg-white/[0.10] text-gray-100' : 'hover:bg-white/[0.05] text-gray-400'}`}
       style={{ height: ROW_HEIGHT, paddingLeft: `${BASE_LEFT + depth * INDENT_WIDTH + 16}px` }}
     >
       {guides}
@@ -374,7 +374,7 @@ function LineRow({
 }) {
   return (
     <div ref={rowRef} className="flex select-text hover:bg-white/[0.02]">
-      <span className="w-[40px] shrink-0 text-right pr-3 text-[11px] text-gray-600 select-none">
+      <span className="w-[44px] shrink-0 text-right pr-3 text-[12px] text-gray-600 select-none">
         {lineNum}
       </span>
       {children}
@@ -515,7 +515,7 @@ function ReadView({
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <pre className="text-[12px] leading-[1.6] font-mono">
+      <pre className="text-[13px] leading-[1.65] font-mono">
         {renderedLines}
         {capped && (
           <div className="px-3 py-2 text-[11px] text-gray-600 italic">
@@ -548,7 +548,7 @@ function EditView({
   return (
     <div className="flex-1 overflow-auto flex">
       <pre
-        className="select-none text-right pr-3 pl-2 py-1 text-[11px] leading-[1.6] font-mono text-gray-600 shrink-0"
+        className="select-none text-right pr-3 pl-2 py-1 text-[12px] leading-[1.65] font-mono text-gray-600 shrink-0"
         aria-hidden="true"
       >
         {gutter}
@@ -563,7 +563,7 @@ function EditView({
           }
         }}
         spellCheck={false}
-        className="flex-1 bg-transparent text-gray-200 text-[12px] leading-[1.6] font-mono outline-none resize-none whitespace-pre py-1 pr-3"
+        className="flex-1 bg-transparent text-gray-200 text-[13px] leading-[1.65] font-mono outline-none resize-none whitespace-pre py-1 pr-3"
         style={{ minHeight: '100%' }}
       />
     </div>
@@ -777,7 +777,7 @@ function FilePanel({
               }
             }}
             placeholder="Find in file"
-            className="flex-1 bg-transparent text-gray-200 outline-none text-[12px] font-mono"
+            className="flex-1 bg-transparent text-gray-200 outline-none text-[13px] font-mono"
           />
           <span className="text-gray-500 shrink-0 tabular-nums">
             {findCount === 0 ? '0/0' : `${findIdx + 1}/${findCount}`}
@@ -817,7 +817,7 @@ function FilePanel({
           <Loader2 size={16} className="text-gray-500 animate-spin" />
         </div>
       ) : isBinary ? (
-        <div className="flex-1 flex items-center justify-center text-gray-600 text-[12px]">
+        <div className="flex-1 flex items-center justify-center text-gray-600 text-[13px]">
           Binary file — preview unavailable
         </div>
       ) : editing ? (
@@ -906,11 +906,7 @@ function FilesPanel({
   selectedFile,
   onSelectFile,
   showHeader = true,
-  controls,
-  onHeaderPointerDown,
-  onHeaderDoubleClick,
-  headerTestId,
-  headerClassName = ''
+  headerTestId
 }: {
   rootEntries: FileEntry[]
   dirCache: Map<string, FileEntry[]>
@@ -919,16 +915,7 @@ function FilesPanel({
   onSelectFile: (path: string) => void
   /** False when hosted in a pane card that draws its own header. */
   showHeader?: boolean
-  /**
-   * Pane chrome (maximize / close) seated in the filter row. A hosting card
-   * that passes this drops its own header row — the filter row is already a
-   * full-width bar, and a second one above it is chrome on chrome.
-   */
-  controls?: ReactNode
-  onHeaderPointerDown?: (e: React.PointerEvent) => void
-  onHeaderDoubleClick?: () => void
   headerTestId?: string
-  headerClassName?: string
 }) {
   const [filter, setFilter] = useState('')
   const { matched, expand } = useMemo(
@@ -939,14 +926,11 @@ function FilesPanel({
   return (
     <div className="flex flex-col min-h-0 h-full">
       {showHeader && <PanelHeader title="Files" />}
-      <div
-        className={`flex items-center gap-1 px-1.5 py-1.5 shrink-0 ${headerClassName}`}
-        onPointerDown={onHeaderPointerDown}
-        onDoubleClick={onHeaderDoubleClick}
-        data-testid={headerTestId}
-      >
-        <div className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1 rounded-md bg-white/[0.04] focus-within:bg-white/[0.06]">
-          <Search size={12} className="text-gray-600 shrink-0" />
+      <div className="flex items-center gap-1 px-1.5 py-1.5 shrink-0" data-testid={headerTestId}>
+        {/* A search field has to read as somewhere you can type before anything
+            is in it; at 4% over a near-black pane it was very nearly the pane. */}
+        <div className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1 rounded-md bg-white/[0.09] focus-within:bg-white/[0.13] transition-colors">
+          <Search size={13} className="text-gray-600 shrink-0" />
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -954,7 +938,7 @@ function FilesPanel({
               if (e.key === 'Escape') setFilter('')
             }}
             placeholder="Filter files…"
-            className="flex-1 bg-transparent text-gray-200 outline-none text-[12px] placeholder:text-gray-600"
+            className="flex-1 bg-transparent text-gray-200 outline-none text-[13px] placeholder:text-gray-600"
           />
           {filter && (
             <button
@@ -966,7 +950,6 @@ function FilesPanel({
             </button>
           )}
         </div>
-        {controls}
       </div>
       <div className="flex-1 overflow-y-auto py-0.5">
         {rootEntries.map((entry) => (
@@ -1173,22 +1156,13 @@ export function FileTreePane({
   remoteHostId,
   selectedFile,
   onSelectFile,
-  controls,
-  onHeaderPointerDown,
-  onHeaderDoubleClick,
-  headerTestId,
-  headerClassName
+  headerTestId
 }: {
   cwd: string
   remoteHostId?: string
   selectedFile: string | null
   onSelectFile: (path: string) => void
-  /** Pane chrome seated in the filter row; see `FilesPanel`. */
-  controls?: ReactNode
-  onHeaderPointerDown?: (e: React.PointerEvent) => void
-  onHeaderDoubleClick?: () => void
   headerTestId?: string
-  headerClassName?: string
 }): JSX.Element {
   const [rootEntries, setRootEntries] = useState<FileEntry[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1251,11 +1225,7 @@ export function FileTreePane({
       selectedFile={selectedFile}
       onSelectFile={onSelectFile}
       showHeader={false}
-      controls={controls}
-      onHeaderPointerDown={onHeaderPointerDown}
-      onHeaderDoubleClick={onHeaderDoubleClick}
       headerTestId={headerTestId}
-      headerClassName={headerClassName}
     />
   )
 }

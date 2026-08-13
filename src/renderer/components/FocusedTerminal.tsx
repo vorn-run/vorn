@@ -98,6 +98,23 @@ export function FocusedTerminal() {
     }
   }
 
+  // Normally this rides inside the terminal column so the panes keep the full
+  // height. A maximized pane collapses that column, and on macOS this wrapper is
+  // the window's only drag region while a session is expanded (App.tsx drops the
+  // app titlebar then) — losing it would leave the window undraggable, with no
+  // Collapse button either. So in that one state it spans the stage.
+  const desktopHeader = !isMobile && (
+    <div
+      className={`group/card shrink-0 ${isMac ? 'titlebar-drag' : 'titlebar-no-drag'}`}
+      onDoubleClick={(e) => {
+        if ((e.target as HTMLElement).closest('button, input, [role="button"]')) return
+        handleContract()
+      }}
+    >
+      <CardHeader terminalId={effectiveId} variant="focused" />
+    </div>
+  )
+
   return (
     <>
       {/* Backdrop — mobile only */}
@@ -118,7 +135,7 @@ export function FocusedTerminal() {
             : 'flex-1 flex flex-col min-h-0 overflow-hidden'
         }
         style={{
-          background: '#1a1a1e',
+          background: 'var(--color-surface-raised)',
           ...(isMobile ? { paddingTop: 'var(--safe-top, 0px)' } : {})
         }}
         {...(isMobile
@@ -182,13 +199,17 @@ export function FocusedTerminal() {
               {terminal.session.branch && (
                 <span className="flex items-center gap-1 mt-0.5">
                   {terminal.session.isWorktree ? (
-                    <FolderGit2 size={11} className="text-amber-500 shrink-0" strokeWidth={1.5} />
+                    <FolderGit2
+                      size={11}
+                      className="text-ink-secondary shrink-0"
+                      strokeWidth={1.5}
+                    />
                   ) : (
                     <GitBranch size={11} className="text-gray-600 shrink-0" strokeWidth={1.5} />
                   )}
                   <span
                     className={`text-[11px] font-mono truncate ${
-                      terminal.session.isWorktree ? 'text-amber-400' : 'text-gray-500'
+                      terminal.session.isWorktree ? 'text-ink-secondary' : 'text-gray-500'
                     }`}
                   >
                     {getBranchLabel(terminal.session)}
@@ -205,17 +226,9 @@ export function FocusedTerminal() {
               )}
             </div>
           </div>
-        ) : (
-          <div
-            className={`group/card ${isMac ? 'titlebar-drag' : 'titlebar-no-drag'}`}
-            onDoubleClick={(e) => {
-              if ((e.target as HTMLElement).closest('button, input, [role="button"]')) return
-              handleContract()
-            }}
-          >
-            <CardHeader terminalId={effectiveId} variant="focused" />
-          </div>
-        )}
+        ) : null}
+
+        {hasMaximizedPane && desktopHeader}
 
         {/* Terminal, plus this session's file panes riding along beside it. */}
         <div className="flex-1 min-h-0 flex">
@@ -223,10 +236,12 @@ export function FocusedTerminal() {
             data-testid="focused-terminal-column"
             className={`flex-1 min-w-0 flex-col ${hasMaximizedPane ? 'hidden' : 'flex'}`}
           >
+            {!hasMaximizedPane && desktopHeader}
+
             <div
               ref={terminalContainerRef}
               className="relative flex-1 p-1 min-h-0"
-              style={{ background: 'rgba(0, 0, 0, 0.3)' }}
+              style={{ background: 'var(--color-surface-sunken)' }}
             >
               <TerminalPane
                 terminalId={effectiveId}

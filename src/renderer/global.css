@@ -2,17 +2,42 @@
 @source "./**/*.{tsx,ts,html}";
 
 @theme {
+  /* The app's only accent, and spent sparingly enough to stay meaningful: it
+     marks work blocked on the person, and nothing else. Not selection, not
+     focus, not running. Terminal output, diffs and logs keep their own colour
+     — that is the work itself, not chrome describing it. */
   --color-bronzo: #c9972a;
   --color-bronzo-dark: #b8862a;
 
-  /* Surface ladder — the app field and the surfaces that lift off it.
-     Depth within the page comes from a step plus a hairline, not a shadow.
-     A shadow means something is floating over the page rather than part of
-     it: menus, dialogs, the selection bar. */
-  --color-surface-base: #1a1a1e; /* app background */
-  --color-surface-sunken: #141416; /* context menus */
-  --color-surface-raised: #1e1e22; /* dialogs */
-  --color-surface-overlay: #26262b; /* selection bars, floating chrome */
+  /* Failure and destructive actions only. Burnt orange rather than signal
+     red so it can sit beside bronzo without the two fighting. */
+  --color-danger: #d4623f;
+
+  /* Ink ramp — warm off-white at four opacities, enough between them to carry
+     hierarchy without a hue. The sessions surface reads from these; the rest of
+     the app still uses Tailwind's grays and is migrated view by view. */
+  --color-ink: #faf9f7; /* primary text */
+  --color-ink-secondary: rgba(255, 255, 255, 0.55); /* row titles, labels */
+  --color-ink-faint: rgba(255, 255, 255, 0.35); /* metadata, identifiers */
+  --color-ink-ghost: rgba(255, 255, 255, 0.18); /* settled, receded */
+
+  /* Surface ladder — the app field and the surfaces that lift off it. Depth
+     comes from a step plus a hairline, never a shadow; a shadow means something
+     floats over the page rather than being part of it. The steps are small, of
+     the order of four points: a panel is a different region, not a different
+     material, and a larger step reads as a hole cut in the page. */
+  --color-surface-base: #0d0d0f; /* app background, behind the cards */
+  --color-surface-sunken: #141416; /* card body and terminal: the main column */
+  --color-surface-panel: #101012; /* panes, card header, status bar: beside the work */
+  --color-surface-overlay: #1c1c20; /* menus, popovers, floating chrome */
+  /* An alias, not a value. A card frame matching the terminal it holds is what
+     keeps a lighter band from showing around the panes, so the equality is the
+     point — spelling it as a reference keeps a later nudge to one from silently
+     failing to move the other. */
+  --color-surface-raised: var(--color-surface-sunken); /* card frame, dialogs */
+  /* Left where it was. The workflow canvas behind these still paints its own
+     #1a1a1e, so moving the nodes onto the sessions ladder would flip them from
+     just above that canvas to just below it. They move when the canvas does. */
   --color-surface-node: #1d1d20; /* workflow canvas node cards */
 }
 
@@ -94,14 +119,23 @@ select,
     line-height: 1.5;
   }
 
-  /* Boost contrast on low-visibility grays for WCAG AA (4.5:1) on mobile.
-     gray-500 (#6b7280) is only 3.6:1 on #1a1a1e — bump to gray-400 level.
-     gray-600 (#4b5563) is only 2.3:1 — bump to gray-500 level. */
+  /* Boost contrast on low-visibility foregrounds for WCAG AA (4.5:1) on mobile.
+     gray-500 (#6b7280) is only 3.0:1 on the #0d0d0f field — bump to gray-400.
+     gray-600 (#4b5563) is only 1.9:1 — bump to gray-500. */
   .text-gray-500 {
-    color: #9ca3af !important; /* gray-400: 6.8:1 */
+    color: #9ca3af !important; /* gray-400: 7.9:1 */
   }
   .text-gray-600 {
-    color: #6b7280 !important; /* gray-500: 3.6:1 → still below, but acceptable for decorative/hint text */
+    color: #6b7280 !important; /* gray-500: 3.0:1 → still below, but acceptable for decorative/hint text */
+  }
+
+  /* The ramp gets the same treatment, on the tokens rather than on class names,
+     so anything reading from it is covered rather than opting out by using the
+     newer vocabulary. faint in particular lands near gray-600 at rest. */
+  :root {
+    --color-ink-secondary: rgba(255, 255, 255, 0.72);
+    --color-ink-faint: rgba(255, 255, 255, 0.55);
+    --color-ink-ghost: rgba(255, 255, 255, 0.35);
   }
 
   /* ── Liquid Glass material (iOS 26 / Framework7 v9 inspired) ── */
@@ -141,9 +175,10 @@ select,
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* Focus-visible ring for keyboard navigation */
+/* Focus ring for keyboard navigation. Plain white and hairline-thin — an
+   accent here would spend the one colour on a state that changes every Tab. */
 :focus-visible {
-  outline: 2px solid rgba(96, 165, 250, 0.6);
+  outline: 1px solid rgba(255, 255, 255, 0.45);
   outline-offset: 1px;
   border-radius: 4px;
 }
@@ -203,9 +238,7 @@ select:focus:not(:focus-visible) {
 
 /* Drop target indicator */
 .card-drop-target {
-  box-shadow:
-    inset 0 0 0 2px rgba(59, 130, 246, 0.5),
-    0 0 12px rgba(59, 130, 246, 0.15);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
   transition: box-shadow 0.15s ease;
 }
 
@@ -254,12 +287,12 @@ select:focus:not(:focus-visible) {
 @keyframes borderPulse {
   0%,
   100% {
-    border-color: rgba(59, 130, 246, 0.15);
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
   }
   50% {
-    border-color: rgba(59, 130, 246, 0.45);
-    box-shadow: 0 0 8px 0 rgba(59, 130, 246, 0.08);
+    border-color: rgba(255, 255, 255, 0.28);
+    box-shadow: 0 0 8px 0 rgba(255, 255, 255, 0.06);
   }
 }
 
@@ -296,8 +329,8 @@ select:focus:not(:focus-visible) {
   border-bottom-color: rgba(255, 255, 255, 0.35);
 }
 .flexible-grid .react-grid-placeholder {
-  background: rgba(59, 130, 246, 0.15) !important;
-  border: 1px dashed rgba(59, 130, 246, 0.4);
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px dashed rgba(255, 255, 255, 0.3);
   border-radius: 8px;
   opacity: 1 !important;
 }

@@ -210,6 +210,7 @@ function reconcilePanes(
   filesPanes: Set<string>,
   editorPanes: Map<string, EditorPaneState>,
   browserPanes: Map<string, BrowserPaneState>,
+  browserMemory: Map<string, BrowserPaneState>,
   devicePanes: Map<string, DevicePaneState>,
   cardSplits: Record<string, CardSplit>,
   liveSessionIds: Set<string>
@@ -217,12 +218,17 @@ function reconcilePanes(
   filesPanes: Set<string>
   editorPanes: Map<string, EditorPaneState>
   browserPanes: Map<string, BrowserPaneState>
+  browserMemory: Map<string, BrowserPaneState>
   devicePanes: Map<string, DevicePaneState>
   cardSplits: Record<string, CardSplit>
 } | null {
   const nextFiles = new Set([...filesPanes].filter((id) => liveSessionIds.has(id)))
   const nextEditors = new Map([...editorPanes].filter(([id]) => liveSessionIds.has(id)))
   const nextBrowsers = new Map([...browserPanes].filter(([id]) => liveSessionIds.has(id)))
+  // Tabs remembered for a closed pane die with their session as well. This is
+  // the path `removeTerminal` cannot cover: a session that simply never came
+  // back leaves no removal to hang the cleanup off.
+  const nextMemory = new Map([...browserMemory].filter(([id]) => liveSessionIds.has(id)))
   // Device panes are in-memory only, but a dead session's pane still keeps a
   // card mounted against a device nobody can drive — the same leak, minus the
   // localStorage growth.
@@ -235,6 +241,7 @@ function reconcilePanes(
     nextFiles.size === filesPanes.size &&
     nextEditors.size === editorPanes.size &&
     nextBrowsers.size === browserPanes.size &&
+    nextMemory.size === browserMemory.size &&
     nextDevices.size === devicePanes.size &&
     !splitsChanged
   ) {
@@ -246,6 +253,7 @@ function reconcilePanes(
     filesPanes: nextFiles,
     editorPanes: nextEditors,
     browserPanes: nextBrowsers,
+    browserMemory: nextMemory,
     devicePanes: nextDevices,
     cardSplits: nextSplits
   }
@@ -303,6 +311,9 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   focusableTerminalIds: [],
   minimizedTerminals: new Set(),
   ...loadPanes(),
+  // Not persisted: remembering tabs across a close is about the current
+  // sitting, and a reload already restores whatever was open from loadPanes.
+  browserMemory: new Map(),
   // Not part of loadPanes: a claim lives in main and dies with the app, so a
   // device pane restored from disk would frame a simulator nobody holds.
   devicePanes: new Map(),
@@ -432,6 +443,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
               state.filesPanes,
               state.editorPanes,
               state.browserPanes,
+              state.browserMemory,
               state.devicePanes,
               state.cardSplits,
               live
@@ -527,7 +539,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
           next.set(sessionId, { tabs: [normalized], activeTab: 0 })
         }
       } else if (!existing) {
-        next.set(sessionId, { tabs: [DEFAULT_BROWSER_URL], activeTab: 0 })
+        // Reopening picks up where the pane left off. Closing it is how you get
+        // the space back, not how you throw the tabs away.
+        const remembered = state.browserMemory.get(sessionId)
+        next.set(sessionId, remembered ?? { tabs: [DEFAULT_BROWSER_URL], activeTab: 0 })
       } else {
         return {}
       }
@@ -538,12 +553,16 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 
   closeBrowserPane: (sessionId) =>
     set((state) => {
-      if (!state.browserPanes.has(sessionId)) return {}
+      const closing = state.browserPanes.get(sessionId)
+      if (!closing) return {}
       const next = new Map(state.browserPanes)
       next.delete(sessionId)
+      const memory = new Map(state.browserMemory)
+      memory.set(sessionId, closing)
       savePanes(state.filesPanes, state.editorPanes, next)
       return {
         browserPanes: next,
+        browserMemory: memory,
         ...(state.maximizedPaneId === browserPaneId(sessionId) ? { maximizedPaneId: null } : {})
       }
     }),
@@ -571,9 +590,17 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     const existing = get().browserPanes.get(sessionId)
     if (!existing || index < 0 || index >= existing.tabs.length) return
     // The last tab going means the pane itself goes; an empty browser is just
-    // a box taking up a grid cell.
+    // a box taking up a grid cell. Closing a tab is a discard, though, not a
+    // "give me the space back" — so unlike a pane close it leaves nothing to
+    // restore, or reopening would hand back the page just thrown away.
     if (existing.tabs.length === 1) {
       get().closeBrowserPane(sessionId)
+      set((state) => {
+        if (!state.browserMemory.has(sessionId)) return {}
+        const memory = new Map(state.browserMemory)
+        memory.delete(sessionId)
+        return { browserMemory: memory }
+      })
       return
     }
     set((state) => {

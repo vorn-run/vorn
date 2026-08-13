@@ -81,7 +81,7 @@ export function WorkflowFilterToolbar() {
         >
           <ListFilter size={13} strokeWidth={1.5} />
           {hasNonDefault && !open && (
-            <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
+            <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-ink-secondary" />
           )}
         </button>
       </Tooltip>
@@ -89,7 +89,7 @@ export function WorkflowFilterToolbar() {
       {open && (
         <div
           ref={dropdownRef}
-          className="fixed z-50 w-[160px] bg-surface-base border border-white/[0.08] rounded-lg shadow-xl overflow-hidden"
+          className="fixed z-50 w-[160px] bg-surface-overlay border border-white/[0.08] rounded-lg shadow-xl overflow-hidden"
           style={{ top: pos.top, left: pos.left }}
         >
           <div className="py-1.5">

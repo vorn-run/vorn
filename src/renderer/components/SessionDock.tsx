@@ -69,7 +69,7 @@ export function SessionDock({ includeMinimized }: Props) {
             type="button"
             onClick={() => setPopoverOpen((v) => !v)}
             className="inline-flex items-center gap-1.5 h-[26px] px-2
-                       rounded-md border border-white/[0.06] bg-[#1a1a1e]
+                       rounded-md border border-white/[0.06] bg-surface-raised
                        text-[11px] font-medium text-gray-300
                        hover:text-white hover:border-white/[0.12] transition-colors
                        relative"
@@ -82,7 +82,7 @@ export function SessionDock({ includeMinimized }: Props) {
             {waitingApprovals.length > 0 && (
               <span
                 aria-hidden="true"
-                className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-400"
+                className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-bronzo"
               />
             )}
           </button>
@@ -141,7 +141,7 @@ export function SessionDock({ includeMinimized }: Props) {
               type="button"
               onClick={() => setPopoverOpen((v) => !v)}
               className="inline-flex items-center justify-center h-[26px] min-w-[28px] px-1.5
-                         rounded-md border border-white/[0.06] bg-[#1a1a1e]
+                         rounded-md border border-white/[0.06] bg-surface-raised
                          text-[11px] font-medium text-gray-400
                          hover:text-white hover:border-white/[0.12] transition-colors"
               aria-haspopup="dialog"
@@ -229,7 +229,7 @@ function DockGroupedPopover({
       onClick={onClose}
       className={`absolute top-full ${align === 'left' ? 'left-0' : 'right-0'} mt-1.5 z-50 p-1.5
                  flex flex-col gap-2 max-h-[60vh] overflow-y-auto min-w-[240px]
-                 bg-[#1a1a1e] border border-white/[0.08] rounded-md shadow-lg`}
+                 bg-surface-raised border border-white/[0.08] rounded-md shadow-lg`}
     >
       {footer && (
         <div
@@ -244,7 +244,7 @@ function DockGroupedPopover({
           {groups.length > 1 && (
             <span
               className={`px-1 text-[9px] font-medium uppercase tracking-wider ${
-                group.kind === 'waiting' ? 'text-amber-400/70' : 'text-gray-500'
+                group.kind === 'waiting' ? 'text-ink-secondary' : 'text-gray-500'
               }`}
             >
               {KIND_LABEL[group.kind]}

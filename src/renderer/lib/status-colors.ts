@@ -1,10 +1,15 @@
 import type { AgentStatus } from '../../shared/types'
 
+/**
+ * Only `waiting` takes the accent — it is the one status blocked on the person.
+ * Running is the commonest state, so painting it would put bronzo across most
+ * of the screen most of the time; it reads white, and STATUS_GLYPH shimmers it.
+ */
 export const STATUS_DOT: Record<AgentStatus, string> = {
-  running: 'bg-green-500',
-  waiting: 'bg-yellow-500',
-  idle: 'bg-gray-500',
-  error: 'bg-red-500'
+  running: 'bg-ink',
+  waiting: 'bg-bronzo',
+  idle: 'bg-ink-ghost',
+  error: 'bg-danger'
 }
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
@@ -26,8 +31,8 @@ export const STATUS_GLYPH: Record<AgentStatus, StatusGlyph> = {
 }
 
 export const STATUS_TEXT: Record<AgentStatus, string> = {
-  running: 'text-green-400',
-  waiting: 'text-amber-400',
-  idle: 'text-gray-500',
-  error: 'text-red-500'
+  running: 'text-ink',
+  waiting: 'text-bronzo',
+  idle: 'text-ink-faint',
+  error: 'text-danger'
 }

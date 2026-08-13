@@ -226,6 +226,16 @@ export interface UISlice {
   editorPanes: Map<string, EditorPaneState>
   /** Session id → the page its browser pane is showing. One browser per session. */
   browserPanes: Map<string, BrowserPaneState>
+  /**
+   * What a closed browser pane was showing, so reopening restores the tabs
+   * rather than starting over.
+   *
+   * `browserPanes` does double duty — an entry's presence is what makes the
+   * pane open, and its value is the tabs — so closing has to delete the entry
+   * and would otherwise take the tabs with it. Kept separate rather than adding
+   * an `open` flag so every `browserPanes.has(...)` check reads the same.
+   */
+  browserMemory: Map<string, BrowserPaneState>
   /** Session id → the simulator its device pane is showing. One device per session. */
   devicePanes: Map<string, DevicePaneState>
   /**

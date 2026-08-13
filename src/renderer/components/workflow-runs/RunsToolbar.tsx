@@ -64,7 +64,7 @@ export function RunsToolbar({ filter, setFilter }: Props) {
         >
           <SlidersHorizontal size={16} strokeWidth={1.5} />
           {hasActiveFilters && !open && (
-            <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
+            <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-ink-secondary" />
           )}
         </button>
       </Tooltip>
@@ -72,7 +72,7 @@ export function RunsToolbar({ filter, setFilter }: Props) {
       {open && (
         <div
           className="absolute right-0 top-full mt-1 z-50 w-[200px]
-                     border border-white/[0.08] rounded-lg shadow-xl overflow-hidden bg-surface-base"
+                     border border-white/[0.08] rounded-lg shadow-xl overflow-hidden bg-surface-overlay"
         >
           <div className="py-1.5">
             <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">

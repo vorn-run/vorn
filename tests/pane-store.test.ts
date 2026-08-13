@@ -31,6 +31,7 @@ function seed(ids: string[] = ['t1']): void {
       filesPanes: new Set(),
       editorPanes: new Map(),
       browserPanes: new Map(),
+      browserMemory: new Map(),
       devicePanes: new Map(),
       cardSplits: {},
       minimizedTerminals: new Set(),
@@ -152,6 +153,55 @@ describe('pane store actions', () => {
     expect(s().browserPanes.has('t1')).toBe(false)
 
     expect(s().maximizedPaneId).toBeNull()
+  })
+
+  it('reopens a closed browser on the tabs it had', () => {
+    // `browserPanes` does double duty: the entry's presence is what makes the
+    // pane open, and its value is the tabs. Closing has to delete the entry, so
+    // without somewhere to put them the tabs went too, and reopening handed
+    // back a blank page — losing however many pages had been opened.
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => s().addBrowserTab('t1', 'vorn.dev'))
+    const tabs = s().browserPanes.get('t1')?.tabs
+    expect(tabs).toHaveLength(2)
+
+    act(() => s().closeBrowserPane('t1'))
+    expect(s().browserPanes.has('t1')).toBe(false)
+
+    act(() => s().openBrowserPane('t1'))
+    expect(s().browserPanes.get('t1')?.tabs).toEqual(tabs)
+  })
+
+  it('forgets a page closed by its tab, rather than the pane', () => {
+    // Closing the last tab routes through closeBrowserPane, so without this the
+    // discard gesture files the page into memory and reopening hands back
+    // exactly the page just thrown away.
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => s().closeBrowserTab('t1', 0))
+    expect(s().browserPanes.has('t1')).toBe(false)
+    expect(s().browserMemory.has('t1')).toBe(false)
+
+    act(() => s().openBrowserPane('t1'))
+    expect(browserUrl('t1')).toBe('about:blank')
+  })
+
+  it("does not hand a recycled session id the previous one's pages", () => {
+    // Ids are reused, and remembered tabs outliving their session would reopen
+    // a browser onto pages that belonged to someone else's work. Deliberately
+    // no re-seed here: seeding resets browserMemory, which would clear the very
+    // thing this is checking gets dropped and let the test pass on its own.
+    const s = () => useAppStore.getState()
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => s().closeBrowserPane('t1'))
+    expect(s().browserMemory.has('t1')).toBe(true)
+
+    act(() => s().removeTerminal('t1'))
+    expect(s().browserMemory.has('t1')).toBe(false)
+
+    act(() => s().openBrowserPane('t1'))
+    expect(activeBrowserUrl(s().browserPanes.get('t1'))).toBe('about:blank')
   })
 
   it('keeps each session on its own page', () => {

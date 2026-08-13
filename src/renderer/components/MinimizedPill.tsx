@@ -21,7 +21,7 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
   return (
     <button
       type="button"
-      className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.06] bg-[#1a1a1e]
+      className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.06] bg-surface-raised
                  px-2.5 py-1 cursor-pointer transition-[border-color] select-none
                  hover:border-white/[0.12]"
       onClick={() => {
@@ -47,7 +47,7 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
           <span className="text-[10px] text-gray-600 shrink-0">&middot;</span>
           <span className="flex items-center gap-0.5 text-[10px] font-mono text-gray-500 truncate max-w-[90px]">
             {session.isWorktree ? (
-              <FolderGit2 size={9} strokeWidth={1.5} className="text-amber-400/70 shrink-0" />
+              <FolderGit2 size={9} strokeWidth={1.5} className="text-ink-faint shrink-0" />
             ) : (
               <GitBranch size={9} strokeWidth={1.5} className="shrink-0" />
             )}

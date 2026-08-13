@@ -48,10 +48,13 @@ export function BranchChip({ terminalId, size = 'sm' }: Props) {
       } ${isSwitching ? 'opacity-50' : ''}`}
       aria-label={`Switch branch (current: ${branchName})`}
     >
+      {/* Worth noticing — it explains why a command ran somewhere other than
+          where you think — but noticing is not being blocked, so it earns
+          brightness rather than the accent. */}
       {isWorktree && worktreeName && (
         <>
-          <FolderGit2 size={iconSize} className="text-amber-400 shrink-0" strokeWidth={1.5} />
-          <span className={`font-mono text-amber-400 truncate ${textSize} ${maxWidth}`}>
+          <FolderGit2 size={iconSize} className="text-ink-secondary shrink-0" strokeWidth={1.5} />
+          <span className={`font-mono text-ink-secondary truncate ${textSize} ${maxWidth}`}>
             {worktreeName}
           </span>
           <span className="text-gray-600 shrink-0">·</span>

@@ -512,7 +512,7 @@ export function App() {
     <div
       className="flex h-dvh text-gray-100"
       style={{
-        background: '#1a1a1e',
+        background: 'var(--color-surface-base)',
         paddingTop: 'var(--safe-top)',
         paddingLeft: 'var(--safe-left)',
         paddingRight: 'var(--safe-right)',
@@ -532,7 +532,7 @@ export function App() {
         {/* z-46 + opaque bg covers the TerminalHost overlay (z-45) when the grid scrolls up. */}
         {!isInlineWorkflowEditor && !isTabToolbarMerged && !isFocusedFullScreen && (
           <div
-            className={`titlebar-drag shrink-0 border-b border-white/[0.06] relative z-[46] bg-[#1a1a1e]
+            className={`titlebar-drag shrink-0 border-b border-white/[0.06] relative z-[46] bg-surface-base
                         flex items-center ${isMobile ? 'px-2 justify-between' : 'px-3'} ${isMobile ? 'h-[52px]' : 'h-[40px]'}`}
             style={
               isMac && !isWeb && !isSidebarOpen && !isMobile

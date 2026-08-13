@@ -73,7 +73,9 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
   return (
     // No grow factor of its own: the frame around it (card body or tab rail)
     // owns the sizing, and a `flex-1` here would fight the terminal's stored
-    // ratio — two grow factors that no longer sum to 1.
+    // ratio — two grow factors that no longer sum to 1. No padding either: the
+    // panes take the card's full height, and the step down in surface separates
+    // them, where insetting framed the panel and cost height.
     <div ref={containerRef} className="relative flex flex-col min-h-0 min-w-0 w-full gap-px">
       {kinds.map((kind, i) => {
         const hidden = hasMaximized && kind !== maximizedKind

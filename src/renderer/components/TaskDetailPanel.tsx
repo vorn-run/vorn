@@ -595,7 +595,7 @@ export function TaskDetailPanel() {
     >
       {/* Resize handle */}
       <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 transition-colors z-10"
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-white/[0.14] transition-colors z-10"
         style={{ position: 'relative', width: 2, minWidth: 2 }}
         onPointerDown={handleResizeStart}
       />

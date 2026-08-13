@@ -33,7 +33,7 @@ export function CardStatusBar({ terminalId, dimmed }: Props) {
       className={`shrink-0 flex items-center gap-2 px-2 h-[22px] border-t border-white/[0.04] text-[11px]
                   transition-opacity duration-200 ease-out
                   ${dimmed ? 'opacity-60 group-hover/card:opacity-100' : 'opacity-100'}`}
-      style={{ background: '#141416' }}
+      style={{ background: 'var(--color-surface-panel)' }}
     >
       {hasBranch && <BranchChip terminalId={terminalId} />}
 
@@ -46,11 +46,11 @@ export function CardStatusBar({ terminalId, dimmed }: Props) {
             setEditingTask(assignedTask)
             setTaskDialogOpen(true)
           }}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded-full
-                     bg-violet-500/10 hover:bg-violet-500/20 transition-colors shrink-0"
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-white/[0.08]
+                     hover:bg-white/[0.06] transition-colors shrink-0"
         >
-          <ListTodo size={10} className="text-violet-400 shrink-0" strokeWidth={2} />
-          <span className="text-[10px] text-violet-400 truncate max-w-[140px]">
+          <ListTodo size={10} className="text-ink-faint shrink-0" strokeWidth={2} />
+          <span className="text-[10px] text-ink-secondary truncate max-w-[140px]">
             {assignedTask.title}
           </span>
         </button>

@@ -214,17 +214,17 @@ describe('PaneCard chrome', () => {
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
   })
 
-  it('seats the tree pane controls in its filter row, not a second bar', async () => {
-    // The filter row is already a full-width bar. A title row above it is
-    // chrome stacked on chrome, and costs a line of tree.
+  it('keeps the tree pane controls out of its filter row', async () => {
+    // Sharing the row made the search field the panel's title bar: it spanned
+    // the full width and the buttons read as part of the input.
     act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
-    const header = screen.getByTestId('files-pane-header')
-    expect(header).toContainElement(screen.getByLabelText('Maximize Files'))
-    expect(header).toContainElement(screen.getByLabelText('Close Files'))
-    expect(screen.getByPlaceholderText('Filter files…')).toBeInTheDocument()
+    const filterRow = screen.getByTestId('files-pane-header')
+    expect(filterRow).toContainElement(screen.getByPlaceholderText('Filter files…'))
+    expect(filterRow).not.toContainElement(screen.getByLabelText('Maximize Files'))
+    expect(filterRow).not.toContainElement(screen.getByLabelText('Close Files'))
   })
 
   it('names the open file once, in the path strip that carries its controls', async () => {
@@ -256,8 +256,21 @@ describe('PaneCard drag and double-click', () => {
     render(<FilesCard sessionId="t1" onDragStart={onDragStart} />)
     await screen.findByText('a.ts')
 
-    fireEvent.pointerDown(screen.getByTestId('files-pane-header'))
+    // The title row carries drag and maximize, not the filter row below it —
+    // wiring both meant two drag handles and two paths to the same action.
+    fireEvent.pointerDown(screen.getByTestId('pane-header-files:t1'))
     expect(onDragStart).toHaveBeenCalledWith('files:t1', expect.anything())
+  })
+
+  it('marks itself as the drop target while a drag is over it', async () => {
+    // The pane has no border of its own — the step down in surface is what
+    // separates it — so the drop indicator is the only thing that can say a
+    // drop would land here.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    const { container } = render(<FilesCard sessionId="t1" isDragTarget />)
+    await screen.findByText('a.ts')
+
+    expect(container.querySelector('.card-drop-target')).toBeInTheDocument()
   })
 
   it('toggles maximize on header double-click', async () => {
@@ -265,10 +278,10 @@ describe('PaneCard drag and double-click', () => {
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
-    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
+    fireEvent.doubleClick(screen.getByTestId('pane-header-files:t1'))
     expect(useAppStore.getState().maximizedPaneId).toBe('files:t1')
 
-    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
+    fireEvent.doubleClick(screen.getByTestId('pane-header-files:t1'))
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
   })
 })

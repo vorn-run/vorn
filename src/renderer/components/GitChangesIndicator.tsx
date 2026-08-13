@@ -24,8 +24,9 @@ export function GitChangesIndicator({ terminalId }: Props) {
                  hover:bg-white/[0.06] rounded transition-colors cursor-pointer"
       title={`${stat.filesChanged} file${stat.filesChanged !== 1 ? 's' : ''} changed`}
     >
-      <span className="text-green-400">+{stat.insertions}</span>
-      <span className="text-red-400">-{stat.deletions}</span>
+      {/* A measurement, not a verdict — a large deletion is not a failure. */}
+      <span className="text-ink-secondary">+{stat.insertions}</span>
+      <span className="text-ink-faint">-{stat.deletions}</span>
     </button>
   )
 }

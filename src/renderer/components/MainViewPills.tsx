@@ -53,7 +53,7 @@ export function MainViewPills() {
               aria-hidden
               className="absolute -top-0.5 -right-0.5 min-w-[12px] h-[12px] px-[3px]
                          flex items-center justify-center
-                         rounded-full bg-amber-400 text-[#1a1a1e]
+                         rounded-full bg-bronzo text-surface-base
                          text-[9px] font-mono leading-none tabular-nums"
             >
               {waitingCount > 9 ? '9+' : waitingCount}

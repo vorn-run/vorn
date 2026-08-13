@@ -67,8 +67,9 @@ export function LastCommandChip({ terminalId }: Props) {
       className="flex items-center gap-1 min-w-0 shrink text-[10px] text-gray-500
                  hover:text-gray-300 transition-colors"
     >
-      <span className={ok ? 'text-green-400' : 'text-red-400'}>{ok ? '✓' : '✗'}</span>
-      {!ok && <span className="text-red-400 font-mono">{last.exitCode}</span>}
+      {/* Success is the ordinary case and recedes; only failure takes colour. */}
+      <span className={ok ? 'text-ink-faint' : 'text-danger'}>{ok ? '✓' : '✗'}</span>
+      {!ok && <span className="text-danger font-mono">{last.exitCode}</span>}
       <span className="font-mono tabular-nums">{formatDuration(last.durationMs)}</span>
       <span className="font-mono truncate max-w-[160px] text-gray-600">{last.command}</span>
     </button>
