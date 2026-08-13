@@ -43,6 +43,8 @@
     "*.{json,css,md,html}": "prettier --write"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@tiptap/core": "^3.27.4",
     "@tiptap/extension-code-block": "^3.29.2",

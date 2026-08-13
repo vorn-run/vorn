@@ -11,7 +11,8 @@ import {
   HeadlessSession,
   GitDiffStat,
   TaskConfig,
-  TaskStatus
+  TaskStatus,
+  MobileProject
 } from '../../shared/types'
 
 export interface WorktreeInfo {
@@ -90,6 +91,20 @@ export interface BrowserPaneState {
 /** The page a browser pane is currently showing. */
 export function activeBrowserUrl(pane: BrowserPaneState | undefined): string | null {
   return pane ? (pane.tabs[pane.activeTab] ?? null) : null
+}
+
+/**
+ * State of a session's device pane — the simulator that session has claimed.
+ *
+ * Deliberately not persisted, unlike files/editor/browser panes. A claim lives
+ * in the main process and does not survive a restart, so reviving this pane
+ * from disk would show a frame for a device this session no longer holds.
+ */
+export interface DevicePaneState {
+  /** UDID of the claimed simulator this pane is showing. */
+  udid: string
+  /** Display name, for the pane title. */
+  name: string
 }
 
 export interface TerminalState {
@@ -211,6 +226,8 @@ export interface UISlice {
   editorPanes: Map<string, EditorPaneState>
   /** Session id → the page its browser pane is showing. One browser per session. */
   browserPanes: Map<string, BrowserPaneState>
+  /** Session id → the simulator its device pane is showing. One device per session. */
+  devicePanes: Map<string, DevicePaneState>
   /**
    * Pane id currently maximized, or null. At most one app-wide. A maximized
    * pane covers only its owner session's footprint — other sessions are
@@ -303,6 +320,15 @@ export interface UISlice {
    */
   closeBrowserTab: (sessionId: string, index: number) => void
   setActiveBrowserTab: (sessionId: string, index: number) => void
+  /**
+   * Show the session's claimed simulator in a pane.
+   *
+   * The pane is a viewer, not the claim: the agent's tools work with it closed,
+   * and closing it releases nothing. That separation is why closing this pane
+   * is safe to do casually.
+   */
+  openDevicePane: (sessionId: string, device: DevicePaneState) => void
+  closeDevicePane: (sessionId: string) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void
   toggleSessionDockCollapsed: () => void
@@ -334,6 +360,16 @@ export interface UISlice {
   setUpdateVersion: (version: string | null) => void
   worktreeCache: Map<string, WorktreeInfo[]>
   loadWorktrees: (projectPath: string, force?: boolean) => Promise<void>
+
+  /**
+   * Per-project answer to "is this a mobile app", used only to decide whether
+   * to offer the device control. Derived and cheap to recompute, so it is
+   * deliberately kept out of the persisted pane state: a stale "not mobile"
+   * written to localStorage would hide the button after someone adds Expo to a
+   * project and never come back.
+   */
+  mobileProjectCache: Map<string, MobileProject>
+  loadMobileProject: (projectPath: string, force?: boolean) => Promise<void>
   sidebarProjectSort: ProjectSortMode
   sidebarWorktreeSort: WorktreeSortMode
   sidebarWorktreeFilter: WorktreeFilter

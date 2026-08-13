@@ -9,6 +9,7 @@ import { claimWorkflowRun, releaseWorkflowRun, type RunClaimRequest } from './wo
 import { scheduleLogManager } from './schedule-log'
 import { getRecentSessions } from './agent-history'
 import { detectIDEs, openInIDE } from './ide-detector'
+import { detectMobileProject } from './mobile-detector'
 import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
 import { clientRegistry } from './broadcast'
 import { browserBridge } from './browser-bridge'
@@ -579,6 +580,7 @@ export function registerAllMethods(): void {
   // Agent/IDE detection
   registerMethod('agent:detectInstalled', () => detectInstalledAgents())
   registerMethod('ide:detect', () => detectIDEs())
+  registerMethod('project:detectMobile', ({ projectPath }) => detectMobileProject(projectPath))
   registerMethod('ide:open', ({ ideId, projectPath }) => openInIDE(ideId, projectPath))
 
   // Tailscale network access
@@ -1104,6 +1106,22 @@ export function registerAllMethods(): void {
   registerMethod('browser:openPane', (p) => browserBridge.request('browser:openPane', p))
   registerMethod('browser:navigate', (p) => browserBridge.request('browser:navigate', p))
   registerMethod('browser:find', (p) => browserBridge.request('browser:find', p))
+
+  // Device pane (relayed to Electron main, same bridge, same reasoning: the
+  // idb_companion child process and its unix socket live only in main).
+  registerMethod('device:list', (p) => browserBridge.request('device:list', p))
+  registerMethod('device:claim', (p) => browserBridge.request('device:claim', p))
+  registerMethod('device:release', (p) => browserBridge.request('device:release', p))
+  registerMethod('device:readScreen', (p) => browserBridge.request('device:readScreen', p))
+  registerMethod('device:find', (p) => browserBridge.request('device:find', p))
+  registerMethod('device:interact', (p) => browserBridge.request('device:interact', p))
+  registerMethod('device:screenshot', (p) => browserBridge.request('device:screenshot', p))
+  registerMethod('device:launch', (p) => browserBridge.request('device:launch', p))
+  registerMethod('device:terminate', (p) => browserBridge.request('device:terminate', p))
+  registerMethod('device:install', (p) => browserBridge.request('device:install', p))
+  registerMethod('device:openUrl', (p) => browserBridge.request('device:openUrl', p))
+  registerMethod('device:logs', (p) => browserBridge.request('device:logs', p))
+  registerMethod('device:openPane', (p) => browserBridge.request('device:openPane', p))
 
   // Wire manager events → broadcast to WS clients
   ptyManager.on('client-message', (channel: string, payload: unknown) => {

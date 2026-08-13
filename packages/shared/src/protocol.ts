@@ -29,7 +29,13 @@ import type {
   BrowserConsoleMessage,
   BrowserNetworkRequest,
   BrowserNode,
-  BrowserTarget
+  BrowserTarget,
+  DeviceInfo,
+  DeviceElement,
+  DeviceScreenRead,
+  DeviceTarget,
+  DevicePoint,
+  MobileProject
 } from './types'
 
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
@@ -190,6 +196,18 @@ export interface RequestMethods {
     result: Record<string, boolean>
   }
   'ide:detect': { params: void; result: Array<{ id: string; name: string }> }
+  /**
+   * Whether a project looks like a mobile app, so the device control can be
+   * offered where it is useful and withheld where it would be noise.
+   *
+   * Advisory only: the device tools themselves are never gated on this. An
+   * agent asked to open a simulator for a project this misreads must still be
+   * able to, or a wrong guess becomes a dead end instead of a missing button.
+   */
+  'project:detectMobile': {
+    params: { projectPath: string }
+    result: MobileProject
+  }
   'ide:open': {
     params: { ideId: string; projectPath: string }
     result: void
@@ -422,6 +440,86 @@ export interface RequestMethods {
   'browser:find': {
     params: { sessionId: string; text: string; limit?: number }
     result: BrowserNode[]
+  }
+
+  // ─── Device (iOS simulator) ───────────────────────────────────
+  //
+  // Forwarded to main over the same bridge and for a sharper version of the
+  // same reason: a simulator is driven by a child `idb_companion` process
+  // speaking gRPC over a unix socket, which only main owns. Session-scoped the
+  // same way — no method takes a session argument.
+  //
+  // `device:list` is the one method that works without a claim; it is how a
+  // session discovers what there is to claim without leaving Vorn.
+  'device:list': {
+    params: { sessionId: string }
+    result: DeviceInfo[]
+  }
+  'device:claim': {
+    params: { sessionId: string; udid: string }
+    result: { udid: string; name: string; booted: boolean }
+  }
+  'device:release': {
+    params: { sessionId: string }
+    result: { released: boolean }
+  }
+  'device:readScreen': {
+    params: { sessionId: string; filter?: 'interactive' | 'all'; cursor?: string; limit?: number }
+    result: DeviceScreenRead
+  }
+  'device:find': {
+    params: { sessionId: string; query: string; limit?: number }
+    result: { elements: DeviceElement[]; generation: number }
+  }
+  'device:interact': {
+    params: {
+      sessionId: string
+      action: 'tap' | 'swipe' | 'type' | 'button' | 'press'
+      target?: DeviceTarget
+      /** Swipe destination, in points. */
+      to?: DevicePoint
+      /** Text for `type`; button name for `button` (HOME, LOCK, SIRI…). */
+      text?: string
+      /** Seconds to hold, for a long press. */
+      duration?: number
+      /**
+       * Opt in to a stroke starting inside the bezel band, which iOS claims as
+       * a system gesture. Refused by default: swallowed silently, it reads to
+       * the agent as a swipe that did nothing.
+       */
+      systemGesture?: boolean
+    }
+    result: { ok: true; generation: number }
+  }
+  'device:screenshot': {
+    params: { sessionId: string; maxEdge?: number }
+    /** Base64 PNG, downscaled in main. `scale` converts image pixels back to
+     *  the points every ref and tap is expressed in. */
+    result: { data: string; scale: number; screen: { width: number; height: number } }
+  }
+  'device:launch': {
+    params: { sessionId: string; bundleId: string }
+    result: { ok: true }
+  }
+  'device:terminate': {
+    params: { sessionId: string; bundleId: string }
+    result: { ok: true }
+  }
+  'device:install': {
+    params: { sessionId: string; path: string }
+    result: { ok: true }
+  }
+  'device:openUrl': {
+    params: { sessionId: string; url: string }
+    result: { ok: true }
+  }
+  'device:logs': {
+    params: { sessionId: string; limit?: number }
+    result: { lines: string[] }
+  }
+  'device:openPane': {
+    params: { sessionId: string; udid?: string }
+    result: { udid: string }
   }
 }
 

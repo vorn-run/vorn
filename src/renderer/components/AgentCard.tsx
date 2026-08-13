@@ -1,6 +1,7 @@
 import { memo, forwardRef, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
+import { selectPaneFlags } from '../stores/ui-slice'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { CardHeader } from './card/CardHeader'
@@ -69,10 +70,7 @@ export const AgentCard = memo(
     )
     const { hasPanes, maximizedPaneId, storedRatio, setCardSplit, storedPanes } = useAppStore(
       useShallow((s) => ({
-        hasPanes:
-          s.filesPanes.has(terminalId) ||
-          s.editorPanes.has(terminalId) ||
-          s.browserPanes.has(terminalId),
+        hasPanes: selectPaneFlags(s, terminalId).any,
         maximizedPaneId: s.maximizedPaneId,
         storedRatio: s.cardSplits[terminalId]?.terminal,
         storedPanes: s.cardSplits[terminalId]?.panes,

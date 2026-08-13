@@ -4,6 +4,7 @@ import { act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
 import { activeBrowserUrl } from '../src/renderer/stores/types'
 import { parsePersistedBrowsers } from '../src/renderer/stores/ui-slice'
+import { DEVICE_SPLIT_RATIO } from '../src/renderer/lib/split-ratio'
 
 /** The page a session's browser is showing, i.e. its active tab. */
 const browserUrl = (id: string): string | null =>
@@ -30,6 +31,8 @@ function seed(ids: string[] = ['t1']): void {
       filesPanes: new Set(),
       editorPanes: new Map(),
       browserPanes: new Map(),
+      devicePanes: new Map(),
+      cardSplits: {},
       minimizedTerminals: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids,
@@ -327,5 +330,25 @@ describe('pane store actions', () => {
     act(() => s().setVisibleTerminalIds([]))
 
     expect(s().filesPanes.has('t1')).toBe(true)
+  })
+
+  it('gives the terminal the larger share when a device pane opens', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openDevicePane('t1', { udid: 'u1', name: 'iPhone 17' }))
+
+    // A phone fills a pane by height, so an even split spends width on empty
+    // background and takes it from the terminal, which uses every column.
+    expect(s().cardSplits.t1.terminal).toBeCloseTo(DEVICE_SPLIT_RATIO)
+    expect(s().cardSplits.t1.terminal).toBeGreaterThan(0.5)
+  })
+
+  it('leaves a split the person already chose alone', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().setCardSplit('t1', { terminal: 0.3, panes: [] }))
+    act(() => s().openDevicePane('t1', { udid: 'u1', name: 'iPhone 17' }))
+
+    // Seeding a default over a ratio someone dragged silently undoes their
+    // decision — the pane would snap back every time a device reattached.
+    expect(s().cardSplits.t1.terminal).toBeCloseTo(0.3)
   })
 })

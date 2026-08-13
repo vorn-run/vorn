@@ -363,6 +363,10 @@ export function App() {
       useAppStore.getState().openBrowserPane(sessionId, url)
     })
 
+    const removeDeviceOpenListener = window.api.onDeviceOpenPane(({ sessionId, udid, name }) => {
+      useAppStore.getState().openDevicePane(sessionId, { udid, name })
+    })
+
     const removeBrowserTabListener = window.api.onBrowserTabCommand((cmd) => {
       const store = useAppStore.getState()
       if (cmd.action === 'add') store.addBrowserTab(cmd.sessionId, cmd.url)
@@ -483,6 +487,7 @@ export function App() {
       removeWidgetSelectListener()
       removeUpdateListener()
       removeBrowserOpenListener()
+      removeDeviceOpenListener()
       removeBrowserTabListener()
       removeSessionUpdatedListener()
       removeHeadlessExitListener()

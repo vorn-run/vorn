@@ -1,4 +1,13 @@
-import { FolderOpen, Globe, Maximize2, Minimize2, Minus, MoreHorizontal, X } from 'lucide-react'
+import {
+  FolderOpen,
+  Globe,
+  Maximize2,
+  Minimize2,
+  Minus,
+  MoreHorizontal,
+  Smartphone,
+  X
+} from 'lucide-react'
 import { useState, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../../stores'
@@ -9,6 +18,8 @@ import { closeTerminalSession } from '../../lib/terminal-close'
 import { toast } from '../Toast'
 import { getDisplayName } from '../../lib/terminal-display'
 import { MOD } from '../../lib/platform'
+import { DevicePicker } from '../DevicePicker'
+import { shouldShowDeviceButton } from '../../lib/device-affordance'
 
 export type CardVariant = 'mini' | 'focused'
 
@@ -18,17 +29,33 @@ interface Props {
 }
 
 export function CardActionCluster({ terminalId, variant }: Props) {
-  const { terminal, setFocused, toggleMinimized, toggleFilesPane, toggleBrowserPane } = useAppStore(
+  const {
+    terminal,
+    setFocused,
+    toggleMinimized,
+    toggleFilesPane,
+    toggleBrowserPane,
+    hasDevicePane,
+    openDevicePane,
+    closeDevicePane,
+    mobileProjectCache
+  } = useAppStore(
     useShallow((s) => ({
       terminal: s.terminals.get(terminalId),
       setFocused: s.setFocusedTerminal,
       toggleMinimized: s.toggleMinimized,
       toggleFilesPane: s.toggleFilesPane,
-      toggleBrowserPane: s.toggleBrowserPane
+      toggleBrowserPane: s.toggleBrowserPane,
+      hasDevicePane: s.devicePanes.has(terminalId),
+      openDevicePane: s.openDevicePane,
+      closeDevicePane: s.closeDevicePane,
+      mobileProjectCache: s.mobileProjectCache
     }))
   )
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
   const moreRef = useRef<HTMLButtonElement>(null)
+  const deviceRef = useRef<HTMLButtonElement>(null)
 
   if (!terminal) return null
 
@@ -83,6 +110,11 @@ export function CardActionCluster({ terminalId, variant }: Props) {
 
   const btn = 'p-1 rounded text-gray-500 hover:text-white hover:bg-white/[0.08] transition-colors'
 
+  const showDevice = shouldShowDeviceButton(
+    mobileProjectCache.get(terminal.session.projectPath),
+    hasDevicePane
+  )
+
   return (
     <div className="flex items-center gap-0.5 shrink-0">
       <Tooltip label="More actions" position={tooltipPos}>
@@ -121,6 +153,37 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           <Globe size={14} strokeWidth={2} />
         </button>
       </Tooltip>
+
+      {showDevice && (
+        <Tooltip label={hasDevicePane ? 'Hide device' : 'Open device'} position={tooltipPos}>
+          <button
+            ref={deviceRef}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              if (hasDevicePane) closeDevicePane(terminalId)
+              else setIsPickerOpen((v) => !v)
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className={btn}
+            aria-label={hasDevicePane ? 'Hide device' : 'Open device'}
+          >
+            <Smartphone size={14} strokeWidth={2} />
+          </button>
+        </Tooltip>
+      )}
+
+      {isPickerOpen && (
+        <DevicePicker
+          sessionId={terminalId}
+          anchorRef={deviceRef}
+          onClose={() => setIsPickerOpen(false)}
+          onSelect={(device) => {
+            setIsPickerOpen(false)
+            openDevicePane(terminalId, device)
+          }}
+        />
+      )}
 
       {showMinimize && (
         <Tooltip label="Minimize" position={tooltipPos}>

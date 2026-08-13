@@ -5,6 +5,7 @@ import { IPC, ResizePayload } from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
 import type { RequestMethods } from '@vornrun/shared/protocol'
 import * as browserRegistry from './browser-registry'
+import * as deviceRegistry from './device-registry'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
 
 let bridge: ServerBridge | null = null
@@ -39,6 +40,23 @@ function registerInboundHandlers(b: ServerBridge): void {
   b.handle('browser:openPane', (p) => browserRegistry.openPane(p as P<'browser:openPane'>))
   b.handle('browser:navigate', (p) => browserRegistry.navigate(p as P<'browser:navigate'>))
   b.handle('browser:find', (p) => browserRegistry.find(p as P<'browser:find'>))
+
+  // The device family answers here for a sharper version of the same reason:
+  // the simulator is driven by a child `idb_companion` process over a unix
+  // socket, and only this process owns it.
+  b.handle('device:list', () => deviceRegistry.listDevices())
+  b.handle('device:claim', (p) => deviceRegistry.claim(p as P<'device:claim'>))
+  b.handle('device:release', (p) => deviceRegistry.release(p as P<'device:release'>))
+  b.handle('device:readScreen', (p) => deviceRegistry.readScreen(p as P<'device:readScreen'>))
+  b.handle('device:find', (p) => deviceRegistry.findElements(p as P<'device:find'>))
+  b.handle('device:interact', (p) => deviceRegistry.interact(p as P<'device:interact'>))
+  b.handle('device:screenshot', (p) => deviceRegistry.screenshot(p as P<'device:screenshot'>))
+  b.handle('device:launch', (p) => deviceRegistry.launch(p as P<'device:launch'>))
+  b.handle('device:terminate', (p) => deviceRegistry.terminate(p as P<'device:terminate'>))
+  b.handle('device:install', (p) => deviceRegistry.install(p as P<'device:install'>))
+  b.handle('device:openUrl', (p) => deviceRegistry.openUrl(p as P<'device:openUrl'>))
+  b.handle('device:logs', (p) => deviceRegistry.logsFor(p as P<'device:logs'>))
+  b.handle('device:openPane', (p) => deviceRegistry.openPane(p as P<'device:openPane'>))
 }
 
 function requireBridge(): ServerBridge {
@@ -199,6 +217,9 @@ export function registerIpcHandlers(): void {
 
   // Agent / IDE detection
   safeHandle(IPC.IDE_DETECT, () => requireBridge().request(IPC.IDE_DETECT))
+  safeHandle(IPC.PROJECT_DETECT_MOBILE, (_, params) =>
+    requireBridge().request(IPC.PROJECT_DETECT_MOBILE, params)
+  )
   safeHandle(IPC.AGENT_DETECT_INSTALLED, () => requireBridge().request(IPC.AGENT_DETECT_INSTALLED))
   safeHandle(IPC.IDE_OPEN, (_, params) => requireBridge().request(IPC.IDE_OPEN, params))
 
@@ -369,6 +390,25 @@ export function registerIpcHandlers(): void {
     browserRegistry.cancelPick(sessionId)
   })
   safeHandle(IPC.BROWSER_ANNOTATE, (_, params) => browserRegistry.annotate(params))
+
+  // ─── Device pane (Electron-only: the companion lives here) ─────
+  //
+  // The browser pane's guest renders itself; a simulator's does not. There is
+  // no `<webview>` equivalent, so the pane is a still image polled from main
+  // and every touch is relayed back the same way. These are the person's
+  // channel into the same registry the agent's tools use — same claim, same
+  // generation counter, so a person tapping the pane invalidates the agent's
+  // refs exactly as the agent's own tap would.
+  safeHandle(IPC.DEVICE_SCREENSHOT, (_, params) => deviceRegistry.screenshot(params))
+  safeHandle(IPC.DEVICE_INTERACT, (_, params) => deviceRegistry.interact(params))
+  safeHandle(IPC.DEVICE_LIST, () => deviceRegistry.listDevices())
+  safeHandle(IPC.DEVICE_CLAIM, (_, params) => deviceRegistry.claim(params))
+  safeHandle(IPC.DEVICE_RELEASE, (_, params) => deviceRegistry.release(params))
+  // Both are read-only by design: pointing at or drawing on the screen must
+  // never move it, or the person ends up describing an element the agent then
+  // finds gone.
+  safeHandle(IPC.DEVICE_PICKED, (_, params) => deviceRegistry.pickAt(params))
+  safeHandle(IPC.DEVICE_ANNOTATE, (_, params) => deviceRegistry.annotate(params))
 
   // ─── Fire-and-forget → bridge notifications ────────────────────
 

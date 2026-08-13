@@ -1,10 +1,11 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { parsePaneId } from '../lib/pane-id'
+import { parsePaneId, type PaneKind } from '../lib/pane-id'
 import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
+import { DeviceCard } from './DeviceCard'
 import { SplitDivider } from './SplitDivider'
 import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
 
@@ -19,17 +20,22 @@ import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
  * its siblings hide — the owner check keeps another session's maximized pane
  * from taking over this one.
  */
+/** Every pane kind a session's column can stack, i.e. all but the terminal. */
+type PaneChildKind = Exclude<PaneKind, 'terminal'>
+
 export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
-  const { hasFiles, hasEditor, hasBrowser, maximizedPaneId, split, setCardSplit } = useAppStore(
-    useShallow((s) => ({
-      hasFiles: s.filesPanes.has(sessionId),
-      hasEditor: s.editorPanes.has(sessionId),
-      hasBrowser: s.browserPanes.has(sessionId),
-      maximizedPaneId: s.maximizedPaneId,
-      split: s.cardSplits[sessionId],
-      setCardSplit: s.setCardSplit
-    }))
-  )
+  const { hasFiles, hasEditor, hasBrowser, hasDevice, maximizedPaneId, split, setCardSplit } =
+    useAppStore(
+      useShallow((s) => ({
+        hasFiles: s.filesPanes.has(sessionId),
+        hasEditor: s.editorPanes.has(sessionId),
+        hasBrowser: s.browserPanes.has(sessionId),
+        hasDevice: s.devicePanes.has(sessionId),
+        maximizedPaneId: s.maximizedPaneId,
+        split: s.cardSplits[sessionId],
+        setCardSplit: s.setCardSplit
+      }))
+    )
   const containerRef = useRef<HTMLDivElement | null>(null)
   // The live drag drives local state; the store is written once, on pointerup.
   const [dragWeights, setDragWeights] = useState<number[] | null>(null)
@@ -37,8 +43,9 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
   const kinds = [
     hasFiles ? ('files' as const) : null,
     hasEditor ? ('editor' as const) : null,
-    hasBrowser ? ('browser' as const) : null
-  ].filter((k): k is 'files' | 'editor' | 'browser' => k !== null)
+    hasBrowser ? ('browser' as const) : null,
+    hasDevice ? ('device' as const) : null
+  ].filter((k): k is PaneChildKind => k !== null)
 
   if (kinds.length === 0) return null
 
@@ -56,10 +63,11 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
     setDragWeights(null)
   }
 
-  const render = (kind: 'files' | 'editor' | 'browser'): ReactNode => {
+  const render = (kind: PaneChildKind): ReactNode => {
     if (kind === 'files') return <FilesCard sessionId={sessionId} />
     if (kind === 'editor') return <EditorCard sessionId={sessionId} />
-    return <BrowserCard sessionId={sessionId} />
+    if (kind === 'browser') return <BrowserCard sessionId={sessionId} />
+    return <DeviceCard sessionId={sessionId} />
   }
 
   return (

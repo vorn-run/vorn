@@ -65,3 +65,8 @@ extraResources:
     to: 'web/dist'
     filter:
       - '**/*'
+  # Data, not a native module, so extraResources rather than asarUnpack.
+  # idb_companion serves no reflection, so the client cannot discover the
+  # schema at runtime — the proto has to ship.
+  - from: 'resources/idb.proto'
+    to: 'idb.proto'
