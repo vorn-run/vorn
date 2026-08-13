@@ -80,7 +80,7 @@ export function NodeConfigPanel({
   const headerConnectorIcon = useConnectionIconFor(connectorConfig?.connectionId)
 
   return (
-    <div className="w-[420px] border-l border-white/[0.08] bg-[#1e1e22] flex flex-col h-full overflow-hidden titlebar-no-drag">
+    <div className="w-[420px] border-l border-white/[0.08] bg-surface-overlay flex flex-col h-full overflow-hidden titlebar-no-drag">
       <div className="flex items-center gap-2 px-5 py-3 border-b border-white/[0.08]">
         {headerConnectorId ? (
           <ConnectorIcon
@@ -116,7 +116,7 @@ export function NodeConfigPanel({
                 <div
                   ref={menuRef}
                   className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1 border border-white/[0.08] rounded-lg shadow-xl"
-                  style={{ background: '#141416' }}
+                  style={{ background: 'var(--color-surface-overlay)' }}
                 >
                   <button
                     onClick={() => {

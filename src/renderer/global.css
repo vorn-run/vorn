@@ -30,15 +30,13 @@
   --color-surface-sunken: #141416; /* card body and terminal: the main column */
   --color-surface-panel: #101012; /* panes, card header, status bar: beside the work */
   --color-surface-overlay: #1c1c20; /* menus, popovers, floating chrome */
-  /* An alias, not a value. A card frame matching the terminal it holds is what
+  /* Aliases, not values. A card frame matching the terminal it holds is what
      keeps a lighter band from showing around the panes, so the equality is the
      point — spelling it as a reference keeps a later nudge to one from silently
-     failing to move the other. */
+     failing to move the other. A workflow node is the same relationship one
+     level out: it lifts off the canvas the way a card lifts off the field. */
   --color-surface-raised: var(--color-surface-sunken); /* card frame, dialogs */
-  /* Left where it was. The workflow canvas behind these still paints its own
-     #1a1a1e, so moving the nodes onto the sessions ladder would flip them from
-     just above that canvas to just below it. They move when the canvas does. */
-  --color-surface-node: #1d1d20; /* workflow canvas node cards */
+  --color-surface-node: var(--color-surface-sunken); /* workflow canvas nodes */
 }
 
 html,

@@ -303,7 +303,7 @@ export function VariableAutocomplete({
       {showDropdown && hasVariables && (
         <div
           ref={dropdownRef}
-          className="absolute z-50 mt-1 w-full bg-[#2a2a2e] border border-white/[0.12]
+          className="absolute z-50 mt-1 w-full bg-surface-overlay border border-white/[0.12]
                      rounded-lg shadow-xl shadow-black/40 overflow-hidden
                      animate-in fade-in-0 zoom-in-95 duration-100"
           style={{ maxHeight: 280 }}

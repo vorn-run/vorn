@@ -10,7 +10,7 @@ interface Props {
 
 export function NodePalette({ onAddTrigger, onAddLaunchAgent, onAddScript, hasTrigger }: Props) {
   return (
-    <div className="w-[180px] border-r border-white/[0.08] bg-[#1e1e22] flex flex-col h-full overflow-hidden titlebar-no-drag">
+    <div className="w-[180px] border-r border-white/[0.08] bg-surface-overlay flex flex-col h-full overflow-hidden titlebar-no-drag">
       <div className="px-3 py-3 border-b border-white/[0.08]">
         <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">
           Add Nodes

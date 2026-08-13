@@ -54,7 +54,7 @@ export function ConnectorButton({
 
       {open && (
         <div
-          className="absolute top-full mt-2 z-50 bg-[#2a2a2e] border border-white/[0.12]
+          className="absolute top-full mt-2 z-50 bg-surface-overlay border border-white/[0.12]
                      rounded-lg shadow-xl shadow-black/40 py-1.5 min-w-[200px]
                      animate-in fade-in-0 zoom-in-95 duration-100"
           style={{ left: '50%', transform: 'translateX(-50%)' }}

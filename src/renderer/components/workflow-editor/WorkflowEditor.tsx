@@ -598,7 +598,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
               <div
                 ref={iconPickerRef}
                 className="absolute top-full left-0 mt-1 p-2 rounded-lg border border-white/[0.08] shadow-xl z-50 w-[220px] space-y-2"
-                style={{ background: '#1e1e22' }}
+                style={{ background: 'var(--color-surface-overlay)' }}
               >
                 <div className="grid grid-cols-8 gap-1">
                   {PROJECT_ICON_OPTIONS.map((opt) => {
@@ -715,7 +715,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
               <div
                 ref={overflowMenuRef}
                 className="absolute right-0 top-full mt-1 z-50 min-w-[180px] py-1 border border-white/[0.08] rounded-lg shadow-xl"
-                style={{ background: '#141416' }}
+                style={{ background: 'var(--color-surface-overlay)' }}
               >
                 <button
                   onClick={() => {
@@ -813,7 +813,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
   if (inline) {
     return (
-      <div className="flex-1 flex flex-col min-h-0" style={{ background: '#1a1a1e' }}>
+      <div
+        className="flex-1 flex flex-col min-h-0"
+        style={{ background: 'var(--color-surface-base)' }}
+      >
         {editorContent}
       </div>
     )
@@ -826,7 +829,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex flex-col titlebar-no-drag"
       style={{
-        background: '#1a1a1e',
+        background: 'var(--color-surface-base)',
         paddingTop: 'var(--safe-top, 0px)',
         paddingRight: 'var(--safe-right, 0px)',
         paddingBottom: 'var(--safe-bottom, 0px)',

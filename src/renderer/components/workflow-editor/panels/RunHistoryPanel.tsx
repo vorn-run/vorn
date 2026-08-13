@@ -38,7 +38,7 @@ export function RunHistoryPanel({
 
   return (
     <>
-      <div className="w-[340px] border-l border-white/[0.08] bg-[#1e1e22] flex flex-col h-full overflow-hidden titlebar-no-drag">
+      <div className="w-[340px] border-l border-white/[0.08] bg-surface-overlay flex flex-col h-full overflow-hidden titlebar-no-drag">
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08]">
           <span className="text-[13px] font-medium text-white">Run History</span>
           <button
