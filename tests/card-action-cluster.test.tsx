@@ -26,6 +26,17 @@ vi.mock('../src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
+// jsdom ships no ResizeObserver, and the picker uses one to reposition when it
+// grows from a spinner into a device list.
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+)
+
 Object.defineProperty(window, 'api', {
   value: { killTerminal: vi.fn() },
   writable: true
@@ -156,5 +167,81 @@ describe('CardActionCluster guards', () => {
     expect(toggleFilesPane).not.toHaveBeenCalled()
     expect(toggleMinimized).not.toHaveBeenCalled()
     expect(setFocused).not.toHaveBeenCalled()
+  })
+})
+
+describe('CardActionCluster device control', () => {
+  const MOBILE = { isMobile: true, framework: 'expo' as const, needsDevClient: true }
+  const WEB = { isMobile: false, framework: null, needsDevClient: false }
+
+  const seed = (mobile?: typeof MOBILE | typeof WEB): void => {
+    act(() => {
+      useAppStore.setState({
+        devicePanes: new Map(),
+        mobileProjectCache: mobile ? new Map([['/tmp/vorn', mobile]]) : new Map()
+      })
+    })
+  }
+
+  it('probes the project itself rather than waiting for the sidebar', () => {
+    // The cache was only ever warmed by SessionItem, so with the sidebar
+    // hidden or collapsed this button never appeared at all — and a control
+    // that is absent rather than disabled gives the person nothing to ask
+    // about, on exactly the mobile project it exists for.
+    const loadMobileProject = vi.fn().mockResolvedValue(undefined)
+    act(() => {
+      useAppStore.setState({
+        devicePanes: new Map(),
+        mobileProjectCache: new Map(),
+        loadMobileProject
+      })
+    })
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    expect(loadMobileProject).toHaveBeenCalledWith('/tmp/vorn')
+  })
+
+  it('offers a device on a mobile project', () => {
+    seed(MOBILE)
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    expect(screen.getByRole('button', { name: 'Open device' })).toBeInTheDocument()
+  })
+
+  it('stays out of the way on a project with no mobile app in it', () => {
+    seed(WEB)
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    expect(screen.queryByRole('button', { name: /device/ })).not.toBeInTheDocument()
+  })
+
+  it('shows nothing while the project is still unprobed', () => {
+    // Defaulting to visible would flash the button in and out on every mount.
+    seed(undefined)
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    expect(screen.queryByRole('button', { name: /device/ })).not.toBeInTheDocument()
+  })
+
+  it('opens the picker rather than guessing a device', () => {
+    // The picker fetches on mount; without a stub it hits the real bridge.
+    ;(window as unknown as { api: Record<string, unknown> }).api.deviceList = () =>
+      Promise.resolve([])
+    seed(MOBILE)
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open device' }))
+    expect(screen.getByRole('listbox', { name: 'Choose a device' })).toBeInTheDocument()
+  })
+
+  it('closes an open pane instead of reopening the picker', () => {
+    const deviceRelease = vi.fn().mockResolvedValue({ released: true })
+    ;(window as unknown as { api: Record<string, unknown> }).api.deviceRelease = deviceRelease
+    seed(WEB)
+    act(() => useAppStore.getState().openDevicePane('term-1', { udid: 'u1', name: 'iPhone 17' }))
+    render(<CardActionCluster terminalId="term-1" variant="focused" />)
+    // The control survives a WEB verdict here on purpose: a pane someone is
+    // driving must always keep its close button.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide device' }))
+    expect(useAppStore.getState().devicePanes.has('term-1')).toBe(false)
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    // Closing the pane hands the device back; a held claim for a pane nobody
+    // is looking at locks the simulator out of every other session.
+    expect(deviceRelease).toHaveBeenCalledWith('term-1')
   })
 })

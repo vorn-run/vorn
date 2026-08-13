@@ -15,6 +15,7 @@ import {
   WorkflowExecution,
   ScriptConfig,
   AiAgentType,
+  MobileProject,
   SSHKeyMeta,
   RemoteHost,
   TailscaleStatus,
@@ -29,7 +30,12 @@ import {
   BranchDeleteResult,
   BrowserSelection,
   BrowserStroke,
-  BrowserAnnotation
+  BrowserAnnotation,
+  DeviceInfo,
+  DeviceSelection,
+  DeviceAnnotation,
+  DeviceTarget,
+  DevicePoint
 } from '../shared/types'
 
 const api = {
@@ -112,6 +118,15 @@ const api = {
 
   detectIDEs: (): Promise<{ id: string; name: string; command: string }[]> =>
     ipcRenderer.invoke(IPC.IDE_DETECT),
+
+  /**
+   * Advisory: whether this project looks like a mobile app, so the device
+   * control can be offered where it helps. Never a gate on the device tools —
+   * an agent asked to drive a simulator for some other directory must still be
+   * able to.
+   */
+  detectMobileProject: (projectPath: string): Promise<MobileProject> =>
+    ipcRenderer.invoke(IPC.PROJECT_DETECT_MOBILE, { projectPath }),
 
   detectInstalledAgents: (): Promise<Record<AiAgentType, boolean>> =>
     ipcRenderer.invoke(IPC.AGENT_DETECT_INSTALLED),
@@ -314,6 +329,23 @@ const api = {
     ipcRenderer.on(IPC.BROWSER_OPEN_PANE, listener)
     return () => {
       ipcRenderer.removeListener(IPC.BROWSER_OPEN_PANE, listener)
+    }
+  },
+
+  /**
+   * Main asking for a device pane to open, on the agent's behalf.
+   *
+   * The claim already exists by the time this fires — the pane is a viewer, so
+   * it can never be what grants a session its device.
+   */
+  onDeviceOpenPane: (callback: (p: { sessionId: string; udid: string; name: string }) => void) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      p: { sessionId: string; udid: string; name: string }
+    ): void => callback(p)
+    ipcRenderer.on(IPC.DEVICE_OPEN_PANE, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.DEVICE_OPEN_PANE, listener)
     }
   },
 
@@ -533,6 +565,42 @@ const api = {
     sessionId: string
     strokes: BrowserStroke[]
   }): Promise<BrowserAnnotation> => ipcRenderer.invoke(IPC.BROWSER_ANNOTATE, params),
+
+  // Device pane. Unlike the browser's, none of this drives a guest in the
+  // renderer: a simulator has no in-process view, so the pane asks main for a
+  // frame and hands taps back to main. Both go through the same registry the
+  // agent's tools use, so the person and the agent share one generation
+  // counter rather than each holding a private idea of the screen.
+  deviceScreenshot: (
+    sessionId: string,
+    maxEdge?: number
+  ): Promise<{ data: string; scale: number; screen: { width: number; height: number } }> =>
+    ipcRenderer.invoke(IPC.DEVICE_SCREENSHOT, { sessionId, maxEdge }),
+  deviceInteract: (params: {
+    sessionId: string
+    action: 'tap' | 'swipe' | 'type' | 'button' | 'press'
+    target?: DeviceTarget
+    to?: DevicePoint
+    text?: string
+    duration?: number
+    systemGesture?: boolean
+  }): Promise<{ ok: true; generation: number }> => ipcRenderer.invoke(IPC.DEVICE_INTERACT, params),
+  deviceList: (): Promise<DeviceInfo[]> => ipcRenderer.invoke(IPC.DEVICE_LIST),
+  deviceClaim: (
+    sessionId: string,
+    udid: string
+  ): Promise<{ udid: string; name: string; booted: boolean }> =>
+    ipcRenderer.invoke(IPC.DEVICE_CLAIM, { sessionId, udid }),
+  deviceRelease: (sessionId: string): Promise<{ released: boolean }> =>
+    ipcRenderer.invoke(IPC.DEVICE_RELEASE, { sessionId }),
+  /** Resolve a point the person tapped in the pane to the element there. The
+   *  point is in **points**, never image pixels — the pane converts first. */
+  pickDeviceElement: (sessionId: string, point: DevicePoint): Promise<DeviceSelection> =>
+    ipcRenderer.invoke(IPC.DEVICE_PICKED, { sessionId, point }),
+  annotateDevice: (params: {
+    sessionId: string
+    strokes: Array<{ points: DevicePoint[] }>
+  }): Promise<DeviceAnnotation> => ipcRenderer.invoke(IPC.DEVICE_ANNOTATE, params),
 
   // Shell
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),

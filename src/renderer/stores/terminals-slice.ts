@@ -1,6 +1,6 @@
 import { StateCreator } from 'zustand'
 import { AppStore, TerminalsSlice, TerminalState } from './types'
-import { filesPaneId, editorPaneId, browserPaneId } from '../lib/pane-id'
+import { filesPaneId, editorPaneId, browserPaneId, devicePaneId } from '../lib/pane-id'
 import { clearDirty } from '../lib/editor-dirty'
 
 export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set) => ({
@@ -27,9 +27,9 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       const next = new Map(state.terminals)
       next.delete(id)
       const order = state.terminalOrder.filter((tid) => tid !== id)
-      // A session owns its file-tree, editor and browser panes: they die with
-      // it, and so does any maximized state pointing at them.
-      const childIds = [filesPaneId(id), editorPaneId(id), browserPaneId(id)]
+      // A session owns its file-tree, editor, browser and device panes: they
+      // die with it, and so does any maximized state pointing at them.
+      const childIds = [filesPaneId(id), editorPaneId(id), browserPaneId(id), devicePaneId(id)]
       // The dirty registry lives outside the store, so it needs explicit
       // teardown — otherwise a session closed with unsaved edits leaves a flag
       // that a recycled id would inherit.
@@ -42,6 +42,11 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       editorPanes.delete(id)
       const browserPanes = new Map(state.browserPanes)
       browserPanes.delete(id)
+      // The claim itself is released by main when the session closes; this is
+      // only the viewer. Leaving it behind would keep a frame of a device this
+      // session no longer holds, and block a later pane from opening.
+      const devicePanes = new Map(state.devicePanes)
+      devicePanes.delete(id)
       // How this card divided its interior dies with it too; a recycled id
       // would otherwise inherit a divider position from a different session.
       const cardSplits = { ...state.cardSplits }
@@ -59,6 +64,7 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         filesPanes,
         editorPanes,
         browserPanes,
+        devicePanes,
         cardSplits,
         gitDiffStats,
         ...(maxOwned ? { maximizedPaneId: null } : {}),

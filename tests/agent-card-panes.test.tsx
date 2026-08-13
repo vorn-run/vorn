@@ -42,6 +42,9 @@ vi.mock('../src/renderer/components/BrowserCard', () => ({
     <div data-testid={`browser-${sessionId}`} />
   )
 }))
+vi.mock('../src/renderer/components/DeviceCard', () => ({
+  DeviceCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`device-${sessionId}`} />
+}))
 
 import { useAppStore } from '../src/renderer/stores'
 import { AgentCard } from '../src/renderer/components/AgentCard'
@@ -74,6 +77,7 @@ function seed(ids: string[]): void {
       filesPanes: new Set(),
       editorPanes: new Map(),
       browserPanes: new Map(),
+      devicePanes: new Map(),
       cardSplits: {},
       maximizedPaneId: null
     })
@@ -101,6 +105,16 @@ describe('AgentCard pane column', () => {
     render(<AgentCard terminalId="t1" />)
     expect(screen.queryByRole('separator')).not.toBeInTheDocument()
     expect(screen.getByTestId('slot-t1')).toBeInTheDocument()
+  })
+
+  it('mounts the column for a device pane, as for every other kind', () => {
+    // The live bug: `hasPanes` listed files, editor and browser but not device,
+    // so `device:openPane` put a pane in the store, reported success, and the
+    // column that would have rendered it was never mounted. Nothing anywhere
+    // said so — the pane simply never appeared.
+    act(() => useAppStore.getState().openDevicePane('t1', { udid: 'udid-1', name: 'iPhone 17' }))
+    render(<AgentCard terminalId="t1" />)
+    expect(screen.getByTestId('device-t1')).toBeInTheDocument()
   })
 
   it('hides its own terminal when one of its panes is maximized', () => {

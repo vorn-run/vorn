@@ -12,11 +12,12 @@
  * untouched — only the components that *render* a pane need to branch on kind.
  */
 
-export type PaneKind = 'terminal' | 'files' | 'editor' | 'browser'
+export type PaneKind = 'terminal' | 'files' | 'editor' | 'browser' | 'device'
 
 const FILES_PREFIX = 'files:'
 const EDITOR_PREFIX = 'editor:'
 const BROWSER_PREFIX = 'browser:'
+const DEVICE_PREFIX = 'device:'
 
 /** Id of the file-tree pane owned by `sessionId`. */
 export function filesPaneId(sessionId: string): string {
@@ -31,6 +32,16 @@ export function editorPaneId(sessionId: string): string {
 /** Id of the browser pane owned by `sessionId`. */
 export function browserPaneId(sessionId: string): string {
   return `${BROWSER_PREFIX}${sessionId}`
+}
+
+/**
+ * Id of the device pane owned by `sessionId`.
+ *
+ * A session holds at most one simulator, so — like its browser — it has at most
+ * one device pane, and the owner id is enough to name it.
+ */
+export function devicePaneId(sessionId: string): string {
+  return `${DEVICE_PREFIX}${sessionId}`
 }
 
 /**
@@ -50,6 +61,9 @@ export function parsePaneId(paneId: string): { kind: PaneKind; sessionId: string
   if (paneId.startsWith(BROWSER_PREFIX)) {
     return { kind: 'browser', sessionId: paneId.slice(BROWSER_PREFIX.length) }
   }
+  if (paneId.startsWith(DEVICE_PREFIX)) {
+    return { kind: 'device', sessionId: paneId.slice(DEVICE_PREFIX.length) }
+  }
   return { kind: 'terminal', sessionId: paneId }
 }
 
@@ -58,6 +72,7 @@ export function paneKind(paneId: string): PaneKind {
   if (paneId.startsWith(FILES_PREFIX)) return 'files'
   if (paneId.startsWith(EDITOR_PREFIX)) return 'editor'
   if (paneId.startsWith(BROWSER_PREFIX)) return 'browser'
+  if (paneId.startsWith(DEVICE_PREFIX)) return 'device'
   return 'terminal'
 }
 
