@@ -327,7 +327,20 @@ export interface UISlice {
    * and closing it releases nothing. That separation is why closing this pane
    * is safe to do casually.
    */
+  /**
+   * Open the pane for a device main already holds. Used when main itself asks
+   * for the pane (the agent claimed the device), where the claim is a
+   * precondition rather than something the renderer arranges.
+   */
   openDevicePane: (sessionId: string, device: DevicePaneState) => void
+  /**
+   * Claim the device, then open the pane — the path for a person picking from
+   * the picker. Opening without claiming leaves the pane polling a session
+   * main has no device for, so every frame fails with "No device is claimed"
+   * and the picker appears to have done nothing. Returns the failure message
+   * so contention can be shown where the person is looking.
+   */
+  claimAndOpenDevicePane: (sessionId: string, device: DevicePaneState) => Promise<string | null>
   closeDevicePane: (sessionId: string) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void

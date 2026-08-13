@@ -202,6 +202,8 @@ describe('CardActionCluster device control', () => {
   })
 
   it('closes an open pane instead of reopening the picker', () => {
+    const deviceRelease = vi.fn().mockResolvedValue({ released: true })
+    ;(window as unknown as { api: Record<string, unknown> }).api.deviceRelease = deviceRelease
     seed(WEB)
     act(() => useAppStore.getState().openDevicePane('term-1', { udid: 'u1', name: 'iPhone 17' }))
     render(<CardActionCluster terminalId="term-1" variant="focused" />)
@@ -210,5 +212,8 @@ describe('CardActionCluster device control', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hide device' }))
     expect(useAppStore.getState().devicePanes.has('term-1')).toBe(false)
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    // Closing the pane hands the device back; a held claim for a pane nobody
+    // is looking at locks the simulator out of every other session.
+    expect(deviceRelease).toHaveBeenCalledWith('term-1')
   })
 })

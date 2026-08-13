@@ -191,10 +191,17 @@ describe('SessionItem device control', () => {
   })
 
   it('closes an open device pane rather than reopening the picker', () => {
+    const deviceRelease = vi.fn().mockResolvedValue({ released: true })
+    Object.defineProperty(window, 'api', {
+      value: { ...(window as unknown as { api?: object }).api, deviceRelease },
+      writable: true,
+      configurable: true
+    })
     seedProject(MOBILE)
     act(() => useAppStore.getState().openDevicePane(session.id, { udid: 'u1', name: 'iPhone 17' }))
     render(<SessionItem session={session} />)
     fireEvent.click(screen.getByRole('button', { name: /Hide device for/ }))
     expect(useAppStore.getState().devicePanes.has(session.id)).toBe(false)
+    expect(deviceRelease).toHaveBeenCalledWith(session.id)
   })
 })

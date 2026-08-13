@@ -36,7 +36,7 @@ export function CardActionCluster({ terminalId, variant }: Props) {
     toggleFilesPane,
     toggleBrowserPane,
     hasDevicePane,
-    openDevicePane,
+    claimAndOpenDevicePane,
     closeDevicePane,
     mobileProjectCache
   } = useAppStore(
@@ -47,7 +47,7 @@ export function CardActionCluster({ terminalId, variant }: Props) {
       toggleFilesPane: s.toggleFilesPane,
       toggleBrowserPane: s.toggleBrowserPane,
       hasDevicePane: s.devicePanes.has(terminalId),
-      openDevicePane: s.openDevicePane,
+      claimAndOpenDevicePane: s.claimAndOpenDevicePane,
       closeDevicePane: s.closeDevicePane,
       mobileProjectCache: s.mobileProjectCache
     }))
@@ -180,7 +180,12 @@ export function CardActionCluster({ terminalId, variant }: Props) {
           onClose={() => setIsPickerOpen(false)}
           onSelect={(device) => {
             setIsPickerOpen(false)
-            openDevicePane(terminalId, device)
+            void claimAndOpenDevicePane(terminalId, device).then((err) => {
+              // The likeliest failure is another session holding the device,
+              // and that message names the holder. A toast rather than inline
+              // state because the picker has already closed by now.
+              if (err) toast.error(err)
+            })
           }}
         />
       )}

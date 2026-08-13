@@ -625,9 +625,35 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       return { devicePanes: next, cardSplits: splits }
     }),
 
+  claimAndOpenDevicePane: async (sessionId, device) => {
+    try {
+      // Claiming first is what makes the pane's first poll succeed. It also
+      // boots the simulator if it is not running, so the person never has to
+      // leave Vorn for Xcode.
+      const claimed = await window.api.deviceClaim(sessionId, device.udid)
+      get().openDevicePane(sessionId, { udid: claimed.udid, name: claimed.name })
+      return null
+    } catch (e) {
+      // Surfaced rather than swallowed: the likeliest failure is another
+      // session holding the device, and that message names the holder.
+      return e instanceof Error ? e.message : String(e)
+    }
+  },
+
   closeDevicePane: (sessionId) =>
     set((state) => {
       if (!state.devicePanes.has(sessionId)) return {}
+      // Closing the pane hands the device back. Holding a claim for a pane
+      // nobody is looking at locks the simulator out of every other session
+      // with nothing on screen to explain why. Fire-and-forget: a failed
+      // release must not block the pane from closing, and main releases on
+      // session teardown regardless.
+      try {
+        void window.api.deviceRelease?.(sessionId)?.catch(() => {})
+      } catch {
+        // A release that throws synchronously must still not trap the pane
+        // open — main releases on session teardown regardless.
+      }
       const next = new Map(state.devicePanes)
       next.delete(sessionId)
       return {

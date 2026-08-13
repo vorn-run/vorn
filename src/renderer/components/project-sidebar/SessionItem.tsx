@@ -31,7 +31,7 @@ export function SessionItem({
   const hasBrowserPane = useAppStore((s) => s.browserPanes.has(session.id))
   const toggleBrowserPane = useAppStore((s) => s.toggleBrowserPane)
   const hasDevicePane = useAppStore((s) => s.devicePanes.has(session.id))
-  const openDevicePane = useAppStore((s) => s.openDevicePane)
+  const claimAndOpenDevicePane = useAppStore((s) => s.claimAndOpenDevicePane)
   const closeDevicePane = useAppStore((s) => s.closeDevicePane)
   const projectPath = useAppStore((s) => s.terminals.get(session.id)?.session.projectPath ?? '')
   const mobile = useAppStore((s) => s.mobileProjectCache.get(projectPath))
@@ -170,7 +170,12 @@ export function SessionItem({
           onClose={() => setIsPickerOpen(false)}
           onSelect={(device) => {
             setIsPickerOpen(false)
-            openDevicePane(session.id, device)
+            void claimAndOpenDevicePane(session.id, device).then((err) => {
+              // The likeliest failure is another session holding the device,
+              // and that message names the holder. A toast rather than inline
+              // state because the picker has already closed by now.
+              if (err) toast.error(err)
+            })
           }}
         />
       )}

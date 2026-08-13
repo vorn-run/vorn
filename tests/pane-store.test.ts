@@ -352,3 +352,64 @@ describe('pane store actions', () => {
     expect(s().cardSplits.t1.terminal).toBeCloseTo(0.3)
   })
 })
+
+describe('claiming a device before showing it', () => {
+  const device = { udid: 'u1', name: 'iPhone 17' }
+
+  const stubApi = (api: Record<string, unknown>): void => {
+    Object.defineProperty(window, 'api', {
+      value: { ...(window as unknown as { api?: object }).api, ...api },
+      writable: true,
+      configurable: true
+    })
+  }
+
+  beforeEach(() => {
+    act(() => {
+      useAppStore.setState({ devicePanes: new Map() })
+    })
+  })
+
+  it('claims the device before opening the pane', async () => {
+    const deviceClaim = vi.fn().mockResolvedValue({ udid: 'u1', name: 'iPhone 17', booted: true })
+    stubApi({ deviceClaim })
+
+    let err: string | null = 'unset'
+    await act(async () => {
+      err = await useAppStore.getState().claimAndOpenDevicePane('s1', device)
+    })
+
+    // Opening without claiming leaves the pane polling a session main has no
+    // device for: every frame fails with "No device is claimed" and the picker
+    // looks like it did nothing at all.
+    expect(deviceClaim).toHaveBeenCalledWith('s1', 'u1')
+    expect(err).toBeNull()
+    expect(useAppStore.getState().devicePanes.get('s1')).toEqual(device)
+  })
+
+  it('takes the name main reports, not the one the picker guessed', async () => {
+    stubApi({
+      deviceClaim: vi.fn().mockResolvedValue({ udid: 'u1', name: 'iPhone 17 Pro', booted: true })
+    })
+    await act(async () => {
+      await useAppStore.getState().claimAndOpenDevicePane('s1', device)
+    })
+    expect(useAppStore.getState().devicePanes.get('s1')?.name).toBe('iPhone 17 Pro')
+  })
+
+  it('leaves the pane shut when the claim is refused, and says why', async () => {
+    stubApi({
+      deviceClaim: vi.fn().mockRejectedValue(new Error('iPhone 17 is in use by session other-1'))
+    })
+
+    let err: string | null = null
+    await act(async () => {
+      err = await useAppStore.getState().claimAndOpenDevicePane('s1', device)
+    })
+
+    // A pane opened over a refused claim is worse than no pane: it shows a
+    // frame of nothing and buries the one message naming the holder.
+    expect(useAppStore.getState().devicePanes.has('s1')).toBe(false)
+    expect(err).toContain('other-1')
+  })
+})
