@@ -49,6 +49,21 @@ describe('detectMobileProject', () => {
     })
   })
 
+  it('still asks for a dev client when ios/ exists but holds no Xcode project', async () => {
+    // A managed Expo repo can carry an `ios/` directory for all sorts of
+    // incidental reasons — committed assets, a stray .gitkeep, the wreckage of
+    // an abandoned prebuild. Reading the bare directory as "prebuilt" reports
+    // needsDevClient: false for an app that cannot run on a simulator from
+    // source, and the person is told the opposite of what they need.
+    await write('package.json', pkg({ expo: '~57.0.8' }))
+    await write('ios/.gitkeep', '')
+
+    expect(await detectMobileProject(dir)).toMatchObject({
+      framework: 'expo',
+      needsDevClient: true
+    })
+  })
+
   it('reports Expo rather than react-native when both are present', async () => {
     // Every Expo app depends on react-native, so first-match-wins on the wrong
     // order would call Journey a bare RN app and silently drop the dev-client

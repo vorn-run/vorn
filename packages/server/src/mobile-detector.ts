@@ -30,6 +30,21 @@ async function readJson(file: string): Promise<Record<string, unknown> | null> {
   }
 }
 
+/**
+ * Whether `dir` holds a real, buildable iOS project.
+ *
+ * The bare existence of an `ios/` directory does not mean the app was
+ * prebuilt. A managed Expo repo can easily carry one — a stray `ios/`
+ * committed for assets, a `.gitkeep`, a leftover from an abandoned prebuild —
+ * and reading that as "native project present" reports `needsDevClient: false`
+ * for an app that very much needs a dev client. The Xcode project is the thing
+ * that actually distinguishes the two, so require it.
+ */
+async function hasXcodeProject(dir: string): Promise<boolean> {
+  const entries = await fs.readdir(dir).catch(() => [] as string[])
+  return entries.some((e) => e.endsWith('.xcodeproj') || e.endsWith('.xcworkspace'))
+}
+
 async function exists(file: string): Promise<boolean> {
   try {
     await fs.access(file)
@@ -70,7 +85,10 @@ export async function detectMobileProject(projectPath: string): Promise<MobilePr
           isMobile: true,
           framework: 'expo',
           // A bare/prebuilt Expo project has native dirs and builds like RN.
-          needsDevClient: !(await exists(path.join(projectPath, 'ios')))
+          // Keyed on the Xcode project rather than the `ios/` directory: an
+          // empty or incidental `ios/` in a managed repo would otherwise claim
+          // the app was prebuilt and hide the dev-client requirement.
+          needsDevClient: !(await hasXcodeProject(path.join(projectPath, 'ios')))
         }
       }
       if ('react-native' in deps) {
@@ -96,8 +114,7 @@ export async function detectMobileProject(projectPath: string): Promise<MobilePr
     // Last, and only as corroboration: an `ios/` directory holding an Xcode
     // project is a prebuilt RN/Expo app whose package.json we could not read.
     if (entries.includes('ios')) {
-      const iosEntries = await fs.readdir(path.join(projectPath, 'ios')).catch(() => [] as string[])
-      if (iosEntries.some((e) => e.endsWith('.xcodeproj') || e.endsWith('.xcworkspace'))) {
+      if (await hasXcodeProject(path.join(projectPath, 'ios'))) {
         return { isMobile: true, framework: 'react-native', needsDevClient: false }
       }
     }
@@ -106,7 +123,11 @@ export async function detectMobileProject(projectPath: string): Promise<MobilePr
     // before `npm install`, where the button should still appear.
     for (const config of EXPO_CONFIGS) {
       if (entries.includes(config)) {
-        return { isMobile: true, framework: 'expo', needsDevClient: !entries.includes('ios') }
+        return {
+          isMobile: true,
+          framework: 'expo',
+          needsDevClient: !(await hasXcodeProject(path.join(projectPath, 'ios')))
+        }
       }
     }
 
