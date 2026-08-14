@@ -12,7 +12,8 @@ import {
   GitDiffStat,
   TaskConfig,
   TaskStatus,
-  MobileProject
+  MobileProject,
+  UpdateStatus
 } from '../../shared/types'
 
 export interface WorktreeInfo {
@@ -182,6 +183,7 @@ export interface ProjectsSlice {
 export type SettingsCategory =
   | 'appearance'
   | 'general'
+  | 'updates'
   | 'notifications'
   | 'agents'
   | 'worktrees'
@@ -438,8 +440,19 @@ export interface UISlice {
   /** Live runs keyed by run id — one workflow can have several at once. */
   workflowExecutions: Map<string, WorkflowExecution>
   setWorkflowExecution: (runId: string, execution: WorkflowExecution) => void
-  updateVersion: string | null
-  setUpdateVersion: (version: string | null) => void
+  /**
+   * Where the app updater is, as one value pushed from main. Named for the app
+   * rather than plain `updateStatus` because TerminalsSlice already owns that
+   * name for per-session agent status, and the two share a store.
+   *
+   * Dismissal is tracked separately so hiding the banner never destroys the
+   * fact that an update is staged — the old code nulled the version and lost it
+   * until relaunch.
+   */
+  appUpdateStatus: UpdateStatus
+  setAppUpdateStatus: (status: UpdateStatus) => void
+  updateBannerDismissed: boolean
+  setUpdateBannerDismissed: (dismissed: boolean) => void
   worktreeCache: Map<string, WorktreeInfo[]>
   loadWorktrees: (projectPath: string, force?: boolean) => Promise<void>
 

@@ -1035,8 +1035,24 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       return { workflowExecutions: next }
     }),
 
-  updateVersion: null,
-  setUpdateVersion: (version) => set({ updateVersion: version }),
+  // Seeded from main so a reload mid-download does not start from scratch.
+  // `unsupported` is the honest starting point: in a dev build no updater
+  // event will ever arrive.
+  appUpdateStatus: { kind: 'unsupported' },
+  setAppUpdateStatus: (status) =>
+    set((state) => ({
+      appUpdateStatus: status,
+      // A newer version re-earns the banner: dismissal applied to the update
+      // the user waved off, not to every update from here on.
+      updateBannerDismissed:
+        status.kind === 'ready' && state.appUpdateStatus.kind === 'ready'
+          ? state.appUpdateStatus.version === status.version && state.updateBannerDismissed
+          : status.kind === 'ready'
+            ? false
+            : state.updateBannerDismissed
+    })),
+  updateBannerDismissed: false,
+  setUpdateBannerDismissed: (dismissed) => set({ updateBannerDismissed: dismissed }),
 
   worktreeCache: new Map(),
   loadWorktrees: async (projectPath, force) => {

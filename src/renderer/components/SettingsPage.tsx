@@ -5,6 +5,7 @@ import { SettingsCategory } from '../stores/types'
 import { SectionHeader } from './settings/SectionHeader'
 import { AppearanceSettings } from './settings/AppearanceSettings'
 import { GeneralSettings } from './settings/GeneralSettings'
+import { UpdatesSettings } from './settings/UpdatesSettings'
 import { NotificationSettings } from './settings/NotificationSettings'
 import { WorktreeSettings } from './settings/WorktreeSettings'
 import { AgentSettings } from './settings/AgentSettings'
@@ -54,6 +55,24 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
           >
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+          </svg>
+        )
+      },
+      {
+        key: 'updates',
+        label: 'Updates',
+        icon: (
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <path d="M12 3v12" />
+            <path d="M7 10l5 5 5-5" />
+            <path d="M4 20h16" />
           </svg>
         )
       },
@@ -244,20 +263,24 @@ export function SettingsPage() {
             <div key={section.header}>
               <SectionHeader label={section.header} />
               <div className="space-y-0.5">
-                {section.items.map((item) => (
-                  <button
-                    key={item.key}
-                    onClick={() => setSettingsCategory(item.key)}
-                    className={`w-full text-left px-3 py-2 rounded-md text-[13px] transition-colors flex items-center gap-2.5 ${
-                      settingsCategory === item.key
-                        ? 'bg-white/[0.08] text-white'
-                        : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
-                    }`}
-                  >
-                    {item.icon}
-                    {item.label}
-                  </button>
-                ))}
+                {section.items
+                  // The updater only exists in the packaged desktop app, so the
+                  // web build would otherwise offer a panel of dead controls.
+                  .filter((item) => item.key !== 'updates' || isElectron)
+                  .map((item) => (
+                    <button
+                      key={item.key}
+                      onClick={() => setSettingsCategory(item.key)}
+                      className={`w-full text-left px-3 py-2 rounded-md text-[13px] transition-colors flex items-center gap-2.5 ${
+                        settingsCategory === item.key
+                          ? 'bg-white/[0.08] text-white'
+                          : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
+                      }`}
+                    >
+                      {item.icon}
+                      {item.label}
+                    </button>
+                  ))}
               </div>
             </div>
           ))}
@@ -295,6 +318,7 @@ export function SettingsPage() {
         <div className="max-w-2xl mx-auto px-8 py-8">
           {settingsCategory === 'appearance' && <AppearanceSettings />}
           {settingsCategory === 'general' && <GeneralSettings />}
+          {settingsCategory === 'updates' && <UpdatesSettings />}
           {settingsCategory === 'notifications' && <NotificationSettings />}
           {settingsCategory === 'worktrees' && <WorktreeSettings />}
           {settingsCategory === 'agents' && <AgentSettings />}

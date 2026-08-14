@@ -1,4 +1,12 @@
-import { app, BrowserWindow, ipcMain, nativeImage, screen, globalShortcut } from 'electron'
+import {
+  app,
+  autoUpdater as nativeAutoUpdater,
+  BrowserWindow,
+  ipcMain,
+  nativeImage,
+  screen,
+  globalShortcut
+} from 'electron'
 import path from 'node:path'
 import { registerIpcHandlers, setBridge } from './ipc-handlers'
 import * as browserRegistry from './browser-registry'
@@ -415,17 +423,23 @@ app.whenReady().then(async () => {
 
   // Load config for widget + update channel
   let updateChannel: 'stable' | 'beta' = 'stable'
+  let updateAutoDownload = true
   try {
     const config = await bridge.request<{
-      defaults: { widgetEnabled?: boolean; updateChannel?: 'stable' | 'beta' }
+      defaults: {
+        widgetEnabled?: boolean
+        updateChannel?: 'stable' | 'beta'
+        updateAutoDownload?: boolean
+      }
     }>(IPC.CONFIG_LOAD)
     widgetEnabled = config.defaults.widgetEnabled !== false
     updateChannel = config.defaults.updateChannel ?? 'stable'
+    updateAutoDownload = config.defaults.updateAutoDownload !== false
   } catch {
     // Config not available yet, use defaults
   }
 
-  updateManager.init(mainWindow, updateChannel)
+  updateManager.init(mainWindow, updateChannel, updateAutoDownload)
 
   // Auto show/hide widget based on main window focus
   mainWindow.on('blur', () => {
@@ -439,7 +453,7 @@ app.whenReady().then(async () => {
     hideWidget()
   })
 
-  // Widget IPC handlers
+  // Update IPC handlers
   ipcMain.on(IPC.UPDATE_INSTALL, () => {
     updateManager.installUpdate()
   })
@@ -447,6 +461,24 @@ app.whenReady().then(async () => {
   ipcMain.on(IPC.UPDATE_SET_CHANNEL, (_e, channel: 'stable' | 'beta') => {
     updateManager.setChannel(channel)
     updateManager.checkForUpdates()
+  })
+
+  ipcMain.on(IPC.UPDATE_CHECK, () => {
+    updateManager.checkForUpdates()
+  })
+
+  ipcMain.on(IPC.UPDATE_SET_AUTO_DOWNLOAD, (_e, enabled: boolean) => {
+    updateManager.setAutoDownload(enabled)
+  })
+
+  ipcMain.on(IPC.UPDATE_DOWNLOAD, () => {
+    updateManager.downloadUpdate()
+  })
+
+  // Synchronous: the Updates panel reads this on mount, before any event has
+  // had a chance to arrive.
+  ipcMain.on(IPC.UPDATE_GET_STATUS, (event) => {
+    event.returnValue = updateManager.getStatus()
   })
 
   ipcMain.on(IPC.WIDGET_HIDE, () => {
@@ -528,6 +560,19 @@ app.whenReady().then(async () => {
     }
   })
 })
+
+// quitAndInstall() closes every window *before* emitting before-quit, the
+// reverse of a normal quit. The darwin branch of the window close handler
+// would therefore still see isQuitting === false and preventDefault the very
+// quit the updater asked for — the app hid instead of restarting, and the
+// update only landed on the next manual ⌘Q. The signal comes from Electron's
+// native autoUpdater rather than from app, and claiming the flag there covers
+// every path reaching quitAndInstall, not just our own install button.
+if (process.platform === 'darwin') {
+  nativeAutoUpdater.on('before-quit-for-update', () => {
+    isQuitting = true
+  })
+}
 
 app.on('before-quit', async () => {
   isQuitting = true

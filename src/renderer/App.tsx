@@ -62,7 +62,6 @@ import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { MissedScheduleDialog } from './components/MissedScheduleDialog'
 import { SourcePromptDialog } from './components/SourcePromptDialog'
 import { OnboardingModal } from './components/OnboardingModal'
-import { UpdateBanner } from './components/UpdateBanner'
 import { ToastContainer } from './components/Toast'
 import { AddTaskDialog } from './components/AddTaskDialog'
 import { GridContextMenu } from './components/GridContextMenu'
@@ -363,8 +362,11 @@ export function App() {
       )
     })
 
-    const removeUpdateListener = window.api.onUpdateDownloaded(({ version }) => {
-      useAppStore.getState().setUpdateVersion(version)
+    // Seed from main first: the events fire once, and a window opened after
+    // one has already passed would otherwise sit on 'unsupported' forever.
+    useAppStore.getState().setAppUpdateStatus(window.api.getUpdateStatus())
+    const removeUpdateListener = window.api.onUpdateStatus((status) => {
+      useAppStore.getState().setAppUpdateStatus(status)
     })
 
     // The agent's browser tools reach the pane through these two: main can
@@ -658,7 +660,6 @@ export function App() {
         )}
 
         {showBanner && <SessionRestoredBanner />}
-        <UpdateBanner />
         <div className="flex-1 flex min-h-0">
           <div className="flex-1 min-w-0 flex flex-col min-h-0">
             {mainViewMode === 'tasks' ? (
