@@ -2,6 +2,7 @@ import { Zap, Clock, CheckSquare, Play, type LucideIcon } from 'lucide-react'
 import type {
   ApprovalConfig,
   NodeExecutionState,
+  NodeExecutionStatus,
   TriggerConfig,
   WorkflowExecution,
   WorkflowNode
@@ -257,4 +258,38 @@ export function runSummaryText(execution: WorkflowExecution): string | undefined
   const text = source?.logs?.trim() || source?.error?.trim()
   if (!text) return undefined
   return text.length > MAX_LOG_TAIL ? `…${text.slice(-MAX_LOG_TAIL)}` : text
+}
+
+/**
+ * What each node is doing across every run of a workflow that is live now.
+ *
+ * A node can be in several states at once when runs go in parallel, so the most
+ * urgent wins: a gate waiting on the person outranks work still going, which
+ * outranks a failure worth reading, which outranks a step that finished.
+ *
+ * Returns undefined when nothing is running, so a canvas showing a definition
+ * rather than a run renders no status at all.
+ */
+const LIVE_STATUS_RANK: Record<string, number> = {
+  waiting: 4,
+  running: 3,
+  error: 2,
+  success: 1
+}
+
+export function liveNodeStatus(
+  executions: Iterable<WorkflowExecution>,
+  workflowId: string
+): Record<string, NodeExecutionStatus> | undefined {
+  const worst: Record<string, NodeExecutionStatus> = {}
+  for (const exec of executions) {
+    if (exec.workflowId !== workflowId) continue
+    for (const ns of exec.nodeStates ?? []) {
+      const rank = LIVE_STATUS_RANK[ns.status] ?? 0
+      if (rank === 0) continue
+      const held = worst[ns.nodeId]
+      if (!held || rank > (LIVE_STATUS_RANK[held] ?? 0)) worst[ns.nodeId] = ns.status
+    }
+  }
+  return Object.keys(worst).length > 0 ? worst : undefined
 }

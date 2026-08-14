@@ -14,6 +14,8 @@ import { ICON_MAP } from '../project-sidebar/icon-map'
 import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../../lib/project-icons'
 import { Tooltip } from '../Tooltip'
 import { useAppStore } from '../../stores'
+import { useShallow } from 'zustand/react/shallow'
+import { liveNodeStatus } from '../../lib/run-presentation'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from '../../lib/platform'
 import { SidebarToggleButton } from '../SidebarToggleButton'
 import { MainViewPills } from '../MainViewPills'
@@ -231,6 +233,25 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     if (!editingId || !isActive || !liveExecSignature) return
     window.api.listWorkflowRuns(editingId, 20).then(setExecutionHistory).catch(console.error)
   }, [editingId, isActive, liveExecSignature])
+
+  /**
+   * What each node is doing in the runs that are live right now.
+   *
+   * The canvas has always accepted a per-node status and nothing ever passed
+   * one, so a node card's status dot never appeared outside its own tests — you
+   * could watch a run park on an approval gate in the runs list while the gate's
+   * node on the canvas looked idle.
+   *
+   * With runs in parallel a node can be in several states at once, so the most
+   * urgent wins: a gate waiting on the person outranks work still going, which
+   * outranks a failure worth reading, which outranks a finished step. Recomputed
+   * off the same signature that already drives the history refetch.
+   */
+  const nodeStatus = useAppStore(
+    useShallow((s) =>
+      editingId ? liveNodeStatus(s.workflowExecutions.values(), editingId) : undefined
+    )
+  )
 
   // Load existing workflow when editing (with slug migration)
   useEffect(() => {
@@ -761,6 +782,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           onInsertNode={handleInsertNode}
           onAddParallelBranch={handleAddParallelBranch}
           selectedNodeId={selectedNodeId}
+          nodeStatus={nodeStatus}
         />
 
         {showRunHistory && (

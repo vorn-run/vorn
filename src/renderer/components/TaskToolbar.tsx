@@ -218,7 +218,9 @@ export function TaskToolbar() {
 
           {/* View section */}
           <div className="py-1.5 border-t border-white/[0.06]">
-            <div className="px-3 py-1 text-[10px] text-ink-faint uppercase tracking-wider">View</div>
+            <div className="px-3 py-1 text-[10px] text-ink-faint uppercase tracking-wider">
+              View
+            </div>
             <div className="flex gap-1 px-3 py-1">
               <button
                 onClick={() => setViewMode('list')}
