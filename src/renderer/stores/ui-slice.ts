@@ -23,6 +23,7 @@ import {
   promotedCardId
 } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
+import { confirmDiscard, clearDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 
 const EMPTY_SESSIONS: TerminalSession[] = []
@@ -808,6 +809,16 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     set((state) => (state.maximizedPaneId === paneId ? {} : { maximizedPaneId: paneId })),
 
   promoteFile: (sessionId, filePath) => {
+    // One card per file per session. Two cards on one path is two editors over
+    // one file on disk, each with its own buffer and its own dirty flag: save in
+    // one, then save in the other, and the second silently writes its stale copy
+    // over the first. Nothing anywhere would report it.
+    for (const [existingId, pane] of get().editorPanes) {
+      if (isPromotedPane(existingId, pane) && pane.sessionId === sessionId) {
+        if (pane.filePath === filePath) return existingId
+      }
+    }
+
     const cardId = nextCardId(sessionId)
     set((state) => {
       const next = new Map(state.editorPanes)
@@ -843,21 +854,46 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 
     if (editor && isPromotedPane(cardId, editor)) {
       // Into the session's editor, which holds one file — so this displaces
-      // whatever was there, exactly as picking a file in the tree does.
+      // whatever was there, exactly as picking a file in the tree does, and has
+      // to ask the same question before throwing that buffer away. The card's
+      // own buffer goes too: it is a different editor under a different id.
+      if (!confirmDiscard(editor.sessionId)) return
+      if (!confirmDiscard(cardId)) return
+      clearDirty(cardId)
       state.openEditorPane(editor.sessionId, editor.filePath)
       state.closeEditorPane(cardId)
       return
     }
 
     if (browser && isPromotedPane(cardId, browser)) {
-      const url = browser.tabs[browser.activeTab] ?? browser.tabs[0]
-      // Onto the end of the session's strip. If that browser is closed, opening
-      // it on this page is the landing spot — a tab with nowhere to go would
-      // leave the card the only thing holding it, and it is about to close.
-      if (state.browserPanes.has(browser.sessionId)) state.addBrowserTab(browser.sessionId, url)
-      else state.openBrowserPane(browser.sessionId, url)
+      // Every tab, not just the active one. A card can gather tabs of its own —
+      // its strip keeps its `+` — and returning it used to carry back whichever
+      // page happened to be in front and drop the rest without a word.
+      const [first, ...rest] = browser.tabs
+      if (state.browserPanes.has(browser.sessionId)) state.addBrowserTab(browser.sessionId, first)
+      // If that browser is closed, opening it on this page is the landing spot —
+      // a tab with nowhere to go would leave the card the only thing holding it,
+      // and it is about to close.
+      else state.openBrowserPane(browser.sessionId, first)
+      for (const url of rest) state.addBrowserTab(browser.sessionId, url)
       state.closeBrowserPane(cardId)
     }
+  },
+
+  closeCard: (cardId) => {
+    const state = get()
+    const editor = state.editorPanes.get(cardId)
+    if (editor && isPromotedPane(cardId, editor)) {
+      // The confirm lives here rather than at each button, because it was
+      // missing from two of the three: the card's own ✕ asked, while its tab
+      // and its sidebar row threw the buffer away silently.
+      if (!confirmDiscard(cardId)) return
+      clearDirty(cardId)
+      state.closeEditorPane(cardId)
+      return
+    }
+    const browser = state.browserPanes.get(cardId)
+    if (browser && isPromotedPane(cardId, browser)) state.closeBrowserPane(cardId)
   },
 
   toggleSessionDockCollapsed: () =>

@@ -23,8 +23,7 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
     setFocusedTerminal,
     setActiveTabId,
     returnCard,
-    closeEditor,
-    closeBrowser
+    closeCard
   } = useAppStore(
     useShallow((s) => ({
       isSelected: s.selectedTerminalId === card.id,
@@ -33,8 +32,7 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
       setFocusedTerminal: s.setFocusedTerminal,
       setActiveTabId: s.setActiveTabId,
       returnCard: s.returnCardToSession,
-      closeEditor: s.closeEditorPane,
-      closeBrowser: s.closeBrowserPane
+      closeCard: s.closeCard
     }))
   )
 
@@ -117,8 +115,7 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
           aria-label={`Close ${name}`}
           onClick={(e) => {
             e.stopPropagation()
-            if (card.kind === 'browser') closeBrowser(card.id)
-            else closeEditor(card.id)
+            closeCard(card.id)
           }}
           className="opacity-0 group-hover/card:opacity-100 focus:opacity-100 text-gray-500
                      hover:text-red-400 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0"

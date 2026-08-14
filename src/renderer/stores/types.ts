@@ -405,6 +405,14 @@ export interface UISlice {
    * land somewhere, and refusing to return it would strand it.
    */
   returnCardToSession: (cardId: string) => void
+  /**
+   * Close a popped-out card, asking first if it holds unsaved edits.
+   *
+   * One action rather than a `closeEditorPane` / `closeBrowserPane` fork at each
+   * button, because the fork was got wrong: the card's own ✕ confirmed, while
+   * its tab and its sidebar row discarded the buffer without a word.
+   */
+  closeCard: (cardId: string) => void
   toggleSessionDockCollapsed: () => void
   setOnboardingOpen: (open: boolean) => void
   setDiffSidebarTerminalId: (id: string | null, tab?: PanelTab) => void

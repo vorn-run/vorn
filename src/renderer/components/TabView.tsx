@@ -214,8 +214,7 @@ export function TabView() {
         const idx = allTabIds.indexOf(id)
         setActiveTabId(allTabIds[idx + 1] ?? allTabIds[idx - 1] ?? null)
       }
-      if (state.browserPanes.has(id)) state.closeBrowserPane(id)
-      else state.closeEditorPane(id)
+      state.closeCard(id)
       return
     }
 

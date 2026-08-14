@@ -8,8 +8,7 @@ const setSelected = vi.fn()
 const setFocusedTerminal = vi.fn()
 const setActiveTabId = vi.fn()
 const returnCard = vi.fn()
-const closeEditor = vi.fn()
-const closeBrowser = vi.fn()
+const closeCard = vi.fn()
 let selectedTerminalId: string | null = null
 let layoutMode = 'grid'
 
@@ -22,8 +21,7 @@ vi.mock('../src/renderer/stores', () => ({
       setFocusedTerminal,
       setActiveTabId,
       returnCardToSession: returnCard,
-      closeEditorPane: closeEditor,
-      closeBrowserPane: closeBrowser
+      closeCard
     }
     return selector ? selector(state) : state
   }
@@ -89,17 +87,18 @@ describe('PromotedCardItem', () => {
     expect(returnCard).toHaveBeenCalledWith('card:t1:0')
 
     fireEvent.click(screen.getByRole('button', { name: /Close server\.ts/ }))
-    expect(closeEditor).toHaveBeenCalledWith('card:t1:0')
+    expect(closeCard).toHaveBeenCalledWith('card:t1:0')
   })
 
-  it('closes a page through the browser collection, not the editor one', () => {
-    // The two live in different maps; closing a page as if it were a file
-    // would report success and leave the card exactly where it was.
+  it('closes through the one action that asks about unsaved edits', () => {
+    // Not `closeEditorPane`/`closeBrowserPane` directly. This row and the card's
+    // tab both used to pick the collection themselves and close it outright,
+    // while only the card's own ✕ confirmed — so the same file discarded its
+    // buffer silently or not depending on which ✕ you reached for.
     render(<PromotedCardItem card={pageCard} />)
 
     fireEvent.click(screen.getByRole('button', { name: /Close vorn\.dev/ }))
-    expect(closeBrowser).toHaveBeenCalledWith('card:t1:1')
-    expect(closeEditor).not.toHaveBeenCalled()
+    expect(closeCard).toHaveBeenCalledWith('card:t1:1')
   })
 
   it('focuses the card, not the session it came from', () => {

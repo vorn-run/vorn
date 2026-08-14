@@ -655,6 +655,110 @@ describe('popping an item out to its own card', () => {
     expect(s().editorPanes.get(theirs)?.sessionId).toBe('t2')
   })
 
+  it("asks before a close discards a card's unsaved edits", async () => {
+    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/draft.ts')
+    })
+    dirtyRefFor(cardId).current = true
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    act(() => s().closeCard(cardId))
+    expect(confirm).toHaveBeenCalledOnce()
+    // Cancelled: the card and its buffer both survive.
+    expect(s().editorPanes.has(cardId)).toBe(true)
+    expect(isEditorDirty(cardId)).toBe(true)
+
+    confirm.mockReturnValue(true)
+    act(() => s().closeCard(cardId))
+    expect(s().editorPanes.has(cardId)).toBe(false)
+    // The flag must not outlive the card, or a later card inherits the prompt.
+    expect(isEditorDirty(cardId)).toBe(false)
+    confirm.mockRestore()
+  })
+
+  it("asks before a return discards the session editor's buffer", async () => {
+    const { dirtyRefFor } = await import('../src/renderer/lib/editor-dirty')
+    act(() => s().openEditorPane('t1', '/p/open.ts'))
+    dirtyRefFor('t1').current = true
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    act(() => s().returnCardToSession(cardId))
+    // Returning displaces the session's editor exactly as picking a file in the
+    // tree does — and that path has always asked first.
+    expect(confirm).toHaveBeenCalled()
+    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/open.ts')
+    expect(s().editorPanes.has(cardId)).toBe(true)
+    confirm.mockRestore()
+  })
+
+  it('closes a page card without prompting — there is no buffer to lose', () => {
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 0) as string
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    act(() => s().closeCard(cardId))
+    expect(confirm).not.toHaveBeenCalled()
+    expect(s().browserPanes.has(cardId)).toBe(false)
+    confirm.mockRestore()
+  })
+
+  it('returns every tab a card gathered, not just the one in front', () => {
+    // A card's strip keeps its `+`, so it can collect pages of its own. Carrying
+    // back only the active one dropped the rest without a word, and the pop-out
+    // control is hidden on a card, so there was no way to rescue them first.
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 0) as string
+    })
+    act(() => {
+      s().addBrowserTab(cardId, 'second.example')
+      s().addBrowserTab(cardId, 'third.example')
+    })
+
+    act(() => s().returnCardToSession(cardId))
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([
+      'https://example.com/',
+      'https://second.example/',
+      'https://third.example/'
+    ])
+  })
+
+  it('never opens the same file twice for one session', () => {
+    // Two cards on one path is two editors over one file, each with its own
+    // buffer: save in one, save in the other, and the second writes its stale
+    // copy over the first with nothing to report it.
+    let first = ''
+    let second = ''
+    act(() => {
+      first = s().promoteFile('t1', '/p/same.ts')
+      second = s().promoteFile('t1', '/p/same.ts')
+    })
+
+    expect(second).toBe(first)
+    expect([...s().editorPanes].filter(([id]) => id !== 't1')).toHaveLength(1)
+  })
+
+  it('still gives two sessions their own card for the same path', () => {
+    // Different worktrees, different files on disk under the same relative name.
+    let a = ''
+    let b = ''
+    act(() => {
+      a = s().promoteFile('t1', '/p/same.ts')
+      b = s().promoteFile('t2', '/p/same.ts')
+    })
+    expect(a).not.toBe(b)
+  })
+
   it('never lets a card corrupt the session order', () => {
     // The grid and the tab strip drag within lists that interleave cards, while
     // terminalOrder holds sessions only. Passing an index from one into the
