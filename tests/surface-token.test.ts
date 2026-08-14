@@ -6,11 +6,21 @@ import { SURFACE, TERMINAL_BACKGROUND } from '../src/shared/surface'
 const root = join(__dirname, '..')
 const read = (p: string): string => readFileSync(join(root, p), 'utf8')
 
-const css = read('src/renderer/global.css')
+const css = read('src/renderer/theme.css')
+
+/** Every stylesheet that is the sole entry point for one of the clients. */
+const ENTRY_SHEETS = ['src/renderer/global.css', 'packages/web/src/global.css'] as const
+
+/** Every ground painted before a client's stylesheet has loaded. */
+const PRE_MOUNT_GROUNDS = [
+  'src/renderer/index.html',
+  'packages/web/index.html',
+  'packages/web/public/offline.html'
+] as const
 
 function token(name: string): string {
   const match = css.match(new RegExp(`--color-${name}:\\s*(#[0-9a-fA-F]{3,8});`))
-  if (!match) throw new Error(`--color-${name} is not defined in global.css`)
+  if (!match) throw new Error(`--color-${name} is not defined in theme.css`)
   return match[1].toLowerCase()
 }
 
@@ -27,15 +37,28 @@ describe('the surface ladder', () => {
     expect(TERMINAL_BACKGROUND).toBe(token('surface-sunken'))
   })
 
-  it('paints both pre-mount grounds on the field', () => {
-    // Before the app mounts there is no stylesheet, so these two spell the
-    // field out. Anything above it flashes light on launch and bands light
-    // while the window is resized.
-    const html = read('src/renderer/index.html')
-    const offline = read('packages/web/public/offline.html')
+  it('paints every pre-mount ground on the field', () => {
+    // Before a client's stylesheet loads there is nothing to read a token from,
+    // so these spell the field out. Anything above it flashes light on launch
+    // and bands light while the window is resized.
+    const wrong = PRE_MOUNT_GROUNDS.filter((p) => !read(p).includes(`background: ${SURFACE.base}`))
+    expect(wrong).toEqual([])
+  })
 
-    expect(html).toContain(`background: ${SURFACE.base}`)
-    expect(offline).toContain(`background: ${SURFACE.base};`)
+  it('gives every client the palette, not just the one that owns it', () => {
+    // Both clients mount the same renderer, but each has its own Tailwind entry
+    // and only one of them defined the tokens. Utilities silently stopped being
+    // generated for the other, and an inline var() that resolves to nothing is
+    // an invalid background — so every tokenised surface went transparent on
+    // the web client the moment this pass replaced its literals.
+    const missing = ENTRY_SHEETS.filter((p) => !/@import\s+['"][^'"]*theme\.css['"]/.test(read(p)))
+    expect(missing).toEqual([])
+
+    // And exactly one file may declare them, or the two drift.
+    const declaring = [...ENTRY_SHEETS, 'src/renderer/theme.css'].filter((p) =>
+      read(p).includes('--color-surface-base:')
+    )
+    expect(declaring).toEqual(['src/renderer/theme.css'])
   })
 
   it('steps in small, even increments from the field up to floating chrome', () => {

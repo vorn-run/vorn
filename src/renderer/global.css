@@ -1,62 +1,9 @@
 @import 'tailwindcss';
 @source "./**/*.{tsx,ts,html}";
 
-@theme {
-  /* The app's only accent, and spent sparingly enough to stay meaningful: it
-     marks work blocked on the person, and nothing else. Not selection, not
-     focus, not running. Terminal output, diffs and logs keep their own colour
-     — that is the work itself, not chrome describing it. */
-  --color-bronzo: #c9972a;
-  --color-bronzo-dark: #b8862a;
-
-  /* Failure and destructive actions only. Burnt orange rather than signal
-     red so it can sit beside bronzo without the two fighting. */
-  --color-danger: #d4623f;
-
-  /* Ink ramp — warm off-white at four opacities, enough between them to carry
-     hierarchy without a hue. The sessions surface reads from these; the rest of
-     the app still uses Tailwind's grays and is migrated view by view. */
-  --color-ink: #faf9f7; /* primary text */
-  --color-ink-secondary: rgba(255, 255, 255, 0.55); /* row titles, labels */
-  --color-ink-faint: rgba(255, 255, 255, 0.35); /* metadata, identifiers */
-  --color-ink-ghost: rgba(255, 255, 255, 0.18); /* settled, receded */
-
-  /* Category colour, for the one surface that is organised by category.
-     A task board is a long list sorted into columns by status, and you read it
-     by scanning for a status — which is the case the rest of the app does not
-     have, and the reason these exist here and nowhere else. All sit around 40%
-     saturation so they read as a set and none of them competes with bronzo,
-     which stays the brightest thing on the board and still means "this one
-     wants you". */
-  --color-status-slate: #7d8590; /* todo — not started */
-  --color-status-blue: #6f8faf; /* in progress */
-  --color-status-sage: #7d9471; /* done */
-
-  /* Surface ladder — the app field and the surfaces that lift off it. Depth
-     comes from a step plus a hairline, never a shadow; a shadow means something
-     floats over the page rather than being part of it. The steps are small, of
-     the order of four points: a panel is a different region, not a different
-     material, and a larger step reads as a hole cut in the page.
-
-     The set sits three points below where it started, and the card body sits
-     two points above its own header rather than four. A card is one object —
-     header, frame and the terminal inside it — so that step only has to
-     separate them, not announce a new region; the step that still has work to
-     do is the one from the field up to the card. Five points down for the
-     whole set was tried first and read as too flat, since a display has less
-     room to separate rungs the closer they all get to black. */
-  --color-surface-base: #0a0a0c; /* app background, behind the cards */
-  --color-surface-sunken: #0f0f11; /* card body and terminal: the main column */
-  --color-surface-panel: #0d0d0f; /* panes, card header, status bar: beside the work */
-  --color-surface-overlay: #19191d; /* menus, popovers, floating chrome */
-  /* Aliases, not values. A card frame matching the terminal it holds is what
-     keeps a lighter band from showing around the panes, so the equality is the
-     point — spelling it as a reference keeps a later nudge to one from silently
-     failing to move the other. A workflow node is the same relationship one
-     level out: it lifts off the canvas the way a card lifts off the field. */
-  --color-surface-raised: var(--color-surface-sunken); /* card frame, dialogs */
-  --color-surface-node: var(--color-surface-sunken); /* workflow canvas nodes */
-}
+/* The palette lives in theme.css so the web client can share it verbatim —
+   it has its own Tailwind entry and would otherwise define no tokens at all. */
+@import './theme.css';
 
 html,
 body {

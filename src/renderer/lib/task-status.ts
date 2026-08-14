@@ -32,7 +32,7 @@ export const TASK_STATUS_TONE: Record<TaskStatus, StatusTone> = {
  * picker each carried their own copy of this array, so adding or reordering a
  * status meant four edits and any one of them could present a different set.
  */
-export const TASK_STATUS_ORDER: TaskStatus[] = [
+export const TASK_STATUS_ORDER: readonly TaskStatus[] = [
   'todo',
   'in_progress',
   'in_review',

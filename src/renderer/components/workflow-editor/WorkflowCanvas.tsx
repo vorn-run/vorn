@@ -26,6 +26,7 @@ import {
 } from '../../../shared/types'
 import { computeFlowLayout, FlowRow } from '../../lib/workflow-helpers'
 import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from './node-visuals'
+import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
 
 export type AddableNodeType =
   | 'agent'
@@ -341,6 +342,11 @@ function LoopRenderer({
     ? `until ${config.until.variable} ${config.until.operator} ${config.until.value}`
     : 'runs every pass'
   const lastBodyId = row.body.length > 0 ? row.body[row.body.length - 1] : null
+  // The rail draws its own header instead of going through NodeCard, so the
+  // loop is the one node whose status has to be read here. It has one: a loop
+  // runs while it iterates, and errors when it has no body steps or holds a
+  // gate — without this the rail sat plain while the run was inside it.
+  const loopStatus = nodeStatus?.[row.loopNode.id]
 
   return (
     <div
@@ -364,6 +370,12 @@ function LoopRenderer({
         <span className="shrink-0 text-[10px] font-mono text-gray-400 bg-white/[0.06] rounded px-1.5 py-0.5">
           max {config.maxIterations ?? 1}
         </span>
+        {loopStatus && WORKFLOW_STATUS_DOT_PULSE[loopStatus] && (
+          <span
+            data-loop-status
+            className={`shrink-0 w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[loopStatus]}`}
+          />
+        )}
       </div>
 
       <div className="px-4 pt-4 flex flex-col items-center">

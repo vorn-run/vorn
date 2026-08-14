@@ -18,7 +18,7 @@ const isMac = navigator.platform.toUpperCase().includes('MAC')
 const TASK_STATUS_OPTIONS: { value: TaskStatusFilter; label: string; dot: string }[] = [
   { value: 'all', label: 'All', dot: 'bg-ink-secondary' },
   ...TASK_STATUS_ORDER.map((s) => ({
-    value: s as TaskStatusFilter,
+    value: s,
     label: TASK_STATUS_LABEL[s],
     dot: TASK_STATUS_DOT[s]
   }))

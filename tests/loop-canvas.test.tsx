@@ -251,4 +251,20 @@ describe('a live run on the canvas', () => {
       expect(container.querySelector(`.${WORKFLOW_STATUS_DOT[s]}`)).toBeNull()
     }
   })
+
+  it('shows the loop itself the state it is in', () => {
+    // The rail draws its own header rather than going through a node card, so
+    // it is the one node that has to read its status separately — and a loop
+    // does have one: running while it iterates, error when its body is empty or
+    // holds a gate. Without this the rail sat plain while the run was inside it.
+    const { container } = renderWith(nodes, null, edges, { loop: 'running' })
+    const dot = container.querySelector('[data-loop-status]')
+    expect(dot).toBeInTheDocument()
+    expect(dot?.className).toContain(WORKFLOW_STATUS_DOT.running)
+  })
+
+  it('leaves the rail plain when the loop is not part of a live run', () => {
+    const { container } = renderWith(nodes, null, edges, { fetch: 'running' })
+    expect(container.querySelector('[data-loop-status]')).toBeNull()
+  })
 })
