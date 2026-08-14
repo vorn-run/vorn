@@ -324,7 +324,15 @@ export interface UISlice {
   setTerminalOrder: (order: string[]) => void
   setVisibleTerminalIds: (ids: string[]) => void
   setFocusableTerminalIds: (ids: string[]) => void
-  reorderTerminals: (fromIndex: number, toIndex: number) => void
+  /**
+   * Move `draggedId` to where `droppedOnId` sits in the session order.
+   *
+   * Takes ids rather than indices because the lists callers drag within
+   * interleave popped-out cards, and `terminalOrder` holds sessions only.
+   * Dragging a card is a no-op — a card has no position of its own, it is drawn
+   * beside its owner — and dropping onto one targets that owner's slot.
+   */
+  reorderTerminals: (draggedId: string, droppedOnId: string) => void
   toggleMinimized: (id: string) => void
   /** Open (or focus) the file-tree pane owned by `sessionId`. */
   openFilesPane: (sessionId: string) => void

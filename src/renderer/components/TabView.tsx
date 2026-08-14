@@ -277,13 +277,9 @@ export function TabView() {
 
   const handlePointerUp = useCallback(() => {
     if (dragState?.isDragging && dropTargetIndex !== null) {
-      const fromIndex = allTabIds.indexOf(dragState.draggingId)
-      if (
-        fromIndex !== -1 &&
-        fromIndex !== dropTargetIndex &&
-        allTabIds.includes(dragState.draggingId)
-      ) {
-        reorderTerminals(fromIndex, dropTargetIndex)
+      const droppedOnId = allTabIds[dropTargetIndex]
+      if (droppedOnId && droppedOnId !== dragState.draggingId) {
+        reorderTerminals(dragState.draggingId, droppedOnId)
       }
     }
     setDragState(null)

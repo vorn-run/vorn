@@ -149,6 +149,23 @@ describe('PaneColumn', () => {
     }
   })
 
+  it("does not treat a card as one of the session's own panes", () => {
+    // A card carries its owner's session id and a kind of its own, so a test of
+    // "not a terminal" matched it — and maximizing a popped-out card hid the
+    // terminal of the session it came from, while the card itself did nothing.
+    let cardId = ''
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    const { result } = renderHook(() => usePaneColumnEntries('t1'))
+
+    // The entries are what maximize is matched against, so a card must not be
+    // among them for the owner's card to stay whole.
+    expect(result.current.map((e) => e.id)).toEqual(['files:t1'])
+    expect(result.current.some((e) => e.id === cardId)).toBe(false)
+  })
+
   it('sizes itself rather than trusting the frame to do it', () => {
     // Every row below is `flex-basis: 0`, so this element has no content height.
     // Inside a `flex-col` frame that collapses it to nothing — which is exactly

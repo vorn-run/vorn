@@ -655,6 +655,49 @@ describe('popping an item out to its own card', () => {
     expect(s().editorPanes.get(theirs)?.sessionId).toBe('t2')
   })
 
+  it('never lets a card corrupt the session order', () => {
+    // The grid and the tab strip drag within lists that interleave cards, while
+    // terminalOrder holds sessions only. Passing an index from one into the
+    // other moved the wrong session, and an index past the end spliced nothing
+    // and wrote `undefined` into the order — which is then persisted and sent
+    // to the server.
+    seed(['t1', 't2', 't3'])
+    act(() => {
+      s().promoteFile('t1', '/p/a.ts')
+    })
+
+    // Drop t3 onto t1's slot. Under the old index-based call the card ahead of
+    // t2 shifted every index by one.
+    act(() => s().reorderTerminals('t3', 't1'))
+    expect(s().terminalOrder).toEqual(['t3', 't1', 't2'])
+    expect(s().terminalOrder.every((id) => typeof id === 'string')).toBe(true)
+  })
+
+  it('treats dragging a card as a no-op rather than moving its owner', () => {
+    // A card has no position of its own — it is drawn beside the session it came
+    // from — so there is nothing for a drag to reorder.
+    seed(['t1', 't2'])
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/a.ts')
+    })
+    const before = s().terminalOrder
+
+    act(() => s().reorderTerminals(cardId, 't2'))
+    expect(s().terminalOrder).toEqual(before)
+  })
+
+  it("resolves a drop onto a card to its owner's slot", () => {
+    seed(['t1', 't2', 't3'])
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t3', '/p/a.ts')
+    })
+
+    act(() => s().reorderTerminals('t1', cardId))
+    expect(s().terminalOrder).toEqual(['t2', 't3', 't1'])
+  })
+
   it('keeps cards through the reconcile that prunes dead sessions', () => {
     // Reconcile prunes on the owner, not the key. Pruning by key would delete
     // every card on the first pass, silently discarding the files and pages

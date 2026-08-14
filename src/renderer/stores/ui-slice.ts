@@ -19,6 +19,7 @@ import {
   devicePaneId,
   isPromotedCardId,
   isTerminalPane,
+  paneOwnerId,
   promotedCardId
 } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
@@ -296,20 +297,32 @@ function reconcilePanes(
 /**
  * Drop every placement a pane held. For closing one.
  *
- * Placement lives apart from the pane records — two app-level fields keyed by
- * pane id — which is what lets ordering, maximize and minimize address any pane
- * without knowing its kind. The cost is that closing a pane has to say so
- * explicitly: an id left in `minimizedTerminals` still shows a dock entry for a
- * pane that no longer exists, and one left in `maximizedPaneId` blanks its
- * owner's card in favour of nothing. Every field is only written when it
- * actually changes, so a close that touches nothing returns nothing.
+ * Placement lives apart from the pane records — four app-level fields keyed by
+ * pane id — which is what lets ordering, maximize, minimize and focus address
+ * any pane without knowing its kind. The cost is that closing a pane has to say
+ * so explicitly, and each field strands differently when it doesn't:
+ *
+ * - `minimizedTerminals` leaves a dock entry that restores nothing.
+ * - `maximizedPaneId` blanks its owner's card in favour of nothing.
+ * - `focusedTerminalId` / `previewTerminalId` are the dangerous pair. The focus
+ *   stage is chosen by "is anything focused", and the app drops its titlebar
+ *   while something is — so an id pointing at a pane that no longer exists
+ *   renders an empty window with no chrome and no way back except Escape.
+ *
+ * Every field is only written when it actually changes, so a close that touches
+ * nothing returns nothing.
  */
 function clearPlacement(
-  state: Pick<AppStore, 'maximizedPaneId' | 'minimizedTerminals'>,
+  state: Pick<
+    AppStore,
+    'maximizedPaneId' | 'minimizedTerminals' | 'focusedTerminalId' | 'previewTerminalId'
+  >,
   paneId: string
 ): Partial<AppStore> {
   const cleared: Partial<AppStore> = {}
   if (state.maximizedPaneId === paneId) cleared.maximizedPaneId = null
+  if (state.focusedTerminalId === paneId) cleared.focusedTerminalId = null
+  if (state.previewTerminalId === paneId) cleared.previewTerminalId = null
   if (state.minimizedTerminals.has(paneId)) {
     const minimized = new Set(state.minimizedTerminals)
     minimized.delete(paneId)
@@ -538,11 +551,24 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     }),
   setFocusableTerminalIds: (ids) => set({ focusableTerminalIds: ids }),
 
-  reorderTerminals: (fromIndex, toIndex) =>
+  reorderTerminals: (draggedId, droppedOnId) =>
     set((state) => {
+      // Ids, not indices. The lists the grid and the tab strip drag within
+      // interleave popped-out cards, while `terminalOrder` holds sessions only,
+      // so an index from either was off by the number of cards ahead of it —
+      // moving the wrong session, and when the index ran past the end, splicing
+      // nothing and writing `undefined` into the order that is then persisted
+      // and shipped to the server.
+      //
+      // A card is not in this list and has no position of its own: it is drawn
+      // beside the session it came from. Dragging one is therefore a no-op, and
+      // dropping onto one means the slot its owner occupies.
       const order = [...state.terminalOrder]
-      const [moved] = order.splice(fromIndex, 1)
-      order.splice(toIndex, 0, moved)
+      const from = order.indexOf(draggedId)
+      const to = order.indexOf(paneOwnerId(droppedOnId))
+      if (from === -1 || to === -1 || from === to) return {}
+      const [moved] = order.splice(from, 1)
+      order.splice(to, 0, moved)
       window.api.reorderSessions(order)
       return { terminalOrder: order }
     }),

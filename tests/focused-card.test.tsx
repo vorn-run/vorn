@@ -117,7 +117,12 @@ describe('FocusedStage', () => {
     expect(useAppStore.getState().focusedTerminalId).toBeNull()
   })
 
-  it('renders nothing for a card closed while it was focused', () => {
+  it('gives up focus when the focused card is closed', () => {
+    // Otherwise the app is stranded: the stage is chosen by "is anything
+    // focused", and the titlebar is dropped while something is — so a focus id
+    // pointing at a closed card renders an empty window with no chrome and no
+    // way back but Escape. This test previously asserted that empty render as
+    // if it were the intended behaviour.
     let cardId = ''
     act(() => {
       cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
@@ -127,10 +132,20 @@ describe('FocusedStage', () => {
       useAppStore.getState().closeEditorPane(cardId)
     })
 
-    // The stage empties on the next pass; drawing a header for a card that is
-    // gone would leave a name and a branch with nothing behind them.
-    const { container } = render(<FocusedStage />)
-    expect(container).toBeEmptyDOMElement()
+    expect(useAppStore.getState().focusedTerminalId).toBeNull()
+  })
+
+  it('gives up focus when the focused card is put back in its session', () => {
+    let cardId = ''
+    act(() => {
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    act(() => {
+      useAppStore.setState({ focusedTerminalId: cardId } as never)
+      useAppStore.getState().returnCardToSession(cardId)
+    })
+
+    expect(useAppStore.getState().focusedTerminalId).toBeNull()
   })
 
   it('keeps interactive header controls out of the drag region', () => {

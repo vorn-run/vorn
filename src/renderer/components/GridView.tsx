@@ -204,9 +204,9 @@ export const GridView = memo(function GridView() {
 
   const handlePointerUp = useCallback(() => {
     if (dragState?.isDragging && dropTargetIndex !== null) {
-      const fromIndex = orderedIds.indexOf(dragState.draggingId)
-      if (fromIndex !== -1 && dropTargetIndex !== -1 && fromIndex !== dropTargetIndex) {
-        reorderTerminals(fromIndex, dropTargetIndex)
+      const droppedOnId = orderedIds[dropTargetIndex]
+      if (droppedOnId && droppedOnId !== dragState.draggingId) {
+        reorderTerminals(dragState.draggingId, droppedOnId)
       }
     }
     setDragState(null)
