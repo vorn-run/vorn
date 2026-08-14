@@ -9,9 +9,9 @@ import {
   EditorPaneState,
   BrowserPaneState,
   DevicePaneState,
-  CardSplit
+  CardSplit,
+  isPromotedPane
 } from './types'
-import { isPromotedPane } from './types'
 import {
   filesPaneId,
   editorPaneId,

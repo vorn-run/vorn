@@ -743,8 +743,10 @@ function CardTab({
             {shortcutIndex + 1}
           </span>
         )}
-        {/* No confirm step, unlike a session: closing a card discards a view of
-            a file that is still on disk, not a running agent and its history. */}
+        {/* No confirm popover, unlike a session's tab: closing a card is not
+            ending a running agent. It still asks about an unsaved buffer —
+            `closeCard` owns that question, so every ✕ that reaches a card asks
+            it the same way. */}
         <TabIconButton
           label={`Close ${subject.name}`}
           icon={<X size={13} strokeWidth={2} />}

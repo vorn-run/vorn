@@ -4,13 +4,13 @@ import { useAppStore } from '../stores'
 import { isPromotedCardId, paneIdFor, type PaneChildKind } from '../lib/pane-id'
 
 /** One row of the column, keyed by the pane id maximize is matched on. */
-/** Stable empty, so "no panes" does not invalidate the frames' memos. */
-const NO_ENTRIES: ColumnEntry[] = []
-
 export interface ColumnEntry {
   id: string
   kind: PaneChildKind
 }
+
+/** Stable empty, so "no panes" does not invalidate the frames' memos. */
+const NO_ENTRIES: ColumnEntry[] = []
 
 /**
  * What this session's column will draw, in order.
