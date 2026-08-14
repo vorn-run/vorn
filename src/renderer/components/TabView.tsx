@@ -5,10 +5,9 @@ import { useAppStore } from '../stores'
 import { selectPaneFlags } from '../stores/ui-slice'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
 import { isTerminalPane, isPromotedCardId } from '../lib/pane-id'
-import { usePromotedCards } from '../hooks/usePromotedCards'
+import { usePromotedCards, usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PromotedPaneCard } from './PromotedPaneCard'
 import { FileTypeIcon } from './file-icons'
-import { displayHost } from '../lib/browser-url'
 import { PaneColumn } from './PaneColumn'
 import { AgentStatusIcon } from './AgentStatusIcon'
 import { TerminalPane } from './TerminalPane'
@@ -25,7 +24,6 @@ import { ConfirmPopover } from './ConfirmPopover'
 import { Tooltip } from './Tooltip'
 import { toast } from './Toast'
 import { ChevronDown, FolderOpen, Globe, GripVertical, Pencil, Plus, X } from 'lucide-react'
-import { isPromotedPane } from '../stores/types'
 import { GridContextMenu } from './GridContextMenu'
 import { GridToolbar } from './GridToolbar'
 import { WindowControls } from './WindowControls'
@@ -698,20 +696,7 @@ function CardTab({
   onSelect: () => void
   onClose: () => void
 }) {
-  const subject = useAppStore((s) => {
-    const editor = s.editorPanes.get(cardId)
-    if (editor && isPromotedPane(cardId, editor)) {
-      return { kind: 'editor' as const, name: editor.filePath.split(/[/\\]/).pop() ?? '' }
-    }
-    const browser = s.browserPanes.get(cardId)
-    if (browser && isPromotedPane(cardId, browser)) {
-      return {
-        kind: 'browser' as const,
-        name: displayHost(browser.tabs[browser.activeTab] ?? browser.tabs[0] ?? '')
-      }
-    }
-    return null
-  })
+  const subject = usePromotedCardSubject(cardId)
 
   if (!subject) return null
 

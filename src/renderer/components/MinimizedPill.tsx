@@ -5,11 +5,8 @@ import { FileTypeIcon } from './file-icons'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { STATUS_DOT } from '../lib/status-colors'
 import { GitBranch, FolderGit2, Globe } from 'lucide-react'
-import { paneOwnerId, isPromotedCardId } from '../lib/pane-id'
-import { displayHost } from '../lib/browser-url'
-
-/** What a minimized card is, enough to name it and draw its icon. */
-type CardSubject = { kind: 'editor'; fileName: string } | { kind: 'browser'; host: string }
+import { paneOwnerId } from '../lib/pane-id'
+import { usePromotedCardSubject } from '../hooks/usePromotedCards'
 
 /**
  * A stowed grid cell, and the way back to it.
@@ -27,10 +24,10 @@ type CardSubject = { kind: 'editor'; fileName: string } | { kind: 'browser'; hos
  */
 export function MinimizedPill({ terminalId }: { terminalId: string }) {
   const sessionId = paneOwnerId(terminalId)
-  const { terminal, card, toggleMinimized, setActiveTabId } = useAppStore(
+  const card = usePromotedCardSubject(terminalId)
+  const { terminal, toggleMinimized, setActiveTabId } = useAppStore(
     useShallow((s) => ({
       terminal: s.terminals.get(sessionId),
-      card: !isPromotedCardId(terminalId) ? null : readCardSubject(s, terminalId),
       toggleMinimized: s.toggleMinimized,
       setActiveTabId: s.setActiveTabId
     }))
@@ -59,7 +56,7 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
           {card.kind === 'browser' ? (
             <Globe size={14} strokeWidth={1.5} className="text-ink-faint" />
           ) : (
-            <FileTypeIcon name={card.fileName} size={14} />
+            <FileTypeIcon name={card.name} size={14} />
           )}
         </span>
       ) : (
@@ -74,7 +71,7 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
       )}
 
       <span className="text-[11px] font-medium text-gray-200 truncate max-w-[120px]">
-        {card ? (card.kind === 'browser' ? card.host : card.fileName) : getDisplayName(session)}
+        {card ? card.name : getDisplayName(session)}
       </span>
 
       {session.branch && (
@@ -92,23 +89,4 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
       )}
     </button>
   )
-}
-
-function readCardSubject(
-  state: {
-    editorPanes: Map<string, { filePath: string }>
-    browserPanes: Map<string, { tabs: string[]; activeTab: number }>
-  },
-  cardId: string
-): CardSubject | null {
-  const editor = state.editorPanes.get(cardId)
-  if (editor) return { kind: 'editor', fileName: editor.filePath.split(/[/\\]/).pop() ?? '' }
-  const browser = state.browserPanes.get(cardId)
-  if (browser) {
-    return {
-      kind: 'browser',
-      host: displayHost(browser.tabs[browser.activeTab] ?? browser.tabs[0] ?? '')
-    }
-  }
-  return null
 }

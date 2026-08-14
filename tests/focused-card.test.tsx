@@ -25,6 +25,8 @@ vi.mock('../src/renderer/components/FocusedTerminal', () => ({
 
 const { useAppStore } = await import('../src/renderer/stores')
 const { FocusedStage } = await import('../src/renderer/components/FocusedStage')
+const { usePromotedCardSubject } = await import('../src/renderer/hooks/usePromotedCards')
+const { renderHook } = await import('@testing-library/react')
 
 const session = (id: string) =>
   ({
@@ -129,5 +131,75 @@ describe('FocusedStage', () => {
     // gone would leave a name and a branch with nothing behind them.
     const { container } = render(<FocusedStage />)
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('keeps interactive header controls out of the drag region', () => {
+    // macOS `-webkit-app-region: drag` swallows clicks on everything inside it,
+    // so a control in this header without the opt-out is visibly present and
+    // completely dead. jsdom has no app-region, so the class is the only thing
+    // that can be checked here — and it is the thing that was missing.
+    let cardId = ''
+    act(() => {
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    act(() => useAppStore.setState({ focusedTerminalId: cardId } as never))
+    render(<FocusedStage />)
+
+    const collapse = screen.getByRole('button', { name: /Collapse a\.ts/ })
+    expect(collapse.className).toContain('titlebar-no-drag')
+    expect(collapse.closest('.titlebar-no-drag')).not.toBeNull()
+  })
+})
+
+/**
+ * The read behind a card's tab, its dock pill and its focus stage.
+ *
+ * Worth its own test because the obvious way to write it is a trap, and the
+ * trap is silent until the component mounts and React aborts the render.
+ */
+describe('usePromotedCardSubject', () => {
+  it('returns the same object across unrelated store updates', () => {
+    let cardId = ''
+    act(() => {
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/src/server.ts')
+    })
+    const { result, rerender } = renderHook(() => usePromotedCardSubject(cardId))
+    const first = result.current
+    expect(first).toEqual({ kind: 'editor', name: 'server.ts', sessionId: 't1' })
+
+    // A selector that built this object inline would hand back a new reference
+    // here, zustand would read it as a changed snapshot, and the component
+    // would re-render and re-select until React gave up.
+    act(() => useAppStore.setState({ selectedTerminalId: 'anything' } as never))
+    rerender()
+    expect(result.current).toBe(first)
+  })
+
+  it('follows the card when what it shows changes', () => {
+    // Navigating a popped-out page, the way its address bar does. Note this is
+    // the browser case on purpose: `openEditorPane` stamps its first argument
+    // as the owner, so calling it with a card id would rewrite the record's
+    // `sessionId` to the card's own — quietly turning the card back into a
+    // session pane. Nothing in the app does that; it is a trap for anything
+    // that later tries to "change the file a card shows".
+    let cardId: string | null = null
+    act(() => {
+      useAppStore.getState().openBrowserPane('t1', 'first.example')
+      cardId = useAppStore.getState().promoteBrowserTab('t1', 0)
+    })
+    const id = cardId as unknown as string
+    const { result, rerender } = renderHook(() => usePromotedCardSubject(id))
+    expect(result.current?.name).toBe('first.example')
+
+    act(() => useAppStore.getState().openBrowserPane(id, 'second.example'))
+    rerender()
+    expect(result.current?.name).toBe('second.example')
+    // And it is still a card: navigating must not rewrite who owns it.
+    expect(result.current?.sessionId).toBe('t1')
+  })
+
+  it('answers null for an id that is not a card', () => {
+    const { result } = renderHook(() => usePromotedCardSubject('t1'))
+    expect(result.current).toBeNull()
   })
 })

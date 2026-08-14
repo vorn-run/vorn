@@ -2,11 +2,10 @@ import { Globe, Minimize2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useShallow } from 'zustand/react/shallow'
-import { isPromotedPane } from '../stores/types'
-import { displayHost } from '../lib/browser-url'
 import { isMac } from '../lib/platform'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FileTypeIcon } from './file-icons'
+import { usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PaneOwnerLabel } from './PaneCard'
 import { PromotedPaneCard } from './PromotedPaneCard'
 import { Tooltip } from './Tooltip'
@@ -26,36 +25,19 @@ import { ICON_BUTTON, ICON_BUTTON_SIZE } from '../lib/icon-button'
  * back out.
  */
 export function FocusedCard({ cardId }: { cardId: string }) {
-  // Flat values only. A nested object built inside the selector is a new
-  // reference every call, which `useShallow` compares as changed — the render
-  // then re-selects, and the two chase each other until React gives up.
-  const { kind, name, sessionId, setFocused, setPreviewTerminal, isPreview } = useAppStore(
-    useShallow((s) => {
-      const editor = s.editorPanes.get(cardId)
-      const browser = s.browserPanes.get(cardId)
-      const promotedEditor = editor && isPromotedPane(cardId, editor) ? editor : null
-      const promotedBrowser = browser && isPromotedPane(cardId, browser) ? browser : null
-      return {
-        kind: promotedEditor ? ('editor' as const) : promotedBrowser ? ('browser' as const) : null,
-        name: promotedEditor
-          ? (promotedEditor.filePath.split(/[/\\]/).pop() ?? '')
-          : promotedBrowser
-            ? displayHost(
-                promotedBrowser.tabs[promotedBrowser.activeTab] ?? promotedBrowser.tabs[0] ?? ''
-              )
-            : '',
-        sessionId: promotedEditor?.sessionId ?? promotedBrowser?.sessionId ?? null,
-        setFocused: s.setFocusedTerminal,
-        setPreviewTerminal: s.setPreviewTerminal,
-        isPreview: s.previewTerminalId === cardId && s.focusedTerminalId !== cardId
-      }
-    })
+  const subject = usePromotedCardSubject(cardId)
+  const { setFocused, setPreviewTerminal, isPreview } = useAppStore(
+    useShallow((s) => ({
+      setFocused: s.setFocusedTerminal,
+      setPreviewTerminal: s.setPreviewTerminal,
+      isPreview: s.previewTerminalId === cardId && s.focusedTerminalId !== cardId
+    }))
   )
   const isMobile = useIsMobile()
 
   // Closed while focused. The stage empties on the next pass; bailing here
   // keeps it from drawing a header for a card that is gone.
-  if (!kind || !sessionId) return null
+  if (!subject) return null
 
   const contract = (): void => {
     if (isPreview) setPreviewTerminal(null)
@@ -86,22 +68,28 @@ export function FocusedCard({ cardId }: { cardId: string }) {
         }}
         data-testid={`focused-card-${cardId}`}
       >
-        <span className="shrink-0 flex items-center justify-center w-4 h-4">
-          {kind === 'browser' ? (
+        <span className="shrink-0 flex items-center justify-center w-4 h-4 titlebar-no-drag">
+          {subject.kind === 'browser' ? (
             <Globe size={16} strokeWidth={1.5} className="text-ink-faint" />
           ) : (
-            <FileTypeIcon name={name} size={16} />
+            <FileTypeIcon name={subject.name} size={16} />
           )}
         </span>
-        <span className="text-[13px] font-medium text-gray-200 truncate">{name}</span>
-        <PaneOwnerLabel sessionId={sessionId} />
+        <span className="text-[13px] font-medium text-gray-200 truncate">{subject.name}</span>
+        {/* Interactive children of a drag region have to opt out of it. On
+            macOS `-webkit-app-region: drag` swallows every click inside, so
+            without this the collapse button and the branch switcher are simply
+            dead — visibly present, and nothing happens when you press them. */}
+        <span className="titlebar-no-drag flex items-center gap-1.5 min-w-0">
+          <PaneOwnerLabel sessionId={subject.sessionId} />
+        </span>
         <span className="flex-1" />
         <Tooltip label="Back to the grid">
           <button
             type="button"
             onClick={contract}
-            className={ICON_BUTTON}
-            aria-label={`Collapse ${name}`}
+            className={`${ICON_BUTTON} titlebar-no-drag`}
+            aria-label={`Collapse ${subject.name}`}
           >
             <Minimize2 size={ICON_BUTTON_SIZE} />
           </button>

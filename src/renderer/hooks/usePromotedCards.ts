@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
+import { displayHost } from '../lib/browser-url'
 import { isPromotedPane, type AppStore } from '../stores/types'
 
 /**
@@ -69,4 +70,52 @@ export function usePromotedOwner(paneId: string): string | null {
 /** Ids of every promoted card, for the store-free paths that only need ids. */
 export function promotedCardIds(state: Pick<AppStore, 'editorPanes' | 'browserPanes'>): string[] {
   return collect(state).map((c) => c.id)
+}
+
+/** What one card is showing, named the way a person would name it. */
+export interface PromotedCardSubject {
+  kind: 'editor' | 'browser'
+  /** Filename, or the page's host. */
+  name: string
+  sessionId: string
+}
+
+/**
+ * What a card is showing — for the tab, the dock pill and the focus stage.
+ *
+ * All three ask the same question, so all three ask it here. That is worth a
+ * hook on its own because the obvious way to write it is a trap: a selector
+ * that builds `{ kind, name }` inline returns a new object on every call, and
+ * zustand compares snapshots by reference — so the component re-renders, the
+ * selector runs again, and React aborts with "maximum update depth exceeded"
+ * the moment such a component mounts. This selects flat values and memoizes the
+ * object once, which is what makes the reference stable.
+ */
+export function usePromotedCardSubject(cardId: string): PromotedCardSubject | null {
+  const { kind, name, sessionId } = useAppStore(
+    useShallow((s) => {
+      const editor = s.editorPanes.get(cardId)
+      if (editor && isPromotedPane(cardId, editor)) {
+        return {
+          kind: 'editor' as const,
+          name: editor.filePath.split(/[/\\]/).pop() ?? '',
+          sessionId: editor.sessionId
+        }
+      }
+      const browser = s.browserPanes.get(cardId)
+      if (browser && isPromotedPane(cardId, browser)) {
+        return {
+          kind: 'browser' as const,
+          name: displayHost(browser.tabs[browser.activeTab] ?? browser.tabs[0] ?? ''),
+          sessionId: browser.sessionId
+        }
+      }
+      return { kind: null, name: '', sessionId: null }
+    })
+  )
+
+  return useMemo(
+    () => (kind && sessionId ? { kind, name, sessionId } : null),
+    [kind, name, sessionId]
+  )
 }
