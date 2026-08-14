@@ -4,6 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { attachCommandBlocks, jumpToCommand } from './command-blocks'
 import type { BufferMetrics } from './spine-layout'
+import { TERMINAL_BACKGROUND } from './surface'
 
 interface TerminalEntry {
   term: Terminal
@@ -98,7 +99,7 @@ const TERM_OPTIONS = {
   fontSize: 13,
   fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace',
   theme: {
-    background: '#141416',
+    background: TERMINAL_BACKGROUND,
     foreground: '#d4d4d8',
     cursor: '#d4d4d8',
     selectionBackground: '#3f3f46',

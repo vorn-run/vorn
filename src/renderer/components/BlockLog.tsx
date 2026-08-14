@@ -3,6 +3,7 @@ import { blockToText, type BlockRow, type StyledRun } from '../lib/block-render'
 import { colorToCss, getBlockLog, onBlockLogChange, type LoggedBlock } from '../lib/block-log'
 import { formatDuration, shortenCwd } from '../lib/command-blocks'
 import { Check, Copy } from 'lucide-react'
+import { TERMINAL_BACKGROUND } from '../lib/surface'
 
 /**
  * Finished commands, drawn as real elements.
@@ -26,7 +27,7 @@ function runStyle(run: StyledRun): React.CSSProperties {
   const fg = colorToCss(run.fg, FG_DEFAULT)
   const bg = colorToCss(run.bg, BG_DEFAULT)
   return {
-    color: run.inverse ? (bg === 'transparent' ? '#141416' : bg) : fg,
+    color: run.inverse ? (bg === 'transparent' ? TERMINAL_BACKGROUND : bg) : fg,
     background: run.inverse ? fg : bg,
     fontWeight: run.bold ? 600 : undefined,
     fontStyle: run.italic ? 'italic' : undefined,
@@ -148,7 +149,7 @@ export function BlockLog({ terminalId, className }: Props) {
       ref={scrollRef}
       onScroll={onScroll}
       className={`overflow-y-auto ${className ?? ''}`}
-      style={{ background: '#141416' }}
+      style={{ background: 'var(--color-surface-sunken)' }}
     >
       <div className="flex flex-col">
         {blocks.map((b) => (

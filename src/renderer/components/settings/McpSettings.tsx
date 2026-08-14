@@ -39,7 +39,7 @@ export function McpSettings() {
             <div
               key={setup.agentType}
               className="border border-white/[0.06] rounded-lg p-4"
-              style={{ background: '#141416' }}
+              style={{ background: 'var(--color-surface-sunken)' }}
             >
               <div className="flex items-center gap-3 mb-3">
                 <AgentIcon agentType={setup.agentType} size={20} />

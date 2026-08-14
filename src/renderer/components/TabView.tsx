@@ -272,7 +272,7 @@ export function TabView() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div
-        className="titlebar-drag shrink-0 flex items-center border-b border-white/[0.06] bg-[#1a1a1e] relative z-[46]"
+        className="titlebar-drag shrink-0 flex items-center border-b border-white/[0.06] bg-surface-overlay relative z-[46]"
         style={{
           minHeight: 40,
           paddingLeft: needsTrafficLightPad ? `${TRAFFIC_LIGHT_PAD_PX}px` : undefined
@@ -386,7 +386,7 @@ export function TabView() {
                   </span>
                 )}
 
-                <span className="absolute right-2 top-0 bottom-0 flex items-center gap-1 group-hover:bg-[#1a1a1e] group-hover:rounded-l-sm">
+                <span className="absolute right-2 top-0 bottom-0 flex items-center gap-1 group-hover:bg-surface-overlay group-hover:rounded-l-sm">
                   {index < 9 && !isRenaming && (
                     <span
                       className="absolute right-0 top-1/2 -translate-y-1/2
@@ -529,7 +529,7 @@ export function TabView() {
           )}
         </div>
       ) : (
-        <div className="flex-1 min-h-0 flex" style={{ background: '#141416' }}>
+        <div className="flex-1 min-h-0 flex" style={{ background: 'var(--color-surface-sunken)' }}>
           <div className="flex-1 min-w-0 flex flex-col">
             <div className="relative flex-1 min-h-0">
               {activeTabId && activeTerminal && (
@@ -544,7 +544,7 @@ export function TabView() {
               {activeTabId && activeTerminal && activeTerminal.lastOutputTimestamp === 0 && (
                 <div
                   className="absolute inset-0 p-3 space-y-2 pointer-events-none"
-                  style={{ background: '#141416' }}
+                  style={{ background: 'var(--color-surface-sunken)' }}
                 >
                   <div className="h-3 w-3/4 rounded bg-white/[0.04] animate-pulse" />
                   <div

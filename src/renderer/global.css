@@ -36,11 +36,19 @@
      comes from a step plus a hairline, never a shadow; a shadow means something
      floats over the page rather than being part of it. The steps are small, of
      the order of four points: a panel is a different region, not a different
-     material, and a larger step reads as a hole cut in the page. */
-  --color-surface-base: #0d0d0f; /* app background, behind the cards */
-  --color-surface-sunken: #141416; /* card body and terminal: the main column */
-  --color-surface-panel: #101012; /* panes, card header, status bar: beside the work */
-  --color-surface-overlay: #1c1c20; /* menus, popovers, floating chrome */
+     material, and a larger step reads as a hole cut in the page.
+
+     The set sits three points below where it started, and the card body sits
+     two points above its own header rather than four. A card is one object —
+     header, frame and the terminal inside it — so that step only has to
+     separate them, not announce a new region; the step that still has work to
+     do is the one from the field up to the card. Five points down for the
+     whole set was tried first and read as too flat, since a display has less
+     room to separate rungs the closer they all get to black. */
+  --color-surface-base: #0a0a0c; /* app background, behind the cards */
+  --color-surface-sunken: #0f0f11; /* card body and terminal: the main column */
+  --color-surface-panel: #0d0d0f; /* panes, card header, status bar: beside the work */
+  --color-surface-overlay: #19191d; /* menus, popovers, floating chrome */
   /* Aliases, not values. A card frame matching the terminal it holds is what
      keeps a lighter band from showing around the panes, so the equality is the
      point — spelling it as a reference keeps a later nudge to one from silently
@@ -129,7 +137,7 @@ select,
   }
 
   /* Boost contrast on low-visibility foregrounds for WCAG AA (4.5:1) on mobile.
-     gray-500 (#6b7280) is only 3.0:1 on the #0d0d0f field — bump to gray-400.
+     gray-500 (#6b7280) is only 3.0:1 on the near-black field — bump to gray-400.
      gray-600 (#4b5563) is only 1.9:1 — bump to gray-500. */
   .text-gray-500 {
     color: #9ca3af !important; /* gray-400: 7.9:1 */

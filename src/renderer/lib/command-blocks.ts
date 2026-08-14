@@ -1,6 +1,7 @@
 import type { IMarker, Terminal } from '@xterm/xterm'
 import { captureBlock, clearBlockLog, hasBlockLogView } from './block-log'
 import type { BufferLike, LineLike } from './block-render'
+import { TERMINAL_BACKGROUND } from './surface'
 
 /**
  * Command blocks: structured command boundaries inside the raw terminal.
@@ -435,7 +436,7 @@ export function attachCommandBlocks(terminalId: string, term: Terminal): () => v
   const defaultCursor = term.options.theme?.cursor
   const applyCursorVisibility = (): void => {
     const theme = term.options.theme ?? {}
-    const background = theme.background ?? '#141416'
+    const background = theme.background ?? TERMINAL_BACKGROUND
     const hide = tracker.inputState() === 'prompt'
     const cursor = hide ? background : defaultCursor
     if (theme.cursor !== cursor) {

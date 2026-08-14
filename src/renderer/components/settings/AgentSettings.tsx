@@ -165,7 +165,7 @@ export function AgentSettings() {
       {/* Status summary bar */}
       <div
         className="flex items-center gap-4 px-4 py-2.5 rounded-lg mb-6 border border-white/[0.04]"
-        style={{ background: '#141416' }}
+        style={{ background: 'var(--color-surface-sunken)' }}
       >
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-400" />
@@ -201,7 +201,7 @@ export function AgentSettings() {
                 <div
                   key={agent.type}
                   className="group rounded-xl border border-white/[0.06] hover:border-white/[0.1] transition-all duration-200 overflow-hidden"
-                  style={{ background: '#141416' }}
+                  style={{ background: 'var(--color-surface-sunken)' }}
                 >
                   {/* Agent header with brand accent */}
                   <div
@@ -321,7 +321,7 @@ export function AgentSettings() {
                 <div
                   key={agent.type}
                   className="rounded-xl border border-white/[0.04] hover:border-white/[0.06] transition-all duration-200 overflow-hidden"
-                  style={{ background: '#141416' }}
+                  style={{ background: 'var(--color-surface-sunken)' }}
                 >
                   <button
                     onClick={() =>

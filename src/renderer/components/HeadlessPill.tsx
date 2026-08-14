@@ -115,7 +115,7 @@ export function HeadlessPill({ session }: Props) {
 
   return (
     <div
-      className={`inline-flex rounded-md border bg-[#1a1a1e] px-2.5 py-1
+      className={`inline-flex rounded-md border bg-surface-overlay px-2.5 py-1
                    cursor-pointer transition-[border-color,box-shadow,opacity] select-none
                    hover:border-white/[0.12]
                    ${borderClass} ${opacityClass}
@@ -232,7 +232,7 @@ export function HeadlessPill({ session }: Props) {
       {expanded && (
         <div
           ref={logsRef}
-          className="mt-1.5 bg-[#141416] rounded border border-white/[0.06] max-h-[180px] overflow-y-auto p-2"
+          className="mt-1.5 bg-surface-sunken rounded border border-white/[0.06] max-h-[180px] overflow-y-auto p-2"
         >
           <pre className="text-[10px] font-mono text-gray-400 whitespace-pre-wrap break-all leading-relaxed m-0">
             {logs || lastOutput || 'Waiting for output...'}

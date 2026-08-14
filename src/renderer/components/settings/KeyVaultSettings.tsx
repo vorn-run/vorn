@@ -136,7 +136,7 @@ export function KeyVaultSettings() {
           <div
             key={key.id}
             className="border border-white/[0.06] rounded-lg p-4"
-            style={{ background: '#141416' }}
+            style={{ background: 'var(--color-surface-sunken)' }}
           >
             <div className="flex items-center gap-3">
               <FileKey size={18} strokeWidth={1.5} className="text-blue-400 shrink-0" />
@@ -189,7 +189,7 @@ export function KeyVaultSettings() {
         {showAddForm && (
           <div
             className="border border-white/[0.08] rounded-lg p-4 space-y-3"
-            style={{ background: '#141416' }}
+            style={{ background: 'var(--color-surface-sunken)' }}
           >
             <div className="text-sm font-medium text-gray-200 mb-3">New Key</div>
             <div>

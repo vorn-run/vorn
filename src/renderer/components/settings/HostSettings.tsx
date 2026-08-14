@@ -205,7 +205,7 @@ export function HostSettings() {
             <div
               key={host.id}
               className="border border-white/[0.06] rounded-lg p-4"
-              style={{ background: '#141416' }}
+              style={{ background: 'var(--color-surface-sunken)' }}
             >
               <div className="flex items-center gap-3 mb-4">
                 <Server size={18} strokeWidth={1.5} className="text-blue-400 shrink-0" />

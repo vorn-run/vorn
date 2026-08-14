@@ -23,7 +23,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
     return (
       <div
         style={{
-          background: '#1a1a1e',
+          background: 'var(--color-surface-overlay)',
           color: '#e5e5e5',
           height: '100vh',
           display: 'flex',

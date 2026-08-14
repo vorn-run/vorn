@@ -285,7 +285,7 @@ export function SSHSettings() {
               <div
                 key={host.id}
                 className="rounded-xl border border-white/[0.06] hover:border-white/[0.1] transition-all overflow-hidden"
-                style={{ background: '#141416' }}
+                style={{ background: 'var(--color-surface-sunken)' }}
               >
                 {/* Collapsed row */}
                 <button
@@ -595,7 +595,7 @@ export function SSHSettings() {
               <div
                 key={sshKey.id}
                 className="rounded-xl border border-white/[0.06] hover:border-white/[0.1] transition-all overflow-hidden"
-                style={{ background: '#141416' }}
+                style={{ background: 'var(--color-surface-sunken)' }}
               >
                 {/* Collapsed row */}
                 <button
@@ -704,7 +704,7 @@ export function SSHSettings() {
         {showAddKeyForm && (
           <div
             className="mt-2 rounded-xl border border-white/[0.08] p-4 space-y-3"
-            style={{ background: '#141416' }}
+            style={{ background: 'var(--color-surface-sunken)' }}
           >
             <div className="text-sm font-medium text-gray-200">New Key</div>
             <div>

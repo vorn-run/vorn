@@ -200,7 +200,7 @@ export function SettingsPage() {
     <motion.div
       className="fixed inset-0 z-50 flex"
       style={{
-        background: '#1a1a1e',
+        background: 'var(--color-surface-overlay)',
         paddingTop: 'var(--safe-top, 0px)',
         paddingRight: 'var(--safe-right, 0px)',
         paddingBottom: 'var(--safe-bottom, 0px)',
@@ -214,7 +214,7 @@ export function SettingsPage() {
       {/* Left sidebar */}
       <div
         className="w-56 border-r border-white/[0.06] flex flex-col shrink-0"
-        style={{ background: '#141416' }}
+        style={{ background: 'var(--color-surface-sunken)' }}
       >
         {/* Header — pl-[78px] for macOS traffic light safe zone (Electron only) */}
         <div
