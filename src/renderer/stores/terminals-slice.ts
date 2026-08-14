@@ -36,21 +36,28 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       clearDirty(id)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(id)
-      // A promoted pane is a grid cell in its own right, so it can also be
-      // minimized in its own right. Both placements are keyed by pane id and
-      // neither is reachable once the owner is gone — an id left in either set
-      // would resurface as a dock entry for a session that no longer exists.
-      const promoted = new Set(state.promotedPanes)
-      for (const childId of childIds) {
-        promoted.delete(childId)
-        minimized.delete(childId)
-      }
+      for (const childId of childIds) minimized.delete(childId)
       const filesPanes = new Set(state.filesPanes)
       filesPanes.delete(id)
+      // Both collections are keyed by pane, so a session's own pane is one
+      // entry and each file or tab popped out to a card of its own is another.
+      // Only the record names the owner — drop by key alone and every card this
+      // session put on the grid would outlive it, drawn against a session the
+      // store no longer has.
       const editorPanes = new Map(state.editorPanes)
-      editorPanes.delete(id)
+      for (const [paneId, pane] of state.editorPanes) {
+        if (pane.sessionId !== id) continue
+        editorPanes.delete(paneId)
+        minimized.delete(paneId)
+        // A card's buffer reports dirtiness under its own id, not its owner's.
+        if (paneId !== id) clearDirty(paneId)
+      }
       const browserPanes = new Map(state.browserPanes)
-      browserPanes.delete(id)
+      for (const [paneId, pane] of state.browserPanes) {
+        if (pane.sessionId !== id) continue
+        browserPanes.delete(paneId)
+        minimized.delete(paneId)
+      }
       // The remembered tabs go with the session too. A recycled id would
       // otherwise reopen its browser onto a previous session's pages.
       const browserMemory = new Map(state.browserMemory)
@@ -74,7 +81,6 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         terminals: next,
         terminalOrder: order,
         minimizedTerminals: minimized,
-        promotedPanes: promoted,
         filesPanes,
         editorPanes,
         browserPanes,

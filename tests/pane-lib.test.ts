@@ -6,7 +6,8 @@ import {
   browserPaneId,
   devicePaneId,
   paneIdFor,
-  panesOwnedBy,
+  promotedCardId,
+  isPromotedCardId,
   parsePaneId,
   paneKind,
   paneOwnerId,
@@ -69,13 +70,31 @@ describe('pane-id', () => {
     expect(paneIdFor('device', 'abc')).toBe(devicePaneId('abc'))
   })
 
-  it('picks out the panes one session owns, and never a session itself', () => {
-    // This is what places a promoted pane next to its owner in the grid. A
-    // terminal id leaking through would place a session twice.
-    const ids = ['files:a', 'editor:a', 'browser:b', 'a', 'b']
-    expect(panesOwnedBy(ids, 'a')).toEqual(['files:a', 'editor:a'])
-    expect(panesOwnedBy(ids, 'b')).toEqual(['browser:b'])
-    expect(panesOwnedBy(ids, 'c')).toEqual([])
+  it('reads a card id back to the session it was popped out of', () => {
+    // This is what places a card next to its owner in the grid, and what labels
+    // it with the right branch.
+    expect(parsePaneId(promotedCardId('abc', 3))).toEqual({ kind: 'card', sessionId: 'abc' })
+    expect(paneOwnerId(promotedCardId('abc', 3))).toBe('abc')
+    expect(isPromotedCardId(promotedCardId('abc', 0))).toBe(true)
+    expect(isPromotedCardId('abc')).toBe(false)
+    expect(isPromotedCardId('editor:abc')).toBe(false)
+  })
+
+  it('reads a card id from the right, so a colon in the session id survives', () => {
+    // Session ids come from the server and may hold a colon. Parsing from the
+    // left would cut `card:host:1234:7` at the first one and hand back `host` —
+    // a card labelled with somebody else's branch, or nobody's.
+    const weird = 'host:1234'
+    const cardId = promotedCardId(weird, 7)
+    expect(parsePaneId(cardId)).toEqual({ kind: 'card', sessionId: weird })
+    expect(paneOwnerId(cardId)).toBe(weird)
+  })
+
+  it('keeps a card out of the session-only paths', () => {
+    // The tab strip and the layout store both filter on this. A card leaking
+    // through would render a tab for a session that does not exist.
+    expect(isTerminalPane(promotedCardId('abc', 1))).toBe(false)
+    expect(paneKind(promotedCardId('abc', 1))).toBe('card')
   })
 
   it('survives session ids that themselves contain a colon', () => {

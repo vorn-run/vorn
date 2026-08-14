@@ -12,27 +12,16 @@
  * untouched — only the components that *render* a pane need to branch on kind.
  */
 
-export type PaneKind = 'terminal' | 'files' | 'editor' | 'browser' | 'device'
+export type PaneKind = 'terminal' | 'files' | 'editor' | 'browser' | 'device' | 'card'
 
-/**
- * What to call each kind where the pane's own title won't do.
- *
- * A pane titles itself by its content — the open file's name, the page's host,
- * the device's name — which is the right thing inside the pane and the wrong
- * thing in a dock, where the question is which of a session's panes this is.
- */
-export const PANE_LABEL: Record<PaneKind, string> = {
-  terminal: 'Terminal',
-  files: 'Files',
-  editor: 'Editor',
-  browser: 'Browser',
-  device: 'Device'
-}
+/** Pane kinds a session stacks inside its own card, i.e. all but those two. */
+export type PaneChildKind = Exclude<PaneKind, 'terminal' | 'card'>
 
 const FILES_PREFIX = 'files:'
 const EDITOR_PREFIX = 'editor:'
 const BROWSER_PREFIX = 'browser:'
 const DEVICE_PREFIX = 'device:'
+const CARD_PREFIX = 'card:'
 
 /** Id of the file-tree pane owned by `sessionId`. */
 export function filesPaneId(sessionId: string): string {
@@ -65,7 +54,7 @@ export function devicePaneId(sessionId: string): string {
  * For code that already holds a kind as data (the pane column, which builds its
  * stack from a list of kinds) rather than calling a named builder per branch.
  */
-export function paneIdFor(kind: Exclude<PaneKind, 'terminal'>, sessionId: string): string {
+export function paneIdFor(kind: PaneChildKind, sessionId: string): string {
   switch (kind) {
     case 'files':
       return filesPaneId(sessionId)
@@ -79,6 +68,26 @@ export function paneIdFor(kind: Exclude<PaneKind, 'terminal'>, sessionId: string
 }
 
 /**
+ * Id for an item promoted out of a session's card — one file, one browser tab.
+ *
+ * Unlike the four ids above there can be many per session, so the id carries a
+ * sequence number as well as the owner. It is read back from the right, because
+ * a session id may itself contain a colon (`host:1234`) while the sequence
+ * number never does — parsing from the left would hand back the wrong owner and
+ * label the card with somebody else's branch.
+ *
+ * The sequence is only ever compared for equality; nothing reads it as a count.
+ */
+export function promotedCardId(sessionId: string, seq: number): string {
+  return `${CARD_PREFIX}${sessionId}:${seq}`
+}
+
+/** True for an id from `promotedCardId`. */
+export function isPromotedCardId(paneId: string): boolean {
+  return paneId.startsWith(CARD_PREFIX)
+}
+
+/**
  * Resolve a pane id to its kind and owner session.
  *
  * Terminal panes are their own owner, so `parsePaneId(termId)` yields
@@ -86,6 +95,11 @@ export function paneIdFor(kind: Exclude<PaneKind, 'terminal'>, sessionId: string
  * pane belong to" a single call regardless of kind.
  */
 export function parsePaneId(paneId: string): { kind: PaneKind; sessionId: string } {
+  if (paneId.startsWith(CARD_PREFIX)) {
+    const rest = paneId.slice(CARD_PREFIX.length)
+    const seqAt = rest.lastIndexOf(':')
+    return { kind: 'card', sessionId: seqAt === -1 ? rest : rest.slice(0, seqAt) }
+  }
   if (paneId.startsWith(FILES_PREFIX)) {
     return { kind: 'files', sessionId: paneId.slice(FILES_PREFIX.length) }
   }
@@ -103,6 +117,7 @@ export function parsePaneId(paneId: string): { kind: PaneKind; sessionId: string
 
 /** Kind of a pane id, without allocating the owner string. */
 export function paneKind(paneId: string): PaneKind {
+  if (paneId.startsWith(CARD_PREFIX)) return 'card'
   if (paneId.startsWith(FILES_PREFIX)) return 'files'
   if (paneId.startsWith(EDITOR_PREFIX)) return 'editor'
   if (paneId.startsWith(BROWSER_PREFIX)) return 'browser'
@@ -118,20 +133,4 @@ export function paneOwnerId(paneId: string): string {
 /** True when the pane is a session's terminal rather than one of its children. */
 export function isTerminalPane(paneId: string): boolean {
   return paneKind(paneId) === 'terminal'
-}
-
-/**
- * The panes `sessionId` owns, out of a set of pane ids.
- *
- * Ownership is encoded in the id, so this needs no store — which is what lets a
- * promoted pane be placed next to the session it came from without either side
- * holding a reference to the other.
- */
-export function panesOwnedBy(paneIds: Iterable<string>, sessionId: string): string[] {
-  const owned: string[] = []
-  for (const paneId of paneIds) {
-    const parsed = parsePaneId(paneId)
-    if (parsed.kind !== 'terminal' && parsed.sessionId === sessionId) owned.push(paneId)
-  }
-  return owned
 }

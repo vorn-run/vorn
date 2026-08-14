@@ -220,7 +220,7 @@ describe('pane store actions', () => {
     const s = () => useAppStore.getState()
     act(() => s().openBrowserPane('t1', 'example.com'))
     expect(JSON.parse(localStorage.getItem('vorn:panes') as string).browsers).toEqual({
-      t1: { tabs: ['https://example.com/'], activeTab: 0 }
+      t1: { tabs: ['https://example.com/'], activeTab: 0, sessionId: 't1' }
     })
 
     act(() => s().removeTerminal('t1'))
@@ -231,7 +231,13 @@ describe('pane store actions', () => {
     // Shipping the tab strip must not silently drop the page people already
     // had open when they upgrade.
     const panes = parsePersistedBrowsers({ t1: 'https://old.example/' })
-    expect(panes.get('t1')).toEqual({ tabs: ['https://old.example/'], activeTab: 0 })
+    // Owned by its key, which is what a session-keyed entry always meant — so
+    // an upgraded entry reads back as the session's own browser, not as a card.
+    expect(panes.get('t1')).toEqual({
+      tabs: ['https://old.example/'],
+      activeTab: 0,
+      sessionId: 't1'
+    })
   })
 
   it('clamps a persisted active tab that points past the end', () => {
@@ -344,7 +350,7 @@ describe('pane store actions', () => {
     expect(raw).toBeTruthy()
     expect(JSON.parse(raw as string)).toEqual({
       files: ['t1'],
-      editors: { t1: '/p/a.ts' },
+      editors: { t1: { filePath: '/p/a.ts', sessionId: 't1' } },
       browsers: {}
     })
 
@@ -466,12 +472,13 @@ describe('claiming a device before showing it', () => {
 })
 
 /**
- * Promotion moves a pane from inside its owner's card to a grid cell of its
- * own. The pane's record never moves — only its placement — so what these pin
- * down is the placement fields staying consistent with the pane actually being
- * there.
+ * Popping a file or a tab out gives it a card of its own in the grid.
+ *
+ * A card is not a flag beside the pane — it *is* a pane entry whose key is not
+ * its owner's id. These pin down that the two collections stay a faithful
+ * account of what is on screen: nothing left behind, nothing owned twice.
  */
-describe('promoting a pane to its own card', () => {
+describe('popping an item out to its own card', () => {
   const s = () => useAppStore.getState()
 
   beforeEach(() => {
@@ -482,96 +489,182 @@ describe('promoting a pane to its own card', () => {
       reorderSessions: vi.fn()
     }
     seed(['t1', 't2'])
-    act(() => s().openFilesPane('t1'))
   })
 
-  it('promotes and returns, idempotently either way', () => {
-    act(() => s().promotePane('files:t1'))
-    expect(s().promotedPanes.has('files:t1')).toBe(true)
-
-    const before = s().promotedPanes
-    act(() => s().promotePane('files:t1'))
-    // Same set object: a repeat must not churn a field every subscriber reads.
-    expect(s().promotedPanes).toBe(before)
-
-    act(() => s().returnPaneToCard('files:t1'))
-    expect(s().promotedPanes.has('files:t1')).toBe(false)
-    const after = s().promotedPanes
-    act(() => s().returnPaneToCard('files:t1'))
-    expect(s().promotedPanes).toBe(after)
-  })
-
-  it('drops maximize when the maximized pane leaves its card', () => {
-    // Maximizing gives a pane its owner's whole footprint — which a promoted
-    // pane is no longer inside. Left set, it would blank the owner's card in
-    // favour of a pane that is not there.
-    act(() => s().setMaximizedPane('files:t1'))
-    act(() => s().promotePane('files:t1'))
-    expect(s().maximizedPaneId).toBe(null)
-  })
-
-  it('un-minimizes a pane on its way home', () => {
-    // The dock entry that restores it disappears with the promotion, so a pane
-    // that went home minimized would be nowhere at all.
-    act(() => s().promotePane('files:t1'))
-    act(() => s().toggleMinimized('files:t1'))
-    expect(s().minimizedTerminals.has('files:t1')).toBe(true)
-
-    act(() => s().returnPaneToCard('files:t1'))
-    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
-  })
-
-  it('clears placement when the pane itself is closed', () => {
-    // A closed pane left in either set still holds a grid cell or a dock entry
-    // for something that no longer exists.
-    act(() => s().promotePane('files:t1'))
-    act(() => s().toggleMinimized('files:t1'))
-
-    act(() => s().closeFilesPane('t1'))
-    expect(s().promotedPanes.has('files:t1')).toBe(false)
-    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
-  })
-
-  it('clears placement for every pane kind on close', () => {
+  it('opens a file as a card without disturbing the session editor', () => {
+    act(() => s().openEditorPane('t1', '/p/open.ts'))
+    let cardId = ''
     act(() => {
-      s().openEditorPane('t1', '/p/a.ts')
-      s().openBrowserPane('t1', 'https://example.com')
-    })
-    act(() => {
-      s().promotePane('editor:t1')
-      s().promotePane('browser:t1')
+      cardId = s().promoteFile('t1', '/p/popped.ts')
     })
 
-    act(() => s().closeEditorPane('t1'))
-    act(() => s().closeBrowserPane('t1'))
-    expect(s().promotedPanes.size).toBe(0)
+    // The whole point: the session's editor holds one file, so a second file
+    // has to land somewhere else or it would displace the first.
+    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/open.ts')
+    expect(s().editorPanes.get(cardId)).toEqual({ filePath: '/p/popped.ts', sessionId: 't1' })
   })
 
-  it('takes promoted panes down with the session that owns them', () => {
+  it('gives every card a distinct id, so two never collapse into one', () => {
+    let a = ''
+    let b = ''
     act(() => {
-      s().openEditorPane('t1', '/p/a.ts')
-      s().promotePane('files:t1')
-      s().promotePane('editor:t1')
-      s().toggleMinimized('editor:t1')
+      a = s().promoteFile('t1', '/p/a.ts')
+      b = s().promoteFile('t1', '/p/b.ts')
+    })
+    expect(a).not.toBe(b)
+    expect(s().editorPanes.size).toBe(2)
+  })
+
+  it('takes a tab out of the strip rather than copying it', () => {
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().addBrowserTab('t1', 'vorn.dev')
+    })
+    let cardId: string | null = null
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 1)
+    })
+
+    // Left in both places it would be two guests on one url, each with its own
+    // scroll position — and closing either would look like a refusal to go.
+    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/'])
+    expect(s().browserPanes.get(cardId as unknown as string)?.tabs).toEqual(['https://vorn.dev/'])
+  })
+
+  it('closes the strip when its last tab is popped out', () => {
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => {
+      s().promoteBrowserTab('t1', 0)
+    })
+    // A browser with no pages is a box taking up a cell, the same as closing
+    // its last tab any other way.
+    expect(s().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('refuses an index that names no tab', () => {
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    let cardId: string | null = 'unset'
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 4)
+    })
+    expect(cardId).toBeNull()
+    expect(s().browserPanes.get('t1')?.tabs).toHaveLength(1)
+  })
+
+  it('returns a file to the session editor', () => {
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    act(() => s().returnCardToSession(cardId))
+
+    expect(s().editorPanes.has(cardId)).toBe(false)
+    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/popped.ts')
+  })
+
+  it('returns a tab to the end of the strip it came from', () => {
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().addBrowserTab('t1', 'vorn.dev')
+    })
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 1) as string
+    })
+    act(() => s().returnCardToSession(cardId))
+
+    expect(s().browserPanes.has(cardId)).toBe(false)
+    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/', 'https://vorn.dev/'])
+  })
+
+  it('opens a browser to receive a tab whose strip has since closed', () => {
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 0) as string
+    })
+    expect(s().browserPanes.has('t1')).toBe(false)
+
+    act(() => s().returnCardToSession(cardId))
+    // Refusing would strand the page: the card is closing either way, so with
+    // nowhere to land the tab would simply be gone.
+    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/'])
+  })
+
+  it('un-minimizes nothing but forgets the card it closed', () => {
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    act(() => s().toggleMinimized(cardId))
+    expect(s().minimizedTerminals.has(cardId)).toBe(true)
+
+    act(() => s().closeEditorPane(cardId))
+    // An id left in the dock is an entry that restores nothing.
+    expect(s().minimizedTerminals.has(cardId)).toBe(false)
+  })
+
+  it('does not file a popped-out page into the reopen memory', () => {
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().addBrowserTab('t1', 'vorn.dev')
+    })
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 1) as string
+    })
+    act(() => s().closeBrowserPane(cardId))
+
+    // Memory is for reopening a session's own browser. A discarded card filed
+    // there would resurface its page on the session's next open.
+    expect(s().browserMemory.has(cardId)).toBe(false)
+  })
+
+  it("takes a session's cards down with it", () => {
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().addBrowserTab('t1', 'vorn.dev')
+    })
+    let file = ''
+    let tab = ''
+    act(() => {
+      file = s().promoteFile('t1', '/p/popped.ts')
+      tab = s().promoteBrowserTab('t1', 1) as string
+      s().toggleMinimized(file)
     })
 
     act(() => s().removeTerminal('t1'))
 
-    // Ownership is encoded in the id, so nothing else would ever clear these:
-    // the ids would sit in the grid and the dock forever, naming a session the
-    // store no longer has.
-    expect(s().promotedPanes.size).toBe(0)
-    expect(s().minimizedTerminals.has('editor:t1')).toBe(false)
+    // Only the record names the owner. Dropping by key alone would leave both
+    // cards on the grid, drawn against a session the store no longer has.
+    expect(s().editorPanes.has(file)).toBe(false)
+    expect(s().browserPanes.has(tab)).toBe(false)
+    expect(s().minimizedTerminals.has(file)).toBe(false)
   })
 
-  it("leaves another session's promoted panes alone", () => {
+  it("leaves another session's cards alone", () => {
+    let mine = ''
+    let theirs = ''
     act(() => {
-      s().openFilesPane('t2')
-      s().promotePane('files:t1')
-      s().promotePane('files:t2')
+      mine = s().promoteFile('t1', '/p/a.ts')
+      theirs = s().promoteFile('t2', '/p/b.ts')
     })
 
     act(() => s().removeTerminal('t1'))
-    expect(s().promotedPanes.has('files:t2')).toBe(true)
+    expect(s().editorPanes.has(mine)).toBe(false)
+    expect(s().editorPanes.get(theirs)?.sessionId).toBe('t2')
+  })
+
+  it('keeps cards through the reconcile that prunes dead sessions', () => {
+    // Reconcile prunes on the owner, not the key. Pruning by key would delete
+    // every card on the first pass, silently discarding the files and pages
+    // someone had put on the grid.
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    act(() => s().setVisibleTerminalIds(['t1', 't2']))
+
+    expect(s().editorPanes.has(cardId)).toBe(true)
   })
 })

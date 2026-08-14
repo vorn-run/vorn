@@ -1,13 +1,12 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { paneIdFor, parsePaneId, type PaneKind } from '../lib/pane-id'
+import { parsePaneId, type PaneChildKind } from '../lib/pane-id'
 import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
 import { SplitDivider } from './SplitDivider'
-import { useGridPlacementActive } from '../hooks/useGridPlacementActive'
 import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
 
 /**
@@ -21,56 +20,40 @@ import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
  * its siblings hide — the owner check keeps another session's maximized pane
  * from taking over this one.
  */
-/** Every pane kind a session's column can stack, i.e. all but the terminal. */
-type PaneChildKind = Exclude<PaneKind, 'terminal'>
-
 export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
-  const {
-    hasFiles,
-    hasEditor,
-    hasBrowser,
-    hasDevice,
-    promotedPanes,
-    maximizedPaneId,
-    split,
-    setCardSplit
-  } = useAppStore(
-    useShallow((s) => ({
-      hasFiles: s.filesPanes.has(sessionId),
-      hasEditor: s.editorPanes.has(sessionId),
-      hasBrowser: s.browserPanes.has(sessionId),
-      hasDevice: s.devicePanes.has(sessionId),
-      promotedPanes: s.promotedPanes,
-      maximizedPaneId: s.maximizedPaneId,
-      split: s.cardSplits[sessionId],
-      setCardSplit: s.setCardSplit
-    }))
-  )
-  const gridPlacementActive = useGridPlacementActive()
+  const { hasFiles, hasEditor, hasBrowser, hasDevice, maximizedPaneId, split, setCardSplit } =
+    useAppStore(
+      useShallow((s) => ({
+        hasFiles: s.filesPanes.has(sessionId),
+        hasEditor: s.editorPanes.has(sessionId),
+        hasBrowser: s.browserPanes.has(sessionId),
+        hasDevice: s.devicePanes.has(sessionId),
+        maximizedPaneId: s.maximizedPaneId,
+        split: s.cardSplits[sessionId],
+        setCardSplit: s.setCardSplit
+      }))
+    )
   const containerRef = useRef<HTMLDivElement | null>(null)
   // The live drag drives local state; the store is written once, on pointerup.
   const [dragWeights, setDragWeights] = useState<number[] | null>(null)
-
-  // A promoted pane is drawn by the grid as a cell of its own, so it leaves the
-  // column entirely — no placeholder. The column simply closes up, and the
-  // session's remaining panes get the space back, which is most of the point of
-  // promoting one. Where the grid is not what's drawing sessions there is no
-  // such cell, so the pane stays in the column and the promotion is inert.
-  const isPromotedOut = (kind: PaneChildKind): boolean =>
-    gridPlacementActive && promotedPanes.has(paneIdFor(kind, sessionId))
 
   const kinds = [
     hasFiles ? ('files' as const) : null,
     hasEditor ? ('editor' as const) : null,
     hasBrowser ? ('browser' as const) : null,
     hasDevice ? ('device' as const) : null
-  ].filter((k): k is PaneChildKind => k !== null && !isPromotedOut(k))
+  ].filter((k): k is PaneChildKind => k !== null)
 
   if (kinds.length === 0) return null
 
   const maximized = maximizedPaneId ? parsePaneId(maximizedPaneId) : null
   const maximizedKind =
-    maximized && maximized.sessionId === sessionId && maximized.kind !== 'terminal'
+    maximized &&
+    maximized.sessionId === sessionId &&
+    maximized.kind !== 'terminal' &&
+    // A popped-out card is maximized by the grid over the whole view, not by
+    // this column over its stack — it is not in the stack to maximize.
+    maximized.kind !== 'card'
       ? maximized.kind
       : null
   const hasMaximized = maximizedKind !== null && kinds.includes(maximizedKind)

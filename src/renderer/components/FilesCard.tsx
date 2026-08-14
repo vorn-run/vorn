@@ -26,11 +26,12 @@ export const FilesCard = memo(
     { sessionId, isDragTarget, onDragStart, flexible },
     ref
   ) {
-    const { terminal, selectedFile, openEditorPane, closeFilesPane } = useAppStore(
+    const { terminal, selectedFile, openEditorPane, promoteFile, closeFilesPane } = useAppStore(
       useShallow((s) => ({
         terminal: s.terminals.get(sessionId),
         selectedFile: s.editorPanes.get(sessionId)?.filePath ?? null,
         openEditorPane: s.openEditorPane,
+        promoteFile: s.promoteFile,
         closeFilesPane: s.closeFilesPane
       }))
     )
@@ -68,6 +69,9 @@ export const FilesCard = memo(
             if (path !== selectedFile && !confirmDiscard(sessionId)) return
             openEditorPane(sessionId, path)
           }}
+          // A card of its own displaces nothing, so unlike selecting a file
+          // there is no buffer at risk and nothing to confirm.
+          onPopOutFile={(path) => promoteFile(sessionId, path)}
         />
       </PaneCard>
     )

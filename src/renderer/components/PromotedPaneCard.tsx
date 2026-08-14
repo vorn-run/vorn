@@ -1,27 +1,26 @@
 import { forwardRef, memo } from 'react'
-import { parsePaneId } from '../lib/pane-id'
-import { FilesCard } from './FilesCard'
+import { useShallow } from 'zustand/react/shallow'
+import { useAppStore } from '../stores'
+import { isPromotedPane } from '../stores/types'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
-import { DeviceCard } from './DeviceCard'
 
 /**
- * A promoted pane, drawn as its own cell in the grid.
+ * A file or browser tab popped out of a session's card, drawn as its own cell.
  *
- * This is a dispatcher and nothing more. The pane renders exactly the component
- * it renders inside a session card — same props, same state, same `PaneCard`
- * chrome — because promotion changes where a pane sits, not what it is. What
- * differs (the identity header, the card frame) is `PaneCard`'s business, and it
- * reads `promotedPanes` for itself rather than being told.
+ * A dispatcher and nothing more. The card renders the same component the pane
+ * renders inside a session — same props but a different key into the same
+ * collection — because popping out changes where a thing is drawn, not what it
+ * is. What differs (the card frame, the owner label, minimize / return) is
+ * `PaneCard`'s business, and it works that out from the key too.
  *
- * Pane ids share an id space with sessions, so ordering, drag, resize and
- * minimize already address a promoted pane without knowing it is one. The pane's
- * record never moves out of the collection that owns it, which is why closing
- * the pane, or its session, still tears down the way it always did.
+ * Which collection holds the key is what says whether this is a file or a page.
+ * There is no third list to keep in step: closing the pane closes the card,
+ * because the pane entry *is* the card.
  */
 
 interface Props {
-  paneId: string
+  cardId: string
   isDragTarget?: boolean
   onDragStart?: (id: string, e: React.PointerEvent) => void
   flexible?: boolean
@@ -29,23 +28,24 @@ interface Props {
 
 export const PromotedPaneCard = memo(
   forwardRef<HTMLDivElement, Props>(function PromotedPaneCard(
-    { paneId, isDragTarget, onDragStart, flexible },
+    { cardId, isDragTarget, onDragStart, flexible },
     ref
   ) {
-    const { kind, sessionId } = parsePaneId(paneId)
-    const props = { sessionId, isDragTarget, onDragStart, flexible }
+    const { editor, browser } = useAppStore(
+      useShallow((s) => ({
+        editor: s.editorPanes.get(cardId),
+        browser: s.browserPanes.get(cardId)
+      }))
+    )
+    const rest = { paneKey: cardId, isDragTarget, onDragStart, flexible }
 
-    switch (kind) {
-      case 'files':
-        return <FilesCard ref={ref} {...props} />
-      case 'editor':
-        return <EditorCard ref={ref} {...props} />
-      case 'browser':
-        return <BrowserCard ref={ref} {...props} />
-      case 'device':
-        return <DeviceCard ref={ref} {...props} />
-      default:
-        return null
+    if (editor && isPromotedPane(cardId, editor)) {
+      return <EditorCard ref={ref} sessionId={editor.sessionId} {...rest} />
     }
+    if (browser && isPromotedPane(cardId, browser)) {
+      return <BrowserCard ref={ref} sessionId={browser.sessionId} {...rest} />
+    }
+    // The pane went away without the grid having re-derived its cells yet.
+    return null
   })
 )

@@ -1,8 +1,17 @@
 import { memo, forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ArrowLeft, ArrowRight, MousePointerClick, Pencil, Plus, RotateCw, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  MousePointerClick,
+  Pencil,
+  Plus,
+  RotateCw,
+  SquareArrowOutUpRight,
+  X
+} from 'lucide-react'
 import { useAppStore } from '../stores'
-import { PaneCard, PaneControls } from './PaneCard'
+import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON } from '../lib/icon-button'
 import { browserPaneId } from '../lib/pane-id'
@@ -11,6 +20,12 @@ import { normalizeUrl, displayHost, flattenPageText } from '../lib/browser-url'
 interface Props {
   /** Session that owns this browser. */
   sessionId: string
+  /**
+   * Which entry in `browserPanes` to draw. Defaults to the session's own
+   * browser. A tab popped out to a card of its own is another entry in the same
+   * map, under a `card:` key — a browser holding exactly one page.
+   */
+  paneKey?: string
   isDragTarget?: boolean
   onDragStart?: (paneId: string, e: React.PointerEvent) => void
   flexible?: boolean
@@ -49,9 +64,11 @@ interface WebviewElement extends HTMLElement {
  */
 export const BrowserCard = memo(
   forwardRef<HTMLDivElement, Props>(function BrowserCard(
-    { sessionId, isDragTarget, onDragStart, flexible },
+    { sessionId, paneKey, isDragTarget, onDragStart, flexible },
     ref
   ) {
+    const key = paneKey ?? sessionId
+    const isCard = key !== sessionId
     const {
       terminal,
       pane,
@@ -59,16 +76,18 @@ export const BrowserCard = memo(
       closeBrowserPane,
       addBrowserTab,
       closeBrowserTab,
-      setActiveBrowserTab
+      setActiveBrowserTab,
+      promoteBrowserTab
     } = useAppStore(
       useShallow((s) => ({
         terminal: s.terminals.get(sessionId),
-        pane: s.browserPanes.get(sessionId) ?? null,
+        pane: s.browserPanes.get(key) ?? null,
         openBrowserPane: s.openBrowserPane,
         closeBrowserPane: s.closeBrowserPane,
         addBrowserTab: s.addBrowserTab,
         closeBrowserTab: s.closeBrowserTab,
-        setActiveBrowserTab: s.setActiveBrowserTab
+        setActiveBrowserTab: s.setActiveBrowserTab,
+        promoteBrowserTab: s.promoteBrowserTab
       }))
     )
 
@@ -134,9 +153,13 @@ export const BrowserCard = memo(
         }
         window.api.attachBrowser(sessionId, id)
       }
-      onAttached()
+      // A popped-out tab deliberately does not bind. Main keeps one browser
+      // handle per session, so a card that attached would steal it from the
+      // session's own browser, and the agent's browser tools would silently act
+      // on a page nobody asked them about.
+      if (!isCard) onAttached()
 
-      view.addEventListener('dom-ready', onAttached)
+      if (!isCard) view.addEventListener('dom-ready', onAttached)
       view.addEventListener('did-start-loading', onStart)
       view.addEventListener('did-stop-loading', onStop)
       view.addEventListener('did-fail-load', onFail)
@@ -148,14 +171,15 @@ export const BrowserCard = memo(
         view.removeEventListener('did-stop-loading', onStop)
         view.removeEventListener('did-fail-load', onFail)
       }
-    }, [pane?.activeTab, sessionId])
+    }, [pane?.activeTab, sessionId, isCard])
 
     // Closing the pane or the session unmounts this card; either way the CDP
     // session must be released, or main keeps a debugger attached to a guest
     // nobody can reach.
     useEffect(() => {
+      if (isCard) return
       return () => window.api.detachBrowser(sessionId)
-    }, [sessionId])
+    }, [sessionId, isCard])
 
     const [picking, setPicking] = useState(false)
 
@@ -270,9 +294,9 @@ export const BrowserCard = memo(
           return
         }
         setFailed(null)
-        openBrowserPane(sessionId, normalized)
+        openBrowserPane(isCard ? key : sessionId, normalized)
       },
-      [openBrowserPane, sessionId]
+      [openBrowserPane, sessionId, key, isCard]
     )
 
     if (!terminal || !pane || url === null) return null
@@ -280,13 +304,14 @@ export const BrowserCard = memo(
     // Shares the card's icon-button style; the disabled states belong to this
     // bar, since back and forward spend most of their life unavailable.
     const btn = `${ICON_BUTTON} disabled:opacity-25 disabled:hover:bg-transparent`
+    const paneId = isCard ? key : browserPaneId(sessionId)
 
     return (
       <PaneCard
         ref={ref}
-        paneId={browserPaneId(sessionId)}
+        paneId={paneId}
         title={displayHost(url)}
-        onClose={() => closeBrowserPane(sessionId)}
+        onClose={() => closeBrowserPane(key)}
         isDragTarget={isDragTarget}
         onDragStart={onDragStart}
         flexible={flexible}
@@ -300,7 +325,7 @@ export const BrowserCard = memo(
           className={`flex items-center gap-1 pl-1.5 pr-1 pt-1 shrink-0 ${
             onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''
           }`}
-          onPointerDown={onDragStart ? (e) => onDragStart(browserPaneId(sessionId), e) : undefined}
+          onPointerDown={onDragStart ? (e) => onDragStart(paneId, e) : undefined}
         >
           <div
             className="flex items-stretch gap-0.5 flex-1 min-w-0 overflow-x-auto"
@@ -315,9 +340,9 @@ export const BrowserCard = memo(
                   role="tab"
                   aria-selected={active}
                   tabIndex={0}
-                  onClick={() => setActiveBrowserTab(sessionId, i)}
+                  onClick={() => setActiveBrowserTab(key, i)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') setActiveBrowserTab(sessionId, i)
+                    if (e.key === 'Enter' || e.key === ' ') setActiveBrowserTab(key, i)
                   }}
                   title={tabUrl}
                   className={`group/tab flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-md max-w-[170px]
@@ -328,11 +353,28 @@ export const BrowserCard = memo(
                               }`}
                 >
                   <span className="text-[11px] truncate">{displayHost(tabUrl)}</span>
+                  {/* A card already holds exactly one page — popping its tab out
+                      again would swap one card for another. */}
+                  {!isCard && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        promoteBrowserTab(key, i)
+                      }}
+                      aria-label={`Open tab ${displayHost(tabUrl)} as its own card`}
+                      title="Open as its own card"
+                      className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
+                                 opacity-0 group-hover/tab:opacity-100 focus:opacity-100 transition-opacity"
+                    >
+                      <SquareArrowOutUpRight size={10} strokeWidth={2.5} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation()
-                      closeBrowserTab(sessionId, i)
+                      closeBrowserTab(key, i)
                     }}
                     aria-label={`Close tab ${displayHost(tabUrl)}`}
                     className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
@@ -345,7 +387,7 @@ export const BrowserCard = memo(
             })}
             <button
               type="button"
-              onClick={() => addBrowserTab(sessionId)}
+              onClick={() => addBrowserTab(key)}
               aria-label="New tab"
               className="shrink-0 self-center ml-0.5 p-1 rounded-md text-gray-600 hover:text-gray-200
                          hover:bg-white/[0.06] transition-colors"
@@ -354,12 +396,24 @@ export const BrowserCard = memo(
             </button>
           </div>
 
-          <PaneControls
-            paneId={browserPaneId(sessionId)}
-            title={displayHost(url)}
-            onClose={() => closeBrowserPane(sessionId)}
-            className="shrink-0"
-          />
+          {isCard ? (
+            <>
+              <PaneOwnerLabel sessionId={sessionId} />
+              <PromotedCardControls
+                cardId={key}
+                title={displayHost(url)}
+                onClose={() => closeBrowserPane(key)}
+                className="shrink-0"
+              />
+            </>
+          ) : (
+            <PaneControls
+              paneId={paneId}
+              title={displayHost(url)}
+              onClose={() => closeBrowserPane(key)}
+              className="shrink-0"
+            />
+          )}
         </div>
 
         {/* Address bar */}
@@ -415,24 +469,32 @@ export const BrowserCard = memo(
           {/* The two agent-facing tools sit after the address bar, away from
               back/forward: they arm a mode over the page rather than navigate,
               and next to an arrow they read as one more history control. */}
-          <button
-            onClick={pickElement}
-            aria-label="Pick an element for the agent"
-            aria-pressed={picking}
-            title="Point at an element to describe it to this session's agent"
-            className={`${btn} ml-1 ${picking ? 'text-ink bg-white/[0.10]' : ''}`}
-          >
-            <MousePointerClick size={14} strokeWidth={2} />
-          </button>
-          <button
-            onClick={() => (annotating ? void sendInk() : setAnnotating(true))}
-            aria-label={annotating ? 'Send the annotation' : 'Draw on the page for the agent'}
-            aria-pressed={annotating}
-            title="Draw over the page, then click again to send it to this session's agent"
-            className={`${btn} ${annotating ? 'text-ink bg-white/[0.10]' : ''}`}
-          >
-            <Pencil size={14} strokeWidth={2} />
-          </button>
+          {/* Absent on a popped-out card: both act through the browser handle
+              main holds for the session, which stays bound to the session's own
+              browser. Offered here they would arm a mode over this page and
+              report on a different one. */}
+          {!isCard && (
+            <>
+              <button
+                onClick={pickElement}
+                aria-label="Pick an element for the agent"
+                aria-pressed={picking}
+                title="Point at an element to describe it to this session's agent"
+                className={`${btn} ml-1 ${picking ? 'text-ink bg-white/[0.10]' : ''}`}
+              >
+                <MousePointerClick size={14} strokeWidth={2} />
+              </button>
+              <button
+                onClick={() => (annotating ? void sendInk() : setAnnotating(true))}
+                aria-label={annotating ? 'Send the annotation' : 'Draw on the page for the agent'}
+                aria-pressed={annotating}
+                title="Draw over the page, then click again to send it to this session's agent"
+                className={`${btn} ${annotating ? 'text-ink bg-white/[0.10]' : ''}`}
+              >
+                <Pencil size={14} strokeWidth={2} />
+              </button>
+            </>
+          )}
         </div>
 
         {failed && <div className="px-2 py-1 text-[10px] text-amber-400/90 shrink-0">{failed}</div>}

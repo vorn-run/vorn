@@ -4,25 +4,36 @@ import { AgentIcon } from './AgentIcon'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { STATUS_DOT } from '../lib/status-colors'
 import { GitBranch, FolderGit2 } from 'lucide-react'
-import { parsePaneId, PANE_LABEL } from '../lib/pane-id'
+import { paneOwnerId, isPromotedCardId } from '../lib/pane-id'
+import { displayHost } from '../lib/browser-url'
 
 /**
  * A stowed grid cell, and the way back to it.
  *
- * The dock takes pane ids, not session ids: a promoted pane is a cell like any
- * other and minimizes like one. So this resolves the owner session from the id
- * rather than looking the id up directly — which for a pane found nothing, and
- * rendered nothing, stranding the pane with no way to restore it.
+ * The dock takes pane ids, not session ids: a popped-out file or tab is a cell
+ * like any other and minimizes like one. So this resolves the owner session from
+ * the id rather than looking the id up directly — which for a card found
+ * nothing, and rendered nothing, stranding it with no way to restore it.
  *
- * A pane's pill wears its owner's name and status, because that is what someone
- * scanning the dock is looking for; the kind is what distinguishes it from the
- * session's own pill sitting next to it.
+ * A card's pill wears its owner's name and status, because that is what someone
+ * scanning the dock is looking for; the file or host is what distinguishes it
+ * from the session's own pill sitting next to it.
  */
 export function MinimizedPill({ terminalId }: { terminalId: string }) {
-  const { kind, sessionId } = parsePaneId(terminalId)
-  const { terminal, toggleMinimized, setActiveTabId } = useAppStore(
+  const sessionId = paneOwnerId(terminalId)
+  const { terminal, cardLabel, toggleMinimized, setActiveTabId } = useAppStore(
     useShallow((s) => ({
       terminal: s.terminals.get(sessionId),
+      cardLabel: !isPromotedCardId(terminalId)
+        ? null
+        : (() => {
+            const editor = s.editorPanes.get(terminalId)
+            if (editor) return editor.filePath.split(/[/\\]/).pop() ?? null
+            const browser = s.browserPanes.get(terminalId)
+            if (browser)
+              return displayHost(browser.tabs[browser.activeTab] ?? browser.tabs[0] ?? '')
+            return null
+          })(),
       toggleMinimized: s.toggleMinimized,
       setActiveTabId: s.setActiveTabId
     }))
@@ -40,8 +51,8 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
                  hover:border-white/[0.12]"
       onClick={() => {
         toggleMinimized(terminalId)
-        // The tab strip only holds sessions, so a pane hands focus to its
-        // owner — that is the tab its card is on.
+        // The tab strip only holds sessions, so a card hands focus to its
+        // owner — that is the tab it came from.
         setActiveTabId(sessionId)
       }}
       title="Click to restore"
@@ -58,10 +69,10 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
         {getDisplayName(session)}
       </span>
 
-      {kind !== 'terminal' && (
+      {cardLabel && (
         <>
           <span className="text-[10px] text-gray-600 shrink-0">&middot;</span>
-          <span className="text-[10px] text-ink-secondary shrink-0">{PANE_LABEL[kind]}</span>
+          <span className="text-[10px] text-ink-secondary truncate max-w-[110px]">{cardLabel}</span>
         </>
       )}
 

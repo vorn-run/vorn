@@ -8,7 +8,7 @@ import 'react-resizable/css/styles.css'
 import { useAppStore } from '../stores'
 import { AgentCard } from './AgentCard'
 import { PromotedPaneCard } from './PromotedPaneCard'
-import { isTerminalPane } from '../lib/pane-id'
+import { isPromotedCardId } from '../lib/pane-id'
 import { PromptLauncher } from './PromptLauncher'
 import { GridContextMenu } from './GridContextMenu'
 import { AgentIcon } from './AgentIcon'
@@ -316,12 +316,12 @@ export const GridView = memo(function GridView() {
 })
 
 /**
- * One cell of the grid: a session's card, or a pane promoted out of one.
+ * One cell of the grid: a session's card, or a file or tab popped out of one.
  *
  * The grid deals in opaque ids and never learns which it is holding — ordering,
- * drag, resize, drop targets and the ref map all address a promoted pane exactly
- * as they address a session. This is the single place the two diverge, and it
- * diverges on the id alone.
+ * drag, resize, drop targets and the ref map all address a popped-out card
+ * exactly as they address a session. This is the single place the two diverge,
+ * and it diverges on the id alone.
  */
 const GridCell = forwardRef<
   HTMLDivElement,
@@ -333,7 +333,7 @@ const GridCell = forwardRef<
     flexible?: boolean
   }
 >(function GridCell({ id, index, isDragTarget, onDragStart, flexible }, ref) {
-  if (isTerminalPane(id)) {
+  if (!isPromotedCardId(id)) {
     return (
       <AgentCard
         ref={ref}
@@ -348,7 +348,7 @@ const GridCell = forwardRef<
   return (
     <PromotedPaneCard
       ref={ref}
-      paneId={id}
+      cardId={id}
       isDragTarget={isDragTarget}
       onDragStart={onDragStart}
       flexible={flexible}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type JSX, type ReactNode } from 'react'
 import type { FileEntry } from '../../shared/types'
-import { ChevronRight, Loader2, X, Search, Pencil, Save } from 'lucide-react'
+import { ChevronRight, Loader2, X, Search, Pencil, Save, SquareArrowOutUpRight } from 'lucide-react'
 import { FileTypeIcon } from './file-icons'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { SplitDivider } from './SplitDivider'
@@ -61,6 +61,7 @@ function TreeNode({
   loadDir,
   selectedFile,
   onSelectFile,
+  onPopOutFile,
   filter,
   matched,
   forceExpand
@@ -71,6 +72,7 @@ function TreeNode({
   loadDir: (path: string) => Promise<void>
   selectedFile: string | null
   onSelectFile: (path: string) => void
+  onPopOutFile?: (path: string) => void
   filter: string
   matched: Set<string>
   forceExpand: Set<string>
@@ -144,6 +146,7 @@ function TreeNode({
                 loadDir={loadDir}
                 selectedFile={selectedFile}
                 onSelectFile={onSelectFile}
+                onPopOutFile={onPopOutFile}
                 filter={filter}
                 matched={matched}
                 forceExpand={forceExpand}
@@ -175,21 +178,48 @@ function TreeNode({
     )
   }
 
+  // A div rather than a button: the row carries a button of its own, and a
+  // button inside a button is invalid markup that browsers resolve by dropping
+  // the inner one — which would leave pop-out unclickable.
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelectFile(entry.path)}
-      className={`group relative w-full flex items-center gap-[5px] pr-2 text-left text-[13.5px] transition-colors
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelectFile(entry.path)
+        }
+      }}
+      className={`group relative w-full flex items-center gap-[5px] pr-1 text-left text-[13.5px]
+        cursor-default select-none transition-colors
         ${isSelected ? 'bg-white/[0.10] text-gray-100' : 'hover:bg-white/[0.05] text-gray-400'}`}
       style={{ height: ROW_HEIGHT, paddingLeft: `${BASE_LEFT + depth * INDENT_WIDTH + 16}px` }}
     >
       {guides}
       <FileTypeIcon name={entry.name} size={16} />
       <span
-        className={`truncate leading-none ${isSelected ? 'text-gray-200' : 'text-gray-400 group-hover:text-gray-300'}`}
+        className={`truncate leading-none flex-1 ${isSelected ? 'text-gray-200' : 'text-gray-400 group-hover:text-gray-300'}`}
       >
         {entry.name}
       </span>
-    </button>
+      {onPopOutFile && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onPopOutFile(entry.path)
+          }}
+          aria-label={`Open ${entry.name} as its own card`}
+          title="Open as its own card"
+          className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white hover:bg-white/[0.08]
+                     opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+        >
+          <SquareArrowOutUpRight size={11} strokeWidth={2} />
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -902,6 +932,7 @@ function FilesPanel({
   loadDir,
   selectedFile,
   onSelectFile,
+  onPopOutFile,
   showHeader = true,
   headerTestId
 }: {
@@ -910,6 +941,12 @@ function FilesPanel({
   loadDir: (path: string) => Promise<void>
   selectedFile: string | null
   onSelectFile: (path: string) => void
+  /**
+   * Open a file as a card of its own instead of in the session's editor.
+   * Absent where there is no grid to put a card in, which is what hides the
+   * per-row control rather than leaving it there doing nothing.
+   */
+  onPopOutFile?: (path: string) => void
   /** False when hosted in a pane card that draws its own header. */
   showHeader?: boolean
   headerTestId?: string
@@ -958,6 +995,7 @@ function FilesPanel({
             loadDir={loadDir}
             selectedFile={selectedFile}
             onSelectFile={onSelectFile}
+            onPopOutFile={onPopOutFile}
             filter={filter}
             matched={matched}
             forceExpand={expand}
@@ -1153,12 +1191,14 @@ export function FileTreePane({
   remoteHostId,
   selectedFile,
   onSelectFile,
+  onPopOutFile,
   headerTestId
 }: {
   cwd: string
   remoteHostId?: string
   selectedFile: string | null
   onSelectFile: (path: string) => void
+  onPopOutFile?: (path: string) => void
   headerTestId?: string
 }): JSX.Element {
   const [rootEntries, setRootEntries] = useState<FileEntry[] | null>(null)
@@ -1221,6 +1261,7 @@ export function FileTreePane({
       loadDir={loadDir}
       selectedFile={selectedFile}
       onSelectFile={onSelectFile}
+      onPopOutFile={onPopOutFile}
       showHeader={false}
       headerTestId={headerTestId}
     />

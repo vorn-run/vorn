@@ -28,7 +28,6 @@ function seed(ids: string[]): void {
       activeProject: null,
       activeWorktreePath: null,
       minimizedTerminals: new Set(),
-      promotedPanes: new Set(),
       filesPanes: new Set(),
       editorPanes: new Map(),
       browserPanes: new Map(),
@@ -38,10 +37,10 @@ function seed(ids: string[]): void {
 }
 
 /**
- * A promoted pane is a layout unit — a grid cell of its own. This is where it
- * becomes one, and where it gets its place in the order.
+ * A popped-out file or tab is a layout unit — a grid cell of its own. This is
+ * where it becomes one, and where it gets its place in the order.
  */
-describe('useVisibleTerminals with promoted panes', () => {
+describe('useVisibleTerminals with popped-out cards', () => {
   beforeEach(() => {
     ;(window as unknown as { api: Record<string, unknown> }).api = {
       notifyWidgetStatus: vi.fn(),
@@ -50,39 +49,54 @@ describe('useVisibleTerminals with promoted panes', () => {
     seed(['t1', 't2'])
   })
 
-  it('places a promoted pane directly after the session it came from', () => {
+  it('places a card directly after the session it came from', () => {
     const { result, rerender } = renderHook(() => useVisibleTerminals())
     expect(result.current.orderedIds).toEqual(['t1', 't2'])
 
+    let cardId = ''
     act(() => {
-      useAppStore.getState().openFilesPane('t1')
-      useAppStore.getState().promotePane('files:t1')
+      cardId = useAppStore.getState().promoteFile('t1', '/p/a.ts')
     })
     rerender()
 
     // Beside its owner, not appended at the end: the two are read together, and
     // a grid that reflows would otherwise separate them by a whole row.
-    expect(result.current.orderedIds).toEqual(['t1', 'files:t1', 't2'])
+    expect(result.current.orderedIds).toEqual(['t1', cardId, 't2'])
   })
 
-  it('sends a minimized promoted pane to the dock, not the grid', () => {
+  it('sends a minimized card to the dock, not the grid', () => {
+    let cardId = ''
     act(() => {
-      useAppStore.getState().openFilesPane('t1')
-      useAppStore.getState().promotePane('files:t1')
-      useAppStore.getState().toggleMinimized('files:t1')
+      cardId = useAppStore.getState().promoteFile('t1', '/p/a.ts')
+      useAppStore.getState().toggleMinimized(cardId)
     })
     const { result } = renderHook(() => useVisibleTerminals())
 
     expect(result.current.orderedIds).toEqual(['t1', 't2'])
-    expect(result.current.minimizedIds).toEqual(['files:t1'])
+    expect(result.current.minimizedIds).toEqual([cardId])
   })
 
-  it('leaves a pane that is merely open inside its card out of the layout', () => {
-    // Opening a pane must not add a cell. Only promotion does — otherwise every
-    // file tree anyone opened would rearrange the whole grid.
-    act(() => useAppStore.getState().openFilesPane('t1'))
+  it("leaves a session's own panes out of the layout", () => {
+    // Opening a file in the session's editor must not add a cell. Only popping
+    // one out does — otherwise every file anyone opened would rearrange the grid.
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().openEditorPane('t1', '/p/a.ts')
+    })
     const { result } = renderHook(() => useVisibleTerminals())
 
     expect(result.current.orderedIds).toEqual(['t1', 't2'])
+  })
+
+  it("keeps each session's cards with that session", () => {
+    let mine = ''
+    let theirs = ''
+    act(() => {
+      mine = useAppStore.getState().promoteFile('t1', '/p/a.ts')
+      theirs = useAppStore.getState().promoteFile('t2', '/p/b.ts')
+    })
+    const { result } = renderHook(() => useVisibleTerminals())
+
+    expect(result.current.orderedIds).toEqual(['t1', mine, 't2', theirs])
   })
 })

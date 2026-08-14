@@ -2,7 +2,8 @@ import { useMemo, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
-import { panesOwnedBy } from '../lib/pane-id'
+import { paneOwnerId } from '../lib/pane-id'
+import { promotedCardIds } from './usePromotedCards'
 
 /**
  * Stable comparator for terminal ids under the active sortMode. Manual mode
@@ -50,7 +51,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     statusFilter,
     terminalOrder,
     minimizedTerminals,
-    promotedPanes,
+    editorPanes,
+    browserPanes,
     setVisibleTerminalIds,
     setFocusableTerminalIds
   } = useAppStore(
@@ -64,7 +66,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       statusFilter: s.statusFilter,
       terminalOrder: s.terminalOrder,
       minimizedTerminals: s.minimizedTerminals,
-      promotedPanes: s.promotedPanes,
+      editorPanes: s.editorPanes,
+      browserPanes: s.browserPanes,
       setVisibleTerminalIds: s.setVisibleTerminalIds,
       setFocusableTerminalIds: s.setFocusableTerminalIds
     }))
@@ -100,10 +103,20 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       })
       .sort(sortFn)
 
-    // Sessions, plus any pane promoted out of one. A child pane normally
-    // renders inside its owner's card and is not a layout unit at all; promoted,
-    // it becomes one — and it is placed directly after its owner so the two stay
-    // together as the grid reflows.
+    // Sessions, plus every file and tab popped out of one.
+    //
+    // A session's panes render inside its own card and are not layout units at
+    // all. A popped-out card is: it is a cell like a session, placed directly
+    // after the session it came from so the two stay together as the grid
+    // reflows, rather than drifting a row apart.
+    const cardsByOwner = new Map<string, string[]>()
+    for (const cardId of promotedCardIds({ editorPanes, browserPanes })) {
+      const owner = paneOwnerId(cardId)
+      const cards = cardsByOwner.get(owner)
+      if (cards) cards.push(cardId)
+      else cardsByOwner.set(owner, [cardId])
+    }
+
     const ordered: string[] = []
     const minimized: string[] = []
     const place = (id: string): void => {
@@ -112,7 +125,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     }
     for (const [id] of filtered) {
       place(id)
-      for (const paneId of panesOwnedBy(promotedPanes, id)) place(paneId)
+      for (const cardId of cardsByOwner.get(id) ?? []) place(cardId)
     }
 
     // Focused-mode nav spans the active project (or workspace) regardless of
@@ -132,7 +145,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     sortMode,
     terminalOrder,
     minimizedTerminals,
-    promotedPanes
+    editorPanes,
+    browserPanes
   ])
 
   useEffect(() => {
