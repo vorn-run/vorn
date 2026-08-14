@@ -96,7 +96,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "@vitest/coverage-v8": "4.1.10",
     "@vitest/eslint-plugin": "^1.6.16",
-    "electron": "^41.2.0",
+    "electron": "^41.10.3",
     "electron-builder": "^26.10.0",
     "electron-vite": "^5.0.0",
     "eslint": "^10.7.0",
@@ -106,7 +106,7 @@
     "jsdom": "^29.1.1",
     "lint-staged": "^17.0.8",
     "node-gyp": "^13.0.1",
-    "postcss": "^8.5.17",
+    "postcss": "^8.5.23",
     "prettier": "^3.8.3",
     "simple-git-hooks": "^2.13.1",
     "tailwindcss": "^4.3.2",
@@ -125,6 +125,12 @@
     "tar": "^7.5.21",
     "path-to-regexp": "^8.4.2",
     "picomatch": "^4.0.4",
-    "fastify": "^5.11.0"
+    "fastify": "^5.11.0",
+    "js-yaml": "^4.3.1",
+    "ip-address": "^10.3.1",
+    "fast-uri": "^3.1.5",
+    "node-gyp/undici": "^8.9.0",
+    "esbuild": "^0.28.1",
+    "postcss": "^8.5.23"
   }
 }
