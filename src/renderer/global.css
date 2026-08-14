@@ -1,9 +1,12 @@
-@import 'tailwindcss';
-@source "./**/*.{tsx,ts,html}";
+/* The palette lives in theme.css so the web client can share it verbatim — it
+   has its own Tailwind entry and would otherwise define no tokens at all.
 
-/* The palette lives in theme.css so the web client can share it verbatim —
-   it has its own Tailwind entry and would otherwise define no tokens at all. */
+   Every @import has to precede everything else in the file, including @source
+   and the comment above it, or PostCSS drops it and takes the whole palette
+   with it. */
+@import 'tailwindcss';
 @import './theme.css';
+@source "./**/*.{tsx,ts,html}";
 
 html,
 body {

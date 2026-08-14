@@ -1,14 +1,16 @@
+/* The renderer's custom styles (scrollbar, animations, etc.) are re-declared
+   below rather than imported, to avoid path resolution issues. The palette is
+   not: it is imported, because a second copy of the tokens is exactly how this
+   client ended up rendering every tokenised background as transparent.
+
+   Every @import has to precede everything else in the file, @source included,
+   or PostCSS drops it and takes the whole palette with it. */
 @import 'tailwindcss';
+@import '../../../src/renderer/theme.css';
 @source "../**/*.{ts,tsx}";
 @source "../index.html";
 @source "../../../src/renderer/**/*.{ts,tsx}";
 @variant dark (&:where(.dark, .dark *));
-
-/* The renderer's custom styles (scrollbar, animations, etc.) are re-declared
-   below rather than imported, to avoid path resolution issues. The palette is
-   not: it is imported, because a second copy of the tokens is exactly how this
-   client ended up rendering every tokenised background as transparent. */
-@import '../../../src/renderer/theme.css';
 
 html,
 body {
