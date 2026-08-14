@@ -214,6 +214,21 @@ describe('PaneCard chrome', () => {
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
   })
 
+  it('fills its frame on both axes', async () => {
+    // A pane fills a block-layout cell whatever it declares, so a missing axis
+    // stays invisible until some frame is a flex row or column — and then the
+    // card settles at its content size with the rest of the stage empty. The
+    // tab strip found both: one axis for the pane column, the other for a
+    // popped-out card's body.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    const { container } = render(<FilesCard sessionId="t1" />)
+    await screen.findByText('a.ts')
+
+    const root = container.firstElementChild as HTMLElement
+    expect(root.className).toContain('h-full')
+    expect(root.className).toContain('w-full')
+  })
+
   it('offers pop-out on every file row', async () => {
     act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)

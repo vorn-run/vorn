@@ -138,7 +138,13 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
       // wear — including selection, since the keyboard shortcuts that walk the
       // grid by position land here too, and a jump that highlights nothing reads
       // as a jump that did nothing.
-      className={`relative overflow-hidden flex flex-col h-full
+      //
+      // Sized on both axes, not one. A pane fills a block-layout cell either
+      // way, but a frame that is a flex *row* gives an auto-width child only its
+      // content width — and this card's content is a tab strip, so it settled at
+      // a few hundred pixels with the rest of the stage empty beside it. Height
+      // had the same problem one level up, in the opposite direction.
+      className={`relative overflow-hidden flex flex-col h-full w-full
                  transition-shadow
                  ${
                    isPromoted
