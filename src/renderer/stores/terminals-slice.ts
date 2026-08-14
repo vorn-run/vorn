@@ -36,12 +36,34 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       clearDirty(id)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(id)
+      for (const childId of childIds) minimized.delete(childId)
       const filesPanes = new Set(state.filesPanes)
       filesPanes.delete(id)
+      // Both collections are keyed by pane, so a session's own pane is one
+      // entry and each file or tab popped out to a card of its own is another.
+      // Only the record names the owner — drop by key alone and every card this
+      // session put on the grid would outlive it, drawn against a session the
+      // store no longer has.
+      // Every pane id this session is taking with it, so the app-level fields
+      // keyed by pane id can be checked against the whole set rather than
+      // against the session id alone.
+      const dying = new Set<string>([id, ...childIds])
       const editorPanes = new Map(state.editorPanes)
-      editorPanes.delete(id)
+      for (const [paneId, pane] of state.editorPanes) {
+        if (pane.sessionId !== id) continue
+        editorPanes.delete(paneId)
+        minimized.delete(paneId)
+        dying.add(paneId)
+        // A card's buffer reports dirtiness under its own id, not its owner's.
+        if (paneId !== id) clearDirty(paneId)
+      }
       const browserPanes = new Map(state.browserPanes)
-      browserPanes.delete(id)
+      for (const [paneId, pane] of state.browserPanes) {
+        if (pane.sessionId !== id) continue
+        browserPanes.delete(paneId)
+        minimized.delete(paneId)
+        dying.add(paneId)
+      }
       // The remembered tabs go with the session too. A recycled id would
       // otherwise reopen its browser onto a previous session's pages.
       const browserMemory = new Map(state.browserMemory)
@@ -59,8 +81,16 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       gitDiffStats.delete(id)
       window.api.notifyWidgetStatus()
       const extra = state.diffSidebarTerminalId === id ? { diffSidebarTerminalId: null } : {}
-      const maxOwned =
-        state.maximizedPaneId === id || childIds.includes(state.maximizedPaneId ?? '')
+      const maxOwned = dying.has(state.maximizedPaneId ?? '')
+      // Focus is the one that cannot be left dangling. The stage is chosen by
+      // "is anything focused" and the app drops its titlebar while something
+      // is, so a focused card outliving its session renders an empty window
+      // with no chrome — Escape is the only way out.
+      const focusOwned = dying.has(state.focusedTerminalId ?? '')
+      const previewOwned = dying.has(state.previewTerminalId ?? '')
+      // Selection reaches the same empty stage by a longer road — Cmd+O focuses
+      // whatever is selected.
+      const selectionOwned = dying.has(state.selectedTerminalId ?? '')
       return {
         terminals: next,
         terminalOrder: order,
@@ -73,6 +103,9 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         cardSplits,
         gitDiffStats,
         ...(maxOwned ? { maximizedPaneId: null } : {}),
+        ...(focusOwned ? { focusedTerminalId: null } : {}),
+        ...(previewOwned ? { previewTerminalId: null } : {}),
+        ...(selectionOwned ? { selectedTerminalId: null } : {}),
         ...extra
       }
     }),

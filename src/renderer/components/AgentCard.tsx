@@ -1,7 +1,7 @@
 import { memo, forwardRef, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { selectPaneFlags } from '../stores/ui-slice'
+import { usePaneColumnEntries } from '../hooks/usePaneColumnEntries'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { CardHeader } from './card/CardHeader'
@@ -9,7 +9,6 @@ import { CardStatusBar } from './card/CardStatusBar'
 import { IntentBar } from './IntentBar'
 import { PaneColumn } from './PaneColumn'
 import { SplitDivider } from './SplitDivider'
-import { parsePaneId } from '../lib/pane-id'
 import { DEFAULT_SPLIT_RATIO } from '../lib/split-ratio'
 import { useTerminalScrollButton } from '../hooks/useTerminalScrollButton'
 
@@ -68,9 +67,13 @@ export const AgentCard = memo(
         setFocused: s.setFocusedTerminal
       }))
     )
-    const { hasPanes, maximizedPaneId, storedRatio, setCardSplit, storedPanes } = useAppStore(
+    // Not a separate "does it have panes" read: this is the column's own answer,
+    // so the terminal can never give away half its width to a column that draws
+    // nothing.
+    const paneEntries = usePaneColumnEntries(terminalId)
+    const hasPanes = paneEntries.length > 0
+    const { maximizedPaneId, storedRatio, setCardSplit, storedPanes } = useAppStore(
       useShallow((s) => ({
-        hasPanes: selectPaneFlags(s, terminalId).any,
         maximizedPaneId: s.maximizedPaneId,
         storedRatio: s.cardSplits[terminalId]?.terminal,
         storedPanes: s.cardSplits[terminalId]?.panes,
@@ -95,12 +98,14 @@ export const AgentCard = memo(
 
     // Which of this session's panes, if any, is maximized. A pane belonging to
     // another session must not blank this card, hence the owner check.
-    const maximized = maximizedPaneId ? parsePaneId(maximizedPaneId) : null
+    //
+    // Matched against the ids this column actually draws rather than by kind.
+    // "Not a terminal" used to mean "one of my four child panes", but a
+    // popped-out card is neither — it carries this session's id and a kind of
+    // its own, so maximizing one passed that test and hid the terminal of the
+    // session it came from while the card itself did not maximize.
     const hasMaximizedPane =
-      hasPanes &&
-      maximized !== null &&
-      maximized.sessionId === terminalId &&
-      maximized.kind !== 'terminal'
+      maximizedPaneId !== null && paneEntries.some((e) => e.id === maximizedPaneId)
     // With no pane column beside it the terminal is a lone flex child, and a
     // grow factor under 1 would leave the rest of the row as dead space — the
     // ratio only means anything when there is a sibling to share with.

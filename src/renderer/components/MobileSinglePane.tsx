@@ -7,6 +7,46 @@ import { PromptLauncher } from './PromptLauncher'
 import { useVisibleTerminals } from '../hooks/useVisibleTerminals'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { GitBranch, FolderGit2 } from 'lucide-react'
+import { isPromotedCardId } from '../lib/pane-id'
+import { usePromotedCardSubject } from '../hooks/usePromotedCards'
+import { CardSubjectIcon } from './CardSubjectIcon'
+
+/**
+ * A popped-out file or page in the mobile list.
+ *
+ * Cards are cells like sessions, so they arrive in `orderedIds` here too — and
+ * `MobileSessionCard` returns null for one, which left them occupying a slot in
+ * the keyboard ring and the visible set with no row to tap. Mobile shows one
+ * thing at a time, and tapping this opens the same focus stage a session does.
+ */
+function MobileCardRow({
+  cardId,
+  isSelected,
+  onTap
+}: {
+  cardId: string
+  isSelected: boolean
+  onTap: () => void
+}) {
+  const card = usePromotedCardSubject(cardId)
+  const owner = useAppStore((s) => s.terminals.get(card?.sessionId ?? '')?.session.projectName)
+
+  if (!card) return null
+
+  return (
+    <button
+      onClick={onTap}
+      className={`w-full text-left rounded-lg border px-3 py-2.5 flex items-center gap-2.5 transition-colors ${
+        isSelected ? 'border-white/40' : 'border-white/[0.06]'
+      }`}
+      style={{ background: 'var(--color-surface-raised)' }}
+    >
+      <CardSubjectIcon card={card} size={16} />
+      <span className="text-[13px] text-gray-200 truncate flex-1">{card.name}</span>
+      {owner && <span className="text-[11px] text-ink-secondary truncate shrink-0">{owner}</span>}
+    </button>
+  )
+}
 
 /**
  * Compact session card for the mobile card list.
@@ -118,17 +158,22 @@ export function MobileSinglePane() {
 
   return (
     <div className="h-full overflow-y-auto px-3 py-3 space-y-2">
-      {orderedIds.map((id) => (
-        <MobileSessionCard
-          key={id}
-          terminalId={id}
-          isSelected={id === selectedId}
-          onTap={() => {
-            setSelected(id)
-            setFocused(id)
-          }}
-        />
-      ))}
+      {orderedIds.map((id) => {
+        const onTap = (): void => {
+          setSelected(id)
+          setFocused(id)
+        }
+        return isPromotedCardId(id) ? (
+          <MobileCardRow key={id} cardId={id} isSelected={id === selectedId} onTap={onTap} />
+        ) : (
+          <MobileSessionCard
+            key={id}
+            terminalId={id}
+            isSelected={id === selectedId}
+            onTap={onTap}
+          />
+        )
+      })}
     </div>
   )
 }

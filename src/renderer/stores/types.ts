@@ -65,12 +65,27 @@ export interface CardSplit {
 }
 
 /**
- * State of a session's file-editor pane. Independent of that session's tree
- * pane — the editor can be open, maximized, and closed on its own.
+ * State of a file-editor pane. Independent of its session's tree pane — the
+ * editor can be open, maximized, and closed on its own.
  */
 export interface EditorPaneState {
   /** Absolute path of the open file. */
   filePath: string
+  /**
+   * The session this editor belongs to, which is not always its key.
+   *
+   * A session's own editor is stored under the session id, so every existing
+   * `editorPanes.get(sessionId)` still reads it. A file popped out to a card of
+   * its own is stored under a `card:` id instead, and this is the only thing
+   * that still says whose file it is — which worktree to read it from, whose
+   * branch to label it with, and what to tear it down alongside.
+   */
+  sessionId: string
+}
+
+/** True when a pane entry was popped out of its session's card. */
+export function isPromotedPane(paneId: string, pane: { sessionId: string }): boolean {
+  return paneId !== pane.sessionId
 }
 
 /**
@@ -86,6 +101,8 @@ export interface BrowserPaneState {
   tabs: string[]
   /** Index into `tabs`. Always in range. */
   activeTab: number
+  /** The session this browser belongs to. See `EditorPaneState.sessionId`. */
+  sessionId: string
 }
 
 /** The page a browser pane is currently showing. */
@@ -222,9 +239,17 @@ export interface UISlice {
   minimizedTerminals: Set<string>
   /** Session ids whose file-tree pane is open. Keyed by owner, one per session. */
   filesPanes: Set<string>
-  /** Session id → the file its editor pane is showing. One editor per session. */
+  /**
+   * Pane id → the file that editor is showing.
+   *
+   * Keyed by pane, not by session, so one session can have several: its own
+   * editor under the session id, plus a `card:` entry for every file popped out
+   * to a card of its own. An entry whose key is not its `sessionId` is exactly
+   * what a promoted card is — there is no second flag to fall out of step with
+   * it, and closing the pane is what removes the card.
+   */
   editorPanes: Map<string, EditorPaneState>
-  /** Session id → the page its browser pane is showing. One browser per session. */
+  /** Pane id → the pages that browser is showing. Keyed like `editorPanes`. */
   browserPanes: Map<string, BrowserPaneState>
   /**
    * What a closed browser pane was showing, so reopening restores the tabs
@@ -299,7 +324,15 @@ export interface UISlice {
   setTerminalOrder: (order: string[]) => void
   setVisibleTerminalIds: (ids: string[]) => void
   setFocusableTerminalIds: (ids: string[]) => void
-  reorderTerminals: (fromIndex: number, toIndex: number) => void
+  /**
+   * Move `draggedId` to where `droppedOnId` sits in the session order.
+   *
+   * Takes ids rather than indices because the lists callers drag within
+   * interleave popped-out cards, and `terminalOrder` holds sessions only.
+   * Dragging a card is a no-op — a card has no position of its own, it is drawn
+   * beside its owner — and dropping onto one targets that owner's slot.
+   */
+  reorderTerminals: (draggedId: string, droppedOnId: string) => void
   toggleMinimized: (id: string) => void
   /** Open (or focus) the file-tree pane owned by `sessionId`. */
   openFilesPane: (sessionId: string) => void
@@ -310,7 +343,7 @@ export interface UISlice {
    * Independent of the tree pane — the editor works with Files closed.
    */
   openEditorPane: (sessionId: string, filePath: string) => void
-  closeEditorPane: (sessionId: string) => void
+  closeEditorPane: (paneId: string) => void
   /**
    * Show `url` in the session's browser pane, creating it if needed.
    *
@@ -320,16 +353,16 @@ export interface UISlice {
    * reveals the session's browser without changing the page it is showing.
    */
   openBrowserPane: (sessionId: string, url?: string) => void
-  closeBrowserPane: (sessionId: string) => void
+  closeBrowserPane: (paneId: string) => void
   toggleBrowserPane: (sessionId: string) => void
-  /** Add a tab to the session's browser and make it active. */
-  addBrowserTab: (sessionId: string, url?: string) => void
+  /** Add a tab to the browser and make it active. */
+  addBrowserTab: (paneId: string, url?: string) => void
   /**
    * Close one tab. Closing the last one closes the pane, since a browser with
    * no page is just an empty box.
    */
-  closeBrowserTab: (sessionId: string, index: number) => void
-  setActiveBrowserTab: (sessionId: string, index: number) => void
+  closeBrowserTab: (paneId: string, index: number) => void
+  setActiveBrowserTab: (paneId: string, index: number) => void
   /**
    * Open the pane for a device main already holds. Used when main itself asks
    * for the pane (the agent claimed the device), where the claim is a
@@ -347,6 +380,39 @@ export interface UISlice {
   closeDevicePane: (sessionId: string) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void
+  /**
+   * Open `filePath` as a card of its own rather than in the session's editor.
+   *
+   * Several files can be open this way at once, which is the point: the
+   * session's own editor holds exactly one, so reading two files side by side
+   * was not possible without this. Returns the new card's id.
+   */
+  promoteFile: (sessionId: string, filePath: string) => string
+  /**
+   * Take one tab out of a browser pane and give it a card of its own.
+   *
+   * The tab leaves the strip rather than being copied — two views of one url
+   * would be two guests loading the same page, each with its own scroll
+   * position and half-filled forms. Returns the new card's id, or null if the
+   * index names no tab.
+   */
+  promoteBrowserTab: (paneId: string, index: number) => string | null
+  /**
+   * Put a promoted card back where it came from: the file into its session's
+   * editor, the tab onto the end of its session's tab strip.
+   *
+   * Where the session has no such pane open, this opens one — the card has to
+   * land somewhere, and refusing to return it would strand it.
+   */
+  returnCardToSession: (cardId: string) => void
+  /**
+   * Close a popped-out card, asking first if it holds unsaved edits.
+   *
+   * One action rather than a `closeEditorPane` / `closeBrowserPane` fork at each
+   * button, because the fork was got wrong: the card's own ✕ confirmed, while
+   * its tab and its sidebar row discarded the buffer without a word.
+   */
+  closeCard: (cardId: string) => void
   toggleSessionDockCollapsed: () => void
   setOnboardingOpen: (open: boolean) => void
   setDiffSidebarTerminalId: (id: string | null, tab?: PanelTab) => void

@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
-import { activeBrowserUrl } from '../src/renderer/stores/types'
+import { activeBrowserUrl, isPromotedPane } from '../src/renderer/stores/types'
 import { parsePersistedBrowsers } from '../src/renderer/stores/ui-slice'
 import { DEVICE_SPLIT_RATIO } from '../src/renderer/lib/split-ratio'
 
@@ -219,7 +219,7 @@ describe('pane store actions', () => {
     const s = () => useAppStore.getState()
     act(() => s().openBrowserPane('t1', 'example.com'))
     expect(JSON.parse(localStorage.getItem('vorn:panes') as string).browsers).toEqual({
-      t1: { tabs: ['https://example.com/'], activeTab: 0 }
+      t1: { tabs: ['https://example.com/'], activeTab: 0, sessionId: 't1' }
     })
 
     act(() => s().removeTerminal('t1'))
@@ -230,7 +230,37 @@ describe('pane store actions', () => {
     // Shipping the tab strip must not silently drop the page people already
     // had open when they upgrade.
     const panes = parsePersistedBrowsers({ t1: 'https://old.example/' })
-    expect(panes.get('t1')).toEqual({ tabs: ['https://old.example/'], activeTab: 0 })
+    // Owned by its key, which is what a session-keyed entry always meant — so
+    // an upgraded entry reads back as the session's own browser, not as a card.
+    expect(panes.get('t1')).toEqual({
+      tabs: ['https://old.example/'],
+      activeTab: 0,
+      sessionId: 't1'
+    })
+  })
+
+  it("carries a card's owner through a persistence round trip", async () => {
+    const { parsePersistedEditors } = await import('../src/renderer/stores/ui-slice')
+    // The owner is the only thing that makes an entry a card. Lose it and the
+    // record reads back as self-owned: it stops being a card, vanishes from the
+    // grid, and the next reconcile deletes it outright because `card:t1:0` is
+    // not a live session.
+    const panes = parsePersistedEditors({
+      t1: { filePath: '/p/own.ts', sessionId: 't1' },
+      'card:t1:0': { filePath: '/p/popped.ts', sessionId: 't1' }
+    })
+
+    expect(panes.get('card:t1:0')).toEqual({ filePath: '/p/popped.ts', sessionId: 't1' })
+    expect(isPromotedPane('card:t1:0', panes.get('card:t1:0')!)).toBe(true)
+    expect(isPromotedPane('t1', panes.get('t1')!)).toBe(false)
+  })
+
+  it('reads an editor persisted by an older build that stored a bare path', async () => {
+    const { parsePersistedEditors } = await import('../src/renderer/stores/ui-slice')
+    // Owned by its key, which is what a session-keyed entry always meant — so
+    // upgrading neither loses the open file nor mistakes it for a card.
+    const panes = parsePersistedEditors({ t1: '/p/legacy.ts' })
+    expect(panes.get('t1')).toEqual({ filePath: '/p/legacy.ts', sessionId: 't1' })
   })
 
   it('clamps a persisted active tab that points past the end', () => {
@@ -343,7 +373,7 @@ describe('pane store actions', () => {
     expect(raw).toBeTruthy()
     expect(JSON.parse(raw as string)).toEqual({
       files: ['t1'],
-      editors: { t1: '/p/a.ts' },
+      editors: { t1: { filePath: '/p/a.ts', sessionId: 't1' } },
       browsers: {}
     })
 
@@ -461,5 +491,518 @@ describe('claiming a device before showing it', () => {
     // frame of nothing and buries the one message naming the holder.
     expect(useAppStore.getState().devicePanes.has('s1')).toBe(false)
     expect(err).toContain('other-1')
+  })
+})
+
+/**
+ * Popping a file or a tab out gives it a card of its own in the grid.
+ *
+ * A card is not a flag beside the pane — it *is* a pane entry whose key is not
+ * its owner's id. These pin down that the two collections stay a faithful
+ * account of what is on screen: nothing left behind, nothing owned twice.
+ */
+describe('popping an item out to its own card', () => {
+  const s = () => useAppStore.getState()
+
+  beforeEach(() => {
+    localStorage.clear()
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...(window as unknown as { api?: Record<string, unknown> }).api,
+      notifyWidgetStatus: vi.fn(),
+      reorderSessions: vi.fn()
+    }
+    seed(['t1', 't2'])
+  })
+
+  it('opens a file as a card without disturbing the session editor', () => {
+    act(() => s().openEditorPane('t1', '/p/open.ts'))
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+
+    // The whole point: the session's editor holds one file, so a second file
+    // has to land somewhere else or it would displace the first.
+    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/open.ts')
+    expect(s().editorPanes.get(cardId)).toEqual({ filePath: '/p/popped.ts', sessionId: 't1' })
+  })
+
+  it('gives every card a distinct id, so two never collapse into one', () => {
+    let a = ''
+    let b = ''
+    act(() => {
+      a = s().promoteFile('t1', '/p/a.ts')
+      b = s().promoteFile('t1', '/p/b.ts')
+    })
+    expect(a).not.toBe(b)
+    expect(s().editorPanes.size).toBe(2)
+  })
+
+  it('takes a tab out of the strip rather than copying it', () => {
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().addBrowserTab('t1', 'vorn.dev')
+    })
+    let cardId: string | null = null
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 1)
+    })
+
+    // Left in both places it would be two guests on one url, each with its own
+    // scroll position — and closing either would look like a refusal to go.
+    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/'])
+    expect(s().browserPanes.get(cardId as unknown as string)?.tabs).toEqual(['https://vorn.dev/'])
+  })
+
+  it('closes the strip when its last tab is popped out', () => {
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    act(() => {
+      s().promoteBrowserTab('t1', 0)
+    })
+    // A browser with no pages is a box taking up a cell, the same as closing
+    // its last tab any other way.
+    expect(s().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('refuses an index that names no tab', () => {
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    let cardId: string | null = 'unset'
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 4)
+    })
+    expect(cardId).toBeNull()
+    expect(s().browserPanes.get('t1')?.tabs).toHaveLength(1)
+  })
+
+  it('returns a file to the session editor', () => {
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    act(() => s().returnCardToSession(cardId))
+
+    expect(s().editorPanes.has(cardId)).toBe(false)
+    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/popped.ts')
+  })
+
+  it('returns a tab to the end of the strip it came from', () => {
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().addBrowserTab('t1', 'vorn.dev')
+    })
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 1) as string
+    })
+    act(() => s().returnCardToSession(cardId))
+
+    expect(s().browserPanes.has(cardId)).toBe(false)
+    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/', 'https://vorn.dev/'])
+  })
+
+  it('opens a browser to receive a tab whose strip has since closed', () => {
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 0) as string
+    })
+    expect(s().browserPanes.has('t1')).toBe(false)
+
+    act(() => s().returnCardToSession(cardId))
+    // Refusing would strand the page: the card is closing either way, so with
+    // nowhere to land the tab would simply be gone.
+    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/'])
+  })
+
+  it('un-minimizes nothing but forgets the card it closed', () => {
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    act(() => s().toggleMinimized(cardId))
+    expect(s().minimizedTerminals.has(cardId)).toBe(true)
+
+    act(() => s().closeEditorPane(cardId))
+    // An id left in the dock is an entry that restores nothing.
+    expect(s().minimizedTerminals.has(cardId)).toBe(false)
+  })
+
+  it('does not file a popped-out page into the reopen memory', () => {
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().addBrowserTab('t1', 'vorn.dev')
+    })
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 1) as string
+    })
+    act(() => s().closeBrowserPane(cardId))
+
+    // Memory is for reopening a session's own browser. A discarded card filed
+    // there would resurface its page on the session's next open.
+    expect(s().browserMemory.has(cardId)).toBe(false)
+  })
+
+  it("takes a session's cards down with it", () => {
+    act(() => {
+      s().openBrowserPane('t1', 'example.com')
+      s().addBrowserTab('t1', 'vorn.dev')
+    })
+    let file = ''
+    let tab = ''
+    act(() => {
+      file = s().promoteFile('t1', '/p/popped.ts')
+      tab = s().promoteBrowserTab('t1', 1) as string
+      s().toggleMinimized(file)
+    })
+
+    act(() => s().removeTerminal('t1'))
+
+    // Only the record names the owner. Dropping by key alone would leave both
+    // cards on the grid, drawn against a session the store no longer has.
+    expect(s().editorPanes.has(file)).toBe(false)
+    expect(s().browserPanes.has(tab)).toBe(false)
+    expect(s().minimizedTerminals.has(file)).toBe(false)
+  })
+
+  it('drops a selection pointing at a card that has been closed', () => {
+    // Cmd+O focuses whatever is selected, so a dead id here reaches the same
+    // empty stage a dead focus id does. A view does sweep a stale selection,
+    // but only while a view deriving the visible list is mounted — which is not
+    // true on the focus stage, so the store cannot rely on being tidied up.
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/a.ts')
+    })
+    act(() => s().setSelectedTerminal(cardId))
+
+    act(() => s().closeCard(cardId))
+    expect(s().selectedTerminalId).toBeNull()
+  })
+
+  it("drops a selection pointing at a closed session's card", () => {
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/a.ts')
+    })
+    act(() => s().setSelectedTerminal(cardId))
+
+    act(() => s().removeTerminal('t1'))
+    expect(s().selectedTerminalId).toBeNull()
+  })
+
+  it("releases focus, preview and maximize when a card's session is closed", async () => {
+    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    dirtyRefFor(cardId).current = true
+    act(() =>
+      useAppStore.setState({
+        focusedTerminalId: cardId,
+        previewTerminalId: cardId,
+        maximizedPaneId: cardId
+      } as never)
+    )
+
+    act(() => s().removeTerminal('t1'))
+
+    // The focus pair is the dangerous one: the stage is chosen by "is anything
+    // focused" and the titlebar is dropped while something is, so a card
+    // outliving its session leaves an empty window with no chrome.
+    expect(s().focusedTerminalId).toBeNull()
+    expect(s().previewTerminalId).toBeNull()
+    expect(s().maximizedPaneId).toBeNull()
+    // And the buffer flag, or a later card inherits its prompt.
+    expect(isEditorDirty(cardId)).toBe(false)
+  })
+
+  it("leaves another session's cards alone", () => {
+    let mine = ''
+    let theirs = ''
+    act(() => {
+      mine = s().promoteFile('t1', '/p/a.ts')
+      theirs = s().promoteFile('t2', '/p/b.ts')
+    })
+
+    act(() => s().removeTerminal('t1'))
+    expect(s().editorPanes.has(mine)).toBe(false)
+    expect(s().editorPanes.get(theirs)?.sessionId).toBe('t2')
+  })
+
+  it("asks before a close discards a card's unsaved edits", async () => {
+    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/draft.ts')
+    })
+    dirtyRefFor(cardId).current = true
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    act(() => s().closeCard(cardId))
+    expect(confirm).toHaveBeenCalledOnce()
+    // Cancelled: the card and its buffer both survive.
+    expect(s().editorPanes.has(cardId)).toBe(true)
+    expect(isEditorDirty(cardId)).toBe(true)
+
+    confirm.mockReturnValue(true)
+    act(() => s().closeCard(cardId))
+    expect(s().editorPanes.has(cardId)).toBe(false)
+    // The flag must not outlive the card, or a later card inherits the prompt.
+    expect(isEditorDirty(cardId)).toBe(false)
+    confirm.mockRestore()
+  })
+
+  it("asks before a return discards the session editor's buffer", async () => {
+    const { dirtyRefFor } = await import('../src/renderer/lib/editor-dirty')
+    act(() => s().openEditorPane('t1', '/p/open.ts'))
+    dirtyRefFor('t1').current = true
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    act(() => s().returnCardToSession(cardId))
+    // Returning displaces the session's editor exactly as picking a file in the
+    // tree does — and that path has always asked first.
+    expect(confirm).toHaveBeenCalled()
+    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/open.ts')
+    expect(s().editorPanes.has(cardId)).toBe(true)
+    confirm.mockRestore()
+  })
+
+  it("does not clear one buffer's flag when the other answer is no", async () => {
+    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    act(() => s().openEditorPane('t1', '/p/open.ts'))
+    dirtyRefFor('t1').current = true
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    dirtyRefFor(cardId).current = true
+    // Yes, then no. Asked as two questions the yes cleared the session editor's
+    // flag and the no then bailed, leaving those edits on screen with nothing
+    // left to prompt about them — so the next pane switch discarded them in
+    // silence. One question cannot produce that state at all.
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValueOnce(false)
+
+    try {
+      act(() => s().returnCardToSession(cardId))
+
+      expect(confirm).toHaveBeenCalledOnce()
+      // The single yes covered both buffers, so the return actually happened —
+      // rather than half-applying and leaving the card where it was.
+      expect(s().editorPanes.has(cardId)).toBe(false)
+      expect(s().editorPanes.get('t1')?.filePath).toBe('/p/popped.ts')
+      expect(isEditorDirty('t1')).toBe(false)
+      expect(isEditorDirty(cardId)).toBe(false)
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it('lands a returned card on the tab that was in front', async () => {
+    act(() => s().openBrowserPane('t1', 'one.example'))
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 0) as string
+    })
+    act(() => {
+      s().addBrowserTab(cardId, 'two.example')
+      s().addBrowserTab(cardId, 'three.example')
+      s().setActiveBrowserTab(cardId, 1)
+    })
+
+    act(() => s().returnCardToSession(cardId))
+    const pane = s().browserPanes.get('t1')!
+    // `addBrowserTab` activates what it adds, so the strip ended up on the
+    // card's *last* page rather than the one being looked at.
+    expect(pane.tabs[pane.activeTab]).toBe('https://two.example/')
+  })
+
+  it('surfaces the existing card when a file is popped out twice', () => {
+    let first = ''
+    act(() => {
+      first = s().promoteFile('t1', '/p/same.ts')
+    })
+    act(() => s().toggleMinimized(first))
+    expect(s().minimizedTerminals.has(first)).toBe(true)
+
+    let second = ''
+    act(() => {
+      second = s().promoteFile('t1', '/p/same.ts')
+    })
+
+    // Returning the id and doing nothing else made the control look dead: the
+    // card existed, minimized, and nothing brought it back.
+    expect(second).toBe(first)
+    expect(s().minimizedTerminals.has(first)).toBe(false)
+  })
+
+  it('prunes a dead session even when the visible list never changes', () => {
+    // `setVisibleTerminalIds` is reconcile's only trigger. Gating the whole
+    // write on the list changing meant a launch where it never moved — every
+    // session filtered out, or every restored one minimized — never pruned at
+    // all, and the dead panes stayed in localStorage for the whole run.
+    act(() => s().openFilesPane('t1'))
+    // t1 is gone but t2 is live, so reconcile has a non-empty live set to prune
+    // against — and the visible list is unchanged, which is the whole point.
+    act(() =>
+      useAppStore.setState({
+        terminals: new Map([
+          ['t2', { id: 't2', session: session('t2'), status: 'idle', lastOutputTimestamp: 1 }]
+        ]),
+        visibleTerminalIds: ['t2']
+      } as never)
+    )
+    expect(s().filesPanes.has('t1')).toBe(true)
+
+    act(() => s().setVisibleTerminalIds(['t2']))
+    expect(s().filesPanes.has('t1')).toBe(false)
+  })
+
+  it('closes a page card without prompting — there is no buffer to lose', async () => {
+    const { dirtyRefFor } = await import('../src/renderer/lib/editor-dirty')
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 0) as string
+    })
+    // A dirty flag under this id, so "no prompt" is a decision rather than an
+    // accident of there being nothing to prompt about. A page has no buffer;
+    // the flag is stale registry state and must not resurrect a dialog.
+    dirtyRefFor(cardId).current = true
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    act(() => s().closeCard(cardId))
+    expect(confirm).not.toHaveBeenCalled()
+    expect(s().browserPanes.has(cardId)).toBe(false)
+    confirm.mockRestore()
+  })
+
+  it('returns every tab a card gathered, not just the one in front', () => {
+    // A card's strip keeps its `+`, so it can collect pages of its own. Carrying
+    // back only the active one dropped the rest without a word, and the pop-out
+    // control is hidden on a card, so there was no way to rescue them first.
+    act(() => s().openBrowserPane('t1', 'example.com'))
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 0) as string
+    })
+    act(() => {
+      s().addBrowserTab(cardId, 'second.example')
+      s().addBrowserTab(cardId, 'third.example')
+    })
+
+    act(() => s().returnCardToSession(cardId))
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([
+      'https://example.com/',
+      'https://second.example/',
+      'https://third.example/'
+    ])
+  })
+
+  it('never opens the same file twice for one session', () => {
+    // Two cards on one path is two editors over one file, each with its own
+    // buffer: save in one, save in the other, and the second writes its stale
+    // copy over the first with nothing to report it.
+    let first = ''
+    let second = ''
+    act(() => {
+      first = s().promoteFile('t1', '/p/same.ts')
+      second = s().promoteFile('t1', '/p/same.ts')
+    })
+
+    expect(second).toBe(first)
+    expect([...s().editorPanes].filter(([id]) => id !== 't1')).toHaveLength(1)
+  })
+
+  it('still gives two sessions their own card for the same path', () => {
+    // Different worktrees, different files on disk under the same relative name.
+    let a = ''
+    let b = ''
+    act(() => {
+      a = s().promoteFile('t1', '/p/same.ts')
+      b = s().promoteFile('t2', '/p/same.ts')
+    })
+    expect(a).not.toBe(b)
+  })
+
+  it('never lets a card corrupt the session order', () => {
+    // The grid and the tab strip drag within lists that interleave cards, while
+    // terminalOrder holds sessions only. Passing an index from one into the
+    // other moved the wrong session, and an index past the end spliced nothing
+    // and wrote `undefined` into the order — which is then persisted and sent
+    // to the server.
+    seed(['t1', 't2', 't3'])
+    const reorderSessions = vi.fn()
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...(window as unknown as { api?: Record<string, unknown> }).api,
+      reorderSessions
+    }
+    act(() => {
+      s().promoteFile('t1', '/p/a.ts')
+    })
+
+    // Dropped by id, so the card sitting between t1 and t2 in the *visible*
+    // order cannot shift the target. Under the old index-based call this same
+    // gesture moved a different session, and a visible index past the end of
+    // `terminalOrder` spliced nothing and wrote `undefined` into it.
+    act(() => s().reorderTerminals('t3', 't1'))
+    expect(s().terminalOrder).toEqual(['t3', 't1', 't2'])
+    // What actually reaches the server is the thing that was being corrupted.
+    expect(reorderSessions).toHaveBeenLastCalledWith(['t3', 't1', 't2'])
+  })
+
+  it('treats dragging a card as a no-op rather than moving its owner', () => {
+    // A card has no position of its own — it is drawn beside the session it came
+    // from — so there is nothing for a drag to reorder.
+    //
+    // Three sessions and the middle one as the target, deliberately: with two
+    // sessions and the last as target, a missing guard splices at -1 and lands
+    // on an order identical to the one it started with, so the bug hides.
+    seed(['t1', 't2', 't3'])
+    const reorderSessions = vi.fn()
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...(window as unknown as { api?: Record<string, unknown> }).api,
+      reorderSessions
+    }
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/a.ts')
+    })
+    const before = s().terminalOrder
+
+    act(() => s().reorderTerminals(cardId, 't2'))
+    // Reference identity: the reducer must return nothing at all, not an equal
+    // array. And nothing may reach the server.
+    expect(s().terminalOrder).toBe(before)
+    expect(reorderSessions).not.toHaveBeenCalled()
+  })
+
+  it("resolves a drop onto a card to its owner's slot", () => {
+    seed(['t1', 't2', 't3'])
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t3', '/p/a.ts')
+    })
+
+    act(() => s().reorderTerminals('t1', cardId))
+    expect(s().terminalOrder).toEqual(['t2', 't3', 't1'])
+  })
+
+  it('keeps cards through the reconcile that prunes dead sessions', () => {
+    // Reconcile prunes on the owner, not the key. Pruning by key would delete
+    // every card on the first pass, silently discarding the files and pages
+    // someone had put on the grid.
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    act(() => s().setVisibleTerminalIds(['t1', 't2']))
+
+    expect(s().editorPanes.has(cardId)).toBe(true)
   })
 })

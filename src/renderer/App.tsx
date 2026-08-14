@@ -5,7 +5,7 @@ import { useAppStore } from './stores'
 import { GridView } from './components/GridView'
 import { TabView } from './components/TabView'
 import { MobileSinglePane } from './components/MobileSinglePane'
-import { FocusedTerminal } from './components/FocusedTerminal'
+import { FocusedStage } from './components/FocusedStage'
 import { TerminalHost } from './components/TerminalHost'
 import { ProjectSidebar } from './components/project-sidebar/ProjectSidebar'
 import { PromptLauncher } from './components/PromptLauncher'
@@ -678,7 +678,7 @@ export function App() {
             ) : isMobile ? (
               <MobileSinglePane />
             ) : focusedId || previewId ? (
-              <FocusedTerminal />
+              <FocusedStage />
             ) : layoutMode === 'tabs' ? (
               <TabView />
             ) : (
@@ -695,7 +695,7 @@ export function App() {
       </main>
 
       {/* Focus overlay — mobile only (desktop renders inline in content area) */}
-      {isMobile && focusedId && <FocusedTerminal />}
+      {isMobile && focusedId && <FocusedStage />}
 
       <TerminalHost />
 

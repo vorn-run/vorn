@@ -9,16 +9,21 @@ import {
   EditorPaneState,
   BrowserPaneState,
   DevicePaneState,
-  CardSplit
+  CardSplit,
+  isPromotedPane
 } from './types'
 import {
   filesPaneId,
   editorPaneId,
   browserPaneId,
   devicePaneId,
-  isTerminalPane
+  isTerminalPane,
+  paneOwnerId,
+  promotedCardSeq,
+  promotedCardId
 } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
+import { confirmDiscard, confirmDiscardAll, clearDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 
 const EMPTY_SESSIONS: TerminalSession[] = []
@@ -68,12 +73,21 @@ function saveGridSettings(patch: Record<string, unknown>): void {
  * under a `files:` / `editor:` / `browser:` prefixed key. Panes now live inside
  * their owner's card, leaving those keys unreachable — dropping them on read
  * keeps the store from carrying dead weight forward forever.
+ *
+ * A popped-out card *is* a cell and holds a rect while it exists, but its rect
+ * is not persisted across a restart either — see the note on the filter below
+ * for why keeping one would hand a dead card's position to a live one.
  */
 function loadFlexibleLayouts(): Record<string, FlexibleLayoutRect> {
   try {
     const raw = localStorage.getItem(FLEXIBLE_STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw) as Record<string, FlexibleLayoutRect>
+    // Sessions only. A card *is* a cell and holds a rect while it exists, but
+    // its id is only unique within a run: the sequence behind it is seeded from
+    // persisted panes, so a fresh launch restarts at zero and the next card to
+    // be popped out of the same session takes the dead one's id — and, if these
+    // were kept, its position and size.
     const live = Object.fromEntries(Object.entries(parsed).filter(([key]) => isTerminalPane(key)))
     if (Object.keys(live).length !== Object.keys(parsed).length) saveFlexibleLayouts(live)
     return live
@@ -141,19 +155,39 @@ function loadPanes(): {
     if (!raw) return { filesPanes: new Set(), editorPanes: new Map(), browserPanes: new Map() }
     const parsed = JSON.parse(raw) as {
       files?: string[]
-      editors?: Record<string, string>
-      browsers?: Record<string, string | { tabs: string[]; activeTab: number }>
+      editors?: Record<string, string | { filePath: string; sessionId?: string }>
+      browsers?: Record<
+        string,
+        string | { tabs?: string[]; activeTab?: number; sessionId?: string }
+      >
     }
-    return {
-      filesPanes: new Set(parsed.files ?? []),
-      editorPanes: new Map(
-        Object.entries(parsed.editors ?? {}).map(([id, filePath]) => [id, { filePath }])
-      ),
-      browserPanes: parsePersistedBrowsers(parsed.browsers)
-    }
+    const editorPanes = parsePersistedEditors(parsed.editors)
+    const browserPanes = parsePersistedBrowsers(parsed.browsers)
+    seedCardSeq(editorPanes.keys(), browserPanes.keys())
+    return { filesPanes: new Set(parsed.files ?? []), editorPanes, browserPanes }
   } catch {
     return { filesPanes: new Set(), editorPanes: new Map(), browserPanes: new Map() }
   }
+}
+
+/**
+ * Read the persisted editor panes.
+ *
+ * Older builds stored a bare path per session, before a pane could be keyed by
+ * anything but its owner. Those read back with the key as the owner, which is
+ * exactly what they meant — so upgrading neither loses an open file nor mistakes
+ * one for a popped-out card.
+ */
+export function parsePersistedEditors(
+  saved: Record<string, string | { filePath?: string; sessionId?: string }> | undefined
+): Map<string, EditorPaneState> {
+  const out = new Map<string, EditorPaneState>()
+  for (const [id, entry] of Object.entries(saved ?? {})) {
+    if (typeof entry === 'string') out.set(id, { filePath: entry, sessionId: id })
+    else if (entry.filePath)
+      out.set(id, { filePath: entry.filePath, sessionId: entry.sessionId ?? id })
+  }
+  return out
 }
 
 /**
@@ -161,17 +195,20 @@ function loadPanes(): {
  *
  * Older builds stored a single url string per session, before a pane could
  * hold tabs. Those are read as a one-tab pane rather than discarded, so
- * upgrading doesn't silently close the page someone had open.
+ * upgrading doesn't silently close the page someone had open. As with editors,
+ * an entry with no recorded owner is owned by its key.
  */
 export function parsePersistedBrowsers(
-  saved: Record<string, string | { tabs?: string[]; activeTab?: number }> | undefined
+  saved:
+    | Record<string, string | { tabs?: string[]; activeTab?: number; sessionId?: string }>
+    | undefined
 ): Map<string, BrowserPaneState> {
   return new Map(
     Object.entries(saved ?? {}).map(([id, entry]) => {
-      if (typeof entry === 'string') return [id, { tabs: [entry], activeTab: 0 }]
+      if (typeof entry === 'string') return [id, { tabs: [entry], activeTab: 0, sessionId: id }]
       const tabs = entry.tabs?.length ? entry.tabs : [DEFAULT_BROWSER_URL]
       const activeTab = Math.min(Math.max(entry.activeTab ?? 0, 0), tabs.length - 1)
-      return [id, { tabs, activeTab }]
+      return [id, { tabs, activeTab, sessionId: entry.sessionId ?? id }]
     })
   )
 }
@@ -186,9 +223,14 @@ function savePanes(
       PANES_STORAGE_KEY,
       JSON.stringify({
         files: [...filesPanes],
-        editors: Object.fromEntries([...editorPanes].map(([id, s]) => [id, s.filePath])),
+        editors: Object.fromEntries(
+          [...editorPanes].map(([id, s]) => [id, { filePath: s.filePath, sessionId: s.sessionId }])
+        ),
         browsers: Object.fromEntries(
-          [...browserPanes].map(([id, s]) => [id, { tabs: s.tabs, activeTab: s.activeTab }])
+          [...browserPanes].map(([id, s]) => [
+            id,
+            { tabs: s.tabs, activeTab: s.activeTab, sessionId: s.sessionId }
+          ])
         )
       })
     )
@@ -223,8 +265,11 @@ function reconcilePanes(
   cardSplits: Record<string, CardSplit>
 } | null {
   const nextFiles = new Set([...filesPanes].filter((id) => liveSessionIds.has(id)))
-  const nextEditors = new Map([...editorPanes].filter(([id]) => liveSessionIds.has(id)))
-  const nextBrowsers = new Map([...browserPanes].filter(([id]) => liveSessionIds.has(id)))
+  // On the record's owner, not on the key: a popped-out file or tab is keyed by
+  // card id, and pruning by key would delete every one of them on the first
+  // reconcile — silently discarding the pages and files someone put there.
+  const nextEditors = new Map([...editorPanes].filter(([, e]) => liveSessionIds.has(e.sessionId)))
+  const nextBrowsers = new Map([...browserPanes].filter(([, b]) => liveSessionIds.has(b.sessionId)))
   // Tabs remembered for a closed pane die with their session as well. This is
   // the path `removeTerminal` cannot cover: a session that simply never came
   // back leaves no removal to hang the cleanup off.
@@ -257,6 +302,85 @@ function reconcilePanes(
     devicePanes: nextDevices,
     cardSplits: nextSplits
   }
+}
+
+/**
+ * Drop every placement a pane held. For closing one.
+ *
+ * Placement lives apart from the pane records — four app-level fields keyed by
+ * pane id — which is what lets ordering, maximize, minimize and focus address
+ * any pane without knowing its kind. The cost is that closing a pane has to say
+ * so explicitly, and each field strands differently when it doesn't:
+ *
+ * - `minimizedTerminals` leaves a dock entry that restores nothing.
+ * - `maximizedPaneId` blanks its owner's card in favour of nothing.
+ * - `focusedTerminalId` / `previewTerminalId` are the dangerous pair. The focus
+ *   stage is chosen by "is anything focused", and the app drops its titlebar
+ *   while something is — so an id pointing at a pane that no longer exists
+ *   renders an empty window with no chrome and no way back except Escape.
+ * - `selectedTerminalId` reaches the same place by a longer road: Cmd+O focuses
+ *   the selection. A view does sweep a stale one, but only while a view that
+ *   derives the visible list is mounted — which is not true on the focus stage,
+ *   so the store cannot rely on being tidied up after.
+ *
+ * Every field is only written when it actually changes, so a close that touches
+ * nothing returns nothing.
+ */
+function clearPlacement(
+  state: Pick<
+    AppStore,
+    | 'maximizedPaneId'
+    | 'minimizedTerminals'
+    | 'focusedTerminalId'
+    | 'previewTerminalId'
+    | 'selectedTerminalId'
+  >,
+  paneId: string
+): Partial<AppStore> {
+  const cleared: Partial<AppStore> = {}
+  if (state.maximizedPaneId === paneId) cleared.maximizedPaneId = null
+  if (state.focusedTerminalId === paneId) cleared.focusedTerminalId = null
+  if (state.previewTerminalId === paneId) cleared.previewTerminalId = null
+  if (state.selectedTerminalId === paneId) cleared.selectedTerminalId = null
+  if (state.minimizedTerminals.has(paneId)) {
+    const minimized = new Set(state.minimizedTerminals)
+    minimized.delete(paneId)
+    cleared.minimizedTerminals = minimized
+  }
+  return cleared
+}
+
+/**
+ * Sequence behind `card:` ids.
+ *
+ * Seeded past whatever the persisted panes already use, because promoted cards
+ * survive a reload: starting from zero would reissue an id a restored card
+ * still holds, and the second card would silently overwrite the first.
+ *
+ * Monotonic, never reused. A gap left by a closed card costs nothing, whereas
+ * reusing its id would hand a new card that card's minimized state and grid rect.
+ */
+let cardSeq = 0
+
+function seedCardSeq(...keys: Iterable<string>[]): void {
+  for (const group of keys) {
+    for (const key of group) {
+      const seq = promotedCardSeq(key)
+      if (seq !== null && seq >= cardSeq) cardSeq = seq + 1
+    }
+  }
+}
+
+function nextCardId(sessionId: string): string {
+  return promotedCardId(sessionId, cardSeq++)
+}
+
+/** Whether two id lists say the same thing, in the same order. */
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
 }
 
 function loadSidebarSettings(): Record<string, string> {
@@ -433,6 +557,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   setTerminalOrder: (order) => set({ terminalOrder: order }),
   setVisibleTerminalIds: (ids) =>
     set((state) => {
+      const unchanged = sameIds(state.visibleTerminalIds, ids)
       // Sessions restore by their persisted id, so pane entries stay valid across
       // restarts — but a session that never comes back would leave its entry
       // behind forever. Reconcile against the live set as it settles.
@@ -449,15 +574,35 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
               live
             )
           : null
-      return { visibleTerminalIds: ids, ...(reconciled ?? {}) }
+      // An unchanged list is not a change worth notifying the app about — but
+      // the reconcile above still has to run, because this is its only trigger.
+      // Gating both on the list changing meant a launch where the visible set
+      // never moved (everything filtered out, or every restored session
+      // minimized) never pruned a dead session's panes at all.
+      if (unchanged && !reconciled) return {}
+      return { ...(unchanged ? {} : { visibleTerminalIds: ids }), ...(reconciled ?? {}) }
     }),
-  setFocusableTerminalIds: (ids) => set({ focusableTerminalIds: ids }),
+  setFocusableTerminalIds: (ids) =>
+    set((state) => (sameIds(state.focusableTerminalIds, ids) ? {} : { focusableTerminalIds: ids })),
 
-  reorderTerminals: (fromIndex, toIndex) =>
+  reorderTerminals: (draggedId, droppedOnId) =>
     set((state) => {
+      // Ids, not indices. The lists the grid and the tab strip drag within
+      // interleave popped-out cards, while `terminalOrder` holds sessions only,
+      // so an index from either was off by the number of cards ahead of it —
+      // moving the wrong session, and when the index ran past the end, splicing
+      // nothing and writing `undefined` into the order that is then persisted
+      // and shipped to the server.
+      //
+      // A card is not in this list and has no position of its own: it is drawn
+      // beside the session it came from. Dragging one is therefore a no-op, and
+      // dropping onto one means the slot its owner occupies.
       const order = [...state.terminalOrder]
-      const [moved] = order.splice(fromIndex, 1)
-      order.splice(toIndex, 0, moved)
+      const from = order.indexOf(draggedId)
+      const to = order.indexOf(paneOwnerId(droppedOnId))
+      if (from === -1 || to === -1 || from === to) return {}
+      const [moved] = order.splice(from, 1)
+      order.splice(to, 0, moved)
       window.api.reorderSessions(order)
       return { terminalOrder: order }
     }),
@@ -490,7 +635,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       savePanes(next, state.editorPanes, state.browserPanes)
       return {
         filesPanes: next,
-        ...(state.maximizedPaneId === filesPaneId(sessionId) ? { maximizedPaneId: null } : {})
+        ...clearPlacement(state, filesPaneId(sessionId))
       }
     }),
 
@@ -503,20 +648,21 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   openEditorPane: (sessionId, filePath) =>
     set((state) => {
       const next = new Map(state.editorPanes)
-      next.set(sessionId, { filePath })
+      next.set(sessionId, { filePath, sessionId })
       savePanes(state.filesPanes, next, state.browserPanes)
       return { editorPanes: next }
     }),
 
-  closeEditorPane: (sessionId) =>
+  closeEditorPane: (paneId) =>
     set((state) => {
-      if (!state.editorPanes.has(sessionId)) return {}
+      const closing = state.editorPanes.get(paneId)
+      if (!closing) return {}
       const next = new Map(state.editorPanes)
-      next.delete(sessionId)
+      next.delete(paneId)
       savePanes(state.filesPanes, next, state.browserPanes)
       return {
         editorPanes: next,
-        ...(state.maximizedPaneId === editorPaneId(sessionId) ? { maximizedPaneId: null } : {})
+        ...clearPlacement(state, isPromotedPane(paneId, closing) ? paneId : editorPaneId(paneId))
       }
     }),
 
@@ -536,13 +682,13 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
           tabs[existing.activeTab] = normalized
           next.set(sessionId, { ...existing, tabs })
         } else {
-          next.set(sessionId, { tabs: [normalized], activeTab: 0 })
+          next.set(sessionId, { tabs: [normalized], activeTab: 0, sessionId })
         }
       } else if (!existing) {
         // Reopening picks up where the pane left off. Closing it is how you get
         // the space back, not how you throw the tabs away.
         const remembered = state.browserMemory.get(sessionId)
-        next.set(sessionId, remembered ?? { tabs: [DEFAULT_BROWSER_URL], activeTab: 0 })
+        next.set(sessionId, remembered ?? { tabs: [DEFAULT_BROWSER_URL], activeTab: 0, sessionId })
       } else {
         return {}
       }
@@ -551,19 +697,22 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       return { browserPanes: next }
     }),
 
-  closeBrowserPane: (sessionId) =>
+  closeBrowserPane: (paneId) =>
     set((state) => {
-      const closing = state.browserPanes.get(sessionId)
+      const closing = state.browserPanes.get(paneId)
       if (!closing) return {}
       const next = new Map(state.browserPanes)
-      next.delete(sessionId)
-      const memory = new Map(state.browserMemory)
-      memory.set(sessionId, closing)
+      next.delete(paneId)
       savePanes(state.filesPanes, state.editorPanes, next)
+      // Remembering the tabs is for reopening a session's own browser. A
+      // popped-out tab has no reopen — closing its card is a discard, and
+      // filing it here would resurface the page on the session's next open.
+      const memory = new Map(state.browserMemory)
+      if (!isPromotedPane(paneId, closing)) memory.set(paneId, closing)
       return {
         browserPanes: next,
-        browserMemory: memory,
-        ...(state.maximizedPaneId === browserPaneId(sessionId) ? { maximizedPaneId: null } : {})
+        ...(isPromotedPane(paneId, closing) ? {} : { browserMemory: memory }),
+        ...clearPlacement(state, isPromotedPane(paneId, closing) ? paneId : browserPaneId(paneId))
       }
     }),
 
@@ -573,38 +722,38 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     else openBrowserPane(sessionId)
   },
 
-  addBrowserTab: (sessionId, url) =>
+  addBrowserTab: (paneId, url) =>
     set((state) => {
-      const existing = state.browserPanes.get(sessionId)
+      const existing = state.browserPanes.get(paneId)
       if (!existing) return {}
       const normalized = url === undefined ? DEFAULT_BROWSER_URL : normalizeUrl(url)
       if (!normalized) return {}
       const next = new Map(state.browserPanes)
       const tabs = [...existing.tabs, normalized]
-      next.set(sessionId, { tabs, activeTab: tabs.length - 1 })
+      next.set(paneId, { ...existing, tabs, activeTab: tabs.length - 1 })
       savePanes(state.filesPanes, state.editorPanes, next)
       return { browserPanes: next }
     }),
 
-  closeBrowserTab: (sessionId, index) => {
-    const existing = get().browserPanes.get(sessionId)
+  closeBrowserTab: (paneId, index) => {
+    const existing = get().browserPanes.get(paneId)
     if (!existing || index < 0 || index >= existing.tabs.length) return
     // The last tab going means the pane itself goes; an empty browser is just
     // a box taking up a grid cell. Closing a tab is a discard, though, not a
     // "give me the space back" — so unlike a pane close it leaves nothing to
     // restore, or reopening would hand back the page just thrown away.
     if (existing.tabs.length === 1) {
-      get().closeBrowserPane(sessionId)
+      get().closeBrowserPane(paneId)
       set((state) => {
-        if (!state.browserMemory.has(sessionId)) return {}
+        if (!state.browserMemory.has(paneId)) return {}
         const memory = new Map(state.browserMemory)
-        memory.delete(sessionId)
+        memory.delete(paneId)
         return { browserMemory: memory }
       })
       return
     }
     set((state) => {
-      const pane = state.browserPanes.get(sessionId)
+      const pane = state.browserPanes.get(paneId)
       if (!pane) return {}
       const tabs = pane.tabs.filter((_, i) => i !== index)
       // Closing a tab left of the active one shifts it; closing the active one
@@ -614,19 +763,19 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
         tabs.length - 1
       )
       const next = new Map(state.browserPanes)
-      next.set(sessionId, { tabs, activeTab: Math.max(activeTab, 0) })
+      next.set(paneId, { ...pane, tabs, activeTab: Math.max(activeTab, 0) })
       savePanes(state.filesPanes, state.editorPanes, next)
       return { browserPanes: next }
     })
   },
 
-  setActiveBrowserTab: (sessionId, index) =>
+  setActiveBrowserTab: (paneId, index) =>
     set((state) => {
-      const existing = state.browserPanes.get(sessionId)
+      const existing = state.browserPanes.get(paneId)
       if (!existing || index < 0 || index >= existing.tabs.length) return {}
       if (existing.activeTab === index) return {}
       const next = new Map(state.browserPanes)
-      next.set(sessionId, { ...existing, activeTab: index })
+      next.set(paneId, { ...existing, activeTab: index })
       savePanes(state.filesPanes, state.editorPanes, next)
       return { browserPanes: next }
     }),
@@ -685,12 +834,125 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       next.delete(sessionId)
       return {
         devicePanes: next,
-        ...(state.maximizedPaneId === devicePaneId(sessionId) ? { maximizedPaneId: null } : {})
+        ...clearPlacement(state, devicePaneId(sessionId))
       }
     }),
 
   setMaximizedPane: (paneId) =>
     set((state) => (state.maximizedPaneId === paneId ? {} : { maximizedPaneId: paneId })),
+
+  promoteFile: (sessionId, filePath) => {
+    // One card per file per session. Two cards on one path is two editors over
+    // one file on disk, each with its own buffer and its own dirty flag: save in
+    // one, then save in the other, and the second silently writes its stale copy
+    // over the first. Nothing anywhere would report it.
+    for (const [existingId, pane] of get().editorPanes) {
+      if (isPromotedPane(existingId, pane) && pane.sessionId === sessionId) {
+        if (pane.filePath !== filePath) continue
+        // Surface the one that exists rather than returning an id the caller
+        // then ignores: popping out an already-popped file that had been
+        // minimized otherwise looked like the control did nothing at all.
+        set((state) =>
+          state.minimizedTerminals.has(existingId)
+            ? {
+                minimizedTerminals: new Set(
+                  [...state.minimizedTerminals].filter((id) => id !== existingId)
+                )
+              }
+            : {}
+        )
+        return existingId
+      }
+    }
+
+    const cardId = nextCardId(sessionId)
+    set((state) => {
+      const next = new Map(state.editorPanes)
+      next.set(cardId, { filePath, sessionId })
+      savePanes(state.filesPanes, next, state.browserPanes)
+      return { editorPanes: next }
+    })
+    return cardId
+  },
+
+  promoteBrowserTab: (paneId, index) => {
+    const pane = get().browserPanes.get(paneId)
+    if (!pane || index < 0 || index >= pane.tabs.length) return null
+    const url = pane.tabs[index]
+    const cardId = nextCardId(pane.sessionId)
+    // Out of the strip before into the card: leaving it in both would mount two
+    // guests on one url, each with its own scroll position and half-typed form,
+    // and closing either would look like the page had refused to go away.
+    get().closeBrowserTab(paneId, index)
+    set((state) => {
+      const next = new Map(state.browserPanes)
+      next.set(cardId, { tabs: [url], activeTab: 0, sessionId: pane.sessionId })
+      savePanes(state.filesPanes, state.editorPanes, next)
+      return { browserPanes: next }
+    })
+    return cardId
+  },
+
+  returnCardToSession: (cardId) => {
+    const state = get()
+    const editor = state.editorPanes.get(cardId)
+    const browser = state.browserPanes.get(cardId)
+
+    if (editor && isPromotedPane(cardId, editor)) {
+      // Into the session's editor, which holds one file — so this displaces
+      // whatever was there, exactly as picking a file in the tree does, and has
+      // to ask the same question before throwing that buffer away. The card's
+      // own buffer goes too: it is a different editor under a different id.
+      // Both buffers in one question. Asked separately, answering yes then no
+      // cleared the session editor's dirty flag and then bailed — leaving those
+      // edits on screen with nothing left to prompt about them ever again.
+      if (!confirmDiscardAll([editor.sessionId, cardId])) return
+      state.openEditorPane(editor.sessionId, editor.filePath)
+      state.closeEditorPane(cardId)
+      return
+    }
+
+    if (browser && isPromotedPane(cardId, browser)) {
+      // Every tab, not just the active one. A card can gather tabs of its own —
+      // its strip keeps its `+` — and returning it used to carry back whichever
+      // page happened to be in front and drop the rest without a word.
+      const [first, ...rest] = browser.tabs
+      if (state.browserPanes.has(browser.sessionId)) state.addBrowserTab(browser.sessionId, first)
+      // If that browser is closed, opening it on this page is the landing spot —
+      // a tab with nowhere to go would leave the card the only thing holding it,
+      // and it is about to close.
+      else state.openBrowserPane(browser.sessionId, first)
+
+      // If the landing failed — a url that no longer normalizes, from a
+      // corrupted store — every add below would no-op and the close would take
+      // the whole card with it. Keep the card instead; it is the only copy.
+      const landed = get().browserPanes.get(browser.sessionId)
+      if (!landed) return
+
+      const firstIndex = landed.tabs.length - 1
+      for (const url of rest) state.addBrowserTab(browser.sessionId, url)
+      // `addBrowserTab` activates what it adds, so without this the strip ends
+      // up showing the card's *last* page rather than the one being looked at.
+      state.setActiveBrowserTab(browser.sessionId, firstIndex + browser.activeTab)
+      state.closeBrowserPane(cardId)
+    }
+  },
+
+  closeCard: (cardId) => {
+    const state = get()
+    const editor = state.editorPanes.get(cardId)
+    if (editor && isPromotedPane(cardId, editor)) {
+      // The confirm lives here rather than at each button, because it was
+      // missing from two of the three: the card's own ✕ asked, while its tab
+      // and its sidebar row threw the buffer away silently.
+      if (!confirmDiscard(cardId)) return
+      clearDirty(cardId)
+      state.closeEditorPane(cardId)
+      return
+    }
+    const browser = state.browserPanes.get(cardId)
+    if (browser && isPromotedPane(cardId, browser)) state.closeBrowserPane(cardId)
+  },
 
   toggleSessionDockCollapsed: () =>
     set((state) => ({ sessionDockCollapsed: !state.sessionDockCollapsed })),

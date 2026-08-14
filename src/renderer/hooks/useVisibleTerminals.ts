@@ -2,6 +2,7 @@ import { useMemo, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
+import { usePromotedCardsByOwner } from './usePromotedCards'
 
 /**
  * Stable comparator for terminal ids under the active sortMode. Manual mode
@@ -67,6 +68,13 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     }))
   )
 
+  // The grouping, not the two pane Maps it comes from. Those are replaced on
+  // any pane write — a browser tab switch, a keystroke in the address bar —
+  // which would re-run this whole memo, re-sorting every session twice and
+  // triggering a reconcile pass, for a list that had not changed. The grouping
+  // is a stable empty when nothing is popped out, which is the common case.
+  const cardsByOwner = usePromotedCardsByOwner()
+
   const workspaceProjects = useMemo(() => {
     if (!projects) return null
     return new Set(
@@ -97,22 +105,34 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       })
       .sort(sortFn)
 
-    // Sessions only. A session's child panes render inside its own card, so
-    // they are not layout units here — putting them in this list once forced
-    // every consumer to translate between grid positions and session positions.
+    // Sessions, plus every file and tab popped out of one.
+    //
+    // A session's panes render inside its own card and are not layout units at
+    // all. A popped-out card is: it is a cell like a session, placed directly
+    // after the session it came from so the two stay together as the grid
+    // reflows, rather than drifting a row apart.
     const ordered: string[] = []
     const minimized: string[] = []
-    for (const [id] of filtered) {
+    const place = (id: string): void => {
       if (minimizedTerminals.has(id)) minimized.push(id)
       else ordered.push(id)
     }
+    for (const [id] of filtered) {
+      place(id)
+      for (const cardId of cardsByOwner.get(id) ?? []) place(cardId)
+    }
 
     // Focused-mode nav spans the active project (or workspace) regardless of
-    // worktree filter or status filter, so cycling sessions reaches all of them.
-    const focusable = all
-      .filter(([, t]) => inActiveScope(t))
-      .sort(sortFn)
-      .map(([id]) => id)
+    // worktree filter or status filter, so cycling reaches all of them.
+    //
+    // Cards are in this list too, beside their owner. Cmd+] and Cmd+1-9 both
+    // index straight into it, so a card being focusable at all is decided here
+    // and nowhere else — the shortcut handlers never learn what an id is.
+    const focusable: string[] = []
+    for (const [id] of all.filter(([, t]) => inActiveScope(t)).sort(sortFn)) {
+      focusable.push(id)
+      focusable.push(...(cardsByOwner.get(id) ?? []))
+    }
 
     return { orderedIds: ordered, minimizedIds: minimized, focusableIds: focusable }
   }, [
@@ -123,7 +143,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     statusFilter,
     sortMode,
     terminalOrder,
-    minimizedTerminals
+    minimizedTerminals,
+    cardsByOwner
   ])
 
   useEffect(() => {

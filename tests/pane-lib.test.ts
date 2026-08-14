@@ -4,6 +4,12 @@ import {
   filesPaneId,
   editorPaneId,
   browserPaneId,
+  devicePaneId,
+  paneIdFor,
+  promotedCardId,
+  isPromotedCardId,
+  isLayoutCellId,
+  promotedCardSeq,
   parsePaneId,
   paneKind,
   paneOwnerId,
@@ -53,6 +59,68 @@ describe('pane-id', () => {
     expect(isTerminalPane('files:abc')).toBe(false)
     expect(isTerminalPane('editor:abc')).toBe(false)
     expect(isTerminalPane('browser:abc')).toBe(false)
+  })
+
+  it('builds a pane id from a kind held as data', () => {
+    // The pane column carries kinds, not ids, so it needs the inverse of
+    // parsePaneId — and the two have to agree, or a promoted pane would be
+    // skipped in the column under one id and drawn in the grid under another.
+    for (const kind of ['files', 'editor', 'browser', 'device'] as const) {
+      const id = paneIdFor(kind, 'abc')
+      expect(parsePaneId(id)).toEqual({ kind, sessionId: 'abc' })
+    }
+    expect(paneIdFor('device', 'abc')).toBe(devicePaneId('abc'))
+  })
+
+  it('reads a card id back to the session it was popped out of', () => {
+    // This is what places a card next to its owner in the grid, and what labels
+    // it with the right branch.
+    expect(parsePaneId(promotedCardId('abc', 3))).toEqual({ kind: 'card', sessionId: 'abc' })
+    expect(paneOwnerId(promotedCardId('abc', 3))).toBe('abc')
+    expect(isPromotedCardId(promotedCardId('abc', 0))).toBe(true)
+    expect(isPromotedCardId('abc')).toBe(false)
+    expect(isPromotedCardId('editor:abc')).toBe(false)
+  })
+
+  it('reads a card id from the right, so a colon in the session id survives', () => {
+    // Session ids come from the server and may hold a colon. Parsing from the
+    // left would cut `card:host:1234:7` at the first one and hand back `host` —
+    // a card labelled with somebody else's branch, or nobody's.
+    const weird = 'host:1234'
+    const cardId = promotedCardId(weird, 7)
+    expect(parsePaneId(cardId)).toEqual({ kind: 'card', sessionId: weird })
+    expect(paneOwnerId(cardId)).toBe(weird)
+  })
+
+  it('reads the sequence off the end, so a colon in the session id survives', () => {
+    // The store seeds its counter past whatever the persisted cards already use.
+    // Reading the number from the wrong side yields NaN for a session id with a
+    // colon in it, the seed silently does nothing, and a reissued id overwrites
+    // a card restored from disk.
+    expect(promotedCardSeq(promotedCardId('abc', 7))).toBe(7)
+    expect(promotedCardSeq(promotedCardId('host:1234', 12))).toBe(12)
+    expect(promotedCardSeq('abc')).toBeNull()
+    expect(promotedCardSeq('editor:abc')).toBeNull()
+  })
+
+  it('counts sessions and cards as grid cells, and child panes as not', () => {
+    // Saved rects are pruned on read by exactly this rule. A card *is* a cell
+    // and keys its rect by its own id, so ruling it out meant every card sat at
+    // the grid origin and snapped back there on every drag; a session's child
+    // panes are drawn inside its card and must stay pruned.
+    expect(isLayoutCellId('abc')).toBe(true)
+    expect(isLayoutCellId(promotedCardId('abc', 2))).toBe(true)
+    expect(isLayoutCellId('files:abc')).toBe(false)
+    expect(isLayoutCellId('editor:abc')).toBe(false)
+    expect(isLayoutCellId('browser:abc')).toBe(false)
+    expect(isLayoutCellId('device:abc')).toBe(false)
+  })
+
+  it('keeps a card out of the session-only paths', () => {
+    // The tab strip and the layout store both filter on this. A card leaking
+    // through would render a tab for a session that does not exist.
+    expect(isTerminalPane(promotedCardId('abc', 1))).toBe(false)
+    expect(paneKind(promotedCardId('abc', 1))).toBe('card')
   })
 
   it('survives session ids that themselves contain a colon', () => {

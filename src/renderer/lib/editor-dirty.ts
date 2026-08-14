@@ -29,7 +29,24 @@ export function clearDirty(sessionId: string): void {
 }
 
 /**
- * Ask before discarding an editor's unsaved changes. Returns true when the
+ * Ask once before discarding several editors' unsaved changes.
+ *
+ * Not `confirmDiscard` called twice. That clears each flag as it is answered,
+ * so a yes-then-no left the first buffer still on screen with its dirty flag
+ * already deleted — after which nothing would ever prompt for it again, and the
+ * next pane switch threw those edits away in silence. One action, one question,
+ * and nothing cleared until the answer covers all of it.
+ */
+export function confirmDiscardAll(ids: string[]): boolean {
+  const dirty = ids.filter(isEditorDirty)
+  if (dirty.length === 0) return true
+  if (!window.confirm('Discard unsaved changes?')) return false
+  for (const id of dirty) clearDirty(id)
+  return true
+}
+
+/**
+ * Ask before discarding one editor's unsaved changes. Returns true when the
  * caller should proceed — either the buffer was clean or the user confirmed.
  */
 export function confirmDiscard(sessionId: string): boolean {

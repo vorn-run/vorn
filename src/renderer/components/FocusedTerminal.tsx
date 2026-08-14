@@ -78,12 +78,13 @@ export function FocusedTerminal() {
   if (!effectiveId || !terminal) return null
 
   // Which of this session's panes, if any, is maximized. A pane belonging to
-  // another session must not take over this stage, hence the owner check.
+  // another session must not take over this stage, hence the owner check — and
+  // the four kinds are named one by one rather than tested as "not a terminal",
+  // because a popped-out card carries this session's id and a kind of its own,
+  // so the looser test would match one and blank the stage for a card that is
+  // drawn somewhere else entirely.
   const maximized = maximizedPaneId ? parsePaneId(maximizedPaneId) : null
-  const maximizedKind =
-    maximized && maximized.sessionId === effectiveId && maximized.kind !== 'terminal'
-      ? maximized.kind
-      : null
+  const maximizedKind = maximized && maximized.sessionId === effectiveId ? maximized.kind : null
   const hasMaximizedPane =
     (maximizedKind === 'files' && hasFilesPane) ||
     (maximizedKind === 'editor' && hasEditorPane) ||

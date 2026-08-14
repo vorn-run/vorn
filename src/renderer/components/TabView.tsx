@@ -2,10 +2,13 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
-import { selectPaneFlags } from '../stores/ui-slice'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
-import { isTerminalPane } from '../lib/pane-id'
+import { isTerminalPane, isPromotedCardId } from '../lib/pane-id'
+import { usePromotedCardsByOwner, usePromotedCardSubject } from '../hooks/usePromotedCards'
+import { PromotedPaneCard } from './PromotedPaneCard'
+import { CardSubjectIcon } from './CardSubjectIcon'
 import { PaneColumn } from './PaneColumn'
+import { usePaneColumnEntries } from '../hooks/usePaneColumnEntries'
 import { AgentStatusIcon } from './AgentStatusIcon'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
@@ -122,14 +125,29 @@ export function TabView() {
   // Tab mode treats minimize as a no-op — every session shows as a tab. The
   // minimizedTerminals set is preserved so switching back to grid restores
   // the dock pills.
+  const cardsByOwner = usePromotedCardsByOwner()
+
+  // What Cmd+1-9 actually indexes. The strip's own order is not it: a minimized
+  // session or card still shows a tab here (minimize is a no-op in this layout)
+  // while dropping out of the shortcut's list, so a badge numbered by tab
+  // position named a shortcut that jumped somewhere else.
+  const shortcutIds = useAppStore((s) => s.visibleTerminalIds)
+
   const allTabIds = useMemo(() => {
-    // Tab mode shows one pane at a time, and its strip/context menu are built
-    // around sessions (rename, status, assigned task). A session's file panes
-    // ride along with it here rather than claiming tabs of their own — they get
-    // their own cells in grid mode, where side-by-side actually means something.
-    const merged = [...orderedIds, ...minimizedIds].filter(isTerminalPane)
-    return merged.sort((a, b) => compareTerminalIds(a, b, terminals, sortMode, terminalOrder))
-  }, [orderedIds, minimizedIds, terminalOrder, terminals, sortMode])
+    // A session's panes ride along with it rather than claiming tabs — they get
+    // their own cells in grid mode, where side-by-side means something.
+    //
+    // A popped-out card does claim one. It is a thing you switch to, and the
+    // whole app should offer one way of switching to a thing: leaving it out
+    // made a card unreachable here except through the sidebar, which is not how
+    // anything else in this strip works.
+    const sessions = [...orderedIds, ...minimizedIds]
+      .filter(isTerminalPane)
+      .sort((a, b) => compareTerminalIds(a, b, terminals, sortMode, terminalOrder))
+    // Beside its owner, not sorted among the sessions: `compareTerminalIds`
+    // reads the terminals map, which holds no entry for a card.
+    return sessions.flatMap((id) => [id, ...(cardsByOwner.get(id) ?? [])])
+  }, [orderedIds, minimizedIds, terminalOrder, terminals, sortMode, cardsByOwner])
   const activeTabId = useAppStore((s) => s.activeTabId)
   const setActiveTabId = useAppStore((s) => s.setActiveTabId)
   const setSelected = useAppStore((s) => s.setSelectedTerminal)
@@ -183,10 +201,23 @@ export function TabView() {
   }
 
   const handleCloseTab = async (id: string): Promise<void> => {
+    const state = useAppStore.getState()
+
+    // A card's tab closes the card. Routing it through closeTerminalSession
+    // would tear down the whole session the card came from — every terminal,
+    // every pane — on a click that says "close this file".
+    if (isPromotedCardId(id)) {
+      if (activeTabId === id) {
+        const idx = allTabIds.indexOf(id)
+        setActiveTabId(allTabIds[idx + 1] ?? allTabIds[idx - 1] ?? null)
+      }
+      state.closeCard(id)
+      return
+    }
+
     const terminal = terminals.get(id)
     const name = terminal ? getDisplayName(terminal.session) : id
 
-    const state = useAppStore.getState()
     if (state.focusedTerminalId === id) state.setFocusedTerminal(null)
 
     // Auto-select adjacent tab before removing
@@ -242,13 +273,9 @@ export function TabView() {
 
   const handlePointerUp = useCallback(() => {
     if (dragState?.isDragging && dropTargetIndex !== null) {
-      const fromIndex = allTabIds.indexOf(dragState.draggingId)
-      if (
-        fromIndex !== -1 &&
-        fromIndex !== dropTargetIndex &&
-        allTabIds.includes(dragState.draggingId)
-      ) {
-        reorderTerminals(fromIndex, dropTargetIndex)
+      const droppedOnId = allTabIds[dropTargetIndex]
+      if (droppedOnId && droppedOnId !== dragState.draggingId) {
+        reorderTerminals(dragState.draggingId, droppedOnId)
       }
     }
     setDragState(null)
@@ -264,10 +291,11 @@ export function TabView() {
 
   const hasTabs = allTabIds.length > 0
   const activeTerminal = activeTabId ? terminals.get(activeTabId) : null
-  // One shared selector rather than a kind-per-line list: the device pane
-  // reached the store and never rendered because this gate was one of the sites
-  // that was never widened for it, and nothing anywhere reported the omission.
-  const activeHasPanes = useAppStore((s) => selectPaneFlags(s, activeTabId).any)
+  // The column's own answer, not a second reading of the same flags. A gate
+  // that could disagree with the column left a 380px sidebar of dead air with
+  // nothing on screen to say what was holding it open — and it had already been
+  // wrong once before, for the device pane, in silence.
+  const activeHasPanes = usePaneColumnEntries(activeTabId).length > 0
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -295,9 +323,26 @@ export function TabView() {
           style={{ minHeight: 40 }}
         >
           {allTabIds.map((id, index) => {
+            if (isPromotedCardId(id)) {
+              return (
+                <CardTab
+                  key={id}
+                  cardId={id}
+                  shortcutIndex={shortcutIds.indexOf(id)}
+                  registerRef={(el) => {
+                    if (el) tabRefs.current.set(id, el)
+                    else tabRefs.current.delete(id)
+                  }}
+                  isActive={id === activeTabId}
+                  onSelect={() => handleSelectTab(id)}
+                  onClose={() => void handleCloseTab(id)}
+                />
+              )
+            }
             const terminal = terminals.get(id)
             if (!terminal) return null
             const isActive = id === activeTabId
+            const shortcutIndex = shortcutIds.indexOf(id)
             const isRenaming = renamingTerminalId === id
             const isDragTarget = dragState?.isDragging === true && dropTargetIndex === index
             const isDragging = dragState?.isDragging === true && dragState.draggingId === id
@@ -338,6 +383,7 @@ export function TabView() {
                   e.stopPropagation()
                   setContextMenu({ terminalId: id, x: e.clientX, y: e.clientY })
                 }}
+                data-testid={`tab-${id}`}
                 className={`titlebar-no-drag group relative flex items-center gap-2 pl-3 pr-10 h-[36px] text-[13px] cursor-pointer
                            transition-colors flex-1 min-w-[120px] max-w-[260px] select-none border-b
                            ${isDragTarget ? 'ring-1 ring-blue-500/50' : ''}
@@ -387,7 +433,7 @@ export function TabView() {
                 )}
 
                 <span className="absolute right-2 top-0 bottom-0 flex items-center gap-1 group-hover:bg-surface-overlay group-hover:rounded-l-sm">
-                  {index < 9 && !isRenaming && (
+                  {shortcutIndex !== -1 && shortcutIndex < 9 && !isRenaming && (
                     <span
                       className="absolute right-0 top-1/2 -translate-y-1/2
                                    opacity-100 group-hover:opacity-0 transition-opacity
@@ -396,7 +442,7 @@ export function TabView() {
                                    pointer-events-none"
                     >
                       {MOD}
-                      {index + 1}
+                      {shortcutIndex + 1}
                     </span>
                   )}
                   {!isRenaming && (
@@ -528,6 +574,13 @@ export function TabView() {
             <PromptLauncher mode="inline" />
           )}
         </div>
+      ) : activeTabId && isPromotedCardId(activeTabId) ? (
+        // A card's tab shows the card, and only the card. The chrome below —
+        // terminal, intent bar, status bar, pane column — all belongs to a
+        // session, and a card is not one.
+        <div className="flex-1 min-h-0 flex" style={{ background: 'var(--color-surface-sunken)' }}>
+          <PromotedPaneCard cardId={activeTabId} />
+        </div>
       ) : (
         <div className="flex-1 min-h-0 flex" style={{ background: 'var(--color-surface-sunken)' }}>
           <div className="flex-1 min-w-0 flex flex-col">
@@ -615,6 +668,92 @@ export function TabView() {
             document.body
           )
         })()}
+    </div>
+  )
+}
+
+/**
+ * A popped-out card's tab.
+ *
+ * Deliberately not the session chip with pieces removed. That chip carries an
+ * agent icon, a status, an assigned task, rename, and toggles for the session's
+ * file and browser panes — a card has none of those, and a file is never
+ * "running". What it shares is the part that matters: it sits in the strip, it
+ * switches on click, it closes on the ✕, and it takes the same Cmd+N position.
+ */
+function CardTab({
+  cardId,
+  shortcutIndex,
+  isActive,
+  registerRef,
+  onSelect,
+  onClose
+}: {
+  cardId: string
+  /** Position in the Cmd+1-9 list, or -1 when no shortcut reaches this tab. */
+  shortcutIndex: number
+  isActive: boolean
+  /**
+   * Card tabs carry no drag handle — a card has no position of its own — but
+   * they must still measure, or the drop indicator jumps over their slot while
+   * a session tab is dragged across them.
+   */
+  registerRef: (el: HTMLDivElement | null) => void
+  onSelect: () => void
+  onClose: () => void
+}) {
+  const subject = usePromotedCardSubject(cardId)
+
+  if (!subject) return null
+
+  return (
+    <div
+      role="tab"
+      tabIndex={0}
+      aria-selected={isActive}
+      ref={registerRef}
+      data-testid={`tab-${cardId}`}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      className={`titlebar-no-drag group relative flex items-center gap-2 pl-3 pr-10 h-[36px] text-[13px]
+                 cursor-pointer transition-colors flex-1 min-w-[120px] max-w-[260px] select-none border-b
+                 ${isActive ? 'text-white border-white' : 'text-gray-500 hover:text-gray-300 border-transparent'}`}
+    >
+      <CardSubjectIcon card={subject} />
+
+      <span className="truncate flex-1 min-w-0" title={subject.name}>
+        {subject.name}
+      </span>
+
+      <span className="absolute right-2 top-0 bottom-0 flex items-center gap-1 group-hover:bg-surface-overlay group-hover:rounded-l-sm">
+        {shortcutIndex !== -1 && shortcutIndex < 9 && (
+          <span
+            className="absolute right-0 top-1/2 -translate-y-1/2
+                       opacity-100 group-hover:opacity-0 transition-opacity
+                       px-1 py-0.5 text-[9px] font-mono text-gray-500
+                       bg-white/[0.06] border border-white/[0.1] rounded leading-none
+                       pointer-events-none"
+          >
+            {MOD}
+            {shortcutIndex + 1}
+          </span>
+        )}
+        {/* No confirm popover, unlike a session's tab: closing a card is not
+            ending a running agent. It still asks about an unsaved buffer —
+            `closeCard` owns that question, so every ✕ that reaches a card asks
+            it the same way. */}
+        <TabIconButton
+          label={`Close ${subject.name}`}
+          icon={<X size={13} strokeWidth={2} />}
+          onClick={onClose}
+          hoverClass="hover:text-gray-200 hover:bg-white/[0.1]"
+        />
+      </span>
     </div>
   )
 }

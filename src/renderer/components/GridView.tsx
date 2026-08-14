@@ -1,4 +1,4 @@
-import { memo, useRef, useState, useCallback, useMemo, useEffect } from 'react'
+import { forwardRef, memo, useRef, useState, useCallback, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { motion } from 'framer-motion'
@@ -7,6 +7,8 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { useAppStore } from '../stores'
 import { AgentCard } from './AgentCard'
+import { PromotedPaneCard } from './PromotedPaneCard'
+import { isPromotedCardId } from '../lib/pane-id'
 import { PromptLauncher } from './PromptLauncher'
 import { GridContextMenu } from './GridContextMenu'
 import { AgentIcon } from './AgentIcon'
@@ -202,9 +204,9 @@ export const GridView = memo(function GridView() {
 
   const handlePointerUp = useCallback(() => {
     if (dragState?.isDragging && dropTargetIndex !== null) {
-      const fromIndex = orderedIds.indexOf(dragState.draggingId)
-      if (fromIndex !== -1 && dropTargetIndex !== -1 && fromIndex !== dropTargetIndex) {
-        reorderTerminals(fromIndex, dropTargetIndex)
+      const droppedOnId = orderedIds[dropTargetIndex]
+      if (droppedOnId && droppedOnId !== dragState.draggingId) {
+        reorderTerminals(dragState.draggingId, droppedOnId)
       }
     }
     setDragState(null)
@@ -291,12 +293,12 @@ export const GridView = memo(function GridView() {
         >
           {orderedIds.map((id, index) => (
             <div key={id} className="min-w-0 min-h-0">
-              <AgentCard
+              <GridCell
                 ref={(el) => {
                   if (el) cardRefs.current.set(id, el)
                   else cardRefs.current.delete(id)
                 }}
-                terminalId={id}
+                id={id}
                 index={index}
                 isDragTarget={dragState?.isDragging === true && dropTargetIndex === index}
                 onDragStart={sortMode === 'manual' ? handleDragStart : undefined}
@@ -311,6 +313,43 @@ export const GridView = memo(function GridView() {
       {dragState?.isDragging && <GridDragGhost dragState={dragState} terminals={terminals} />}
     </div>
   )
+})
+
+/**
+ * One cell of the grid: a session's card, or a file or tab popped out of one.
+ *
+ * The grid deals in opaque ids and never learns which it is holding — ordering,
+ * drag, resize, drop targets and the ref map all address a popped-out card
+ * exactly as they address a session. This is the single place the two diverge,
+ * and it diverges on the id alone.
+ */
+const GridCell = forwardRef<
+  HTMLDivElement,
+  {
+    id: string
+    index: number
+    isDragTarget?: boolean
+    onDragStart?: (id: string, e: React.PointerEvent) => void
+    flexible?: boolean
+  }
+>(function GridCell({ id, index, isDragTarget, onDragStart, flexible }, ref) {
+  if (!isPromotedCardId(id)) {
+    return (
+      <AgentCard
+        ref={ref}
+        terminalId={id}
+        index={index}
+        isDragTarget={isDragTarget}
+        onDragStart={onDragStart}
+        flexible={flexible}
+      />
+    )
+  }
+  // No `onDragStart`. A card has no position of its own in the ordered grid —
+  // it is drawn beside the session it came from — so a drag could only ever be
+  // a no-op that showed no ghost and moved nothing. In the flexible layout,
+  // where cells do carry their own rect, `react-grid-layout` provides the drag.
+  return <PromotedPaneCard ref={ref} cardId={id} isDragTarget={isDragTarget} flexible={flexible} />
 })
 
 /* ── Flexible Grid (Grafana-style free positioning) ──────────── */
@@ -344,6 +383,16 @@ function FlexibleGrid({
     useShallow((s) => {
       const keys: Record<string, string> = {}
       for (const id of orderedIds) {
+        // A card is not in `terminals`, so without this it had no key — which
+        // meant the auto-placement branch never ran and every card landed at
+        // the origin on top of the others, and `persistLayout` skipped it, so
+        // dragging one snapped back on every pointerup. Its own id is the key:
+        // unlike a session's, it is already stable for as long as the card
+        // exists.
+        if (isPromotedCardId(id)) {
+          keys[id] = id
+          continue
+        }
         const t = s.terminals.get(id)
         if (!t) continue
         keys[id] = getStableKey(t.session) || id
@@ -451,7 +500,7 @@ function FlexibleGrid({
       >
         {orderedIds.map((id, index) => (
           <div key={id} className="h-full">
-            <AgentCard terminalId={id} index={index} flexible />
+            <GridCell id={id} index={index} flexible />
           </div>
         ))}
       </GridLayout>

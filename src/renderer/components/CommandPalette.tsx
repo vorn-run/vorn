@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../stores'
+import { usePromotedCards } from '../hooks/usePromotedCards'
+import { FileTypeIcon } from './file-icons'
 import { getProjectHostIds, getProjectRemoteHostId, type RecentSession } from '../../shared/types'
 import { SortMode, StatusFilter } from '../stores/types'
 import { AGENT_DEFINITIONS, AGENT_LIST } from '../lib/agent-definitions'
@@ -32,7 +34,8 @@ import {
   Terminal,
   Plug,
   HardDrive,
-  LayoutDashboard
+  LayoutDashboard,
+  Globe
 } from 'lucide-react'
 
 type CommandCategory =
@@ -116,6 +119,7 @@ function useCommands(
 ): Command[] {
   const config = useAppStore((s) => s.config)
   const terminals = useAppStore((s) => s.terminals)
+  const promotedCards = usePromotedCards()
   const worktreeCache = useAppStore((s) => s.worktreeCache)
   const addTerminal = useAppStore((s) => s.addTerminal)
   const setFocusedTerminal = useAppStore((s) => s.setFocusedTerminal)
@@ -285,6 +289,27 @@ function useCommands(
         icon: <AgentIcon agentType={agentType} size={14} />,
         keywords: [kindLabel, term.session.projectName, term.status],
         onExecute: () => setFocusedTerminal(id)
+      })
+    }
+
+    // --- Popped-out cards ---
+    // A card has a grid cell, a tab, a sidebar row, a dock pill and a focus
+    // stage. Leaving it out of here made the palette the one way of reaching a
+    // thing that could not reach half of them.
+    for (const card of promotedCards) {
+      const owner = terminals.get(card.sessionId)?.session
+      commands.push({
+        id: `card:${card.id}`,
+        label: card.name,
+        category: 'terminals',
+        icon:
+          card.kind === 'browser' ? (
+            <Globe size={14} strokeWidth={1.5} />
+          ) : (
+            <FileTypeIcon name={card.name} size={14} />
+          ),
+        keywords: [card.subject, owner?.projectName ?? '', owner?.branch ?? ''].filter(Boolean),
+        onExecute: () => setFocusedTerminal(card.id)
       })
     }
 
@@ -474,6 +499,7 @@ function useCommands(
     return commands
   }, [
     terminals,
+    promotedCards,
     config,
     recentSessions,
     installStatus,

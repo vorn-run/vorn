@@ -21,16 +21,20 @@ vi.mock('../src/renderer/components/FilesCard', () => ({
   FilesCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`files-${sessionId}`} />
 }))
 vi.mock('../src/renderer/components/EditorCard', () => ({
-  EditorCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`editor-${sessionId}`} />
+  EditorCard: ({ sessionId, paneKey }: { sessionId: string; paneKey?: string }) => (
+    <div data-testid={`editor-${paneKey ?? sessionId}`} />
+  )
 }))
 vi.mock('../src/renderer/components/BrowserCard', () => ({
-  BrowserCard: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid={`browser-${sessionId}`} />
+  BrowserCard: ({ sessionId, paneKey }: { sessionId: string; paneKey?: string }) => (
+    <div data-testid={`browser-${paneKey ?? sessionId}`} />
   )
 }))
 
 const { useAppStore } = await import('../src/renderer/stores')
 const { PaneColumn } = await import('../src/renderer/components/PaneColumn')
+const { usePaneColumnEntries } = await import('../src/renderer/hooks/usePaneColumnEntries')
+const { renderHook } = await import('@testing-library/react')
 
 const session = (id: string) =>
   ({
@@ -54,7 +58,12 @@ beforeEach(() => {
       editorPanes: new Map(),
       browserPanes: new Map(),
       cardSplits: {},
-      maximizedPaneId: null
+      maximizedPaneId: null,
+      // Layout decides where a card is drawn, so a test that switches it would
+      // otherwise hand that choice to the next one.
+      config: { defaults: { layoutMode: 'grid' } } as never,
+      focusedTerminalId: null,
+      previewTerminalId: null
     })
   })
 })
@@ -116,6 +125,101 @@ describe('PaneColumn', () => {
     expect(screen.getByTestId('browser-t1')).toBeInTheDocument()
     // One divider, between the two — not one above the first.
     expect(screen.getAllByRole('separator')).toHaveLength(1)
+  })
+
+  it('never draws a popped-out card, whatever the layout', () => {
+    // A card is a thing in its own right — its own cell, its own tab, its own
+    // focus stage. Drawing it back inside its owner is what made it read as
+    // merely displaced from the session: focusing one handed you the whole
+    // session with the file wedged in beside the terminal, and the card then
+    // offered to put itself "back" into the session you were looking at.
+    let cardId = ''
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+
+    for (const state of [{ focusedTerminalId: null }, { focusedTerminalId: 't1' }]) {
+      act(() => useAppStore.setState(state as never))
+      const { unmount } = render(<PaneColumn sessionId="t1" />)
+      expect(screen.queryByTestId(`editor-${cardId}`)).not.toBeInTheDocument()
+      // The session's own panes are unaffected — only cards are excluded.
+      expect(screen.getByTestId('files-t1')).toBeInTheDocument()
+      unmount()
+    }
+  })
+
+  it("does not treat a card as one of the session's own panes", () => {
+    // A card carries its owner's session id and a kind of its own, so a test of
+    // "not a terminal" matched it — and maximizing a popped-out card hid the
+    // terminal of the session it came from, while the card itself did nothing.
+    let cardId = ''
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    const { result } = renderHook(() => usePaneColumnEntries('t1'))
+
+    // The entries are what maximize is matched against, so a card must not be
+    // among them for the owner's card to stay whole.
+    expect(result.current.map((e) => e.id)).toEqual(['files:t1'])
+    expect(result.current.some((e) => e.id === cardId)).toBe(false)
+  })
+
+  it('answers "no panes" for a card id', () => {
+    // `editorPanes` is keyed by pane, so `has(cardId)` is true for an editor
+    // card — and building entries from that yields an `editor:card:<id>` pane
+    // that does not exist. The tab strip passes its active tab id straight in,
+    // which can be a card, so this is reachable.
+    let cardId = ''
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    const { result } = renderHook(() => usePaneColumnEntries(cardId))
+
+    expect(result.current).toEqual([])
+  })
+
+  it('sizes itself rather than trusting the frame to do it', () => {
+    // Every row below is `flex-basis: 0`, so this element has no content height.
+    // Inside a `flex-col` frame that collapses it to nothing — which is exactly
+    // what the tab strip's frame is, and why tab mode showed a band of dead air
+    // where its panes should have been. The card's frame is a row, where the
+    // cross axis stretches and the bug stays hidden.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    const { container } = render(<PaneColumn sessionId="t1" />)
+
+    expect((container.firstElementChild as HTMLElement).className).toContain('h-full')
+  })
+
+  it('answers the frames with the same list it draws', () => {
+    // The frames around the column decide whether to leave room for it. Deciding
+    // that separately is how a column ends up occupying space while drawing
+    // nothing, so they ask this and it is the same list the render walks.
+    const { result, rerender } = renderHook(() => usePaneColumnEntries('t1'))
+    expect(result.current).toEqual([])
+
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    rerender()
+    expect(result.current.map((e) => e.id)).toEqual(['files:t1'])
+
+    // Stable across an unrelated update, or every memo downstream re-runs.
+    const before = result.current
+    act(() => useAppStore.setState({ selectedTerminalId: 'x' } as never))
+    rerender()
+    expect(result.current).toBe(before)
+  })
+
+  it('leaves a session with only a card no column at all', () => {
+    // Not merely empty: reserving one split the card body's width for something
+    // that drew nothing, leaving the terminal at its ratio with a dead band
+    // beside it and no sign of what was holding the space open.
+    act(() => {
+      useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    const { container } = render(<PaneColumn sessionId="t1" />)
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('gives a maximized pane the whole column and hides its siblings', () => {

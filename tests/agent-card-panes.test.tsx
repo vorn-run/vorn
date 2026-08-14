@@ -167,6 +167,22 @@ describe('AgentCard pane column', () => {
     expect(screen.getByTestId('card-terminal-t2')).not.toHaveClass('hidden')
   })
 
+  it('keeps its terminal when one of its own cards is maximized', () => {
+    // A popped-out card carries its owner's session id and a kind of its own,
+    // so "maximized pane whose kind is not terminal" matched it — and the
+    // session that the card came from hid its whole terminal column while the
+    // card itself did not maximize. Nothing on screen explained it.
+    let cardId = ''
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+      useAppStore.getState().setMaximizedPane(cardId)
+    })
+    render(<AgentCard terminalId="t1" />)
+
+    expect(screen.getByTestId('card-terminal-t1')).not.toHaveClass('hidden')
+  })
+
   it('sizes the terminal from the stored split', () => {
     act(() => {
       useAppStore.getState().openFilesPane('t1')

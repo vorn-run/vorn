@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { isPromotedCardId } from '../lib/pane-id'
 import { useAppStore } from '../stores'
 import { StatusFilter } from '../stores/types'
 import { resolveActiveProject, createShellInProject } from '../lib/session-utils'
@@ -254,7 +255,11 @@ export function useKeyboardShortcuts() {
       // F2 — rename focused or selected terminal
       if (e.key === 'F2') {
         const targetId = state.focusedTerminalId || state.selectedTerminalId
-        if (targetId) {
+        // A card's name is its filename or its host — there is nothing to
+        // rename, and no card chrome renders the input. Setting the id anyway
+        // made F2 a dead key that then swallowed the next Escape clearing a
+        // rename nobody could see.
+        if (targetId && !isPromotedCardId(targetId)) {
           e.preventDefault()
           state.setRenamingTerminalId(targetId)
           return
