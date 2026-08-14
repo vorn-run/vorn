@@ -362,6 +362,34 @@ describe('panes travel with their session into focus mode', () => {
     )
   })
 
+  it('carries a popped-out card into focus mode', async () => {
+    // Focused mode gives a card no cell of its own, so it joins the session's
+    // pane stack. Left out it was nowhere at all here, and the sidebar row that
+    // is the only other way to it appeared to do nothing when clicked.
+    act(() => useAppStore.getState().promoteFile('t1', '/repo/popped.ts'))
+    render(<FocusedTerminal />)
+
+    await waitFor(() =>
+      expect(mockReadFileContent).toHaveBeenCalledWith('/repo/popped.ts', undefined, undefined)
+    )
+  })
+
+  it("shows a card beside the session's own editor, not instead of it", async () => {
+    // Two editors on one session in one stack. Keyed by kind, the second would
+    // never be reached and the popped-out file would silently not be there.
+    act(() => {
+      useAppStore.getState().openEditorPane('t1', '/repo/own.ts')
+      useAppStore.getState().promoteFile('t1', '/repo/popped.ts')
+    })
+    render(<FocusedTerminal />)
+
+    await waitFor(() => {
+      const paths = mockReadFileContent.mock.calls.map((c) => c[0])
+      expect(paths).toContain('/repo/own.ts')
+      expect(paths).toContain('/repo/popped.ts')
+    })
+  })
+
   it("carries the session's browser into focus mode too", () => {
     act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
     render(<FocusedTerminal />)

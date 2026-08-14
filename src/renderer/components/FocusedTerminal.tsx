@@ -16,6 +16,8 @@ import { useTerminalScrollButton } from '../hooks/useTerminalScrollButton'
 import { useTerminalPinchZoom } from '../hooks/useTerminalPinchZoom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FilesCard } from './FilesCard'
+import { PromotedPaneCard } from './PromotedPaneCard'
+import { usePromotedCardsFor } from '../hooks/usePromotedCards'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
@@ -69,6 +71,9 @@ export function FocusedTerminal() {
   const hasDevicePane = useAppStore((s) => (effectiveId ? s.devicePanes.has(effectiveId) : false))
   // Shared with the card grid and tab view, so a new pane kind is added once.
   const hasAnyPane = useSessionHasPaneColumn(effectiveId)
+  // Focused mode gives a card no cell of its own, so the session's cards join
+  // its pane stack here — the same fallback the pane column makes.
+  const cards = usePromotedCardsFor(effectiveId ?? '')
   // Maximize is session-scoped in the grid; expanded mode is that same session
   // filling the stage, so a maximized pane has to take the whole body here too.
   // Reading it only for panes this session owns keeps a stale id inert.
@@ -84,7 +89,12 @@ export function FocusedTerminal() {
     maximized && maximized.sessionId === effectiveId && maximized.kind !== 'terminal'
       ? maximized.kind
       : null
+  // A card is matched on pane id, not kind: a session can hold several editors
+  // at once here — its own, plus one per popped-out file — and kind alone would
+  // maximize whichever the stack happened to reach first.
+  const maximizedCardId = cards.some((c) => c.id === maximizedPaneId) ? maximizedPaneId : null
   const hasMaximizedPane =
+    maximizedCardId !== null ||
     (maximizedKind === 'files' && hasFilesPane) ||
     (maximizedKind === 'editor' && hasEditorPane) ||
     (maximizedKind === 'browser' && hasBrowserPane) ||
@@ -292,25 +302,46 @@ export function FocusedTerminal() {
               }`}
             >
               {hasFilesPane && (
-                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'files'}>
+                <PaneSlot
+                  hidden={
+                    hasMaximizedPane && (maximizedCardId !== null || maximizedKind !== 'files')
+                  }
+                >
                   <FilesCard sessionId={effectiveId} />
                 </PaneSlot>
               )}
               {hasEditorPane && (
-                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'editor'}>
+                <PaneSlot
+                  hidden={
+                    hasMaximizedPane && (maximizedCardId !== null || maximizedKind !== 'editor')
+                  }
+                >
                   <EditorCard sessionId={effectiveId} />
                 </PaneSlot>
               )}
               {hasBrowserPane && (
-                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'browser'}>
+                <PaneSlot
+                  hidden={
+                    hasMaximizedPane && (maximizedCardId !== null || maximizedKind !== 'browser')
+                  }
+                >
                   <BrowserCard sessionId={effectiveId} />
                 </PaneSlot>
               )}
               {hasDevicePane && (
-                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'device'}>
+                <PaneSlot
+                  hidden={
+                    hasMaximizedPane && (maximizedCardId !== null || maximizedKind !== 'device')
+                  }
+                >
                   <DeviceCard sessionId={effectiveId} />
                 </PaneSlot>
               )}
+              {cards.map((card) => (
+                <PaneSlot key={card.id} hidden={hasMaximizedPane && maximizedCardId !== card.id}>
+                  <PromotedPaneCard cardId={card.id} />
+                </PaneSlot>
+              ))}
             </div>
           )}
         </div>

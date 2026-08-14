@@ -5,6 +5,7 @@ import { paneIdFor, type PaneChildKind } from '../lib/pane-id'
 import { usePromotedCardsFor } from '../hooks/usePromotedCards'
 import { useCardsDrawnAsCells } from '../hooks/useCardsDrawnAsCells'
 import { FilesCard } from './FilesCard'
+import { PromotedPaneCard } from './PromotedPaneCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
@@ -88,13 +89,10 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
   }
 
   const render = (entry: ColumnEntry): ReactNode => {
-    if (entry.cardKey) {
-      return entry.kind === 'browser' ? (
-        <BrowserCard sessionId={sessionId} paneKey={entry.cardKey} />
-      ) : (
-        <EditorCard sessionId={sessionId} paneKey={entry.cardKey} />
-      )
-    }
+    // One dispatcher for cards, shared with the grid and the tab strip. Three
+    // places drawing a card is three chances for them to disagree about what a
+    // card even is.
+    if (entry.cardKey) return <PromotedPaneCard cardId={entry.cardKey} />
     if (entry.kind === 'files') return <FilesCard sessionId={sessionId} />
     if (entry.kind === 'editor') return <EditorCard sessionId={sessionId} />
     if (entry.kind === 'browser') return <BrowserCard sessionId={sessionId} />
