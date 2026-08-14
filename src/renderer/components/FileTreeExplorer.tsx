@@ -213,8 +213,13 @@ function TreeNode({
           }}
           aria-label={`Open ${entry.name} as its own card`}
           title="Open as its own card"
+          // Hover-revealed here, unlike the pane's own controls. A tree is
+          // hundreds of rows deep: a control drawn at rest on every one of them
+          // is a column of arrows down the whole panel, and the thing being
+          // read — the filenames — has to compete with it. The editor pane
+          // carries a control that is always there, for the file you have open.
           className="shrink-0 p-0.5 rounded text-ink-ghost hover:text-white hover:bg-white/[0.08]
-                     transition-colors"
+                     opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
         >
           <SquareArrowOutUpRight size={11} strokeWidth={2} />
         </button>

@@ -1,11 +1,15 @@
 import { useAppStore } from '../stores'
 import { useShallow } from 'zustand/react/shallow'
 import { AgentIcon } from './AgentIcon'
+import { FileTypeIcon } from './file-icons'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { STATUS_DOT } from '../lib/status-colors'
-import { GitBranch, FolderGit2 } from 'lucide-react'
+import { GitBranch, FolderGit2, Globe } from 'lucide-react'
 import { paneOwnerId, isPromotedCardId } from '../lib/pane-id'
 import { displayHost } from '../lib/browser-url'
+
+/** What a minimized card is, enough to name it and draw its icon. */
+type CardSubject = { kind: 'editor'; fileName: string } | { kind: 'browser'; host: string }
 
 /**
  * A stowed grid cell, and the way back to it.
@@ -15,25 +19,18 @@ import { displayHost } from '../lib/browser-url'
  * the id rather than looking the id up directly — which for a card found
  * nothing, and rendered nothing, stranding it with no way to restore it.
  *
- * A card's pill wears its owner's name and status, because that is what someone
- * scanning the dock is looking for; the file or host is what distinguishes it
- * from the session's own pill sitting next to it.
+ * A card's pill is the card's own: its file icon or a globe, and its filename or
+ * host. It borrows none of the session's chrome — no agent icon, no status dot,
+ * because a file has no agent and is never "running", and a pill that showed
+ * both would be claiming a state the thing does not have. The branch still
+ * shows, since that is which copy of the file you are looking at.
  */
 export function MinimizedPill({ terminalId }: { terminalId: string }) {
   const sessionId = paneOwnerId(terminalId)
-  const { terminal, cardLabel, toggleMinimized, setActiveTabId } = useAppStore(
+  const { terminal, card, toggleMinimized, setActiveTabId } = useAppStore(
     useShallow((s) => ({
       terminal: s.terminals.get(sessionId),
-      cardLabel: !isPromotedCardId(terminalId)
-        ? null
-        : (() => {
-            const editor = s.editorPanes.get(terminalId)
-            if (editor) return editor.filePath.split(/[/\\]/).pop() ?? null
-            const browser = s.browserPanes.get(terminalId)
-            if (browser)
-              return displayHost(browser.tabs[browser.activeTab] ?? browser.tabs[0] ?? '')
-            return null
-          })(),
+      card: !isPromotedCardId(terminalId) ? null : readCardSubject(s, terminalId),
       toggleMinimized: s.toggleMinimized,
       setActiveTabId: s.setActiveTabId
     }))
@@ -57,24 +54,28 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
       }}
       title="Click to restore"
     >
-      <span
-        className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[status]} ${
-          status === 'running' ? 'animate-pulse' : ''
-        }`}
-      />
-
-      <AgentIcon agentType={session.agentType} size={14} />
-
-      <span className="text-[11px] font-medium text-gray-200 truncate max-w-[120px]">
-        {getDisplayName(session)}
-      </span>
-
-      {cardLabel && (
+      {card ? (
+        <span className="shrink-0 flex items-center justify-center w-[14px] h-[14px]">
+          {card.kind === 'browser' ? (
+            <Globe size={14} strokeWidth={1.5} className="text-ink-faint" />
+          ) : (
+            <FileTypeIcon name={card.fileName} size={14} />
+          )}
+        </span>
+      ) : (
         <>
-          <span className="text-[10px] text-gray-600 shrink-0">&middot;</span>
-          <span className="text-[10px] text-ink-secondary truncate max-w-[110px]">{cardLabel}</span>
+          <span
+            className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[status]} ${
+              status === 'running' ? 'animate-pulse' : ''
+            }`}
+          />
+          <AgentIcon agentType={session.agentType} size={14} />
         </>
       )}
+
+      <span className="text-[11px] font-medium text-gray-200 truncate max-w-[120px]">
+        {card ? (card.kind === 'browser' ? card.host : card.fileName) : getDisplayName(session)}
+      </span>
 
       {session.branch && (
         <>
@@ -91,4 +92,23 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
       )}
     </button>
   )
+}
+
+function readCardSubject(
+  state: {
+    editorPanes: Map<string, { filePath: string }>
+    browserPanes: Map<string, { tabs: string[]; activeTab: number }>
+  },
+  cardId: string
+): CardSubject | null {
+  const editor = state.editorPanes.get(cardId)
+  if (editor) return { kind: 'editor', fileName: editor.filePath.split(/[/\\]/).pop() ?? '' }
+  const browser = state.browserPanes.get(cardId)
+  if (browser) {
+    return {
+      kind: 'browser',
+      host: displayHost(browser.tabs[browser.activeTab] ?? browser.tabs[0] ?? '')
+    }
+  }
+  return null
 }

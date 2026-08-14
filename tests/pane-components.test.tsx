@@ -214,16 +214,16 @@ describe('PaneCard chrome', () => {
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
   })
 
-  it('offers pop-out on every file row without waiting for a hover', async () => {
-    // Hover-revealed, these read as absent: you look at the tree, see no way to
-    // pop a file out, and conclude the feature is missing. The pane's own
-    // controls have never been hover-revealed for exactly this reason.
+  it('offers pop-out on every file row', async () => {
     act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
+    // Revealed on hover, deliberately: a tree is hundreds of rows, and a
+    // control drawn at rest on each of them buries the filenames. The always-
+    // there control lives on the editor pane, for the file you have open.
     const popOut = screen.getByRole('button', { name: /Open a\.ts as its own card/ })
-    expect(popOut.className).not.toContain('opacity-0')
+    expect(popOut.className).toContain('group-hover:opacity-100')
 
     fireEvent.click(popOut)
     const cards = [...useAppStore.getState().editorPanes].filter(([id]) => id !== 't1')
