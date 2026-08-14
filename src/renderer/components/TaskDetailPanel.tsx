@@ -589,7 +589,7 @@ export function TaskDetailPanel() {
   return (
     <div
       className="shrink-0 flex flex-col border-l border-white/[0.08] overflow-hidden"
-      style={{ width: panelWidth, background: '#141416' }}
+      style={{ width: panelWidth, background: 'var(--color-surface-sunken)' }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
@@ -645,7 +645,7 @@ export function TaskDetailPanel() {
               }}
             >
               <Tooltip label="Delete task" position="bottom">
-                <button className="p-1 text-gray-600 hover:text-red-400 rounded transition-colors">
+                <button className="p-1 text-gray-600 hover:text-danger rounded transition-colors">
                   <Trash2 size={13} strokeWidth={1.5} />
                 </button>
               </Tooltip>
@@ -708,7 +708,7 @@ export function TaskDetailPanel() {
             <button
               onClick={() => setFormUseWorktree(!formUseWorktree)}
               className={`flex items-center gap-1.5 hover:bg-white/[0.04] rounded px-1.5 py-0.5 -mx-1.5 transition-colors ${
-                formUseWorktree ? 'text-amber-400' : 'text-gray-500'
+                formUseWorktree ? 'text-ink-secondary' : 'text-gray-500'
               }`}
             >
               <FolderGit2 size={13} strokeWidth={1.5} />
@@ -821,7 +821,7 @@ export function TaskDetailPanel() {
                   <button
                     onClick={() => handleRemoveImage(filename)}
                     className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center
-                                 opacity-0 group-hover/img:opacity-100 transition-opacity text-white hover:text-red-400"
+                                 opacity-0 group-hover/img:opacity-100 transition-opacity text-white hover:text-danger"
                   >
                     <X size={10} strokeWidth={3} />
                   </button>
@@ -846,8 +846,8 @@ export function TaskDetailPanel() {
               <button
                 onClick={handleFocusSession}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium
-                           bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20
-                           rounded-md transition-colors text-violet-400 hover:text-violet-300"
+                           bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08]
+                           rounded-md transition-colors text-ink-secondary hover:text-ink"
               >
                 <Terminal size={12} strokeWidth={2} />
                 Focus Session
@@ -857,8 +857,8 @@ export function TaskDetailPanel() {
               <button
                 onClick={handleResumeSession}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium
-                           bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20
-                           rounded-md transition-colors text-amber-400 hover:text-amber-300"
+                           bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08]
+                           rounded-md transition-colors text-ink-secondary hover:text-ink"
               >
                 <Play size={12} strokeWidth={2} />
                 Resume Session
@@ -914,8 +914,8 @@ export function TaskDetailPanel() {
               Changes
               {stat && (
                 <span className="flex items-center gap-1.5 font-mono normal-case">
-                  <span className="text-green-400">+{stat.insertions}</span>
-                  <span className="text-red-400">-{stat.deletions}</span>
+                  <span className="text-ink-secondary">+{stat.insertions}</span>
+                  <span className="text-ink-faint">-{stat.deletions}</span>
                 </span>
               )}
               <div className="flex-1" />
@@ -952,9 +952,9 @@ export function TaskDetailPanel() {
               <>
                 {/* Review feedback bar */}
                 {comments.length > 0 && (
-                  <div className="px-3 py-2 border-t border-purple-500/15 bg-purple-500/[0.05] flex items-center gap-2">
-                    <MessageSquare size={13} className="text-purple-400 shrink-0" />
-                    <span className="text-[12px] text-purple-300 flex-1">
+                  <div className="px-3 py-2 border-t border-white/[0.08] bg-white/[0.02] flex items-center gap-2">
+                    <MessageSquare size={13} className="text-ink-secondary shrink-0" />
+                    <span className="text-[12px] text-ink-secondary flex-1">
                       {comments.length} comment{comments.length !== 1 ? 's' : ''}
                     </span>
                     <button
@@ -966,8 +966,8 @@ export function TaskDetailPanel() {
                     <button
                       onClick={handleSendFeedback}
                       className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium
-                                 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/20
-                                 rounded-md transition-colors text-purple-300 hover:text-purple-200"
+                                 bg-ink hover:bg-white text-surface-base
+                                 rounded-md transition-colors"
                     >
                       <Send size={11} strokeWidth={2} />
                       {task?.agentSessionId ? 'Send to Agent' : 'Copy Feedback'}

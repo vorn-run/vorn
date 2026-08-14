@@ -118,7 +118,7 @@ export function KanbanCardMenu({
       icon: sessionIsLive ? Terminal : Play,
       label: sessionIsLive ? 'Focus session' : 'Resume session',
       onClick: () => handleAction(onOpenSession),
-      className: sessionIsLive ? 'text-violet-400' : 'text-amber-400'
+      className: sessionIsLive ? 'text-ink' : 'text-ink-secondary'
     })
   }
   if (status === 'in_review' && onReviewDiff) {
@@ -126,7 +126,7 @@ export function KanbanCardMenu({
       icon: FileCode,
       label: 'Review diff',
       onClick: () => handleAction(onReviewDiff),
-      className: 'text-purple-400'
+      className: 'text-ink-secondary'
     })
   }
   if (status === 'in_review' && onComplete) {
@@ -134,7 +134,7 @@ export function KanbanCardMenu({
       icon: CheckCircle2,
       label: 'Mark as done',
       onClick: () => handleAction(onComplete),
-      className: 'text-green-400'
+      className: 'text-ink-secondary'
     })
   }
   if (status === 'cancelled' && onReopen) {
@@ -142,7 +142,7 @@ export function KanbanCardMenu({
       icon: RotateCcw,
       label: 'Reopen task',
       onClick: () => handleAction(onReopen),
-      className: 'text-amber-400'
+      className: 'text-ink-secondary'
     })
   }
 
@@ -159,7 +159,7 @@ export function KanbanCardMenu({
       label: 'Cancel task',
       onClick: () => handleAction(onCancel!),
       separator: true,
-      className: 'text-red-400'
+      className: 'text-danger'
     })
   }
 
@@ -187,7 +187,7 @@ export function KanbanCardMenu({
     label: 'Delete',
     onClick: () => setConfirmingDelete(true),
     separator: !deleteHasSiblingSeparator,
-    className: 'text-red-400'
+    className: 'text-danger'
   })
 
   return (
@@ -230,7 +230,7 @@ export function KanbanCardMenu({
                     </button>
                     <button
                       onClick={() => handleAction(onDelete)}
-                      className="px-2 py-1 text-[11px] font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-md transition-colors"
+                      className="px-2 py-1 text-[11px] font-medium text-danger bg-danger/10 hover:bg-danger/20 border border-danger/20 rounded-md transition-colors"
                     >
                       Delete
                     </button>

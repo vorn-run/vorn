@@ -12,7 +12,7 @@ import { ListTodo } from 'lucide-react'
 import { toast } from './Toast'
 import { useWorkspaceProjects } from '../hooks/useWorkspaceProjects'
 
-const ROOT_STYLE = { background: '#141416' }
+const ROOT_STYLE = { background: 'var(--color-surface-sunken)' }
 
 export function TaskBoardView() {
   const activeProject = useAppStore((s) => s.activeProject)

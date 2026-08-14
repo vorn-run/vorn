@@ -292,7 +292,7 @@ export function AddTaskDialog() {
                         <button
                           onClick={() => handleRemoveImage(filename)}
                           className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center
-                                     opacity-0 group-hover/img:opacity-100 transition-opacity text-white hover:text-red-400"
+                                     opacity-0 group-hover/img:opacity-100 transition-opacity text-white hover:text-danger"
                         >
                           <X size={10} strokeWidth={3} />
                         </button>

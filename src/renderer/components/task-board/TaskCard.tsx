@@ -5,7 +5,8 @@ import {
   TASK_STATUS_ICON,
   TASK_STATUS_TEXT,
   formatTaskDate,
-  getTaskShortId
+  getTaskShortId,
+  TASK_LIVE_DOT
 } from '../../lib/task-status'
 import {
   Pencil,
@@ -129,7 +130,7 @@ export function TaskCard({
                 <span className="flex items-center gap-1">
                   <AgentIcon agentType={task.assignedAgent} size={13} />
                   {sessionIsLive && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse-dot" />
+                    <span className={`w-1.5 h-1.5 rounded-full ${TASK_LIVE_DOT}`} />
                   )}
                 </span>
               )}

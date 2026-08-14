@@ -4,11 +4,16 @@ import { GitFileDiff } from '../../shared/types'
 import { X, MessageSquare } from 'lucide-react'
 import { FileTypeIcon } from './file-icons'
 
+/**
+ * The letter already says which. Four hues for four categories is the pattern
+ * the rest of this pass removed — the diff body below keeps its green and red,
+ * because that is the work itself rather than a label describing it.
+ */
 const STATUS_COLORS: Record<string, { color: string; label: string }> = {
-  modified: { color: 'text-yellow-400', label: 'M' },
-  added: { color: 'text-green-400', label: 'A' },
-  deleted: { color: 'text-red-400', label: 'D' },
-  renamed: { color: 'text-blue-400', label: 'R' }
+  modified: { color: 'text-ink-secondary', label: 'M' },
+  added: { color: 'text-ink-secondary', label: 'A' },
+  deleted: { color: 'text-ink-secondary', label: 'D' },
+  renamed: { color: 'text-ink-secondary', label: 'R' }
 }
 
 export interface DiffComment {
@@ -43,8 +48,10 @@ export function DiffFileList({
             <FileTypeIcon name={fileName} size={15} />
             <span className="flex-1 min-w-0 truncate text-gray-300 font-mono">{file.filePath}</span>
             <span className="shrink-0 flex items-center gap-1.5 text-[11px] font-mono">
-              {file.insertions > 0 && <span className="text-green-400">+{file.insertions}</span>}
-              {file.deletions > 0 && <span className="text-red-400">-{file.deletions}</span>}
+              {file.insertions > 0 && (
+                <span className="text-ink-secondary">+{file.insertions}</span>
+              )}
+              {file.deletions > 0 && <span className="text-ink-faint">-{file.deletions}</span>}
             </span>
             <span className={`shrink-0 text-[10px] font-bold ${meta.color}`}>{meta.label}</span>
           </button>
@@ -78,7 +85,7 @@ function InlineCommentInput({
   }
 
   return (
-    <div className="mx-2 my-1 bg-blue-500/[0.08] border border-blue-500/20 rounded-md p-2">
+    <div className="mx-2 my-1 bg-white/[0.04] border border-white/[0.10] rounded-md p-2">
       <textarea
         ref={inputRef}
         value={text}
@@ -87,7 +94,7 @@ function InlineCommentInput({
         placeholder="Add review comment..."
         rows={2}
         className="w-full px-2 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded text-xs
-                   text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500/30
+                   text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/[0.20]
                    resize-none font-mono"
       />
       <div className="flex items-center justify-between mt-1.5">
@@ -102,7 +109,7 @@ function InlineCommentInput({
           <button
             onClick={() => text.trim() && onSubmit(text.trim())}
             disabled={!text.trim()}
-            className="px-2 py-1 text-[10px] font-medium text-blue-400 hover:text-blue-300
+            className="px-2 py-1 text-[10px] font-medium text-ink hover:text-white
                        disabled:opacity-30 transition-colors"
           >
             Comment
@@ -115,12 +122,12 @@ function InlineCommentInput({
 
 function CommentBadge({ comment, onRemove }: { comment: DiffComment; onRemove: () => void }) {
   return (
-    <div className="mx-2 my-0.5 bg-blue-500/[0.06] border border-blue-500/15 rounded-md px-3 py-1.5 flex items-start gap-2">
-      <MessageSquare size={11} className="text-blue-400 mt-0.5 shrink-0" />
-      <span className="text-xs text-blue-300 flex-1">{comment.comment}</span>
+    <div className="mx-2 my-0.5 bg-white/[0.03] border border-white/[0.08] rounded-md px-3 py-1.5 flex items-start gap-2">
+      <MessageSquare size={11} className="text-ink-secondary mt-0.5 shrink-0" />
+      <span className="text-xs text-ink-secondary flex-1">{comment.comment}</span>
       <button
         onClick={onRemove}
-        className="text-gray-600 hover:text-red-400 p-0.5 shrink-0 transition-colors"
+        className="text-gray-600 hover:text-danger p-0.5 shrink-0 transition-colors"
       >
         <X size={10} strokeWidth={2} />
       </button>
@@ -190,7 +197,7 @@ export function DiffContent({
               <span className="text-gray-300 flex-1 min-w-0 truncate">{file.filePath}</span>
               <span className={`${meta.color} text-[10px] font-bold shrink-0`}>{meta.label}</span>
               {fileCommentCount > 0 && (
-                <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded-full ml-auto">
+                <span className="text-[10px] text-ink-secondary bg-white/[0.06] px-1.5 py-0.5 rounded-full ml-auto">
                   {fileCommentCount} comment{fileCommentCount !== 1 ? 's' : ''}
                 </span>
               )}
@@ -241,7 +248,7 @@ function parseDiffLines(
       newLine = parseInt(hunkMatch[2], 10)
       inHunk = true
       nodes.push(
-        <div key={lineIndex} className="bg-blue-500/10 text-blue-300 px-3 py-0.5 select-text">
+        <div key={lineIndex} className="bg-white/[0.05] text-ink-secondary px-3 py-0.5 select-text">
           {line}
         </div>
       )
@@ -290,7 +297,7 @@ function parseDiffLines(
           </span>
           <span className="text-green-300 px-1 flex-1">{line.slice(1) || ' '}</span>
           {isCommentable && (
-            <span className="opacity-0 group-hover/line:opacity-100 pr-2 text-blue-400 transition-opacity shrink-0">
+            <span className="opacity-0 group-hover/line:opacity-100 pr-2 text-ink-secondary transition-opacity shrink-0">
               <MessageSquare size={11} strokeWidth={2} />
             </span>
           )}
@@ -312,7 +319,7 @@ function parseDiffLines(
           </span>
           <span className="text-red-300 px-1 flex-1">{line.slice(1) || ' '}</span>
           {isCommentable && (
-            <span className="opacity-0 group-hover/line:opacity-100 pr-2 text-blue-400 transition-opacity shrink-0">
+            <span className="opacity-0 group-hover/line:opacity-100 pr-2 text-ink-secondary transition-opacity shrink-0">
               <MessageSquare size={11} strokeWidth={2} />
             </span>
           )}

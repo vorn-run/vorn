@@ -51,6 +51,9 @@ describe('TaskBoardView', () => {
     const { container, getByText } = render(<TaskBoardView />)
     expect(getByText(/No tasks yet/i)).toBeInTheDocument()
     const root = container.firstElementChild as HTMLElement
-    expect(root.style.background).toBe('rgb(20, 20, 22)')
+    // The board reads the surface ladder rather than restating a hex. Asserting
+    // the token keeps this from breaking every time the ladder is retuned — the
+    // literal it used to pin was one of two copies of the same value.
+    expect(root.style.background).toBe('var(--color-surface-sunken)')
   })
 })
