@@ -60,9 +60,13 @@ export function TaskCard({
 
   if (variant === 'kanban') {
     return (
+      // The same relationship a workflow node has to its canvas: an opaque rung of
+      // the ladder plus a hairline, not a translucent wash. A wash over the field
+      // greys toward the white it is made of, which is why these cards read pale
+      // while nodes at the same lightness read as part of the app.
       <div
-        className={`group relative bg-white/[0.04] border border-white/[0.06] rounded-sm overflow-hidden
-                     hover:bg-white/[0.06] hover:border-white/[0.1]
+        className={`group relative bg-surface-raised border border-white/[0.08] rounded-md overflow-hidden
+                     hover:border-white/[0.16]
                      transition-colors duration-150
                      ${dimmed ? 'opacity-60' : ''} ${onSelect ? 'cursor-pointer' : ''}`}
         onClick={onSelect}

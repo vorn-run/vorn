@@ -168,7 +168,7 @@ export function RightPanel() {
     <>
       <div
         className="relative flex min-h-0 flex-col border-l border-white/[0.06] shrink-0"
-        style={{ width: computedWidth, background: '#141416' }}
+        style={{ width: computedWidth, background: 'var(--color-surface-panel)' }}
       >
         {/* Resize handle */}
         <div

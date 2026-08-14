@@ -589,7 +589,7 @@ export function TaskDetailPanel() {
   return (
     <div
       className="shrink-0 flex flex-col border-l border-white/[0.08] overflow-hidden"
-      style={{ width: panelWidth, background: 'var(--color-surface-sunken)' }}
+      style={{ width: panelWidth, background: 'var(--color-surface-panel)' }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >

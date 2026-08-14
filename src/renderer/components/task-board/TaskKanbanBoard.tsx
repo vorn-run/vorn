@@ -98,11 +98,15 @@ export function TaskKanbanBoard({
         const iconColor = TASK_STATUS_TEXT[col.status]
         const isDragOver = dragOverCol === col.status
 
+        // A column is a region of the board, not a material laid on top of it. The
+        // white wash it used to carry lit five tall slabs a step above the field,
+        // which is what made this surface read pale beside the workflow canvas —
+        // there the field shows through and only the nodes lift off it.
         return (
           <div
             key={col.status}
             className={`group/col flex-1 min-w-0 min-h-0 flex flex-col rounded-lg transition-all duration-200 ${
-              isDragOver ? 'bg-white/[0.04] ring-1 ring-inset ring-white/[0.1]' : 'bg-white/[0.02]'
+              isDragOver ? 'bg-white/[0.04] ring-1 ring-inset ring-white/[0.1]' : ''
             }`}
             onDragOver={handleDragOver}
             onDragEnter={() => handleDragEnter(col.status)}

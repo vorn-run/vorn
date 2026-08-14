@@ -12,7 +12,9 @@ import { ListTodo } from 'lucide-react'
 import { toast } from './Toast'
 import { useWorkspaceProjects } from '../hooks/useWorkspaceProjects'
 
-const ROOT_STYLE = { background: 'var(--color-surface-sunken)' }
+// The field the whole view sits on, the same rung the workflow canvas uses.
+// It was a step higher, which is why tasks read pale next to workflows.
+const ROOT_STYLE = { background: 'var(--color-surface-base)' }
 
 export function TaskBoardView() {
   const activeProject = useAppStore((s) => s.activeProject)

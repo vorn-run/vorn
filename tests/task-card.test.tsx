@@ -87,6 +87,17 @@ describe('TaskCard', () => {
     })
   }
 
+  it('lifts a kanban card off the field with a ladder rung, not a wash', () => {
+    // A translucent white fill greys toward the white it is made of, so these
+    // cards read pale while workflow nodes at the same lightness read as part
+    // of the app. Same relationship, so the same treatment: an opaque surface
+    // token plus a hairline.
+    const { container } = render(<TaskCard {...base} task={task()} variant="kanban" />)
+    const card = container.firstElementChild as HTMLElement
+    expect(card.className).toContain('bg-surface-raised')
+    expect(card.className).not.toMatch(/(^|\s)bg-white\//)
+  })
+
   it('marks a live session with the one moving thing on the board', () => {
     // Motion is a report of work in progress; nothing else on this surface
     // moves. The dot only appears once an agent is actually assigned.

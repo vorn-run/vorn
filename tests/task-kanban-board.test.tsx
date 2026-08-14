@@ -66,6 +66,16 @@ describe('TaskKanbanBoard', () => {
     expect(scrollContainers.length).toBeGreaterThanOrEqual(1)
   })
 
+  it('leaves the field showing through a column at rest', () => {
+    // A column groups cards; it is not a material sitting on the board. Filling
+    // it lit five tall slabs a step above the field and is what made this view
+    // read pale beside the workflow canvas, where only the nodes lift.
+    const { container } = render(<TaskKanbanBoard allTasks={[]} {...defaultProps} />)
+    container.querySelectorAll('.group\\/col').forEach((col) => {
+      expect(col.className).not.toMatch(/(^|\s)bg-/)
+    })
+  })
+
   it('renders cards inside the correct column', () => {
     const tasks = [
       makeTask({ status: 'todo', order: 0 }),
