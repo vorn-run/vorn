@@ -420,7 +420,7 @@ export const BrowserCard = memo(
             aria-label="Pick an element for the agent"
             aria-pressed={picking}
             title="Point at an element to describe it to this session's agent"
-            className={`${btn} ml-1 ${picking ? 'text-sky-400 bg-white/[0.06]' : ''}`}
+            className={`${btn} ml-1 ${picking ? 'text-ink bg-white/[0.10]' : ''}`}
           >
             <MousePointerClick size={14} strokeWidth={2} />
           </button>
@@ -429,7 +429,7 @@ export const BrowserCard = memo(
             aria-label={annotating ? 'Send the annotation' : 'Draw on the page for the agent'}
             aria-pressed={annotating}
             title="Draw over the page, then click again to send it to this session's agent"
-            className={`${btn} ${annotating ? 'text-sky-400 bg-white/[0.06]' : ''}`}
+            className={`${btn} ${annotating ? 'text-ink bg-white/[0.10]' : ''}`}
           >
             <Pencil size={14} strokeWidth={2} />
           </button>

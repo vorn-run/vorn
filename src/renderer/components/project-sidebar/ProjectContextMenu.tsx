@@ -31,8 +31,7 @@ export function ProjectContextMenu({
     <div
       ref={menuRef}
       className="absolute right-0 top-full mt-1 z-50 min-w-[140px] py-1
-                 border border-white/[0.08] rounded-lg shadow-xl"
-      style={{ background: '#141416' }}
+                 bg-surface-overlay border border-white/[0.08] rounded-lg shadow-xl"
     >
       <button
         onClick={() => {

@@ -482,7 +482,9 @@ function GridDragGhost({
         top: dragState.pointerY - dragState.offsetY,
         width: dragState.width,
         zIndex: 9999,
-        background: '#1a1a1e',
+        // A card under the cursor is the one thing that genuinely floats over
+        // the page, which is what the overlay rung is for.
+        background: 'var(--color-surface-overlay)',
         boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)'
       }}
     >
