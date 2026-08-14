@@ -122,6 +122,25 @@ describe('PromotedCardItem', () => {
     expect(closeCard).toHaveBeenCalledWith('card:t1:0')
   })
 
+  it('is reachable from the keyboard, not only the pointer', () => {
+    // The row is a div with role=button — it carries buttons of its own, and a
+    // button inside a button is invalid markup — so Enter and Space are code
+    // here rather than something the platform provides.
+    render(<PromotedCardItem card={fileCard} />)
+    const row = screen.getByText('server.ts').closest('[role="button"]') as HTMLElement
+
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(setSelected).toHaveBeenCalledWith('card:t1:0')
+
+    setSelected.mockClear()
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(setSelected).toHaveBeenCalledWith('card:t1:0')
+
+    setSelected.mockClear()
+    fireEvent.keyDown(row, { key: 'a' })
+    expect(setSelected).not.toHaveBeenCalled()
+  })
+
   it('closes through the one action that asks about unsaved edits', () => {
     // Not `closeEditorPane`/`closeBrowserPane` directly. This row and the card's
     // tab both used to pick the collection themselves and close it outright,

@@ -205,3 +205,123 @@ describe('SessionItem device control', () => {
     expect(deviceRelease).toHaveBeenCalledWith(session.id)
   })
 })
+
+/**
+ * A session's popped-out cards are listed beneath its row, so the row is now a
+ * fragment rather than a single button — and the rows below it have to be
+ * reachable, not merely rendered.
+ */
+describe('SessionItem with popped-out cards', () => {
+  beforeEach(() => {
+    seedProject(WEB)
+    // `seedProject` resets the session maps but not the pane ones, so a card
+    // promoted in one test would otherwise still be listed in the next.
+    act(() => useAppStore.setState({ editorPanes: new Map(), browserPanes: new Map() }))
+  })
+
+  it('lists a card beneath the session it came from', () => {
+    act(() => {
+      useAppStore.getState().promoteFile(session.id, '/proj/src/server.ts')
+    })
+    render(<SessionItem session={session} />)
+
+    expect(screen.getByText('My Session')).toBeInTheDocument()
+    expect(screen.getByText('server.ts')).toBeInTheDocument()
+  })
+
+  it('lists a popped-out page by its host', () => {
+    act(() => {
+      useAppStore.getState().openBrowserPane(session.id, 'vorn.dev')
+      useAppStore.getState().promoteBrowserTab(session.id, 0)
+    })
+    render(<SessionItem session={session} />)
+
+    expect(screen.getByText('vorn.dev')).toBeInTheDocument()
+  })
+
+  it("does not list another session's cards", () => {
+    act(() => {
+      useAppStore.setState({
+        terminals: new Map([
+          ...useAppStore.getState().terminals,
+          [
+            'other',
+            {
+              id: 'other',
+              session: { id: 'other', projectPath: '/p2', projectName: 'p2', agentType: 'claude' },
+              status: 'idle',
+              lastOutputTimestamp: 1
+            }
+          ]
+        ]) as never
+      })
+      useAppStore.getState().promoteFile('other', '/p2/theirs.ts')
+    })
+    render(<SessionItem session={session} />)
+
+    expect(screen.queryByText('theirs.ts')).not.toBeInTheDocument()
+  })
+
+  it('leaves the row alone when the session has popped nothing out', () => {
+    render(<SessionItem session={session} />)
+    // The session row itself, and nothing beneath it. (Its own controls are
+    // real buttons; a card row is a div with role=button, which is the tell.)
+    expect(screen.getByText('My Session')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /back in its session card/ })).toBeNull()
+  })
+})
+
+/**
+ * The row's own controls. These predate cards, but the row became a fragment to
+ * carry them, so they are worth pinning while the file is being changed.
+ */
+describe('SessionItem controls', () => {
+  beforeEach(() => {
+    seedProject(WEB)
+    act(() =>
+      useAppStore.setState({
+        editorPanes: new Map(),
+        browserPanes: new Map(),
+        filesPanes: new Set(),
+        focusedTerminalId: null,
+        activeTabId: null,
+        config: { defaults: { layoutMode: 'grid' } } as never
+      })
+    )
+  })
+
+  it('focuses the session in grid mode', () => {
+    render(<SessionItem session={session} />)
+    fireEvent.click(screen.getByText('My Session'))
+    expect(useAppStore.getState().focusedTerminalId).toBe(session.id)
+  })
+
+  it('activates its tab in tab mode, and leaves focus alone', () => {
+    act(() => useAppStore.setState({ config: { defaults: { layoutMode: 'tabs' } } as never }))
+    render(<SessionItem session={session} />)
+    fireEvent.click(screen.getByText('My Session'))
+
+    expect(useAppStore.getState().activeTabId).toBe(session.id)
+    expect(useAppStore.getState().focusedTerminalId).toBeNull()
+  })
+
+  it('toggles the file tree from the row', () => {
+    render(<SessionItem session={session} />)
+    const files = screen.getByRole('button', { name: /files for My Session/ })
+
+    fireEvent.click(files)
+    expect(useAppStore.getState().filesPanes.has(session.id)).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /files for My Session/ }))
+    expect(useAppStore.getState().filesPanes.has(session.id)).toBe(false)
+  })
+
+  it('toggles the browser from the row', () => {
+    render(<SessionItem session={session} />)
+    const browser = screen.getByRole('button', { name: /browser for My Session/ })
+
+    fireEvent.click(browser)
+    expect(useAppStore.getState().browserPanes.has(session.id)).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: /browser for My Session/ }))
+    expect(useAppStore.getState().browserPanes.has(session.id)).toBe(false)
+  })
+})

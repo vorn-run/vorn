@@ -69,6 +69,15 @@ vi.mock('../src/renderer/components/AgentCard', () => ({
   })
 }))
 
+vi.mock('../src/renderer/components/PromotedPaneCard', () => ({
+  PromotedPaneCard: forwardRef<HTMLDivElement, { cardId: string }>(function MockCard(
+    { cardId },
+    ref
+  ) {
+    return <div ref={ref} data-testid={`card-${cardId}`} />
+  })
+}))
+
 vi.mock('../src/renderer/components/PromptLauncher', () => ({
   PromptLauncher: () => null
 }))
@@ -142,6 +151,7 @@ beforeEach(() => {
     minimizedTerminals: new Set<string>(),
     filesPanes: new Set<string>(),
     editorPanes: new Map(),
+    browserPanes: new Map(),
     maximizedPaneId: null,
     flexibleLayouts: {},
     rowHeight: 208,
@@ -385,5 +395,39 @@ describe('GridView — session-owned panes', () => {
 
     expect(screen.getByTestId('card-term-a')).toBeInTheDocument()
     expect(screen.queryByTestId('card-files:term-a')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The grid takes opaque ids and learns what one is in a single place. A card is
+ * a cell like a session — placed beside the session it came from, and given a
+ * key of its own so the flexible layout can hold a rect for it.
+ */
+describe('GridView with popped-out cards', () => {
+  it('draws a card as a cell, beside the session it came from', () => {
+    let cardId = ''
+    act(() => {
+      cardId = useAppStore.getState().promoteFile('term-a', '/repo/a.ts')
+    })
+    render(<GridView />)
+
+    // Both kinds present, and the card's cell is drawn by the card dispatcher
+    // rather than by AgentCard — which would have found no session for the id.
+    expect(screen.getByTestId('card-term-a')).toBeInTheDocument()
+    expect(screen.getByTestId(`card-${cardId}`)).toBeInTheDocument()
+    expect(screen.getByTestId('card-term-b')).toBeInTheDocument()
+  })
+
+  it('gives a card a layout key of its own', () => {
+    // Without one every card fell to the same default rect at the origin, and
+    // its position was never persisted — so a drag snapped back every time.
+    let cardId = ''
+    act(() => {
+      useAppStore.setState({ gridColumns: -1 })
+      cardId = useAppStore.getState().promoteFile('term-a', '/repo/a.ts')
+    })
+    render(<GridView />)
+
+    expect(screen.getByTestId(`card-${cardId}`)).toBeInTheDocument()
   })
 })

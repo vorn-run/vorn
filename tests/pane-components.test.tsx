@@ -201,6 +201,50 @@ describe('EditorCard', () => {
   })
 })
 
+describe('EditorCard pop-out', () => {
+  it('moves the open file out to a card of its own', async () => {
+    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
+    render(<EditorCard sessionId="t1" />)
+    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: /Open this file as its own card/ }))
+
+    // Out of the session's editor and into a card — not copied into both.
+    expect(useAppStore.getState().editorPanes.has('t1')).toBe(false)
+    const cards = [...useAppStore.getState().editorPanes]
+    expect(cards).toHaveLength(1)
+    expect(cards[0][1]).toEqual({ filePath: '/repo/a.ts', sessionId: 't1' })
+  })
+
+  it('asks first when the buffer it would move has unsaved edits', async () => {
+    const { dirtyRefFor } = await import('../src/renderer/lib/editor-dirty')
+    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    render(<EditorCard sessionId="t1" />)
+    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
+    // After mount: the editor clears the flag as it loads, so a value set
+    // before render would be wiped before the click ever happened.
+    dirtyRefFor('t1').current = true
+    fireEvent.click(screen.getByRole('button', { name: /Open this file as its own card/ }))
+
+    // The card mounts a fresh editor under its own id, so the buffer does not
+    // travel — declining has to leave everything where it was.
+    expect(confirm).toHaveBeenCalled()
+    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/a.ts')
+    confirm.mockRestore()
+  })
+
+  it('maximizes from its header, which a card cannot do', async () => {
+    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
+    render(<EditorCard sessionId="t1" />)
+    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
+
+    fireEvent.doubleClick(screen.getByTestId('editor-pane-header'))
+    expect(useAppStore.getState().maximizedPaneId).toBe('editor:t1')
+  })
+})
+
 describe('PaneCard chrome', () => {
   it('maximizes and restores through the store', async () => {
     act(() => useAppStore.getState().openFilesPane('t1'))
@@ -258,6 +302,25 @@ describe('PaneCard chrome', () => {
     fireEvent.click(screen.getByRole('button', { name: /Open a\.ts as its own card/ }))
     // Popping out is additive; only selecting a file displaces the editor.
     expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/b.ts')
+  })
+
+  it('opens a file from the keyboard as well as the pointer', async () => {
+    // The row became a div with role=button so it could carry a pop-out button,
+    // which means Enter and Space are this component's job now.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    render(<FilesCard sessionId="t1" />)
+    const row = (await screen.findByText('a.ts')).closest('[role="button"]') as HTMLElement
+
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/a.ts')
+
+    act(() => useAppStore.getState().closeEditorPane('t1'))
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/a.ts')
+
+    act(() => useAppStore.getState().closeEditorPane('t1'))
+    fireEvent.keyDown(row, { key: 'x' })
+    expect(useAppStore.getState().editorPanes.has('t1')).toBe(false)
   })
 
   it('gives a directory row no pop-out', async () => {

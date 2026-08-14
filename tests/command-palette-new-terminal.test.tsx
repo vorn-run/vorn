@@ -256,3 +256,78 @@ describe('CommandPalette — shell terminal entry uses the Shell label', () => {
     expect(screen.getByText('Shell 1')).toBeInTheDocument()
   })
 })
+
+describe('CommandPalette — popped-out cards', () => {
+  it('lists a card, so the palette can reach everything the grid can', () => {
+    // A card has a cell, a tab, a sidebar row, a dock pill and a focus stage.
+    // Leaving it out made the palette the one way of reaching a thing that
+    // could not reach half of them.
+    act(() => {
+      useAppStore.setState({
+        terminals: new Map([
+          [
+            't1',
+            {
+              id: 't1',
+              session: {
+                id: 't1',
+                agentType: 'claude' as const,
+                projectName: 'vorn',
+                projectPath: '/repo',
+                status: 'running' as const,
+                createdAt: Date.now(),
+                pid: 1,
+                branch: 'main',
+                displayName: 'Session One'
+              },
+              status: 'running' as const,
+              lastOutputTimestamp: Date.now()
+            }
+          ]
+        ])
+      })
+      useAppStore.getState().promoteFile('t1', '/repo/src/server.ts')
+      useAppStore.getState().openBrowserPane('t1', 'vorn.dev')
+      useAppStore.getState().promoteBrowserTab('t1', 0)
+    })
+
+    render(<CommandPalette />)
+
+    expect(screen.getByText('server.ts')).toBeInTheDocument()
+    expect(screen.getByText('vorn.dev')).toBeInTheDocument()
+  })
+
+  it('focuses the card when its entry is chosen', () => {
+    let cardId = ''
+    act(() => {
+      useAppStore.setState({
+        terminals: new Map([
+          [
+            't1',
+            {
+              id: 't1',
+              session: {
+                id: 't1',
+                agentType: 'claude' as const,
+                projectName: 'vorn',
+                projectPath: '/repo',
+                status: 'running' as const,
+                createdAt: Date.now(),
+                pid: 1,
+                displayName: 'Session One'
+              },
+              status: 'running' as const,
+              lastOutputTimestamp: Date.now()
+            }
+          ]
+        ])
+      })
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/notes.md')
+    })
+
+    render(<CommandPalette />)
+    fireEvent.click(screen.getByText('notes.md'))
+
+    expect(useAppStore.getState().focusedTerminalId).toBe(cardId)
+  })
+})

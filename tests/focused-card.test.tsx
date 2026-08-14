@@ -160,6 +160,37 @@ describe('FocusedStage', () => {
     expect(useAppStore.getState().focusedTerminalId).toBeNull()
   })
 
+  it('releases a hover preview rather than the focus behind it', () => {
+    // Preview is a separate, weaker kind of focus: collapsing one must put the
+    // grid back without disturbing whatever was properly focused.
+    let cardId = ''
+    act(() => {
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    act(() => useAppStore.setState({ previewTerminalId: cardId, focusedTerminalId: 't1' } as never))
+    render(<FocusedStage />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Collapse a\.ts/ }))
+    expect(useAppStore.getState().previewTerminalId).toBeNull()
+    expect(useAppStore.getState().focusedTerminalId).toBe('t1')
+  })
+
+  it('collapses on a double-click of the header, but not of a control', () => {
+    let cardId = ''
+    act(() => {
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    act(() => useAppStore.setState({ focusedTerminalId: cardId } as never))
+    render(<FocusedStage />)
+
+    // On a control, the double-click belongs to the control.
+    fireEvent.doubleClick(screen.getByRole('button', { name: /Collapse a\.ts/ }))
+    expect(useAppStore.getState().focusedTerminalId).toBe(cardId)
+
+    fireEvent.doubleClick(screen.getByTestId(`focused-card-${cardId}`))
+    expect(useAppStore.getState().focusedTerminalId).toBeNull()
+  })
+
   it('keeps every interactive header control out of the drag region', () => {
     // macOS `-webkit-app-region: drag` swallows clicks on everything inside it,
     // so a control in this header without the opt-out is visibly present and
