@@ -168,7 +168,12 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
                     ${isPromoted ? 'border-b border-white/[0.04]' : ''}
                     ${onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''}`}
           onPointerDown={onDragStart ? handleDragStart : undefined}
-          onDoubleClick={() => setMaximizedPane(isMaximized ? null : paneId)}
+          // A card has no owner card to be maximized over — nothing reads the
+          // field for one. Writing it anyway left a phantom that swallowed the
+          // next Escape and un-maximized whatever genuinely was.
+          onDoubleClick={
+            isPromoted ? undefined : () => setMaximizedPane(isMaximized ? null : paneId)
+          }
           data-testid={`pane-header-${paneId}`}
         >
           <span className="text-[12px] text-gray-300 font-medium shrink-0">{title}</span>

@@ -747,6 +747,96 @@ describe('popping an item out to its own card', () => {
     confirm.mockRestore()
   })
 
+  it("does not clear one buffer's flag when the other answer is no", async () => {
+    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    act(() => s().openEditorPane('t1', '/p/open.ts'))
+    dirtyRefFor('t1').current = true
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    dirtyRefFor(cardId).current = true
+    // Yes, then no. Asked as two questions the yes cleared the session editor's
+    // flag and the no then bailed, leaving those edits on screen with nothing
+    // left to prompt about them — so the next pane switch discarded them in
+    // silence. One question cannot produce that state at all.
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValueOnce(false)
+
+    try {
+      act(() => s().returnCardToSession(cardId))
+
+      expect(confirm).toHaveBeenCalledOnce()
+      // The single yes covered both buffers, so the return actually happened —
+      // rather than half-applying and leaving the card where it was.
+      expect(s().editorPanes.has(cardId)).toBe(false)
+      expect(s().editorPanes.get('t1')?.filePath).toBe('/p/popped.ts')
+      expect(isEditorDirty('t1')).toBe(false)
+      expect(isEditorDirty(cardId)).toBe(false)
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it('lands a returned card on the tab that was in front', async () => {
+    act(() => s().openBrowserPane('t1', 'one.example'))
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 0) as string
+    })
+    act(() => {
+      s().addBrowserTab(cardId, 'two.example')
+      s().addBrowserTab(cardId, 'three.example')
+      s().setActiveBrowserTab(cardId, 1)
+    })
+
+    act(() => s().returnCardToSession(cardId))
+    const pane = s().browserPanes.get('t1')!
+    // `addBrowserTab` activates what it adds, so the strip ended up on the
+    // card's *last* page rather than the one being looked at.
+    expect(pane.tabs[pane.activeTab]).toBe('https://two.example/')
+  })
+
+  it('surfaces the existing card when a file is popped out twice', () => {
+    let first = ''
+    act(() => {
+      first = s().promoteFile('t1', '/p/same.ts')
+    })
+    act(() => s().toggleMinimized(first))
+    expect(s().minimizedTerminals.has(first)).toBe(true)
+
+    let second = ''
+    act(() => {
+      second = s().promoteFile('t1', '/p/same.ts')
+    })
+
+    // Returning the id and doing nothing else made the control look dead: the
+    // card existed, minimized, and nothing brought it back.
+    expect(second).toBe(first)
+    expect(s().minimizedTerminals.has(first)).toBe(false)
+  })
+
+  it('prunes a dead session even when the visible list never changes', () => {
+    // `setVisibleTerminalIds` is reconcile's only trigger. Gating the whole
+    // write on the list changing meant a launch where it never moved — every
+    // session filtered out, or every restored one minimized — never pruned at
+    // all, and the dead panes stayed in localStorage for the whole run.
+    act(() => s().openFilesPane('t1'))
+    // t1 is gone but t2 is live, so reconcile has a non-empty live set to prune
+    // against — and the visible list is unchanged, which is the whole point.
+    act(() =>
+      useAppStore.setState({
+        terminals: new Map([
+          ['t2', { id: 't2', session: session('t2'), status: 'idle', lastOutputTimestamp: 1 }]
+        ]),
+        visibleTerminalIds: ['t2']
+      } as never)
+    )
+    expect(s().filesPanes.has('t1')).toBe(true)
+
+    act(() => s().setVisibleTerminalIds(['t2']))
+    expect(s().filesPanes.has('t1')).toBe(false)
+  })
+
   it('closes a page card without prompting — there is no buffer to lose', async () => {
     const { dirtyRefFor } = await import('../src/renderer/lib/editor-dirty')
     act(() => s().openBrowserPane('t1', 'example.com'))

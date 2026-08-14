@@ -71,10 +71,14 @@ export const EditorCard = memo(
     }
 
     const paneId = isCard ? key : editorPaneId(sessionId)
-    const toggleMaximize = (): void => {
-      const state = useAppStore.getState()
-      state.setMaximizedPane(state.maximizedPaneId === paneId ? null : paneId)
-    }
+    // Same reason as `PaneCard`'s header: a card is not maximizable, and the
+    // write left a phantom id behind.
+    const toggleMaximize = isCard
+      ? undefined
+      : (): void => {
+          const state = useAppStore.getState()
+          state.setMaximizedPane(state.maximizedPaneId === paneId ? null : paneId)
+        }
 
     return (
       <PaneCard

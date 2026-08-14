@@ -17,13 +17,13 @@ import {
   editorPaneId,
   browserPaneId,
   devicePaneId,
-  isLayoutCellId,
+  isTerminalPane,
   paneOwnerId,
   promotedCardSeq,
   promotedCardId
 } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
-import { confirmDiscard, clearDirty } from '../lib/editor-dirty'
+import { confirmDiscard, confirmDiscardAll, clearDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 
 const EMPTY_SESSIONS: TerminalSession[] = []
@@ -83,7 +83,12 @@ function loadFlexibleLayouts(): Record<string, FlexibleLayoutRect> {
     const raw = localStorage.getItem(FLEXIBLE_STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw) as Record<string, FlexibleLayoutRect>
-    const live = Object.fromEntries(Object.entries(parsed).filter(([key]) => isLayoutCellId(key)))
+    // Sessions only. A card *is* a cell and holds a rect while it exists, but
+    // its id is only unique within a run: the sequence behind it is seeded from
+    // persisted panes, so a fresh launch restarts at zero and the next card to
+    // be popped out of the same session takes the dead one's id — and, if these
+    // were kept, its position and size.
+    const live = Object.fromEntries(Object.entries(parsed).filter(([key]) => isTerminalPane(key)))
     if (Object.keys(live).length !== Object.keys(parsed).length) saveFlexibleLayouts(live)
     return live
   } catch {
@@ -543,11 +548,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   setTerminalOrder: (order) => set({ terminalOrder: order }),
   setVisibleTerminalIds: (ids) =>
     set((state) => {
-      // An unchanged list is not a change. The effect that calls this re-runs
-      // whenever the layout memo produces a new array, and writing it anyway
-      // notified every subscriber in the app and ran a reconcile pass that
-      // copies six collections to usually conclude nothing.
-      if (sameIds(state.visibleTerminalIds, ids)) return {}
+      const unchanged = sameIds(state.visibleTerminalIds, ids)
       // Sessions restore by their persisted id, so pane entries stay valid across
       // restarts — but a session that never comes back would leave its entry
       // behind forever. Reconcile against the live set as it settles.
@@ -564,7 +565,13 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
               live
             )
           : null
-      return { visibleTerminalIds: ids, ...(reconciled ?? {}) }
+      // An unchanged list is not a change worth notifying the app about — but
+      // the reconcile above still has to run, because this is its only trigger.
+      // Gating both on the list changing meant a launch where the visible set
+      // never moved (everything filtered out, or every restored session
+      // minimized) never pruned a dead session's panes at all.
+      if (unchanged && !reconciled) return {}
+      return { ...(unchanged ? {} : { visibleTerminalIds: ids }), ...(reconciled ?? {}) }
     }),
   setFocusableTerminalIds: (ids) =>
     set((state) => (sameIds(state.focusableTerminalIds, ids) ? {} : { focusableTerminalIds: ids })),
@@ -832,7 +839,20 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     // over the first. Nothing anywhere would report it.
     for (const [existingId, pane] of get().editorPanes) {
       if (isPromotedPane(existingId, pane) && pane.sessionId === sessionId) {
-        if (pane.filePath === filePath) return existingId
+        if (pane.filePath !== filePath) continue
+        // Surface the one that exists rather than returning an id the caller
+        // then ignores: popping out an already-popped file that had been
+        // minimized otherwise looked like the control did nothing at all.
+        set((state) =>
+          state.minimizedTerminals.has(existingId)
+            ? {
+                minimizedTerminals: new Set(
+                  [...state.minimizedTerminals].filter((id) => id !== existingId)
+                )
+              }
+            : {}
+        )
+        return existingId
       }
     }
 
@@ -874,9 +894,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // whatever was there, exactly as picking a file in the tree does, and has
       // to ask the same question before throwing that buffer away. The card's
       // own buffer goes too: it is a different editor under a different id.
-      if (!confirmDiscard(editor.sessionId)) return
-      if (!confirmDiscard(cardId)) return
-      clearDirty(cardId)
+      // Both buffers in one question. Asked separately, answering yes then no
+      // cleared the session editor's dirty flag and then bailed — leaving those
+      // edits on screen with nothing left to prompt about them ever again.
+      if (!confirmDiscardAll([editor.sessionId, cardId])) return
       state.openEditorPane(editor.sessionId, editor.filePath)
       state.closeEditorPane(cardId)
       return
@@ -892,7 +913,18 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // a tab with nowhere to go would leave the card the only thing holding it,
       // and it is about to close.
       else state.openBrowserPane(browser.sessionId, first)
+
+      // If the landing failed — a url that no longer normalizes, from a
+      // corrupted store — every add below would no-op and the close would take
+      // the whole card with it. Keep the card instead; it is the only copy.
+      const landed = get().browserPanes.get(browser.sessionId)
+      if (!landed) return
+
+      const firstIndex = landed.tabs.length - 1
       for (const url of rest) state.addBrowserTab(browser.sessionId, url)
+      // `addBrowserTab` activates what it adds, so without this the strip ends
+      // up showing the card's *last* page rather than the one being looked at.
+      state.setActiveBrowserTab(browser.sessionId, firstIndex + browser.activeTab)
       state.closeBrowserPane(cardId)
     }
   },
