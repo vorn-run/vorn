@@ -208,6 +208,14 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
     term.loadAddon(addon)
     e._gpuAddon = addon
     term.refresh(0, term.rows - 1)
+    // The first fit ran against the DOM renderer's idea of a cell. A GPU
+    // renderer measures the font itself and usually lands on a slightly
+    // narrower cell, so the column count chosen a moment ago is now too low —
+    // and nothing else recomputes it, because the wrapper's size has not
+    // changed. That is the whole reason a terminal sat with a band of unused
+    // width down its right edge until the window was resized: resizing was the
+    // only thing that ever asked it to fit again.
+    fitTerminal(terminalId)
   }
   // Terminal fallback — if even canvas fails to load, there's no further
   // fallback, so swallow the error here instead of propagating an unhandled
@@ -299,17 +307,22 @@ function ensurePersistentWrapper(entry: TerminalEntry, terminalId: string): HTML
   entry.persistentWrapper = wrapper
   if (hostRoot) {
     hostRoot.appendChild(wrapper)
-    openIntoPersistentWrapper(entry)
+    openIntoPersistentWrapper(entry, terminalId)
   }
   return wrapper
 }
 
-function openIntoPersistentWrapper(entry: TerminalEntry): void {
+function openIntoPersistentWrapper(entry: TerminalEntry, terminalId: string): void {
   if (entry.term.element) return
   const wrapper = entry.persistentWrapper
   if (!wrapper || !wrapper.parentElement) return
   entry.term.open(wrapper)
   entry._loadRenderer?.()
+  // A font that arrives after the terminal opened changes the cell width under
+  // a column count already chosen, the same way a renderer swap does. Resolved
+  // immediately when nothing is pending, so this costs a microtask in the
+  // common case.
+  void document.fonts?.ready.then(() => fitTerminal(terminalId))
 }
 
 /**
@@ -323,7 +336,7 @@ export function setHostRoot(root: HTMLElement | null): void {
     const wrapper = entry.persistentWrapper
     if (wrapper && wrapper.parentElement !== root) {
       root.appendChild(wrapper)
-      openIntoPersistentWrapper(entry)
+      openIntoPersistentWrapper(entry, id)
       // Re-sync after adoption — registerSlot may have run before the host
       // mounted, setting geometry on a detached wrapper. Now that it's in the
       // DOM and xterm has opened, position + fit correctly.
@@ -342,7 +355,7 @@ export function registerSlot(terminalId: string, slotEl: HTMLElement): void {
   if (!entry) entry = createTerminalEntry(terminalId)
   entry.activeSlot = slotEl
   ensurePersistentWrapper(entry, terminalId)
-  openIntoPersistentWrapper(entry)
+  openIntoPersistentWrapper(entry, terminalId)
   syncTerminalOverlay(terminalId)
 }
 
@@ -448,6 +461,13 @@ export function getRegisteredTerminalIds(): string[] {
 
 /**
  * Fit the terminal to its persistent wrapper and notify the pty of new size.
+ *
+ * Called for anything that changes the size of a *cell* as well as anything
+ * that changes the size of the box. `syncTerminalOverlay` only fits when the
+ * wrapper's rect moves, which is the right trigger for a resized card and the
+ * wrong one for a renderer swap or a font arriving — both leave the box
+ * identical and the column count stale, and the terminal then sat with a band
+ * of unused width until something resized it.
  */
 export function fitTerminal(terminalId: string): void {
   const entry = registry.get(terminalId)

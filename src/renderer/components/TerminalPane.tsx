@@ -133,7 +133,11 @@ export function TerminalPane({ terminalId, agentType, isFocused, flexible, domBl
   }
 
   return (
-    <div className="flex h-full w-full pr-2">
+    // No right padding: the terminal already ends short of the card. xterm
+    // reserves a scrollbar gutter and the fit addon drops the partial column
+    // that will not fit, so a pane's worth of width was going unused at the
+    // edge before anything was added on top of it.
+    <div className="flex h-full w-full">
       <CommandSpine terminalId={terminalId} className="relative mr-2 h-full" />
       <TerminalSlot
         terminalId={terminalId}
