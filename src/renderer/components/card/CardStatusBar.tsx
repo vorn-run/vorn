@@ -33,7 +33,7 @@ export function CardStatusBar({ terminalId, dimmed }: Props) {
       className={`shrink-0 flex items-center gap-2 px-2 h-[22px] border-t border-white/[0.04] text-[11px]
                   transition-opacity duration-200 ease-out
                   ${dimmed ? 'opacity-60 group-hover/card:opacity-100' : 'opacity-100'}`}
-      style={{ background: 'var(--color-surface-panel)' }}
+      style={{ background: 'var(--color-surface-raised)' }}
     >
       {hasBranch && <BranchChip terminalId={terminalId} />}
 

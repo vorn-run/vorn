@@ -53,11 +53,14 @@ export function CardHeader({
   const dragHandleClass = draggable ? `drag-handle${onDragStart ? ' cursor-grab' : ''}` : ''
 
   return (
+    // The card is one object, so its header, body and status bar share a ground
+    // and the hairline below does the dividing. Two fills made the header read
+    // as a separate band stuck to the top of the card rather than part of it.
     <div
       className={`flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.04] shrink-0
                   transition-opacity duration-200 ease-out
                   ${dimmed ? 'opacity-60 group-hover/card:opacity-100' : 'opacity-100'}`}
-      style={{ background: 'var(--color-surface-panel)' }}
+      style={{ background: 'var(--color-surface-raised)' }}
     >
       <div
         className={`flex-1 min-w-0 flex items-center gap-2 ${dragHandleClass}`}

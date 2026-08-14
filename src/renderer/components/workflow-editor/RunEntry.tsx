@@ -226,11 +226,12 @@ export function RunStepsList({
           return (
             <div key={ns.nodeId}>
               {/* Line linking the previous step to this one so the cards read
-                  as one continuous flow. Deliberately neutral: the status dots
+                  as one continuous flow. Neutral on purpose: the status dots
                   carry the colour, and tinting the connectors too turns the
-                  trace into a rainbow that competes with them. */}
+                  trace into a rainbow that competes with them. It read
+                  gray-700, which is blue-tinted rather than neutral. */}
               {i > 0 && (
-                <div aria-hidden className="flex justify-center text-gray-700">
+                <div aria-hidden className="flex justify-center text-ink-ghost">
                   <div className="flex flex-col items-center">
                     <div className="w-px h-3.5 bg-current" />
                     <ChevronDown size={10} strokeWidth={2} className="-mt-[3px]" />

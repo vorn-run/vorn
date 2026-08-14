@@ -80,7 +80,7 @@ export function NodeConfigPanel({
   const headerConnectorIcon = useConnectionIconFor(connectorConfig?.connectionId)
 
   return (
-    <div className="w-[420px] border-l border-white/[0.08] bg-surface-overlay flex flex-col h-full overflow-hidden titlebar-no-drag">
+    <div className="w-[420px] border-l border-white/[0.08] bg-surface-node flex flex-col h-full overflow-hidden titlebar-no-drag">
       <div className="flex items-center gap-2 px-5 py-3 border-b border-white/[0.08]">
         {headerConnectorId ? (
           <ConnectorIcon
@@ -224,18 +224,22 @@ export function NodeConfigPanel({
 
         {/* A trigger has nothing downstream of its own failure to govern. */}
         {node.type !== 'trigger' && onErrorChange && (
-          <div className="pt-4 border-t border-gray-800">
+          <div className="pt-4 border-t border-white/[0.08]">
             <label
               htmlFor={`onError-${node.id}`}
               className="block text-[11px] text-gray-500 mb-1.5"
             >
               If this step fails
             </label>
+            {/* Tailwind's gray-900 and gray-700 are blue-tinted (#111827,
+                #374151), so this control read as the one blue thing in the
+                editor. Every other select in these panels uses this wash. */}
             <select
               id={`onError-${node.id}`}
               value={node.onError ?? 'stop'}
               onChange={(e) => onErrorChange(node.id, e.target.value as WorkflowNodeErrorPolicy)}
-              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200"
+              className="w-full px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-md
+                         text-[13px] text-gray-200 focus:outline-none focus:border-white/[0.2]"
             >
               <option value="stop">Stop the run</option>
               <option value="continue">Carry on anyway</option>
