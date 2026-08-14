@@ -45,7 +45,7 @@ describe('the surface ladder', () => {
     expect(wrong).toEqual([])
   })
 
-  it('gives every client the palette, not just the one that owns it', () => {
+  it('gives every client the palette, not just the one that owns it', async () => {
     // Both clients mount the same renderer, but each has its own Tailwind entry
     // and only one of them defined the tokens. Utilities silently stopped being
     // generated for the other, and an inline var() that resolves to nothing is
@@ -59,6 +59,28 @@ describe('the surface ladder', () => {
       read(p).includes('--color-surface-base:')
     )
     expect(declaring).toEqual(['src/renderer/theme.css'])
+  })
+
+  it('keeps every @import ahead of the statements that would drop it', () => {
+    // PostCSS silently discards an @import that does not precede every other
+    // statement — @source counts — and it warns rather than errors, so the
+    // build stays green while every token resolves to nothing: cards and
+    // dialogs paint transparent and the status hues vanish. Compiling the sheet
+    // in isolation does not reproduce it, because the bundler's pipeline is
+    // what enforces the rule, so the ordering itself is what has to be pinned.
+    const outOfOrder = ENTRY_SHEETS.filter((p) => {
+      const statements = read(p)
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+      const lastImport = statements.map((l) => l.startsWith('@import')).lastIndexOf(true)
+      const firstOther = statements.findIndex(
+        (l) => !l.startsWith('@import') && !l.startsWith('@charset')
+      )
+      return firstOther !== -1 && lastImport > firstOther
+    })
+    expect(outOfOrder).toEqual([])
   })
 
   it('steps in small, even increments from the field up to floating chrome', () => {

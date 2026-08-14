@@ -35,17 +35,21 @@
      the order of four points: a panel is a different region, not a different
      material, and a larger step reads as a hole cut in the page.
 
-     The set sits three points below where it started, and the card body sits
-     two points above its own header rather than four. A card is one object —
-     header, frame and the terminal inside it — so that step only has to
-     separate them, not announce a new region; the step that still has work to
-     do is the one from the field up to the card. Five points down for the
-     whole set was tried first and read as too flat, since a display has less
-     room to separate rungs the closer they all get to black. */
-  --color-surface-base: #0a0a0c; /* app background, behind the cards */
-  --color-surface-sunken: #0f0f11; /* card body and terminal: the main column */
-  --color-surface-panel: #0d0d0f; /* panes, card header, status bar: beside the work */
-  --color-surface-overlay: #19191d; /* menus, popovers, floating chrome */
+     These values were moved down — first five points, then three, with the
+     card body dropped a further two so it sat closer to its own header. Each
+     step survived the move arithmetically and the set still failed in the
+     built app: the rungs stopped resolving as distinct surfaces, and a board
+     of cards read as one flat field. A ladder this tight needs the headroom,
+     so the level is back where it started and should stay there. Judge any
+     future move in the packaged app on a real display, not in dev.
+
+     The card body is four points above its header, not two. Two was tried on
+     the theory that a card is one object; it is, but the header still has to
+     read as a different band or the card loses its top edge. */
+  --color-surface-base: #0d0d0f; /* app background, behind the cards */
+  --color-surface-sunken: #141416; /* card body and terminal: the main column */
+  --color-surface-panel: #101012; /* panes, card header, status bar: beside the work */
+  --color-surface-overlay: #1c1c20; /* menus, popovers, floating chrome */
   /* Aliases, not values. A card frame matching the terminal it holds is what
      keeps a lighter band from showing around the panes, so the equality is the
      point — spelling it as a reference keeps a later nudge to one from silently
