@@ -215,7 +215,7 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
     // changed. That is the whole reason a terminal sat with a band of unused
     // width down its right edge until the window was resized: resizing was the
     // only thing that ever asked it to fit again.
-    refit(terminalId)
+    fitTerminal(terminalId)
   }
   // Terminal fallback — if even canvas fails to load, there's no further
   // fallback, so swallow the error here instead of propagating an unhandled
@@ -293,29 +293,6 @@ function notifyRegistryChange(): void {
   }
 }
 
-/**
- * Fit the terminal to the space it already has, and tell the pty.
- *
- * `syncTerminalOverlay` only fits when the wrapper's rect changes, which is the
- * right trigger for a moved or resized card and the wrong one for anything that
- * changes the size of a *cell* — a renderer swap, a font arriving, a font-size
- * change. Those leave the wrapper identical and the column count stale.
- */
-export function refit(terminalId: string): void {
-  const entry = registry.get(terminalId)
-  if (!entry || !entry.term.element) return
-  try {
-    entry.fitAddon.fit()
-  } catch {
-    return
-  }
-  const { cols, rows } = entry.term
-  if (cols === entry.lastSyncedCols && rows === entry.lastSyncedRows) return
-  entry.lastSyncedCols = cols
-  entry.lastSyncedRows = rows
-  window.api.resizeTerminal({ id: terminalId, cols, rows })
-}
-
 function ensurePersistentWrapper(entry: TerminalEntry, terminalId: string): HTMLDivElement {
   if (entry.persistentWrapper) return entry.persistentWrapper
   const wrapper = document.createElement('div')
@@ -345,7 +322,7 @@ function openIntoPersistentWrapper(entry: TerminalEntry, terminalId: string): vo
   // a column count already chosen, the same way a renderer swap does. Resolved
   // immediately when nothing is pending, so this costs a microtask in the
   // common case.
-  void document.fonts?.ready.then(() => refit(terminalId))
+  void document.fonts?.ready.then(() => fitTerminal(terminalId))
 }
 
 /**
@@ -484,6 +461,13 @@ export function getRegisteredTerminalIds(): string[] {
 
 /**
  * Fit the terminal to its persistent wrapper and notify the pty of new size.
+ *
+ * Called for anything that changes the size of a *cell* as well as anything
+ * that changes the size of the box. `syncTerminalOverlay` only fits when the
+ * wrapper's rect moves, which is the right trigger for a resized card and the
+ * wrong one for a renderer swap or a font arriving — both leave the box
+ * identical and the column count stale, and the terminal then sat with a band
+ * of unused width until something resized it.
  */
 export function fitTerminal(terminalId: string): void {
   const entry = registry.get(terminalId)
