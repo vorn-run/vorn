@@ -14,7 +14,7 @@ import { useAppStore } from '../stores'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON } from '../lib/icon-button'
-import { browserPaneId } from '../lib/pane-id'
+import { browserPaneId, isPromotedCardId } from '../lib/pane-id'
 import { normalizeUrl, displayHost, flattenPageText } from '../lib/browser-url'
 
 interface Props {
@@ -68,7 +68,7 @@ export const BrowserCard = memo(
     ref
   ) {
     const key = paneKey ?? sessionId
-    const isCard = key !== sessionId
+    const isCard = isPromotedCardId(key)
     const {
       terminal,
       pane,

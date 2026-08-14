@@ -18,8 +18,8 @@ import {
   browserPaneId,
   devicePaneId,
   isLayoutCellId,
-  isPromotedCardId,
   paneOwnerId,
+  promotedCardSeq,
   promotedCardId
 } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
@@ -351,15 +351,22 @@ let cardSeq = 0
 function seedCardSeq(...keys: Iterable<string>[]): void {
   for (const group of keys) {
     for (const key of group) {
-      if (!isPromotedCardId(key)) continue
-      const seq = Number(key.slice(key.lastIndexOf(':') + 1))
-      if (Number.isFinite(seq) && seq >= cardSeq) cardSeq = seq + 1
+      const seq = promotedCardSeq(key)
+      if (seq !== null && seq >= cardSeq) cardSeq = seq + 1
     }
   }
 }
 
 function nextCardId(sessionId: string): string {
   return promotedCardId(sessionId, cardSeq++)
+}
+
+/** Whether two id lists say the same thing, in the same order. */
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
 }
 
 function loadSidebarSettings(): Record<string, string> {
@@ -536,6 +543,11 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   setTerminalOrder: (order) => set({ terminalOrder: order }),
   setVisibleTerminalIds: (ids) =>
     set((state) => {
+      // An unchanged list is not a change. The effect that calls this re-runs
+      // whenever the layout memo produces a new array, and writing it anyway
+      // notified every subscriber in the app and ran a reconcile pass that
+      // copies six collections to usually conclude nothing.
+      if (sameIds(state.visibleTerminalIds, ids)) return {}
       // Sessions restore by their persisted id, so pane entries stay valid across
       // restarts — but a session that never comes back would leave its entry
       // behind forever. Reconcile against the live set as it settles.
@@ -554,7 +566,8 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
           : null
       return { visibleTerminalIds: ids, ...(reconciled ?? {}) }
     }),
-  setFocusableTerminalIds: (ids) => set({ focusableTerminalIds: ids }),
+  setFocusableTerminalIds: (ids) =>
+    set((state) => (sameIds(state.focusableTerminalIds, ids) ? {} : { focusableTerminalIds: ids })),
 
   reorderTerminals: (draggedId, droppedOnId) =>
     set((state) => {

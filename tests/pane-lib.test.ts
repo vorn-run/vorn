@@ -9,6 +9,7 @@ import {
   promotedCardId,
   isPromotedCardId,
   isLayoutCellId,
+  promotedCardSeq,
   parsePaneId,
   paneKind,
   paneOwnerId,
@@ -89,6 +90,17 @@ describe('pane-id', () => {
     const cardId = promotedCardId(weird, 7)
     expect(parsePaneId(cardId)).toEqual({ kind: 'card', sessionId: weird })
     expect(paneOwnerId(cardId)).toBe(weird)
+  })
+
+  it('reads the sequence off the end, so a colon in the session id survives', () => {
+    // The store seeds its counter past whatever the persisted cards already use.
+    // Reading the number from the wrong side yields NaN for a session id with a
+    // colon in it, the seed silently does nothing, and a reissued id overwrites
+    // a card restored from disk.
+    expect(promotedCardSeq(promotedCardId('abc', 7))).toBe(7)
+    expect(promotedCardSeq(promotedCardId('host:1234', 12))).toBe(12)
+    expect(promotedCardSeq('abc')).toBeNull()
+    expect(promotedCardSeq('editor:abc')).toBeNull()
   })
 
   it('counts sessions and cards as grid cells, and child panes as not', () => {

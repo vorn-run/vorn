@@ -1,10 +1,10 @@
 import { useAppStore } from '../stores'
 import { useShallow } from 'zustand/react/shallow'
 import { AgentIcon } from './AgentIcon'
-import { FileTypeIcon } from './file-icons'
+import { CardSubjectIcon } from './CardSubjectIcon'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { STATUS_DOT } from '../lib/status-colors'
-import { GitBranch, FolderGit2, Globe } from 'lucide-react'
+import { GitBranch, FolderGit2 } from 'lucide-react'
 import { paneOwnerId } from '../lib/pane-id'
 import { usePromotedCardSubject } from '../hooks/usePromotedCards'
 
@@ -52,13 +52,7 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
       title="Click to restore"
     >
       {card ? (
-        <span className="shrink-0 flex items-center justify-center w-[14px] h-[14px]">
-          {card.kind === 'browser' ? (
-            <Globe size={14} strokeWidth={1.5} className="text-ink-faint" />
-          ) : (
-            <FileTypeIcon name={card.name} size={14} />
-          )}
-        </span>
+        <CardSubjectIcon card={card} />
       ) : (
         <>
           <span

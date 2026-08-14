@@ -1,7 +1,6 @@
 import { forwardRef, memo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { isPromotedPane } from '../stores/types'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 
@@ -39,12 +38,10 @@ export const PromotedPaneCard = memo(
     )
     const rest = { paneKey: cardId, isDragTarget, onDragStart, flexible }
 
-    if (editor && isPromotedPane(cardId, editor)) {
-      return <EditorCard ref={ref} sessionId={editor.sessionId} {...rest} />
-    }
-    if (browser && isPromotedPane(cardId, browser)) {
-      return <BrowserCard ref={ref} sessionId={browser.sessionId} {...rest} />
-    }
+    // No `isPromotedPane` check: a `card:`-prefixed key can only ever name a
+    // card, since a session's own pane is keyed by its session id.
+    if (editor) return <EditorCard ref={ref} sessionId={editor.sessionId} {...rest} />
+    if (browser) return <BrowserCard ref={ref} sessionId={browser.sessionId} {...rest} />
     // The pane went away without the grid having re-derived its cells yet.
     return null
   })

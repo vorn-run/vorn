@@ -82,6 +82,21 @@ export function promotedCardId(sessionId: string, seq: number): string {
   return `${CARD_PREFIX}${sessionId}:${seq}`
 }
 
+/**
+ * The sequence number in a card id, or null for anything else.
+ *
+ * The id's shape — owner first, sequence last, read from the right — is stated
+ * once in this module. The store seeds its counter past whatever the persisted
+ * cards already use, and doing that by hand elsewhere put half the format in a
+ * second file, where a change here would break seeding silently and the failure
+ * is a reissued id overwriting a restored card.
+ */
+export function promotedCardSeq(paneId: string): number | null {
+  if (!isPromotedCardId(paneId)) return null
+  const seq = Number(paneId.slice(paneId.lastIndexOf(':') + 1))
+  return Number.isFinite(seq) ? seq : null
+}
+
 /** True for an id from `promotedCardId`. */
 export function isPromotedCardId(paneId: string): boolean {
   return paneId.startsWith(CARD_PREFIX)

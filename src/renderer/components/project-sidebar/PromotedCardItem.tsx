@@ -1,8 +1,8 @@
-import { CornerDownLeft, Globe, X } from 'lucide-react'
+import { CornerDownLeft, X } from 'lucide-react'
 import { useAppStore } from '../../stores'
 import { useShallow } from 'zustand/react/shallow'
 import { Tooltip } from '../Tooltip'
-import { FileTypeIcon } from '../file-icons'
+import { CardSubjectIcon } from '../CardSubjectIcon'
 import type { PromotedCard } from '../../hooks/usePromotedCards'
 
 /**
@@ -90,13 +90,7 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
       {/* The file's own icon, the one the tree gives it — a generic page glyph
           would make every card look alike in a list whose whole job is telling
           them apart. Sized to the session row's agent icon. */}
-      <span className="shrink-0 flex items-center justify-center w-[14px] h-[14px]">
-        {card.kind === 'browser' ? (
-          <Globe size={14} strokeWidth={1.5} className="text-ink-faint" />
-        ) : (
-          <FileTypeIcon name={name} size={14} />
-        )}
-      </span>
+      <CardSubjectIcon card={card} />
       <span className="truncate flex-1">{name}</span>
 
       <Tooltip label="Put back in its session card" position="right">

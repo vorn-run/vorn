@@ -2,7 +2,7 @@ import { useMemo, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
-import { promotedCardsByOwner } from './usePromotedCards'
+import { usePromotedCardsByOwner } from './usePromotedCards'
 
 /**
  * Stable comparator for terminal ids under the active sortMode. Manual mode
@@ -50,8 +50,6 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     statusFilter,
     terminalOrder,
     minimizedTerminals,
-    editorPanes,
-    browserPanes,
     setVisibleTerminalIds,
     setFocusableTerminalIds
   } = useAppStore(
@@ -65,12 +63,17 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       statusFilter: s.statusFilter,
       terminalOrder: s.terminalOrder,
       minimizedTerminals: s.minimizedTerminals,
-      editorPanes: s.editorPanes,
-      browserPanes: s.browserPanes,
       setVisibleTerminalIds: s.setVisibleTerminalIds,
       setFocusableTerminalIds: s.setFocusableTerminalIds
     }))
   )
+
+  // The grouping, not the two pane Maps it comes from. Those are replaced on
+  // any pane write — a browser tab switch, a keystroke in the address bar —
+  // which would re-run this whole memo, re-sorting every session twice and
+  // triggering a reconcile pass, for a list that had not changed. The grouping
+  // is a stable empty when nothing is popped out, which is the common case.
+  const cardsByOwner = usePromotedCardsByOwner()
 
   const workspaceProjects = useMemo(() => {
     if (!projects) return null
@@ -108,8 +111,6 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     // all. A popped-out card is: it is a cell like a session, placed directly
     // after the session it came from so the two stay together as the grid
     // reflows, rather than drifting a row apart.
-    const cardsByOwner = promotedCardsByOwner({ editorPanes, browserPanes })
-
     const ordered: string[] = []
     const minimized: string[] = []
     const place = (id: string): void => {
@@ -143,8 +144,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     sortMode,
     terminalOrder,
     minimizedTerminals,
-    editorPanes,
-    browserPanes
+    cardsByOwner
   ])
 
   useEffect(() => {

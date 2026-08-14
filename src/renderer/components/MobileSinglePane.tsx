@@ -6,10 +6,10 @@ import { CardContextMenu } from './CardContextMenu'
 import { PromptLauncher } from './PromptLauncher'
 import { useVisibleTerminals } from '../hooks/useVisibleTerminals'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
-import { GitBranch, FolderGit2, Globe } from 'lucide-react'
+import { GitBranch, FolderGit2 } from 'lucide-react'
 import { isPromotedCardId } from '../lib/pane-id'
 import { usePromotedCardSubject } from '../hooks/usePromotedCards'
-import { FileTypeIcon } from './file-icons'
+import { CardSubjectIcon } from './CardSubjectIcon'
 
 /**
  * A popped-out file or page in the mobile list.
@@ -41,13 +41,7 @@ function MobileCardRow({
       }`}
       style={{ background: 'var(--color-surface-raised)' }}
     >
-      <span className="shrink-0 flex items-center justify-center w-4 h-4">
-        {card.kind === 'browser' ? (
-          <Globe size={16} strokeWidth={1.5} className="text-ink-faint" />
-        ) : (
-          <FileTypeIcon name={card.name} size={16} />
-        )}
-      </span>
+      <CardSubjectIcon card={card} size={16} />
       <span className="text-[13px] text-gray-200 truncate flex-1">{card.name}</span>
       {owner && <span className="text-[11px] text-ink-secondary truncate shrink-0">{owner}</span>}
     </button>

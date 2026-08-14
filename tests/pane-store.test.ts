@@ -35,7 +35,6 @@ function seed(ids: string[] = ['t1']): void {
       devicePanes: new Map(),
       cardSplits: {},
       minimizedTerminals: new Set(),
-      promotedPanes: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids,
       visibleTerminalIds: []

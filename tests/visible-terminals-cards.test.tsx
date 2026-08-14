@@ -100,6 +100,24 @@ describe('useVisibleTerminals with popped-out cards', () => {
     expect(result.current.orderedIds).toEqual(['t1', mine, 't2', theirs])
   })
 
+  it('does not disturb the layout when a pane changes but the cells do not', () => {
+    // Both pane Maps are replaced on any pane write — switching a browser tab,
+    // typing in the address bar. Depending on them directly re-ran the whole
+    // layout memo, re-sorting every session twice and triggering a reconcile
+    // pass that copies six collections, for a list that had not changed.
+    const { result, rerender } = renderHook(() => useVisibleTerminals())
+    const before = result.current.orderedIds
+
+    act(() => {
+      useAppStore.getState().openBrowserPane('t1', 'example.com')
+      useAppStore.getState().addBrowserTab('t1', 'second.example')
+      useAppStore.getState().setActiveBrowserTab('t1', 0)
+    })
+    rerender()
+
+    expect(result.current.orderedIds).toBe(before)
+  })
+
   it('makes a card reachable by keyboard nav', () => {
     // Cmd+] and Cmd+1-9 both index straight into focusableIds, so whether a
     // card can be focused at all is decided here — the shortcut handlers never

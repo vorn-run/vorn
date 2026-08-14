@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { FileEditorPane } from './FileTreeExplorer'
-import { editorPaneId } from '../lib/pane-id'
+import { editorPaneId, isPromotedCardId } from '../lib/pane-id'
 import { dirtyRefFor, confirmDiscard, clearDirty } from '../lib/editor-dirty'
 
 interface Props {
@@ -46,7 +46,7 @@ export const EditorCard = memo(
 
     if (!terminal || !filePath) return null
 
-    const isCard = key !== sessionId
+    const isCard = isPromotedCardId(key)
     const cwd = terminal.session.worktreePath || terminal.session.projectPath
     const remoteHostId = terminal.session.remoteHostId
     const fileName = filePath.split(/[/\\]/).pop() ?? filePath

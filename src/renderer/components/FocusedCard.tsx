@@ -1,10 +1,10 @@
-import { Globe, Minimize2 } from 'lucide-react'
+import { Minimize2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useShallow } from 'zustand/react/shallow'
 import { isMac } from '../lib/platform'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { FileTypeIcon } from './file-icons'
+import { CardSubjectIcon } from './CardSubjectIcon'
 import { usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PaneOwnerLabel } from './PaneCard'
 import { FocusedNavHint } from './card/FocusedNavHint'
@@ -69,12 +69,8 @@ export function FocusedCard({ cardId }: { cardId: string }) {
         }}
         data-testid={`focused-card-${cardId}`}
       >
-        <span className="shrink-0 flex items-center justify-center w-4 h-4 titlebar-no-drag">
-          {subject.kind === 'browser' ? (
-            <Globe size={16} strokeWidth={1.5} className="text-ink-faint" />
-          ) : (
-            <FileTypeIcon name={subject.name} size={16} />
-          )}
+        <span className="titlebar-no-drag flex items-center">
+          <CardSubjectIcon card={subject} size={16} />
         </span>
         <span className="text-[13px] font-medium text-gray-200 truncate">{subject.name}</span>
         {/* Interactive children of a drag region have to opt out of it. On

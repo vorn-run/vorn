@@ -6,7 +6,7 @@ import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerm
 import { isTerminalPane, isPromotedCardId } from '../lib/pane-id'
 import { usePromotedCardsByOwner, usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PromotedPaneCard } from './PromotedPaneCard'
-import { FileTypeIcon } from './file-icons'
+import { CardSubjectIcon } from './CardSubjectIcon'
 import { PaneColumn } from './PaneColumn'
 import { usePaneColumnEntries } from '../hooks/usePaneColumnEntries'
 import { AgentStatusIcon } from './AgentStatusIcon'
@@ -724,13 +724,7 @@ function CardTab({
                  cursor-pointer transition-colors flex-1 min-w-[120px] max-w-[260px] select-none border-b
                  ${isActive ? 'text-white border-white' : 'text-gray-500 hover:text-gray-300 border-transparent'}`}
     >
-      <span className="shrink-0 flex items-center justify-center w-4 h-4">
-        {subject.kind === 'browser' ? (
-          <Globe size={14} strokeWidth={1.5} className="text-ink-faint" />
-        ) : (
-          <FileTypeIcon name={subject.name} size={14} />
-        )}
-      </span>
+      <CardSubjectIcon card={subject} />
 
       <span className="truncate flex-1 min-w-0" title={subject.name}>
         {subject.name}
