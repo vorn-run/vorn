@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
-import { selectPaneFlags } from '../stores/ui-slice'
+import { useSessionHasPaneColumn } from '../hooks/useCardsDrawnAsCells'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { AgentStatusIcon } from './AgentStatusIcon'
@@ -68,7 +68,7 @@ export function FocusedTerminal() {
   const hasBrowserPane = useAppStore((s) => (effectiveId ? s.browserPanes.has(effectiveId) : false))
   const hasDevicePane = useAppStore((s) => (effectiveId ? s.devicePanes.has(effectiveId) : false))
   // Shared with the card grid and tab view, so a new pane kind is added once.
-  const hasAnyPane = useAppStore((s) => selectPaneFlags(s, effectiveId).any)
+  const hasAnyPane = useSessionHasPaneColumn(effectiveId)
   // Maximize is session-scoped in the grid; expanded mode is that same session
   // filling the stage, so a maximized pane has to take the whole body here too.
   // Reading it only for panes this session owns keeps a stale id inert.

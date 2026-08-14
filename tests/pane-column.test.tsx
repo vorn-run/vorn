@@ -33,6 +33,8 @@ vi.mock('../src/renderer/components/BrowserCard', () => ({
 
 const { useAppStore } = await import('../src/renderer/stores')
 const { PaneColumn } = await import('../src/renderer/components/PaneColumn')
+const { useSessionHasPaneColumn } = await import('../src/renderer/hooks/useCardsDrawnAsCells')
+const { renderHook } = await import('@testing-library/react')
 
 const session = (id: string) =>
   ({
@@ -168,6 +170,30 @@ describe('PaneColumn', () => {
     expect(screen.getByTestId('editor-t1')).toBeInTheDocument()
     expect(screen.getByTestId(`editor-${cardId}`)).toBeInTheDocument()
     expect(screen.getAllByRole('separator')).toHaveLength(1)
+  })
+
+  it('reserves no column for a card the grid is drawing', () => {
+    // The card cell is the whole point, so the session must not also hold space
+    // open for it. It did: the gate said "has panes", the card body split its
+    // width, and PaneColumn then rendered nothing — the terminal squeezed to
+    // its ratio with a band of dead space beside it and nothing to explain it.
+    act(() => {
+      useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    const { result } = renderHook(() => useSessionHasPaneColumn('t1'))
+    expect(result.current).toBe(false)
+
+    const { container } = render(<PaneColumn sessionId="t1" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('reserves a column for a card no layout is drawing', () => {
+    act(() => {
+      useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+      useAppStore.setState({ focusedTerminalId: 't1' } as never)
+    })
+    const { result } = renderHook(() => useSessionHasPaneColumn('t1'))
+    expect(result.current).toBe(true)
   })
 
   it('gives a maximized pane the whole column and hides its siblings', () => {

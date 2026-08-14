@@ -99,4 +99,19 @@ describe('useVisibleTerminals with popped-out cards', () => {
 
     expect(result.current.orderedIds).toEqual(['t1', mine, 't2', theirs])
   })
+
+  it("orders a session's cards straight after it, however many", () => {
+    // What the tab strip and the grid both consume. Cards cannot be sorted
+    // among the sessions — compareTerminalIds reads the terminals map, which
+    // holds no entry for a card — so placement beside the owner is the ordering.
+    let a = ''
+    let b = ''
+    act(() => {
+      a = useAppStore.getState().promoteFile('t1', '/p/a.ts')
+      b = useAppStore.getState().promoteFile('t1', '/p/b.ts')
+    })
+    const { result } = renderHook(() => useVisibleTerminals())
+
+    expect(result.current.orderedIds).toEqual(['t1', a, b, 't2'])
+  })
 })

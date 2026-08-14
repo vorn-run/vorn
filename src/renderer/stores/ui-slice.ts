@@ -1084,16 +1084,19 @@ export function selectPaneFlags(
   const editor = sessionId ? s.editorPanes.has(sessionId) : false
   const browser = sessionId ? s.browserPanes.has(sessionId) : false
   const device = sessionId ? s.devicePanes.has(sessionId) : false
-  // `any` also counts popped-out cards, because outside the grid they render in
-  // this session's column. A session whose only pane is a popped-out file has
-  // all four flags false, and without this the column would not be rendered at
-  // all — the file would be reachable from nowhere.
-  const cards = sessionId ? ownsPromotedCard(s, sessionId) : false
-  return { files, editor, browser, device, any: files || editor || browser || device || cards }
+  return { files, editor, browser, device, any: files || editor || browser || device }
 }
 
-/** Whether `sessionId` has popped anything out to a card of its own. */
-function ownsPromotedCard(
+/**
+ * Whether `sessionId` has popped anything out to a card of its own.
+ *
+ * Deliberately not folded into `selectPaneFlags().any`. Whether a card renders
+ * in this session's column depends on the layout, and a flag that answered
+ * "yes" everywhere made the card cell reserve a column that rendered nothing —
+ * the session's terminal squeezed to its split ratio with dead space beside it.
+ * `useSessionHasPaneColumn` is where the two questions are combined.
+ */
+export function ownsPromotedCard(
   s: Pick<AppStore, 'editorPanes' | 'browserPanes'>,
   sessionId: string
 ): boolean {

@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { paneIdFor, type PaneChildKind } from '../lib/pane-id'
 import { usePromotedCardsFor } from '../hooks/usePromotedCards'
-import { useGridDrawsCards } from '../hooks/useGridDrawsCards'
+import { useCardsDrawnAsCells } from '../hooks/useCardsDrawnAsCells'
 import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
@@ -18,11 +18,10 @@ import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
  * column beside its terminal, so the space a card gets is divided between the
  * things that belong to it rather than spread across unrelated grid cells.
  *
- * The column also takes in the session's popped-out cards wherever the grid is
- * not drawing them — the tab strip, focused mode, mobile. Those layouts show one
- * session and have no cell to put a card in, so without this a popped-out file
- * simply vanished when you left the grid, taking the control that brings it back
- * with it.
+ * The column also takes in the session's popped-out cards wherever the layout
+ * gives them no cell of their own — focused mode, hover preview, mobile. Those
+ * show a single session, so without this a popped-out file simply vanished when
+ * you left the grid, taking the control that brings it back with it.
  *
  * While one of the panes is maximized it takes the whole column and its siblings
  * hide — the owner check keeps another session's maximized pane from taking over
@@ -51,7 +50,7 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
         setCardSplit: s.setCardSplit
       }))
     )
-  const gridDrawsCards = useGridDrawsCards()
+  const cardsHaveCells = useCardsDrawnAsCells()
   const cards = usePromotedCardsFor(sessionId)
   const containerRef = useRef<HTMLDivElement | null>(null)
   // The live drag drives local state; the store is written once, on pointerup.
@@ -68,7 +67,7 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
     ...ownKinds.map((kind) => ({ id: paneIdFor(kind, sessionId), kind })),
     // Cards last, after everything the session already had — they arrived last,
     // and inserting them above would shuffle the panes someone had arranged.
-    ...(gridDrawsCards
+    ...(cardsHaveCells
       ? []
       : cards.map((card) => ({ id: card.id, kind: card.kind, cardKey: card.id })))
   ]
