@@ -18,7 +18,11 @@ const hidTimeouts: (number | undefined)[] = []
 const slowShutdown = { on: false }
 /** Args of each exec call, in the order it *completed*. */
 const execCompletions: string[][] = []
-/** What `simctl list` returns. A test can swap this to change the fixture. */
+/**
+ * What `simctl list` returns. A test can swap this to change the fixture; it is
+ * restored before each test, because a swap that leaks makes the *next* test
+ * pass or fail for a reason nothing in it mentions.
+ */
 const simctlList = {
   value: JSON.stringify({
     devices: {
@@ -29,7 +33,23 @@ const simctlList = {
     }
   })
 }
+const SIMCTL_LIST_DEFAULT = simctlList.value
+/** Detached `simctl shutdown` calls made on quit. */
+const detachedSpawns: string[][] = []
+/** `error` listeners attached to those detached children. */
+const spawnErrorHandlers: ((e: unknown) => void)[] = []
 vi.mock('node:child_process', () => ({
+  spawn: (cmd: string, args: string[]) => {
+    detachedSpawns.push([cmd, ...args])
+    const child = {
+      on: (event: string, cb: (e: unknown) => void) => {
+        if (event === 'error') spawnErrorHandlers.push(cb)
+        return child
+      },
+      unref: () => {}
+    }
+    return child
+  },
   execFile: (cmd: string, args: string[], cb: (e: unknown, out: unknown) => void) => {
     execCalls.push([cmd, ...args])
     // `promisify` hands the callback value straight through as the resolved
@@ -104,14 +124,19 @@ import {
   formatRuntime,
   keycodesFor,
   clampMaxEdge,
+  shutdownOwnedDevices,
+  screenshot,
   type AXElement
 } from '../src/main/device-registry'
 
 beforeEach(() => {
   resetForTests()
+  simctlList.value = SIMCTL_LIST_DEFAULT
   execCalls.length = 0
   stopped.length = 0
   spawned.length = 0
+  detachedSpawns.length = 0
+  spawnErrorHandlers.length = 0
   slowShutdown.on = false
   execCompletions.length = 0
 })
@@ -441,6 +466,67 @@ describe('a press pays for its own hold', () => {
   })
 })
 
+describe('a coordinate that cannot be trusted', () => {
+  /** A claimed device whose companion answers, so the driving path runs. */
+  function claimed(): void {
+    const e = newEntry('s1', 'udid-1')
+    e.companion = {} as never
+    setEntryForTests(e)
+  }
+
+  beforeEach(() => {
+    treeJson.value = JSON.stringify([
+      { role: 'AXWindow', frame: { x: 0, y: 0, width: 402, height: 874 } }
+    ])
+  })
+
+  it('refuses a tap outside the screen, and says what the screen is', () => {
+    // The units mistake: a coordinate read straight off a screenshot, never
+    // divided by the scale. Delivered as-is it lands nowhere, the call returns
+    // ok, and the agent reads the unchanged screen as "the button is broken".
+    claimed()
+    return expect(
+      interact({ sessionId: 's1', action: 'tap', target: { x: 1206, y: 2622 } })
+    ).rejects.toThrow(/402x874 points/)
+  })
+
+  it('lets a tap on the screen through, edges included', async () => {
+    claimed()
+    await expect(
+      interact({ sessionId: 's1', action: 'tap', target: { x: 402, y: 874 } })
+    ).resolves.toMatchObject({ ok: true })
+  })
+
+  it('refuses a tap when there is no screen size to check it against', async () => {
+    // Waving the point through here made a tap the one input that could still
+    // be aimed at nothing: the swipe branch refuses on exactly this condition.
+    treeJson.value = JSON.stringify([])
+    claimed()
+    await expect(
+      interact({ sessionId: 's1', action: 'tap', target: { x: 10, y: 10 } })
+    ).rejects.toThrow(/screen size could not be read/)
+  })
+
+  it('refuses a screenshot when only the height is unreadable', async () => {
+    // Validity is both dimensions — the swipe guard has always checked both.
+    treeJson.value = JSON.stringify([
+      { role: 'AXWindow', frame: { x: 0, y: 0, width: 402, height: 0 } }
+    ])
+    claimed()
+    await expect(screenshot({ sessionId: 's1' })).rejects.toThrow(/screen size could not be read/)
+  })
+
+  it('refuses a screenshot whose scale cannot be measured', async () => {
+    // A read taken mid-transition comes back with no root frame. What used to
+    // be returned here was the constructor's guess of 3, and a 1.14-ratio image
+    // divided by 3 lands a tap a third of the way to where it was aimed. The
+    // swipe guard already fails closed on exactly this condition.
+    treeJson.value = JSON.stringify([])
+    claimed()
+    await expect(screenshot({ sessionId: 's1' })).rejects.toThrow(/screen size could not be read/)
+  })
+})
+
 describe('typing keycodes', () => {
   it('maps the characters it claims to support', () => {
     expect(keycodesFor('a')).toEqual([4])
@@ -483,6 +569,94 @@ describe('screenshot edge clamping', () => {
     expect(clampMaxEdge(0)).toBe(1000)
     expect(clampMaxEdge(Number.NaN)).toBe(1000)
     expect(clampMaxEdge(-50)).toBe(1000)
+  })
+})
+
+describe('claiming a device you already hold', () => {
+  /**
+   * `openPane` re-claims whenever it is given a udid, so "claim, read, tap,
+   * show the person the pane" is the ordinary path into this — not an exotic
+   * one. Rebuilding the entry there looks harmless and is not: the flag that
+   * records who booted the simulator is recomputed against a simulator that is
+   * booted *because we booted it*, and the generation counter that keeps a ref
+   * from an old screen off a new one drops back to where it started while the
+   * same companion keeps serving.
+   */
+  it('keeps the entry it already has, rather than building a fresh one', async () => {
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    const entry = entryForTests('s1')!
+    expect(entry.bootedByVorn).toBe(true)
+
+    // Stand in for a session that has been driving the device for a while.
+    entry.generation = 4
+    entry.scale = 2
+    entry.logs.push('a line worth keeping')
+
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+
+    const after = entryForTests('s1')!
+    expect(after.bootedByVorn).toBe(true)
+    expect(after.generation).toBe(4)
+    expect(after.scale).toBe(2)
+    expect(after.logs).toEqual(['a line worth keeping'])
+  })
+
+  it('does not start a second companion for a device it is already attached to', async () => {
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    expect(spawned).toHaveLength(1)
+  })
+
+  it('reboots and takes ownership when the simulator went down underneath it', async () => {
+    // udid-2 is listed as already booted, so the first claim does not own it.
+    await claim({ sessionId: 's1', udid: 'udid-2' })
+    expect(entryForTests('s1')?.bootedByVorn).toBe(false)
+
+    // The person shuts it down from elsewhere; the next claim boots it, and
+    // that boot is ours.
+    simctlList.value = JSON.stringify({
+      devices: {
+        'com.apple.CoreSimulator.SimRuntime.iOS-26-2': [
+          { udid: 'udid-1', name: 'iPhone 17', state: 'Shutdown', isAvailable: true },
+          { udid: 'udid-2', name: 'iPad Pro', state: 'Shutdown', isAvailable: true }
+        ]
+      }
+    })
+
+    await claim({ sessionId: 's1', udid: 'udid-2' })
+    expect(entryForTests('s1')?.bootedByVorn).toBe(true)
+    expect(execCalls.some((c) => c.includes('boot') && c.includes('udid-2'))).toBe(true)
+  })
+})
+
+describe('quitting with a device claimed', () => {
+  /**
+   * `bootedByVorn` is only ever honoured by `release`, and quitting does not
+   * release. So the commonest way to leave was the one path that never enforced
+   * it: close the app with a device claimed and the simulator ran on forever.
+   */
+  it('shuts down the simulators it booted', async () => {
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    shutdownOwnedDevices()
+    expect(detachedSpawns).toEqual([['xcrun', 'simctl', 'shutdown', 'udid-1']])
+  })
+
+  it('survives a shutdown that cannot even start', async () => {
+    // spawn reports a missing binary through an async `error` event rather than
+    // by throwing, and an `error` event with no listener is an uncaught
+    // exception. Best-effort cleanup on the way out must not take the process
+    // down with it.
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    shutdownOwnedDevices()
+    expect(spawnErrorHandlers).toHaveLength(1)
+    expect(() => spawnErrorHandlers[0](new Error('spawn xcrun ENOENT'))).not.toThrow()
+  })
+
+  it('leaves a simulator the person booted running', async () => {
+    // udid-2 is already booted in the fixture, so it is not ours to close.
+    await claim({ sessionId: 's1', udid: 'udid-2' })
+    shutdownOwnedDevices()
+    expect(detachedSpawns).toEqual([])
   })
 })
 
