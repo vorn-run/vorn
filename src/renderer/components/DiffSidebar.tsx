@@ -51,10 +51,8 @@ export function DiffFileList({
             <FileTypeIcon name={fileName} size={15} />
             <span className="flex-1 min-w-0 truncate text-gray-300 font-mono">{file.filePath}</span>
             <span className="shrink-0 flex items-center gap-1.5 text-[11px] font-mono">
-              {file.insertions > 0 && (
-                <span className="text-ink-secondary">+{file.insertions}</span>
-              )}
-              {file.deletions > 0 && <span className="text-ink-faint">-{file.deletions}</span>}
+              {file.insertions > 0 && <span className="text-diff-add">+{file.insertions}</span>}
+              {file.deletions > 0 && <span className="text-diff-remove">-{file.deletions}</span>}
             </span>
             <span className={`shrink-0 text-[10px] font-bold ${STATUS_LETTER_CLASS}`}>
               {letter}

@@ -270,6 +270,20 @@ export function installCompanionQuitHook(): void {
 }
 
 /**
+ * How long a call may take before we give up on it.
+ *
+ * Without this a call that never answers hangs its caller for the life of the
+ * process, and an agent waiting on a tool result has no way to tell that apart
+ * from a slow simulator. Generous enough that a cold app launch fits.
+ *
+ * A caller that asks the device to *hold* — a long press is a DOWN, a delay and
+ * an UP inside one call — must add that hold to the budget. Left at the bare
+ * default, a 30s press raced this exact number and lost: the press happened and
+ * the call reported failure.
+ */
+export const CALL_TIMEOUT_MS = 30_000
+
+/**
  * Wraps a unary companion call in a promise.
  *
  * gRPC-js is callback-first, and a status error carries the detail that makes
@@ -283,9 +297,28 @@ export function installCompanionQuitHook(): void {
  *  - `screenshot` returns `image_format` as an empty string, so the format has
  *    to be sniffed from the bytes (they are PNG) rather than trusted.
  */
-export function call<T>(client: CompanionClient, method: string, request: unknown): Promise<T> {
+export function call<T>(
+  client: CompanionClient,
+  method: string,
+  request: unknown,
+  timeoutMs: number = CALL_TIMEOUT_MS
+): Promise<T> {
   return new Promise((resolve, reject) => {
+    // A wedged simulator keeps its socket open, so gRPC never errors and a
+    // unary call waits as long as a streaming one would. `screenshot` and
+    // `accessibility_info` come through here — the two calls an agent makes
+    // most, and the two whose silence is least distinguishable from slowness.
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error(`The device did not answer ${method} within ${timeoutMs / 1000}s.`))
+    }, timeoutMs)
+
     client[method](request, (err: grpc.ServiceError | null, res: T) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       if (err) reject(new Error(err.details || err.message))
       else resolve(res)
     })
@@ -293,25 +326,97 @@ export function call<T>(client: CompanionClient, method: string, request: unknow
 }
 
 /**
- * Writes a sequence of messages to a client-streaming call and waits for the
- * single reply.
+ * Writes a sequence of messages to a **client-streaming** call — `stream X → Y`
+ * — and waits for the single reply.
  *
- * `hid` and `launch` are `stream X → Y`, not unary: a tap is *two* events, a
- * DOWN and an UP, and sending only the first leaves a finger held on the glass
- * — every subsequent gesture then behaves strangely for reasons nothing
- * reports. Keeping both halves inside one call is what makes that impossible to
- * get half-right at a call site.
+ * `hid` is the one that matters: a tap is *two* events, a DOWN and an UP, and
+ * sending only the first leaves a finger held on the glass — every subsequent
+ * gesture then behaves strangely for reasons nothing reports. Keeping both
+ * halves inside one call is what makes that impossible to get half-right at a
+ * call site.
+ *
+ * Only for methods the proto declares as `stream X` returning a bare `Y`. A
+ * method that streams *back* has no callback form at all, and passing one there
+ * is a hang rather than an error — see `callBidiStreaming`.
  */
 export function callStreaming<T>(
   client: CompanionClient,
   method: string,
-  messages: readonly unknown[]
+  messages: readonly unknown[],
+  timeoutMs: number = CALL_TIMEOUT_MS
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    let settled = false
+    // The timer is armed before the call is opened, so a client that answers
+    // synchronously — a mock, or a future grpc-js fast path — finds it already
+    // there. Held in an object because cancelling needs the stream, and the
+    // stream does not exist until after the timer.
+    const open: { stream?: grpc.ClientWritableStream<unknown> } = {}
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      open.stream?.cancel()
+      reject(new Error(`The device did not answer ${method} within ${timeoutMs / 1000}s.`))
+    }, timeoutMs)
+    const settle = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn()
+    }
+
     const stream = client[method]((err: grpc.ServiceError | null, res: T) => {
-      if (err) reject(new Error(err.details || err.message))
-      else resolve(res)
+      if (err) settle(() => reject(new Error(err.details || err.message)))
+      else settle(() => resolve(res))
     })
+    open.stream = stream
+
+    for (const m of messages) stream.write(m)
+    stream.end()
+  })
+}
+
+export function callBidiStreaming<T>(
+  client: CompanionClient,
+  method: string,
+  messages: readonly unknown[],
+  timeoutMs: number = CALL_TIMEOUT_MS
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let last: T | undefined
+    let settled = false
+    // Same shape as the helper above, and for the same reason: the deadline is
+    // armed before the call exists, so nothing can reach the timer before it is
+    // there. The handlers below happen to be registered after it either way —
+    // keeping both functions identical is what stops a later reordering
+    // reintroducing that.
+    const open: { stream?: grpc.ClientDuplexStream<unknown, T> } = {}
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      open.stream?.cancel()
+      reject(new Error(`The device did not answer ${method} within ${timeoutMs / 1000}s.`))
+    }, timeoutMs)
+    const settle = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn()
+    }
+
+    const stream = client[method]() as grpc.ClientDuplexStream<unknown, T>
+    open.stream = stream
+
+    stream.on('data', (msg: T) => {
+      last = msg
+    })
+    stream.on('error', (err: grpc.ServiceError) => {
+      settle(() => reject(new Error(err.details || err.message)))
+    })
+    stream.on('end', () => {
+      settle(() => resolve((last ?? {}) as T))
+    })
+
     for (const m of messages) stream.write(m)
     stream.end()
   })

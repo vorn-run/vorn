@@ -16,6 +16,8 @@ import {
   stopCompanion,
   call,
   callStreaming,
+  callBidiStreaming,
+  CALL_TIMEOUT_MS,
   type CompanionHandle
 } from './device-companion'
 import log from './logger'
@@ -833,7 +835,15 @@ export async function interact(params: {
     }
   }
 
-  await callStreaming(entry.companion.client, 'hid', events)
+  // A press asks the device to hold, and that hold is spent inside the call.
+  // Charging it to the same budget as the round trip is how a 30s press came to
+  // fail after succeeding: the deadline fired on the delay it had itself asked
+  // for.
+  const heldSeconds = events.reduce<number>(
+    (total, e) => total + ((e as { delay?: { duration?: number } }).delay?.duration ?? 0),
+    0
+  )
+  await callStreaming(entry.companion.client, 'hid', events, CALL_TIMEOUT_MS + heldSeconds * 1000)
   // Refs describe a screen that this input may have just replaced.
   entry.generation++
   entry.refs.clear()
@@ -923,7 +933,10 @@ export async function launch(params: {
 }): Promise<{ ok: true }> {
   const entry = deviceFor(params.sessionId)
   try {
-    await callStreaming(entry.companion.client, 'launch', [
+    // Bidirectional in the proto — `stream LaunchRequest → stream LaunchResponse`
+    // — so it has no callback form. Sent through the client-streaming helper it
+    // never settled, and device_launch hung for the life of the process.
+    await callBidiStreaming(entry.companion.client, 'launch', [
       { start: { bundle_id: params.bundleId, foreground_if_running: true } }
     ])
   } catch (err) {
