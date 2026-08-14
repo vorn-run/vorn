@@ -2,7 +2,6 @@ import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { displayHost } from '../lib/browser-url'
-import { isPromotedCardId } from '../lib/pane-id'
 import { activeBrowserUrl, isPromotedPane, type AppStore } from '../stores/types'
 
 /**
@@ -34,11 +33,10 @@ function fileName(path: string): string {
   return path.split(/[/\\]/).pop() ?? path
 }
 
-function collect(state: PaneMaps, owner?: string): PromotedCard[] {
+function collect(state: PaneMaps): PromotedCard[] {
   const cards: PromotedCard[] = []
   for (const [id, pane] of state.editorPanes) {
     if (!isPromotedPane(id, pane)) continue
-    if (owner !== undefined && pane.sessionId !== owner) continue
     cards.push({
       id,
       kind: 'editor',
@@ -49,7 +47,6 @@ function collect(state: PaneMaps, owner?: string): PromotedCard[] {
   }
   for (const [id, pane] of state.browserPanes) {
     if (!isPromotedPane(id, pane)) continue
-    if (owner !== undefined && pane.sessionId !== owner) continue
     const url = activeBrowserUrl(pane) ?? ''
     cards.push({
       id,
@@ -74,27 +71,22 @@ export function usePromotedCards(): PromotedCard[] {
   return useMemo(() => collect({ editorPanes, browserPanes }), [editorPanes, browserPanes])
 }
 
-/** The cards `sessionId` popped out. */
+/**
+ * The cards `sessionId` popped out.
+ *
+ * Filtered from the shared list rather than scanning the pane maps itself: this
+ * is called once per session row in the sidebar, so scanning per call turned one
+ * walk of both maps into one walk per session.
+ */
 export function usePromotedCardsFor(sessionId: string): PromotedCard[] {
-  const { editorPanes, browserPanes } = usePaneMaps()
-  return useMemo(
-    () => collect({ editorPanes, browserPanes }, sessionId),
-    [editorPanes, browserPanes, sessionId]
-  )
+  const all = usePromotedCards()
+  return useMemo(() => {
+    const mine = all.filter((c) => c.sessionId === sessionId)
+    return mine.length === 0 ? NO_CARDS : mine
+  }, [all, sessionId])
 }
 
-/**
- * Card ids grouped by the session they came from.
- *
- * The one place that answers "which cards sit beside which session" — the
- * ordering contract the grid and the tab strip are both built on. Written twice,
- * they would drift the moment either grew a sort or a filter, and the two strips
- * would disagree about where a card belongs.
- *
- * Grouped on `pane.sessionId`, the authoritative owner, rather than by parsing
- * it back out of the card's id.
- */
-export function promotedCardsByOwner(state: PaneMaps): Map<string, string[]> {
+function groupByOwner(state: PaneMaps): Map<string, string[]> {
   const cards = collect(state)
   if (cards.length === 0) return NO_OWNERS
   const byOwner = new Map<string, string[]>()
@@ -106,12 +98,17 @@ export function promotedCardsByOwner(state: PaneMaps): Map<string, string[]> {
   return byOwner
 }
 
+/**
+ * Card ids grouped by the session they came from.
+ *
+ * The one place that answers "which cards sit beside which session" — the
+ * ordering contract the grid and the tab strip are both built on. Written twice,
+ * they drifted the moment either grew a filter. Grouped on `pane.sessionId`, the
+ * authoritative owner, rather than by parsing it back out of the card's id.
+ */
 export function usePromotedCardsByOwner(): Map<string, string[]> {
   const { editorPanes, browserPanes } = usePaneMaps()
-  return useMemo(
-    () => promotedCardsByOwner({ editorPanes, browserPanes }),
-    [editorPanes, browserPanes]
-  )
+  return useMemo(() => groupByOwner({ editorPanes, browserPanes }), [editorPanes, browserPanes])
 }
 
 /**
@@ -128,9 +125,8 @@ export function usePromotedCardsByOwner(): Map<string, string[]> {
  */
 export function usePromotedCardSubject(cardId: string): PromotedCard | null {
   const cards = usePromotedCards()
-  // No memo needed: `cards` is itself memoized, so `find` hands back the very
-  // object it holds, and that reference is stable for as long as the list is.
-  // A session id can never name a card, so the scan is skipped outright for the
-  // far more common case of a plain terminal pill or tab.
-  return isPromotedCardId(cardId) ? (cards.find((c) => c.id === cardId) ?? null) : null
+  // No memo: `cards` is memoized, so `find` hands back the very object it holds
+  // and that reference is stable for as long as the list is — which is what
+  // keeps a caller's own memos and effects from re-running every render.
+  return cards.find((c) => c.id === cardId) ?? null
 }

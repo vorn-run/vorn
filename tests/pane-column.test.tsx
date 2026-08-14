@@ -166,6 +166,21 @@ describe('PaneColumn', () => {
     expect(result.current.some((e) => e.id === cardId)).toBe(false)
   })
 
+  it('answers "no panes" for a card id', () => {
+    // `editorPanes` is keyed by pane, so `has(cardId)` is true for an editor
+    // card — and building entries from that yields an `editor:card:<id>` pane
+    // that does not exist. The tab strip passes its active tab id straight in,
+    // which can be a card, so this is reachable.
+    let cardId = ''
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    const { result } = renderHook(() => usePaneColumnEntries(cardId))
+
+    expect(result.current).toEqual([])
+  })
+
   it('sizes itself rather than trusting the frame to do it', () => {
     // Every row below is `flex-basis: 0`, so this element has no content height.
     // Inside a `flex-col` frame that collapses it to nothing — which is exactly

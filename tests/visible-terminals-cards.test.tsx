@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
 import { useVisibleTerminals } from '../src/renderer/hooks/useVisibleTerminals'
+import { usePromotedCardsFor } from '../src/renderer/hooks/usePromotedCards'
 
 const session = (id: string) =>
   ({
@@ -98,6 +99,23 @@ describe('useVisibleTerminals with popped-out cards', () => {
     const { result } = renderHook(() => useVisibleTerminals())
 
     expect(result.current.orderedIds).toEqual(['t1', mine, 't2', theirs])
+  })
+
+  it('hands a session with no cards the same empty list every time', () => {
+    // Rendered once per session row in the sidebar. A fresh array each call
+    // re-runs every memo and effect downstream of it, on every pane write
+    // anywhere in the app — including for sessions that have no cards at all.
+    const { result, rerender } = renderHook(() => usePromotedCardsFor('t2'))
+    const first = result.current
+    expect(first).toEqual([])
+
+    act(() => {
+      useAppStore.getState().promoteFile('t1', '/p/a.ts')
+    })
+    rerender()
+
+    // Another session's card is not this session's business.
+    expect(result.current).toBe(first)
   })
 
   it('does not disturb the layout when a pane changes but the cells do not', () => {
