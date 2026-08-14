@@ -259,20 +259,6 @@ select:focus:not(:focus-visible) {
   transition: box-shadow 0.15s ease;
 }
 
-/* Status pulse animation */
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-.animate-pulse-dot {
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-
 /* Running glyph — two-tier organic twinkle. Opacity envelopes only; the
    per-cell delay + duration are set inline. */
 @keyframes rg-pulse-in {

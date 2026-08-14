@@ -3,7 +3,7 @@ import { blockToText, type BlockRow, type StyledRun } from '../lib/block-render'
 import { colorToCss, getBlockLog, onBlockLogChange, type LoggedBlock } from '../lib/block-log'
 import { formatDuration, shortenCwd } from '../lib/command-blocks'
 import { Check, Copy } from 'lucide-react'
-import { TERMINAL_BACKGROUND } from '../lib/surface'
+import { TERMINAL_BACKGROUND } from '../../shared/surface'
 
 /**
  * Finished commands, drawn as real elements.

@@ -1,11 +1,5 @@
 import type { AgentStatus } from '../../shared/types'
-
-const STATUS_LABEL: Record<AgentStatus, string> = {
-  running: 'Running',
-  waiting: 'Waiting',
-  idle: 'Idle',
-  error: 'Error'
-}
+import { STATUS_LABEL } from './status-colors'
 
 export function buildTooltip(
   displayName: string,

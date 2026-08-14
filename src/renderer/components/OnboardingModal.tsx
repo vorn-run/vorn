@@ -469,7 +469,7 @@ function StepWorkspace() {
                   className="text-[9px] px-1.5 py-0.5 rounded"
                   style={{
                     background: i === 0 ? 'rgba(201,151,42,0.08)' : 'rgba(255,255,255,0.03)',
-                    color: i === 0 ? '#c9972a' : '#555'
+                    color: i === 0 ? 'var(--color-bronzo)' : '#555'
                   }}
                 >
                   {t}
@@ -723,7 +723,7 @@ export function OnboardingModal() {
                 className="relative h-1 rounded-full transition-all duration-300"
                 style={{
                   width: i === currentStep ? 32 : 16,
-                  background: i <= currentStep ? '#c9972a' : 'rgba(255,255,255,0.08)'
+                  background: i <= currentStep ? 'var(--color-bronzo)' : 'rgba(255,255,255,0.08)'
                 }}
                 aria-label={`Go to step ${i + 1}: ${s.title}`}
               />

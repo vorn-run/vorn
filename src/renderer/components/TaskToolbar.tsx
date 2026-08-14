@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useAppStore } from '../stores'
 import { TaskStatusFilter } from '../stores/types'
-import { TaskViewMode, TaskStatus } from '../../shared/types'
-import { TASK_STATUS_LABEL, TASK_STATUS_DOT } from '../lib/task-status'
+import { TaskViewMode } from '../../shared/types'
+import { TASK_STATUS_LABEL, TASK_STATUS_DOT, TASK_STATUS_ORDER } from '../lib/task-status'
 import { SlidersHorizontal, Archive } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { OptionRow } from './OptionRow'
@@ -17,7 +17,7 @@ const isMac = navigator.platform.toUpperCase().includes('MAC')
 // carry its own copy of both, and painted "All" in todo's colour.
 const TASK_STATUS_OPTIONS: { value: TaskStatusFilter; label: string; dot: string }[] = [
   { value: 'all', label: 'All', dot: 'bg-ink-secondary' },
-  ...(['todo', 'in_progress', 'in_review', 'done', 'cancelled'] as TaskStatus[]).map((s) => ({
+  ...TASK_STATUS_ORDER.map((s) => ({
     value: s as TaskStatusFilter,
     label: TASK_STATUS_LABEL[s],
     dot: TASK_STATUS_DOT[s]

@@ -53,3 +53,22 @@ export const TONE_DOT_MOVING: Record<StatusTone, string> = {
   ...TONE_DOT,
   live: `${TONE_DOT.live} animate-pulse`
 }
+
+/**
+ * Project a vocabulary's tones through one of the tables above.
+ *
+ * Each domain owns a `Record<itsStatus, StatusTone>` and then needs the same
+ * thing said in classes; without this every domain transcribes it key by key,
+ * which is a line per status per table and four edits in lockstep to add one
+ * status. Tailwind is satisfied by the literals above — it scans for candidate
+ * class names in source text, and copying a string it has already seen is not
+ * assembling a new one.
+ */
+export function byTone<K extends string>(
+  tones: Record<K, StatusTone>,
+  table: Record<StatusTone, string>
+): Record<K, string> {
+  const out = {} as Record<K, string>
+  for (const key of Object.keys(tones) as K[]) out[key] = table[tones[key]]
+  return out
+}

@@ -43,7 +43,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
           </p>
           <pre
             style={{
-              background: '#111113',
+              background: 'var(--color-surface-sunken)',
               border: '1px solid rgba(255,255,255,0.06)',
               borderRadius: 8,
               padding: 16,

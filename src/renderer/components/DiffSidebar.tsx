@@ -9,12 +9,15 @@ import { FileTypeIcon } from './file-icons'
  * the rest of this pass removed — the diff body below keeps its green and red,
  * because that is the work itself rather than a label describing it.
  */
-const STATUS_COLORS: Record<string, { color: string; label: string }> = {
-  modified: { color: 'text-ink-secondary', label: 'M' },
-  added: { color: 'text-ink-secondary', label: 'A' },
-  deleted: { color: 'text-ink-secondary', label: 'D' },
-  renamed: { color: 'text-ink-secondary', label: 'R' }
+const STATUS_LETTER: Record<string, string> = {
+  modified: 'M',
+  added: 'A',
+  deleted: 'D',
+  renamed: 'R'
 }
+
+/** One tone for all four: the letter says which, the colour only says "file". */
+const STATUS_LETTER_CLASS = 'text-ink-secondary'
 
 export interface DiffComment {
   filePath: string
@@ -35,7 +38,7 @@ export function DiffFileList({
   return (
     <div className="border-b border-white/[0.06] max-h-[200px] overflow-y-auto">
       {files.map((file) => {
-        const meta = STATUS_COLORS[file.status] || STATUS_COLORS.modified
+        const letter = STATUS_LETTER[file.status] ?? STATUS_LETTER.modified
         const isSelected = selectedFile === file.filePath
         const fileName = file.filePath.split('/').pop() || file.filePath
         return (
@@ -53,7 +56,9 @@ export function DiffFileList({
               )}
               {file.deletions > 0 && <span className="text-ink-faint">-{file.deletions}</span>}
             </span>
-            <span className={`shrink-0 text-[10px] font-bold ${meta.color}`}>{meta.label}</span>
+            <span className={`shrink-0 text-[10px] font-bold ${STATUS_LETTER_CLASS}`}>
+              {letter}
+            </span>
           </button>
         )
       })}
@@ -166,7 +171,7 @@ export function DiffContent({
   return (
     <div className="flex-1 overflow-y-auto">
       {files.map((file) => {
-        const meta = STATUS_COLORS[file.status] || STATUS_COLORS.modified
+        const letter = STATUS_LETTER[file.status] ?? STATUS_LETTER.modified
         const fileName = file.filePath.split('/').pop() || file.filePath
         const lines = parseDiffLines(
           file.diff,
@@ -195,7 +200,9 @@ export function DiffContent({
             >
               <FileTypeIcon name={fileName} size={14} />
               <span className="text-gray-300 flex-1 min-w-0 truncate">{file.filePath}</span>
-              <span className={`${meta.color} text-[10px] font-bold shrink-0`}>{meta.label}</span>
+              <span className={`${STATUS_LETTER_CLASS} text-[10px] font-bold shrink-0`}>
+                {letter}
+              </span>
               {fileCommentCount > 0 && (
                 <span className="text-[10px] text-ink-secondary bg-white/[0.06] px-1.5 py-0.5 rounded-full ml-auto">
                   {fileCommentCount} comment{fileCommentCount !== 1 ? 's' : ''}

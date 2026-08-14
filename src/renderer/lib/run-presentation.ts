@@ -270,7 +270,7 @@ export function runSummaryText(execution: WorkflowExecution): string | undefined
  * Returns undefined when nothing is running, so a canvas showing a definition
  * rather than a run renders no status at all.
  */
-const LIVE_STATUS_RANK: Record<string, number> = {
+const LIVE_STATUS_RANK: Partial<Record<NodeExecutionStatus, number>> = {
   waiting: 4,
   running: 3,
   error: 2,
@@ -282,14 +282,20 @@ export function liveNodeStatus(
   workflowId: string
 ): Record<string, NodeExecutionStatus> | undefined {
   const worst: Record<string, NodeExecutionStatus> = {}
+  const ranks: Record<string, number> = {}
+  let found = false
   for (const exec of executions) {
-    if (exec.workflowId !== workflowId) continue
+    // Finished runs stay in the store to back the history list, so without this
+    // the canvas would keep every dot from the last run that ever completed and
+    // could never go back to showing a plain definition.
+    if (exec.status !== 'running' || exec.workflowId !== workflowId) continue
     for (const ns of exec.nodeStates ?? []) {
-      const rank = LIVE_STATUS_RANK[ns.status] ?? 0
-      if (rank === 0) continue
-      const held = worst[ns.nodeId]
-      if (!held || rank > (LIVE_STATUS_RANK[held] ?? 0)) worst[ns.nodeId] = ns.status
+      const rank = LIVE_STATUS_RANK[ns.status]
+      if (!rank || rank <= (ranks[ns.nodeId] ?? 0)) continue
+      worst[ns.nodeId] = ns.status
+      ranks[ns.nodeId] = rank
+      found = true
     }
   }
-  return Object.keys(worst).length > 0 ? worst : undefined
+  return found ? worst : undefined
 }

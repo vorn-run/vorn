@@ -3,11 +3,14 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check } from 'lucide-react'
 import { TaskStatus } from '../../shared/types'
-import { TASK_STATUS_LABEL, TASK_STATUS_ICON, TASK_STATUS_TEXT } from '../lib/task-status'
+import {
+  TASK_STATUS_LABEL,
+  TASK_STATUS_ICON,
+  TASK_STATUS_TEXT,
+  TASK_STATUS_ORDER
+} from '../lib/task-status'
 import { useAppStore } from '../stores'
 import { toast } from './Toast'
-
-const ALL_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done', 'cancelled']
 
 export function StatusPicker({
   taskId,
@@ -141,7 +144,7 @@ export function StatusPicker({
                 minWidth: 180
               }}
             >
-              {ALL_STATUSES.map((status) => {
+              {TASK_STATUS_ORDER.map((status) => {
                 const Icon = TASK_STATUS_ICON[status]
                 const isCurrent = status === currentStatus
                 // In store mode, in_progress is only reachable from todo — the

@@ -4,7 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { attachCommandBlocks, jumpToCommand } from './command-blocks'
 import type { BufferMetrics } from './spine-layout'
-import { TERMINAL_BACKGROUND } from './surface'
+import { TERMINAL_BACKGROUND } from '../../shared/surface'
 
 interface TerminalEntry {
   term: Terminal

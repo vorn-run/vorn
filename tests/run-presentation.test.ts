@@ -395,7 +395,7 @@ describe('bucketOf', () => {
 
 describe('liveNodeStatus', () => {
   const exec = (over: Partial<WorkflowExecution>): WorkflowExecution =>
-    run({ workflowId: 'wf-1', ...over })
+    run({ workflowId: 'wf-1', status: 'running', ...over })
 
   it('reports what each node of a running workflow is doing', () => {
     const map = liveNodeStatus(
@@ -463,6 +463,26 @@ describe('liveNodeStatus', () => {
       'wf-1'
     )
     expect(map).toBeUndefined()
+  })
+
+  it('forgets a run once it finishes', () => {
+    // Finished runs stay in the store to back the history list. Reading their
+    // node states too would leave the last run's dots on the canvas forever,
+    // and the canvas could never go back to showing a plain definition.
+    const stillReported = (['success', 'error', 'cancelled'] as const).filter(
+      (status) =>
+        liveNodeStatus(
+          [
+            exec({
+              status,
+              nodeStates: [{ nodeId: 'a', status: 'success' }] as NodeExecutionState[]
+            })
+          ],
+          'wf-1'
+        ) !== undefined
+    )
+
+    expect(stillReported).toEqual([])
   })
 
   it('says nothing rather than an empty map when nothing is live', () => {

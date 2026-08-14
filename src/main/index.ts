@@ -8,6 +8,7 @@ import { installConnectorCredentialsSync } from './connector-credentials-sync'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
 import { IPC, PermissionRequestInfo } from '../shared/types'
+import { SURFACE } from '../shared/surface'
 import { launchServer, stopServer, getServerBridge } from './server/server-launcher'
 import type { ServerBridge } from './server/server-bridge'
 import log from './logger'
@@ -59,7 +60,7 @@ function createWindow(): void {
           trafficLightPosition: { x: 16, y: 13 }
         }
       : {}),
-    backgroundColor: '#1a1a1e',
+    backgroundColor: SURFACE.base,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

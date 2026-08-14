@@ -1,5 +1,5 @@
 import type { NodeExecutionStatus } from '../../shared/types'
-import { TONE_DOT, TONE_DOT_MOVING, TONE_TEXT, type StatusTone } from './status-tone'
+import { byTone, TONE_DOT, TONE_DOT_MOVING, TONE_TEXT, type StatusTone } from './status-tone'
 
 /** `cancelled` is the only run-level state a node cannot be in. */
 export type WorkflowStatusKey = NodeExecutionStatus | 'cancelled'
@@ -30,15 +30,7 @@ export const WORKFLOW_STATUS_TONE: Record<WorkflowStatusKey, StatusTone> = {
   cancelled: 'idle'
 }
 
-export const WORKFLOW_STATUS_DOT: Record<WorkflowStatusKey, string> = {
-  waiting: TONE_DOT[WORKFLOW_STATUS_TONE.waiting],
-  error: TONE_DOT[WORKFLOW_STATUS_TONE.error],
-  running: TONE_DOT[WORKFLOW_STATUS_TONE.running],
-  success: TONE_DOT[WORKFLOW_STATUS_TONE.success],
-  pending: TONE_DOT[WORKFLOW_STATUS_TONE.pending],
-  skipped: TONE_DOT[WORKFLOW_STATUS_TONE.skipped],
-  cancelled: TONE_DOT[WORKFLOW_STATUS_TONE.cancelled]
-}
+export const WORKFLOW_STATUS_DOT = byTone(WORKFLOW_STATUS_TONE, TONE_DOT)
 
 /**
  * The same dots, animated for the state that is actually moving.
@@ -47,25 +39,9 @@ export const WORKFLOW_STATUS_DOT: Record<WorkflowStatusKey, string> = {
  * legends, not live indicators — a pulsing key would suggest the *filter* is
  * doing something.
  */
-export const WORKFLOW_STATUS_DOT_PULSE: Record<WorkflowStatusKey, string> = {
-  waiting: TONE_DOT_MOVING[WORKFLOW_STATUS_TONE.waiting],
-  error: TONE_DOT_MOVING[WORKFLOW_STATUS_TONE.error],
-  running: TONE_DOT_MOVING[WORKFLOW_STATUS_TONE.running],
-  success: TONE_DOT_MOVING[WORKFLOW_STATUS_TONE.success],
-  pending: TONE_DOT_MOVING[WORKFLOW_STATUS_TONE.pending],
-  skipped: TONE_DOT_MOVING[WORKFLOW_STATUS_TONE.skipped],
-  cancelled: TONE_DOT_MOVING[WORKFLOW_STATUS_TONE.cancelled]
-}
+export const WORKFLOW_STATUS_DOT_PULSE = byTone(WORKFLOW_STATUS_TONE, TONE_DOT_MOVING)
 
-export const WORKFLOW_STATUS_TEXT: Record<WorkflowStatusKey, string> = {
-  waiting: TONE_TEXT[WORKFLOW_STATUS_TONE.waiting],
-  error: TONE_TEXT[WORKFLOW_STATUS_TONE.error],
-  running: TONE_TEXT[WORKFLOW_STATUS_TONE.running],
-  success: TONE_TEXT[WORKFLOW_STATUS_TONE.success],
-  pending: TONE_TEXT[WORKFLOW_STATUS_TONE.pending],
-  skipped: TONE_TEXT[WORKFLOW_STATUS_TONE.skipped],
-  cancelled: TONE_TEXT[WORKFLOW_STATUS_TONE.cancelled]
-}
+export const WORKFLOW_STATUS_TEXT = byTone(WORKFLOW_STATUS_TONE, TONE_TEXT)
 
 /**
  * A run's one-line verdict. Every tone is a status tone; `neutral` — a stopped

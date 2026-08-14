@@ -1,6 +1,6 @@
 import { TaskStatus } from '../../shared/types'
 import { Circle, Clock, Eye, CheckCircle2, XCircle } from 'lucide-react'
-import { TONE_DOT, TONE_DOT_MOVING, TONE_TEXT, type StatusTone } from './status-tone'
+import { byTone, TONE_DOT, TONE_DOT_MOVING, TONE_TEXT, type StatusTone } from './status-tone'
 
 /**
  * What each task state means, in the shared vocabulary.
@@ -23,6 +23,22 @@ export const TASK_STATUS_TONE: Record<TaskStatus, StatusTone> = {
   done: 'settled',
   cancelled: 'idle'
 }
+
+/**
+ * The order a person reads the statuses in, and the definition of "all of
+ * them".
+ *
+ * The kanban columns, the list sections, the toolbar filter and the status
+ * picker each carried their own copy of this array, so adding or reordering a
+ * status meant four edits and any one of them could present a different set.
+ */
+export const TASK_STATUS_ORDER: TaskStatus[] = [
+  'todo',
+  'in_progress',
+  'in_review',
+  'done',
+  'cancelled'
+]
 
 /**
  * The label for each status, in one place.
@@ -69,21 +85,29 @@ export const TASK_STATUS_ICON: Record<
  * the board and stops it becoming just another column tint. `cancelled` keeps no
  * colour at all: an abandoned task is an absence, not a category.
  */
-export const TASK_STATUS_TEXT: Record<TaskStatus, string> = {
-  todo: 'text-status-slate',
-  in_progress: 'text-status-blue',
-  in_review: TONE_TEXT[TASK_STATUS_TONE.in_review],
-  done: 'text-status-sage',
-  cancelled: TONE_TEXT[TASK_STATUS_TONE.cancelled]
+const CATEGORY: Partial<Record<TaskStatus, { text: string; dot: string }>> = {
+  todo: { text: 'text-status-slate', dot: 'bg-status-slate' },
+  in_progress: { text: 'text-status-blue', dot: 'bg-status-blue' },
+  done: { text: 'text-status-sage', dot: 'bg-status-sage' }
 }
 
-export const TASK_STATUS_DOT: Record<TaskStatus, string> = {
-  todo: 'bg-status-slate',
-  in_progress: 'bg-status-blue',
-  in_review: TONE_DOT[TASK_STATUS_TONE.in_review],
-  done: 'bg-status-sage',
-  cancelled: TONE_DOT[TASK_STATUS_TONE.cancelled]
+/**
+ * Tone first, then a category colour where the board has one. Written as one
+ * function over both axes so the word and the dot for a status cannot be given
+ * different answers — they used to be two hand-listed maps kept in step by a
+ * test that compared them with string surgery.
+ */
+function categorised(table: Record<StatusTone, string>, axis: 'text' | 'dot') {
+  const out = byTone(TASK_STATUS_TONE, table)
+  for (const status of TASK_STATUS_ORDER) {
+    const pair = CATEGORY[status]
+    if (pair) out[status] = pair[axis]
+  }
+  return out
 }
+
+export const TASK_STATUS_TEXT = categorised(TONE_TEXT, 'text')
+export const TASK_STATUS_DOT = categorised(TONE_DOT, 'dot')
 
 /** The live-session dot on a card — the one moving thing on this surface. */
 export const TASK_LIVE_DOT = TONE_DOT_MOVING.live

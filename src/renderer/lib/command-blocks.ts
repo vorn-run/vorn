@@ -1,7 +1,7 @@
 import type { IMarker, Terminal } from '@xterm/xterm'
 import { captureBlock, clearBlockLog, hasBlockLogView } from './block-log'
 import type { BufferLike, LineLike } from './block-render'
-import { TERMINAL_BACKGROUND } from './surface'
+import { TERMINAL_BACKGROUND } from '../../shared/surface'
 
 /**
  * Command blocks: structured command boundaries inside the raw terminal.

@@ -242,10 +242,12 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
    * could watch a run park on an approval gate in the runs list while the gate's
    * node on the canvas looked idle.
    *
-   * With runs in parallel a node can be in several states at once, so the most
-   * urgent wins: a gate waiting on the person outranks work still going, which
-   * outranks a failure worth reading, which outranks a finished step. Recomputed
-   * off the same signature that already drives the history refetch.
+   * See `liveNodeStatus` for how parallel runs are reconciled. This is a
+   * selector rather than a memo keyed on the signature above, because a node
+   * flipping from running to success changes nothing that signature spells out
+   * and the canvas still has to follow it. So it runs on every store commit,
+   * including per-chunk log writes — which is why the fold skips runs that are
+   * not running before it looks at a single node.
    */
   const nodeStatus = useAppStore(
     useShallow((s) =>

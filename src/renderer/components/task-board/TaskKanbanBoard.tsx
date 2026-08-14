@@ -1,12 +1,15 @@
 import { useState, useRef } from 'react'
 import { TaskConfig, TaskStatus } from '../../../shared/types'
 import { TaskCard } from './TaskCard'
-import { TASK_STATUS_ICON, TASK_STATUS_TEXT, TASK_STATUS_LABEL } from '../../lib/task-status'
+import {
+  TASK_STATUS_ICON,
+  TASK_STATUS_TEXT,
+  TASK_STATUS_LABEL,
+  TASK_STATUS_ORDER
+} from '../../lib/task-status'
 import { Plus } from 'lucide-react'
 
-const KANBAN_ORDER: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done', 'cancelled']
-
-const KANBAN_COLUMNS: { status: TaskStatus; title: string }[] = KANBAN_ORDER.map((status) => ({
+const KANBAN_COLUMNS = TASK_STATUS_ORDER.map((status) => ({
   status,
   title: TASK_STATUS_LABEL[status]
 }))

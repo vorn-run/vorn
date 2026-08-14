@@ -1,5 +1,5 @@
 import type { AgentStatus } from '../../shared/types'
-import { TONE_DOT, TONE_TEXT, type StatusTone } from './status-tone'
+import { byTone, TONE_DOT, TONE_TEXT, type StatusTone } from './status-tone'
 
 /**
  * What each session state means, in the shared vocabulary.
@@ -16,19 +16,9 @@ export const STATUS_TONE: Record<AgentStatus, StatusTone> = {
   error: 'broken'
 }
 
-export const STATUS_DOT: Record<AgentStatus, string> = {
-  running: TONE_DOT[STATUS_TONE.running],
-  waiting: TONE_DOT[STATUS_TONE.waiting],
-  idle: TONE_DOT[STATUS_TONE.idle],
-  error: TONE_DOT[STATUS_TONE.error]
-}
+export const STATUS_DOT = byTone(STATUS_TONE, TONE_DOT)
 
-export const STATUS_TEXT: Record<AgentStatus, string> = {
-  running: TONE_TEXT[STATUS_TONE.running],
-  waiting: TONE_TEXT[STATUS_TONE.waiting],
-  idle: TONE_TEXT[STATUS_TONE.idle],
-  error: TONE_TEXT[STATUS_TONE.error]
-}
+export const STATUS_TEXT = byTone(STATUS_TONE, TONE_TEXT)
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   running: 'Running',

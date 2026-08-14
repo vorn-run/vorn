@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  byTone,
   TONE_DOT,
   TONE_DOT_MOVING,
   TONE_TEXT,
@@ -7,8 +8,16 @@ import {
 } from '../src/renderer/lib/status-tone'
 import { STATUS_TONE } from '../src/renderer/lib/status-colors'
 import { WORKFLOW_STATUS_TONE } from '../src/renderer/lib/workflow-status'
+import { TASK_STATUS_TONE } from '../src/renderer/lib/task-status'
 
 const EVERY_TONE: StatusTone[] = ['blocked', 'broken', 'live', 'settled', 'idle']
+
+/** Every status vocabulary in the app, keyed loosely so one loop covers all. */
+const SURFACES: [string, Record<string, StatusTone>][] = [
+  ['sessions', STATUS_TONE],
+  ['workflows', WORKFLOW_STATUS_TONE],
+  ['tasks', TASK_STATUS_TONE]
+]
 
 describe('the shared status tones', () => {
   it('spends the accent on exactly one meaning', () => {
@@ -54,22 +63,43 @@ describe('the shared status tones', () => {
 })
 
 describe('what each surface calls blocked', () => {
-  it('agrees across sessions and workflows', () => {
+  it('agrees across sessions, workflows and tasks', () => {
     // Three surfaces, one accent. These used to be independent tables, so a
-    // waiting session and a waiting gate could — and did — drift apart.
+    // waiting session and a waiting gate could — and did — drift apart. A task
+    // in review is the same relationship wearing a third name: an agent has
+    // finished and is waiting on the person.
     expect(STATUS_TONE.waiting).toBe('blocked')
     expect(WORKFLOW_STATUS_TONE.waiting).toBe('blocked')
+    expect(TASK_STATUS_TONE.in_review).toBe('blocked')
   })
 
   it('gives each surface exactly one blocked state', () => {
-    const sessions = Object.values(STATUS_TONE).filter((t) => t === 'blocked')
-    const workflows = Object.values(WORKFLOW_STATUS_TONE).filter((t) => t === 'blocked')
-    expect(sessions).toHaveLength(1)
-    expect(workflows).toHaveLength(1)
+    for (const [surface, tones] of SURFACES) {
+      const blocked = Object.entries(tones).filter(([, t]) => t === 'blocked')
+      expect(blocked.map(([, t]) => `${surface}:${t}`)).toEqual([`${surface}:blocked`])
+    }
   })
 
   it('keeps a stopped run out of broken', () => {
     // Stopping a run is a decision, not a failure.
     expect(WORKFLOW_STATUS_TONE.cancelled).not.toBe('broken')
+  })
+})
+
+describe('byTone', () => {
+  it('answers for every key a vocabulary declares', () => {
+    // The projection is what stops a domain transcribing the tables by hand and
+    // leaving one status behind, so covering the whole key set is the point.
+    for (const [, tones] of SURFACES) {
+      const projected = byTone(tones, TONE_DOT)
+      expect(Object.keys(projected).sort()).toEqual(Object.keys(tones).sort())
+      expect(Object.entries(projected).filter(([, cls]) => !cls)).toEqual([])
+    }
+  })
+
+  it('reads through the tone rather than copying a class', () => {
+    expect(byTone({ anything: 'blocked' } as const, TONE_TEXT)).toEqual({
+      anything: TONE_TEXT.blocked
+    })
   })
 })

@@ -140,20 +140,6 @@ select:focus:not(:focus-visible) {
     0 0 12px rgba(59, 130, 246, 0.15);
 }
 
-/* Status pulse animation */
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-.animate-pulse-dot {
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-
 /* Drag handle */
 .drag-handle {
   cursor: grab;
