@@ -39,20 +39,22 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
   )
 
   /**
-   * Bring the card into view, which means whatever the current layout needs.
+   * Go to the card. The card itself — not the session it came from.
    *
-   * Selecting alone only highlights a grid cell. In focused mode and the tab
-   * strip there is no grid, and the card is drawn in its owner session's column
-   * — so getting to it means going to that session first. Without this the row
-   * looked inert in exactly the two layouts where the card was hardest to find.
+   * This mirrors `SessionItem` exactly, on the card's own id, because that is
+   * the point: a card is the same kind of thing as a session and is reached the
+   * same way. An earlier version focused the *owner*, on the reasoning that the
+   * card was drawn inside it — so clicking a file handed you the whole session
+   * with the file wedged in beside its terminal, and offered to put the file
+   * "back" into the session you were already looking at.
    */
   const reveal = (): void => {
     setSelected(card.id)
     if (layoutMode === 'tabs') {
-      setActiveTabId(card.sessionId)
+      setActiveTabId(card.id)
       setFocusedTerminal(null)
     } else {
-      setFocusedTerminal(card.sessionId)
+      setFocusedTerminal(card.id)
     }
   }
 

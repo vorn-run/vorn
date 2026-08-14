@@ -33,8 +33,6 @@ vi.mock('../src/renderer/components/BrowserCard', () => ({
 
 const { useAppStore } = await import('../src/renderer/stores')
 const { PaneColumn } = await import('../src/renderer/components/PaneColumn')
-const { useSessionHasPaneColumn } = await import('../src/renderer/hooks/useCardsDrawnAsCells')
-const { renderHook } = await import('@testing-library/react')
 
 const session = (id: string) =>
   ({
@@ -127,73 +125,37 @@ describe('PaneColumn', () => {
     expect(screen.getAllByRole('separator')).toHaveLength(1)
   })
 
-  it('leaves a popped-out card to the grid', () => {
+  it('never draws a popped-out card, whatever the layout', () => {
+    // A card is a thing in its own right — its own cell, its own tab, its own
+    // focus stage. Drawing it back inside its owner is what made it read as
+    // merely displaced from the session: focusing one handed you the whole
+    // session with the file wedged in beside the terminal, and the card then
+    // offered to put itself "back" into the session you were looking at.
     let cardId = ''
     act(() => {
       useAppStore.getState().openFilesPane('t1')
       cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
     })
-    render(<PaneColumn sessionId="t1" />)
 
-    // The grid is drawing it as a cell of its own. Drawing it here as well
-    // would mount it twice — for a browser card, two guests on one url, each
-    // with its own scroll position and half-filled form.
-    expect(screen.queryByTestId(`editor-${cardId}`)).not.toBeInTheDocument()
-    expect(screen.getByTestId('files-t1')).toBeInTheDocument()
+    for (const state of [{ focusedTerminalId: null }, { focusedTerminalId: 't1' }]) {
+      act(() => useAppStore.setState(state as never))
+      const { unmount } = render(<PaneColumn sessionId="t1" />)
+      expect(screen.queryByTestId(`editor-${cardId}`)).not.toBeInTheDocument()
+      // The session's own panes are unaffected — only cards are excluded.
+      expect(screen.getByTestId('files-t1')).toBeInTheDocument()
+      unmount()
+    }
   })
 
-  it('takes the card in where no grid is drawing it', () => {
-    let cardId = ''
-    act(() => {
-      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
-      useAppStore.setState({ focusedTerminalId: 't1' } as never)
-    })
-    render(<PaneColumn sessionId="t1" />)
-
-    // Focused mode shows one session and has no cell for a card. Left to the
-    // grid it would be nowhere at all — and the control that puts it back
-    // travels with it, so it could not be recovered from the card either.
-    expect(screen.getByTestId(`editor-${cardId}`)).toBeInTheDocument()
-  })
-
-  it("keeps a card clear of the session's own editor", () => {
-    let cardId = ''
-    act(() => {
-      useAppStore.getState().openEditorPane('t1', '/repo/open.ts')
-      cardId = useAppStore.getState().promoteFile('t1', '/repo/popped.ts')
-      useAppStore.setState({ focusedTerminalId: 't1' } as never)
-    })
-    render(<PaneColumn sessionId="t1" />)
-
-    // Both are editors on one session, and only the pane id tells them apart —
-    // keying the column by kind would collapse them into one row.
-    expect(screen.getByTestId('editor-t1')).toBeInTheDocument()
-    expect(screen.getByTestId(`editor-${cardId}`)).toBeInTheDocument()
-    expect(screen.getAllByRole('separator')).toHaveLength(1)
-  })
-
-  it('reserves no column for a card the grid is drawing', () => {
-    // The card cell is the whole point, so the session must not also hold space
-    // open for it. It did: the gate said "has panes", the card body split its
-    // width, and PaneColumn then rendered nothing — the terminal squeezed to
-    // its ratio with a band of dead space beside it and nothing to explain it.
+  it('leaves a session with only a card no column at all', () => {
+    // Not merely empty: reserving one split the card body's width for something
+    // that drew nothing, leaving the terminal at its ratio with a dead band
+    // beside it and no sign of what was holding the space open.
     act(() => {
       useAppStore.getState().promoteFile('t1', '/repo/a.ts')
     })
-    const { result } = renderHook(() => useSessionHasPaneColumn('t1'))
-    expect(result.current).toBe(false)
-
     const { container } = render(<PaneColumn sessionId="t1" />)
     expect(container).toBeEmptyDOMElement()
-  })
-
-  it('reserves a column for a card no layout is drawing', () => {
-    act(() => {
-      useAppStore.getState().promoteFile('t1', '/repo/a.ts')
-      useAppStore.setState({ focusedTerminalId: 't1' } as never)
-    })
-    const { result } = renderHook(() => useSessionHasPaneColumn('t1'))
-    expect(result.current).toBe(true)
   })
 
   it('gives a maximized pane the whole column and hides its siblings', () => {

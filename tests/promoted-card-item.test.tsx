@@ -102,24 +102,23 @@ describe('PromotedCardItem', () => {
     expect(closeEditor).not.toHaveBeenCalled()
   })
 
-  it('goes to the session the card is drawn in, not just the grid cell', () => {
-    // Outside the grid the card lives in its owner's column, so selecting alone
-    // highlights something that is not on screen. Focused mode is where this
-    // row looked most inert, and it is where the card is hardest to find.
+  it('focuses the card, not the session it came from', () => {
+    // The whole point. Focusing the owner handed back the terminal and every
+    // pane with the file wedged in beside them, and the card then offered to go
+    // "back" to the session it was already sitting inside.
     render(<PromotedCardItem card={fileCard} />)
     fireEvent.click(screen.getByText('server.ts'))
 
-    expect(setFocusedTerminal).toHaveBeenCalledWith('t1')
+    expect(setFocusedTerminal).toHaveBeenCalledWith('card:t1:0')
+    expect(setFocusedTerminal).not.toHaveBeenCalledWith('t1')
   })
 
-  it('switches the tab strip to the owner rather than to the card', () => {
+  it("activates the card's own tab, not the owner's", () => {
     layoutMode = 'tabs'
     render(<PromotedCardItem card={pageCard} />)
     fireEvent.click(screen.getByText('vorn.dev'))
 
-    // The strip holds sessions only: activating the card id would select a tab
-    // that does not exist and leave the strip on whatever it was showing.
-    expect(setActiveTabId).toHaveBeenCalledWith('t1')
+    expect(setActiveTabId).toHaveBeenCalledWith('card:t1:1')
     expect(setFocusedTerminal).toHaveBeenCalledWith(null)
   })
 })

@@ -129,11 +129,16 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     }
 
     // Focused-mode nav spans the active project (or workspace) regardless of
-    // worktree filter or status filter, so cycling sessions reaches all of them.
-    const focusable = all
-      .filter(([, t]) => inActiveScope(t))
-      .sort(sortFn)
-      .map(([id]) => id)
+    // worktree filter or status filter, so cycling reaches all of them.
+    //
+    // Cards are in this list too, beside their owner. Cmd+] and Cmd+1-9 both
+    // index straight into it, so a card being focusable at all is decided here
+    // and nowhere else — the shortcut handlers never learn what an id is.
+    const focusable: string[] = []
+    for (const [id] of all.filter(([, t]) => inActiveScope(t)).sort(sortFn)) {
+      focusable.push(id)
+      focusable.push(...(cardsByOwner.get(id) ?? []))
+    }
 
     return { orderedIds: ordered, minimizedIds: minimized, focusableIds: focusable }
   }, [

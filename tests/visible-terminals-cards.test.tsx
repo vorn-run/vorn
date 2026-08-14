@@ -100,6 +100,19 @@ describe('useVisibleTerminals with popped-out cards', () => {
     expect(result.current.orderedIds).toEqual(['t1', mine, 't2', theirs])
   })
 
+  it('makes a card reachable by keyboard nav', () => {
+    // Cmd+] and Cmd+1-9 both index straight into focusableIds, so whether a
+    // card can be focused at all is decided here — the shortcut handlers never
+    // learn what an id is, and would skip cards silently if this list did.
+    let cardId = ''
+    act(() => {
+      cardId = useAppStore.getState().promoteFile('t1', '/p/a.ts')
+    })
+    renderHook(() => useVisibleTerminals())
+
+    expect(useAppStore.getState().focusableTerminalIds).toEqual(['t1', cardId, 't2'])
+  })
+
   it("orders a session's cards straight after it, however many", () => {
     // What the tab strip and the grid both consume. Cards cannot be sorted
     // among the sessions — compareTerminalIds reads the terminals map, which

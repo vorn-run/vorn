@@ -2,10 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { paneIdFor, type PaneChildKind } from '../lib/pane-id'
-import { usePromotedCardsFor } from '../hooks/usePromotedCards'
-import { useCardsDrawnAsCells } from '../hooks/useCardsDrawnAsCells'
 import { FilesCard } from './FilesCard'
-import { PromotedPaneCard } from './PromotedPaneCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
@@ -19,23 +16,20 @@ import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
  * column beside its terminal, so the space a card gets is divided between the
  * things that belong to it rather than spread across unrelated grid cells.
  *
- * The column also takes in the session's popped-out cards wherever the layout
- * gives them no cell of their own — focused mode, hover preview, mobile. Those
- * show a single session, so without this a popped-out file simply vanished when
- * you left the grid, taking the control that brings it back with it.
+ * Popped-out cards are deliberately not here. A card is a thing in its own
+ * right — its own cell, its own tab, its own focus stage — and drawing it back
+ * inside its owner was what made it read as merely displaced from the session
+ * rather than independent of it.
  *
  * While one of the panes is maximized it takes the whole column and its siblings
  * hide — the owner check keeps another session's maximized pane from taking over
  * this one.
  */
 
-/** One row of the column: a pane the session owns, or a card it popped out. */
+/** One row of the column, keyed by the pane id maximize is matched on. */
 interface ColumnEntry {
-  /** Pane id, which is also the React key and what maximize is matched on. */
   id: string
   kind: PaneChildKind
-  /** Set when this is a popped-out card, and is then the key into its map. */
-  cardKey?: string
 }
 
 export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
@@ -51,8 +45,6 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
         setCardSplit: s.setCardSplit
       }))
     )
-  const cardsHaveCells = useCardsDrawnAsCells()
-  const cards = usePromotedCardsFor(sessionId)
   const containerRef = useRef<HTMLDivElement | null>(null)
   // The live drag drives local state; the store is written once, on pointerup.
   const [dragWeights, setDragWeights] = useState<number[] | null>(null)
@@ -64,20 +56,15 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
     hasDevice ? ('device' as const) : null
   ].filter((k): k is PaneChildKind => k !== null)
 
-  const entries: ColumnEntry[] = [
-    ...ownKinds.map((kind) => ({ id: paneIdFor(kind, sessionId), kind })),
-    // Cards last, after everything the session already had — they arrived last,
-    // and inserting them above would shuffle the panes someone had arranged.
-    ...(cardsHaveCells
-      ? []
-      : cards.map((card) => ({ id: card.id, kind: card.kind, cardKey: card.id })))
-  ]
+  const entries: ColumnEntry[] = ownKinds.map((kind) => ({
+    id: paneIdFor(kind, sessionId),
+    kind
+  }))
 
   if (entries.length === 0) return null
 
-  // Matched on pane id rather than kind: a session can now hold several editors
-  // in one column — its own, plus a card per popped-out file — and only the id
-  // tells them apart.
+  // Matched on pane id rather than kind, so a stale or foreign id is simply not
+  // found rather than matching by kind and blanking the wrong session's column.
   const maximizedIndex = entries.findIndex((e) => e.id === maximizedPaneId)
   const hasMaximized = maximizedIndex !== -1
 
@@ -89,10 +76,6 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
   }
 
   const render = (entry: ColumnEntry): ReactNode => {
-    // One dispatcher for cards, shared with the grid and the tab strip. Three
-    // places drawing a card is three chances for them to disagree about what a
-    // card even is.
-    if (entry.cardKey) return <PromotedPaneCard cardId={entry.cardKey} />
     if (entry.kind === 'files') return <FilesCard sessionId={sessionId} />
     if (entry.kind === 'editor') return <EditorCard sessionId={sessionId} />
     if (entry.kind === 'browser') return <BrowserCard sessionId={sessionId} />
