@@ -74,9 +74,9 @@ function saveGridSettings(patch: Record<string, unknown>): void {
  * their owner's card, leaving those keys unreachable — dropping them on read
  * keeps the store from carrying dead weight forward forever.
  *
- * A popped-out card *is* a cell, though, and keys its rect by its own id — so
- * those are kept. Pruning them was why a card's position never survived a
- * re-render in the flexible layout.
+ * A popped-out card *is* a cell and holds a rect while it exists, but its rect
+ * is not persisted across a restart either — see the note on the filter below
+ * for why keeping one would hand a dead card's position to a live one.
  */
 function loadFlexibleLayouts(): Record<string, FlexibleLayoutRect> {
   try {
