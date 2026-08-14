@@ -240,7 +240,7 @@ export function WorkspaceSwitcher() {
         <div
           className="absolute left-0 top-full mt-1 z-50 w-[260px] py-1
                      border border-white/[0.08] rounded-lg shadow-xl overflow-hidden"
-          style={{ background: '#1a1a1e' }}
+          style={{ background: 'var(--color-surface-overlay)' }}
         >
           {/* Workspace list */}
           <div className="max-h-[300px] overflow-auto">

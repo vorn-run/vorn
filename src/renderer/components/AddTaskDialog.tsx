@@ -225,20 +225,20 @@ export function AddTaskDialog() {
           >
             {/* Header bar */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06]">
-              <div className="flex items-center gap-2 text-[13px] text-gray-400">
-                <span className="text-gray-500">{isEditMode ? 'Edit Task' : 'New task'}</span>
+              <div className="flex items-center gap-2 text-[13px] text-ink-secondary">
+                <span className="text-ink-faint">{isEditMode ? 'Edit Task' : 'New task'}</span>
               </div>
               <div className="flex items-center gap-1">
                 <button
                   onClick={handleExpand}
-                  className="p-1 text-gray-500 hover:text-white rounded transition-colors"
+                  className="p-1 text-ink-faint hover:text-white rounded transition-colors"
                   title="Expand to full panel"
                 >
                   <Maximize2 size={14} />
                 </button>
                 <button
                   onClick={handleClose}
-                  className="p-1 text-gray-500 hover:text-white rounded transition-colors"
+                  className="p-1 text-ink-faint hover:text-white rounded transition-colors"
                   title="Close"
                 >
                   <X size={14} />
@@ -256,7 +256,7 @@ export function AddTaskDialog() {
                 onChange={(e) => setTitle(e.target.value)}
                 autoFocus
                 className="w-full px-4 pt-3 pb-1 bg-transparent text-[15px] font-medium
-                           text-gray-200 placeholder-gray-600 focus:outline-none"
+                           text-ink placeholder-ink-faint focus:outline-none"
               />
 
               {/* Description */}
@@ -292,7 +292,7 @@ export function AddTaskDialog() {
                         <button
                           onClick={() => handleRemoveImage(filename)}
                           className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center
-                                     opacity-0 group-hover/img:opacity-100 transition-opacity text-white hover:text-red-400"
+                                     opacity-0 group-hover/img:opacity-100 transition-opacity text-white hover:text-danger"
                         >
                           <X size={10} strokeWidth={3} />
                         </button>
@@ -325,7 +325,7 @@ export function AddTaskDialog() {
 
               {/* Branch pill */}
               {(branch || isEditMode) && (
-                <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.06] text-xs text-gray-400">
+                <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.06] text-xs text-ink-secondary">
                   <FolderGit2 size={10} />
                   {branch || 'branch'}
                 </span>
@@ -336,7 +336,7 @@ export function AddTaskDialog() {
               {/* Attach images */}
               <button
                 onClick={handleAddImages}
-                className="p-1.5 text-gray-500 hover:text-gray-300 rounded transition-colors"
+                className="p-1.5 text-ink-faint hover:text-ink-secondary rounded transition-colors"
                 title="Attach images"
               >
                 <Paperclip size={14} />

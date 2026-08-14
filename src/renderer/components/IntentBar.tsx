@@ -550,13 +550,13 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
     : 'font-mono text-[13px] leading-[19px]'
 
   return (
-    <div className="relative shrink-0" style={{ background: '#141416' }}>
+    <div className="relative shrink-0" style={{ background: 'var(--color-surface-sunken)' }}>
       {menuVisible &&
         menuPos &&
         createPortal(
           <div
             className="fixed z-[60] rounded-[3px] border border-white/[0.07]
-                       bg-[#191a1d] overflow-hidden"
+                       bg-surface-overlay overflow-hidden"
             style={{ left: menuPos.left, width: menuPos.width, bottom: menuPos.bottom }}
           >
             <div

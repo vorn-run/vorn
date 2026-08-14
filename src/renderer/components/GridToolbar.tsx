@@ -128,7 +128,7 @@ export function GridToolbar() {
         <div
           className="absolute right-0 top-full mt-1 z-50 w-[200px]
                      border border-white/[0.08] rounded-lg shadow-xl overflow-hidden"
-          style={{ background: '#1a1a1e' }}
+          style={{ background: 'var(--color-surface-overlay)' }}
         >
           {/* Status section */}
           <div className="py-1.5">

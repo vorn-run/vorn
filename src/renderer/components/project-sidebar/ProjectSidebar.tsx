@@ -113,7 +113,10 @@ export function ProjectSidebar() {
       }`}
       style={{
         ...(!isMobile ? { width: `${sidebarWidth}px` } : {}),
-        background: '#141416',
+        // The sidebar is chrome beside the work, the same rung as a card header
+        // or the status bar. It was painted at the card-body value, so it read
+        // as a lit band down the left edge of every view.
+        background: 'var(--color-surface-panel)',
         transition: isResizingState ? 'none' : 'width 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
       }}
     >

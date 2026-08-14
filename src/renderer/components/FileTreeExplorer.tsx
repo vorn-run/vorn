@@ -833,10 +833,7 @@ function FilePanel({
       ) : null}
 
       {saveError && (
-        <div
-          className="px-3 py-1 text-[11px] text-red-400 border-t border-white/[0.06] shrink-0"
-          style={{ background: '#2a1a1a' }}
-        >
+        <div className="px-3 py-1 text-[11px] text-danger bg-danger/10 border-t border-white/[0.06] shrink-0">
           {saveError}
         </div>
       )}

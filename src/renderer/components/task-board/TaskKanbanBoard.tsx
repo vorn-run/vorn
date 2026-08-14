@@ -1,16 +1,18 @@
 import { useState, useRef } from 'react'
 import { TaskConfig, TaskStatus } from '../../../shared/types'
 import { TaskCard } from './TaskCard'
-import { STATUS_ICON, STATUS_ICON_COLOR } from '../../lib/task-status'
+import {
+  TASK_STATUS_ICON,
+  TASK_STATUS_TEXT,
+  TASK_STATUS_LABEL,
+  TASK_STATUS_ORDER
+} from '../../lib/task-status'
 import { Plus } from 'lucide-react'
 
-const KANBAN_COLUMNS: { status: TaskStatus; title: string }[] = [
-  { status: 'todo', title: 'Todo' },
-  { status: 'in_progress', title: 'In Progress' },
-  { status: 'in_review', title: 'In Review' },
-  { status: 'done', title: 'Done' },
-  { status: 'cancelled', title: 'Cancelled' }
-]
+const KANBAN_COLUMNS = TASK_STATUS_ORDER.map((status) => ({
+  status,
+  title: TASK_STATUS_LABEL[status]
+}))
 
 export function TaskKanbanBoard({
   allTasks,
@@ -95,15 +97,19 @@ export function TaskKanbanBoard({
         const tasks = allTasks
           .filter((t) => t.status === col.status)
           .sort((a, b) => a.order - b.order)
-        const ColIcon = STATUS_ICON[col.status]
-        const iconColor = STATUS_ICON_COLOR[col.status]
+        const ColIcon = TASK_STATUS_ICON[col.status]
+        const iconColor = TASK_STATUS_TEXT[col.status]
         const isDragOver = dragOverCol === col.status
 
+        // A column is a region of the board, not a material laid on top of it. The
+        // white wash it used to carry lit five tall slabs a step above the field,
+        // which is what made this surface read pale beside the workflow canvas —
+        // there the field shows through and only the nodes lift off it.
         return (
           <div
             key={col.status}
             className={`group/col flex-1 min-w-0 min-h-0 flex flex-col rounded-lg transition-all duration-200 ${
-              isDragOver ? 'bg-white/[0.04] ring-1 ring-inset ring-white/[0.1]' : 'bg-white/[0.02]'
+              isDragOver ? 'bg-white/[0.04] ring-1 ring-inset ring-white/[0.1]' : ''
             }`}
             onDragOver={handleDragOver}
             onDragEnter={() => handleDragEnter(col.status)}
@@ -113,12 +119,12 @@ export function TaskKanbanBoard({
             {/* Column header */}
             <div className="px-3 py-3 flex items-center gap-2 shrink-0">
               <ColIcon size={14} className={iconColor} />
-              <span className="text-[13px] font-medium text-gray-300">{col.title}</span>
-              <span className="text-[11px] text-gray-500 ml-0.5">{tasks.length}</span>
+              <span className="text-[13px] font-medium text-ink-secondary">{col.title}</span>
+              <span className="text-[11px] text-ink-faint ml-0.5">{tasks.length}</span>
               <div className="flex-1" />
               <button
                 onClick={() => onAddTask?.(col.status)}
-                className="p-1 text-gray-600 hover:text-gray-300 rounded transition-colors opacity-0 group-hover/col:opacity-100"
+                className="p-1 text-ink-faint hover:text-ink-secondary rounded transition-colors opacity-0 group-hover/col:opacity-100"
                 title="Add task"
               >
                 <Plus size={14} />
@@ -130,7 +136,7 @@ export function TaskKanbanBoard({
               {tasks.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center min-h-[80px]">
                   <div className="border border-dashed border-white/[0.08] rounded-lg px-4 py-5 text-center w-full">
-                    <p className="text-xs text-gray-600">Drop tasks here</p>
+                    <p className="text-xs text-ink-faint">Drop tasks here</p>
                   </div>
                 </div>
               ) : (
@@ -167,7 +173,7 @@ export function TaskKanbanBoard({
             <div className="px-2 pb-2">
               <button
                 onClick={() => onAddTask?.(col.status)}
-                className="w-full py-2 text-xs text-gray-600 hover:text-gray-300
+                className="w-full py-2 text-xs text-ink-faint hover:text-ink-secondary
                            hover:bg-white/[0.04] rounded-lg transition-colors
                            flex items-center justify-center gap-1"
               >

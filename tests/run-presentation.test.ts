@@ -7,6 +7,7 @@ import {
   describeRun,
   ranUninterrupted,
   runStages,
+  liveNodeStatus,
   runSummaryText
 } from '../src/renderer/lib/run-presentation'
 import type {
@@ -389,5 +390,110 @@ describe('bucketOf', () => {
     expect(bucketOf(run({ status: 'success' }))).toBe('success')
     expect(bucketOf(run({ status: 'error' }))).toBe('error')
     expect(bucketOf(run({ status: 'cancelled' }))).toBe('error')
+  })
+})
+
+describe('liveNodeStatus', () => {
+  const exec = (over: Partial<WorkflowExecution>): WorkflowExecution =>
+    run({ workflowId: 'wf-1', status: 'running', ...over })
+
+  it('reports what each node of a running workflow is doing', () => {
+    const map = liveNodeStatus(
+      [
+        exec({
+          nodeStates: [
+            { nodeId: 'a', status: 'success' },
+            { nodeId: 'b', status: 'running' }
+          ] as NodeExecutionState[]
+        })
+      ],
+      'wf-1'
+    )
+    expect(map).toEqual({ a: 'success', b: 'running' })
+  })
+
+  it('lets the gate win when two runs disagree about a node', () => {
+    // Runs go in parallel, so one node can be finished in one and parked on an
+    // approval in another. The one that needs a person is the one worth showing.
+    const map = liveNodeStatus(
+      [
+        exec({
+          runId: 'r1',
+          nodeStates: [{ nodeId: 'a', status: 'success' }] as NodeExecutionState[]
+        }),
+        exec({
+          runId: 'r2',
+          nodeStates: [{ nodeId: 'a', status: 'waiting' }] as NodeExecutionState[]
+        })
+      ],
+      'wf-1'
+    )
+    expect(map).toEqual({ a: 'waiting' })
+  })
+
+  it('ranks running above error above success', () => {
+    const map = liveNodeStatus(
+      [
+        exec({
+          runId: 'r1',
+          nodeStates: [{ nodeId: 'a', status: 'success' }] as NodeExecutionState[]
+        }),
+        exec({
+          runId: 'r2',
+          nodeStates: [{ nodeId: 'a', status: 'error' }] as NodeExecutionState[]
+        }),
+        exec({
+          runId: 'r3',
+          nodeStates: [{ nodeId: 'a', status: 'running' }] as NodeExecutionState[]
+        })
+      ],
+      'wf-1'
+    )
+    expect(map).toEqual({ a: 'running' })
+  })
+
+  it('ignores runs of other workflows', () => {
+    const map = liveNodeStatus(
+      [
+        exec({
+          workflowId: 'wf-2',
+          nodeStates: [{ nodeId: 'a', status: 'running' }] as NodeExecutionState[]
+        })
+      ],
+      'wf-1'
+    )
+    expect(map).toBeUndefined()
+  })
+
+  it('forgets a run once it finishes', () => {
+    // Finished runs stay in the store to back the history list. Reading their
+    // node states too would leave the last run's dots on the canvas forever,
+    // and the canvas could never go back to showing a plain definition.
+    const stillReported = (['success', 'error', 'cancelled'] as const).filter(
+      (status) =>
+        liveNodeStatus(
+          [
+            exec({
+              status,
+              nodeStates: [{ nodeId: 'a', status: 'success' }] as NodeExecutionState[]
+            })
+          ],
+          'wf-1'
+        ) !== undefined
+    )
+
+    expect(stillReported).toEqual([])
+  })
+
+  it('says nothing rather than an empty map when nothing is live', () => {
+    // The canvas takes undefined to mean "this is a definition, not a run", so
+    // an empty object here would still be a truthy claim that a run exists.
+    expect(liveNodeStatus([], 'wf-1')).toBeUndefined()
+    expect(
+      liveNodeStatus(
+        [exec({ nodeStates: [{ nodeId: 'a', status: 'pending' }] as NodeExecutionState[] })],
+        'wf-1'
+      )
+    ).toBeUndefined()
   })
 })

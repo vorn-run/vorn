@@ -35,7 +35,7 @@ export function LogReplayModal({ logs, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-[90vw] max-w-[900px] h-[80vh] bg-[#0d0d0f] border border-white/[0.1] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-[90vw] max-w-[900px] h-[80vh] bg-surface-base border border-white/[0.1] rounded-xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] shrink-0">
           <div className="flex items-center gap-3">

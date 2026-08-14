@@ -1,29 +1,28 @@
 import type { AgentStatus } from '../../shared/types'
+import { byTone, TONE_DOT, TONE_TEXT, type StatusTone } from './status-tone'
 
 /**
- * Only `waiting` takes the accent — it is the one status blocked on the person.
- * Running is the commonest state, so painting it would put bronzo across most
- * of the screen most of the time; it reads white and animates instead. Motion
- * is reserved for work actually in progress, so a waiting dot stays still and
- * lets the accent do the calling — the rule `workflow-status.ts` follows too.
+ * What each session state means, in the shared vocabulary.
+ *
+ * Only `waiting` is blocked on the person, so only `waiting` takes the accent.
+ * Running is the commonest state — painting it would put bronzo across most of
+ * the screen most of the time — so it reads as live, which is also the one tone
+ * allowed to move. `status-tone.ts` decides what those words look like.
  */
-export const STATUS_DOT: Record<AgentStatus, string> = {
-  running: 'bg-ink',
-  waiting: 'bg-bronzo',
-  idle: 'bg-ink-ghost',
-  error: 'bg-danger'
+export const STATUS_TONE: Record<AgentStatus, StatusTone> = {
+  running: 'live',
+  waiting: 'blocked',
+  idle: 'idle',
+  error: 'broken'
 }
+
+export const STATUS_DOT = byTone(STATUS_TONE, TONE_DOT)
+
+export const STATUS_TEXT = byTone(STATUS_TONE, TONE_TEXT)
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   running: 'Running',
   waiting: 'Waiting',
   idle: 'Idle',
   error: 'Error'
-}
-
-export const STATUS_TEXT: Record<AgentStatus, string> = {
-  running: 'text-ink',
-  waiting: 'text-bronzo',
-  idle: 'text-ink-faint',
-  error: 'text-danger'
 }

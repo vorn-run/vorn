@@ -1,43 +1,9 @@
 @import 'tailwindcss';
 @source "./**/*.{tsx,ts,html}";
 
-@theme {
-  /* The app's only accent, and spent sparingly enough to stay meaningful: it
-     marks work blocked on the person, and nothing else. Not selection, not
-     focus, not running. Terminal output, diffs and logs keep their own colour
-     — that is the work itself, not chrome describing it. */
-  --color-bronzo: #c9972a;
-  --color-bronzo-dark: #b8862a;
-
-  /* Failure and destructive actions only. Burnt orange rather than signal
-     red so it can sit beside bronzo without the two fighting. */
-  --color-danger: #d4623f;
-
-  /* Ink ramp — warm off-white at four opacities, enough between them to carry
-     hierarchy without a hue. The sessions surface reads from these; the rest of
-     the app still uses Tailwind's grays and is migrated view by view. */
-  --color-ink: #faf9f7; /* primary text */
-  --color-ink-secondary: rgba(255, 255, 255, 0.55); /* row titles, labels */
-  --color-ink-faint: rgba(255, 255, 255, 0.35); /* metadata, identifiers */
-  --color-ink-ghost: rgba(255, 255, 255, 0.18); /* settled, receded */
-
-  /* Surface ladder — the app field and the surfaces that lift off it. Depth
-     comes from a step plus a hairline, never a shadow; a shadow means something
-     floats over the page rather than being part of it. The steps are small, of
-     the order of four points: a panel is a different region, not a different
-     material, and a larger step reads as a hole cut in the page. */
-  --color-surface-base: #0d0d0f; /* app background, behind the cards */
-  --color-surface-sunken: #141416; /* card body and terminal: the main column */
-  --color-surface-panel: #101012; /* panes, card header, status bar: beside the work */
-  --color-surface-overlay: #1c1c20; /* menus, popovers, floating chrome */
-  /* Aliases, not values. A card frame matching the terminal it holds is what
-     keeps a lighter band from showing around the panes, so the equality is the
-     point — spelling it as a reference keeps a later nudge to one from silently
-     failing to move the other. A workflow node is the same relationship one
-     level out: it lifts off the canvas the way a card lifts off the field. */
-  --color-surface-raised: var(--color-surface-sunken); /* card frame, dialogs */
-  --color-surface-node: var(--color-surface-sunken); /* workflow canvas nodes */
-}
+/* The palette lives in theme.css so the web client can share it verbatim —
+   it has its own Tailwind entry and would otherwise define no tokens at all. */
+@import './theme.css';
 
 html,
 body {
@@ -118,7 +84,7 @@ select,
   }
 
   /* Boost contrast on low-visibility foregrounds for WCAG AA (4.5:1) on mobile.
-     gray-500 (#6b7280) is only 3.0:1 on the #0d0d0f field — bump to gray-400.
+     gray-500 (#6b7280) is only 3.0:1 on the near-black field — bump to gray-400.
      gray-600 (#4b5563) is only 1.9:1 — bump to gray-500. */
   .text-gray-500 {
     color: #9ca3af !important; /* gray-400: 7.9:1 */
@@ -238,20 +204,6 @@ select:focus:not(:focus-visible) {
 .card-drop-target {
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35);
   transition: box-shadow 0.15s ease;
-}
-
-/* Status pulse animation */
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-.animate-pulse-dot {
-  animation: pulse-dot 2s ease-in-out infinite;
 }
 
 /* Running glyph — two-tier organic twinkle. Opacity envelopes only; the

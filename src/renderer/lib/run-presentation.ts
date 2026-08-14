@@ -2,6 +2,7 @@ import { Zap, Clock, CheckSquare, Play, type LucideIcon } from 'lucide-react'
 import type {
   ApprovalConfig,
   NodeExecutionState,
+  NodeExecutionStatus,
   TriggerConfig,
   WorkflowExecution,
   WorkflowNode
@@ -257,4 +258,44 @@ export function runSummaryText(execution: WorkflowExecution): string | undefined
   const text = source?.logs?.trim() || source?.error?.trim()
   if (!text) return undefined
   return text.length > MAX_LOG_TAIL ? `…${text.slice(-MAX_LOG_TAIL)}` : text
+}
+
+/**
+ * What each node is doing across every run of a workflow that is live now.
+ *
+ * A node can be in several states at once when runs go in parallel, so the most
+ * urgent wins: a gate waiting on the person outranks work still going, which
+ * outranks a failure worth reading, which outranks a step that finished.
+ *
+ * Returns undefined when nothing is running, so a canvas showing a definition
+ * rather than a run renders no status at all.
+ */
+const LIVE_STATUS_RANK: Partial<Record<NodeExecutionStatus, number>> = {
+  waiting: 4,
+  running: 3,
+  error: 2,
+  success: 1
+}
+
+export function liveNodeStatus(
+  executions: Iterable<WorkflowExecution>,
+  workflowId: string
+): Record<string, NodeExecutionStatus> | undefined {
+  const worst: Record<string, NodeExecutionStatus> = {}
+  const ranks: Record<string, number> = {}
+  let found = false
+  for (const exec of executions) {
+    // Finished runs stay in the store to back the history list, so without this
+    // the canvas would keep every dot from the last run that ever completed and
+    // could never go back to showing a plain definition.
+    if (exec.status !== 'running' || exec.workflowId !== workflowId) continue
+    for (const ns of exec.nodeStates ?? []) {
+      const rank = LIVE_STATUS_RANK[ns.status]
+      if (!rank || rank <= (ranks[ns.nodeId] ?? 0)) continue
+      worst[ns.nodeId] = ns.status
+      ranks[ns.nodeId] = rank
+      found = true
+    }
+  }
+  return found ? worst : undefined
 }

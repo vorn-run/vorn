@@ -11,8 +11,11 @@ import { TaskListView } from './task-board/TaskListView'
 import { ListTodo } from 'lucide-react'
 import { toast } from './Toast'
 import { useWorkspaceProjects } from '../hooks/useWorkspaceProjects'
+import { TASK_STATUS_LABEL, TASK_STATUS_ORDER } from '../lib/task-status'
 
-const ROOT_STYLE = { background: '#141416' }
+// The field the whole view sits on, the same rung the workflow canvas uses.
+// It was a step higher, which is why tasks read pale next to workflows.
+const ROOT_STYLE = { background: 'var(--color-surface-base)' }
 
 export function TaskBoardView() {
   const activeProject = useAppStore((s) => s.activeProject)
@@ -143,29 +146,28 @@ export function TaskBoardView() {
     setTaskDialogOpen(true, status)
   }
 
-  const sections: { status: TaskStatus; title: string; tasks: TaskConfig[]; emptyText: string }[] =
-    [
-      { status: 'todo', title: 'Todo', tasks: todoTasks, emptyText: 'No tasks in queue' },
-      {
-        status: 'in_progress',
-        title: 'In Progress',
-        tasks: inProgressTasks,
-        emptyText: 'No active tasks'
-      },
-      {
-        status: 'in_review',
-        title: 'In Review',
-        tasks: inReviewTasks,
-        emptyText: 'No tasks awaiting review'
-      },
-      { status: 'done', title: 'Done', tasks: doneTasks, emptyText: 'No completed tasks' },
-      {
-        status: 'cancelled',
-        title: 'Cancelled',
-        tasks: cancelledTasks,
-        emptyText: 'No cancelled tasks'
-      }
-    ]
+  // The heading comes from the shared map; only the empty line is this view's
+  // own, since it says what the section is empty *of* rather than naming it.
+  const EMPTY_TEXT: Record<TaskStatus, string> = {
+    todo: 'No tasks in queue',
+    in_progress: 'No active tasks',
+    in_review: 'No tasks awaiting review',
+    done: 'No completed tasks',
+    cancelled: 'No cancelled tasks'
+  }
+  const SECTION_TASKS: Record<TaskStatus, TaskConfig[]> = {
+    todo: todoTasks,
+    in_progress: inProgressTasks,
+    in_review: inReviewTasks,
+    done: doneTasks,
+    cancelled: cancelledTasks
+  }
+  const sections = TASK_STATUS_ORDER.map((status) => ({
+    status,
+    title: TASK_STATUS_LABEL[status],
+    tasks: SECTION_TASKS[status],
+    emptyText: EMPTY_TEXT[status]
+  }))
 
   const totalTasks = allTasks.length
 
@@ -177,11 +179,11 @@ export function TaskBoardView() {
       >
         {totalTasks === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <ListTodo size={40} strokeWidth={1} className="text-gray-700 mb-3" />
-            <p className="text-sm text-gray-500 mb-1">
+            <ListTodo size={40} strokeWidth={1} className="text-ink-faint mb-3" />
+            <p className="text-sm text-ink-faint mb-1">
               {taskStatusFilter !== 'all' ? 'No matching tasks' : 'No tasks yet'}
             </p>
-            <p className="text-xs text-gray-600">
+            <p className="text-xs text-ink-faint">
               {taskStatusFilter !== 'all'
                 ? 'Try changing the status filter'
                 : activeProject

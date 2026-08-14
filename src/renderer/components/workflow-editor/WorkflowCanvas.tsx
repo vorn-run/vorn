@@ -21,10 +21,12 @@ import {
   ApprovalConfig,
   LoopConfig,
   CreateTaskFromItemConfig,
-  CallConnectorActionConfig
+  CallConnectorActionConfig,
+  NodeExecutionStatus
 } from '../../../shared/types'
 import { computeFlowLayout, FlowRow } from '../../lib/workflow-helpers'
 import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from './node-visuals'
+import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
 
 export type AddableNodeType =
   | 'agent'
@@ -41,6 +43,12 @@ interface Props {
   onInsertNode: (afterNodeId: string, beforeNodeId: string | null, type: AddableNodeType) => void
   onAddParallelBranch: (forkFromId: string, type: 'agent' | 'script') => void
   selectedNodeId: string | null
+  /**
+   * What each node is doing in the runs that are live right now, so the canvas
+   * reports a run rather than only describing a definition. Absent when nothing
+   * is running, which is most of the time.
+   */
+  nodeStatus?: Record<string, NodeExecutionStatus>
 }
 
 function VerticalLine({ dashed, height }: { dashed?: boolean; height?: number }) {
@@ -58,13 +66,15 @@ function NodeCard({
   node,
   allNodes,
   selected,
-  onClick
+  onClick,
+  executionStatus
 }: {
   node: WorkflowNode
   /** Every node in the workflow: a loop card lists the steps it repeats. */
   allNodes: WorkflowNode[]
   selected: boolean
   onClick: () => void
+  executionStatus?: NodeExecutionStatus
 }) {
   if (node.type === 'loop') {
     return (
@@ -74,6 +84,7 @@ function NodeCard({
         nodes={allNodes}
         selected={selected}
         onClick={onClick}
+        executionStatus={executionStatus}
       />
     )
   }
@@ -96,6 +107,7 @@ function NodeCard({
         config={node.config as ScriptConfig}
         selected={selected}
         onClick={onClick}
+        executionStatus={executionStatus}
       />
     )
   }
@@ -107,6 +119,7 @@ function NodeCard({
         config={node.config as ConditionConfig}
         selected={selected}
         onClick={onClick}
+        executionStatus={executionStatus}
       />
     )
   }
@@ -118,6 +131,7 @@ function NodeCard({
         config={node.config as ApprovalConfig}
         selected={selected}
         onClick={onClick}
+        executionStatus={executionStatus}
       />
     )
   }
@@ -129,6 +143,7 @@ function NodeCard({
         config={node.config as CreateTaskFromItemConfig}
         selected={selected}
         onClick={onClick}
+        executionStatus={executionStatus}
       />
     )
   }
@@ -140,6 +155,7 @@ function NodeCard({
         config={node.config as CallConnectorActionConfig}
         selected={selected}
         onClick={onClick}
+        executionStatus={executionStatus}
       />
     )
   }
@@ -150,6 +166,7 @@ function NodeCard({
       config={node.config as LaunchAgentConfig}
       selected={selected}
       onClick={onClick}
+      executionStatus={executionStatus}
     />
   )
 }
@@ -162,6 +179,7 @@ function FlowRowRenderer({
   onInsertNode,
   onAddParallelBranch,
   selectedNodeId,
+  nodeStatus,
   isInsideBranch
 }: {
   rows: FlowRow[]
@@ -172,6 +190,7 @@ function FlowRowRenderer({
   onAddParallelBranch: (forkFromId: string, type: 'agent' | 'script') => void
   selectedNodeId: string | null
   isInsideBranch?: boolean
+  nodeStatus?: Record<string, NodeExecutionStatus>
 }) {
   return (
     <>
@@ -197,6 +216,7 @@ function FlowRowRenderer({
                 allNodes={nodes ?? []}
                 selected={row.node.id === selectedNodeId}
                 onClick={() => onNodeClick(row.node.id)}
+                executionStatus={nodeStatus?.[row.node.id]}
               />
 
               {!isLast && (
@@ -254,6 +274,7 @@ function FlowRowRenderer({
               onNodeClick={onNodeClick}
               onInsertNode={onInsertNode}
               selectedNodeId={selectedNodeId}
+              nodeStatus={nodeStatus}
               nodes={nodes ?? []}
             />
           )
@@ -267,6 +288,7 @@ function FlowRowRenderer({
             onInsertNode={onInsertNode}
             onAddParallelBranch={onAddParallelBranch}
             selectedNodeId={selectedNodeId}
+            nodeStatus={nodeStatus}
             edges={edges}
             nodes={nodes}
           />
@@ -304,12 +326,14 @@ function LoopRenderer({
   onNodeClick,
   onInsertNode,
   selectedNodeId,
+  nodeStatus,
   nodes
 }: {
   row: Extract<FlowRow, { kind: 'loop' }>
   onNodeClick: (nodeId: string) => void
   onInsertNode: (afterNodeId: string, beforeNodeId: string | null, type: AddableNodeType) => void
   selectedNodeId: string | null
+  nodeStatus?: Record<string, NodeExecutionStatus>
   nodes: WorkflowNode[]
 }) {
   const config = row.loopNode.config as LoopConfig
@@ -318,6 +342,11 @@ function LoopRenderer({
     ? `until ${config.until.variable} ${config.until.operator} ${config.until.value}`
     : 'runs every pass'
   const lastBodyId = row.body.length > 0 ? row.body[row.body.length - 1] : null
+  // The rail draws its own header instead of going through NodeCard, so the
+  // loop is the one node whose status has to be read here. It has one: a loop
+  // runs while it iterates, and errors when it has no body steps or holds a
+  // gate — without this the rail sat plain while the run was inside it.
+  const loopStatus = nodeStatus?.[row.loopNode.id]
 
   return (
     <div
@@ -341,6 +370,12 @@ function LoopRenderer({
         <span className="shrink-0 text-[10px] font-mono text-gray-400 bg-white/[0.06] rounded px-1.5 py-0.5">
           max {config.maxIterations ?? 1}
         </span>
+        {loopStatus && WORKFLOW_STATUS_DOT_PULSE[loopStatus] && (
+          <span
+            data-loop-status
+            className={`shrink-0 w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[loopStatus]}`}
+          />
+        )}
       </div>
 
       <div className="px-4 pt-4 flex flex-col items-center">
@@ -361,6 +396,7 @@ function LoopRenderer({
                   allNodes={nodes}
                   selected={bodyRow.node.id === selectedNodeId}
                   onClick={() => onNodeClick(bodyRow.node.id)}
+                  executionStatus={nodeStatus?.[bodyRow.node.id]}
                 />
               )}
             </Fragment>
@@ -400,6 +436,7 @@ function ForkRenderer({
   onInsertNode,
   onAddParallelBranch,
   selectedNodeId,
+  nodeStatus,
   edges,
   nodes
 }: {
@@ -408,6 +445,7 @@ function ForkRenderer({
   onInsertNode: (afterNodeId: string, beforeNodeId: string | null, type: AddableNodeType) => void
   onAddParallelBranch: (forkFromId: string, type: 'agent' | 'script') => void
   selectedNodeId: string | null
+  nodeStatus?: Record<string, NodeExecutionStatus>
   edges?: WorkflowEdge[]
   nodes?: WorkflowNode[]
 }) {
@@ -467,6 +505,7 @@ function ForkRenderer({
                 onInsertNode={onInsertNode}
                 onAddParallelBranch={onAddParallelBranch}
                 selectedNodeId={selectedNodeId}
+                nodeStatus={nodeStatus}
                 isInsideBranch
               />
 
@@ -487,7 +526,8 @@ export function WorkflowCanvas({
   onNodeClick,
   onInsertNode,
   onAddParallelBranch,
-  selectedNodeId
+  selectedNodeId,
+  nodeStatus
 }: Props) {
   const flowLayout = useMemo(() => computeFlowLayout(nodes, edges), [nodes, edges])
 
@@ -502,6 +542,7 @@ export function WorkflowCanvas({
           onInsertNode={onInsertNode}
           onAddParallelBranch={onAddParallelBranch}
           selectedNodeId={selectedNodeId}
+          nodeStatus={nodeStatus}
         />
       </div>
     </div>

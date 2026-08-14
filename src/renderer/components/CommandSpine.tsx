@@ -47,7 +47,7 @@ interface Props {
 
 const MARK_COLOR: Record<SpineStatus, string> = {
   // Success is muted on purpose: colour is spent only where there is
-  // something to report. Light enough to read as a bar against #141416.
+  // something to report. Light enough to read as a bar against the card ground.
   ok: '#6b6b76',
   fail: '#f87171',
   running: '#60a5fa'

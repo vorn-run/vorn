@@ -18,6 +18,8 @@ vi.mock('../src/renderer/lib/use-connections', () => ({
 
 import { WorkflowCanvas } from '../src/renderer/components/workflow-editor/WorkflowCanvas'
 import { NODE_SELECTED } from '../src/renderer/components/workflow-editor/node-visuals'
+import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
+import type { NodeExecutionStatus } from '../src/shared/types'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 afterEach(cleanup)
@@ -60,12 +62,14 @@ const edges: WorkflowEdge[] = [
 function renderWith(
   list: WorkflowNode[],
   selectedNodeId: string | null = null,
-  edgeList: WorkflowEdge[] = edges
+  edgeList: WorkflowEdge[] = edges,
+  nodeStatus?: Record<string, NodeExecutionStatus>
 ) {
   return render(
     <WorkflowCanvas
       nodes={list}
       edges={edgeList}
+      nodeStatus={nodeStatus}
       selectedNodeId={selectedNodeId}
       onNodeClick={() => {}}
       onInsertNode={() => {}}
@@ -220,5 +224,47 @@ describe('the canvas reads in one colour', () => {
     for (const el of labels) {
       expect(el.className).not.toMatch(/green|red|bronzo|danger/)
     }
+  })
+})
+
+describe('a live run on the canvas', () => {
+  it('shows each node the state it is in', () => {
+    // The canvas has always accepted a per-node status and nothing ever passed
+    // one, so this dot never appeared outside its own tests: a run could park on
+    // a gate in the runs list while its node here looked idle.
+    const { container } = renderWith(nodes, null, edges, {
+      fetch: 'running',
+      write: 'success'
+    })
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.running}`)).toBeInTheDocument()
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.success}`)).toBeInTheDocument()
+  })
+
+  it('accents a node the run is waiting on', () => {
+    const { container } = renderWith(nodes, null, edges, { gate: 'waiting' })
+    expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.waiting}`)).toBeInTheDocument()
+  })
+
+  it('says nothing when nothing is running', () => {
+    const { container } = renderWith(nodes)
+    for (const s of ['running', 'waiting', 'success', 'error'] as const) {
+      expect(container.querySelector(`.${WORKFLOW_STATUS_DOT[s]}`)).toBeNull()
+    }
+  })
+
+  it('shows the loop itself the state it is in', () => {
+    // The rail draws its own header rather than going through a node card, so
+    // it is the one node that has to read its status separately — and a loop
+    // does have one: running while it iterates, error when its body is empty or
+    // holds a gate. Without this the rail sat plain while the run was inside it.
+    const { container } = renderWith(nodes, null, edges, { loop: 'running' })
+    const dot = container.querySelector('[data-loop-status]')
+    expect(dot).toBeInTheDocument()
+    expect(dot?.className).toContain(WORKFLOW_STATUS_DOT.running)
+  })
+
+  it('leaves the rail plain when the loop is not part of a live run', () => {
+    const { container } = renderWith(nodes, null, edges, { fetch: 'running' })
+    expect(container.querySelector('[data-loop-status]')).toBeNull()
   })
 })

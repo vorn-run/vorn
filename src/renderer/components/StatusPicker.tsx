@@ -3,11 +3,14 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check } from 'lucide-react'
 import { TaskStatus } from '../../shared/types'
-import { STATUS_BADGE, STATUS_ICON, STATUS_ICON_COLOR } from '../lib/task-status'
+import {
+  TASK_STATUS_LABEL,
+  TASK_STATUS_ICON,
+  TASK_STATUS_TEXT,
+  TASK_STATUS_ORDER
+} from '../lib/task-status'
 import { useAppStore } from '../stores'
 import { toast } from './Toast'
-
-const ALL_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done', 'cancelled']
 
 export function StatusPicker({
   taskId,
@@ -31,8 +34,7 @@ export function StatusPicker({
   const reviewTask = useAppStore((s) => s.reviewTask)
   const updateTask = useAppStore((s) => s.updateTask)
 
-  const badge = STATUS_BADGE[currentStatus]
-  const CurrentIcon = STATUS_ICON[currentStatus]
+  const CurrentIcon = TASK_STATUS_ICON[currentStatus]
 
   const handleTrigger = (e: React.MouseEvent) => {
     if (disabled) return
@@ -119,8 +121,10 @@ export function StatusPicker({
           disabled ? 'cursor-default' : 'hover:bg-white/[0.04]'
         }`}
       >
-        <CurrentIcon size={13} className={STATUS_ICON_COLOR[currentStatus]} />
-        <span className={`text-[12px] ${badge.color}`}>{badge.label}</span>
+        <CurrentIcon size={13} className={TASK_STATUS_TEXT[currentStatus]} />
+        <span className={`text-[12px] ${TASK_STATUS_TEXT[currentStatus]}`}>
+          {TASK_STATUS_LABEL[currentStatus]}
+        </span>
       </button>
 
       {createPortal(
@@ -140,9 +144,8 @@ export function StatusPicker({
                 minWidth: 180
               }}
             >
-              {ALL_STATUSES.map((status) => {
-                const b = STATUS_BADGE[status]
-                const Icon = STATUS_ICON[status]
+              {TASK_STATUS_ORDER.map((status) => {
+                const Icon = TASK_STATUS_ICON[status]
                 const isCurrent = status === currentStatus
                 // In store mode, in_progress is only reachable from todo — the
                 // default workflow only fires on that transition.
@@ -159,14 +162,14 @@ export function StatusPicker({
                     disabled={isItemDisabled}
                     className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors ${
                       isItemDisabled
-                        ? 'text-gray-600 cursor-not-allowed'
-                        : 'text-gray-300 hover:bg-white/[0.06] cursor-pointer'
+                        ? 'text-ink-faint cursor-not-allowed'
+                        : 'text-ink-secondary hover:bg-white/[0.06] cursor-pointer'
                     }`}
                     title={isItemDisabled ? 'Move to Todo first, then start the task' : undefined}
                   >
-                    <Icon size={14} className={STATUS_ICON_COLOR[status]} />
-                    <span className="flex-1 text-left">{b.label}</span>
-                    {isCurrent && <Check size={13} className="text-gray-400" />}
+                    <Icon size={14} className={TASK_STATUS_TEXT[status]} />
+                    <span className="flex-1 text-left">{TASK_STATUS_LABEL[status]}</span>
+                    {isCurrent && <Check size={13} className="text-ink-secondary" />}
                   </button>
                 )
               })}

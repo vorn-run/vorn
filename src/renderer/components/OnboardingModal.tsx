@@ -171,7 +171,7 @@ function StepAgents() {
             return (
               <div
                 key={a.type}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg border border-white/[0.06] bg-[#141416]"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg border border-white/[0.06] bg-surface-sunken"
               >
                 <div
                   className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
@@ -197,7 +197,7 @@ function StepAgents() {
           {notInstalled.map((a) => (
             <div
               key={a.type}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg border border-white/[0.04] bg-[#141416]"
+              className="flex items-center gap-3 px-3 py-2 rounded-lg border border-white/[0.04] bg-surface-sunken"
             >
               <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 bg-white/[0.03] opacity-40">
                 <AgentIcon agentType={a.type} size={14} />
@@ -221,7 +221,7 @@ function StepAgents() {
         {loading ? 'Scanning...' : 'Re-detect agents'}
       </button>
 
-      <div className="rounded-lg border border-white/[0.06] overflow-hidden bg-[#141416]">
+      <div className="rounded-lg border border-white/[0.06] overflow-hidden bg-surface-sunken">
         <button
           onClick={() => setMcpOpen(!mcpOpen)}
           className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-white/[0.02] transition-colors"
@@ -303,7 +303,7 @@ function StepProjects() {
         branches simultaneously without conflicts.
       </p>
 
-      <div className="rounded-lg border border-white/[0.06] p-3.5 space-y-2.5 bg-[#141416]">
+      <div className="rounded-lg border border-white/[0.06] p-3.5 space-y-2.5 bg-surface-sunken">
         <div className="flex items-start gap-3">
           <FolderGit2 size={15} className="text-cyan-400 mt-0.5 shrink-0" />
           <div className="text-[12px] text-gray-200 font-medium">my-app/</div>
@@ -342,7 +342,7 @@ function StepProjects() {
         ].map(({ icon: Icon, text }) => (
           <div
             key={text}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-white/[0.04] text-[11px] text-gray-400 bg-[#141416]"
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-white/[0.04] text-[11px] text-gray-400 bg-surface-sunken"
           >
             <Icon size={11} className="text-gray-500 shrink-0" />
             {text}
@@ -388,7 +388,7 @@ function StepSessions() {
         agent, project, and branch — then type an optional prompt to direct the agent.
       </p>
 
-      <div className="rounded-lg border border-white/[0.06] p-4 space-y-3 bg-[#141416]">
+      <div className="rounded-lg border border-white/[0.06] p-4 space-y-3 bg-surface-sunken">
         <div className="flex items-center gap-2">
           {LAUNCHER_PICKERS.map(({ icon: Icon, label }) => (
             <div
@@ -443,7 +443,7 @@ function StepWorkspace() {
       </p>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg border border-white/[0.06] p-3 space-y-2 bg-[#141416]">
+        <div className="rounded-lg border border-white/[0.06] p-3 space-y-2 bg-surface-sunken">
           <div className="flex items-center gap-1.5 mb-1">
             <LayoutGrid size={11} className="text-cyan-400" />
             <span className="text-[11px] font-medium text-gray-300">Grid</span>
@@ -456,7 +456,7 @@ function StepWorkspace() {
           <span className="text-[10px] text-gray-600">Side-by-side comparison</span>
         </div>
 
-        <div className="rounded-lg border border-white/[0.06] p-3 space-y-2 bg-[#141416]">
+        <div className="rounded-lg border border-white/[0.06] p-3 space-y-2 bg-surface-sunken">
           <div className="flex items-center gap-1.5 mb-1">
             <Columns3 size={11} className="text-violet-400" />
             <span className="text-[11px] font-medium text-gray-300">Tabs</span>
@@ -469,7 +469,7 @@ function StepWorkspace() {
                   className="text-[9px] px-1.5 py-0.5 rounded"
                   style={{
                     background: i === 0 ? 'rgba(201,151,42,0.08)' : 'rgba(255,255,255,0.03)',
-                    color: i === 0 ? '#c9972a' : '#555'
+                    color: i === 0 ? 'var(--color-bronzo)' : '#555'
                   }}
                 >
                   {t}
@@ -482,7 +482,7 @@ function StepWorkspace() {
         </div>
       </div>
 
-      <div className="rounded-lg border border-white/[0.06] p-3 bg-[#141416]">
+      <div className="rounded-lg border border-white/[0.06] p-3 bg-surface-sunken">
         <div className="flex items-center gap-2 mb-2">
           <PanelRight size={12} className="text-gray-400" />
           <span className="text-[11px] font-medium text-gray-300">Review Panel</span>
@@ -519,7 +519,7 @@ function StepWorkflows() {
         Trigger them manually, on a schedule, or when a task changes status.
       </p>
 
-      <div className="rounded-lg border border-white/[0.06] p-4 space-y-2.5 bg-[#141416]">
+      <div className="rounded-lg border border-white/[0.06] p-4 space-y-2.5 bg-surface-sunken">
         <div className="text-[11px] text-gray-600 uppercase tracking-wider font-medium mb-2">
           Trigger types
         </div>
@@ -544,7 +544,7 @@ function StepWorkflows() {
         {['Launch Agent', 'Run Script', 'Condition', 'Parallel'].map((n) => (
           <span
             key={n}
-            className="text-[11px] px-2.5 py-1 rounded-md border border-white/[0.06] text-gray-400 bg-[#141416]"
+            className="text-[11px] px-2.5 py-1 rounded-md border border-white/[0.06] text-gray-400 bg-surface-sunken"
           >
             {n}
           </span>
@@ -571,7 +571,7 @@ function StepShortcuts() {
         searches sessions, projects, workflows, and every action in one place.
       </p>
 
-      <div className="rounded-lg border border-white/[0.06] p-3 grid grid-cols-2 gap-x-4 gap-y-2 bg-[#141416]">
+      <div className="rounded-lg border border-white/[0.06] p-3 grid grid-cols-2 gap-x-4 gap-y-2 bg-surface-sunken">
         {ESSENTIAL_SHORTCUTS.map((s) => (
           <div key={s.id} className="flex items-center justify-between gap-2">
             <span className="text-[12px] text-gray-400">{s.description}</span>
@@ -620,7 +620,7 @@ function StepReady() {
             key={category}
             onClick={() => openSettings(category)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-white/[0.04]
-                       hover:border-white/[0.08] hover:bg-white/[0.02] transition-all text-left group bg-[#141416]"
+                       hover:border-white/[0.08] hover:bg-white/[0.02] transition-all text-left group bg-surface-sunken"
           >
             <div className="w-7 h-7 rounded-md flex items-center justify-center bg-white/[0.04] group-hover:bg-white/[0.06] transition-colors">
               <Icon size={14} className="text-gray-400" />
@@ -700,7 +700,7 @@ export function OnboardingModal() {
 
       <motion.div
         className="fixed top-1/2 left-1/2 z-[60] w-[520px] max-h-[85vh]
-                   border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden flex flex-col bg-[#1a1a1e]"
+                   border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden flex flex-col bg-surface-overlay"
         initial={{ opacity: 0, scale: 0.96, x: '-50%', y: '-50%' }}
         animate={{ opacity: 1, scale: 1, x: '-50%', y: '-50%' }}
         exit={{ opacity: 0, scale: 0.96, x: '-50%', y: '-50%' }}
@@ -723,7 +723,7 @@ export function OnboardingModal() {
                 className="relative h-1 rounded-full transition-all duration-300"
                 style={{
                   width: i === currentStep ? 32 : 16,
-                  background: i <= currentStep ? '#c9972a' : 'rgba(255,255,255,0.08)'
+                  background: i <= currentStep ? 'var(--color-bronzo)' : 'rgba(255,255,255,0.08)'
                 }}
                 aria-label={`Go to step ${i + 1}: ${s.title}`}
               />

@@ -589,7 +589,7 @@ export function TaskDetailPanel() {
   return (
     <div
       className="shrink-0 flex flex-col border-l border-white/[0.08] overflow-hidden"
-      style={{ width: panelWidth, background: '#141416' }}
+      style={{ width: panelWidth, background: 'var(--color-surface-panel)' }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
@@ -604,7 +604,7 @@ export function TaskDetailPanel() {
       <div className="px-4 py-3 border-b border-white/[0.06] shrink-0">
         <div className="flex items-center gap-2">
           {isCreateMode ? (
-            <h3 className="text-[14px] font-medium text-gray-100 flex-1">New Task</h3>
+            <h3 className="text-[14px] font-medium text-ink flex-1">New Task</h3>
           ) : (
             <div className="flex-1" />
           )}
@@ -615,7 +615,7 @@ export function TaskDetailPanel() {
                   unarchiveTask(task.id)
                   toast.success('Task unarchived')
                 }}
-                className="p-1 text-gray-600 hover:text-gray-200 rounded transition-colors"
+                className="p-1 text-ink-faint hover:text-ink rounded transition-colors"
               >
                 <ArchiveRestore size={13} strokeWidth={1.5} />
               </button>
@@ -628,7 +628,7 @@ export function TaskDetailPanel() {
                   archiveTask(task.id)
                   toast.success('Task archived')
                 }}
-                className="p-1 text-gray-600 hover:text-gray-200 rounded transition-colors"
+                className="p-1 text-ink-faint hover:text-ink rounded transition-colors"
               >
                 <Archive size={13} strokeWidth={1.5} />
               </button>
@@ -645,7 +645,7 @@ export function TaskDetailPanel() {
               }}
             >
               <Tooltip label="Delete task" position="bottom">
-                <button className="p-1 text-gray-600 hover:text-red-400 rounded transition-colors">
+                <button className="p-1 text-ink-faint hover:text-danger rounded transition-colors">
                   <Trash2 size={13} strokeWidth={1.5} />
                 </button>
               </Tooltip>
@@ -654,7 +654,7 @@ export function TaskDetailPanel() {
           <Tooltip label="Close" position="bottom">
             <button
               onClick={() => setSelectedTaskId(null)}
-              className="p-1 text-gray-500 hover:text-white rounded transition-colors"
+              className="p-1 text-ink-faint hover:text-white rounded transition-colors"
             >
               <X size={14} strokeWidth={1.5} />
             </button>
@@ -668,7 +668,7 @@ export function TaskDetailPanel() {
         <div className="px-4 py-3 border-b border-white/[0.06] space-y-2.5">
           {/* Status */}
           <div className="flex items-center gap-2 text-[12px]">
-            <span className="text-gray-600 w-20 shrink-0">Status</span>
+            <span className="text-ink-faint w-20 shrink-0">Status</span>
             <StatusPicker
               taskId={task?.id}
               currentStatus={task?.status ?? 'todo'}
@@ -678,7 +678,7 @@ export function TaskDetailPanel() {
 
           {/* Project */}
           <div className="flex items-center gap-2 text-[12px]">
-            <span className="text-gray-600 w-20 shrink-0">Project</span>
+            <span className="text-ink-faint w-20 shrink-0">Project</span>
             <ProjectPicker
               currentProject={formProjectName}
               projects={config?.projects || []}
@@ -688,15 +688,15 @@ export function TaskDetailPanel() {
 
           {/* Branch */}
           <div className="flex items-center gap-2 text-[12px]">
-            <span className="text-gray-600 w-20 shrink-0">Branch</span>
+            <span className="text-ink-faint w-20 shrink-0">Branch</span>
             <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              <GitBranch size={11} strokeWidth={2} className="text-gray-500 shrink-0" />
+              <GitBranch size={11} strokeWidth={2} className="text-ink-faint shrink-0" />
               <input
                 type="text"
                 placeholder="feature/my-task"
                 value={formBranch}
                 onChange={(e) => setFormBranch(e.target.value)}
-                className="flex-1 min-w-0 bg-transparent text-[12px] text-gray-300 placeholder-gray-600
+                className="flex-1 min-w-0 bg-transparent text-[12px] text-ink-secondary placeholder-ink-faint
                            focus:outline-none border-none px-0 py-0.5"
               />
             </div>
@@ -704,11 +704,11 @@ export function TaskDetailPanel() {
 
           {/* Worktree */}
           <div className="flex items-center gap-2 text-[12px]">
-            <span className="text-gray-600 w-20 shrink-0">Worktree</span>
+            <span className="text-ink-faint w-20 shrink-0">Worktree</span>
             <button
               onClick={() => setFormUseWorktree(!formUseWorktree)}
               className={`flex items-center gap-1.5 hover:bg-white/[0.04] rounded px-1.5 py-0.5 -mx-1.5 transition-colors ${
-                formUseWorktree ? 'text-amber-400' : 'text-gray-500'
+                formUseWorktree ? 'text-ink-secondary' : 'text-ink-faint'
               }`}
             >
               <FolderGit2 size={13} strokeWidth={1.5} />
@@ -718,7 +718,7 @@ export function TaskDetailPanel() {
 
           {/* Agent */}
           <div className="flex items-center gap-2 text-[12px]">
-            <span className="text-gray-600 w-20 shrink-0">Agent</span>
+            <span className="text-ink-faint w-20 shrink-0">Agent</span>
             <AgentPicker
               currentAgent={formAssignedAgent}
               onChange={(a) => setFormAssignedAgent(a === 'fromTask' ? null : a)}
@@ -730,8 +730,8 @@ export function TaskDetailPanel() {
           {/* Created */}
           {!isCreateMode && task && (
             <div className="flex items-center gap-2 text-[12px]">
-              <span className="text-gray-600 w-20 shrink-0">Created</span>
-              <span className="flex items-center gap-1 text-gray-400">
+              <span className="text-ink-faint w-20 shrink-0">Created</span>
+              <span className="flex items-center gap-1 text-ink-secondary">
                 <Calendar size={11} strokeWidth={2} />
                 {formatDate(task.createdAt)}
               </span>
@@ -741,8 +741,8 @@ export function TaskDetailPanel() {
           {/* Completed */}
           {!isCreateMode && task?.completedAt && (
             <div className="flex items-center gap-2 text-[12px]">
-              <span className="text-gray-600 w-20 shrink-0">Completed</span>
-              <span className="flex items-center gap-1 text-gray-400">
+              <span className="text-ink-faint w-20 shrink-0">Completed</span>
+              <span className="flex items-center gap-1 text-ink-secondary">
                 <Clock size={11} strokeWidth={2} />
                 {formatDate(task.completedAt)}
               </span>
@@ -758,8 +758,8 @@ export function TaskDetailPanel() {
             value={formTitle}
             onChange={(e) => setFormTitle(e.target.value)}
             autoFocus={isCreateMode}
-            className="w-full text-[16px] font-semibold text-gray-100 bg-transparent
-                       border-none outline-none placeholder-gray-600
+            className="w-full text-[16px] font-semibold text-ink bg-transparent
+                       border-none outline-none placeholder-ink-faint
                        focus:bg-white/[0.02] rounded px-1 -mx-1 py-0.5 transition-colors"
           />
         </div>
@@ -775,15 +775,15 @@ export function TaskDetailPanel() {
                 e.preventDefault()
                 window.api.openExternal(task.sourceExternalUrl!)
               }}
-              className="inline-flex items-center gap-1.5 px-2 py-1 bg-white/[0.04] border border-white/[0.08] rounded-md text-xs text-gray-400 hover:text-white hover:bg-white/[0.08] transition-colors"
+              className="inline-flex items-center gap-1.5 px-2 py-1 bg-white/[0.04] border border-white/[0.08] rounded-md text-xs text-ink-secondary hover:text-white hover:bg-white/[0.08] transition-colors"
             >
               <ConnectorIcon
                 connectorId={task.sourceConnectorId}
                 size={13}
-                className="text-gray-400"
+                className="text-ink-secondary"
               />
               {task.sourceExternalId ? `#${task.sourceExternalId}` : task.sourceConnectorId}
-              <span className="text-gray-600">↗</span>
+              <span className="text-ink-faint">↗</span>
             </a>
           </div>
         )}
@@ -821,7 +821,7 @@ export function TaskDetailPanel() {
                   <button
                     onClick={() => handleRemoveImage(filename)}
                     className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center
-                                 opacity-0 group-hover/img:opacity-100 transition-opacity text-white hover:text-red-400"
+                                 opacity-0 group-hover/img:opacity-100 transition-opacity text-white hover:text-danger"
                   >
                     <X size={10} strokeWidth={3} />
                   </button>
@@ -831,7 +831,7 @@ export function TaskDetailPanel() {
             <button
               onClick={handleAddImages}
               className="w-16 h-16 rounded-lg border border-dashed border-white/[0.1] flex items-center justify-center
-                           text-gray-600 hover:text-gray-400 hover:border-white/[0.2] transition-colors"
+                           text-ink-faint hover:text-ink-secondary hover:border-white/[0.2] transition-colors"
               title="Add images"
             >
               <ImagePlus size={18} strokeWidth={1.5} />
@@ -846,8 +846,8 @@ export function TaskDetailPanel() {
               <button
                 onClick={handleFocusSession}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium
-                           bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/20
-                           rounded-md transition-colors text-violet-400 hover:text-violet-300"
+                           bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08]
+                           rounded-md transition-colors text-ink-secondary hover:text-ink"
               >
                 <Terminal size={12} strokeWidth={2} />
                 Focus Session
@@ -857,8 +857,8 @@ export function TaskDetailPanel() {
               <button
                 onClick={handleResumeSession}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium
-                           bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20
-                           rounded-md transition-colors text-amber-400 hover:text-amber-300"
+                           bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08]
+                           rounded-md transition-colors text-ink-secondary hover:text-ink"
               >
                 <Play size={12} strokeWidth={2} />
                 Resume Session
@@ -872,8 +872,8 @@ export function TaskDetailPanel() {
           <div className="border-t border-white/[0.06]">
             <button
               onClick={() => setShowWorkflowRuns(!showWorkflowRuns)}
-              className="w-full px-4 py-2.5 flex items-center gap-2 text-[11px] font-medium text-gray-500
-                         uppercase tracking-wider hover:text-gray-300 transition-colors"
+              className="w-full px-4 py-2.5 flex items-center gap-2 text-[11px] font-medium text-ink-faint
+                         uppercase tracking-wider hover:text-ink-secondary transition-colors"
             >
               {showWorkflowRuns ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
               <Workflow size={12} strokeWidth={2} />
@@ -906,16 +906,16 @@ export function TaskDetailPanel() {
           <div className="border-t border-white/[0.06]">
             <button
               onClick={() => setShowDiffSection(!showDiffSection)}
-              className="w-full px-4 py-2.5 flex items-center gap-2 text-[11px] font-medium text-gray-500
-                         uppercase tracking-wider hover:text-gray-300 transition-colors"
+              className="w-full px-4 py-2.5 flex items-center gap-2 text-[11px] font-medium text-ink-faint
+                         uppercase tracking-wider hover:text-ink-secondary transition-colors"
             >
               {showDiffSection ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
               <FileCode size={12} strokeWidth={2} />
               Changes
               {stat && (
                 <span className="flex items-center gap-1.5 font-mono normal-case">
-                  <span className="text-green-400">+{stat.insertions}</span>
-                  <span className="text-red-400">-{stat.deletions}</span>
+                  <span className="text-ink-secondary">+{stat.insertions}</span>
+                  <span className="text-ink-faint">-{stat.deletions}</span>
                 </span>
               )}
               <div className="flex-1" />
@@ -927,7 +927,7 @@ export function TaskDetailPanel() {
                   }}
                   className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium normal-case
                              bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06]
-                             rounded transition-colors text-gray-400 hover:text-gray-200"
+                             rounded transition-colors text-ink-secondary hover:text-ink"
                 >
                   <GitCommitHorizontal size={11} strokeWidth={1.5} />
                   Commit
@@ -938,7 +938,7 @@ export function TaskDetailPanel() {
                   e.stopPropagation()
                   fetchDiff()
                 }}
-                className="p-0.5 text-gray-500 hover:text-white rounded transition-colors"
+                className="p-0.5 text-ink-faint hover:text-white rounded transition-colors"
               >
                 <RefreshCw
                   size={12}
@@ -952,22 +952,22 @@ export function TaskDetailPanel() {
               <>
                 {/* Review feedback bar */}
                 {comments.length > 0 && (
-                  <div className="px-3 py-2 border-t border-purple-500/15 bg-purple-500/[0.05] flex items-center gap-2">
-                    <MessageSquare size={13} className="text-purple-400 shrink-0" />
-                    <span className="text-[12px] text-purple-300 flex-1">
+                  <div className="px-3 py-2 border-t border-white/[0.08] bg-white/[0.02] flex items-center gap-2">
+                    <MessageSquare size={13} className="text-ink-secondary shrink-0" />
+                    <span className="text-[12px] text-ink-secondary flex-1">
                       {comments.length} comment{comments.length !== 1 ? 's' : ''}
                     </span>
                     <button
                       onClick={() => setComments([])}
-                      className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+                      className="text-[11px] text-ink-faint hover:text-ink-secondary transition-colors"
                     >
                       Clear
                     </button>
                     <button
                       onClick={handleSendFeedback}
                       className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium
-                                 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/20
-                                 rounded-md transition-colors text-purple-300 hover:text-purple-200"
+                                 bg-ink hover:bg-white text-surface-base
+                                 rounded-md transition-colors"
                     >
                       <Send size={11} strokeWidth={2} />
                       {task?.agentSessionId ? 'Send to Agent' : 'Copy Feedback'}
@@ -977,7 +977,7 @@ export function TaskDetailPanel() {
 
                 {diffLoading && !diffResult ? (
                   <div className="flex items-center justify-center py-8">
-                    <Loader2 size={18} className="text-gray-500 animate-spin" />
+                    <Loader2 size={18} className="text-ink-faint animate-spin" />
                   </div>
                 ) : diffResult && diffResult.files.length > 0 ? (
                   <>
@@ -1000,7 +1000,7 @@ export function TaskDetailPanel() {
                     />
                   </>
                 ) : (
-                  <div className="text-center py-6 text-xs text-gray-600">
+                  <div className="text-center py-6 text-xs text-ink-faint">
                     {cwd ? 'No uncommitted changes' : 'No project path'}
                   </div>
                 )}
@@ -1015,7 +1015,7 @@ export function TaskDetailPanel() {
         <div className="px-4 py-3 border-t border-white/[0.06] flex justify-end gap-2 shrink-0">
           <button
             onClick={() => setSelectedTaskId(null)}
-            className="px-3 py-1.5 text-sm text-gray-400 hover:text-gray-200
+            className="px-3 py-1.5 text-sm text-ink-secondary hover:text-ink
                        bg-white/[0.04] hover:bg-white/[0.08] rounded-lg transition-colors"
           >
             Cancel

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useAppStore } from '../stores'
 import { TaskStatusFilter } from '../stores/types'
 import { TaskViewMode } from '../../shared/types'
+import { TASK_STATUS_LABEL, TASK_STATUS_DOT, TASK_STATUS_ORDER } from '../lib/task-status'
 import { SlidersHorizontal, Archive } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { OptionRow } from './OptionRow'
@@ -12,13 +13,15 @@ const isMac = navigator.platform.toUpperCase().includes('MAC')
 
 /* ── Options ─────────────────────────────────────────────────── */
 
+// The filter legend reads the same labels and tones the board does. It used to
+// carry its own copy of both, and painted "All" in todo's colour.
 const TASK_STATUS_OPTIONS: { value: TaskStatusFilter; label: string; dot: string }[] = [
-  { value: 'all', label: 'All', dot: 'bg-gray-400' },
-  { value: 'todo', label: 'Todo', dot: 'bg-gray-500' },
-  { value: 'in_progress', label: 'In Progress', dot: 'bg-blue-500' },
-  { value: 'in_review', label: 'In Review', dot: 'bg-purple-500' },
-  { value: 'done', label: 'Done', dot: 'bg-green-500' },
-  { value: 'cancelled', label: 'Cancelled', dot: 'bg-gray-600' }
+  { value: 'all', label: 'All', dot: 'bg-ink-secondary' },
+  ...TASK_STATUS_ORDER.map((s) => ({
+    value: s,
+    label: TASK_STATUS_LABEL[s],
+    dot: TASK_STATUS_DOT[s]
+  }))
 ]
 
 /* ── Icons ───────────────────────────────────────────────────── */
@@ -120,7 +123,7 @@ export function TaskToolbar() {
               ? 'text-white bg-white/[0.1]'
               : hasActiveFilters
                 ? 'text-white bg-white/[0.08] hover:bg-white/[0.12]'
-                : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
+                : 'text-ink-secondary hover:text-white hover:bg-white/[0.06]'
           }`}
         >
           <SlidersHorizontal size={16} strokeWidth={1.5} />
@@ -134,11 +137,11 @@ export function TaskToolbar() {
         <div
           className="absolute right-0 top-full mt-1 z-50 w-[200px]
                      border border-white/[0.08] rounded-lg shadow-xl overflow-hidden"
-          style={{ background: '#1a1a1e' }}
+          style={{ background: 'var(--color-surface-overlay)' }}
         >
           {/* Status section */}
           <div className="py-1.5">
-            <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">
+            <div className="px-3 py-1 text-[10px] text-ink-faint uppercase tracking-wider">
               Status
             </div>
             {TASK_STATUS_OPTIONS.map((opt) => (
@@ -155,18 +158,18 @@ export function TaskToolbar() {
           {/* Source section (only show if connectors have tasks) */}
           {connectorIds.size > 0 && (
             <div className="py-1.5 border-t border-white/[0.06]">
-              <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">
+              <div className="px-3 py-1 text-[10px] text-ink-faint uppercase tracking-wider">
                 Source
               </div>
               <OptionRow
                 selected={taskSourceFilter === 'all'}
-                dot="bg-gray-400"
+                dot="bg-ink-secondary"
                 label="All Sources"
                 onClick={() => setTaskSourceFilter('all')}
               />
               <OptionRow
                 selected={taskSourceFilter === 'local'}
-                dot="bg-blue-400"
+                dot="bg-ink-faint"
                 label="Local Only"
                 onClick={() => setTaskSourceFilter('local')}
               />
@@ -177,7 +180,7 @@ export function TaskToolbar() {
                   className={`w-full text-left px-3 py-1.5 text-[12px] transition-colors flex items-center gap-2 ${
                     taskSourceFilter === cid
                       ? 'text-white bg-white/[0.06]'
-                      : 'text-gray-300 hover:text-white hover:bg-white/[0.04]'
+                      : 'text-ink-secondary hover:text-white hover:bg-white/[0.04]'
                   }`}
                 >
                   {taskSourceFilter === cid ? (
@@ -197,7 +200,7 @@ export function TaskToolbar() {
                   <ConnectorIcon
                     connectorId={cid}
                     size={10}
-                    className={taskSourceFilter === cid ? 'text-white' : 'text-gray-500'}
+                    className={taskSourceFilter === cid ? 'text-white' : 'text-ink-faint'}
                   />
                   {connectorNames[cid] || cid.charAt(0).toUpperCase() + cid.slice(1)}
                 </button>
@@ -206,8 +209,8 @@ export function TaskToolbar() {
           )}
 
           <div className="py-1.5 border-t border-white/[0.06]">
-            <div className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-gray-300">
-              <Archive size={12} className="text-gray-500" />
+            <div className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-ink-secondary">
+              <Archive size={12} className="text-ink-faint" />
               <span className="flex-1">Include archived</span>
               <ToggleSwitch checked={taskIncludeArchived} onChange={setTaskIncludeArchived} />
             </div>
@@ -215,14 +218,16 @@ export function TaskToolbar() {
 
           {/* View section */}
           <div className="py-1.5 border-t border-white/[0.06]">
-            <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">View</div>
+            <div className="px-3 py-1 text-[10px] text-ink-faint uppercase tracking-wider">
+              View
+            </div>
             <div className="flex gap-1 px-3 py-1">
               <button
                 onClick={() => setViewMode('list')}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] transition-colors ${
                   taskViewMode === 'list'
                     ? 'bg-white/[0.1] text-white'
-                    : 'text-gray-500 hover:text-gray-300 bg-white/[0.04]'
+                    : 'text-ink-faint hover:text-ink-secondary bg-white/[0.04]'
                 }`}
               >
                 {ListIcon}
@@ -233,7 +238,7 @@ export function TaskToolbar() {
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] transition-colors ${
                   taskViewMode === 'kanban'
                     ? 'bg-white/[0.1] text-white'
-                    : 'text-gray-500 hover:text-gray-300 bg-white/[0.04]'
+                    : 'text-ink-faint hover:text-ink-secondary bg-white/[0.04]'
                 }`}
               >
                 {KanbanIcon}

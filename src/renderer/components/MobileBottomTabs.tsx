@@ -64,7 +64,7 @@ export function MobileBottomTabs({ hidden }: Props) {
       className="fixed left-3 right-3 flex items-stretch rounded-[32px] z-[35]"
       style={{
         bottom: 'calc(12px + var(--safe-bottom, 0px))',
-        background: 'var(--glass-bg, #141416)',
+        background: 'var(--glass-bg, var(--color-surface-sunken))',
         backdropFilter: 'var(--glass-blur, none)',
         WebkitBackdropFilter: 'var(--glass-blur, none)',
         boxShadow: 'var(--glass-shadow, none)'

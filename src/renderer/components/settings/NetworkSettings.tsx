@@ -269,7 +269,7 @@ function DeviceList({ status }: { status: TailscaleStatus }) {
       </div>
       <div
         className="rounded-lg border border-white/[0.06] overflow-hidden"
-        style={{ background: '#141416' }}
+        style={{ background: 'var(--color-surface-sunken)' }}
       >
         {[...online, ...offline].map((device, i) => (
           <div

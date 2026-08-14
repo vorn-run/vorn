@@ -37,7 +37,7 @@ export function HeadlessBadge({ align = 'left' }: Props) {
           type="button"
           onClick={() => setOpen((v) => !v)}
           className="inline-flex items-center gap-1.5 h-[26px] px-2
-                     rounded-md border border-white/[0.06] bg-[#1a1a1e]
+                     rounded-md border border-white/[0.06] bg-surface-overlay
                      text-[11px] font-medium text-gray-300
                      hover:text-white hover:border-white/[0.12] transition-colors
                      relative"
@@ -68,7 +68,7 @@ export function HeadlessBadge({ align = 'left' }: Props) {
           aria-label="Headless sessions"
           className={`absolute top-full ${align === 'left' ? 'left-0' : 'right-0'} mt-1.5 z-50 p-1.5
                      flex flex-col gap-1.5 max-h-[60vh] overflow-y-auto min-w-[280px]
-                     bg-[#1a1a1e] border border-white/[0.08] rounded-md shadow-lg`}
+                     bg-surface-overlay border border-white/[0.08] rounded-md shadow-lg`}
         >
           {headlessSessions.map((session) => (
             <HeadlessPill key={session.id} session={session} />

@@ -103,7 +103,7 @@ export function SelectPicker({
               transition={{ type: 'spring', duration: 0.2, bounce: 0.1 }}
               className="fixed z-[200] border border-white/[0.08] rounded-lg shadow-xl overflow-hidden"
               style={{
-                background: '#1a1a1e',
+                background: 'var(--color-surface-overlay)',
                 top: position.top,
                 left: position.left,
                 minWidth: position.width,
