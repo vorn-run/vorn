@@ -4,6 +4,9 @@ import {
   filesPaneId,
   editorPaneId,
   browserPaneId,
+  devicePaneId,
+  paneIdFor,
+  panesOwnedBy,
   parsePaneId,
   paneKind,
   paneOwnerId,
@@ -53,6 +56,26 @@ describe('pane-id', () => {
     expect(isTerminalPane('files:abc')).toBe(false)
     expect(isTerminalPane('editor:abc')).toBe(false)
     expect(isTerminalPane('browser:abc')).toBe(false)
+  })
+
+  it('builds a pane id from a kind held as data', () => {
+    // The pane column carries kinds, not ids, so it needs the inverse of
+    // parsePaneId — and the two have to agree, or a promoted pane would be
+    // skipped in the column under one id and drawn in the grid under another.
+    for (const kind of ['files', 'editor', 'browser', 'device'] as const) {
+      const id = paneIdFor(kind, 'abc')
+      expect(parsePaneId(id)).toEqual({ kind, sessionId: 'abc' })
+    }
+    expect(paneIdFor('device', 'abc')).toBe(devicePaneId('abc'))
+  })
+
+  it('picks out the panes one session owns, and never a session itself', () => {
+    // This is what places a promoted pane next to its owner in the grid. A
+    // terminal id leaking through would place a session twice.
+    const ids = ['files:a', 'editor:a', 'browser:b', 'a', 'b']
+    expect(panesOwnedBy(ids, 'a')).toEqual(['files:a', 'editor:a'])
+    expect(panesOwnedBy(ids, 'b')).toEqual(['browser:b'])
+    expect(panesOwnedBy(ids, 'c')).toEqual([])
   })
 
   it('survives session ids that themselves contain a colon', () => {

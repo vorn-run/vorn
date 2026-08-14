@@ -14,6 +14,21 @@
 
 export type PaneKind = 'terminal' | 'files' | 'editor' | 'browser' | 'device'
 
+/**
+ * What to call each kind where the pane's own title won't do.
+ *
+ * A pane titles itself by its content — the open file's name, the page's host,
+ * the device's name — which is the right thing inside the pane and the wrong
+ * thing in a dock, where the question is which of a session's panes this is.
+ */
+export const PANE_LABEL: Record<PaneKind, string> = {
+  terminal: 'Terminal',
+  files: 'Files',
+  editor: 'Editor',
+  browser: 'Browser',
+  device: 'Device'
+}
+
 const FILES_PREFIX = 'files:'
 const EDITOR_PREFIX = 'editor:'
 const BROWSER_PREFIX = 'browser:'
@@ -42,6 +57,25 @@ export function browserPaneId(sessionId: string): string {
  */
 export function devicePaneId(sessionId: string): string {
   return `${DEVICE_PREFIX}${sessionId}`
+}
+
+/**
+ * Id of the pane of `kind` owned by `sessionId` — the inverse of `parsePaneId`.
+ *
+ * For code that already holds a kind as data (the pane column, which builds its
+ * stack from a list of kinds) rather than calling a named builder per branch.
+ */
+export function paneIdFor(kind: Exclude<PaneKind, 'terminal'>, sessionId: string): string {
+  switch (kind) {
+    case 'files':
+      return filesPaneId(sessionId)
+    case 'editor':
+      return editorPaneId(sessionId)
+    case 'browser':
+      return browserPaneId(sessionId)
+    case 'device':
+      return devicePaneId(sessionId)
+  }
 }
 
 /**
@@ -84,4 +118,20 @@ export function paneOwnerId(paneId: string): string {
 /** True when the pane is a session's terminal rather than one of its children. */
 export function isTerminalPane(paneId: string): boolean {
   return paneKind(paneId) === 'terminal'
+}
+
+/**
+ * The panes `sessionId` owns, out of a set of pane ids.
+ *
+ * Ownership is encoded in the id, so this needs no store — which is what lets a
+ * promoted pane be placed next to the session it came from without either side
+ * holding a reference to the other.
+ */
+export function panesOwnedBy(paneIds: Iterable<string>, sessionId: string): string[] {
+  const owned: string[] = []
+  for (const paneId of paneIds) {
+    const parsed = parsePaneId(paneId)
+    if (parsed.kind !== 'terminal' && parsed.sessionId === sessionId) owned.push(paneId)
+  }
+  return owned
 }

@@ -4,11 +4,25 @@ import { AgentIcon } from './AgentIcon'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { STATUS_DOT } from '../lib/status-colors'
 import { GitBranch, FolderGit2 } from 'lucide-react'
+import { parsePaneId, PANE_LABEL } from '../lib/pane-id'
 
+/**
+ * A stowed grid cell, and the way back to it.
+ *
+ * The dock takes pane ids, not session ids: a promoted pane is a cell like any
+ * other and minimizes like one. So this resolves the owner session from the id
+ * rather than looking the id up directly — which for a pane found nothing, and
+ * rendered nothing, stranding the pane with no way to restore it.
+ *
+ * A pane's pill wears its owner's name and status, because that is what someone
+ * scanning the dock is looking for; the kind is what distinguishes it from the
+ * session's own pill sitting next to it.
+ */
 export function MinimizedPill({ terminalId }: { terminalId: string }) {
+  const { kind, sessionId } = parsePaneId(terminalId)
   const { terminal, toggleMinimized, setActiveTabId } = useAppStore(
     useShallow((s) => ({
-      terminal: s.terminals.get(terminalId),
+      terminal: s.terminals.get(sessionId),
       toggleMinimized: s.toggleMinimized,
       setActiveTabId: s.setActiveTabId
     }))
@@ -26,7 +40,9 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
                  hover:border-white/[0.12]"
       onClick={() => {
         toggleMinimized(terminalId)
-        setActiveTabId(terminalId)
+        // The tab strip only holds sessions, so a pane hands focus to its
+        // owner — that is the tab its card is on.
+        setActiveTabId(sessionId)
       }}
       title="Click to restore"
     >
@@ -41,6 +57,13 @@ export function MinimizedPill({ terminalId }: { terminalId: string }) {
       <span className="text-[11px] font-medium text-gray-200 truncate max-w-[120px]">
         {getDisplayName(session)}
       </span>
+
+      {kind !== 'terminal' && (
+        <>
+          <span className="text-[10px] text-gray-600 shrink-0">&middot;</span>
+          <span className="text-[10px] text-ink-secondary shrink-0">{PANE_LABEL[kind]}</span>
+        </>
+      )}
 
       {session.branch && (
         <>

@@ -35,6 +35,7 @@ function seed(ids: string[] = ['t1']): void {
       devicePanes: new Map(),
       cardSplits: {},
       minimizedTerminals: new Set(),
+      promotedPanes: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids,
       visibleTerminalIds: []
@@ -461,5 +462,116 @@ describe('claiming a device before showing it', () => {
     // frame of nothing and buries the one message naming the holder.
     expect(useAppStore.getState().devicePanes.has('s1')).toBe(false)
     expect(err).toContain('other-1')
+  })
+})
+
+/**
+ * Promotion moves a pane from inside its owner's card to a grid cell of its
+ * own. The pane's record never moves — only its placement — so what these pin
+ * down is the placement fields staying consistent with the pane actually being
+ * there.
+ */
+describe('promoting a pane to its own card', () => {
+  const s = () => useAppStore.getState()
+
+  beforeEach(() => {
+    localStorage.clear()
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...(window as unknown as { api?: Record<string, unknown> }).api,
+      notifyWidgetStatus: vi.fn(),
+      reorderSessions: vi.fn()
+    }
+    seed(['t1', 't2'])
+    act(() => s().openFilesPane('t1'))
+  })
+
+  it('promotes and returns, idempotently either way', () => {
+    act(() => s().promotePane('files:t1'))
+    expect(s().promotedPanes.has('files:t1')).toBe(true)
+
+    const before = s().promotedPanes
+    act(() => s().promotePane('files:t1'))
+    // Same set object: a repeat must not churn a field every subscriber reads.
+    expect(s().promotedPanes).toBe(before)
+
+    act(() => s().returnPaneToCard('files:t1'))
+    expect(s().promotedPanes.has('files:t1')).toBe(false)
+    const after = s().promotedPanes
+    act(() => s().returnPaneToCard('files:t1'))
+    expect(s().promotedPanes).toBe(after)
+  })
+
+  it('drops maximize when the maximized pane leaves its card', () => {
+    // Maximizing gives a pane its owner's whole footprint — which a promoted
+    // pane is no longer inside. Left set, it would blank the owner's card in
+    // favour of a pane that is not there.
+    act(() => s().setMaximizedPane('files:t1'))
+    act(() => s().promotePane('files:t1'))
+    expect(s().maximizedPaneId).toBe(null)
+  })
+
+  it('un-minimizes a pane on its way home', () => {
+    // The dock entry that restores it disappears with the promotion, so a pane
+    // that went home minimized would be nowhere at all.
+    act(() => s().promotePane('files:t1'))
+    act(() => s().toggleMinimized('files:t1'))
+    expect(s().minimizedTerminals.has('files:t1')).toBe(true)
+
+    act(() => s().returnPaneToCard('files:t1'))
+    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
+  })
+
+  it('clears placement when the pane itself is closed', () => {
+    // A closed pane left in either set still holds a grid cell or a dock entry
+    // for something that no longer exists.
+    act(() => s().promotePane('files:t1'))
+    act(() => s().toggleMinimized('files:t1'))
+
+    act(() => s().closeFilesPane('t1'))
+    expect(s().promotedPanes.has('files:t1')).toBe(false)
+    expect(s().minimizedTerminals.has('files:t1')).toBe(false)
+  })
+
+  it('clears placement for every pane kind on close', () => {
+    act(() => {
+      s().openEditorPane('t1', '/p/a.ts')
+      s().openBrowserPane('t1', 'https://example.com')
+    })
+    act(() => {
+      s().promotePane('editor:t1')
+      s().promotePane('browser:t1')
+    })
+
+    act(() => s().closeEditorPane('t1'))
+    act(() => s().closeBrowserPane('t1'))
+    expect(s().promotedPanes.size).toBe(0)
+  })
+
+  it('takes promoted panes down with the session that owns them', () => {
+    act(() => {
+      s().openEditorPane('t1', '/p/a.ts')
+      s().promotePane('files:t1')
+      s().promotePane('editor:t1')
+      s().toggleMinimized('editor:t1')
+    })
+
+    act(() => s().removeTerminal('t1'))
+
+    // Ownership is encoded in the id, so nothing else would ever clear these:
+    // the ids would sit in the grid and the dock forever, naming a session the
+    // store no longer has.
+    expect(s().promotedPanes.size).toBe(0)
+    expect(s().minimizedTerminals.has('editor:t1')).toBe(false)
+  })
+
+  it("leaves another session's promoted panes alone", () => {
+    act(() => {
+      s().openFilesPane('t2')
+      s().promotePane('files:t1')
+      s().promotePane('files:t2')
+    })
+
+    act(() => s().removeTerminal('t1'))
+    expect(s().promotedPanes.has('files:t2')).toBe(true)
   })
 })

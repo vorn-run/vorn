@@ -259,6 +259,36 @@ function reconcilePanes(
   }
 }
 
+/**
+ * Drop every placement a pane held. For closing one.
+ *
+ * Placement lives apart from the pane records — three app-level fields keyed by
+ * pane id — which is what lets ordering, drag and minimize address any pane
+ * without knowing its kind. The cost is that closing a pane has to say so
+ * explicitly: an id left in `promotedPanes` still holds a grid cell, and one
+ * left in `minimizedTerminals` still shows a dock entry, both for a pane that no
+ * longer exists. Every field is only written when it actually changes, so a
+ * close that touches nothing returns nothing.
+ */
+function clearPlacement(
+  state: Pick<AppStore, 'maximizedPaneId' | 'promotedPanes' | 'minimizedTerminals'>,
+  paneId: string
+): Partial<AppStore> {
+  const cleared: Partial<AppStore> = {}
+  if (state.maximizedPaneId === paneId) cleared.maximizedPaneId = null
+  if (state.promotedPanes.has(paneId)) {
+    const promoted = new Set(state.promotedPanes)
+    promoted.delete(paneId)
+    cleared.promotedPanes = promoted
+  }
+  if (state.minimizedTerminals.has(paneId)) {
+    const minimized = new Set(state.minimizedTerminals)
+    minimized.delete(paneId)
+    cleared.minimizedTerminals = minimized
+  }
+  return cleared
+}
+
 function loadSidebarSettings(): Record<string, string> {
   try {
     const raw = localStorage.getItem(SIDEBAR_STORAGE_KEY)
@@ -318,6 +348,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   // device pane restored from disk would frame a simulator nobody holds.
   devicePanes: new Map(),
   maximizedPaneId: null,
+  promotedPanes: new Set<string>(),
   sessionDockCollapsed: false,
   isOnboardingOpen: false,
   diffSidebarTerminalId: null,
@@ -490,7 +521,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       savePanes(next, state.editorPanes, state.browserPanes)
       return {
         filesPanes: next,
-        ...(state.maximizedPaneId === filesPaneId(sessionId) ? { maximizedPaneId: null } : {})
+        ...clearPlacement(state, filesPaneId(sessionId))
       }
     }),
 
@@ -516,7 +547,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       savePanes(state.filesPanes, next, state.browserPanes)
       return {
         editorPanes: next,
-        ...(state.maximizedPaneId === editorPaneId(sessionId) ? { maximizedPaneId: null } : {})
+        ...clearPlacement(state, editorPaneId(sessionId))
       }
     }),
 
@@ -563,7 +594,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       return {
         browserPanes: next,
         browserMemory: memory,
-        ...(state.maximizedPaneId === browserPaneId(sessionId) ? { maximizedPaneId: null } : {})
+        ...clearPlacement(state, browserPaneId(sessionId))
       }
     }),
 
@@ -685,12 +716,38 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       next.delete(sessionId)
       return {
         devicePanes: next,
-        ...(state.maximizedPaneId === devicePaneId(sessionId) ? { maximizedPaneId: null } : {})
+        ...clearPlacement(state, devicePaneId(sessionId))
       }
     }),
 
   setMaximizedPane: (paneId) =>
     set((state) => (state.maximizedPaneId === paneId ? {} : { maximizedPaneId: paneId })),
+
+  promotePane: (paneId) =>
+    set((state) => {
+      if (state.promotedPanes.has(paneId)) return {}
+      const next = new Set(state.promotedPanes)
+      next.add(paneId)
+      // Maximizing covers the owner's footprint, which a promoted pane no
+      // longer sits inside.
+      const clearMax = state.maximizedPaneId === paneId
+      return { promotedPanes: next, ...(clearMax ? { maximizedPaneId: null } : {}) }
+    }),
+
+  returnPaneToCard: (paneId) =>
+    set((state) => {
+      if (!state.promotedPanes.has(paneId)) return {}
+      const next = new Set(state.promotedPanes)
+      next.delete(paneId)
+      // A pane going home cannot stay minimized: the dock entry that would
+      // restore it is about to disappear with it.
+      const minimized = new Set(state.minimizedTerminals)
+      const wasMinimized = minimized.delete(paneId)
+      return {
+        promotedPanes: next,
+        ...(wasMinimized ? { minimizedTerminals: minimized } : {})
+      }
+    }),
 
   toggleSessionDockCollapsed: () =>
     set((state) => ({ sessionDockCollapsed: !state.sessionDockCollapsed })),

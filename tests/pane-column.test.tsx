@@ -54,7 +54,13 @@ beforeEach(() => {
       editorPanes: new Map(),
       browserPanes: new Map(),
       cardSplits: {},
-      maximizedPaneId: null
+      maximizedPaneId: null,
+      promotedPanes: new Set(),
+      // Both placement and layout are global, so a test that promotes a pane or
+      // switches to tabs would otherwise hand its state to the next one.
+      config: { defaults: { layoutMode: 'grid' } } as never,
+      focusedTerminalId: null,
+      previewTerminalId: null
     })
   })
 })
@@ -116,6 +122,39 @@ describe('PaneColumn', () => {
     expect(screen.getByTestId('browser-t1')).toBeInTheDocument()
     // One divider, between the two — not one above the first.
     expect(screen.getAllByRole('separator')).toHaveLength(1)
+  })
+
+  it('lets a promoted pane out of the column entirely', () => {
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().openBrowserPane('t1')
+      useAppStore.getState().promotePane('files:t1')
+    })
+    render(<PaneColumn sessionId="t1" />)
+
+    // Gone, not hidden: the grid draws it as a cell of its own, and a copy left
+    // here would mount the pane twice — two <webview>s on one url, two file
+    // trees fighting over the same selection.
+    expect(screen.queryByTestId('files-t1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('browser-t1')).toBeInTheDocument()
+    // And the column closes up: one pane left means no divider.
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument()
+  })
+
+  it('keeps a promoted pane in the column where no grid is drawing it', () => {
+    // Promotion is a grid placement. The tab strip shows one session and has no
+    // cell to put a promoted pane in, so honouring the flag there would drop the
+    // pane out of the UI with the control to bring it back going with it.
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      useAppStore.getState().promotePane('files:t1')
+      useAppStore.setState({
+        config: { defaults: { layoutMode: 'tabs' } }
+      } as never)
+    })
+    render(<PaneColumn sessionId="t1" />)
+
+    expect(screen.getByTestId('files-t1')).toBeInTheDocument()
   })
 
   it('gives a maximized pane the whole column and hides its siblings', () => {

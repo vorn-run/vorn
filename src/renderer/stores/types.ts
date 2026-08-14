@@ -244,6 +244,16 @@ export interface UISlice {
    * unaffected, which is what makes it usable for side-by-side comparison.
    */
   maximizedPaneId: string | null
+  /**
+   * Panes promoted out of their session card into a card of their own.
+   *
+   * Placement, not ownership: the pane stays in whichever collection above
+   * holds it, so opening, closing and session teardown are unchanged. This only
+   * says it is drawn as its own layout unit rather than inside its owner —
+   * which is the arrangement the grid was built for, before child panes were
+   * folded into their cards.
+   */
+  promotedPanes: Set<string>
   sessionDockCollapsed: boolean
   isOnboardingOpen: boolean
   diffSidebarTerminalId: string | null
@@ -347,6 +357,10 @@ export interface UISlice {
   closeDevicePane: (sessionId: string) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void
+  /** Give a pane its own card in the grid. Its record does not move. */
+  promotePane: (paneId: string) => void
+  /** Put a promoted pane back inside its session card. */
+  returnPaneToCard: (paneId: string) => void
   toggleSessionDockCollapsed: () => void
   setOnboardingOpen: (open: boolean) => void
   setDiffSidebarTerminalId: (id: string | null, tab?: PanelTab) => void

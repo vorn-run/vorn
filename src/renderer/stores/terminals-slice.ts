@@ -36,6 +36,15 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       clearDirty(id)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(id)
+      // A promoted pane is a grid cell in its own right, so it can also be
+      // minimized in its own right. Both placements are keyed by pane id and
+      // neither is reachable once the owner is gone — an id left in either set
+      // would resurface as a dock entry for a session that no longer exists.
+      const promoted = new Set(state.promotedPanes)
+      for (const childId of childIds) {
+        promoted.delete(childId)
+        minimized.delete(childId)
+      }
       const filesPanes = new Set(state.filesPanes)
       filesPanes.delete(id)
       const editorPanes = new Map(state.editorPanes)
@@ -65,6 +74,7 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         terminals: next,
         terminalOrder: order,
         minimizedTerminals: minimized,
+        promotedPanes: promoted,
         filesPanes,
         editorPanes,
         browserPanes,

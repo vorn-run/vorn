@@ -1,4 +1,4 @@
-import { memo, useRef, useState, useCallback, useMemo, useEffect } from 'react'
+import { forwardRef, memo, useRef, useState, useCallback, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { motion } from 'framer-motion'
@@ -7,6 +7,8 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { useAppStore } from '../stores'
 import { AgentCard } from './AgentCard'
+import { PromotedPaneCard } from './PromotedPaneCard'
+import { isTerminalPane } from '../lib/pane-id'
 import { PromptLauncher } from './PromptLauncher'
 import { GridContextMenu } from './GridContextMenu'
 import { AgentIcon } from './AgentIcon'
@@ -291,12 +293,12 @@ export const GridView = memo(function GridView() {
         >
           {orderedIds.map((id, index) => (
             <div key={id} className="min-w-0 min-h-0">
-              <AgentCard
+              <GridCell
                 ref={(el) => {
                   if (el) cardRefs.current.set(id, el)
                   else cardRefs.current.delete(id)
                 }}
-                terminalId={id}
+                id={id}
                 index={index}
                 isDragTarget={dragState?.isDragging === true && dropTargetIndex === index}
                 onDragStart={sortMode === 'manual' ? handleDragStart : undefined}
@@ -310,6 +312,47 @@ export const GridView = memo(function GridView() {
       )}
       {dragState?.isDragging && <GridDragGhost dragState={dragState} terminals={terminals} />}
     </div>
+  )
+})
+
+/**
+ * One cell of the grid: a session's card, or a pane promoted out of one.
+ *
+ * The grid deals in opaque ids and never learns which it is holding — ordering,
+ * drag, resize, drop targets and the ref map all address a promoted pane exactly
+ * as they address a session. This is the single place the two diverge, and it
+ * diverges on the id alone.
+ */
+const GridCell = forwardRef<
+  HTMLDivElement,
+  {
+    id: string
+    index: number
+    isDragTarget?: boolean
+    onDragStart?: (id: string, e: React.PointerEvent) => void
+    flexible?: boolean
+  }
+>(function GridCell({ id, index, isDragTarget, onDragStart, flexible }, ref) {
+  if (isTerminalPane(id)) {
+    return (
+      <AgentCard
+        ref={ref}
+        terminalId={id}
+        index={index}
+        isDragTarget={isDragTarget}
+        onDragStart={onDragStart}
+        flexible={flexible}
+      />
+    )
+  }
+  return (
+    <PromotedPaneCard
+      ref={ref}
+      paneId={id}
+      isDragTarget={isDragTarget}
+      onDragStart={onDragStart}
+      flexible={flexible}
+    />
   )
 })
 
@@ -451,7 +494,7 @@ function FlexibleGrid({
       >
         {orderedIds.map((id, index) => (
           <div key={id} className="h-full">
-            <AgentCard terminalId={id} index={index} flexible />
+            <GridCell id={id} index={index} flexible />
           </div>
         ))}
       </GridLayout>

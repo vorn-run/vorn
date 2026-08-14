@@ -2,6 +2,7 @@ import { useMemo, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
+import { panesOwnedBy } from '../lib/pane-id'
 
 /**
  * Stable comparator for terminal ids under the active sortMode. Manual mode
@@ -49,6 +50,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     statusFilter,
     terminalOrder,
     minimizedTerminals,
+    promotedPanes,
     setVisibleTerminalIds,
     setFocusableTerminalIds
   } = useAppStore(
@@ -62,6 +64,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       statusFilter: s.statusFilter,
       terminalOrder: s.terminalOrder,
       minimizedTerminals: s.minimizedTerminals,
+      promotedPanes: s.promotedPanes,
       setVisibleTerminalIds: s.setVisibleTerminalIds,
       setFocusableTerminalIds: s.setFocusableTerminalIds
     }))
@@ -97,14 +100,19 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
       })
       .sort(sortFn)
 
-    // Sessions only. A session's child panes render inside its own card, so
-    // they are not layout units here — putting them in this list once forced
-    // every consumer to translate between grid positions and session positions.
+    // Sessions, plus any pane promoted out of one. A child pane normally
+    // renders inside its owner's card and is not a layout unit at all; promoted,
+    // it becomes one — and it is placed directly after its owner so the two stay
+    // together as the grid reflows.
     const ordered: string[] = []
     const minimized: string[] = []
-    for (const [id] of filtered) {
+    const place = (id: string): void => {
       if (minimizedTerminals.has(id)) minimized.push(id)
       else ordered.push(id)
+    }
+    for (const [id] of filtered) {
+      place(id)
+      for (const paneId of panesOwnedBy(promotedPanes, id)) place(paneId)
     }
 
     // Focused-mode nav spans the active project (or workspace) regardless of
@@ -123,7 +131,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     statusFilter,
     sortMode,
     terminalOrder,
-    minimizedTerminals
+    minimizedTerminals,
+    promotedPanes
   ])
 
   useEffect(() => {

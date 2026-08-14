@@ -1,10 +1,12 @@
 import { forwardRef, type ReactNode } from 'react'
-import { Maximize2, Minimize2, X } from 'lucide-react'
+import { CornerDownLeft, Maximize2, Minimize2, Minus, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { Tooltip } from './Tooltip'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON, ICON_BUTTON_SIZE } from '../lib/icon-button'
+import { paneOwnerId } from '../lib/pane-id'
+import { BranchChip } from './card/BranchChip'
 
 export interface PaneCardProps {
   /** This pane's id — `files:<sessionId>` or `editor:<sessionId>`. */
@@ -24,14 +26,22 @@ export interface PaneCardProps {
 }
 
 /**
- * Maximize / close for one pane.
+ * Controls for one pane: where it sits, how big it is, and closing it.
  *
  * Split out of the header so a headerless pane can seat the same controls in a
  * bar of its own making, rather than growing a second one.
  *
- * There is deliberately no minimize here. A minimized pane had nowhere to go —
- * the dock only surfaces sessions, and expanded mode ignores the state
- * entirely — so the button silently discarded the pane.
+ * The set changes with placement, because the useful moves do. A pane inside a
+ * session card can be promoted out of it or maximized over its owner; a
+ * promoted pane is already a cell of its own, so it minimizes to the dock and
+ * returns to its card instead. Close means the same thing either way — the pane
+ * is gone, not merely stowed.
+ *
+ * Minimize appears only once promoted, and that is not an oversight left over.
+ * A docked pane had nowhere to go when minimized: the dock surfaces grid cells,
+ * and a pane inside a card is not one, so the button silently discarded it.
+ * Promotion makes the pane a cell, which is exactly what gives minimize
+ * somewhere to land.
  */
 export function PaneControls({
   paneId,
@@ -44,30 +54,73 @@ export function PaneControls({
   onClose: () => void
   className?: string
 }): ReactNode {
-  const { isMaximized, setMaximizedPane } = useAppStore(
-    useShallow((s) => ({
-      isMaximized: s.maximizedPaneId === paneId,
-      setMaximizedPane: s.setMaximizedPane
-    }))
-  )
+  const { isMaximized, isPromoted, setMaximizedPane, promotePane, returnPane, toggleMinimized } =
+    useAppStore(
+      useShallow((s) => ({
+        isMaximized: s.maximizedPaneId === paneId,
+        isPromoted: s.promotedPanes.has(paneId),
+        setMaximizedPane: s.setMaximizedPane,
+        promotePane: s.promotePane,
+        returnPane: s.returnPaneToCard,
+        toggleMinimized: s.toggleMinimized
+      }))
+    )
 
   // Always visible, never hover-revealed: hidden until the pointer arrives, a
   // panel reads as having no controls at all.
   return (
     <div className={`flex items-center gap-0.5 ${className}`}>
-      <Tooltip label={isMaximized ? 'Restore' : 'Maximize'}>
-        <button
-          onClick={() => setMaximizedPane(isMaximized ? null : paneId)}
-          className={ICON_BUTTON}
-          aria-label={isMaximized ? `Restore ${title}` : `Maximize ${title}`}
-        >
-          {isMaximized ? (
-            <Minimize2 size={ICON_BUTTON_SIZE} />
-          ) : (
-            <Maximize2 size={ICON_BUTTON_SIZE} />
-          )}
-        </button>
-      </Tooltip>
+      {/* Three of the four pane kinds are headerless, seating these controls in
+          a bar of their own. Hanging ownership off the controls rather than off
+          the header is therefore the one placement every kind inherits. */}
+      {isPromoted && <PaneOwnerLabel paneId={paneId} />}
+      {isPromoted ? (
+        <>
+          <Tooltip label="Minimize">
+            <button
+              onClick={() => toggleMinimized(paneId)}
+              className={ICON_BUTTON}
+              aria-label={`Minimize ${title}`}
+            >
+              <Minus size={ICON_BUTTON_SIZE} />
+            </button>
+          </Tooltip>
+          <Tooltip label="Put back in its session card">
+            <button
+              onClick={() => returnPane(paneId)}
+              className={ICON_BUTTON}
+              aria-label={`Put ${title} back in its session card`}
+            >
+              <CornerDownLeft size={ICON_BUTTON_SIZE} />
+            </button>
+          </Tooltip>
+        </>
+      ) : (
+        <>
+          <Tooltip label="Open as its own card">
+            <button
+              onClick={() => promotePane(paneId)}
+              className={ICON_BUTTON}
+              aria-label={`Open ${title} as its own card`}
+            >
+              <SquareArrowOutUpRight size={ICON_BUTTON_SIZE} />
+            </button>
+          </Tooltip>
+          <Tooltip label={isMaximized ? 'Restore' : 'Maximize'}>
+            <button
+              onClick={() => setMaximizedPane(isMaximized ? null : paneId)}
+              className={ICON_BUTTON}
+              aria-label={isMaximized ? `Restore ${title}` : `Maximize ${title}`}
+            >
+              {isMaximized ? (
+                <Minimize2 size={ICON_BUTTON_SIZE} />
+              ) : (
+                <Maximize2 size={ICON_BUTTON_SIZE} />
+              )}
+            </button>
+          </Tooltip>
+        </>
+      )}
       <Tooltip label="Close">
         <button onClick={onClose} className={ICON_BUTTON} aria-label={`Close ${title}`}>
           <X size={ICON_BUTTON_SIZE} strokeWidth={2} />
@@ -90,10 +143,13 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
   { paneId, title, onClose, children, isDragTarget, onDragStart, flexible, headerless },
   ref
 ) {
-  const { isMaximized, setMaximizedPane } = useAppStore(
+  const { isMaximized, isPromoted, isSelected, setMaximizedPane, setSelected } = useAppStore(
     useShallow((s) => ({
       isMaximized: s.maximizedPaneId === paneId,
-      setMaximizedPane: s.setMaximizedPane
+      isPromoted: s.promotedPanes.has(paneId),
+      isSelected: s.selectedTerminalId === paneId,
+      setMaximizedPane: s.setMaximizedPane,
+      setSelected: s.setSelectedTerminal
     }))
   )
 
@@ -104,17 +160,33 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
   return (
     <div
       ref={ref}
-      // Square and borderless, filling the card. The step down to PANE_SURFACE
-      // is the whole separation — see that module for why.
+      // Inside a card: square and borderless, filling it. The step down to
+      // PANE_SURFACE is the whole separation — see that module for why.
+      //
+      // Promoted, it is a grid cell among session cards, so it wears what they
+      // wear — including selection, since the keyboard shortcuts that walk the
+      // grid by position now land here too, and a jump that highlights nothing
+      // reads as a jump that did nothing.
       className={`relative overflow-hidden flex flex-col h-full
                  transition-shadow
+                 ${
+                   isPromoted
+                     ? `border transition-colors ${
+                         isSelected
+                           ? 'border-white/40'
+                           : 'border-white/[0.06] hover:border-white/[0.12]'
+                       }`
+                     : ''
+                 }
                  ${isDragTarget ? 'card-drop-target' : ''}
                  ${flexible ? '' : 'hover:z-10 focus-within:z-10'}`}
-      style={{ background: PANE_SURFACE }}
+      style={{ background: isPromoted ? 'var(--color-surface-raised)' : PANE_SURFACE }}
+      onPointerDown={isPromoted && !isSelected ? () => setSelected(paneId) : undefined}
     >
       {!headerless && (
         <div
           className={`flex items-center gap-1.5 px-2 py-1 shrink-0
+                    ${isPromoted ? 'border-b border-white/[0.04]' : ''}
                     ${onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''}`}
           onPointerDown={onDragStart ? handleDragStart : undefined}
           onDoubleClick={() => setMaximizedPane(isMaximized ? null : paneId)}
@@ -132,3 +204,30 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
     </div>
   )
 })
+
+/**
+ * Which session a promoted pane came out of.
+ *
+ * Inside a card the question never arises — the pane is visibly part of
+ * something. Out in the grid beside a dozen other cards it does, and the failure
+ * is quiet: the right file tree from the wrong worktree looks exactly like the
+ * right one. So this says project, then hands worktree and branch to the same
+ * `BranchChip` a session card wears, which means the switcher works here too.
+ *
+ * No accent. Bronzo marks work blocked on the person; a worktree name is
+ * information, not a request.
+ */
+function PaneOwnerLabel({ paneId }: { paneId: string }): ReactNode {
+  const sessionId = paneOwnerId(paneId)
+  const projectName = useAppStore((s) => s.terminals.get(sessionId)?.session.projectName)
+
+  if (!projectName) return null
+
+  return (
+    <>
+      <span className="text-ink-ghost shrink-0">·</span>
+      <span className="text-[11px] text-ink-secondary truncate max-w-[140px]">{projectName}</span>
+      <BranchChip terminalId={sessionId} />
+    </>
+  )
+}
