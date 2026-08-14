@@ -1084,5 +1084,24 @@ export function selectPaneFlags(
   const editor = sessionId ? s.editorPanes.has(sessionId) : false
   const browser = sessionId ? s.browserPanes.has(sessionId) : false
   const device = sessionId ? s.devicePanes.has(sessionId) : false
-  return { files, editor, browser, device, any: files || editor || browser || device }
+  // `any` also counts popped-out cards, because outside the grid they render in
+  // this session's column. A session whose only pane is a popped-out file has
+  // all four flags false, and without this the column would not be rendered at
+  // all — the file would be reachable from nowhere.
+  const cards = sessionId ? ownsPromotedCard(s, sessionId) : false
+  return { files, editor, browser, device, any: files || editor || browser || device || cards }
+}
+
+/** Whether `sessionId` has popped anything out to a card of its own. */
+function ownsPromotedCard(
+  s: Pick<AppStore, 'editorPanes' | 'browserPanes'>,
+  sessionId: string
+): boolean {
+  for (const [paneId, pane] of s.editorPanes) {
+    if (pane.sessionId === sessionId && isPromotedPane(paneId, pane)) return true
+  }
+  for (const [paneId, pane] of s.browserPanes) {
+    if (pane.sessionId === sessionId && isPromotedPane(paneId, pane)) return true
+  }
+  return false
 }

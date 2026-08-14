@@ -21,11 +21,13 @@ vi.mock('../src/renderer/components/FilesCard', () => ({
   FilesCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`files-${sessionId}`} />
 }))
 vi.mock('../src/renderer/components/EditorCard', () => ({
-  EditorCard: ({ sessionId }: { sessionId: string }) => <div data-testid={`editor-${sessionId}`} />
+  EditorCard: ({ sessionId, paneKey }: { sessionId: string; paneKey?: string }) => (
+    <div data-testid={`editor-${paneKey ?? sessionId}`} />
+  )
 }))
 vi.mock('../src/renderer/components/BrowserCard', () => ({
-  BrowserCard: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid={`browser-${sessionId}`} />
+  BrowserCard: ({ sessionId, paneKey }: { sessionId: string; paneKey?: string }) => (
+    <div data-testid={`browser-${paneKey ?? sessionId}`} />
   )
 }))
 
@@ -54,7 +56,12 @@ beforeEach(() => {
       editorPanes: new Map(),
       browserPanes: new Map(),
       cardSplits: {},
-      maximizedPaneId: null
+      maximizedPaneId: null,
+      // Layout decides where a card is drawn, so a test that switches it would
+      // otherwise hand that choice to the next one.
+      config: { defaults: { layoutMode: 'grid' } } as never,
+      focusedTerminalId: null,
+      previewTerminalId: null
     })
   })
 })
@@ -115,6 +122,51 @@ describe('PaneColumn', () => {
     expect(screen.getByTestId('files-t1')).toBeInTheDocument()
     expect(screen.getByTestId('browser-t1')).toBeInTheDocument()
     // One divider, between the two — not one above the first.
+    expect(screen.getAllByRole('separator')).toHaveLength(1)
+  })
+
+  it('leaves a popped-out card to the grid', () => {
+    let cardId = ''
+    act(() => {
+      useAppStore.getState().openFilesPane('t1')
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    render(<PaneColumn sessionId="t1" />)
+
+    // The grid is drawing it as a cell of its own. Drawing it here as well
+    // would mount it twice — for a browser card, two guests on one url, each
+    // with its own scroll position and half-filled form.
+    expect(screen.queryByTestId(`editor-${cardId}`)).not.toBeInTheDocument()
+    expect(screen.getByTestId('files-t1')).toBeInTheDocument()
+  })
+
+  it('takes the card in where no grid is drawing it', () => {
+    let cardId = ''
+    act(() => {
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+      useAppStore.setState({ focusedTerminalId: 't1' } as never)
+    })
+    render(<PaneColumn sessionId="t1" />)
+
+    // Focused mode shows one session and has no cell for a card. Left to the
+    // grid it would be nowhere at all — and the control that puts it back
+    // travels with it, so it could not be recovered from the card either.
+    expect(screen.getByTestId(`editor-${cardId}`)).toBeInTheDocument()
+  })
+
+  it("keeps a card clear of the session's own editor", () => {
+    let cardId = ''
+    act(() => {
+      useAppStore.getState().openEditorPane('t1', '/repo/open.ts')
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/popped.ts')
+      useAppStore.setState({ focusedTerminalId: 't1' } as never)
+    })
+    render(<PaneColumn sessionId="t1" />)
+
+    // Both are editors on one session, and only the pane id tells them apart —
+    // keying the column by kind would collapse them into one row.
+    expect(screen.getByTestId('editor-t1')).toBeInTheDocument()
+    expect(screen.getByTestId(`editor-${cardId}`)).toBeInTheDocument()
     expect(screen.getAllByRole('separator')).toHaveLength(1)
   })
 

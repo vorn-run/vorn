@@ -16,15 +16,45 @@ import type { PromotedCard } from '../../hooks/usePromotedCards'
  * it without spending a word.
  */
 export function PromotedCardItem({ card }: { card: PromotedCard }) {
-  const { isSelected, setSelected, returnCard, closeEditor, closeBrowser } = useAppStore(
+  const {
+    isSelected,
+    layoutMode,
+    setSelected,
+    setFocusedTerminal,
+    setActiveTabId,
+    returnCard,
+    closeEditor,
+    closeBrowser
+  } = useAppStore(
     useShallow((s) => ({
       isSelected: s.selectedTerminalId === card.id,
+      layoutMode: s.config?.defaults?.layoutMode ?? 'grid',
       setSelected: s.setSelectedTerminal,
+      setFocusedTerminal: s.setFocusedTerminal,
+      setActiveTabId: s.setActiveTabId,
       returnCard: s.returnCardToSession,
       closeEditor: s.closeEditorPane,
       closeBrowser: s.closeBrowserPane
     }))
   )
+
+  /**
+   * Bring the card into view, which means whatever the current layout needs.
+   *
+   * Selecting alone only highlights a grid cell. In focused mode and the tab
+   * strip there is no grid, and the card is drawn in its owner session's column
+   * — so getting to it means going to that session first. Without this the row
+   * looked inert in exactly the two layouts where the card was hardest to find.
+   */
+  const reveal = (): void => {
+    setSelected(card.id)
+    if (layoutMode === 'tabs') {
+      setActiveTabId(card.sessionId)
+      setFocusedTerminal(null)
+    } else {
+      setFocusedTerminal(card.sessionId)
+    }
+  }
 
   const fileName = card.subject.split(/[/\\]/).pop() ?? ''
   const name = card.kind === 'browser' ? displayHost(card.subject) : fileName
@@ -33,11 +63,11 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
     <div
       role="button"
       tabIndex={0}
-      onClick={() => setSelected(card.id)}
+      onClick={reveal}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          setSelected(card.id)
+          reveal()
         }
       }}
       title={card.subject}

@@ -1,7 +1,9 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
-import { parsePaneId, type PaneChildKind } from '../lib/pane-id'
+import { paneIdFor, type PaneChildKind } from '../lib/pane-id'
+import { usePromotedCardsFor } from '../hooks/usePromotedCards'
+import { useGridDrawsCards } from '../hooks/useGridDrawsCards'
 import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
@@ -12,14 +14,30 @@ import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
 /**
  * The stack of panes a session owns, rendered inside that session's frame.
  *
- * Panes are no longer grid cells: a session's tree, editor and browser live in
- * a column beside its terminal, so the space a card gets is divided between the
+ * Panes are not grid cells: a session's tree, editor and browser live in a
+ * column beside its terminal, so the space a card gets is divided between the
  * things that belong to it rather than spread across unrelated grid cells.
  *
- * While one of the session's panes is maximized it takes the whole column and
- * its siblings hide — the owner check keeps another session's maximized pane
- * from taking over this one.
+ * The column also takes in the session's popped-out cards wherever the grid is
+ * not drawing them — the tab strip, focused mode, mobile. Those layouts show one
+ * session and have no cell to put a card in, so without this a popped-out file
+ * simply vanished when you left the grid, taking the control that brings it back
+ * with it.
+ *
+ * While one of the panes is maximized it takes the whole column and its siblings
+ * hide — the owner check keeps another session's maximized pane from taking over
+ * this one.
  */
+
+/** One row of the column: a pane the session owns, or a card it popped out. */
+interface ColumnEntry {
+  /** Pane id, which is also the React key and what maximize is matched on. */
+  id: string
+  kind: PaneChildKind
+  /** Set when this is a popped-out card, and is then the key into its map. */
+  cardKey?: string
+}
+
 export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
   const { hasFiles, hasEditor, hasBrowser, hasDevice, maximizedPaneId, split, setCardSplit } =
     useAppStore(
@@ -33,42 +51,54 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
         setCardSplit: s.setCardSplit
       }))
     )
+  const gridDrawsCards = useGridDrawsCards()
+  const cards = usePromotedCardsFor(sessionId)
   const containerRef = useRef<HTMLDivElement | null>(null)
   // The live drag drives local state; the store is written once, on pointerup.
   const [dragWeights, setDragWeights] = useState<number[] | null>(null)
 
-  const kinds = [
+  const ownKinds = [
     hasFiles ? ('files' as const) : null,
     hasEditor ? ('editor' as const) : null,
     hasBrowser ? ('browser' as const) : null,
     hasDevice ? ('device' as const) : null
   ].filter((k): k is PaneChildKind => k !== null)
 
-  if (kinds.length === 0) return null
+  const entries: ColumnEntry[] = [
+    ...ownKinds.map((kind) => ({ id: paneIdFor(kind, sessionId), kind })),
+    // Cards last, after everything the session already had — they arrived last,
+    // and inserting them above would shuffle the panes someone had arranged.
+    ...(gridDrawsCards
+      ? []
+      : cards.map((card) => ({ id: card.id, kind: card.kind, cardKey: card.id })))
+  ]
 
-  const maximized = maximizedPaneId ? parsePaneId(maximizedPaneId) : null
-  const maximizedKind =
-    maximized &&
-    maximized.sessionId === sessionId &&
-    maximized.kind !== 'terminal' &&
-    // A popped-out card is maximized by the grid over the whole view, not by
-    // this column over its stack — it is not in the stack to maximize.
-    maximized.kind !== 'card'
-      ? maximized.kind
-      : null
-  const hasMaximized = maximizedKind !== null && kinds.includes(maximizedKind)
+  if (entries.length === 0) return null
 
-  const weights = dragWeights ?? splitPaneWeights(split?.panes, kinds.length)
+  // Matched on pane id rather than kind: a session can now hold several editors
+  // in one column — its own, plus a card per popped-out file — and only the id
+  // tells them apart.
+  const maximizedIndex = entries.findIndex((e) => e.id === maximizedPaneId)
+  const hasMaximized = maximizedIndex !== -1
+
+  const weights = dragWeights ?? splitPaneWeights(split?.panes, entries.length)
 
   const commit = (next: number[]): void => {
     setCardSplit(sessionId, { terminal: split?.terminal ?? 0.5, panes: next })
     setDragWeights(null)
   }
 
-  const render = (kind: PaneChildKind): ReactNode => {
-    if (kind === 'files') return <FilesCard sessionId={sessionId} />
-    if (kind === 'editor') return <EditorCard sessionId={sessionId} />
-    if (kind === 'browser') return <BrowserCard sessionId={sessionId} />
+  const render = (entry: ColumnEntry): ReactNode => {
+    if (entry.cardKey) {
+      return entry.kind === 'browser' ? (
+        <BrowserCard sessionId={sessionId} paneKey={entry.cardKey} />
+      ) : (
+        <EditorCard sessionId={sessionId} paneKey={entry.cardKey} />
+      )
+    }
+    if (entry.kind === 'files') return <FilesCard sessionId={sessionId} />
+    if (entry.kind === 'editor') return <EditorCard sessionId={sessionId} />
+    if (entry.kind === 'browser') return <BrowserCard sessionId={sessionId} />
     return <DeviceCard sessionId={sessionId} />
   }
 
@@ -79,8 +109,8 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
     // panes take the card's full height, and the step down in surface separates
     // them, where insetting framed the panel and cost height.
     <div ref={containerRef} className="relative flex flex-col min-h-0 min-w-0 w-full gap-px">
-      {kinds.map((kind, i) => {
-        const hidden = hasMaximized && kind !== maximizedKind
+      {entries.map((entry, i) => {
+        const hidden = hasMaximized && i !== maximizedIndex
         if (hidden) {
           // Hidden, not unmounted. Unmounting destroys the browser pane's
           // <webview> guest, which loses the page, its scroll position and any
@@ -93,32 +123,32 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
           // size: a webview collapsed to zero does not reliably come back.
           return (
             <div
-              key={kind}
+              key={entry.id}
               aria-hidden
-              data-testid={`pane-hidden-${sessionId}-${kind}`}
+              data-testid={`pane-hidden-${sessionId}-${entry.kind}`}
               className="absolute inset-0 pointer-events-none invisible"
             >
-              {render(kind)}
+              {render(entry)}
             </div>
           )
         }
         return (
-          <div key={kind} className="contents">
+          <div key={entry.id} className="contents">
             {i > 0 && !hasMaximized && (
               <SplitDivider
                 axis="y"
                 containerRef={containerRef}
                 onRatioChange={(r) => setDragWeights(resizePaneWeights(weights, i - 1, r))}
                 onRatioCommit={(r) => commit(resizePaneWeights(weights, i - 1, r))}
-                label={`Resize ${kind} panel`}
-                testId={`pane-divider-${sessionId}-${kind}`}
+                label={`Resize ${entry.kind} panel`}
+                testId={`pane-divider-${sessionId}-${entry.kind}`}
               />
             )}
             <div
               className="min-h-0 min-w-0"
               style={{ flexGrow: hasMaximized ? 1 : weights[i], flexShrink: 1, flexBasis: 0 }}
             >
-              {render(kind)}
+              {render(entry)}
             </div>
           </div>
         )

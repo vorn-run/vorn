@@ -5,16 +5,22 @@ import '@testing-library/jest-dom/vitest'
 import type { PromotedCard } from '../src/renderer/hooks/usePromotedCards'
 
 const setSelected = vi.fn()
+const setFocusedTerminal = vi.fn()
+const setActiveTabId = vi.fn()
 const returnCard = vi.fn()
 const closeEditor = vi.fn()
 const closeBrowser = vi.fn()
 let selectedTerminalId: string | null = null
+let layoutMode = 'grid'
 
 vi.mock('../src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = {
       selectedTerminalId,
+      config: { defaults: { layoutMode } },
       setSelectedTerminal: setSelected,
+      setFocusedTerminal,
+      setActiveTabId,
       returnCardToSession: returnCard,
       closeEditorPane: closeEditor,
       closeBrowserPane: closeBrowser
@@ -47,6 +53,7 @@ const pageCard: PromotedCard = {
 describe('PromotedCardItem', () => {
   beforeEach(() => {
     selectedTerminalId = null
+    layoutMode = 'grid'
     vi.clearAllMocks()
   })
 
@@ -93,5 +100,26 @@ describe('PromotedCardItem', () => {
     fireEvent.click(screen.getByRole('button', { name: /Close vorn\.dev/ }))
     expect(closeBrowser).toHaveBeenCalledWith('card:t1:1')
     expect(closeEditor).not.toHaveBeenCalled()
+  })
+
+  it('goes to the session the card is drawn in, not just the grid cell', () => {
+    // Outside the grid the card lives in its owner's column, so selecting alone
+    // highlights something that is not on screen. Focused mode is where this
+    // row looked most inert, and it is where the card is hardest to find.
+    render(<PromotedCardItem card={fileCard} />)
+    fireEvent.click(screen.getByText('server.ts'))
+
+    expect(setFocusedTerminal).toHaveBeenCalledWith('t1')
+  })
+
+  it('switches the tab strip to the owner rather than to the card', () => {
+    layoutMode = 'tabs'
+    render(<PromotedCardItem card={pageCard} />)
+    fireEvent.click(screen.getByText('vorn.dev'))
+
+    // The strip holds sessions only: activating the card id would select a tab
+    // that does not exist and leave the strip on whatever it was showing.
+    expect(setActiveTabId).toHaveBeenCalledWith('t1')
+    expect(setFocusedTerminal).toHaveBeenCalledWith(null)
   })
 })
