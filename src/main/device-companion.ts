@@ -270,6 +270,20 @@ export function installCompanionQuitHook(): void {
 }
 
 /**
+ * How long a call may take before we give up on it.
+ *
+ * Without this a call that never answers hangs its caller for the life of the
+ * process, and an agent waiting on a tool result has no way to tell that apart
+ * from a slow simulator. Generous enough that a cold app launch fits.
+ *
+ * A caller that asks the device to *hold* — a long press is a DOWN, a delay and
+ * an UP inside one call — must add that hold to the budget. Left at the bare
+ * default, a 30s press raced this exact number and lost: the press happened and
+ * the call reported failure.
+ */
+export const CALL_TIMEOUT_MS = 30_000
+
+/**
  * Wraps a unary companion call in a promise.
  *
  * gRPC-js is callback-first, and a status error carries the detail that makes
@@ -283,23 +297,33 @@ export function installCompanionQuitHook(): void {
  *  - `screenshot` returns `image_format` as an empty string, so the format has
  *    to be sniffed from the bytes (they are PNG) rather than trusted.
  */
-export function call<T>(client: CompanionClient, method: string, request: unknown): Promise<T> {
+export function call<T>(
+  client: CompanionClient,
+  method: string,
+  request: unknown,
+  timeoutMs: number = CALL_TIMEOUT_MS
+): Promise<T> {
   return new Promise((resolve, reject) => {
+    // A wedged simulator keeps its socket open, so gRPC never errors and a
+    // unary call waits as long as a streaming one would. `screenshot` and
+    // `accessibility_info` come through here — the two calls an agent makes
+    // most, and the two whose silence is least distinguishable from slowness.
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error(`The device did not answer ${method} within ${timeoutMs / 1000}s.`))
+    }, timeoutMs)
+
     client[method](request, (err: grpc.ServiceError | null, res: T) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       if (err) reject(new Error(err.details || err.message))
       else resolve(res)
     })
   })
 }
-
-/**
- * How long any streaming call may take before we give up on it.
- *
- * Without this a call that never answers hangs its caller for the life of the
- * process, and an agent waiting on a tool result has no way to tell that apart
- * from a slow simulator. Generous enough that a cold app launch fits.
- */
-const STREAM_TIMEOUT_MS = 30_000
 
 /**
  * Writes a sequence of messages to a **client-streaming** call — `stream X → Y`
@@ -318,7 +342,8 @@ const STREAM_TIMEOUT_MS = 30_000
 export function callStreaming<T>(
   client: CompanionClient,
   method: string,
-  messages: readonly unknown[]
+  messages: readonly unknown[],
+  timeoutMs: number = CALL_TIMEOUT_MS
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     let settled = false
@@ -331,8 +356,8 @@ export function callStreaming<T>(
       if (settled) return
       settled = true
       open.stream?.cancel()
-      reject(new Error(`The device did not answer ${method} within ${STREAM_TIMEOUT_MS / 1000}s.`))
-    }, STREAM_TIMEOUT_MS)
+      reject(new Error(`The device did not answer ${method} within ${timeoutMs / 1000}s.`))
+    }, timeoutMs)
     const settle = (fn: () => void): void => {
       if (settled) return
       settled = true
@@ -354,7 +379,8 @@ export function callStreaming<T>(
 export function callBidiStreaming<T>(
   client: CompanionClient,
   method: string,
-  messages: readonly unknown[]
+  messages: readonly unknown[],
+  timeoutMs: number = CALL_TIMEOUT_MS
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const stream = client[method]() as grpc.ClientDuplexStream<unknown, T>
@@ -370,8 +396,8 @@ export function callBidiStreaming<T>(
       if (settled) return
       settled = true
       stream.cancel()
-      reject(new Error(`The device did not answer ${method} within ${STREAM_TIMEOUT_MS / 1000}s.`))
-    }, STREAM_TIMEOUT_MS)
+      reject(new Error(`The device did not answer ${method} within ${timeoutMs / 1000}s.`))
+    }, timeoutMs)
 
     stream.on('data', (msg: T) => {
       last = msg

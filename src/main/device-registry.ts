@@ -17,6 +17,7 @@ import {
   call,
   callStreaming,
   callBidiStreaming,
+  CALL_TIMEOUT_MS,
   type CompanionHandle
 } from './device-companion'
 import log from './logger'
@@ -834,7 +835,15 @@ export async function interact(params: {
     }
   }
 
-  await callStreaming(entry.companion.client, 'hid', events)
+  // A press asks the device to hold, and that hold is spent inside the call.
+  // Charging it to the same budget as the round trip is how a 30s press came to
+  // fail after succeeding: the deadline fired on the delay it had itself asked
+  // for.
+  const heldSeconds = events.reduce<number>(
+    (total, e) => total + ((e as { delay?: { duration?: number } }).delay?.duration ?? 0),
+    0
+  )
+  await callStreaming(entry.companion.client, 'hid', events, CALL_TIMEOUT_MS + heldSeconds * 1000)
   // Refs describe a screen that this input may have just replaced.
   entry.generation++
   entry.refs.clear()

@@ -12,6 +12,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
  */
 
 const execCalls: string[][] = []
+/** The deadline the registry asked for on each `hid` call. */
+const hidTimeouts: (number | undefined)[] = []
 /** Whether `simctl shutdown` should take its real, slow time to answer. */
 const slowShutdown = { on: false }
 /** Args of each exec call, in the order it *completed*. */
@@ -66,7 +68,12 @@ vi.mock('../src/main/device-companion', () => ({
   },
   stopCompanion: (udid: string) => stopped.push(udid),
   call: async () => ({ json: treeJson.value }),
-  callStreaming: async () => ({})
+  callStreaming: async (_c: unknown, _m: string, _msgs: unknown, timeoutMs?: number) => {
+    hidTimeouts.push(timeoutMs)
+    return {}
+  },
+  callBidiStreaming: async () => ({}),
+  CALL_TIMEOUT_MS: 30_000
 }))
 
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => ({}) } }))
@@ -399,6 +406,38 @@ describe('runtime formatting', () => {
 
   it('handles a runtime with no version suffix', () => {
     expect(formatRuntime('com.apple.CoreSimulator.SimRuntime.iOS')).toBe('iOS')
+  })
+})
+
+describe('a press pays for its own hold', () => {
+  /** A claimed device whose companion answers, so `interact` runs for real. */
+  function claimed(): void {
+    const e = newEntry('s1', 'udid-1')
+    e.companion = {} as never
+    setEntryForTests(e)
+  }
+
+  beforeEach(() => {
+    hidTimeouts.length = 0
+    treeJson.value = JSON.stringify([
+      { role: 'AXWindow', frame: { x: 0, y: 0, width: 402, height: 874 } }
+    ])
+  })
+
+  it('adds the hold to the deadline, so the press cannot outlast its own call', async () => {
+    // A long press is DOWN, a delay, UP — all inside one call. Charged against
+    // the bare round-trip budget, a press held for as long as the deadline
+    // allows loses the race with it: the press happens and the call reports
+    // failure. The hold has to be added to the budget it is spent from.
+    claimed()
+    await interact({ sessionId: 's1', action: 'press', target: { x: 200, y: 400 }, duration: 30 })
+    expect(hidTimeouts).toEqual([30_000 + 30 * 1000])
+  })
+
+  it('charges a plain tap nothing extra', async () => {
+    claimed()
+    await interact({ sessionId: 's1', action: 'tap', target: { x: 200, y: 400 } })
+    expect(hidTimeouts).toEqual([30_000])
   })
 })
 

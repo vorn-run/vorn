@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { callStreaming, callBidiStreaming } from '../src/main/device-companion'
+import { callStreaming, callBidiStreaming, CALL_TIMEOUT_MS } from '../src/main/device-companion'
 import type { CompanionClient } from '../src/main/device-companion'
 
 /**
@@ -81,6 +81,29 @@ describe('callStreaming, for stream X → Y', () => {
 
     await expect(callStreaming(client, 'hid', [{}])).rejects.toThrow('device is not booted')
   })
+})
+
+it('lets a caller buy more time for a hold it asked the device to make', async () => {
+  // A long press is DOWN, a delay, UP — all inside one call. Charged against
+  // the bare round-trip budget, a press held for as long as the deadline
+  // allows loses the race with it: the press happens and the call reports
+  // failure. The caller adds the hold to the budget.
+  vi.useFakeTimers()
+  const call = new WritableCall()
+  const client = { hid: () => call } as unknown as CompanionClient
+
+  const pending = callStreaming(client, 'hid', [{}], CALL_TIMEOUT_MS + 30_000)
+  const nearlyThere = vi.advanceTimersByTimeAsync(CALL_TIMEOUT_MS + 29_000)
+  let settled = false
+  void pending.catch(() => {
+    settled = true
+  })
+  await nearlyThere
+  expect(settled).toBe(false)
+
+  const rest = vi.advanceTimersByTimeAsync(2_000)
+  await expect(pending).rejects.toThrow(/within 60s/)
+  await rest
 })
 
 describe('callBidiStreaming, for stream X → stream Y', () => {
