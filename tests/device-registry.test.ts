@@ -487,6 +487,25 @@ describe('a coordinate that cannot be trusted', () => {
     ).resolves.toMatchObject({ ok: true })
   })
 
+  it('refuses a tap when there is no screen size to check it against', async () => {
+    // Waving the point through here made a tap the one input that could still
+    // be aimed at nothing: the swipe branch refuses on exactly this condition.
+    treeJson.value = JSON.stringify([])
+    claimed()
+    await expect(
+      interact({ sessionId: 's1', action: 'tap', target: { x: 10, y: 10 } })
+    ).rejects.toThrow(/screen size could not be read/)
+  })
+
+  it('refuses a screenshot when only the height is unreadable', async () => {
+    // Validity is both dimensions — the swipe guard has always checked both.
+    treeJson.value = JSON.stringify([
+      { role: 'AXWindow', frame: { x: 0, y: 0, width: 402, height: 0 } }
+    ])
+    claimed()
+    await expect(screenshot({ sessionId: 's1' })).rejects.toThrow(/screen size could not be read/)
+  })
+
   it('refuses a screenshot whose scale cannot be measured', async () => {
     // A read taken mid-transition comes back with no root frame. What used to
     // be returned here was the constructor's guess of 3, and a 1.14-ratio image

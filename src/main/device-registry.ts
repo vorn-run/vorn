@@ -777,15 +777,23 @@ export function formatRuntime(identifier: string): string {
  * call returns ok, and the agent reads the unchanged screen as "the button did
  * not work" and tries again.
  *
- * Silent when the screen size is unknown: that case is the swipe guard's to
- * refuse, and a screenshot now fails closed rather than handing out a scale
- * nobody measured.
+ * Fails closed when the screen size is unknown, rather than waving the point
+ * through. Letting it past was the same "confidently ok, did nothing" this
+ * guard exists to stop — and the swipe branch refuses on exactly that condition
+ * two cases down, so opting out here only made a tap the one input that could
+ * still be aimed at nothing.
  */
 function requireOnScreen(
   point: DevicePoint,
   screen: { width: number; height: number }
 ): DevicePoint {
-  if (screen.width <= 0 || screen.height <= 0) return point
+  if (screen.width <= 0 || screen.height <= 0) {
+    throw new Error(
+      'The screen size could not be read, so there is nothing to check this point against. ' +
+        'That usually means the screen is mid-transition — call device_read_screen once it has ' +
+        'settled, then interact.'
+    )
+  }
   const inside = point.x >= 0 && point.y >= 0 && point.x <= screen.width && point.y <= screen.height
   if (!inside) {
     throw new Error(
@@ -990,7 +998,7 @@ export async function screenshot(params: {
   // was aimed, and reports ok. A read taken mid-transition comes back with no
   // root frame, so this is reachable whenever a screenshot is the first thing
   // asked of a screen that is still settling.
-  if (!entry.screenPoints || entry.screenPoints.width <= 0) {
+  if (!entry.screenPoints || entry.screenPoints.width <= 0 || entry.screenPoints.height <= 0) {
     throw new Error(
       'The screen size could not be read, so the scale of the image cannot be ' +
         'measured — and a coordinate divided by a guessed scale lands somewhere ' +
