@@ -57,6 +57,16 @@ describe('DiffFileList', () => {
     expect(screen.getByText('M')).toBeInTheDocument()
   })
 
+  it('keeps a diff in its own colours, which are green and red', () => {
+    // The accent rule carves diffs out: they are the work itself rather than
+    // chrome describing it, and added/removed have read green/red for as long
+    // as diffs have existed. Neutralising them threw away meaning a reader
+    // already had.
+    render(<DiffFileList {...props} files={[file({ insertions: 4, deletions: 2 })]} />)
+    expect(screen.getByText('+4').className).toContain('text-diff-add')
+    expect(screen.getByText('-2').className).toContain('text-diff-remove')
+  })
+
   it('shows an insertion and deletion count only when there is one', () => {
     render(
       <DiffFileList

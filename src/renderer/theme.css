@@ -29,6 +29,16 @@
   --color-status-blue: #6f8faf; /* in progress */
   --color-status-sage: #7d9471; /* done */
 
+  /* A diff's own colours, and the one place green and red are allowed.
+     The accent rule carves this out already: terminal output, diffs and logs
+     keep their colour because they are the work itself rather than chrome
+     describing it. Added and removed lines have read green and red for as long
+     as diffs have existed, and neutralising them threw away meaning a reader
+     already had. Held to the same low saturation as the rest of the palette so
+     they sit beside bronzo rather than shouting over it. */
+  --color-diff-add: #7ea96a;
+  --color-diff-remove: #c96f62;
+
   /* Surface ladder — the app field and the surfaces that lift off it. Depth
      comes from a step plus a hairline, never a shadow; a shadow means something
      floats over the page rather than being part of it. The steps are small, of

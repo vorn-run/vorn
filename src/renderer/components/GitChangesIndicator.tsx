@@ -24,9 +24,11 @@ export function GitChangesIndicator({ terminalId }: Props) {
                  hover:bg-white/[0.06] rounded transition-colors cursor-pointer"
       title={`${stat.filesChanged} file${stat.filesChanged !== 1 ? 's' : ''} changed`}
     >
-      {/* A measurement, not a verdict — a large deletion is not a failure. */}
-      <span className="text-ink-secondary">+{stat.insertions}</span>
-      <span className="text-ink-faint">-{stat.deletions}</span>
+      {/* A diff keeps its own colours: green and red here are the work itself,
+          not chrome describing it, and they have meant added and removed for
+          longer than this app has existed. */}
+      <span className="text-diff-add">+{stat.insertions}</span>
+      <span className="text-diff-remove">-{stat.deletions}</span>
     </button>
   )
 }

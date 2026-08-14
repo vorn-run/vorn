@@ -16,6 +16,7 @@ import {
   stopCompanion,
   call,
   callStreaming,
+  callBidiStreaming,
   type CompanionHandle
 } from './device-companion'
 import log from './logger'
@@ -923,7 +924,10 @@ export async function launch(params: {
 }): Promise<{ ok: true }> {
   const entry = deviceFor(params.sessionId)
   try {
-    await callStreaming(entry.companion.client, 'launch', [
+    // Bidirectional in the proto — `stream LaunchRequest → stream LaunchResponse`
+    // — so it has no callback form. Sent through the client-streaming helper it
+    // never settled, and device_launch hung for the life of the process.
+    await callBidiStreaming(entry.companion.client, 'launch', [
       { start: { bundle_id: params.bundleId, foreground_if_running: true } }
     ])
   } catch (err) {

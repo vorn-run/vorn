@@ -293,14 +293,27 @@ export function call<T>(client: CompanionClient, method: string, request: unknow
 }
 
 /**
- * Writes a sequence of messages to a client-streaming call and waits for the
- * single reply.
+ * How long any streaming call may take before we give up on it.
  *
- * `hid` and `launch` are `stream X → Y`, not unary: a tap is *two* events, a
- * DOWN and an UP, and sending only the first leaves a finger held on the glass
- * — every subsequent gesture then behaves strangely for reasons nothing
- * reports. Keeping both halves inside one call is what makes that impossible to
- * get half-right at a call site.
+ * Without this a call that never answers hangs its caller for the life of the
+ * process, and an agent waiting on a tool result has no way to tell that apart
+ * from a slow simulator. Generous enough that a cold app launch fits.
+ */
+const STREAM_TIMEOUT_MS = 30_000
+
+/**
+ * Writes a sequence of messages to a **client-streaming** call — `stream X → Y`
+ * — and waits for the single reply.
+ *
+ * `hid` is the one that matters: a tap is *two* events, a DOWN and an UP, and
+ * sending only the first leaves a finger held on the glass — every subsequent
+ * gesture then behaves strangely for reasons nothing reports. Keeping both
+ * halves inside one call is what makes that impossible to get half-right at a
+ * call site.
+ *
+ * Only for methods the proto declares as `stream X` returning a bare `Y`. A
+ * method that streams *back* has no callback form at all, and passing one there
+ * is a hang rather than an error — see `callBidiStreaming`.
  */
 export function callStreaming<T>(
   client: CompanionClient,
@@ -308,10 +321,64 @@ export function callStreaming<T>(
   messages: readonly unknown[]
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    let settled = false
+    // `timer` is declared below and only read from callbacks, which cannot run
+    // before the synchronous body finishes.
+    const settle = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn()
+    }
+
     const stream = client[method]((err: grpc.ServiceError | null, res: T) => {
-      if (err) reject(new Error(err.details || err.message))
-      else resolve(res)
+      if (err) settle(() => reject(new Error(err.details || err.message)))
+      else settle(() => resolve(res))
     })
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      stream.cancel()
+      reject(new Error(`The device did not answer ${method} within ${STREAM_TIMEOUT_MS / 1000}s.`))
+    }, STREAM_TIMEOUT_MS)
+
+    for (const m of messages) stream.write(m)
+    stream.end()
+  })
+}
+
+export function callBidiStreaming<T>(
+  client: CompanionClient,
+  method: string,
+  messages: readonly unknown[]
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const stream = client[method]() as grpc.ClientDuplexStream<unknown, T>
+    let last: T | undefined
+    let settled = false
+    const settle = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn()
+    }
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      stream.cancel()
+      reject(new Error(`The device did not answer ${method} within ${STREAM_TIMEOUT_MS / 1000}s.`))
+    }, STREAM_TIMEOUT_MS)
+
+    stream.on('data', (msg: T) => {
+      last = msg
+    })
+    stream.on('error', (err: grpc.ServiceError) => {
+      settle(() => reject(new Error(err.details || err.message)))
+    })
+    stream.on('end', () => {
+      settle(() => resolve((last ?? {}) as T))
+    })
+
     for (const m of messages) stream.write(m)
     stream.end()
   })
