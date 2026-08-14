@@ -126,6 +126,31 @@ select,
   }
 }
 
+/* The terminal's scrollbar overlays instead of reserving a gutter.
+   xterm sets `overflow-y: scroll` on its viewport, so Chromium holds ~6px open
+   down the right edge of every terminal — but only draws a bar once there is
+   something to scroll. That is why an empty session reached the card's edge and
+   a busy one stopped short of it: the same code, two different widths, for a
+   reason nothing on screen explained. The command spine down the left already
+   shows where you are in the scrollback, so the bar itself is not what was
+   carrying that information. */
+.xterm .xterm-viewport {
+  scrollbar-width: none;
+}
+
+/* The column that will not fit is dead space — a terminal draws whole cells or
+   nothing, so up to one character's width is always left over. Centring the
+   screen splits that between the two edges instead of banking it all against
+   the right one, which is the difference between symmetric padding and a ragged
+   margin. Never more than half a character either side. */
+.xterm .xterm-screen {
+  margin-inline: auto;
+}
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
