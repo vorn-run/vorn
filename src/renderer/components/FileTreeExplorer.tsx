@@ -213,8 +213,8 @@ function TreeNode({
           }}
           aria-label={`Open ${entry.name} as its own card`}
           title="Open as its own card"
-          className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white hover:bg-white/[0.08]
-                     opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+          className="shrink-0 p-0.5 rounded text-ink-ghost hover:text-white hover:bg-white/[0.08]
+                     transition-colors"
         >
           <SquareArrowOutUpRight size={11} strokeWidth={2} />
         </button>

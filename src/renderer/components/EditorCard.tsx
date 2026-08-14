@@ -35,10 +35,11 @@ export const EditorCard = memo(
     ref
   ) {
     const key = paneKey ?? sessionId
-    const { terminal, filePath, closeEditorPane } = useAppStore(
+    const { terminal, filePath, promoteFile, closeEditorPane } = useAppStore(
       useShallow((s) => ({
         terminal: s.terminals.get(sessionId),
         filePath: s.editorPanes.get(key)?.filePath ?? null,
+        promoteFile: s.promoteFile,
         closeEditorPane: s.closeEditorPane
       }))
     )
@@ -57,6 +58,16 @@ export const EditorCard = memo(
       if (!confirmDiscard(key)) return
       clearDirty(key)
       closeEditorPane(key)
+    }
+
+    // Out of the session's editor and into a card of its own. The buffer does
+    // not travel — the card mounts a fresh editor under its own id — so an
+    // unsaved edit is discarded here exactly as it would be by closing.
+    const handlePopOut = (): void => {
+      if (!confirmDiscard(sessionId)) return
+      clearDirty(sessionId)
+      promoteFile(sessionId, filePath)
+      closeEditorPane(sessionId)
     }
 
     const paneId = isCard ? key : editorPaneId(sessionId)
@@ -101,6 +112,11 @@ export const EditorCard = memo(
               <PaneControls
                 paneId={paneId}
                 title={fileName}
+                // Distinct from the tree's per-row control, which names the
+                // file — a session with both open would otherwise carry two
+                // buttons reading exactly alike.
+                popOutLabel="this file"
+                onPopOut={handlePopOut}
                 onClose={handleClose}
                 className="shrink-0"
               />

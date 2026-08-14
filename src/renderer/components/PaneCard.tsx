@@ -1,5 +1,5 @@
 import { forwardRef, type ReactNode } from 'react'
-import { CornerDownLeft, Maximize2, Minimize2, Minus, X } from 'lucide-react'
+import { CornerDownLeft, Maximize2, Minimize2, Minus, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { Tooltip } from './Tooltip'
@@ -26,7 +26,7 @@ export interface PaneCardProps {
 }
 
 /**
- * Maximize / close for one pane.
+ * Pop out / maximize / close for one pane.
  *
  * Split out of the header so a headerless pane can seat the same controls in a
  * bar of its own making, rather than growing a second one.
@@ -34,17 +34,26 @@ export interface PaneCardProps {
  * There is deliberately no minimize here. A minimized pane had nowhere to go —
  * the dock only surfaces grid cells, and a pane inside a card is not one — so
  * the button silently discarded the pane. A card popped out of a session *is* a
- * grid cell, and carries its own controls in `PromotedCardChrome`.
+ * grid cell, and carries its own controls in `PromotedCardControls`.
  */
 export function PaneControls({
   paneId,
   title,
   onClose,
+  onPopOut,
+  popOutLabel,
   className = ''
 }: {
   paneId: string
   title: string
   onClose: () => void
+  /**
+   * Give this pane's current subject — the open file, the active tab — a card
+   * of its own. Absent on a pane with no single subject to pop out.
+   */
+  onPopOut?: () => void
+  /** What the pop-out would take out, for the label. Defaults to `title`. */
+  popOutLabel?: string
   className?: string
 }): ReactNode {
   const { isMaximized, setMaximizedPane } = useAppStore(
@@ -58,6 +67,17 @@ export function PaneControls({
   // panel reads as having no controls at all.
   return (
     <div className={`flex items-center gap-0.5 ${className}`}>
+      {onPopOut && (
+        <Tooltip label="Open as its own card">
+          <button
+            onClick={onPopOut}
+            className={ICON_BUTTON}
+            aria-label={`Open ${popOutLabel ?? title} as its own card`}
+          >
+            <SquareArrowOutUpRight size={ICON_BUTTON_SIZE} />
+          </button>
+        </Tooltip>
+      )}
       <Tooltip label={isMaximized ? 'Restore' : 'Maximize'}>
         <button
           onClick={() => setMaximizedPane(isMaximized ? null : paneId)}

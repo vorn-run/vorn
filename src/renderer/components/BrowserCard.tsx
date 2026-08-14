@@ -365,7 +365,7 @@ export const BrowserCard = memo(
                       aria-label={`Open tab ${displayHost(tabUrl)} as its own card`}
                       title="Open as its own card"
                       className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
-                                 opacity-0 group-hover/tab:opacity-100 focus:opacity-100 transition-opacity"
+                                 hover:bg-white/[0.08] transition-colors"
                     >
                       <SquareArrowOutUpRight size={10} strokeWidth={2.5} />
                     </button>
@@ -410,6 +410,11 @@ export const BrowserCard = memo(
             <PaneControls
               paneId={paneId}
               title={displayHost(url)}
+              // "this page", not the host: the tab strip already offers a
+              // control naming each tab, and two buttons reading identically is
+              // a coin flip for anyone not looking at where they sit.
+              popOutLabel="this page"
+              onPopOut={() => promoteBrowserTab(key, pane.activeTab)}
               onClose={() => closeBrowserPane(key)}
               className="shrink-0"
             />

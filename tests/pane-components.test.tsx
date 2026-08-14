@@ -214,6 +214,43 @@ describe('PaneCard chrome', () => {
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
   })
 
+  it('offers pop-out on every file row without waiting for a hover', async () => {
+    // Hover-revealed, these read as absent: you look at the tree, see no way to
+    // pop a file out, and conclude the feature is missing. The pane's own
+    // controls have never been hover-revealed for exactly this reason.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    render(<FilesCard sessionId="t1" />)
+    await screen.findByText('a.ts')
+
+    const popOut = screen.getByRole('button', { name: /Open a\.ts as its own card/ })
+    expect(popOut.className).not.toContain('opacity-0')
+
+    fireEvent.click(popOut)
+    const cards = [...useAppStore.getState().editorPanes].filter(([id]) => id !== 't1')
+    expect(cards).toHaveLength(1)
+    expect(cards[0][1]).toEqual({ filePath: '/repo/a.ts', sessionId: 't1' })
+  })
+
+  it('pops a file out without disturbing what the session editor holds', async () => {
+    act(() => useAppStore.getState().openEditorPane('t1', '/repo/b.ts'))
+    render(<FilesCard sessionId="t1" />)
+    await screen.findByText('a.ts')
+
+    fireEvent.click(screen.getByRole('button', { name: /Open a\.ts as its own card/ }))
+    // Popping out is additive; only selecting a file displaces the editor.
+    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/b.ts')
+  })
+
+  it('gives a directory row no pop-out', async () => {
+    // A folder is not a thing a card can show, and an inert control on every
+    // folder row is noise down the whole tree.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    render(<FilesCard sessionId="t1" />)
+    await screen.findByText('src')
+
+    expect(screen.queryByRole('button', { name: /Open src as its own card/ })).toBeNull()
+  })
+
   it('keeps the tree pane controls out of its filter row', async () => {
     // Sharing the row made the search field the panel's title bar: it spanned
     // the full width and the buttons read as part of the input.
@@ -405,6 +442,39 @@ describe('BrowserCard', () => {
     expect(screen.getAllByText('localhost:5173')).toHaveLength(1)
     expect(screen.getByRole('tab')).toHaveTextContent('localhost:5173')
     expect(screen.getByLabelText('Address')).toHaveValue('http://localhost:5173/')
+  })
+
+  it('offers pop-out on the tab and in the pane controls, both visible', async () => {
+    act(() => {
+      useAppStore.getState().openBrowserPane('t1', 'localhost:5173')
+      useAppStore.getState().addBrowserTab('t1', 'vorn.dev')
+    })
+    render(<BrowserCard sessionId="t1" />)
+
+    // Per tab, so a page you are not looking at can be popped out without
+    // switching to it first; and in the control cluster beside maximize and
+    // close, which is where a control of this kind is looked for.
+    const perTab = screen.getByRole('button', { name: /Open tab localhost:5173 as its own card/ })
+    expect(perTab.className).not.toContain('opacity-0')
+    expect(screen.getByRole('button', { name: /Open tab vorn\.dev as its own card/ })).toBeTruthy()
+    // The cluster control names its subject differently, so the two are never
+    // the same control read twice.
+    expect(screen.getByRole('button', { name: /Open this page as its own card/ })).toBeTruthy()
+
+    fireEvent.click(perTab)
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['https://vorn.dev/'])
+  })
+
+  it('pops the tab being looked at from the control cluster', () => {
+    act(() => {
+      useAppStore.getState().openBrowserPane('t1', 'localhost:5173')
+      useAppStore.getState().addBrowserTab('t1', 'vorn.dev')
+    })
+    render(<BrowserCard sessionId="t1" />)
+
+    // addBrowserTab activates what it adds, so the cluster acts on vorn.dev.
+    fireEvent.click(screen.getByRole('button', { name: /Open this page as its own card/ }))
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['http://localhost:5173/'])
   })
 
   it("sends what the user picked to the session's agent", async () => {
