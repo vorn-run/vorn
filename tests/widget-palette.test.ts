@@ -15,6 +15,17 @@ describe('the widget reads the same palette as the app', () => {
     // Tailwind entry, no second declaration to drift.
     expect(widget).toMatch(/@import\s+['"]\.\/theme\.css['"]/)
     expect(widget).not.toContain('--color-bronzo:')
+
+    // And it has to be the first statement. PostCSS silently discards an
+    // @import that any rule precedes — it warns rather than errors, so the
+    // build stays green while every token resolves to nothing. Comments are
+    // allowed ahead of it; nothing else is.
+    const firstStatement = widget
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .map((l) => l.trim())
+      .find(Boolean)
+    expect(firstStatement).toMatch(/^@import/)
   })
 
   it('marks the one state that is blocked on the person with the accent', () => {
@@ -42,8 +53,11 @@ describe('the widget reads the same palette as the app', () => {
     // Four hardcoded status hues, an indigo used for focus and selection, and a
     // second spelling of the accent all lived here. A hue the app does not have
     // a name for is the thing worth catching.
-    const strays = ['#4ade80', '#facc15', '#ef4444', '#6b7280', '#c9972a', '99, 102, 241'].filter(
-      (hex) => widget.toLowerCase().includes(hex.toLowerCase())
+    // Matched loosely on purpose: reformatting `99, 102, 241` to `99,102,241`
+    // would otherwise let the same colour back in unnoticed.
+    const sheet = widget.toLowerCase().replace(/\s+/g, '')
+    const strays = ['#4ade80', '#facc15', '#ef4444', '#6b7280', '#c9972a', '99,102,241'].filter(
+      (hex) => sheet.includes(hex)
     )
     expect(strays).toEqual([])
   })
