@@ -159,14 +159,14 @@ export function StatusPicker({
                     disabled={isItemDisabled}
                     className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors ${
                       isItemDisabled
-                        ? 'text-gray-600 cursor-not-allowed'
-                        : 'text-gray-300 hover:bg-white/[0.06] cursor-pointer'
+                        ? 'text-ink-faint cursor-not-allowed'
+                        : 'text-ink-secondary hover:bg-white/[0.06] cursor-pointer'
                     }`}
                     title={isItemDisabled ? 'Move to Todo first, then start the task' : undefined}
                   >
                     <Icon size={14} className={TASK_STATUS_TEXT[status]} />
                     <span className="flex-1 text-left">{TASK_STATUS_LABEL[status]}</span>
-                    {isCurrent && <Check size={13} className="text-gray-400" />}
+                    {isCurrent && <Check size={13} className="text-ink-secondary" />}
                   </button>
                 )
               })}

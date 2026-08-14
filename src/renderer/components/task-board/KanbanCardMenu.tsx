@@ -195,7 +195,7 @@ export function KanbanCardMenu({
       <button
         ref={triggerRef}
         onClick={handleTrigger}
-        className="p-1 text-gray-600 hover:text-gray-300 rounded transition-colors opacity-0 group-hover:opacity-100"
+        className="p-1 text-ink-faint hover:text-ink-secondary rounded transition-colors opacity-0 group-hover:opacity-100"
         title="More actions"
       >
         <MoreHorizontal size={14} strokeWidth={2} />
@@ -220,11 +220,11 @@ export function KanbanCardMenu({
             >
               {confirmingDelete ? (
                 <div className="px-3 py-2">
-                  <p className="text-xs text-gray-300 mb-2.5">Delete this task permanently?</p>
+                  <p className="text-xs text-ink-secondary mb-2.5">Delete this task permanently?</p>
                   <div className="flex justify-end gap-2">
                     <button
                       onClick={() => setConfirmingDelete(false)}
-                      className="px-2 py-1 text-[11px] text-gray-400 hover:text-gray-200 bg-white/[0.04] hover:bg-white/[0.08] rounded-md transition-colors"
+                      className="px-2 py-1 text-[11px] text-ink-secondary hover:text-ink bg-white/[0.04] hover:bg-white/[0.08] rounded-md transition-colors"
                     >
                       Cancel
                     </button>
@@ -245,9 +245,9 @@ export function KanbanCardMenu({
                         e.stopPropagation()
                         item.onClick()
                       }}
-                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-gray-300 hover:bg-white/[0.06] transition-colors"
+                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-ink-secondary hover:bg-white/[0.06] transition-colors"
                     >
-                      <item.icon size={14} className={item.className ?? 'text-gray-500'} />
+                      <item.icon size={14} className={item.className ?? 'text-ink-faint'} />
                       <span>{item.label}</span>
                     </button>
                   </div>

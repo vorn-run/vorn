@@ -63,13 +63,13 @@ export function TaskListView({
               onClick={() => toggleSection(section.title)}
             >
               {isCollapsed ? (
-                <ChevronRight size={14} className="text-gray-400 shrink-0" />
+                <ChevronRight size={14} className="text-ink-secondary shrink-0" />
               ) : (
-                <ChevronDown size={14} className="text-gray-400 shrink-0" />
+                <ChevronDown size={14} className="text-ink-secondary shrink-0" />
               )}
               <SectionIcon size={14} className={`${iconColor} shrink-0`} />
-              <span className="text-[13px] font-medium text-gray-300">{section.title}</span>
-              <span className="text-[11px] text-gray-500">{section.tasks.length}</span>
+              <span className="text-[13px] font-medium text-ink-secondary">{section.title}</span>
+              <span className="text-[11px] text-ink-faint">{section.tasks.length}</span>
               <div className="flex-1" />
               <button
                 type="button"
@@ -77,7 +77,7 @@ export function TaskListView({
                   e.stopPropagation()
                   onAddTask?.(section.status)
                 }}
-                className="p-1 text-gray-500 hover:text-gray-300 rounded transition-colors"
+                className="p-1 text-ink-faint hover:text-ink-secondary rounded transition-colors"
                 aria-label={`Add task to ${section.title}`}
                 title="Add task"
               >
@@ -97,7 +97,7 @@ export function TaskListView({
                 >
                   <div className="py-1">
                     {section.tasks.length === 0 ? (
-                      <p className="text-xs text-gray-600 py-2 pl-10">{section.emptyText}</p>
+                      <p className="text-xs text-ink-faint py-2 pl-10">{section.emptyText}</p>
                     ) : (
                       section.tasks.map((task) => (
                         <TaskCard

@@ -71,10 +71,10 @@ export function TaskCard({
           {/* Top row: short ID + source badge + menu */}
           <div className="flex items-center justify-between mb-1.5">
             <span className="flex items-center gap-1.5">
-              <span className="text-[10px] text-gray-500 font-medium">{shortId}</span>
+              <span className="text-[10px] text-ink-faint font-medium">{shortId}</span>
               {task.sourceConnectorId && task.sourceExternalId && (
                 <>
-                  <span className="text-[10px] text-gray-600">·</span>
+                  <span className="text-[10px] text-ink-faint">·</span>
                   <SourceBadge
                     connectorId={task.sourceConnectorId}
                     url={task.sourceExternalUrl}
@@ -86,7 +86,7 @@ export function TaskCard({
                 <Archive
                   size={10}
                   strokeWidth={2}
-                  className="text-gray-500"
+                  className="text-ink-faint"
                   aria-label="Archived"
                 />
               )}
@@ -117,7 +117,7 @@ export function TaskCard({
             <StatusIcon size={14} className={`${iconColor} mt-0.5 shrink-0`} />
             <span
               className={`text-[13px] font-medium leading-snug line-clamp-2
-                           ${task.status === 'cancelled' ? 'text-gray-500 line-through' : 'text-gray-200'}`}
+                           ${task.status === 'cancelled' ? 'text-ink-faint line-through' : 'text-ink'}`}
             >
               {task.title}
             </span>
@@ -135,7 +135,7 @@ export function TaskCard({
                 </span>
               )}
             </div>
-            <span className="text-[11px] text-gray-600">
+            <span className="text-[11px] text-ink-faint">
               Created {formatTaskDate(task.createdAt)}
             </span>
           </div>
@@ -155,12 +155,12 @@ export function TaskCard({
         {task.assignedAgent ? (
           <AgentIcon agentType={task.assignedAgent} size={14} />
         ) : (
-          <span className="text-[10px] text-gray-600">---</span>
+          <span className="text-[10px] text-ink-faint">---</span>
         )}
       </div>
 
       {/* Task short ID + source badge */}
-      <span className="flex items-center gap-1.5 text-[11px] text-gray-500 font-medium shrink-0">
+      <span className="flex items-center gap-1.5 text-[11px] text-ink-faint font-medium shrink-0">
         {shortId}
         {task.sourceConnectorId && task.sourceExternalId && (
           <SourceBadge
@@ -170,7 +170,7 @@ export function TaskCard({
           />
         )}
         {isArchived && (
-          <Archive size={10} strokeWidth={2} className="text-gray-500" aria-label="Archived" />
+          <Archive size={10} strokeWidth={2} className="text-ink-faint" aria-label="Archived" />
         )}
       </span>
 
@@ -180,14 +180,14 @@ export function TaskCard({
       {/* Title */}
       <span
         className={`text-sm truncate flex-1 min-w-0 ${
-          task.status === 'cancelled' ? 'text-gray-500 line-through' : 'text-gray-200'
+          task.status === 'cancelled' ? 'text-ink-faint line-through' : 'text-ink'
         }`}
       >
         {task.title}
       </span>
 
       {/* Right side: date */}
-      <span className="text-[11px] text-gray-500 shrink-0">{formatTaskDate(task.createdAt)}</span>
+      <span className="text-[11px] text-ink-faint shrink-0">{formatTaskDate(task.createdAt)}</span>
 
       {/* Hover actions */}
       <div
@@ -197,7 +197,7 @@ export function TaskCard({
         {task.status === 'in_review' && onReviewDiff && (
           <button
             onClick={onReviewDiff}
-            className="p-1 text-gray-600 hover:text-gray-200 rounded-sm transition-colors"
+            className="p-1 text-ink-faint hover:text-ink rounded-sm transition-colors"
             title="Review diff"
           >
             <FileCode size={12} strokeWidth={2} />
@@ -206,7 +206,7 @@ export function TaskCard({
         {task.status === 'in_review' && onComplete && (
           <button
             onClick={onComplete}
-            className="p-1 text-gray-600 hover:text-gray-200 rounded-sm transition-colors"
+            className="p-1 text-ink-faint hover:text-ink rounded-sm transition-colors"
             title="Mark as done"
           >
             <CheckCircle2 size={12} strokeWidth={2} />
@@ -215,7 +215,7 @@ export function TaskCard({
         {task.status === 'cancelled' && onReopen && (
           <button
             onClick={onReopen}
-            className="p-1 text-gray-600 hover:text-gray-200 rounded-sm transition-colors"
+            className="p-1 text-ink-faint hover:text-ink rounded-sm transition-colors"
             title="Reopen task"
           >
             <RotateCcw size={12} strokeWidth={2} />
@@ -224,7 +224,7 @@ export function TaskCard({
         {onOpenSession && (
           <button
             onClick={onOpenSession}
-            className="p-1 text-gray-600 hover:text-gray-200 rounded-sm transition-colors"
+            className="p-1 text-ink-faint hover:text-ink rounded-sm transition-colors"
             title={sessionIsLive ? 'Focus session' : 'Resume session'}
           >
             {sessionIsLive ? (
@@ -236,7 +236,7 @@ export function TaskCard({
         )}
         <button
           onClick={onEdit}
-          className="p-1 text-gray-600 hover:text-gray-200 rounded-sm transition-colors"
+          className="p-1 text-ink-faint hover:text-ink rounded-sm transition-colors"
           title="Edit task"
         >
           <Pencil size={12} strokeWidth={2} />
@@ -244,7 +244,7 @@ export function TaskCard({
         {task.status !== 'cancelled' && task.status !== 'done' && onCancel && (
           <button
             onClick={onCancel}
-            className="p-1 text-gray-600 hover:text-gray-200 rounded-sm transition-colors"
+            className="p-1 text-ink-faint hover:text-ink rounded-sm transition-colors"
             title="Cancel task"
           >
             <XCircle size={12} strokeWidth={2} />
@@ -253,7 +253,7 @@ export function TaskCard({
         {!isArchived && isTerminalTaskStatus(task.status) && onArchive && (
           <button
             onClick={onArchive}
-            className="p-1 text-gray-600 hover:text-gray-200 rounded-sm transition-colors"
+            className="p-1 text-ink-faint hover:text-ink rounded-sm transition-colors"
             title="Archive task"
           >
             <Archive size={12} strokeWidth={2} />
@@ -262,7 +262,7 @@ export function TaskCard({
         {isArchived && onUnarchive && (
           <button
             onClick={onUnarchive}
-            className="p-1 text-gray-600 hover:text-gray-200 rounded-sm transition-colors"
+            className="p-1 text-ink-faint hover:text-ink rounded-sm transition-colors"
             title="Unarchive task"
           >
             <ArchiveRestore size={12} strokeWidth={2} />
@@ -274,7 +274,7 @@ export function TaskCard({
           onConfirm={onDelete}
         >
           <button
-            className="p-1 text-gray-600 hover:text-gray-200 rounded-sm transition-colors"
+            className="p-1 text-ink-faint hover:text-ink rounded-sm transition-colors"
             title="Delete task"
           >
             <Trash2 size={12} strokeWidth={2} />

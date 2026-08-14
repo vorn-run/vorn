@@ -112,12 +112,12 @@ export function TaskKanbanBoard({
             {/* Column header */}
             <div className="px-3 py-3 flex items-center gap-2 shrink-0">
               <ColIcon size={14} className={iconColor} />
-              <span className="text-[13px] font-medium text-gray-300">{col.title}</span>
-              <span className="text-[11px] text-gray-500 ml-0.5">{tasks.length}</span>
+              <span className="text-[13px] font-medium text-ink-secondary">{col.title}</span>
+              <span className="text-[11px] text-ink-faint ml-0.5">{tasks.length}</span>
               <div className="flex-1" />
               <button
                 onClick={() => onAddTask?.(col.status)}
-                className="p-1 text-gray-600 hover:text-gray-300 rounded transition-colors opacity-0 group-hover/col:opacity-100"
+                className="p-1 text-ink-faint hover:text-ink-secondary rounded transition-colors opacity-0 group-hover/col:opacity-100"
                 title="Add task"
               >
                 <Plus size={14} />
@@ -129,7 +129,7 @@ export function TaskKanbanBoard({
               {tasks.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center min-h-[80px]">
                   <div className="border border-dashed border-white/[0.08] rounded-lg px-4 py-5 text-center w-full">
-                    <p className="text-xs text-gray-600">Drop tasks here</p>
+                    <p className="text-xs text-ink-faint">Drop tasks here</p>
                   </div>
                 </div>
               ) : (
@@ -166,7 +166,7 @@ export function TaskKanbanBoard({
             <div className="px-2 pb-2">
               <button
                 onClick={() => onAddTask?.(col.status)}
-                className="w-full py-2 text-xs text-gray-600 hover:text-gray-300
+                className="w-full py-2 text-xs text-ink-faint hover:text-ink-secondary
                            hover:bg-white/[0.04] rounded-lg transition-colors
                            flex items-center justify-center gap-1"
               >

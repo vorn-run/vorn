@@ -177,11 +177,11 @@ export function TaskBoardView() {
       >
         {totalTasks === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <ListTodo size={40} strokeWidth={1} className="text-gray-700 mb-3" />
-            <p className="text-sm text-gray-500 mb-1">
+            <ListTodo size={40} strokeWidth={1} className="text-ink-faint mb-3" />
+            <p className="text-sm text-ink-faint mb-1">
               {taskStatusFilter !== 'all' ? 'No matching tasks' : 'No tasks yet'}
             </p>
-            <p className="text-xs text-gray-600">
+            <p className="text-xs text-ink-faint">
               {taskStatusFilter !== 'all'
                 ? 'Try changing the status filter'
                 : activeProject
