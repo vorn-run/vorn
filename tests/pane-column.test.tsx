@@ -33,6 +33,8 @@ vi.mock('../src/renderer/components/BrowserCard', () => ({
 
 const { useAppStore } = await import('../src/renderer/stores')
 const { PaneColumn } = await import('../src/renderer/components/PaneColumn')
+const { usePaneColumnEntries } = await import('../src/renderer/hooks/usePaneColumnEntries')
+const { renderHook } = await import('@testing-library/react')
 
 const session = (id: string) =>
   ({
@@ -145,6 +147,36 @@ describe('PaneColumn', () => {
       expect(screen.getByTestId('files-t1')).toBeInTheDocument()
       unmount()
     }
+  })
+
+  it('sizes itself rather than trusting the frame to do it', () => {
+    // Every row below is `flex-basis: 0`, so this element has no content height.
+    // Inside a `flex-col` frame that collapses it to nothing — which is exactly
+    // what the tab strip's frame is, and why tab mode showed a band of dead air
+    // where its panes should have been. The card's frame is a row, where the
+    // cross axis stretches and the bug stays hidden.
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    const { container } = render(<PaneColumn sessionId="t1" />)
+
+    expect((container.firstElementChild as HTMLElement).className).toContain('h-full')
+  })
+
+  it('answers the frames with the same list it draws', () => {
+    // The frames around the column decide whether to leave room for it. Deciding
+    // that separately is how a column ends up occupying space while drawing
+    // nothing, so they ask this and it is the same list the render walks.
+    const { result, rerender } = renderHook(() => usePaneColumnEntries('t1'))
+    expect(result.current).toEqual([])
+
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    rerender()
+    expect(result.current.map((e) => e.id)).toEqual(['files:t1'])
+
+    // Stable across an unrelated update, or every memo downstream re-runs.
+    const before = result.current
+    act(() => useAppStore.setState({ selectedTerminalId: 'x' } as never))
+    rerender()
+    expect(result.current).toBe(before)
   })
 
   it('leaves a session with only a card no column at all', () => {

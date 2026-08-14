@@ -2,13 +2,13 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
-import { selectPaneFlags } from '../stores/ui-slice'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
 import { isTerminalPane, isPromotedCardId } from '../lib/pane-id'
 import { usePromotedCards, usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PromotedPaneCard } from './PromotedPaneCard'
 import { FileTypeIcon } from './file-icons'
 import { PaneColumn } from './PaneColumn'
+import { usePaneColumnEntries } from '../hooks/usePaneColumnEntries'
 import { AgentStatusIcon } from './AgentStatusIcon'
 import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
@@ -299,10 +299,11 @@ export function TabView() {
 
   const hasTabs = allTabIds.length > 0
   const activeTerminal = activeTabId ? terminals.get(activeTabId) : null
-  // One shared selector rather than a kind-per-line list: the device pane
-  // reached the store and never rendered because this gate was one of the sites
-  // that was never widened for it, and nothing anywhere reported the omission.
-  const activeHasPanes = useAppStore((s) => selectPaneFlags(s, activeTabId).any)
+  // The column's own answer, not a second reading of the same flags. A gate
+  // that could disagree with the column left a 380px sidebar of dead air with
+  // nothing on screen to say what was holding it open — and it had already been
+  // wrong once before, for the device pane, in silence.
+  const activeHasPanes = usePaneColumnEntries(activeTabId).length > 0
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
