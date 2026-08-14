@@ -24,13 +24,13 @@
  */
 export const SURFACE = {
   /** App field, the window ground, and the document before the app mounts. */
-  base: '#0a0a0c',
+  base: '#0d0d0f',
   /** Card body and the terminal canvas inside it. */
-  sunken: '#0f0f11',
+  sunken: '#141416',
   /** Panes, card header, status bar: beside the work. */
-  panel: '#0d0d0f',
+  panel: '#101012',
   /** Menus, popovers, floating chrome. */
-  overlay: '#19191d'
+  overlay: '#1c1c20'
 } as const
 
 /** The terminal canvas sits on the same rung as the card holding it. */
