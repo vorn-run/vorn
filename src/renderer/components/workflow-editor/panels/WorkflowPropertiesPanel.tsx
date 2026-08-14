@@ -54,7 +54,7 @@ export function WorkflowPropertiesPanel({
   onClose
 }: Props) {
   return (
-    <div className="w-[340px] border-l border-white/[0.08] bg-surface-overlay flex flex-col h-full overflow-hidden titlebar-no-drag">
+    <div className="w-[340px] border-l border-white/[0.08] bg-surface-node flex flex-col h-full overflow-hidden titlebar-no-drag">
       <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08]">
         <span className="text-[13px] font-medium text-white">Properties</span>
         <button

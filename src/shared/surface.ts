@@ -27,7 +27,7 @@ export const SURFACE = {
   base: '#0d0d0f',
   /** Card body and the terminal canvas inside it. */
   sunken: '#141416',
-  /** Panes, card header, status bar: beside the work. */
+  /** Panes and the sidebar: chrome beside the work. */
   panel: '#101012',
   /** Menus, popovers, floating chrome. */
   overlay: '#1c1c20'

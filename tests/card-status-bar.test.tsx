@@ -709,4 +709,12 @@ describe('TabView merged toolbar controls', () => {
     fireEvent.click(moreBtn)
     expect(moreBtn).toBeInTheDocument()
   })
+
+  it('sits on the same ground as the rest of the card', () => {
+    // Same rule as the header: one card, one ground, divided by a hairline.
+    const { container } = render(<CardStatusBar terminalId="term-1" />)
+    const bar = container.firstElementChild as HTMLElement
+    expect(bar.style.background).toBe('var(--color-surface-raised)')
+    expect(bar.className).toContain('border-t')
+  })
 })

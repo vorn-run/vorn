@@ -151,6 +151,16 @@ describe('CardHeader', () => {
     expect(setRenamingTerminalId).not.toHaveBeenCalled()
   })
 
+  it('sits on the same ground as the rest of the card', () => {
+    // A card is one object. The header used to take the pane rung while the
+    // body took the card rung, so it read as a separate band stuck to the top
+    // rather than part of the card — the hairline is what divides them.
+    const { container } = render(<CardHeader terminalId="term-1" variant="mini" />)
+    const header = container.firstElementChild as HTMLElement
+    expect(header.style.background).toBe('var(--color-surface-raised)')
+    expect(header.className).toContain('border-b')
+  })
+
   it('focused variant shows the action cluster without needing hover', () => {
     render(<CardHeader terminalId="term-1" variant="focused" />)
     expect(screen.getByRole('button', { name: /Collapse/ })).toBeInTheDocument()

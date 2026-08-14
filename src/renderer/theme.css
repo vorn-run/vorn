@@ -48,7 +48,7 @@
      read as a different band or the card loses its top edge. */
   --color-surface-base: #0d0d0f; /* app background, behind the cards */
   --color-surface-sunken: #141416; /* card body and terminal: the main column */
-  --color-surface-panel: #101012; /* panes, card header, status bar: beside the work */
+  --color-surface-panel: #101012; /* panes and the sidebar: chrome beside the work */
   --color-surface-overlay: #1c1c20; /* menus, popovers, floating chrome */
   /* Aliases, not values. A card frame matching the terminal it holds is what
      keeps a lighter band from showing around the panes, so the equality is the
