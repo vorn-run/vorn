@@ -130,6 +130,19 @@ export function paneOwnerId(paneId: string): string {
   return parsePaneId(paneId).sessionId
 }
 
+/**
+ * True for ids that are cells of the grid in their own right, and so can own a
+ * saved rect: sessions, and cards popped out of one.
+ *
+ * A session's child panes are drawn inside its card and are not cells — an
+ * older build gave them their own, and their rects are pruned on read. Cards
+ * are, and pruning theirs is why one never held a position in the flexible
+ * layout: it was dropped on load, so every card fell back to the origin.
+ */
+export function isLayoutCellId(paneId: string): boolean {
+  return isTerminalPane(paneId) || isPromotedCardId(paneId)
+}
+
 /** True when the pane is a session's terminal rather than one of its children. */
 export function isTerminalPane(paneId: string): boolean {
   return paneKind(paneId) === 'terminal'

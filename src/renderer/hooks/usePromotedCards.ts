@@ -2,14 +2,15 @@ import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { displayHost } from '../lib/browser-url'
-import { isPromotedPane, type AppStore } from '../stores/types'
+import { isPromotedCardId } from '../lib/pane-id'
+import { activeBrowserUrl, isPromotedPane, type AppStore } from '../stores/types'
 
 /**
- * What a promoted card is showing, and whose it is.
+ * What a card is and what it is showing.
  *
  * There is no list of promoted cards to keep in step with anything: a card *is*
- * a pane entry whose key is not its owner's id. Reading it back out of the two
- * pane collections means the card cannot outlive the pane it draws, and closing
+ * a pane entry whose key is not its owner's id. Reading them back out of the two
+ * pane collections means a card cannot outlive the pane it draws, and closing
  * the pane is what closes the card.
  */
 export interface PromotedCard {
@@ -17,105 +18,119 @@ export interface PromotedCard {
   id: string
   kind: 'editor' | 'browser'
   sessionId: string
-  /** Absolute file path, or the page's url. What the card is showing. */
+  /** Absolute file path, or the page's url. */
   subject: string
+  /** What to call it: the filename, or the page's host. */
+  name: string
 }
 
-function collect(state: Pick<AppStore, 'editorPanes' | 'browserPanes'>): PromotedCard[] {
+type PaneMaps = Pick<AppStore, 'editorPanes' | 'browserPanes'>
+
+/** Stable empty results, so "no cards" does not invalidate every memo downstream. */
+const NO_CARDS: PromotedCard[] = []
+const NO_OWNERS = new Map<string, string[]>()
+
+function fileName(path: string): string {
+  return path.split(/[/\\]/).pop() ?? path
+}
+
+function collect(state: PaneMaps, owner?: string): PromotedCard[] {
   const cards: PromotedCard[] = []
   for (const [id, pane] of state.editorPanes) {
-    if (isPromotedPane(id, pane)) {
-      cards.push({ id, kind: 'editor', sessionId: pane.sessionId, subject: pane.filePath })
-    }
+    if (!isPromotedPane(id, pane)) continue
+    if (owner !== undefined && pane.sessionId !== owner) continue
+    cards.push({
+      id,
+      kind: 'editor',
+      sessionId: pane.sessionId,
+      subject: pane.filePath,
+      name: fileName(pane.filePath)
+    })
   }
   for (const [id, pane] of state.browserPanes) {
-    if (isPromotedPane(id, pane)) {
-      const url = pane.tabs[pane.activeTab] ?? pane.tabs[0] ?? ''
-      cards.push({ id, kind: 'browser', sessionId: pane.sessionId, subject: url })
-    }
+    if (!isPromotedPane(id, pane)) continue
+    if (owner !== undefined && pane.sessionId !== owner) continue
+    const url = activeBrowserUrl(pane) ?? ''
+    cards.push({
+      id,
+      kind: 'browser',
+      sessionId: pane.sessionId,
+      subject: url,
+      name: displayHost(url)
+    })
   }
-  return cards
+  return cards.length === 0 ? NO_CARDS : cards
 }
 
-/** Every promoted card, in no particular order. */
-export function usePromotedCards(): PromotedCard[] {
-  const { editorPanes, browserPanes } = useAppStore(
+function usePaneMaps(): PaneMaps {
+  return useAppStore(
     useShallow((s) => ({ editorPanes: s.editorPanes, browserPanes: s.browserPanes }))
   )
+}
+
+/** Every promoted card. */
+export function usePromotedCards(): PromotedCard[] {
+  const { editorPanes, browserPanes } = usePaneMaps()
   return useMemo(() => collect({ editorPanes, browserPanes }), [editorPanes, browserPanes])
 }
 
-/** The cards `sessionId` popped out, in the order they were popped. */
+/** The cards `sessionId` popped out. */
 export function usePromotedCardsFor(sessionId: string): PromotedCard[] {
-  const all = usePromotedCards()
-  return useMemo(() => all.filter((c) => c.sessionId === sessionId), [all, sessionId])
-}
-
-/**
- * This pane's owner if it is a promoted card, otherwise null.
- *
- * Doubles as the "is this a card" test, because the two questions are always
- * asked together — a card draws differently *and* has to say whose it is.
- */
-export function usePromotedOwner(paneId: string): string | null {
-  return useAppStore((s) => {
-    const editor = s.editorPanes.get(paneId)
-    if (editor && isPromotedPane(paneId, editor)) return editor.sessionId
-    const browser = s.browserPanes.get(paneId)
-    if (browser && isPromotedPane(paneId, browser)) return browser.sessionId
-    return null
-  })
-}
-
-/** Ids of every promoted card, for the store-free paths that only need ids. */
-export function promotedCardIds(state: Pick<AppStore, 'editorPanes' | 'browserPanes'>): string[] {
-  return collect(state).map((c) => c.id)
-}
-
-/** What one card is showing, named the way a person would name it. */
-export interface PromotedCardSubject {
-  kind: 'editor' | 'browser'
-  /** Filename, or the page's host. */
-  name: string
-  sessionId: string
-}
-
-/**
- * What a card is showing — for the tab, the dock pill and the focus stage.
- *
- * All three ask the same question, so all three ask it here. That is worth a
- * hook on its own because the obvious way to write it is a trap: a selector
- * that builds `{ kind, name }` inline returns a new object on every call, and
- * zustand compares snapshots by reference — so the component re-renders, the
- * selector runs again, and React aborts with "maximum update depth exceeded"
- * the moment such a component mounts. This selects flat values and memoizes the
- * object once, which is what makes the reference stable.
- */
-export function usePromotedCardSubject(cardId: string): PromotedCardSubject | null {
-  const { kind, name, sessionId } = useAppStore(
-    useShallow((s) => {
-      const editor = s.editorPanes.get(cardId)
-      if (editor && isPromotedPane(cardId, editor)) {
-        return {
-          kind: 'editor' as const,
-          name: editor.filePath.split(/[/\\]/).pop() ?? '',
-          sessionId: editor.sessionId
-        }
-      }
-      const browser = s.browserPanes.get(cardId)
-      if (browser && isPromotedPane(cardId, browser)) {
-        return {
-          kind: 'browser' as const,
-          name: displayHost(browser.tabs[browser.activeTab] ?? browser.tabs[0] ?? ''),
-          sessionId: browser.sessionId
-        }
-      }
-      return { kind: null, name: '', sessionId: null }
-    })
-  )
-
+  const { editorPanes, browserPanes } = usePaneMaps()
   return useMemo(
-    () => (kind && sessionId ? { kind, name, sessionId } : null),
-    [kind, name, sessionId]
+    () => collect({ editorPanes, browserPanes }, sessionId),
+    [editorPanes, browserPanes, sessionId]
   )
+}
+
+/**
+ * Card ids grouped by the session they came from.
+ *
+ * The one place that answers "which cards sit beside which session" — the
+ * ordering contract the grid and the tab strip are both built on. Written twice,
+ * they would drift the moment either grew a sort or a filter, and the two strips
+ * would disagree about where a card belongs.
+ *
+ * Grouped on `pane.sessionId`, the authoritative owner, rather than by parsing
+ * it back out of the card's id.
+ */
+export function promotedCardsByOwner(state: PaneMaps): Map<string, string[]> {
+  const cards = collect(state)
+  if (cards.length === 0) return NO_OWNERS
+  const byOwner = new Map<string, string[]>()
+  for (const card of cards) {
+    const owned = byOwner.get(card.sessionId)
+    if (owned) owned.push(card.id)
+    else byOwner.set(card.sessionId, [card.id])
+  }
+  return byOwner
+}
+
+export function usePromotedCardsByOwner(): Map<string, string[]> {
+  const { editorPanes, browserPanes } = usePaneMaps()
+  return useMemo(
+    () => promotedCardsByOwner({ editorPanes, browserPanes }),
+    [editorPanes, browserPanes]
+  )
+}
+
+/**
+ * What one card is showing — for its tab, its dock pill and the focus stage.
+ *
+ * All three ask the same question, so all three ask it here, and the answer is
+ * derived from the same `collect` everything else uses rather than a second
+ * hand-rolled walk of the two maps.
+ *
+ * Note what is *not* here: no work in the selector body. Zustand runs selectors
+ * on every state change, not every render, so a `new URL()` or a path split in
+ * one runs on every terminal output tick for every mounted card. The derivation
+ * happens once per pane change, inside `collect`'s memo.
+ */
+export function usePromotedCardSubject(cardId: string): PromotedCard | null {
+  const cards = usePromotedCards()
+  // No memo needed: `cards` is itself memoized, so `find` hands back the very
+  // object it holds, and that reference is stable for as long as the list is.
+  // A session id can never name a card, so the scan is skipped outright for the
+  // far more common case of a plain terminal pill or tab.
+  return isPromotedCardId(cardId) ? (cards.find((c) => c.id === cardId) ?? null) : null
 }

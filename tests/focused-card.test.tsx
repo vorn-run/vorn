@@ -180,7 +180,7 @@ describe('usePromotedCardSubject', () => {
     })
     const { result, rerender } = renderHook(() => usePromotedCardSubject(cardId))
     const first = result.current
-    expect(first).toEqual({ kind: 'editor', name: 'server.ts', sessionId: 't1' })
+    expect(first).toMatchObject({ kind: 'editor', name: 'server.ts', sessionId: 't1' })
 
     // A selector that built this object inline would hand back a new reference
     // here, zustand would read it as a changed snapshot, and the component

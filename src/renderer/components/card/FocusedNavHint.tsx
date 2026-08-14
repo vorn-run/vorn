@@ -33,24 +33,24 @@ export function FocusedNavHint({ terminalId }: Props) {
         <span className="text-gray-700"> / </span>
         {total}
       </span>
-      <Tooltip label="Previous session" shortcut={`${MOD}[`} position="bottom">
+      <Tooltip label="Previous" shortcut={`${MOD}[`} position="bottom">
         <button
           type="button"
           onClick={() => setFocusedTerminal(prevId)}
           onPointerDown={(e) => e.stopPropagation()}
           className={ICON_BUTTON}
-          aria-label="Previous session"
+          aria-label="Previous cell"
         >
           <ChevronLeft size={14} strokeWidth={2} />
         </button>
       </Tooltip>
-      <Tooltip label="Next session" shortcut={`${MOD}]`} position="bottom">
+      <Tooltip label="Next" shortcut={`${MOD}]`} position="bottom">
         <button
           type="button"
           onClick={() => setFocusedTerminal(nextId)}
           onPointerDown={(e) => e.stopPropagation()}
           className={ICON_BUTTON}
-          aria-label="Next session"
+          aria-label="Next cell"
         >
           <ChevronRight size={14} strokeWidth={2} />
         </button>

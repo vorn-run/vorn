@@ -2,8 +2,7 @@ import { useMemo, useEffect } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
-import { paneOwnerId } from '../lib/pane-id'
-import { promotedCardIds } from './usePromotedCards'
+import { promotedCardsByOwner } from './usePromotedCards'
 
 /**
  * Stable comparator for terminal ids under the active sortMode. Manual mode
@@ -109,13 +108,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     // all. A popped-out card is: it is a cell like a session, placed directly
     // after the session it came from so the two stay together as the grid
     // reflows, rather than drifting a row apart.
-    const cardsByOwner = new Map<string, string[]>()
-    for (const cardId of promotedCardIds({ editorPanes, browserPanes })) {
-      const owner = paneOwnerId(cardId)
-      const cards = cardsByOwner.get(owner)
-      if (cards) cards.push(cardId)
-      else cardsByOwner.set(owner, [cardId])
-    }
+    const cardsByOwner = promotedCardsByOwner({ editorPanes, browserPanes })
 
     const ordered: string[] = []
     const minimized: string[] = []

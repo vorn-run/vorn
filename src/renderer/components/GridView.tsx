@@ -345,15 +345,11 @@ const GridCell = forwardRef<
       />
     )
   }
-  return (
-    <PromotedPaneCard
-      ref={ref}
-      cardId={id}
-      isDragTarget={isDragTarget}
-      onDragStart={onDragStart}
-      flexible={flexible}
-    />
-  )
+  // No `onDragStart`. A card has no position of its own in the ordered grid —
+  // it is drawn beside the session it came from — so a drag could only ever be
+  // a no-op that showed no ghost and moved nothing. In the flexible layout,
+  // where cells do carry their own rect, `react-grid-layout` provides the drag.
+  return <PromotedPaneCard ref={ref} cardId={id} isDragTarget={isDragTarget} flexible={flexible} />
 })
 
 /* ── Flexible Grid (Grafana-style free positioning) ──────────── */
@@ -387,6 +383,16 @@ function FlexibleGrid({
     useShallow((s) => {
       const keys: Record<string, string> = {}
       for (const id of orderedIds) {
+        // A card is not in `terminals`, so without this it had no key — which
+        // meant the auto-placement branch never ran and every card landed at
+        // the origin on top of the others, and `persistLayout` skipped it, so
+        // dragging one snapped back on every pointerup. Its own id is the key:
+        // unlike a session's, it is already stable for as long as the card
+        // exists.
+        if (isPromotedCardId(id)) {
+          keys[id] = id
+          continue
+        }
         const t = s.terminals.get(id)
         if (!t) continue
         keys[id] = getStableKey(t.session) || id

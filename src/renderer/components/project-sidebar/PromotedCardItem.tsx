@@ -3,7 +3,6 @@ import { useAppStore } from '../../stores'
 import { useShallow } from 'zustand/react/shallow'
 import { Tooltip } from '../Tooltip'
 import { FileTypeIcon } from '../file-icons'
-import { displayHost } from '../../lib/browser-url'
 import type { PromotedCard } from '../../hooks/usePromotedCards'
 
 /**
@@ -26,7 +25,13 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
     closeCard
   } = useAppStore(
     useShallow((s) => ({
-      isSelected: s.selectedTerminalId === card.id,
+      // The same reading a session row uses. Off `selectedTerminalId` alone, a
+      // card row stayed dark in tab mode while the session rows beside it lit
+      // up — two kinds of row in one list answering different questions.
+      isSelected:
+        (s.config?.defaults?.layoutMode ?? 'grid') === 'tabs'
+          ? s.activeTabId === card.id
+          : s.focusedTerminalId === card.id || s.selectedTerminalId === card.id,
       layoutMode: s.config?.defaults?.layoutMode ?? 'grid',
       setSelected: s.setSelectedTerminal,
       setFocusedTerminal: s.setFocusedTerminal,
@@ -56,8 +61,7 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
     }
   }
 
-  const fileName = card.subject.split(/[/\\]/).pop() ?? ''
-  const name = card.kind === 'browser' ? displayHost(card.subject) : fileName
+  const { name } = card
 
   return (
     <div
@@ -90,7 +94,7 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
         {card.kind === 'browser' ? (
           <Globe size={14} strokeWidth={1.5} className="text-ink-faint" />
         ) : (
-          <FileTypeIcon name={fileName} size={14} />
+          <FileTypeIcon name={name} size={14} />
         )}
       </span>
       <span className="truncate flex-1">{name}</span>

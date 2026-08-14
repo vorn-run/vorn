@@ -39,7 +39,7 @@ describe('FocusedNavHint', () => {
     const setFocusedTerminal = vi.fn()
     useAppStore.setState({ setFocusedTerminal })
     render(<FocusedNavHint terminalId="a" />)
-    fireEvent.click(screen.getByLabelText('Next session'))
+    fireEvent.click(screen.getByLabelText('Next cell'))
     expect(setFocusedTerminal).toHaveBeenCalledWith('b')
   })
 
@@ -47,7 +47,7 @@ describe('FocusedNavHint', () => {
     const setFocusedTerminal = vi.fn()
     useAppStore.setState({ setFocusedTerminal })
     render(<FocusedNavHint terminalId="c" />)
-    fireEvent.click(screen.getByLabelText('Next session'))
+    fireEvent.click(screen.getByLabelText('Next cell'))
     expect(setFocusedTerminal).toHaveBeenCalledWith('a')
   })
 
@@ -55,7 +55,7 @@ describe('FocusedNavHint', () => {
     const setFocusedTerminal = vi.fn()
     useAppStore.setState({ setFocusedTerminal })
     render(<FocusedNavHint terminalId="c" />)
-    fireEvent.click(screen.getByLabelText('Previous session'))
+    fireEvent.click(screen.getByLabelText('Previous cell'))
     expect(setFocusedTerminal).toHaveBeenCalledWith('b')
   })
 
@@ -63,7 +63,7 @@ describe('FocusedNavHint', () => {
     const setFocusedTerminal = vi.fn()
     useAppStore.setState({ setFocusedTerminal })
     render(<FocusedNavHint terminalId="a" />)
-    fireEvent.click(screen.getByLabelText('Previous session'))
+    fireEvent.click(screen.getByLabelText('Previous cell'))
     expect(setFocusedTerminal).toHaveBeenCalledWith('c')
   })
 
@@ -74,8 +74,8 @@ describe('FocusedNavHint', () => {
         <FocusedNavHint terminalId="b" />
       </div>
     )
-    fireEvent.pointerDown(screen.getByLabelText('Next session'))
-    fireEvent.pointerDown(screen.getByLabelText('Previous session'))
+    fireEvent.pointerDown(screen.getByLabelText('Next cell'))
+    fireEvent.pointerDown(screen.getByLabelText('Previous cell'))
     expect(parentPointerDown).not.toHaveBeenCalled()
   })
 })

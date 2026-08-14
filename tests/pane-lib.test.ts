@@ -8,6 +8,7 @@ import {
   paneIdFor,
   promotedCardId,
   isPromotedCardId,
+  isLayoutCellId,
   parsePaneId,
   paneKind,
   paneOwnerId,
@@ -88,6 +89,19 @@ describe('pane-id', () => {
     const cardId = promotedCardId(weird, 7)
     expect(parsePaneId(cardId)).toEqual({ kind: 'card', sessionId: weird })
     expect(paneOwnerId(cardId)).toBe(weird)
+  })
+
+  it('counts sessions and cards as grid cells, and child panes as not', () => {
+    // Saved rects are pruned on read by exactly this rule. A card *is* a cell
+    // and keys its rect by its own id, so ruling it out meant every card sat at
+    // the grid origin and snapped back there on every drag; a session's child
+    // panes are drawn inside its card and must stay pruned.
+    expect(isLayoutCellId('abc')).toBe(true)
+    expect(isLayoutCellId(promotedCardId('abc', 2))).toBe(true)
+    expect(isLayoutCellId('files:abc')).toBe(false)
+    expect(isLayoutCellId('editor:abc')).toBe(false)
+    expect(isLayoutCellId('browser:abc')).toBe(false)
+    expect(isLayoutCellId('device:abc')).toBe(false)
   })
 
   it('keeps a card out of the session-only paths', () => {

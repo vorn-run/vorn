@@ -7,6 +7,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { FileTypeIcon } from './file-icons'
 import { usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PaneOwnerLabel } from './PaneCard'
+import { FocusedNavHint } from './card/FocusedNavHint'
 import { PromotedPaneCard } from './PromotedPaneCard'
 import { Tooltip } from './Tooltip'
 import { ICON_BUTTON, ICON_BUTTON_SIZE } from '../lib/icon-button'
@@ -84,6 +85,12 @@ export function FocusedCard({ cardId }: { cardId: string }) {
           <PaneOwnerLabel sessionId={subject.sessionId} />
         </span>
         <span className="flex-1" />
+        {/* Cards are in the focus ring, so the counter has to be here too —
+            without it the "3 / 7" simply vanished while a card was on the stage
+            and reappeared on the next session, so the total looked wrong. */}
+        <span className="titlebar-no-drag flex items-center shrink-0">
+          <FocusedNavHint terminalId={cardId} />
+        </span>
         <Tooltip label="Back to the grid">
           <button
             type="button"

@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
 import { isTerminalPane, isPromotedCardId } from '../lib/pane-id'
-import { usePromotedCards, usePromotedCardSubject } from '../hooks/usePromotedCards'
+import { usePromotedCardsByOwner, usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PromotedPaneCard } from './PromotedPaneCard'
 import { FileTypeIcon } from './file-icons'
 import { PaneColumn } from './PaneColumn'
@@ -125,16 +125,13 @@ export function TabView() {
   // Tab mode treats minimize as a no-op — every session shows as a tab. The
   // minimizedTerminals set is preserved so switching back to grid restores
   // the dock pills.
-  const promotedCards = usePromotedCards()
-  const cardsByOwner = useMemo(() => {
-    const byOwner = new Map<string, string[]>()
-    for (const card of promotedCards) {
-      const cards = byOwner.get(card.sessionId)
-      if (cards) cards.push(card.id)
-      else byOwner.set(card.sessionId, [card.id])
-    }
-    return byOwner
-  }, [promotedCards])
+  const cardsByOwner = usePromotedCardsByOwner()
+
+  // What Cmd+1-9 actually indexes. The strip's own order is not it: a minimized
+  // session or card still shows a tab here (minimize is a no-op in this layout)
+  // while dropping out of the shortcut's list, so a badge numbered by tab
+  // position named a shortcut that jumped somewhere else.
+  const shortcutIds = useAppStore((s) => s.visibleTerminalIds)
 
   const allTabIds = useMemo(() => {
     // A session's panes ride along with it rather than claiming tabs — they get
@@ -331,7 +328,11 @@ export function TabView() {
                 <CardTab
                   key={id}
                   cardId={id}
-                  index={index}
+                  shortcutIndex={shortcutIds.indexOf(id)}
+                  registerRef={(el) => {
+                    if (el) tabRefs.current.set(id, el)
+                    else tabRefs.current.delete(id)
+                  }}
                   isActive={id === activeTabId}
                   onSelect={() => handleSelectTab(id)}
                   onClose={() => void handleCloseTab(id)}
@@ -341,6 +342,7 @@ export function TabView() {
             const terminal = terminals.get(id)
             if (!terminal) return null
             const isActive = id === activeTabId
+            const shortcutIndex = shortcutIds.indexOf(id)
             const isRenaming = renamingTerminalId === id
             const isDragTarget = dragState?.isDragging === true && dropTargetIndex === index
             const isDragging = dragState?.isDragging === true && dragState.draggingId === id
@@ -431,7 +433,7 @@ export function TabView() {
                 )}
 
                 <span className="absolute right-2 top-0 bottom-0 flex items-center gap-1 group-hover:bg-surface-overlay group-hover:rounded-l-sm">
-                  {index < 9 && !isRenaming && (
+                  {shortcutIndex !== -1 && shortcutIndex < 9 && !isRenaming && (
                     <span
                       className="absolute right-0 top-1/2 -translate-y-1/2
                                    opacity-100 group-hover:opacity-0 transition-opacity
@@ -440,7 +442,7 @@ export function TabView() {
                                    pointer-events-none"
                     >
                       {MOD}
-                      {index + 1}
+                      {shortcutIndex + 1}
                     </span>
                   )}
                   {!isRenaming && (
@@ -681,14 +683,22 @@ export function TabView() {
  */
 function CardTab({
   cardId,
-  index,
+  shortcutIndex,
   isActive,
+  registerRef,
   onSelect,
   onClose
 }: {
   cardId: string
-  index: number
+  /** Position in the Cmd+1-9 list, or -1 when no shortcut reaches this tab. */
+  shortcutIndex: number
   isActive: boolean
+  /**
+   * Card tabs carry no drag handle — a card has no position of its own — but
+   * they must still measure, or the drop indicator jumps over their slot while
+   * a session tab is dragged across them.
+   */
+  registerRef: (el: HTMLDivElement | null) => void
   onSelect: () => void
   onClose: () => void
 }) {
@@ -701,6 +711,7 @@ function CardTab({
       role="tab"
       tabIndex={0}
       aria-selected={isActive}
+      ref={registerRef}
       data-testid={`tab-${cardId}`}
       onClick={onSelect}
       onKeyDown={(e) => {
@@ -726,7 +737,7 @@ function CardTab({
       </span>
 
       <span className="absolute right-2 top-0 bottom-0 flex items-center gap-1 group-hover:bg-surface-overlay group-hover:rounded-l-sm">
-        {index < 9 && (
+        {shortcutIndex !== -1 && shortcutIndex < 9 && (
           <span
             className="absolute right-0 top-1/2 -translate-y-1/2
                        opacity-100 group-hover:opacity-0 transition-opacity
@@ -735,7 +746,7 @@ function CardTab({
                        pointer-events-none"
           >
             {MOD}
-            {index + 1}
+            {shortcutIndex + 1}
           </span>
         )}
         {/* No confirm step, unlike a session: closing a card discards a view of

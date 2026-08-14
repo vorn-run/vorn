@@ -17,8 +17,8 @@ import {
   editorPaneId,
   browserPaneId,
   devicePaneId,
+  isLayoutCellId,
   isPromotedCardId,
-  isTerminalPane,
   paneOwnerId,
   promotedCardId
 } from '../lib/pane-id'
@@ -73,13 +73,17 @@ function saveGridSettings(patch: Record<string, unknown>): void {
  * under a `files:` / `editor:` / `browser:` prefixed key. Panes now live inside
  * their owner's card, leaving those keys unreachable — dropping them on read
  * keeps the store from carrying dead weight forward forever.
+ *
+ * A popped-out card *is* a cell, though, and keys its rect by its own id — so
+ * those are kept. Pruning them was why a card's position never survived a
+ * re-render in the flexible layout.
  */
 function loadFlexibleLayouts(): Record<string, FlexibleLayoutRect> {
   try {
     const raw = localStorage.getItem(FLEXIBLE_STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw) as Record<string, FlexibleLayoutRect>
-    const live = Object.fromEntries(Object.entries(parsed).filter(([key]) => isTerminalPane(key)))
+    const live = Object.fromEntries(Object.entries(parsed).filter(([key]) => isLayoutCellId(key)))
     if (Object.keys(live).length !== Object.keys(parsed).length) saveFlexibleLayouts(live)
     return live
   } catch {

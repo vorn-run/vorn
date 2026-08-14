@@ -34,13 +34,15 @@ const fileCard: PromotedCard = {
   id: 'card:t1:0',
   kind: 'editor',
   sessionId: 't1',
-  subject: '/repo/src/server.ts'
+  subject: '/repo/src/server.ts',
+  name: 'server.ts'
 }
 const pageCard: PromotedCard = {
   id: 'card:t1:1',
   kind: 'browser',
   sessionId: 't1',
-  subject: 'https://vorn.dev/docs'
+  subject: 'https://vorn.dev/docs',
+  name: 'vorn.dev'
 }
 
 /**

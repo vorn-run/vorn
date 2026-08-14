@@ -5,7 +5,7 @@ import { useAppStore } from '../stores'
 import { Tooltip } from './Tooltip'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON, ICON_BUTTON_SIZE } from '../lib/icon-button'
-import { usePromotedOwner } from '../hooks/usePromotedCards'
+import { isPromotedCardId } from '../lib/pane-id'
 import { BranchChip } from './card/BranchChip'
 
 export interface PaneCardProps {
@@ -113,8 +113,10 @@ export const PaneCard = forwardRef<HTMLDivElement, PaneCardProps>(function PaneC
   { paneId, title, onClose, children, isDragTarget, onDragStart, flexible, headerless },
   ref
 ) {
-  const owner = usePromotedOwner(paneId)
-  const isPromoted = owner !== null
+  // From the id, not from the store. A card id can only ever name a card, so
+  // subscribing two Maps to learn it cost every pane in the grid a subscription
+  // for a two-character prefix test.
+  const isPromoted = isPromotedCardId(paneId)
   const { isMaximized, isSelected, setMaximizedPane, setSelected } = useAppStore(
     useShallow((s) => ({
       isMaximized: s.maximizedPaneId === paneId,
