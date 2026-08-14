@@ -1,3 +1,11 @@
+/* The widget is its own window with its own stylesheet, so it never saw the
+   palette the rest of the app reads. That is how it ended up the one surface
+   where a waiting agent is yellow rather than the accent — the same state the
+   dock, the runs list and the task board all mark with bronzo. Importing the
+   theme is enough: @theme emits the tokens as plain custom properties, no
+   Tailwind entry required. */
+@import './theme.css';
+
 * {
   margin: 0;
   padding: 0;
@@ -23,7 +31,7 @@ body {
 }
 
 .widget-container {
-  background: rgba(26, 26, 30, 0.96);
+  background: color-mix(in srgb, var(--color-surface-overlay) 96%, transparent);
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
@@ -94,10 +102,10 @@ body {
 @keyframes glow-ring {
   0%,
   100% {
-    box-shadow: 0 0 0 0 var(--glow-color, rgba(74, 222, 128, 0.4));
+    box-shadow: 0 0 0 0 var(--glow-color, rgba(255, 255, 255, 0.4));
   }
   50% {
-    box-shadow: 0 0 8px 3px var(--glow-color, rgba(74, 222, 128, 0.3));
+    box-shadow: 0 0 8px 3px var(--glow-color, rgba(255, 255, 255, 0.3));
   }
 }
 
@@ -106,7 +114,9 @@ body {
   border-radius: 50%;
 }
 
-/* Status dot */
+/* Status dot. The four states read exactly as they do everywhere else: only
+   waiting is blocked on the person and takes the accent, running is the
+   commonest state so it stays ink, and idle recedes. */
 .status-dot {
   width: 7px;
   height: 7px;
@@ -115,16 +125,16 @@ body {
 }
 
 .status-running {
-  background: #4ade80;
+  background: var(--color-ink);
 }
 .status-waiting {
-  background: #facc15;
+  background: var(--color-bronzo);
 }
 .status-idle {
-  background: #6b7280;
+  background: var(--color-ink-ghost);
 }
 .status-error {
-  background: #ef4444;
+  background: var(--color-danger);
 }
 
 /* App button (V_ / Vorn label) */
@@ -134,7 +144,7 @@ body {
   border: none;
   font-size: 11px;
   font-weight: 600;
-  color: #c9972a;
+  color: var(--color-bronzo);
   cursor: pointer;
   padding: 0;
   border-radius: 3px;
@@ -251,8 +261,8 @@ body {
 }
 
 .permission-focused {
-  border-color: rgba(99, 102, 241, 0.45);
-  background: rgba(99, 102, 241, 0.06);
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .permission-header {
@@ -340,9 +350,9 @@ body {
 }
 
 .permission-allow:hover {
-  background: rgba(74, 222, 128, 0.18);
-  border-color: rgba(74, 222, 128, 0.35);
-  color: #4ade80;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: var(--color-ink);
 }
 
 .permission-deny {
@@ -352,9 +362,9 @@ body {
 }
 
 .permission-deny:hover {
-  background: rgba(239, 68, 68, 0.14);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
+  color: var(--color-danger);
 }
 
 .permission-suggestions {
@@ -382,8 +392,8 @@ body {
 }
 
 .permission-suggestion-btn:hover {
-  background: rgba(99, 102, 241, 0.12);
-  border-color: rgba(99, 102, 241, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
   color: rgba(255, 255, 255, 0.7);
 }
 
@@ -436,7 +446,7 @@ body {
 }
 
 .ask-option-selected {
-  background: rgba(99, 102, 241, 0.15) !important;
-  border-color: rgba(99, 102, 241, 0.45) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
   color: rgba(255, 255, 255, 0.9) !important;
 }
