@@ -36,10 +36,19 @@ const simctlList = {
 const SIMCTL_LIST_DEFAULT = simctlList.value
 /** Detached `simctl shutdown` calls made on quit. */
 const detachedSpawns: string[][] = []
+/** `error` listeners attached to those detached children. */
+const spawnErrorHandlers: ((e: unknown) => void)[] = []
 vi.mock('node:child_process', () => ({
   spawn: (cmd: string, args: string[]) => {
     detachedSpawns.push([cmd, ...args])
-    return { unref: () => {} }
+    const child = {
+      on: (event: string, cb: (e: unknown) => void) => {
+        if (event === 'error') spawnErrorHandlers.push(cb)
+        return child
+      },
+      unref: () => {}
+    }
+    return child
   },
   execFile: (cmd: string, args: string[], cb: (e: unknown, out: unknown) => void) => {
     execCalls.push([cmd, ...args])
@@ -127,6 +136,7 @@ beforeEach(() => {
   stopped.length = 0
   spawned.length = 0
   detachedSpawns.length = 0
+  spawnErrorHandlers.length = 0
   slowShutdown.on = false
   execCompletions.length = 0
 })
@@ -629,6 +639,17 @@ describe('quitting with a device claimed', () => {
     await claim({ sessionId: 's1', udid: 'udid-1' })
     shutdownOwnedDevices()
     expect(detachedSpawns).toEqual([['xcrun', 'simctl', 'shutdown', 'udid-1']])
+  })
+
+  it('survives a shutdown that cannot even start', async () => {
+    // spawn reports a missing binary through an async `error` event rather than
+    // by throwing, and an `error` event with no listener is an uncaught
+    // exception. Best-effort cleanup on the way out must not take the process
+    // down with it.
+    await claim({ sessionId: 's1', udid: 'udid-1' })
+    shutdownOwnedDevices()
+    expect(spawnErrorHandlers).toHaveLength(1)
+    expect(() => spawnErrorHandlers[0](new Error('spawn xcrun ENOENT'))).not.toThrow()
   })
 
   it('leaves a simulator the person booted running', async () => {

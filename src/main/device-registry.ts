@@ -634,10 +634,18 @@ export function shutdownOwnedDevices(): void {
   for (const entry of entries.values()) {
     if (!entry.bootedByVorn) continue
     try {
-      spawn('xcrun', ['simctl', 'shutdown', entry.udid], {
+      const child = spawn('xcrun', ['simctl', 'shutdown', entry.udid], {
         detached: true,
         stdio: 'ignore'
-      }).unref()
+      })
+      // spawn reports a missing binary through an async `error` event, not by
+      // throwing — and an `error` event with no listener is an uncaught
+      // exception. Best-effort cleanup on the way out has no business taking
+      // the process down with it, so the failure is logged and dropped.
+      child.on('error', (err) => {
+        log.warn(`[device] could not shut down ${entry.udid.slice(0, 8)} on quit: ${String(err)}`)
+      })
+      child.unref()
     } catch (err) {
       log.warn(`[device] could not shut down ${entry.udid.slice(0, 8)} on quit: ${String(err)}`)
     }
