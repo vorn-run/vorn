@@ -318,6 +318,10 @@ function reconcilePanes(
  *   stage is chosen by "is anything focused", and the app drops its titlebar
  *   while something is — so an id pointing at a pane that no longer exists
  *   renders an empty window with no chrome and no way back except Escape.
+ * - `selectedTerminalId` reaches the same place by a longer road: Cmd+O focuses
+ *   the selection. A view does sweep a stale one, but only while a view that
+ *   derives the visible list is mounted — which is not true on the focus stage,
+ *   so the store cannot rely on being tidied up after.
  *
  * Every field is only written when it actually changes, so a close that touches
  * nothing returns nothing.
@@ -325,7 +329,11 @@ function reconcilePanes(
 function clearPlacement(
   state: Pick<
     AppStore,
-    'maximizedPaneId' | 'minimizedTerminals' | 'focusedTerminalId' | 'previewTerminalId'
+    | 'maximizedPaneId'
+    | 'minimizedTerminals'
+    | 'focusedTerminalId'
+    | 'previewTerminalId'
+    | 'selectedTerminalId'
   >,
   paneId: string
 ): Partial<AppStore> {
@@ -333,6 +341,7 @@ function clearPlacement(
   if (state.maximizedPaneId === paneId) cleared.maximizedPaneId = null
   if (state.focusedTerminalId === paneId) cleared.focusedTerminalId = null
   if (state.previewTerminalId === paneId) cleared.previewTerminalId = null
+  if (state.selectedTerminalId === paneId) cleared.selectedTerminalId = null
   if (state.minimizedTerminals.has(paneId)) {
     const minimized = new Set(state.minimizedTerminals)
     minimized.delete(paneId)

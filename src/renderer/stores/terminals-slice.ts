@@ -88,6 +88,9 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       // with no chrome — Escape is the only way out.
       const focusOwned = dying.has(state.focusedTerminalId ?? '')
       const previewOwned = dying.has(state.previewTerminalId ?? '')
+      // Selection reaches the same empty stage by a longer road — Cmd+O focuses
+      // whatever is selected.
+      const selectionOwned = dying.has(state.selectedTerminalId ?? '')
       return {
         terminals: next,
         terminalOrder: order,
@@ -102,6 +105,7 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         ...(maxOwned ? { maximizedPaneId: null } : {}),
         ...(focusOwned ? { focusedTerminalId: null } : {}),
         ...(previewOwned ? { previewTerminalId: null } : {}),
+        ...(selectionOwned ? { selectedTerminalId: null } : {}),
         ...extra
       }
     }),

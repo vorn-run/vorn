@@ -665,6 +665,32 @@ describe('popping an item out to its own card', () => {
     expect(s().minimizedTerminals.has(file)).toBe(false)
   })
 
+  it('drops a selection pointing at a card that has been closed', () => {
+    // Cmd+O focuses whatever is selected, so a dead id here reaches the same
+    // empty stage a dead focus id does. A view does sweep a stale selection,
+    // but only while a view deriving the visible list is mounted — which is not
+    // true on the focus stage, so the store cannot rely on being tidied up.
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/a.ts')
+    })
+    act(() => s().setSelectedTerminal(cardId))
+
+    act(() => s().closeCard(cardId))
+    expect(s().selectedTerminalId).toBeNull()
+  })
+
+  it("drops a selection pointing at a closed session's card", () => {
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/a.ts')
+    })
+    act(() => s().setSelectedTerminal(cardId))
+
+    act(() => s().removeTerminal('t1'))
+    expect(s().selectedTerminalId).toBeNull()
+  })
+
   it("releases focus, preview and maximize when a card's session is closed", async () => {
     const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
     let cardId = ''
