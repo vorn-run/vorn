@@ -1,7 +1,7 @@
 import { Repeat } from 'lucide-react'
 import type { LoopConfig, NodeExecutionStatus, WorkflowNode } from '../../../../shared/types'
-import { WORKFLOW_STATUS_DOT_PULSE } from '../../../lib/workflow-status'
-import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from '../node-visuals'
+import { NODE_GLYPH } from '../node-visuals'
+import { NodeShell, NodeFooter } from './NodeShell'
 
 interface Props {
   label: string
@@ -38,49 +38,38 @@ export function LoopNode({
       : `Repeats ${body.length} step${body.length === 1 ? '' : 's'} · up to ${max}×`
 
   return (
-    <div
-      onClick={(e) => {
-        e.stopPropagation()
-        onClick()
-      }}
-      className={`relative px-3 py-2.5 rounded-md border w-[280px] transition-all cursor-pointer
-                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
-                  ${body.length === 0 ? 'border-dashed' : ''}
-                  bg-surface-node hover:bg-white/[0.02]`}
-    >
-      {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (
-        <span
-          className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[executionStatus]}`}
-        />
-      )}
-      <div className="flex items-center gap-2">
-        <Repeat size={14} className={`shrink-0 ${NODE_GLYPH}`} strokeWidth={2} />
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-white truncate">{label}</div>
-          <div className="text-[11px] text-gray-500 truncate">{subtitle}</div>
-        </div>
-        {iteration !== undefined && iteration > 0 && (
+    <NodeShell
+      icon={<Repeat size={14} className={`shrink-0 ${NODE_GLYPH}`} strokeWidth={2} />}
+      label={label}
+      subtitle={subtitle}
+      selected={selected}
+      executionStatus={executionStatus}
+      onClick={onClick}
+      dashed={body.length === 0}
+      trailing={
+        iteration !== undefined &&
+        iteration > 0 && (
           <span className="shrink-0 text-[10px] text-gray-400 bg-white/[0.06] rounded px-1.5 py-0.5">
             {iteration}×
           </span>
-        )}
-      </div>
-
+        )
+      }
+    >
       {body.length > 0 && (
-        <div className="mt-2 border-t border-white/[0.06] pt-2 space-y-0.5">
+        <NodeFooter rows>
           {body.map((n, i) => (
             <div key={n.id} className="text-[11px] text-gray-500 truncate">
               <span className="text-gray-600 tabular-nums">{i + 1}.</span> {n.label}
             </div>
           ))}
-        </div>
+        </NodeFooter>
       )}
 
       {config.until?.variable && (
-        <div className="mt-2 text-[11px] text-gray-600 truncate border-t border-white/[0.06] pt-2">
+        <NodeFooter>
           until {config.until.variable} {config.until.operator} {config.until.value}
-        </div>
+        </NodeFooter>
       )}
-    </div>
+    </NodeShell>
   )
 }
