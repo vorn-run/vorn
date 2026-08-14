@@ -123,6 +123,11 @@ describe('useVisibleTerminals with popped-out cards', () => {
     // typing in the address bar. Depending on them directly re-ran the whole
     // layout memo, re-sorting every session twice and triggering a reconcile
     // pass that copies six collections, for a list that had not changed.
+    // With a card present — the case this file is about. Zero cards is the easy
+    // half, and the grouping returns a shared constant there.
+    act(() => {
+      useAppStore.getState().promoteFile('t2', '/p/held.ts')
+    })
     const { result, rerender } = renderHook(() => useVisibleTerminals())
     const before = result.current.orderedIds
 

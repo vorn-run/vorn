@@ -86,18 +86,6 @@ export function usePromotedCardsFor(sessionId: string): PromotedCard[] {
   }, [all, sessionId])
 }
 
-function groupByOwner(state: PaneMaps): Map<string, string[]> {
-  const cards = collect(state)
-  if (cards.length === 0) return NO_OWNERS
-  const byOwner = new Map<string, string[]>()
-  for (const card of cards) {
-    const owned = byOwner.get(card.sessionId)
-    if (owned) owned.push(card.id)
-    else byOwner.set(card.sessionId, [card.id])
-  }
-  return byOwner
-}
-
 /**
  * Card ids grouped by the session they came from.
  *
@@ -105,10 +93,34 @@ function groupByOwner(state: PaneMaps): Map<string, string[]> {
  * ordering contract the grid and the tab strip are both built on. Written twice,
  * they drifted the moment either grew a filter. Grouped on `pane.sessionId`, the
  * authoritative owner, rather than by parsing it back out of the card's id.
+ *
+ * Keyed on which cards exist and whose they are, deliberately — not on the pane
+ * Maps those come from. Those Maps are replaced on *every* pane write: switching
+ * a browser tab, a keystroke in the address bar. Memoizing on them meant this
+ * Map changed identity on each one, which re-ran the grid's layout memo — two
+ * full sorts of every session — for an arrangement that had not moved. What a
+ * card *shows* changes often; where it sits almost never.
  */
 export function usePromotedCardsByOwner(): Map<string, string[]> {
   const { editorPanes, browserPanes } = usePaneMaps()
-  return useMemo(() => groupByOwner({ editorPanes, browserPanes }), [editorPanes, browserPanes])
+  const cards = useMemo(() => collect({ editorPanes, browserPanes }), [editorPanes, browserPanes])
+  // Ids and owners only, flattened to a string. Neither can contain a NUL or a
+  // SOH, so no two distinct groupings collapse to one signature — and the Map is
+  // rebuilt from the signature rather than from `cards`, so this memo depends on
+  // nothing else and needs no lint exception to say so.
+  const signature = cards.map((c) => `${c.id}\u0000${c.sessionId}`).join('\u0001')
+
+  return useMemo(() => {
+    if (!signature) return NO_OWNERS
+    const byOwner = new Map<string, string[]>()
+    for (const entry of signature.split('\u0001')) {
+      const [id, sessionId] = entry.split('\u0000')
+      const owned = byOwner.get(sessionId)
+      if (owned) owned.push(id)
+      else byOwner.set(sessionId, [id])
+    }
+    return byOwner
+  }, [signature])
 }
 
 /**

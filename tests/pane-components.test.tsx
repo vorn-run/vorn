@@ -238,6 +238,10 @@ describe('PaneCard chrome', () => {
     // control drawn at rest on each of them buries the filenames. The always-
     // there control lives on the editor pane, for the file you have open.
     const popOut = screen.getByRole('button', { name: /Open a\.ts as its own card/ })
+    // Both halves of the rule. Asserting only the reveal leaves `opacity-0`
+    // free to be dropped, which draws the arrow permanently on every one of
+    // hundreds of rows — the exact noise the hover exists to prevent.
+    expect(popOut.className).toContain('opacity-0')
     expect(popOut.className).toContain('group-hover:opacity-100')
 
     fireEvent.click(popOut)

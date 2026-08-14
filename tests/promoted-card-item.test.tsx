@@ -10,12 +10,16 @@ const setActiveTabId = vi.fn()
 const returnCard = vi.fn()
 const closeCard = vi.fn()
 let selectedTerminalId: string | null = null
+let focusedTerminalId: string | null = null
+let activeTabId: string | null = null
 let layoutMode = 'grid'
 
 vi.mock('../src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = {
       selectedTerminalId,
+      focusedTerminalId,
+      activeTabId,
       config: { defaults: { layoutMode } },
       setSelectedTerminal: setSelected,
       setFocusedTerminal,
@@ -53,8 +57,34 @@ const pageCard: PromotedCard = {
 describe('PromotedCardItem', () => {
   beforeEach(() => {
     selectedTerminalId = null
+    focusedTerminalId = null
+    activeTabId = null
     layoutMode = 'grid'
     vi.clearAllMocks()
+  })
+
+  it('lights up from the same state a session row reads, in each layout', () => {
+    // Off `selectedTerminalId` alone a card row stayed dark in tab mode while
+    // the session rows beside it lit up — two kinds of row in one list
+    // answering different questions. The marker span is the whole tell.
+    const marker = (c: HTMLElement): Element | null => c.querySelector('span.bg-white')
+
+    focusedTerminalId = 'card:t1:0'
+    const grid = render(<PromotedCardItem card={fileCard} />)
+    expect(marker(grid.container)).not.toBeNull()
+    grid.unmount()
+
+    focusedTerminalId = null
+    layoutMode = 'tabs'
+    activeTabId = 'card:t1:0'
+    const tabs = render(<PromotedCardItem card={fileCard} />)
+    expect(marker(tabs.container)).not.toBeNull()
+    tabs.unmount()
+
+    // And stays dark when neither names it.
+    activeTabId = 'something-else'
+    const other = render(<PromotedCardItem card={fileCard} />)
+    expect(marker(other.container)).toBeNull()
   })
 
   it("shares the session row's metrics rather than approximating them", () => {

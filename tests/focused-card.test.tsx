@@ -22,6 +22,13 @@ vi.mock('../src/renderer/components/PromotedPaneCard', () => ({
 vi.mock('../src/renderer/components/FocusedTerminal', () => ({
   FocusedTerminal: () => <div data-testid="focused-terminal" />
 }))
+// jsdom reports no platform, so `isMac` is false and the header renders with
+// no drag region at all — which made the opt-out assertion below vacuously
+// true. Force the branch that actually has the hazard.
+vi.mock('../src/renderer/lib/platform', async (orig) => ({
+  ...(await orig<typeof import('../src/renderer/lib/platform')>()),
+  isMac: true
+}))
 
 const { useAppStore } = await import('../src/renderer/stores')
 const { FocusedStage } = await import('../src/renderer/components/FocusedStage')
@@ -35,7 +42,12 @@ const session = (id: string) =>
     projectPath: '/repo',
     agentType: 'claude',
     createdAt: 0,
-    displayName: id
+    displayName: id,
+    // With a branch, so the owner label renders its switcher — an interactive
+    // control inside the drag region, and the one most likely to go quietly
+    // dead. Without it the label draws no button and the sweep below has
+    // nothing to catch.
+    branch: 'main'
   }) as never
 
 beforeEach(() => {
@@ -148,11 +160,13 @@ describe('FocusedStage', () => {
     expect(useAppStore.getState().focusedTerminalId).toBeNull()
   })
 
-  it('keeps interactive header controls out of the drag region', () => {
+  it('keeps every interactive header control out of the drag region', () => {
     // macOS `-webkit-app-region: drag` swallows clicks on everything inside it,
     // so a control in this header without the opt-out is visibly present and
-    // completely dead. jsdom has no app-region, so the class is the only thing
-    // that can be checked here — and it is the thing that was missing.
+    // completely dead. jsdom has no app-region, so the class is the only proxy
+    // available — but it has to be checked on *every* control, not just the one
+    // that was reported: the branch switcher in the owner label is interactive
+    // too, and is the one most likely to go quietly dead.
     let cardId = ''
     act(() => {
       cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
@@ -160,9 +174,14 @@ describe('FocusedStage', () => {
     act(() => useAppStore.setState({ focusedTerminalId: cardId } as never))
     render(<FocusedStage />)
 
-    const collapse = screen.getByRole('button', { name: /Collapse a\.ts/ })
-    expect(collapse.className).toContain('titlebar-no-drag')
-    expect(collapse.closest('.titlebar-no-drag')).not.toBeNull()
+    const header = screen.getByTestId(`focused-card-${cardId}`)
+    expect(header.className).toContain('titlebar-drag')
+
+    const controls = header.querySelectorAll('button, input, [role="button"]')
+    expect(controls.length).toBeGreaterThan(0)
+    for (const control of controls) {
+      expect(control.closest('.titlebar-no-drag')).not.toBeNull()
+    }
   })
 })
 

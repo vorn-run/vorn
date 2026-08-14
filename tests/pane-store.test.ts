@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
-import { activeBrowserUrl } from '../src/renderer/stores/types'
+import { activeBrowserUrl, isPromotedPane } from '../src/renderer/stores/types'
 import { parsePersistedBrowsers } from '../src/renderer/stores/ui-slice'
 import { DEVICE_SPLIT_RATIO } from '../src/renderer/lib/split-ratio'
 
@@ -237,6 +237,30 @@ describe('pane store actions', () => {
       activeTab: 0,
       sessionId: 't1'
     })
+  })
+
+  it("carries a card's owner through a persistence round trip", async () => {
+    const { parsePersistedEditors } = await import('../src/renderer/stores/ui-slice')
+    // The owner is the only thing that makes an entry a card. Lose it and the
+    // record reads back as self-owned: it stops being a card, vanishes from the
+    // grid, and the next reconcile deletes it outright because `card:t1:0` is
+    // not a live session.
+    const panes = parsePersistedEditors({
+      t1: { filePath: '/p/own.ts', sessionId: 't1' },
+      'card:t1:0': { filePath: '/p/popped.ts', sessionId: 't1' }
+    })
+
+    expect(panes.get('card:t1:0')).toEqual({ filePath: '/p/popped.ts', sessionId: 't1' })
+    expect(isPromotedPane('card:t1:0', panes.get('card:t1:0')!)).toBe(true)
+    expect(isPromotedPane('t1', panes.get('t1')!)).toBe(false)
+  })
+
+  it('reads an editor persisted by an older build that stored a bare path', async () => {
+    const { parsePersistedEditors } = await import('../src/renderer/stores/ui-slice')
+    // Owned by its key, which is what a session-keyed entry always meant — so
+    // upgrading neither loses the open file nor mistakes it for a card.
+    const panes = parsePersistedEditors({ t1: '/p/legacy.ts' })
+    expect(panes.get('t1')).toEqual({ filePath: '/p/legacy.ts', sessionId: 't1' })
   })
 
   it('clamps a persisted active tab that points past the end', () => {
@@ -641,6 +665,33 @@ describe('popping an item out to its own card', () => {
     expect(s().minimizedTerminals.has(file)).toBe(false)
   })
 
+  it("releases focus, preview and maximize when a card's session is closed", async () => {
+    const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteFile('t1', '/p/popped.ts')
+    })
+    dirtyRefFor(cardId).current = true
+    act(() =>
+      useAppStore.setState({
+        focusedTerminalId: cardId,
+        previewTerminalId: cardId,
+        maximizedPaneId: cardId
+      } as never)
+    )
+
+    act(() => s().removeTerminal('t1'))
+
+    // The focus pair is the dangerous one: the stage is chosen by "is anything
+    // focused" and the titlebar is dropped while something is, so a card
+    // outliving its session leaves an empty window with no chrome.
+    expect(s().focusedTerminalId).toBeNull()
+    expect(s().previewTerminalId).toBeNull()
+    expect(s().maximizedPaneId).toBeNull()
+    // And the buffer flag, or a later card inherits its prompt.
+    expect(isEditorDirty(cardId)).toBe(false)
+  })
+
   it("leaves another session's cards alone", () => {
     let mine = ''
     let theirs = ''
@@ -696,12 +747,17 @@ describe('popping an item out to its own card', () => {
     confirm.mockRestore()
   })
 
-  it('closes a page card without prompting — there is no buffer to lose', () => {
+  it('closes a page card without prompting — there is no buffer to lose', async () => {
+    const { dirtyRefFor } = await import('../src/renderer/lib/editor-dirty')
     act(() => s().openBrowserPane('t1', 'example.com'))
     let cardId = ''
     act(() => {
       cardId = s().promoteBrowserTab('t1', 0) as string
     })
+    // A dirty flag under this id, so "no prompt" is a decision rather than an
+    // accident of there being nothing to prompt about. A page has no buffer;
+    // the flag is stale registry state and must not resurrect a dialog.
+    dirtyRefFor(cardId).current = true
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     act(() => s().closeCard(cardId))
@@ -765,21 +821,38 @@ describe('popping an item out to its own card', () => {
     // and wrote `undefined` into the order — which is then persisted and sent
     // to the server.
     seed(['t1', 't2', 't3'])
+    const reorderSessions = vi.fn()
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...(window as unknown as { api?: Record<string, unknown> }).api,
+      reorderSessions
+    }
     act(() => {
       s().promoteFile('t1', '/p/a.ts')
     })
 
-    // Drop t3 onto t1's slot. Under the old index-based call the card ahead of
-    // t2 shifted every index by one.
+    // Dropped by id, so the card sitting between t1 and t2 in the *visible*
+    // order cannot shift the target. Under the old index-based call this same
+    // gesture moved a different session, and a visible index past the end of
+    // `terminalOrder` spliced nothing and wrote `undefined` into it.
     act(() => s().reorderTerminals('t3', 't1'))
     expect(s().terminalOrder).toEqual(['t3', 't1', 't2'])
-    expect(s().terminalOrder.every((id) => typeof id === 'string')).toBe(true)
+    // What actually reaches the server is the thing that was being corrupted.
+    expect(reorderSessions).toHaveBeenLastCalledWith(['t3', 't1', 't2'])
   })
 
   it('treats dragging a card as a no-op rather than moving its owner', () => {
     // A card has no position of its own — it is drawn beside the session it came
     // from — so there is nothing for a drag to reorder.
-    seed(['t1', 't2'])
+    //
+    // Three sessions and the middle one as the target, deliberately: with two
+    // sessions and the last as target, a missing guard splices at -1 and lands
+    // on an order identical to the one it started with, so the bug hides.
+    seed(['t1', 't2', 't3'])
+    const reorderSessions = vi.fn()
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...(window as unknown as { api?: Record<string, unknown> }).api,
+      reorderSessions
+    }
     let cardId = ''
     act(() => {
       cardId = s().promoteFile('t1', '/p/a.ts')
@@ -787,7 +860,10 @@ describe('popping an item out to its own card', () => {
     const before = s().terminalOrder
 
     act(() => s().reorderTerminals(cardId, 't2'))
-    expect(s().terminalOrder).toEqual(before)
+    // Reference identity: the reducer must return nothing at all, not an equal
+    // array. And nothing may reach the server.
+    expect(s().terminalOrder).toBe(before)
+    expect(reorderSessions).not.toHaveBeenCalled()
   })
 
   it("resolves a drop onto a card to its owner's slot", () => {
