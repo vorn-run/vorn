@@ -383,21 +383,29 @@ export function callBidiStreaming<T>(
   timeoutMs: number = CALL_TIMEOUT_MS
 ): Promise<T> {
   return new Promise((resolve, reject) => {
-    const stream = client[method]() as grpc.ClientDuplexStream<unknown, T>
     let last: T | undefined
     let settled = false
+    // Same shape as the helper above, and for the same reason: the deadline is
+    // armed before the call exists, so nothing can reach the timer before it is
+    // there. The handlers below happen to be registered after it either way —
+    // keeping both functions identical is what stops a later reordering
+    // reintroducing that.
+    const open: { stream?: grpc.ClientDuplexStream<unknown, T> } = {}
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      open.stream?.cancel()
+      reject(new Error(`The device did not answer ${method} within ${timeoutMs / 1000}s.`))
+    }, timeoutMs)
     const settle = (fn: () => void): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       fn()
     }
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      stream.cancel()
-      reject(new Error(`The device did not answer ${method} within ${timeoutMs / 1000}s.`))
-    }, timeoutMs)
+
+    const stream = client[method]() as grpc.ClientDuplexStream<unknown, T>
+    open.stream = stream
 
     stream.on('data', (msg: T) => {
       last = msg

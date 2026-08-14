@@ -128,6 +128,22 @@ describe('callBidiStreaming, for stream X → stream Y', () => {
     expect(call.ended).toBe(true)
   })
 
+  it('survives a client that answers synchronously', async () => {
+    // Both helpers arm the deadline before opening the call, so neither can
+    // reach the timer before it exists. Unreachable as the handlers are
+    // registered today — pinned so a reordering cannot make it reachable.
+    const call = new DuplexCall()
+    const client = {
+      launch: () => {
+        call.emit('data', { running: true })
+        queueMicrotask(() => call.emit('end'))
+        return call
+      }
+    } as unknown as CompanionClient
+
+    await expect(callBidiStreaming(client, 'launch', [{}])).resolves.toBeDefined()
+  })
+
   it('takes the last message when the server sends several', async () => {
     const call = new DuplexCall()
     const client = {
