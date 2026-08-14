@@ -322,8 +322,17 @@ export function callStreaming<T>(
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     let settled = false
-    // `timer` is declared below and only read from callbacks, which cannot run
-    // before the synchronous body finishes.
+    // The timer is armed before the call is opened, so a client that answers
+    // synchronously — a mock, or a future grpc-js fast path — finds it already
+    // there. Held in an object because cancelling needs the stream, and the
+    // stream does not exist until after the timer.
+    const open: { stream?: grpc.ClientWritableStream<unknown> } = {}
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      open.stream?.cancel()
+      reject(new Error(`The device did not answer ${method} within ${STREAM_TIMEOUT_MS / 1000}s.`))
+    }, STREAM_TIMEOUT_MS)
     const settle = (fn: () => void): void => {
       if (settled) return
       settled = true
@@ -335,12 +344,7 @@ export function callStreaming<T>(
       if (err) settle(() => reject(new Error(err.details || err.message)))
       else settle(() => resolve(res))
     })
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      stream.cancel()
-      reject(new Error(`The device did not answer ${method} within ${STREAM_TIMEOUT_MS / 1000}s.`))
-    }, STREAM_TIMEOUT_MS)
+    open.stream = stream
 
     for (const m of messages) stream.write(m)
     stream.end()

@@ -55,6 +55,22 @@ describe('callStreaming, for stream X → Y', () => {
     expect(call.ended).toBe(true)
   })
 
+  it('survives a client that answers synchronously', async () => {
+    // Real gRPC always answers on a later tick, so the deadline could be armed
+    // after the call was opened and nothing would notice. A mock — or a future
+    // fast path — that calls back inside the same turn would then reach the
+    // timer before it existed and crash instead of resolving.
+    const call = new WritableCall()
+    const client = {
+      hid: (cb: (e: null, r: unknown) => void) => {
+        cb(null, { ok: true })
+        return call
+      }
+    } as unknown as CompanionClient
+
+    await expect(callStreaming(client, 'hid', [{ down: 1 }])).resolves.toEqual({ ok: true })
+  })
+
   it('carries the status detail, which is the actionable half of a failure', async () => {
     const client = {
       hid: (cb: (e: unknown) => void) => {
