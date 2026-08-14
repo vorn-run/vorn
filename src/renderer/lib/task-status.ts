@@ -1,15 +1,52 @@
 import { TaskStatus } from '../../shared/types'
 import { Circle, Clock, Eye, CheckCircle2, XCircle } from 'lucide-react'
+import { TONE_DOT, TONE_DOT_MOVING, TONE_TEXT, type StatusTone } from './status-tone'
 
-export const STATUS_BADGE: Record<TaskStatus, { label: string; color: string; bg: string }> = {
-  todo: { label: 'Todo', color: 'text-gray-400', bg: 'bg-gray-500/20' },
-  in_progress: { label: 'In Progress', color: 'text-blue-400', bg: 'bg-blue-500/20' },
-  in_review: { label: 'In Review', color: 'text-purple-400', bg: 'bg-purple-500/20' },
-  done: { label: 'Done', color: 'text-green-400', bg: 'bg-green-500/20' },
-  cancelled: { label: 'Cancelled', color: 'text-gray-500', bg: 'bg-gray-500/10' }
+/**
+ * What each task state means, in the shared vocabulary.
+ *
+ * `in_review` is the accent, and it marks the same relationship the accent marks
+ * everywhere else: an agent has finished and is waiting on the person. A waiting
+ * session, an open approval gate and a task handed back for review are one idea
+ * wearing three names.
+ *
+ * This replaces five maps that disagreed. `in_progress` alone had six values —
+ * blue in four of them, and `text-yellow-500` in the one map that actually
+ * reached a card, so the icon on every in-progress task was yellow while three
+ * unread maps insisted it was blue. `StatusPicker` drew the icon from one map and
+ * the word beside it from another, on the same row.
+ */
+export const TASK_STATUS_TONE: Record<TaskStatus, StatusTone> = {
+  todo: 'idle',
+  in_progress: 'live',
+  in_review: 'blocked',
+  done: 'settled',
+  cancelled: 'idle'
 }
 
-export const STATUS_ICON: Record<TaskStatus, React.FC<{ size?: number; className?: string }>> = {
+/**
+ * The label for each status, in one place.
+ *
+ * These were written out four times — the kanban columns, the list sections, the
+ * toolbar filter and the status picker — which is how the toolbar ended up
+ * painting "All" in the colour it used for `todo`.
+ */
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  todo: 'Todo',
+  in_progress: 'In Progress',
+  in_review: 'In Review',
+  done: 'Done',
+  cancelled: 'Cancelled'
+}
+
+/**
+ * A task carries its status as a glyph rather than a dot — the one surface where
+ * the shape does the work and the colour only reinforces it.
+ */
+export const TASK_STATUS_ICON: Record<
+  TaskStatus,
+  React.FC<{ size?: number; className?: string }>
+> = {
   todo: Circle,
   in_progress: Clock,
   in_review: Eye,
@@ -17,29 +54,24 @@ export const STATUS_ICON: Record<TaskStatus, React.FC<{ size?: number; className
   cancelled: XCircle
 }
 
-export const STATUS_ACCENT: Record<TaskStatus, { dot: string; bar: string }> = {
-  todo: { dot: 'bg-gray-400', bar: 'bg-gray-400' },
-  in_progress: { dot: 'bg-blue-500', bar: 'bg-blue-500' },
-  in_review: { dot: 'bg-purple-500', bar: 'bg-purple-500' },
-  done: { dot: 'bg-green-500', bar: 'bg-green-500' },
-  cancelled: { dot: 'bg-gray-600', bar: 'bg-gray-600' }
+export const TASK_STATUS_TEXT: Record<TaskStatus, string> = {
+  todo: TONE_TEXT[TASK_STATUS_TONE.todo],
+  in_progress: TONE_TEXT[TASK_STATUS_TONE.in_progress],
+  in_review: TONE_TEXT[TASK_STATUS_TONE.in_review],
+  done: TONE_TEXT[TASK_STATUS_TONE.done],
+  cancelled: TONE_TEXT[TASK_STATUS_TONE.cancelled]
 }
 
-export const STATUS_ICON_COLOR: Record<TaskStatus, string> = {
-  todo: 'text-gray-400',
-  in_progress: 'text-yellow-500',
-  in_review: 'text-purple-400',
-  done: 'text-green-500',
-  cancelled: 'text-gray-500'
+export const TASK_STATUS_DOT: Record<TaskStatus, string> = {
+  todo: TONE_DOT[TASK_STATUS_TONE.todo],
+  in_progress: TONE_DOT[TASK_STATUS_TONE.in_progress],
+  in_review: TONE_DOT[TASK_STATUS_TONE.in_review],
+  done: TONE_DOT[TASK_STATUS_TONE.done],
+  cancelled: TONE_DOT[TASK_STATUS_TONE.cancelled]
 }
 
-export const STATUS_HEADER_BG: Record<TaskStatus, string> = {
-  todo: 'bg-gray-500/10',
-  in_progress: 'bg-blue-500/10',
-  in_review: 'bg-purple-500/10',
-  done: 'bg-green-500/10',
-  cancelled: 'bg-gray-500/5'
-}
+/** The live-session dot on a card — the one moving thing on this surface. */
+export const TASK_LIVE_DOT = TONE_DOT_MOVING.live
 
 export function formatTaskDate(dateStr: string): string {
   const d = new Date(dateStr)

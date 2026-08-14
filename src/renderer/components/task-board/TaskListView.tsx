@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { TaskConfig, TaskStatus } from '../../../shared/types'
 import { TaskCard } from './TaskCard'
-import { STATUS_ICON, STATUS_ICON_COLOR } from '../../lib/task-status'
+import { TASK_STATUS_ICON, TASK_STATUS_TEXT } from '../../lib/task-status'
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -52,8 +52,8 @@ export function TaskListView({
     <div className="space-y-1">
       {sections.map((section) => {
         const isCollapsed = collapsed.has(section.title)
-        const SectionIcon = STATUS_ICON[section.status]
-        const iconColor = STATUS_ICON_COLOR[section.status]
+        const SectionIcon = TASK_STATUS_ICON[section.status]
+        const iconColor = TASK_STATUS_TEXT[section.status]
 
         return (
           <div key={section.title}>

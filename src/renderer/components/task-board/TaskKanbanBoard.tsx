@@ -1,16 +1,15 @@
 import { useState, useRef } from 'react'
 import { TaskConfig, TaskStatus } from '../../../shared/types'
 import { TaskCard } from './TaskCard'
-import { STATUS_ICON, STATUS_ICON_COLOR } from '../../lib/task-status'
+import { TASK_STATUS_ICON, TASK_STATUS_TEXT, TASK_STATUS_LABEL } from '../../lib/task-status'
 import { Plus } from 'lucide-react'
 
-const KANBAN_COLUMNS: { status: TaskStatus; title: string }[] = [
-  { status: 'todo', title: 'Todo' },
-  { status: 'in_progress', title: 'In Progress' },
-  { status: 'in_review', title: 'In Review' },
-  { status: 'done', title: 'Done' },
-  { status: 'cancelled', title: 'Cancelled' }
-]
+const KANBAN_ORDER: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done', 'cancelled']
+
+const KANBAN_COLUMNS: { status: TaskStatus; title: string }[] = KANBAN_ORDER.map((status) => ({
+  status,
+  title: TASK_STATUS_LABEL[status]
+}))
 
 export function TaskKanbanBoard({
   allTasks,
@@ -95,8 +94,8 @@ export function TaskKanbanBoard({
         const tasks = allTasks
           .filter((t) => t.status === col.status)
           .sort((a, b) => a.order - b.order)
-        const ColIcon = STATUS_ICON[col.status]
-        const iconColor = STATUS_ICON_COLOR[col.status]
+        const ColIcon = TASK_STATUS_ICON[col.status]
+        const iconColor = TASK_STATUS_TEXT[col.status]
         const isDragOver = dragOverCol === col.status
 
         return (

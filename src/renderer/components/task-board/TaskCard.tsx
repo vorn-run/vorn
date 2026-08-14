@@ -2,8 +2,8 @@ import { TaskConfig, isTerminalTaskStatus } from '../../../shared/types'
 import { AgentIcon } from '../AgentIcon'
 import { SourceBadge } from '../ConnectorIcon'
 import {
-  STATUS_ICON,
-  STATUS_ICON_COLOR,
+  TASK_STATUS_ICON,
+  TASK_STATUS_TEXT,
   formatTaskDate,
   getTaskShortId
 } from '../../lib/task-status'
@@ -51,8 +51,8 @@ export function TaskCard({
   sessionIsLive?: boolean
   variant?: 'default' | 'kanban'
 }) {
-  const StatusIcon = STATUS_ICON[task.status]
-  const iconColor = STATUS_ICON_COLOR[task.status]
+  const StatusIcon = TASK_STATUS_ICON[task.status]
+  const iconColor = TASK_STATUS_TEXT[task.status]
   const shortId = getTaskShortId(task)
   const isArchived = !!task.archivedAt
   const dimmed = task.status === 'cancelled' || isArchived
