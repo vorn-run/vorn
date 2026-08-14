@@ -533,6 +533,10 @@ app.on('before-quit', async () => {
   isQuitting = true
   globalShortcut.unregisterAll()
   updateManager.stop()
+  // Killing the companions leaves the simulators Vorn booted running: nothing
+  // releases a claim on the way out, and `bootedByVorn` is only honoured by
+  // release. Detached, so this outlives the process rather than delaying it.
+  deviceRegistry.shutdownOwnedDevices()
   await stopServer()
 })
 

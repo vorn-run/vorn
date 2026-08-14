@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { nativeImage } from 'electron'
 import type {
@@ -519,8 +519,7 @@ async function claimLocked(params: {
   const previous = entries.get(params.sessionId)
   if (previous && previous.udid !== params.udid) await release({ sessionId: params.sessionId })
 
-  const wasBooted = device.booted
-  if (!wasBooted) {
+  const boot = async (): Promise<void> => {
     try {
       await exec('xcrun', ['simctl', 'boot', params.udid])
       await exec('xcrun', ['simctl', 'bootstatus', params.udid, '-b'])
@@ -528,6 +527,37 @@ async function claimLocked(params: {
       throw explainSimctl(err)
     }
   }
+
+  /**
+   * Claiming a device you already hold keeps the entry you already have.
+   *
+   * Rebuilding it looks harmless and is not. `bootedByVorn` would be recomputed
+   * against a simulator that is booted *because we booted it*, so it would read
+   * false and nothing would ever shut it down again. The generation counter
+   * would drop back to 1 while the same companion kept serving, so a ref minted
+   * before the re-claim would resolve cleanly against a different element after
+   * it — the exact mis-tap the counter exists to prevent. The measured scale and
+   * the captured logs would go too.
+   *
+   * This is not an exotic path: `openPane` re-claims whenever it is given a
+   * udid, so "claim, read, tap, show the person the pane" walks straight into
+   * it.
+   */
+  if (decision.alreadyMine && previous && previous.udid === params.udid) {
+    // The simulator can have gone down under us — shut down from Simulator.app,
+    // or the machine slept. Booting it again makes it ours again.
+    if (!device.booted) {
+      await boot()
+      previous.bootedByVorn = true
+    }
+    if (!previous.companion) {
+      previous.companion = await startCompanion(params.udid, onCompanionExit)
+    }
+    return { udid: params.udid, name: device.name, booted: true }
+  }
+
+  const wasBooted = device.booted
+  if (!wasBooted) await boot()
 
   const entry = newEntry(params.sessionId, params.udid)
   entry.bootedByVorn = !wasBooted
@@ -583,6 +613,35 @@ export function release(params: { sessionId: string }): Promise<{ released: bool
     }
     return { released: true }
   })
+}
+
+/**
+ * Shuts down every simulator this process booted, on the way out.
+ *
+ * `bootedByVorn` is only honoured by `release`, and quitting does not release —
+ * so closing the app with a device claimed left the simulator running forever,
+ * which is the whole thing that flag exists to prevent. It is the commonest way
+ * to leave, and the one path that never enforced it.
+ *
+ * Detached and unreferenced on purpose. `before-quit` handlers are not awaited
+ * by Electron, so anything that has to finish must outlive the process rather
+ * than hold it up; and `simctl shutdown` takes seconds and can wedge, which
+ * would otherwise be a quit that hangs. The trade is that a shutdown which
+ * fails has nowhere to report it — acceptable for a device nobody is using any
+ * more, and better than an app that will not close.
+ */
+export function shutdownOwnedDevices(): void {
+  for (const entry of entries.values()) {
+    if (!entry.bootedByVorn) continue
+    try {
+      spawn('xcrun', ['simctl', 'shutdown', entry.udid], {
+        detached: true,
+        stdio: 'ignore'
+      }).unref()
+    } catch (err) {
+      log.warn(`[device] could not shut down ${entry.udid.slice(0, 8)} on quit: ${String(err)}`)
+    }
+  }
 }
 
 /** Called when a session closes, so a claim cannot outlive its owner. */
@@ -709,6 +768,35 @@ export function formatRuntime(identifier: string): string {
 }
 
 /** Resolves a target to a point, refusing a stale ref rather than tapping. */
+/**
+ * Refuses a point that is not on the screen.
+ *
+ * The units mistake this catches — a coordinate read off a screenshot and never
+ * divided by the scale — is the same one the swipe guard already refuses, and
+ * it is far likelier on a tap. Delivered as-is the event lands nowhere, the
+ * call returns ok, and the agent reads the unchanged screen as "the button did
+ * not work" and tries again.
+ *
+ * Silent when the screen size is unknown: that case is the swipe guard's to
+ * refuse, and a screenshot now fails closed rather than handing out a scale
+ * nobody measured.
+ */
+function requireOnScreen(
+  point: DevicePoint,
+  screen: { width: number; height: number }
+): DevicePoint {
+  if (screen.width <= 0 || screen.height <= 0) return point
+  const inside = point.x >= 0 && point.y >= 0 && point.x <= screen.width && point.y <= screen.height
+  if (!inside) {
+    throw new Error(
+      `(${point.x}, ${point.y}) is outside the screen, which is ${screen.width}x${screen.height} ` +
+        'points. Coordinates are in points, not image pixels — divide a coordinate read off a ' +
+        'screenshot by the `scale` that screenshot reported.'
+    )
+  }
+  return point
+}
+
 function resolveTarget(target: DeviceTarget | undefined, entry: Entry): DevicePoint {
   if (!target) throw new Error('An interaction needs a target: either a ref or x/y (in points).')
   if ('ref' in target) return tapPointFor(target.ref, entry)
@@ -778,7 +866,7 @@ export async function interact(params: {
   switch (params.action) {
     case 'tap':
     case 'press': {
-      const point = resolveTarget(params.target, entry)
+      const point = requireOnScreen(resolveTarget(params.target, entry), screen)
       const touch = { action: { touch: { point } } }
       events.push({ press: { action: touch.action, direction: 'DOWN' } })
       if (params.action === 'press') {
@@ -894,14 +982,30 @@ export async function screenshot(params: {
 }): Promise<{ data: string; scale: number; screen: { width: number; height: number } }> {
   const entry = deviceFor(params.sessionId)
   if (!entry.screenPoints) await fetchTree(entry)
-  const screen = entry.screenPoints ?? { width: 0, height: 0 }
+  // Fail closed, exactly as the swipe guard does on the same condition. The
+  // scale is the number the caller divides an image coordinate by; without a
+  // screen size it cannot be measured, and what used to be returned was the
+  // constructor's guess of 3 wearing a comment that said "read, never assumed".
+  // A 1.14-ratio image divided by 3 lands a tap a third of the way to where it
+  // was aimed, and reports ok. A read taken mid-transition comes back with no
+  // root frame, so this is reachable whenever a screenshot is the first thing
+  // asked of a screen that is still settling.
+  if (!entry.screenPoints || entry.screenPoints.width <= 0) {
+    throw new Error(
+      'The screen size could not be read, so the scale of the image cannot be ' +
+        'measured — and a coordinate divided by a guessed scale lands somewhere ' +
+        'other than where you aimed. The screen is usually mid-transition; call ' +
+        'device_read_screen once it has settled, then take the screenshot.'
+    )
+  }
+  const screen = entry.screenPoints
 
   const res = await call<{ image_data: Buffer }>(entry.companion.client, 'screenshot', {})
   const image = nativeImage.createFromBuffer(Buffer.from(res.image_data))
   const size = image.getSize()
   // Read, never assumed: the tree's points against the image's pixels is the
   // only honest source for this ratio.
-  if (screen.width > 0) entry.scale = size.width / screen.width
+  entry.scale = size.width / screen.width
 
   const maxEdge = clampMaxEdge(params.maxEdge)
   const longest = Math.max(size.width, size.height)
@@ -918,7 +1022,7 @@ export async function screenshot(params: {
     data: out.toPNG().toString('base64'),
     // The scale of the image *as returned*, not of the raw capture — this is
     // the number that converts a coordinate on the delivered image to points.
-    scale: screen.width > 0 ? shown.width / screen.width : entry.scale,
+    scale: shown.width / screen.width,
     screen
   }
 }
