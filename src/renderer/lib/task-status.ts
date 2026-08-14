@@ -54,19 +54,34 @@ export const TASK_STATUS_ICON: Record<
   cancelled: XCircle
 }
 
+/**
+ * Two axes, not one.
+ *
+ * `TASK_STATUS_TONE` above says how urgent a state is, and that is what the rest
+ * of the app reads — it is why `in_review` takes the accent. But a task board is
+ * also the only surface *organised* by status: a long list sorted into columns,
+ * read by scanning for one. A column of identical grey rows is hard to scan and,
+ * frankly, dispiriting to look at.
+ *
+ * So status here also carries a category colour, kept at low saturation so the
+ * board reads as a set. `in_review` defers to the accent rather than taking a
+ * category colour of its own, which is what keeps bronzo the brightest thing on
+ * the board and stops it becoming just another column tint. `cancelled` keeps no
+ * colour at all: an abandoned task is an absence, not a category.
+ */
 export const TASK_STATUS_TEXT: Record<TaskStatus, string> = {
-  todo: TONE_TEXT[TASK_STATUS_TONE.todo],
-  in_progress: TONE_TEXT[TASK_STATUS_TONE.in_progress],
+  todo: 'text-status-slate',
+  in_progress: 'text-status-blue',
   in_review: TONE_TEXT[TASK_STATUS_TONE.in_review],
-  done: TONE_TEXT[TASK_STATUS_TONE.done],
+  done: 'text-status-sage',
   cancelled: TONE_TEXT[TASK_STATUS_TONE.cancelled]
 }
 
 export const TASK_STATUS_DOT: Record<TaskStatus, string> = {
-  todo: TONE_DOT[TASK_STATUS_TONE.todo],
-  in_progress: TONE_DOT[TASK_STATUS_TONE.in_progress],
+  todo: 'bg-status-slate',
+  in_progress: 'bg-status-blue',
   in_review: TONE_DOT[TASK_STATUS_TONE.in_review],
-  done: TONE_DOT[TASK_STATUS_TONE.done],
+  done: 'bg-status-sage',
   cancelled: TONE_DOT[TASK_STATUS_TONE.cancelled]
 }
 
