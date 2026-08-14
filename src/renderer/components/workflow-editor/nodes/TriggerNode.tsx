@@ -6,7 +6,8 @@ import type {
 } from '../../../../shared/types'
 import { useConnectorIdFor, useConnectionIconFor } from '../../../lib/use-connections'
 import { ConnectorIcon } from '../../ConnectorIcon'
-import { NODE_SELECTED, NODE_UNSELECTED, NODE_GLYPH } from '../node-visuals'
+import { NODE_GLYPH } from '../node-visuals'
+import { NodeShell } from './NodeShell'
 
 interface Props {
   label: string
@@ -69,17 +70,9 @@ export function TriggerNode({ label, config, selected, onClick }: Props) {
   const { connectorId, icon: connectorGlyph } = useConnectorGlyph(config)
 
   return (
-    <div
-      onClick={(e) => {
-        e.stopPropagation()
-        onClick()
-      }}
-      className={`px-3 py-2.5 rounded-md border w-[280px] transition-all cursor-pointer
-                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
-                  bg-surface-node hover:bg-white/[0.02]`}
-    >
-      <div className="flex items-center gap-2">
-        {connectorId ? (
+    <NodeShell
+      icon={
+        connectorId ? (
           <ConnectorIcon
             connectorId={connectorId}
             icon={connectorGlyph}
@@ -88,12 +81,12 @@ export function TriggerNode({ label, config, selected, onClick }: Props) {
           />
         ) : (
           <Icon size={14} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />
-        )}
-        <div className="min-w-0">
-          <div className="text-[13px] font-medium text-white truncate">{label}</div>
-          <div className="text-[11px] text-gray-500 truncate">{getSubtitle(config)}</div>
-        </div>
-      </div>
-    </div>
+        )
+      }
+      label={label}
+      subtitle={getSubtitle(config)}
+      selected={selected}
+      onClick={onClick}
+    />
   )
 }

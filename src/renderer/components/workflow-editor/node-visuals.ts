@@ -233,3 +233,13 @@ export const NODE_UNSELECTED = 'border-white/[0.08]'
  */
 export const TASK_CHIP =
   'text-[10px] px-1.5 py-0.5 border border-white/[0.08] rounded text-ink-secondary truncate cursor-pointer hover:bg-white/[0.06] transition-colors'
+
+/**
+ * What a preview line on a node card is cut to.
+ *
+ * Every card that previews its own content wrote this by hand, with the cut
+ * length as a bare number a few lines from the string it applied to.
+ */
+export function truncate(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max) + '...' : text
+}
