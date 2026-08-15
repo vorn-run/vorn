@@ -4,9 +4,10 @@ import { Plus, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { PaneCard, PaneControls } from './PaneCard'
 import { TerminalPane } from './TerminalPane'
-import { PANE_SURFACE } from '../lib/pane-surface'
+import { IntentBar } from './IntentBar'
 import { terminalsPaneId } from '../lib/pane-id'
 import { getDisplayName } from '../lib/terminal-display'
+import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { addTerminalToPanel } from '../lib/session-utils'
 import { closeTerminalSession } from '../lib/terminal-close'
 
@@ -164,16 +165,32 @@ export const TerminalsCard = memo(
             holds the xterm and its scrollback, and a slot is only where a
             terminal is currently shown. Rendering them all would also have two
             slots claiming one terminal, which the registry resolves by
-            last-writer-wins: one of them would simply go blank. */}
-        <div className="flex-1 min-h-0 relative" style={{ background: PANE_SURFACE }}>
+            last-writer-wins: one of them would simply go blank.
+
+            Framed as a terminal, not as a pane: the sunken surface, the same
+            half-step of top padding, and the composer docked beneath. A shell
+            in here is the same kind of thing as a shell in the grid, and the
+            pane grey is for frames around someone else's content — which is
+            what the tab strip above is, and what the terminal below is not. */}
+        <div
+          className="flex-1 min-h-0 relative pt-0.5"
+          style={{ background: 'var(--color-surface-sunken)' }}
+        >
           <TerminalPane
             key={active.id}
             terminalId={active.id}
             agentType={active.agentType}
             isFocused={focusedId === active.id}
+            flexible={flexible}
             domBlocks={domBlocks}
           />
         </div>
+
+        <IntentBar
+          terminalId={active.id}
+          compact
+          indentPx={terminalTextIndentPx(active.agentType, domBlocks)}
+        />
       </PaneCard>
     )
   })
