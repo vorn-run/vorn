@@ -9,6 +9,7 @@ import {
 } from '../../shared/types'
 import { useAppStore } from '../stores'
 import { toast } from '../components/Toast'
+import { closeTerminalsPanel } from './terminal-close'
 
 function normalizeComparablePath(p: string): string {
   const normalized = p.replace(/\\/g, '/').replace(/\/+$/, '')
@@ -206,6 +207,65 @@ export async function createSessionFromProject(
     remoteHostId
   })
   state.addTerminal(session)
+}
+
+/**
+ * Start a shell inside a session's terminals panel.
+ *
+ * Same creation as `createShellInProject` — a shell terminal is a full session
+ * either way — differing only in where the new id is put. It must not become
+ * the active tab: a terminal claimed by a panel is deliberately absent from the
+ * tab strip, so activating one would select a tab that is not there.
+ */
+export async function addTerminalToPanel(sessionId: string): Promise<string | null> {
+  // The owner answers both questions — where the shell starts and what it
+  // inherits — so it is read once here rather than each caller working out a
+  // cwd of its own and this function looking the same session up again.
+  const owner = useAppStore.getState().terminals.get(sessionId)?.session
+  if (!owner) return null
+  try {
+    const session = await window.api.createShellTerminal(owner.worktreePath || owner.projectPath)
+    const state = useAppStore.getState()
+    const enriched: TerminalSession = {
+      ...session,
+      projectName: owner.projectName,
+      projectPath: owner.projectPath,
+      worktreePath: owner.worktreePath,
+      worktreeName: owner.worktreeName,
+      branch: owner.branch,
+      isWorktree: owner.isWorktree
+    }
+    state.addTerminal(enriched)
+    state.openTerminalsPane(sessionId, enriched.id)
+    // Returned so the caller can put the keyboard in it — a new shell nobody
+    // is typing into is a shell you have to click before using.
+    return enriched.id
+  } catch (err) {
+    console.error('[addTerminalToPanel] failed:', err)
+    toast.error(`Failed to start terminal: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
+/**
+ * Show or hide a session's terminals panel, from wherever it is asked for.
+ *
+ * Opening it with nothing in it would be an empty box holding a pane, so the
+ * first shell is created as part of opening — in the session's own directory,
+ * which is the point of the panel. The rule lives here rather than in each
+ * control because the sidebar row, the card header and the tab strip all offer
+ * it, and three copies would drift.
+ */
+export async function toggleTerminalsPanel(sessionId: string): Promise<void> {
+  const state = useAppStore.getState()
+  if (state.terminalsPanes.has(sessionId)) {
+    // The shells go with the panel. Merely dropping the claim would scatter
+    // them across the grid as top-level cards, and the next click here would
+    // add another shell beside them.
+    await closeTerminalsPanel(sessionId)
+    return
+  }
+  await addTerminalToPanel(sessionId)
 }
 
 export async function createShellInProject(

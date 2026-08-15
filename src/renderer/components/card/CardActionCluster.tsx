@@ -7,6 +7,7 @@ import {
   Minus,
   MoreHorizontal,
   Smartphone,
+  SquareTerminal,
   X
 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
@@ -17,11 +18,13 @@ import { Tooltip } from '../Tooltip'
 import { ConfirmPopover } from '../ConfirmPopover'
 import { CardContextMenu } from '../CardContextMenu'
 import { closeTerminalSession } from '../../lib/terminal-close'
+import { toggleTerminalsPanel } from '../../lib/session-utils'
 import { toast } from '../Toast'
 import { getDisplayName } from '../../lib/terminal-display'
 import { MOD } from '../../lib/platform'
 import { DevicePicker } from '../DevicePicker'
 import { shouldShowDeviceButton } from '../../lib/device-affordance'
+import { shouldOfferPane } from '../../lib/pane-affordance'
 
 export type CardVariant = 'mini' | 'focused'
 
@@ -37,6 +40,8 @@ export function CardActionCluster({ terminalId, variant }: Props) {
     toggleMinimized,
     toggleFilesPane,
     toggleBrowserPane,
+    hasTerminalsPane,
+    hasBrowserPane,
     hasDevicePane,
     claimAndOpenDevicePane,
     closeDevicePane,
@@ -49,6 +54,8 @@ export function CardActionCluster({ terminalId, variant }: Props) {
       toggleMinimized: s.toggleMinimized,
       toggleFilesPane: s.toggleFilesPane,
       toggleBrowserPane: s.toggleBrowserPane,
+      hasTerminalsPane: s.terminalsPanes.has(terminalId),
+      hasBrowserPane: s.browserPanes.has(terminalId),
       hasDevicePane: s.devicePanes.has(terminalId),
       claimAndOpenDevicePane: s.claimAndOpenDevicePane,
       closeDevicePane: s.closeDevicePane,
@@ -84,6 +91,11 @@ export function CardActionCluster({ terminalId, variant }: Props) {
   const handleOpenBrowser = (e: React.MouseEvent): void => {
     e.stopPropagation()
     toggleBrowserPane(terminalId)
+  }
+
+  const handleTerminals = (e: React.MouseEvent): void => {
+    e.stopPropagation()
+    void toggleTerminalsPanel(terminalId)
   }
 
   const handleMinimize = (e: React.MouseEvent): void => {
@@ -125,9 +137,15 @@ export function CardActionCluster({ terminalId, variant }: Props) {
   // tooltips get clipped off-screen. Drop them below the buttons instead.
   const tooltipPos = isFocused ? 'bottom' : 'top'
 
+  // A shell is offered none of the project panes it has no use for — unless one
+  // is already open, which keeps its own control so it can be closed.
+  const agentType = terminal.session.agentType
+  const showBrowser = shouldOfferPane(agentType, hasBrowserPane)
+  const showTerminals = shouldOfferPane(agentType, hasTerminalsPane)
   const showDevice = shouldShowDeviceButton(
     mobileProjectCache.get(terminal.session.projectPath),
-    hasDevicePane
+    hasDevicePane,
+    agentType
   )
 
   return (
@@ -157,17 +175,36 @@ export function CardActionCluster({ terminalId, variant }: Props) {
         </button>
       </Tooltip>
 
-      <Tooltip label="Open browser" position={tooltipPos}>
-        <button
-          type="button"
-          onClick={handleOpenBrowser}
-          onPointerDown={(e) => e.stopPropagation()}
-          className={ICON_BUTTON}
-          aria-label="Open browser"
+      {showTerminals && (
+        <Tooltip
+          label={hasTerminalsPane ? 'Close terminals' : 'Add a terminal'}
+          position={tooltipPos}
         >
-          <Globe size={ICON_BUTTON_SIZE} strokeWidth={2} />
-        </button>
-      </Tooltip>
+          <button
+            type="button"
+            onClick={handleTerminals}
+            onPointerDown={(e) => e.stopPropagation()}
+            className={ICON_BUTTON}
+            aria-label={hasTerminalsPane ? 'Close terminals' : 'Add a terminal'}
+          >
+            <SquareTerminal size={ICON_BUTTON_SIZE} strokeWidth={2} />
+          </button>
+        </Tooltip>
+      )}
+
+      {showBrowser && (
+        <Tooltip label="Open browser" position={tooltipPos}>
+          <button
+            type="button"
+            onClick={handleOpenBrowser}
+            onPointerDown={(e) => e.stopPropagation()}
+            className={ICON_BUTTON}
+            aria-label="Open browser"
+          >
+            <Globe size={ICON_BUTTON_SIZE} strokeWidth={2} />
+          </button>
+        </Tooltip>
+      )}
 
       {showDevice && (
         <Tooltip

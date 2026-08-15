@@ -106,6 +106,46 @@ export interface BrowserPaneState {
   sessionId: string
 }
 
+/**
+ * State of a session's terminals panel — the shells it holds beside its agent.
+ *
+ * Deliberately the same shape as `BrowserPaneState`, because it is the same
+ * problem: an ordered list with one of them in front, whose presence *is* the
+ * pane being open.
+ *
+ * What it holds are session ids. A shell terminal is already a full session
+ * with its own pid, so a panel needs no new entity — only a record of which
+ * session each shell hangs under, which is this list. Taking an id out of it is
+ * the whole of "extract this terminal": it is a session already, so it becomes
+ * a grid cell, a tab, a sidebar row and a focus target the moment it is no
+ * longer claimed here.
+ */
+export interface TerminalsPaneState {
+  /** Session ids of the shells in this panel. Never empty while it exists. */
+  terminals: string[]
+  /** Index into `terminals`. Always in range. */
+  activeTab: number
+}
+
+/**
+ * Which tab a panel is showing, clamped into range.
+ *
+ * `activeTab` is kept in range by every action that writes it and by the
+ * persisted-state reader, so this is belt and braces — but it is the one place
+ * that answers the question, and the card indexes its tab list by it. Two
+ * answers, one clamped and one not, is how an out-of-range index reaches a
+ * dereference.
+ */
+export function activePanelIndex(pane: TerminalsPaneState | undefined): number {
+  if (!pane || pane.terminals.length === 0) return 0
+  return Math.min(Math.max(pane.activeTab, 0), pane.terminals.length - 1)
+}
+
+/** The terminal a panel is currently showing. */
+export function activePanelTerminalId(pane: TerminalsPaneState | undefined): string | null {
+  return pane ? (pane.terminals[activePanelIndex(pane)] ?? null) : null
+}
+
 /** The page a browser pane is currently showing. */
 export function activeBrowserUrl(pane: BrowserPaneState | undefined): string | null {
   return pane ? (pane.tabs[pane.activeTab] ?? null) : null
@@ -266,6 +306,16 @@ export interface UISlice {
   /** Session id → the simulator its device pane is showing. One device per session. */
   devicePanes: Map<string, DevicePaneState>
   /**
+   * Session id → the shells it holds beside its agent. One panel per session.
+   *
+   * A terminal listed here is claimed by that session: it is drawn in the panel
+   * and nowhere else, and is deliberately absent from the grid, the tab strip,
+   * the sidebar, the dock and keyboard nav until it is extracted. That hiding
+   * is what keeps a terminal to a single rendered slot — the registry is
+   * last-writer-wins, so two slots for one id would fight over the wrapper.
+   */
+  terminalsPanes: Map<string, TerminalsPaneState>
+  /**
    * Pane id currently maximized, or null. At most one app-wide. A maximized
    * pane covers only its owner session's footprint — other sessions are
    * unaffected, which is what makes it usable for side-by-side comparison.
@@ -380,6 +430,25 @@ export interface UISlice {
    */
   claimAndOpenDevicePane: (sessionId: string, device: DevicePaneState) => Promise<string | null>
   closeDevicePane: (sessionId: string) => void
+  /**
+   * Show the session's terminals panel, adding `terminalId` to it if given.
+   *
+   * Opening with nothing to show would be an empty box taking up a pane, so the
+   * caller creates a shell first and hands it here.
+   */
+  openTerminalsPane: (sessionId: string, terminalId: string) => void
+  /** Close the panel. The shells in it are the caller's to dispose of. */
+  closeTerminalsPane: (sessionId: string) => void
+  setActivePanelTerminal: (sessionId: string, index: number) => void
+  /**
+   * Take a terminal out of its session's panel and let it stand on its own.
+   *
+   * Only removes the claim — the terminal is already a session, so it has a
+   * grid cell, a tab, a sidebar row and a focus slot the moment nothing is
+   * hiding it. Taking the last one closes the panel, since a panel with no
+   * shells is a box taking up space.
+   */
+  extractPanelTerminal: (sessionId: string, terminalId: string) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void
   /**

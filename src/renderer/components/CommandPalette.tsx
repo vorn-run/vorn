@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../stores'
+import { useClaimedTerminalIds } from '../hooks/usePanelTerminals'
 import { usePromotedCards } from '../hooks/usePromotedCards'
 import { FileTypeIcon } from './file-icons'
 import { getProjectHostIds, getProjectRemoteHostId, type RecentSession } from '../../shared/types'
@@ -119,6 +120,7 @@ function useCommands(
 ): Command[] {
   const config = useAppStore((s) => s.config)
   const terminals = useAppStore((s) => s.terminals)
+  const claimed = useClaimedTerminalIds()
   const promotedCards = usePromotedCards()
   const worktreeCache = useAppStore((s) => s.worktreeCache)
   const addTerminal = useAppStore((s) => s.addTerminal)
@@ -278,6 +280,10 @@ function useCommands(
 
     // --- Terminals ---
     for (const [id, term] of terminals) {
+      // A shell held by a terminals panel is deliberately absent from every
+      // other surface; focusing one from here would open a stage for a session
+      // the grid, the strip and the sidebar all agree is not there.
+      if (claimed.has(id)) continue
       const name = getDisplayName(term.session)
       const agentType = term.session.agentType
       const agentDef = agentType === 'shell' ? null : AGENT_DEFINITIONS[agentType]
@@ -499,6 +505,7 @@ function useCommands(
     return commands
   }, [
     terminals,
+    claimed,
     promotedCards,
     config,
     recentSessions,

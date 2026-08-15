@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useAppStore } from '../../stores'
+import { useClaimedTerminalIds } from '../../hooks/usePanelTerminals'
 import { SessionItem } from './SessionItem'
 import { ProjectsSectionToolbar } from './ProjectsSectionToolbar'
 import { getDisplayName } from '../../lib/terminal-display'
@@ -16,6 +17,8 @@ export function FlatSessionsSection({
   workspaceTerminalCount: number
 }) {
   const terminals = useAppStore((s) => s.terminals)
+  // Held by a terminals panel means drawn only there — see ProjectSidebar.
+  const claimed = useClaimedTerminalIds()
   const activeProject = useAppStore((s) => s.activeProject)
   const setActiveProject = useAppStore((s) => s.setActiveProject)
   const setFocusedTerminal = useAppStore((s) => s.setFocusedTerminal)
@@ -27,6 +30,7 @@ export function FlatSessionsSection({
       activeProject && workspaceProjectNames.has(activeProject) ? activeProject : null
     const list: (SidebarSessionInfo & { projectName: string; lastActivity: number })[] = []
     for (const [id, t] of terminals) {
+      if (claimed.has(id)) continue
       if (!workspaceProjectNames.has(t.session.projectName)) continue
       if (effectiveProject && t.session.projectName !== effectiveProject) continue
       list.push({
@@ -43,7 +47,7 @@ export function FlatSessionsSection({
     }
     list.sort((a, b) => b.lastActivity - a.lastActivity)
     return list
-  }, [terminals, workspaceProjectNames, activeProject])
+  }, [terminals, claimed, workspaceProjectNames, activeProject])
 
   return (
     <>

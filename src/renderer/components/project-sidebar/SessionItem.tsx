@@ -1,12 +1,14 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
-import { X, FolderTree, Globe, Loader2, Smartphone } from 'lucide-react'
+import { X, FolderTree, Globe, Loader2, Smartphone, SquareTerminal } from 'lucide-react'
 import { useAppStore } from '../../stores'
 import { AgentStatusIcon } from '../AgentStatusIcon'
 import { closeTerminalSession } from '../../lib/terminal-close'
+import { toggleTerminalsPanel } from '../../lib/session-utils'
 import { toast } from '../Toast'
 import { STATUS_LABEL } from '../../lib/status-colors'
 import { DevicePicker } from '../DevicePicker'
 import { shouldShowDeviceButton } from '../../lib/device-affordance'
+import { shouldOfferPane } from '../../lib/pane-affordance'
 import { PromotedCardItem } from './PromotedCardItem'
 import { usePromotedCardsFor } from '../../hooks/usePromotedCards'
 import type { SidebarSessionInfo } from './types'
@@ -31,6 +33,7 @@ export function SessionItem({
   const hasFilesPane = useAppStore((s) => s.filesPanes.has(session.id))
   const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
   const hasBrowserPane = useAppStore((s) => s.browserPanes.has(session.id))
+  const hasTerminalsPane = useAppStore((s) => s.terminalsPanes.has(session.id))
   const toggleBrowserPane = useAppStore((s) => s.toggleBrowserPane)
   const hasDevicePane = useAppStore((s) => s.devicePanes.has(session.id))
   const claimAndOpenDevicePane = useAppStore((s) => s.claimAndOpenDevicePane)
@@ -52,7 +55,11 @@ export function SessionItem({
     if (projectPath) void loadMobileProject(projectPath)
   }, [projectPath, loadMobileProject])
 
-  const showDevice = shouldShowDeviceButton(mobile, hasDevicePane)
+  // A shell has no use for a browser, a simulator, or a panel of further
+  // shells. An already-open pane keeps its control so it can still be closed.
+  const showBrowser = shouldOfferPane(session.agentType, hasBrowserPane)
+  const showTerminals = shouldOfferPane(session.agentType, hasTerminalsPane)
+  const showDevice = shouldShowDeviceButton(mobile, hasDevicePane, session.agentType)
   const isActive =
     layoutMode === 'tabs' ? activeTabId === session.id : focusedTerminalId === session.id
   const isPreviewing = previewTerminalId === session.id
@@ -138,22 +145,42 @@ export function SessionItem({
         >
           <FolderTree size={12} strokeWidth={2} />
         </button>
-        <button
-          type="button"
-          aria-label={`${hasBrowserPane ? 'Hide' : 'Show'} browser for ${session.name}`}
-          title={hasBrowserPane ? 'Hide browser' : 'Show browser'}
-          onClick={(e) => {
-            e.stopPropagation()
-            toggleBrowserPane(session.id)
-          }}
-          className={`${
-            hasBrowserPane
-              ? 'opacity-100 text-ink'
-              : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
-          } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
-        >
-          <Globe size={12} strokeWidth={2} />
-        </button>
+        {showTerminals && (
+          <button
+            type="button"
+            aria-label={`${hasTerminalsPane ? 'Close' : 'Show'} terminals for ${session.name}`}
+            title={hasTerminalsPane ? 'Close these terminals' : 'Add a terminal'}
+            onClick={(e) => {
+              e.stopPropagation()
+              void toggleTerminalsPanel(session.id)
+            }}
+            className={`${
+              hasTerminalsPane
+                ? 'opacity-100 text-ink'
+                : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
+            } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
+          >
+            <SquareTerminal size={12} strokeWidth={2} />
+          </button>
+        )}
+        {showBrowser && (
+          <button
+            type="button"
+            aria-label={`${hasBrowserPane ? 'Hide' : 'Show'} browser for ${session.name}`}
+            title={hasBrowserPane ? 'Hide browser' : 'Show browser'}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleBrowserPane(session.id)
+            }}
+            className={`${
+              hasBrowserPane
+                ? 'opacity-100 text-ink'
+                : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
+            } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
+          >
+            <Globe size={12} strokeWidth={2} />
+          </button>
+        )}
         {showDevice && (
           <button
             ref={deviceButtonRef}

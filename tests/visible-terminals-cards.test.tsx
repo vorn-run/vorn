@@ -29,6 +29,7 @@ function seed(ids: string[]): void {
       activeProject: null,
       activeWorktreePath: null,
       minimizedTerminals: new Set(),
+      terminalsPanes: new Map(),
       filesPanes: new Set(),
       editorPanes: new Map(),
       browserPanes: new Map(),
@@ -167,5 +168,60 @@ describe('useVisibleTerminals with popped-out cards', () => {
     const { result } = renderHook(() => useVisibleTerminals())
 
     expect(result.current.orderedIds).toEqual(['t1', a, b, 't2'])
+  })
+})
+
+/**
+ * A shell held in a session's panel is drawn there and nowhere else. That is
+ * not tidiness: the terminal registry is last-writer-wins on a slot, so one
+ * terminal rendered twice would have the two fighting over a single wrapper.
+ */
+describe('useVisibleTerminals with a terminals panel', () => {
+  beforeEach(() => {
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      notifyWidgetStatus: vi.fn(),
+      reorderSessions: vi.fn()
+    }
+    seed(['t1', 't2'])
+  })
+
+  it('keeps a claimed shell out of the grid and out of keyboard nav', () => {
+    const { result, rerender } = renderHook(() => useVisibleTerminals())
+    expect(result.current.orderedIds).toEqual(['t1', 't2'])
+
+    act(() => useAppStore.getState().openTerminalsPane('t1', 't2'))
+    rerender()
+
+    // Out of the grid, and out of the ring — landing on it with Cmd+] would
+    // focus a terminal with nothing drawing it.
+    expect(result.current.orderedIds).toEqual(['t1'])
+    expect(useAppStore.getState().focusableTerminalIds).toEqual(['t1'])
+  })
+
+  it('keeps a claimed shell out of the dock, even when minimized', () => {
+    act(() => {
+      useAppStore.getState().toggleMinimized('t2')
+      useAppStore.getState().openTerminalsPane('t1', 't2')
+    })
+    const { result } = renderHook(() => useVisibleTerminals())
+
+    // A dock pill for it would restore a terminal into a grid that is not
+    // drawing it, which is the one-slot rule broken from the other side.
+    expect(result.current.minimizedIds).toEqual([])
+    expect(result.current.orderedIds).toEqual(['t1'])
+  })
+
+  it('gives it back the moment it is extracted', () => {
+    const { result, rerender } = renderHook(() => useVisibleTerminals())
+    act(() => useAppStore.getState().openTerminalsPane('t1', 't2'))
+    rerender()
+    expect(result.current.orderedIds).toEqual(['t1'])
+
+    act(() => useAppStore.getState().extractPanelTerminal('t1', 't2'))
+    rerender()
+
+    // Extraction is only letting go of the claim — the terminal was a session
+    // all along, so it is a cell again with nothing else to do.
+    expect(result.current.orderedIds).toEqual(['t1', 't2'])
   })
 })

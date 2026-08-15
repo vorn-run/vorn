@@ -113,6 +113,29 @@ describe('CardActionCluster — mini variant (grid, hover-revealed)', () => {
     expect(toggleFilesPane).toHaveBeenCalledWith('term-1')
   })
 
+  it('offers the terminals panel where the other panes are offered', async () => {
+    // The control has to be here, not only in the sidebar: this cluster is
+    // where someone reaches for a session's panes while working in the grid.
+    const createShellTerminal = vi.fn().mockResolvedValue({
+      id: 'sh1',
+      agentType: 'shell',
+      projectName: 'Vorn',
+      projectPath: '/tmp/vorn'
+    })
+    Object.assign((window as unknown as { api: Record<string, unknown> }).api, {
+      createShellTerminal,
+      notifyWidgetStatus: vi.fn()
+    })
+    act(() => useAppStore.setState({ terminalsPanes: new Map() }))
+    render(<CardActionCluster terminalId="term-1" variant="mini" />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add a terminal' }))
+    })
+
+    expect(useAppStore.getState().terminalsPanes.get('term-1')?.terminals).toEqual(['sh1'])
+  })
+
   it('Minimize toggles the minimized state for this terminal', () => {
     render(<CardActionCluster terminalId="term-1" variant="mini" />)
     fireEvent.click(screen.getByRole('button', { name: /Minimize/ }))

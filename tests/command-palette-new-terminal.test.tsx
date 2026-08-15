@@ -64,6 +64,7 @@ beforeEach(() => {
     useAppStore.setState({
       isCommandPaletteOpen: true,
       terminals: new Map(),
+      terminalsPanes: new Map(),
       config: {
         version: 1,
         projects: [{ name: 'vorn', path: '/tmp/vorn', preferredAgents: ['claude'] }],
@@ -119,6 +120,37 @@ describe('CommandPalette — New Terminal Session action', () => {
       expect.objectContaining({ id: 'sh-42', projectName: 'vorn' })
     )
     expect(setActiveTabId).toHaveBeenCalledWith('sh-42')
+  })
+
+  it("leaves out a shell held by a session's terminals panel", () => {
+    const term = (id: string, name: string) => ({
+      id,
+      session: {
+        id,
+        projectName: 'vorn',
+        projectPath: '/tmp/vorn',
+        agentType: 'shell',
+        displayName: name
+      },
+      status: 'idle',
+      lastOutputTimestamp: 1
+    })
+    act(() => {
+      useAppStore.setState({
+        terminals: new Map([
+          ['agent', term('agent', 'Agent session')],
+          ['sh1', term('sh1', 'Held shell')]
+        ]) as never,
+        terminalsPanes: new Map([['agent', { terminals: ['sh1'], activeTab: 0 }]])
+      })
+    })
+
+    render(<CommandPalette />)
+
+    // Focusing a claimed shell from here would open a stage for a session the
+    // grid, the tab strip and the sidebar all agree is not there.
+    expect(screen.getByText('Agent session')).toBeInTheDocument()
+    expect(screen.queryByText('Held shell')).not.toBeInTheDocument()
   })
 
   it('does not expose "Toggle Terminal Panel" anymore', () => {

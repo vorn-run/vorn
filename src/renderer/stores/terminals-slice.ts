@@ -1,6 +1,13 @@
 import { StateCreator } from 'zustand'
 import { AppStore, TerminalsSlice, TerminalState } from './types'
-import { filesPaneId, editorPaneId, browserPaneId, devicePaneId } from '../lib/pane-id'
+import {
+  filesPaneId,
+  editorPaneId,
+  browserPaneId,
+  devicePaneId,
+  terminalsPaneId
+} from '../lib/pane-id'
+import { releaseFromPanels, saveTerminalPanels } from './ui-slice'
 import { clearDirty } from '../lib/editor-dirty'
 
 export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set) => ({
@@ -26,7 +33,11 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
     set((state) => {
       const next = new Map(state.terminals)
       next.delete(id)
-      const order = state.terminalOrder.filter((tid) => tid !== id)
+      // The shells this session's panel is holding. Read once: the order filter
+      // below and the teardown further down have to name the same set, and the
+      // lookup was running per element of the whole session order.
+      const held = new Set(state.terminalsPanes.get(id)?.terminals ?? [])
+      const order = state.terminalOrder.filter((tid) => tid !== id && !held.has(tid))
       // A session owns its file-tree, editor, browser and device panes: they
       // die with it, and so does any maximized state pointing at them.
       const childIds = [filesPaneId(id), editorPaneId(id), browserPaneId(id), devicePaneId(id)]
@@ -64,6 +75,27 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         minimized.delete(paneId)
         dying.add(paneId)
       }
+      // The panel goes, and so do the shells it was holding — they are sessions
+      // in their own right, and the list is the only thing that was hiding them
+      // from every other surface. Their ptys are killed by the caller, which
+      // owns the async side; this is the record of them.
+      let terminalsPanes = new Map(state.terminalsPanes)
+      terminalsPanes.delete(id)
+      for (const heldId of held) {
+        next.delete(heldId)
+        minimized.delete(heldId)
+        dying.add(heldId)
+      }
+      // The other direction: this session may itself be a shell some panel is
+      // holding, closed from its own tab. Without releasing the claim the tab
+      // outlives the terminal — named after a raw id, drawing a pane for a
+      // session that is gone.
+      const released = releaseFromPanels(terminalsPanes, id)
+      if (released) {
+        terminalsPanes = released.panes
+        for (const ownerId of released.emptied) dying.add(terminalsPaneId(ownerId))
+      }
+      if (held.size > 0 || released) saveTerminalPanels(terminalsPanes)
       // The remembered tabs go with the session too. A recycled id would
       // otherwise reopen its browser onto a previous session's pages.
       const browserMemory = new Map(state.browserMemory)
@@ -80,7 +112,12 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       const gitDiffStats = new Map(state.gitDiffStats)
       gitDiffStats.delete(id)
       window.api.notifyWidgetStatus()
-      const extra = state.diffSidebarTerminalId === id ? { diffSidebarTerminalId: null } : {}
+      // Against the whole dying set, like every other field keyed by id below:
+      // the diff sidebar can be pointed at a shell this session was holding,
+      // and would then stay mounted against a session the store has dropped.
+      const extra = dying.has(state.diffSidebarTerminalId ?? '')
+        ? { diffSidebarTerminalId: null }
+        : {}
       const maxOwned = dying.has(state.maximizedPaneId ?? '')
       // Focus is the one that cannot be left dangling. The stage is chosen by
       // "is anything focused" and the app drops its titlebar while something
@@ -95,6 +132,7 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         terminals: next,
         terminalOrder: order,
         minimizedTerminals: minimized,
+        terminalsPanes,
         filesPanes,
         editorPanes,
         browserPanes,

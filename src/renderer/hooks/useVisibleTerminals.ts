@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
 import { usePromotedCardsByOwner } from './usePromotedCards'
+import { useClaimedTerminalIds } from './usePanelTerminals'
 
 /**
  * Stable comparator for terminal ids under the active sortMode. Manual mode
@@ -74,6 +75,10 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
   // triggering a reconcile pass, for a list that had not changed. The grouping
   // is a stable empty when nothing is popped out, which is the common case.
   const cardsByOwner = usePromotedCardsByOwner()
+  // Terminals a session holds in its panel. They are drawn there and nowhere
+  // else, so they are not layout units, not focusable, and not dock entries —
+  // and the registry's one-slot-per-terminal rule depends on that staying true.
+  const claimedTerminals = useClaimedTerminalIds()
 
   const workspaceProjects = useMemo(() => {
     if (!projects) return null
@@ -91,7 +96,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     }
     const sortFn = ([aId]: [string, TerminalState], [bId]: [string, TerminalState]): number =>
       compareTerminalIds(aId, bId, terminals, sortMode, terminalOrder)
-    const all = Array.from(terminals.entries())
+    const all = Array.from(terminals.entries()).filter(([id]) => !claimedTerminals.has(id))
     const filtered = all
       .filter(([, t]) => {
         if (!inActiveScope(t)) return false
@@ -144,7 +149,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     sortMode,
     terminalOrder,
     minimizedTerminals,
-    cardsByOwner
+    cardsByOwner,
+    claimedTerminals
   ])
 
   useEffect(() => {

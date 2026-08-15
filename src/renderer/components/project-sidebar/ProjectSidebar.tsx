@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import { useAppStore } from '../../stores'
+import { useClaimedTerminalIds } from '../../hooks/usePanelTerminals'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { getDisplayName } from '../../lib/terminal-display'
 import { useSidebarResize } from './useSidebarResize'
@@ -14,6 +15,11 @@ import type { SidebarSessionInfo } from './types'
 export function ProjectSidebar() {
   const config = useAppStore((s) => s.config)
   const terminals = useAppStore((s) => s.terminals)
+  // A shell held by a session's terminals panel is drawn there and nowhere
+  // else. It is listed in `terminals` like any session, so every surface that
+  // walks that map has to drop it — a row here would focus a terminal the grid
+  // has no cell for.
+  const claimed = useClaimedTerminalIds()
   const activeWorkspace = useAppStore((s) => s.activeWorkspace)
   const isSidebarOpen = useAppStore((s) => s.isSidebarOpen)
   const toggleSidebar = useAppStore((s) => s.toggleSidebar)
@@ -58,6 +64,7 @@ export function ProjectSidebar() {
     const mainCounts = new Map<string, number>()
 
     for (const [id, t] of terminals) {
+      if (claimed.has(id)) continue
       const pName = t.session.projectName
       const info: SidebarSessionInfo = {
         id,
@@ -90,7 +97,7 @@ export function ProjectSidebar() {
       worktreeSessionCounts: wtCounts,
       mainRepoSessionCounts: mainCounts
     }
-  }, [terminals])
+  }, [terminals, claimed])
 
   const workspaceTerminalCount = useMemo(() => {
     let count = 0

@@ -6,6 +6,7 @@ import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
+import { TerminalsCard } from './TerminalsCard'
 import { SplitDivider } from './SplitDivider'
 import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
 
@@ -57,6 +58,7 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
     if (entry.kind === 'files') return <FilesCard sessionId={sessionId} />
     if (entry.kind === 'editor') return <EditorCard sessionId={sessionId} />
     if (entry.kind === 'browser') return <BrowserCard sessionId={sessionId} />
+    if (entry.kind === 'terminals') return <TerminalsCard sessionId={sessionId} />
     return <DeviceCard sessionId={sessionId} />
   }
 

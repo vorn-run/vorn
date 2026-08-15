@@ -206,6 +206,96 @@ describe('SessionItem device control', () => {
   })
 })
 
+describe('SessionItem terminals control', () => {
+  const seedApi = (createShellTerminal: unknown): void => {
+    Object.defineProperty(window, 'api', {
+      value: {
+        ...(window as unknown as { api?: object }).api,
+        createShellTerminal,
+        notifyWidgetStatus: vi.fn(),
+        reorderSessions: vi.fn()
+      },
+      writable: true,
+      configurable: true
+    })
+  }
+
+  it('opens the panel with a shell already in it', async () => {
+    const createShellTerminal = vi
+      .fn()
+      .mockResolvedValue({ id: 'sh1', agentType: 'shell', projectName: 'p', projectPath: '/proj' })
+    seedApi(createShellTerminal)
+    seedProject(WEB)
+    act(() => {
+      useAppStore.setState({ terminalsPanes: new Map() })
+    })
+
+    render(<SessionItem session={session} />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Show terminals for/ }))
+    })
+
+    // An empty panel is a box occupying a pane and showing nothing, so opening
+    // it and creating the first shell are one action.
+    expect(createShellTerminal).toHaveBeenCalledWith('/proj')
+    expect(useAppStore.getState().terminalsPanes.get(session.id)?.terminals).toEqual(['sh1'])
+  })
+
+  it('offers a shell neither a panel nor a browser', () => {
+    seedApi(vi.fn())
+    seedProject(WEB)
+    act(() => {
+      useAppStore.setState({ terminalsPanes: new Map(), browserPanes: new Map() })
+    })
+
+    render(<SessionItem session={{ ...session, agentType: 'shell' }} />)
+
+    // A panel of shells inside a shell, and a browser beside a prompt nobody
+    // asked to drive from there. The file tree stays — looking at files next to
+    // a shell is as reasonable as next to an agent.
+    expect(screen.queryByRole('button', { name: /terminals for/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /browser for/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /files for/ })).toBeInTheDocument()
+  })
+
+  it('leaves a shell the control for a panel it already has', () => {
+    seedApi(vi.fn())
+    seedProject(WEB)
+    act(() => {
+      useAppStore.setState({ terminalsPanes: new Map() })
+      useAppStore.getState().openTerminalsPane(session.id, 'sh1')
+    })
+
+    render(<SessionItem session={{ ...session, agentType: 'shell' }} />)
+
+    // Hiding it would leave the panel on screen with no way to close it.
+    expect(screen.getByRole('button', { name: /Close terminals for/ })).toBeInTheDocument()
+  })
+
+  it('closes an open panel and the shells in it, rather than adding another', async () => {
+    const createShellTerminal = vi.fn()
+    const killTerminal = vi.fn().mockResolvedValue(undefined)
+    seedApi(createShellTerminal)
+    Object.assign((window as unknown as { api: Record<string, unknown> }).api, { killTerminal })
+    seedProject(WEB)
+    act(() => {
+      useAppStore.setState({ terminalsPanes: new Map() })
+      useAppStore.getState().openTerminalsPane(session.id, 'sh1')
+    })
+
+    render(<SessionItem session={session} />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Close terminals for/ }))
+    })
+
+    // Dropping the claim alone would scatter live shells across the grid as
+    // top-level cards, and the next click here would add another beside them.
+    expect(useAppStore.getState().terminalsPanes.has(session.id)).toBe(false)
+    expect(killTerminal).toHaveBeenCalledWith('sh1')
+    expect(createShellTerminal).not.toHaveBeenCalled()
+  })
+})
+
 /**
  * A session's popped-out cards are listed beneath its row, so the row is now a
  * fragment rather than a single button — and the rows below it have to be
