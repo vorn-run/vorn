@@ -91,7 +91,9 @@ describe('UpdatesSettings', () => {
       mockStore.appUpdateStatus = { kind: 'error', message: 'ENOTFOUND update.vorn.run' }
       render(<UpdatesSettings />)
 
-      expect(screen.getByText("Couldn't check for updates")).toBeInTheDocument()
+      // The label stays general: a failed download lands in this same state,
+      // so naming the check would misreport what went wrong.
+      expect(screen.getByText("Couldn't update")).toBeInTheDocument()
       expect(screen.getByText('ENOTFOUND update.vorn.run')).toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
       expect(checkForUpdates).toHaveBeenCalledTimes(1)

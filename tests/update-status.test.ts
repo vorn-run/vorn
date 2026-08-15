@@ -28,6 +28,16 @@ describe('formatLastChecked', () => {
     expect(formatLastChecked(NOW - 172_800_000, NOW)).toBe('checked 2 days ago')
   })
 
+  it('never claims more time has passed than really has', () => {
+    // Each unit advances only once it has fully elapsed. Rounding used to
+    // report 1m31s as "2 minutes ago" — telling the user the app had waited
+    // longer than it had.
+    expect(formatLastChecked(NOW - 91_000, NOW)).toBe('checked 1 minute ago')
+    expect(formatLastChecked(NOW - 59_999, NOW)).toBe('checked just now')
+    expect(formatLastChecked(NOW - 5_400_000, NOW)).toBe('checked 1 hour ago')
+    expect(formatLastChecked(NOW - 129_600_000, NOW)).toBe('checked 1 day ago')
+  })
+
   it('never reports the future as negative when clocks disagree', () => {
     expect(formatLastChecked(NOW + 5_000, NOW)).toBe('checked just now')
   })

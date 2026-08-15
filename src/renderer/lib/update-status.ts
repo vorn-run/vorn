@@ -40,16 +40,19 @@ export interface UpdateStatusView {
 export function formatLastChecked(at: number | null, now: number = Date.now()): string | null {
   if (at == null) return null
 
-  const seconds = Math.max(0, Math.round((now - at) / 1000))
+  // Floor rather than round at every step: an "… ago" string should only
+  // advance once the unit has actually elapsed. Rounding reported 1m31s as
+  // "2 minutes ago", claiming more time had passed than really had.
+  const seconds = Math.max(0, Math.floor((now - at) / 1000))
   if (seconds < 60) return 'checked just now'
 
-  const minutes = Math.round(seconds / 60)
+  const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `checked ${minutes} minute${minutes === 1 ? '' : 's'} ago`
 
-  const hours = Math.round(minutes / 60)
+  const hours = Math.floor(minutes / 60)
   if (hours < 24) return `checked ${hours} hour${hours === 1 ? '' : 's'} ago`
 
-  const days = Math.round(hours / 24)
+  const days = Math.floor(hours / 24)
   return `checked ${days} day${days === 1 ? '' : 's'} ago`
 }
 
@@ -114,8 +117,11 @@ export function describeUpdateStatus(
       }
 
     case 'error':
+      // Both a failed check and a failed download land here, so the label
+      // cannot claim which one it was. The message underneath carries the
+      // detail; retry re-checks, which is the right move either way.
       return {
-        label: "Couldn't check for updates",
+        label: "Couldn't update",
         shortLabel: 'Update failed',
         detail: status.message,
         tone: 'broken',
