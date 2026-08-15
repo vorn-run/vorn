@@ -269,12 +269,14 @@ describe('SessionItem terminals control', () => {
     render(<SessionItem session={{ ...session, agentType: 'shell' }} />)
 
     // Hiding it would leave the panel on screen with no way to close it.
-    expect(screen.getByRole('button', { name: /Hide terminals for/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Close terminals for/ })).toBeInTheDocument()
   })
 
-  it('closes an open panel rather than adding another shell to it', () => {
+  it('closes an open panel and the shells in it, rather than adding another', async () => {
     const createShellTerminal = vi.fn()
+    const killTerminal = vi.fn().mockResolvedValue(undefined)
     seedApi(createShellTerminal)
+    Object.assign((window as unknown as { api: Record<string, unknown> }).api, { killTerminal })
     seedProject(WEB)
     act(() => {
       useAppStore.setState({ terminalsPanes: new Map() })
@@ -282,9 +284,14 @@ describe('SessionItem terminals control', () => {
     })
 
     render(<SessionItem session={session} />)
-    fireEvent.click(screen.getByRole('button', { name: /Hide terminals for/ }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Close terminals for/ }))
+    })
 
+    // Dropping the claim alone would scatter live shells across the grid as
+    // top-level cards, and the next click here would add another beside them.
     expect(useAppStore.getState().terminalsPanes.has(session.id)).toBe(false)
+    expect(killTerminal).toHaveBeenCalledWith('sh1')
     expect(createShellTerminal).not.toHaveBeenCalled()
   })
 })

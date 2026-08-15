@@ -142,9 +142,11 @@ export function CardActionCluster({ terminalId, variant }: Props) {
   const agentType = terminal.session.agentType
   const showBrowser = shouldOfferPane(agentType, hasBrowserPane)
   const showTerminals = shouldOfferPane(agentType, hasTerminalsPane)
-  const showDevice =
-    shouldShowDeviceButton(mobileProjectCache.get(terminal.session.projectPath), hasDevicePane) &&
-    shouldOfferPane(agentType, hasDevicePane)
+  const showDevice = shouldShowDeviceButton(
+    mobileProjectCache.get(terminal.session.projectPath),
+    hasDevicePane,
+    agentType
+  )
 
   return (
     <div className="flex items-center gap-0.5 shrink-0">
@@ -175,7 +177,7 @@ export function CardActionCluster({ terminalId, variant }: Props) {
 
       {showTerminals && (
         <Tooltip
-          label={hasTerminalsPane ? 'Hide terminals' : 'Add a terminal'}
+          label={hasTerminalsPane ? 'Close terminals' : 'Add a terminal'}
           position={tooltipPos}
         >
           <button
@@ -183,7 +185,7 @@ export function CardActionCluster({ terminalId, variant }: Props) {
             onClick={handleTerminals}
             onPointerDown={(e) => e.stopPropagation()}
             className={ICON_BUTTON}
-            aria-label={hasTerminalsPane ? 'Hide terminals' : 'Add a terminal'}
+            aria-label={hasTerminalsPane ? 'Close terminals' : 'Add a terminal'}
           >
             <SquareTerminal size={ICON_BUTTON_SIZE} strokeWidth={2} />
           </button>

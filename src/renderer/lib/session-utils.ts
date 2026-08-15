@@ -9,6 +9,7 @@ import {
 } from '../../shared/types'
 import { useAppStore } from '../stores'
 import { toast } from '../components/Toast'
+import { closeTerminalsPanel } from './terminal-close'
 
 function normalizeComparablePath(p: string): string {
   const normalized = p.replace(/\\/g, '/').replace(/\/+$/, '')
@@ -216,27 +217,33 @@ export async function createSessionFromProject(
  * the active tab: a terminal claimed by a panel is deliberately absent from the
  * tab strip, so activating one would select a tab that is not there.
  */
-export async function addTerminalToPanel(sessionId: string, cwd: string): Promise<void> {
+export async function addTerminalToPanel(sessionId: string): Promise<string | null> {
+  // The owner answers both questions — where the shell starts and what it
+  // inherits — so it is read once here rather than each caller working out a
+  // cwd of its own and this function looking the same session up again.
+  const owner = useAppStore.getState().terminals.get(sessionId)?.session
+  if (!owner) return null
   try {
-    const session = await window.api.createShellTerminal(cwd)
+    const session = await window.api.createShellTerminal(owner.worktreePath || owner.projectPath)
     const state = useAppStore.getState()
-    const owner = state.terminals.get(sessionId)?.session
-    const enriched: TerminalSession = owner
-      ? {
-          ...session,
-          projectName: owner.projectName,
-          projectPath: owner.projectPath,
-          worktreePath: owner.worktreePath,
-          worktreeName: owner.worktreeName,
-          branch: owner.branch,
-          isWorktree: owner.isWorktree
-        }
-      : session
+    const enriched: TerminalSession = {
+      ...session,
+      projectName: owner.projectName,
+      projectPath: owner.projectPath,
+      worktreePath: owner.worktreePath,
+      worktreeName: owner.worktreeName,
+      branch: owner.branch,
+      isWorktree: owner.isWorktree
+    }
     state.addTerminal(enriched)
     state.openTerminalsPane(sessionId, enriched.id)
+    // Returned so the caller can put the keyboard in it — a new shell nobody
+    // is typing into is a shell you have to click before using.
+    return enriched.id
   } catch (err) {
     console.error('[addTerminalToPanel] failed:', err)
     toast.error(`Failed to start terminal: ${err instanceof Error ? err.message : String(err)}`)
+    return null
   }
 }
 
@@ -252,12 +259,13 @@ export async function addTerminalToPanel(sessionId: string, cwd: string): Promis
 export async function toggleTerminalsPanel(sessionId: string): Promise<void> {
   const state = useAppStore.getState()
   if (state.terminalsPanes.has(sessionId)) {
-    state.closeTerminalsPane(sessionId)
+    // The shells go with the panel. Merely dropping the claim would scatter
+    // them across the grid as top-level cards, and the next click here would
+    // add another shell beside them.
+    await closeTerminalsPanel(sessionId)
     return
   }
-  const owner = state.terminals.get(sessionId)?.session
-  if (!owner) return
-  await addTerminalToPanel(sessionId, owner.worktreePath || owner.projectPath)
+  await addTerminalToPanel(sessionId)
 }
 
 export async function createShellInProject(

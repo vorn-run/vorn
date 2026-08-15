@@ -1,7 +1,8 @@
-import { memo, forwardRef, useMemo } from 'react'
+import { memo, forwardRef, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Plus, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useAppStore } from '../stores'
+import { activePanelIndex } from '../stores/types'
 import { PaneCard, PaneControls } from './PaneCard'
 import { TerminalPane } from './TerminalPane'
 import { IntentBar } from './IntentBar'
@@ -9,7 +10,7 @@ import { terminalsPaneId } from '../lib/pane-id'
 import { getDisplayName } from '../lib/terminal-display'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { addTerminalToPanel } from '../lib/session-utils'
-import { closeTerminalSession } from '../lib/terminal-close'
+import { closeTerminalSession, closeTerminalsPanel } from '../lib/terminal-close'
 
 interface Props {
   /** Session that owns this panel. */
@@ -43,19 +44,22 @@ export const TerminalsCard = memo(
     // selector instead would hand `useShallow` a fresh array every call, so no
     // two snapshots would ever compare equal and the component would re-render
     // without end. Derive it in a memo below, not in the selector.
-    const { owner, pane, terminals, focusedId, setActive, extract, closePanel, domBlocks } =
-      useAppStore(
-        useShallow((s) => ({
-          owner: s.terminals.get(sessionId),
-          pane: s.terminalsPanes.get(sessionId) ?? null,
-          terminals: s.terminals,
-          focusedId: s.focusedTerminalId,
-          setActive: s.setActivePanelTerminal,
-          extract: s.extractPanelTerminal,
-          closePanel: s.closeTerminalsPane,
-          domBlocks: s.config?.defaults.domBlockRendering ?? true
-        }))
-      )
+    const { owner, pane, terminals, setActive, extract, domBlocks } = useAppStore(
+      useShallow((s) => ({
+        owner: s.terminals.get(sessionId),
+        pane: s.terminalsPanes.get(sessionId) ?? null,
+        terminals: s.terminals,
+        setActive: s.setActivePanelTerminal,
+        extract: s.extractPanelTerminal,
+        domBlocks: s.config?.defaults.domBlockRendering ?? true
+      }))
+    )
+
+    // Which shell should hold the keyboard. It cannot be `focusedTerminalId`:
+    // a claimed shell is deliberately kept out of the focusable set, so that
+    // comparison is structurally always false and nothing ever put the caret in
+    // here — clicking a tab left you typing at the agent instead.
+    const [focusTarget, setFocusTarget] = useState<string | null>(null)
 
     const held = pane?.terminals
     const names = useMemo(
@@ -69,10 +73,9 @@ export const TerminalsCard = memo(
 
     if (!owner || !pane || names.length === 0) return null
 
-    const active = names[Math.min(pane.activeTab, names.length - 1)]
+    const active = names[activePanelIndex(pane)]
     const paneId = terminalsPaneId(sessionId)
-    const cwd = owner.session.worktreePath || owner.session.projectPath
-    const close = (): void => closePanel(sessionId)
+    const close = (): void => void closeTerminalsPanel(sessionId)
 
     return (
       <PaneCard
@@ -106,10 +109,19 @@ export const TerminalsCard = memo(
                   role="tab"
                   aria-selected={isActive}
                   tabIndex={0}
-                  onClick={() => setActive(sessionId, i)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') setActive(sessionId, i)
+                  onClick={() => {
+                    setActive(sessionId, i)
+                    setFocusTarget(t.id)
                   }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return
+                    setActive(sessionId, i)
+                    setFocusTarget(t.id)
+                  }}
+                  // The card underneath selects its session on pointerdown and
+                  // then focuses that session's agent a frame later, which would
+                  // take the keyboard straight back off the shell.
+                  onPointerDown={(e) => e.stopPropagation()}
                   title={t.name}
                   className={`group/tab flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-md max-w-[170px]
                               cursor-default select-none transition-colors ${
@@ -149,7 +161,12 @@ export const TerminalsCard = memo(
             })}
             <button
               type="button"
-              onClick={() => void addTerminalToPanel(sessionId, cwd)}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => {
+                void addTerminalToPanel(sessionId).then((id) => {
+                  if (id) setFocusTarget(id)
+                })
+              }}
               aria-label="New terminal in this session"
               className="shrink-0 self-center ml-0.5 p-1 rounded-md text-gray-600 hover:text-gray-200
                          hover:bg-white/[0.06] transition-colors"
@@ -180,7 +197,7 @@ export const TerminalsCard = memo(
             key={active.id}
             terminalId={active.id}
             agentType={active.agentType}
-            isFocused={focusedId === active.id}
+            isFocused={focusTarget === active.id}
             flexible={flexible}
             domBlocks={domBlocks}
           />

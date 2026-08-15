@@ -469,7 +469,7 @@ export function TabView() {
                       />
                       {shouldOfferPane(terminal.session.agentType, terminalsPanes.has(id)) && (
                         <TabIconButton
-                          label="Add a terminal"
+                          label={terminalsPanes.has(id) ? 'Close terminals' : 'Add a terminal'}
                           icon={<SquareTerminal size={13} />}
                           onClick={() => void toggleTerminalsPanel(id)}
                         />

@@ -9,6 +9,40 @@ export function consumePendingTerminalClose(id: string): boolean {
   return pending
 }
 
+/**
+ * Close a session's terminals panel, and the shells it is holding.
+ *
+ * The shells go with it. They were created by the panel and are claimed by it,
+ * and that claim is the only thing keeping them off every other surface — so
+ * dropping the panel alone would leave live ptys scattered across the grid as
+ * top-level cards nobody asked for, and the next click on the same control
+ * would start yet another shell beside them.
+ *
+ * Each kill is independent, so one failure cannot strand the rest.
+ */
+export async function closeTerminalsPanel(sessionId: string): Promise<void> {
+  const state = useAppStore.getState()
+  const held = state.terminalsPanes.get(sessionId)?.terminals ?? []
+  for (const heldId of held) {
+    pendingTerminalCloses.add(heldId)
+    destroyTerminal(heldId)
+  }
+  // Closes the panel too: its last shell leaving is what shuts it, and
+  // `removeTerminal` releases each claim on the way through.
+  for (const heldId of held) state.removeTerminal(heldId)
+  state.closeTerminalsPane(sessionId)
+
+  await Promise.allSettled(
+    held.map(async (target) => {
+      try {
+        await window.api.killTerminal(target)
+      } catch (err) {
+        console.warn(`[terminal-close] killTerminal failed for ${target}:`, err)
+      }
+    })
+  )
+}
+
 export async function closeTerminalSession(id: string): Promise<void> {
   const state = useAppStore.getState()
 

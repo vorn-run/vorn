@@ -59,9 +59,7 @@ export function SessionItem({
   // shells. An already-open pane keeps its control so it can still be closed.
   const showBrowser = shouldOfferPane(session.agentType, hasBrowserPane)
   const showTerminals = shouldOfferPane(session.agentType, hasTerminalsPane)
-  const showDevice =
-    shouldShowDeviceButton(mobile, hasDevicePane) &&
-    shouldOfferPane(session.agentType, hasDevicePane)
+  const showDevice = shouldShowDeviceButton(mobile, hasDevicePane, session.agentType)
   const isActive =
     layoutMode === 'tabs' ? activeTabId === session.id : focusedTerminalId === session.id
   const isPreviewing = previewTerminalId === session.id
@@ -150,8 +148,8 @@ export function SessionItem({
         {showTerminals && (
           <button
             type="button"
-            aria-label={`${hasTerminalsPane ? 'Hide' : 'Show'} terminals for ${session.name}`}
-            title={hasTerminalsPane ? 'Hide terminals' : 'Add a terminal'}
+            aria-label={`${hasTerminalsPane ? 'Close' : 'Show'} terminals for ${session.name}`}
+            title={hasTerminalsPane ? 'Close these terminals' : 'Add a terminal'}
             onClick={(e) => {
               e.stopPropagation()
               void toggleTerminalsPanel(session.id)
