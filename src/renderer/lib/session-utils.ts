@@ -208,6 +208,38 @@ export async function createSessionFromProject(
   state.addTerminal(session)
 }
 
+/**
+ * Start a shell inside a session's terminals panel.
+ *
+ * Same creation as `createShellInProject` — a shell terminal is a full session
+ * either way — differing only in where the new id is put. It must not become
+ * the active tab: a terminal claimed by a panel is deliberately absent from the
+ * tab strip, so activating one would select a tab that is not there.
+ */
+export async function addTerminalToPanel(sessionId: string, cwd: string): Promise<void> {
+  try {
+    const session = await window.api.createShellTerminal(cwd)
+    const state = useAppStore.getState()
+    const owner = state.terminals.get(sessionId)?.session
+    const enriched: TerminalSession = owner
+      ? {
+          ...session,
+          projectName: owner.projectName,
+          projectPath: owner.projectPath,
+          worktreePath: owner.worktreePath,
+          worktreeName: owner.worktreeName,
+          branch: owner.branch,
+          isWorktree: owner.isWorktree
+        }
+      : session
+    state.addTerminal(enriched)
+    state.openTerminalsPane(sessionId, enriched.id)
+  } catch (err) {
+    console.error('[addTerminalToPanel] failed:', err)
+    toast.error(`Failed to start terminal: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
 export async function createShellInProject(
   cwd?: string,
   context?: {

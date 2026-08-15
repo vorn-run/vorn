@@ -82,6 +82,7 @@ function seed(ids = ['t1']): void {
       filesPanes: new Set(),
       editorPanes: new Map(),
       browserPanes: new Map(),
+      terminalsPanes: new Map(),
       minimizedTerminals: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids
@@ -459,6 +460,20 @@ describe('panes travel with their session into focus mode', () => {
     )
     const paths = mockReadFileContent.mock.calls.map((c) => c[0])
     expect(paths).not.toContain('/repo/popped.ts')
+  })
+
+  it("carries the session's terminals panel in too", () => {
+    // Focus mode keeps its own copy of the pane stack, so a new kind has to be
+    // added there as well as to the column — leaving it out is how a pane
+    // silently vanishes on expand.
+    seed(['t1', 'sh1'])
+    act(() => {
+      useAppStore.setState({ focusedTerminalId: 't1' })
+      useAppStore.getState().openTerminalsPane('t1', 'sh1')
+    })
+    render(<FocusedTerminal />)
+
+    expect(screen.getByTestId('terminals-pane-header-t1')).toBeInTheDocument()
   })
 
   it("carries the session's browser into focus mode too", () => {

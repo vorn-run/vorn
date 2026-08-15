@@ -9,6 +9,7 @@ import {
   EditorPaneState,
   BrowserPaneState,
   DevicePaneState,
+  TerminalsPaneState,
   CardSplit,
   isPromotedPane
 } from './types'
@@ -17,6 +18,7 @@ import {
   editorPaneId,
   browserPaneId,
   devicePaneId,
+  terminalsPaneId,
   isTerminalPane,
   paneOwnerId,
   promotedCardSeq,
@@ -41,6 +43,7 @@ const SIDEBAR_STORAGE_KEY = 'vorn:sidebarSettings'
 const FLEXIBLE_STORAGE_KEY = 'vorn:flexibleLayouts'
 const CARD_SPLITS_STORAGE_KEY = 'vorn:cardSplits'
 const PANES_STORAGE_KEY = 'vorn:panes'
+const TERMINAL_PANELS_STORAGE_KEY = 'vorn:terminalPanels'
 /**
  * Where a browser pane opened with no url starts. Deliberately blank: guessing
  * a page would be wrong more often than not, and the address bar is focused
@@ -254,6 +257,7 @@ function reconcilePanes(
   browserPanes: Map<string, BrowserPaneState>,
   browserMemory: Map<string, BrowserPaneState>,
   devicePanes: Map<string, DevicePaneState>,
+  terminalsPanes: Map<string, TerminalsPaneState>,
   cardSplits: Record<string, CardSplit>,
   liveSessionIds: Set<string>
 ): {
@@ -262,6 +266,7 @@ function reconcilePanes(
   browserPanes: Map<string, BrowserPaneState>
   browserMemory: Map<string, BrowserPaneState>
   devicePanes: Map<string, DevicePaneState>
+  terminalsPanes: Map<string, TerminalsPaneState>
   cardSplits: Record<string, CardSplit>
 } | null {
   const nextFiles = new Set([...filesPanes].filter((id) => liveSessionIds.has(id)))
@@ -278,6 +283,10 @@ function reconcilePanes(
   // card mounted against a device nobody can drive — the same leak, minus the
   // localStorage growth.
   const nextDevices = new Map([...devicePanes].filter(([id]) => liveSessionIds.has(id)))
+  // A panel goes with its owner, and its remaining shells go with it — they are
+  // sessions too, so a dead session's list would otherwise keep ids that hide
+  // terminals which no longer exist.
+  const nextPanels = new Map([...terminalsPanes].filter(([id]) => liveSessionIds.has(id)))
   const nextSplits = Object.fromEntries(
     Object.entries(cardSplits).filter(([id]) => liveSessionIds.has(id))
   )
@@ -288,18 +297,21 @@ function reconcilePanes(
     nextBrowsers.size === browserPanes.size &&
     nextMemory.size === browserMemory.size &&
     nextDevices.size === devicePanes.size &&
+    nextPanels.size === terminalsPanes.size &&
     !splitsChanged
   ) {
     return null
   }
   savePanes(nextFiles, nextEditors, nextBrowsers)
   if (splitsChanged) saveCardSplits(nextSplits)
+  if (nextPanels.size !== terminalsPanes.size) saveTerminalPanels(nextPanels)
   return {
     filesPanes: nextFiles,
     editorPanes: nextEditors,
     browserPanes: nextBrowsers,
     browserMemory: nextMemory,
     devicePanes: nextDevices,
+    terminalsPanes: nextPanels,
     cardSplits: nextSplits
   }
 }
@@ -383,6 +395,44 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return true
 }
 
+/**
+ * Which shells each session holds, persisted so a reload keeps the arrangement.
+ *
+ * Shape: `{ [sessionId]: { terminals: sessionId[], activeTab: number } }`. An
+ * entry whose terminals are all gone is dropped on read: a panel listing shells
+ * that no longer exist would render an empty box, and its ids are how those
+ * shells stay hidden from every other surface.
+ */
+export function parsePersistedPanels(
+  parsed: Record<string, Partial<TerminalsPaneState>> | undefined
+): Map<string, TerminalsPaneState> {
+  const out = new Map<string, TerminalsPaneState>()
+  for (const [id, pane] of Object.entries(parsed ?? {})) {
+    const terminals = pane?.terminals?.filter((t) => typeof t === 'string') ?? []
+    if (terminals.length === 0) continue
+    const activeTab = Math.min(Math.max(pane?.activeTab ?? 0, 0), terminals.length - 1)
+    out.set(id, { terminals, activeTab })
+  }
+  return out
+}
+
+function loadTerminalPanels(): Map<string, TerminalsPaneState> {
+  try {
+    const raw = localStorage.getItem(TERMINAL_PANELS_STORAGE_KEY)
+    return raw ? parsePersistedPanels(JSON.parse(raw)) : new Map()
+  } catch {
+    return new Map()
+  }
+}
+
+function saveTerminalPanels(panels: Map<string, TerminalsPaneState>): void {
+  try {
+    localStorage.setItem(TERMINAL_PANELS_STORAGE_KEY, JSON.stringify(Object.fromEntries(panels)))
+  } catch {
+    /* ignore */
+  }
+}
+
 function loadSidebarSettings(): Record<string, string> {
   try {
     const raw = localStorage.getItem(SIDEBAR_STORAGE_KEY)
@@ -441,6 +491,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   // Not part of loadPanes: a claim lives in main and dies with the app, so a
   // device pane restored from disk would frame a simulator nobody holds.
   devicePanes: new Map(),
+  terminalsPanes: loadTerminalPanels(),
   maximizedPaneId: null,
   sessionDockCollapsed: false,
   isOnboardingOpen: false,
@@ -570,6 +621,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
               state.browserPanes,
               state.browserMemory,
               state.devicePanes,
+              state.terminalsPanes,
               state.cardSplits,
               live
             )
@@ -836,6 +888,85 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
         devicePanes: next,
         ...clearPlacement(state, devicePaneId(sessionId))
       }
+    }),
+
+  openTerminalsPane: (sessionId, terminalId) =>
+    set((state) => {
+      const next = new Map(state.terminalsPanes)
+      const existing = next.get(sessionId)
+      if (existing) {
+        // Already claimed — show it rather than listing it twice, which would
+        // put one terminal in two tabs fighting over a single rendered slot.
+        if (existing.terminals.includes(terminalId)) {
+          next.set(sessionId, {
+            ...existing,
+            activeTab: existing.terminals.indexOf(terminalId)
+          })
+        } else {
+          const terminals = [...existing.terminals, terminalId]
+          next.set(sessionId, { terminals, activeTab: terminals.length - 1 })
+        }
+      } else {
+        next.set(sessionId, { terminals: [terminalId], activeTab: 0 })
+      }
+      saveTerminalPanels(next)
+      return { terminalsPanes: next }
+    }),
+
+  closeTerminalsPane: (sessionId) =>
+    set((state) => {
+      if (!state.terminalsPanes.has(sessionId)) return {}
+      const next = new Map(state.terminalsPanes)
+      next.delete(sessionId)
+      saveTerminalPanels(next)
+      return {
+        terminalsPanes: next,
+        ...clearPlacement(state, terminalsPaneId(sessionId))
+      }
+    }),
+
+  setActivePanelTerminal: (sessionId, index) =>
+    set((state) => {
+      const pane = state.terminalsPanes.get(sessionId)
+      if (!pane || index < 0 || index >= pane.terminals.length) return {}
+      if (pane.activeTab === index) return {}
+      const next = new Map(state.terminalsPanes)
+      next.set(sessionId, { ...pane, activeTab: index })
+      saveTerminalPanels(next)
+      return { terminalsPanes: next }
+    }),
+
+  extractPanelTerminal: (sessionId, terminalId) =>
+    set((state) => {
+      const pane = state.terminalsPanes.get(sessionId)
+      if (!pane) return {}
+      const index = pane.terminals.indexOf(terminalId)
+      if (index === -1) return {}
+
+      const next = new Map(state.terminalsPanes)
+      const terminals = pane.terminals.filter((id) => id !== terminalId)
+      if (terminals.length === 0) {
+        // A panel with no shells is a box taking up a pane, the same rule the
+        // browser's last tab follows.
+        next.delete(sessionId)
+        saveTerminalPanels(next)
+        return {
+          terminalsPanes: next,
+          ...clearPlacement(state, terminalsPaneId(sessionId))
+        }
+      }
+      // Land on the neighbour rather than jumping to the far end, and shift
+      // when something ahead of the active one leaves.
+      const activeTab = Math.max(
+        0,
+        Math.min(
+          index <= pane.activeTab ? pane.activeTab - 1 : pane.activeTab,
+          terminals.length - 1
+        )
+      )
+      next.set(sessionId, { terminals, activeTab })
+      saveTerminalPanels(next)
+      return { terminalsPanes: next }
     }),
 
   setMaximizedPane: (paneId) =>
@@ -1197,12 +1328,30 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
  * say why. One selector, so a new kind is added once.
  */
 export function selectPaneFlags(
-  s: Pick<AppStore, 'filesPanes' | 'editorPanes' | 'browserPanes' | 'devicePanes'>,
+  s: Pick<
+    AppStore,
+    'filesPanes' | 'editorPanes' | 'browserPanes' | 'devicePanes' | 'terminalsPanes'
+  >,
   sessionId: string | null
-): { files: boolean; editor: boolean; browser: boolean; device: boolean; any: boolean } {
+): {
+  files: boolean
+  editor: boolean
+  browser: boolean
+  device: boolean
+  terminals: boolean
+  any: boolean
+} {
   const files = sessionId ? s.filesPanes.has(sessionId) : false
   const editor = sessionId ? s.editorPanes.has(sessionId) : false
   const browser = sessionId ? s.browserPanes.has(sessionId) : false
   const device = sessionId ? s.devicePanes.has(sessionId) : false
-  return { files, editor, browser, device, any: files || editor || browser || device }
+  const terminals = sessionId ? s.terminalsPanes.has(sessionId) : false
+  return {
+    files,
+    editor,
+    browser,
+    device,
+    terminals,
+    any: files || editor || browser || device || terminals
+  }
 }

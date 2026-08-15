@@ -26,7 +26,9 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
     set((state) => {
       const next = new Map(state.terminals)
       next.delete(id)
-      const order = state.terminalOrder.filter((tid) => tid !== id)
+      const order = state.terminalOrder.filter(
+        (tid) => tid !== id && !(state.terminalsPanes.get(id)?.terminals ?? []).includes(tid)
+      )
       // A session owns its file-tree, editor, browser and device panes: they
       // die with it, and so does any maximized state pointing at them.
       const childIds = [filesPaneId(id), editorPaneId(id), browserPaneId(id), devicePaneId(id)]
@@ -64,6 +66,18 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         minimized.delete(paneId)
         dying.add(paneId)
       }
+      // The panel goes, and so do the shells it was holding — they are sessions
+      // in their own right, and the list is the only thing that was hiding them
+      // from every other surface. Their ptys are killed by the caller, which
+      // owns the async side; this is the record of them.
+      const terminalsPanes = new Map(state.terminalsPanes)
+      const heldTerminals = terminalsPanes.get(id)?.terminals ?? []
+      terminalsPanes.delete(id)
+      for (const heldId of heldTerminals) {
+        next.delete(heldId)
+        minimized.delete(heldId)
+        dying.add(heldId)
+      }
       // The remembered tabs go with the session too. A recycled id would
       // otherwise reopen its browser onto a previous session's pages.
       const browserMemory = new Map(state.browserMemory)
@@ -95,6 +109,7 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         terminals: next,
         terminalOrder: order,
         minimizedTerminals: minimized,
+        terminalsPanes,
         filesPanes,
         editorPanes,
         browserPanes,

@@ -28,12 +28,13 @@ export function usePaneColumnEntries(sessionId: string | null): ColumnEntry[] {
   // `editor:card:<id>` entry for a pane that does not exist. Harmless only
   // because today's callers happen to branch before reading it.
   const owner = sessionId !== null && !isPromotedCardId(sessionId) ? sessionId : null
-  const { hasFiles, hasEditor, hasBrowser, hasDevice } = useAppStore(
+  const { hasFiles, hasEditor, hasBrowser, hasDevice, hasTerminals } = useAppStore(
     useShallow((s) => ({
       hasFiles: owner ? s.filesPanes.has(owner) : false,
       hasEditor: owner ? s.editorPanes.has(owner) : false,
       hasBrowser: owner ? s.browserPanes.has(owner) : false,
-      hasDevice: owner ? s.devicePanes.has(owner) : false
+      hasDevice: owner ? s.devicePanes.has(owner) : false,
+      hasTerminals: owner ? s.terminalsPanes.has(owner) : false
     }))
   )
 
@@ -45,8 +46,9 @@ export function usePaneColumnEntries(sessionId: string | null): ColumnEntry[] {
       hasFiles ? ('files' as const) : null,
       hasEditor ? ('editor' as const) : null,
       hasBrowser ? ('browser' as const) : null,
-      hasDevice ? ('device' as const) : null
+      hasDevice ? ('device' as const) : null,
+      hasTerminals ? ('terminals' as const) : null
     ].filter((k): k is PaneChildKind => k !== null)
     return kinds.map((kind) => ({ id: paneIdFor(kind, owner), kind }))
-  }, [owner, hasFiles, hasEditor, hasBrowser, hasDevice])
+  }, [owner, hasFiles, hasEditor, hasBrowser, hasDevice, hasTerminals])
 }

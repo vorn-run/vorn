@@ -12,7 +12,7 @@
  * untouched — only the components that *render* a pane need to branch on kind.
  */
 
-export type PaneKind = 'terminal' | 'files' | 'editor' | 'browser' | 'device' | 'card'
+export type PaneKind = 'terminal' | 'files' | 'editor' | 'browser' | 'device' | 'terminals' | 'card'
 
 /** Pane kinds a session stacks inside its own card, i.e. all but those two. */
 export type PaneChildKind = Exclude<PaneKind, 'terminal' | 'card'>
@@ -21,6 +21,7 @@ const FILES_PREFIX = 'files:'
 const EDITOR_PREFIX = 'editor:'
 const BROWSER_PREFIX = 'browser:'
 const DEVICE_PREFIX = 'device:'
+const TERMINALS_PREFIX = 'terminals:'
 const CARD_PREFIX = 'card:'
 
 /** Id of the file-tree pane owned by `sessionId`. */
@@ -36,6 +37,17 @@ export function editorPaneId(sessionId: string): string {
 /** Id of the browser pane owned by `sessionId`. */
 export function browserPaneId(sessionId: string): string {
   return `${BROWSER_PREFIX}${sessionId}`
+}
+
+/**
+ * Id of the terminals panel owned by `sessionId`.
+ *
+ * One panel per session holding any number of shells, so — like its browser —
+ * the owner id is enough to name it. Which shells, and which is in front, is
+ * the panel's own state.
+ */
+export function terminalsPaneId(sessionId: string): string {
+  return `${TERMINALS_PREFIX}${sessionId}`
 }
 
 /**
@@ -64,6 +76,8 @@ export function paneIdFor(kind: PaneChildKind, sessionId: string): string {
       return browserPaneId(sessionId)
     case 'device':
       return devicePaneId(sessionId)
+    case 'terminals':
+      return terminalsPaneId(sessionId)
   }
 }
 
@@ -127,6 +141,9 @@ export function parsePaneId(paneId: string): { kind: PaneKind; sessionId: string
   if (paneId.startsWith(DEVICE_PREFIX)) {
     return { kind: 'device', sessionId: paneId.slice(DEVICE_PREFIX.length) }
   }
+  if (paneId.startsWith(TERMINALS_PREFIX)) {
+    return { kind: 'terminals', sessionId: paneId.slice(TERMINALS_PREFIX.length) }
+  }
   return { kind: 'terminal', sessionId: paneId }
 }
 
@@ -137,6 +154,7 @@ export function paneKind(paneId: string): PaneKind {
   if (paneId.startsWith(EDITOR_PREFIX)) return 'editor'
   if (paneId.startsWith(BROWSER_PREFIX)) return 'browser'
   if (paneId.startsWith(DEVICE_PREFIX)) return 'device'
+  if (paneId.startsWith(TERMINALS_PREFIX)) return 'terminals'
   return 'terminal'
 }
 

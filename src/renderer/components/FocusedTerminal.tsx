@@ -19,6 +19,7 @@ import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
+import { TerminalsCard } from './TerminalsCard'
 import { parsePaneId } from '../lib/pane-id'
 import { isMac } from '../lib/platform'
 import { ArrowDown, FolderGit2, GitBranch, Minimize2, Pencil } from 'lucide-react'
@@ -67,6 +68,9 @@ export function FocusedTerminal() {
   const hasEditorPane = useAppStore((s) => (effectiveId ? s.editorPanes.has(effectiveId) : false))
   const hasBrowserPane = useAppStore((s) => (effectiveId ? s.browserPanes.has(effectiveId) : false))
   const hasDevicePane = useAppStore((s) => (effectiveId ? s.devicePanes.has(effectiveId) : false))
+  const hasTerminalsPane = useAppStore((s) =>
+    effectiveId ? s.terminalsPanes.has(effectiveId) : false
+  )
   // Shared with the card grid and tab view, so a new pane kind is added once.
   const hasAnyPane = useAppStore((s) => selectPaneFlags(s, effectiveId).any)
   // Maximize is session-scoped in the grid; expanded mode is that same session
@@ -89,7 +93,8 @@ export function FocusedTerminal() {
     (maximizedKind === 'files' && hasFilesPane) ||
     (maximizedKind === 'editor' && hasEditorPane) ||
     (maximizedKind === 'browser' && hasBrowserPane) ||
-    (maximizedKind === 'device' && hasDevicePane)
+    (maximizedKind === 'device' && hasDevicePane) ||
+    (maximizedKind === 'terminals' && hasTerminalsPane)
 
   const handleContract = (): void => {
     if (isPreview) {
@@ -310,6 +315,11 @@ export function FocusedTerminal() {
               {hasDevicePane && (
                 <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'device'}>
                   <DeviceCard sessionId={effectiveId} />
+                </PaneSlot>
+              )}
+              {hasTerminalsPane && (
+                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'terminals'}>
+                  <TerminalsCard sessionId={effectiveId} />
                 </PaneSlot>
               )}
             </div>

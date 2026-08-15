@@ -5,6 +5,7 @@ import {
   editorPaneId,
   browserPaneId,
   devicePaneId,
+  terminalsPaneId,
   paneIdFor,
   promotedCardId,
   isPromotedCardId,
@@ -65,11 +66,12 @@ describe('pane-id', () => {
     // The pane column carries kinds, not ids, so it needs the inverse of
     // parsePaneId — and the two have to agree, or a promoted pane would be
     // skipped in the column under one id and drawn in the grid under another.
-    for (const kind of ['files', 'editor', 'browser', 'device'] as const) {
+    for (const kind of ['files', 'editor', 'browser', 'device', 'terminals'] as const) {
       const id = paneIdFor(kind, 'abc')
       expect(parsePaneId(id)).toEqual({ kind, sessionId: 'abc' })
     }
     expect(paneIdFor('device', 'abc')).toBe(devicePaneId('abc'))
+    expect(paneIdFor('terminals', 'abc')).toBe(terminalsPaneId('abc'))
   })
 
   it('reads a card id back to the session it was popped out of', () => {

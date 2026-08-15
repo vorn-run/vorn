@@ -206,6 +206,58 @@ describe('SessionItem device control', () => {
   })
 })
 
+describe('SessionItem terminals control', () => {
+  const seedApi = (createShellTerminal: unknown): void => {
+    Object.defineProperty(window, 'api', {
+      value: {
+        ...(window as unknown as { api?: object }).api,
+        createShellTerminal,
+        notifyWidgetStatus: vi.fn(),
+        reorderSessions: vi.fn()
+      },
+      writable: true,
+      configurable: true
+    })
+  }
+
+  it('opens the panel with a shell already in it', async () => {
+    const createShellTerminal = vi
+      .fn()
+      .mockResolvedValue({ id: 'sh1', agentType: 'shell', projectName: 'p', projectPath: '/proj' })
+    seedApi(createShellTerminal)
+    seedProject(WEB)
+    act(() => {
+      useAppStore.setState({ terminalsPanes: new Map() })
+    })
+
+    render(<SessionItem session={session} />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Show terminals for/ }))
+    })
+
+    // An empty panel is a box occupying a pane and showing nothing, so opening
+    // it and creating the first shell are one action.
+    expect(createShellTerminal).toHaveBeenCalledWith('/proj')
+    expect(useAppStore.getState().terminalsPanes.get(session.id)?.terminals).toEqual(['sh1'])
+  })
+
+  it('closes an open panel rather than adding another shell to it', () => {
+    const createShellTerminal = vi.fn()
+    seedApi(createShellTerminal)
+    seedProject(WEB)
+    act(() => {
+      useAppStore.setState({ terminalsPanes: new Map() })
+      useAppStore.getState().openTerminalsPane(session.id, 'sh1')
+    })
+
+    render(<SessionItem session={session} />)
+    fireEvent.click(screen.getByRole('button', { name: /Hide terminals for/ }))
+
+    expect(useAppStore.getState().terminalsPanes.has(session.id)).toBe(false)
+    expect(createShellTerminal).not.toHaveBeenCalled()
+  })
+})
+
 /**
  * A session's popped-out cards are listed beneath its row, so the row is now a
  * fragment rather than a single button — and the rows below it have to be
