@@ -5,6 +5,24 @@ import '@testing-library/jest-dom/vitest'
 
 const mockStore = {
   terminals: new Map(),
+  terminalsPanes: new Map(),
+  // A session row reads these; the rows are what this file renders.
+  filesPanes: new Set(),
+  editorPanes: new Map(),
+  browserPanes: new Map(),
+  devicePanes: new Map(),
+  mobileProjectCache: new Map(),
+  loadMobileProject: vi.fn(),
+  toggleFilesPane: vi.fn(),
+  toggleBrowserPane: vi.fn(),
+  claimAndOpenDevicePane: vi.fn(),
+  closeDevicePane: vi.fn(),
+  setActiveTabId: vi.fn(),
+  setPreviewTerminal: vi.fn(),
+  focusedTerminalId: null as string | null,
+  previewTerminalId: null as string | null,
+  activeTabId: null as string | null,
+  config: null,
   activeProject: null as string | null,
   setActiveProject: vi.fn(),
   setFocusedTerminal: vi.fn(),
@@ -29,6 +47,7 @@ const { FlatSessionsSection } =
 
 beforeEach(() => {
   mockStore.terminals.clear()
+  mockStore.terminalsPanes.clear()
   mockStore.activeProject = null
   mockStore.setActiveProject.mockReset()
   mockStore.setFocusedTerminal.mockReset()
@@ -71,6 +90,39 @@ describe('FlatSessionsSection', () => {
     fireEvent.click(screen.getByText('All Projects'))
     expect(mockStore.setActiveProject).toHaveBeenCalledWith(null)
     expect(mockStore.setFocusedTerminal).toHaveBeenCalledWith(null)
+  })
+
+  it("leaves out a shell held by a session's terminals panel", () => {
+    const term = (id: string, name: string) => ({
+      id,
+      session: {
+        id,
+        projectName: 'p1',
+        projectPath: '/p1',
+        agentType: 'shell',
+        displayName: name
+      },
+      status: 'idle',
+      lastOutputTimestamp: 1
+    })
+    mockStore.terminals.set('agent', term('agent', 'Agent'))
+    mockStore.terminals.set('sh1', term('sh1', 'Held shell'))
+    mockStore.terminalsPanes.set('agent', { terminals: ['sh1'], activeTab: 0 })
+
+    render(
+      <FlatSessionsSection
+        isCollapsed={false}
+        workspaceProjectNames={new Set(['p1'])}
+        workspaceTerminalCount={2}
+      />
+    )
+
+    // A claimed shell is drawn in its panel and nowhere else. A row here would
+    // focus a terminal that has no cell in the grid and no tab in the strip —
+    // and the sidebar builds its list straight off the terminals map, so it has
+    // to drop them itself.
+    expect(screen.getByText('Agent')).toBeInTheDocument()
+    expect(screen.queryByText('Held shell')).not.toBeInTheDocument()
   })
 
   it('shows empty state when there are no sessions', () => {
