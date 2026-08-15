@@ -1,4 +1,5 @@
-import type { DeviceInfo, MobileProject } from '../../shared/types'
+import type { AgentType, DeviceInfo, MobileProject } from '../../shared/types'
+import { shouldOfferPane } from './pane-affordance'
 
 /**
  * Whether to offer the device control for a session.
@@ -17,9 +18,13 @@ import type { DeviceInfo, MobileProject } from '../../shared/types'
  */
 export function shouldShowDeviceButton(
   mobile: MobileProject | undefined,
-  hasDevicePane: boolean
+  hasDevicePane: boolean,
+  agentType?: AgentType
 ): boolean {
   if (hasDevicePane) return true
+  // A simulator beside a plain shell is one of the project panes a shell has no
+  // use for; `shouldOfferPane` states that rule once for all of them.
+  if (!shouldOfferPane(agentType, hasDevicePane)) return false
   return mobile?.isMobile === true
 }
 

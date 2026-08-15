@@ -194,6 +194,43 @@ describe('the terminals panel', () => {
     expect(s().terminalsPanes.has('owner')).toBe(false)
   })
 
+  it('takes its shells with it when the panel is closed', async () => {
+    const kill = vi.fn().mockResolvedValue(undefined)
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      ...(window as unknown as { api: Record<string, unknown> }).api,
+      killTerminal: kill
+    }
+    const { closeTerminalsPanel } = await import('../src/renderer/lib/terminal-close')
+    act(() => {
+      s().openTerminalsPane('owner', 'sh1')
+      s().openTerminalsPane('owner', 'sh2')
+    })
+
+    await act(async () => {
+      await closeTerminalsPanel('owner')
+    })
+
+    // Dropping the claim alone would leave two live ptys loose on the grid as
+    // top-level cards, and the control that made them would offer to make a
+    // third.
+    expect(s().terminalsPanes.has('owner')).toBe(false)
+    expect(s().terminals.has('sh1')).toBe(false)
+    expect(s().terminals.has('sh2')).toBe(false)
+    expect(kill.mock.calls.map((c) => c[0]).sort()).toEqual(['sh1', 'sh2'])
+    // The session that owned the panel is untouched — only its shells went.
+    expect(s().terminals.has('owner')).toBe(true)
+  })
+
+  it('reads a corrupted active tab as the first one', async () => {
+    const { parsePersistedPanels } = await import('../src/renderer/stores/ui-slice')
+    // `?? 0` only catches null and undefined. A string or a NaN here reaches
+    // the card as an index, which looks up undefined and is dereferenced.
+    const restored = parsePersistedPanels({
+      owner: { terminals: ['sh1'], activeTab: 'nope' as unknown as number }
+    })
+    expect(restored.get('owner')?.activeTab).toBe(0)
+  })
+
   it('takes its shells down with the session, and forgets the panel', () => {
     act(() => {
       s().openTerminalsPane('owner', 'sh1')

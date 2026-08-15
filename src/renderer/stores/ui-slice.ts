@@ -474,7 +474,11 @@ export function parsePersistedPanels(
   for (const [id, pane] of Object.entries(parsed ?? {})) {
     const terminals = pane?.terminals?.filter((t) => typeof t === 'string') ?? []
     if (terminals.length === 0) continue
-    const activeTab = Math.min(Math.max(pane?.activeTab ?? 0, 0), terminals.length - 1)
+    // `?? 0` only catches null and undefined: a corrupted entry with a string
+    // or a NaN here propagates through Math.min as NaN, and the card indexes
+    // its tab list with it and dereferences undefined.
+    const saved = Number.isInteger(pane?.activeTab) ? (pane?.activeTab as number) : 0
+    const activeTab = Math.min(Math.max(saved, 0), terminals.length - 1)
     out.set(id, { terminals, activeTab })
   }
   return out
@@ -957,22 +961,11 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   openTerminalsPane: (sessionId, terminalId) =>
     set((state) => {
       const next = new Map(state.terminalsPanes)
-      const existing = next.get(sessionId)
-      if (existing) {
-        // Already claimed — show it rather than listing it twice, which would
-        // put one terminal in two tabs fighting over a single rendered slot.
-        if (existing.terminals.includes(terminalId)) {
-          next.set(sessionId, {
-            ...existing,
-            activeTab: existing.terminals.indexOf(terminalId)
-          })
-        } else {
-          const terminals = [...existing.terminals, terminalId]
-          next.set(sessionId, { terminals, activeTab: terminals.length - 1 })
-        }
-      } else {
-        next.set(sessionId, { terminals: [terminalId], activeTab: 0 })
-      }
+      const existing = next.get(sessionId)?.terminals ?? []
+      // Claimed already means show it, not list it twice: one terminal in two
+      // tabs is two slots fighting over a single rendered wrapper.
+      const terminals = existing.includes(terminalId) ? existing : [...existing, terminalId]
+      next.set(sessionId, { terminals, activeTab: terminals.indexOf(terminalId) })
       saveTerminalPanels(next)
       return { terminalsPanes: next }
     }),
@@ -1007,11 +1000,18 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const released = releaseFromPanels(state.terminalsPanes, terminalId)
       if (!released) return {}
       saveTerminalPanels(released.panes)
+      // Keyed off what was emptied, not off the caller's sessionId: those can
+      // disagree, and the panel that actually went would keep its focus and
+      // maximize pointing at a pane that no longer draws.
       return {
         terminalsPanes: released.panes,
-        ...(released.emptied.includes(sessionId)
-          ? clearPlacement(state, terminalsPaneId(sessionId))
-          : {})
+        ...released.emptied.reduce(
+          (cleared, ownerId) => ({
+            ...cleared,
+            ...clearPlacement(state, terminalsPaneId(ownerId))
+          }),
+          {}
+        )
       }
     }),
 

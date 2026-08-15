@@ -126,9 +126,23 @@ export interface TerminalsPaneState {
   activeTab: number
 }
 
+/**
+ * Which tab a panel is showing, clamped into range.
+ *
+ * `activeTab` is kept in range by every action that writes it and by the
+ * persisted-state reader, so this is belt and braces — but it is the one place
+ * that answers the question, and the card indexes its tab list by it. Two
+ * answers, one clamped and one not, is how an out-of-range index reaches a
+ * dereference.
+ */
+export function activePanelIndex(pane: TerminalsPaneState | undefined): number {
+  if (!pane || pane.terminals.length === 0) return 0
+  return Math.min(Math.max(pane.activeTab, 0), pane.terminals.length - 1)
+}
+
 /** The terminal a panel is currently showing. */
 export function activePanelTerminalId(pane: TerminalsPaneState | undefined): string | null {
-  return pane ? (pane.terminals[pane.activeTab] ?? null) : null
+  return pane ? (pane.terminals[activePanelIndex(pane)] ?? null) : null
 }
 
 /** The page a browser pane is currently showing. */
