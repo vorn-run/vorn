@@ -23,7 +23,18 @@ import { buildTooltip } from '../lib/tab-tooltip'
 import { ConfirmPopover } from './ConfirmPopover'
 import { Tooltip } from './Tooltip'
 import { toast } from './Toast'
-import { ChevronDown, FolderOpen, Globe, GripVertical, Pencil, Plus, X } from 'lucide-react'
+import {
+  ChevronDown,
+  FolderOpen,
+  Globe,
+  GripVertical,
+  Pencil,
+  Plus,
+  SquareTerminal,
+  X
+} from 'lucide-react'
+import { toggleTerminalsPanel } from '../lib/session-utils'
+import { shouldOfferPane } from '../lib/pane-affordance'
 import { GridContextMenu } from './GridContextMenu'
 import { GridToolbar } from './GridToolbar'
 import { WindowControls } from './WindowControls'
@@ -158,6 +169,10 @@ export function TabView() {
   const reorderTerminals = useAppStore((s) => s.reorderTerminals)
   const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
   const toggleBrowserPane = useAppStore((s) => s.toggleBrowserPane)
+  // Only to answer "is this one already open" — a shell keeps the control for a
+  // pane it has, so the pane can still be closed.
+  const browserPanes = useAppStore((s) => s.browserPanes)
+  const terminalsPanes = useAppStore((s) => s.terminalsPanes)
   const tasks = useAppStore((s) => s.config?.tasks)
   const isSidebarOpen = useAppStore((s) => s.isSidebarOpen)
   const domBlocks = useAppStore((s) => s.config?.defaults.domBlockRendering ?? true)
@@ -452,11 +467,20 @@ export function TabView() {
                         icon={<FolderOpen size={13} />}
                         onClick={() => toggleFilesPane(id)}
                       />
-                      <TabIconButton
-                        label="Open browser"
-                        icon={<Globe size={13} />}
-                        onClick={() => toggleBrowserPane(id)}
-                      />
+                      {shouldOfferPane(terminal.session.agentType, terminalsPanes.has(id)) && (
+                        <TabIconButton
+                          label="Add a terminal"
+                          icon={<SquareTerminal size={13} />}
+                          onClick={() => void toggleTerminalsPanel(id)}
+                        />
+                      )}
+                      {shouldOfferPane(terminal.session.agentType, browserPanes.has(id)) && (
+                        <TabIconButton
+                          label="Open browser"
+                          icon={<Globe size={13} />}
+                          onClick={() => toggleBrowserPane(id)}
+                        />
+                      )}
                       <TabIconButton
                         label="Rename session"
                         icon={<Pencil size={13} />}

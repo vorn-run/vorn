@@ -241,6 +241,37 @@ describe('SessionItem terminals control', () => {
     expect(useAppStore.getState().terminalsPanes.get(session.id)?.terminals).toEqual(['sh1'])
   })
 
+  it('offers a shell neither a panel nor a browser', () => {
+    seedApi(vi.fn())
+    seedProject(WEB)
+    act(() => {
+      useAppStore.setState({ terminalsPanes: new Map(), browserPanes: new Map() })
+    })
+
+    render(<SessionItem session={{ ...session, agentType: 'shell' }} />)
+
+    // A panel of shells inside a shell, and a browser beside a prompt nobody
+    // asked to drive from there. The file tree stays — looking at files next to
+    // a shell is as reasonable as next to an agent.
+    expect(screen.queryByRole('button', { name: /terminals for/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /browser for/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /files for/ })).toBeInTheDocument()
+  })
+
+  it('leaves a shell the control for a panel it already has', () => {
+    seedApi(vi.fn())
+    seedProject(WEB)
+    act(() => {
+      useAppStore.setState({ terminalsPanes: new Map() })
+      useAppStore.getState().openTerminalsPane(session.id, 'sh1')
+    })
+
+    render(<SessionItem session={{ ...session, agentType: 'shell' }} />)
+
+    // Hiding it would leave the panel on screen with no way to close it.
+    expect(screen.getByRole('button', { name: /Hide terminals for/ })).toBeInTheDocument()
+  })
+
   it('closes an open panel rather than adding another shell to it', () => {
     const createShellTerminal = vi.fn()
     seedApi(createShellTerminal)

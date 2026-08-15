@@ -3,11 +3,12 @@ import { X, FolderTree, Globe, Loader2, Smartphone, SquareTerminal } from 'lucid
 import { useAppStore } from '../../stores'
 import { AgentStatusIcon } from '../AgentStatusIcon'
 import { closeTerminalSession } from '../../lib/terminal-close'
-import { addTerminalToPanel } from '../../lib/session-utils'
+import { toggleTerminalsPanel } from '../../lib/session-utils'
 import { toast } from '../Toast'
 import { STATUS_LABEL } from '../../lib/status-colors'
 import { DevicePicker } from '../DevicePicker'
 import { shouldShowDeviceButton } from '../../lib/device-affordance'
+import { shouldOfferPane } from '../../lib/pane-affordance'
 import { PromotedCardItem } from './PromotedCardItem'
 import { usePromotedCardsFor } from '../../hooks/usePromotedCards'
 import type { SidebarSessionInfo } from './types'
@@ -33,11 +34,6 @@ export function SessionItem({
   const toggleFilesPane = useAppStore((s) => s.toggleFilesPane)
   const hasBrowserPane = useAppStore((s) => s.browserPanes.has(session.id))
   const hasTerminalsPane = useAppStore((s) => s.terminalsPanes.has(session.id))
-  const closeTerminalsPane = useAppStore((s) => s.closeTerminalsPane)
-  const sessionCwd = useAppStore((s) => {
-    const t = s.terminals.get(session.id)?.session
-    return t ? t.worktreePath || t.projectPath : ''
-  })
   const toggleBrowserPane = useAppStore((s) => s.toggleBrowserPane)
   const hasDevicePane = useAppStore((s) => s.devicePanes.has(session.id))
   const claimAndOpenDevicePane = useAppStore((s) => s.claimAndOpenDevicePane)
@@ -59,7 +55,13 @@ export function SessionItem({
     if (projectPath) void loadMobileProject(projectPath)
   }, [projectPath, loadMobileProject])
 
-  const showDevice = shouldShowDeviceButton(mobile, hasDevicePane)
+  // A shell has no use for a browser, a simulator, or a panel of further
+  // shells. An already-open pane keeps its control so it can still be closed.
+  const showBrowser = shouldOfferPane(session.agentType, hasBrowserPane)
+  const showTerminals = shouldOfferPane(session.agentType, hasTerminalsPane)
+  const showDevice =
+    shouldShowDeviceButton(mobile, hasDevicePane) &&
+    shouldOfferPane(session.agentType, hasDevicePane)
   const isActive =
     layoutMode === 'tabs' ? activeTabId === session.id : focusedTerminalId === session.id
   const isPreviewing = previewTerminalId === session.id
@@ -145,41 +147,42 @@ export function SessionItem({
         >
           <FolderTree size={12} strokeWidth={2} />
         </button>
-        <button
-          type="button"
-          aria-label={`${hasTerminalsPane ? 'Hide' : 'Show'} terminals for ${session.name}`}
-          title={hasTerminalsPane ? 'Hide terminals' : 'Add a terminal'}
-          onClick={(e) => {
-            e.stopPropagation()
-            // Opening with nothing in it would be an empty box taking up a
-            // pane, so the first shell is created as part of opening.
-            if (hasTerminalsPane) closeTerminalsPane(session.id)
-            else void addTerminalToPanel(session.id, sessionCwd)
-          }}
-          className={`${
-            hasTerminalsPane
-              ? 'opacity-100 text-ink'
-              : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
-          } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
-        >
-          <SquareTerminal size={12} strokeWidth={2} />
-        </button>
-        <button
-          type="button"
-          aria-label={`${hasBrowserPane ? 'Hide' : 'Show'} browser for ${session.name}`}
-          title={hasBrowserPane ? 'Hide browser' : 'Show browser'}
-          onClick={(e) => {
-            e.stopPropagation()
-            toggleBrowserPane(session.id)
-          }}
-          className={`${
-            hasBrowserPane
-              ? 'opacity-100 text-ink'
-              : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
-          } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
-        >
-          <Globe size={12} strokeWidth={2} />
-        </button>
+        {showTerminals && (
+          <button
+            type="button"
+            aria-label={`${hasTerminalsPane ? 'Hide' : 'Show'} terminals for ${session.name}`}
+            title={hasTerminalsPane ? 'Hide terminals' : 'Add a terminal'}
+            onClick={(e) => {
+              e.stopPropagation()
+              void toggleTerminalsPanel(session.id)
+            }}
+            className={`${
+              hasTerminalsPane
+                ? 'opacity-100 text-ink'
+                : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
+            } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
+          >
+            <SquareTerminal size={12} strokeWidth={2} />
+          </button>
+        )}
+        {showBrowser && (
+          <button
+            type="button"
+            aria-label={`${hasBrowserPane ? 'Hide' : 'Show'} browser for ${session.name}`}
+            title={hasBrowserPane ? 'Hide browser' : 'Show browser'}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleBrowserPane(session.id)
+            }}
+            className={`${
+              hasBrowserPane
+                ? 'opacity-100 text-ink'
+                : 'opacity-0 group-hover/session:opacity-100 text-gray-500'
+            } focus:opacity-100 hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0`}
+          >
+            <Globe size={12} strokeWidth={2} />
+          </button>
+        )}
         {showDevice && (
           <button
             ref={deviceButtonRef}

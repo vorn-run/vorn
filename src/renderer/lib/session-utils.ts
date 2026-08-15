@@ -240,6 +240,26 @@ export async function addTerminalToPanel(sessionId: string, cwd: string): Promis
   }
 }
 
+/**
+ * Show or hide a session's terminals panel, from wherever it is asked for.
+ *
+ * Opening it with nothing in it would be an empty box holding a pane, so the
+ * first shell is created as part of opening — in the session's own directory,
+ * which is the point of the panel. The rule lives here rather than in each
+ * control because the sidebar row, the card header and the tab strip all offer
+ * it, and three copies would drift.
+ */
+export async function toggleTerminalsPanel(sessionId: string): Promise<void> {
+  const state = useAppStore.getState()
+  if (state.terminalsPanes.has(sessionId)) {
+    state.closeTerminalsPane(sessionId)
+    return
+  }
+  const owner = state.terminals.get(sessionId)?.session
+  if (!owner) return
+  await addTerminalToPanel(sessionId, owner.worktreePath || owner.projectPath)
+}
+
 export async function createShellInProject(
   cwd?: string,
   context?: {
