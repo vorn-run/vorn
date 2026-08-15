@@ -618,14 +618,6 @@ const api = {
   // App info
   getAppVersion: (): string => ipcRenderer.sendSync('get-app-version'),
   // Auto-update
-  onUpdateDownloaded: (callback: (info: { version: string }) => void) => {
-    const listener = (_: Electron.IpcRendererEvent, info: { version: string }): void =>
-      callback(info)
-    ipcRenderer.on(IPC.UPDATE_DOWNLOADED, listener)
-    return () => {
-      ipcRenderer.removeListener(IPC.UPDATE_DOWNLOADED, listener)
-    }
-  },
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => {
     const listener = (_: Electron.IpcRendererEvent, status: UpdateStatus): void => callback(status)
     ipcRenderer.on(IPC.UPDATE_STATUS, listener)

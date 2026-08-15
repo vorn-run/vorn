@@ -1,4 +1,5 @@
 import type { UpdateStatus } from '../../shared/types'
+import type { StatusTone } from './status-tone'
 
 /**
  * What the UI needs to draw a status, derived from the raw updater state.
@@ -19,11 +20,16 @@ export interface UpdateStatusView {
   /** Supporting line: the channel, a timestamp, an error's detail. */
   detail: string | null
   /**
-   * How to paint the pip. Only 'accent' is bronzo, reserved for the one state
-   * that is genuinely blocked on the person — see theme.css. The app's own
-   * work is 'busy'; a real failure is 'danger'.
+   * Which of the app's five status tones this state carries. Routed through the
+   * shared vocabulary rather than naming colours here: status-tone.ts is the
+   * only place that decides what a tone looks like, and a test enforces that
+   * `blocked` keeps meaning exactly one thing.
+   *
+   * `blocked` is the accent, and only a staged update earns it — that is the
+   * one state waiting on the person. Checking and downloading are the app's own
+   * work, so they are `live`.
    */
-  tone: 'idle' | 'busy' | 'accent' | 'danger'
+  tone: StatusTone
   /** 0–100 while transferring, otherwise null. */
   percent: number | null
   /** The action worth offering here, if any. */
@@ -68,7 +74,7 @@ export function describeUpdateStatus(
         label: 'Checking for updates…',
         shortLabel: 'Checking…',
         detail: `${channel} channel`,
-        tone: 'busy',
+        tone: 'live',
         percent: null,
         action: null
       }
@@ -89,8 +95,10 @@ export function describeUpdateStatus(
       return {
         label: status.version ? `Downloading ${status.version}` : 'Downloading update',
         shortLabel: `Downloading ${status.percent}%`,
-        detail: `${status.percent}%`,
-        tone: 'busy',
+        // The bar below carries the number; saying it twice in two places is
+        // two things to keep in step for one fact.
+        detail: null,
+        tone: 'live',
         percent: status.percent,
         action: null
       }
@@ -100,7 +108,7 @@ export function describeUpdateStatus(
         label: `Version ${status.version} is ready to install`,
         shortLabel: `v${status.version} ready`,
         detail: 'restart to apply',
-        tone: 'accent',
+        tone: 'blocked',
         percent: null,
         action: 'restart'
       }
@@ -110,7 +118,7 @@ export function describeUpdateStatus(
         label: "Couldn't check for updates",
         shortLabel: 'Update failed',
         detail: status.message,
-        tone: 'danger',
+        tone: 'broken',
         percent: null,
         action: 'retry'
       }

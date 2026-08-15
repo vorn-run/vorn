@@ -35,8 +35,9 @@ describe('formatLastChecked', () => {
 
 describe('describeUpdateStatus', () => {
   it('spends the accent only on the state that is blocked on the person', () => {
-    // theme.css reserves bronzo for work waiting on the user. A download in
-    // flight is the app's own work, so it must not claim the accent.
+    // status-tone.ts reserves `blocked` — the bronzo tone — for work waiting on
+    // the user. A download in flight is the app's own work, so it must not
+    // claim the accent.
     const tones = {
       idle: describeUpdateStatus({ kind: 'idle', lastCheckedAt: null }, 'stable', NOW).tone,
       checking: describeUpdateStatus({ kind: 'checking' }, 'stable', NOW).tone,
@@ -51,12 +52,12 @@ describe('describeUpdateStatus', () => {
       unsupported: describeUpdateStatus({ kind: 'unsupported' }, 'stable', NOW).tone
     }
 
-    expect(Object.entries(tones).filter(([, tone]) => tone === 'accent')).toEqual([
-      ['ready', 'accent']
+    expect(Object.entries(tones).filter(([, tone]) => tone === 'blocked')).toEqual([
+      ['ready', 'blocked']
     ])
-    expect(tones.error).toBe('danger')
-    expect(tones.checking).toBe('busy')
-    expect(tones.downloading).toBe('busy')
+    expect(tones.error).toBe('broken')
+    expect(tones.checking).toBe('live')
+    expect(tones.downloading).toBe('live')
   })
 
   it('falls back to the channel when nothing has been checked yet', () => {

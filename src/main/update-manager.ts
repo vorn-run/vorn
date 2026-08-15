@@ -1,5 +1,5 @@
 import { autoUpdater, UpdateInfo, ProgressInfo } from 'electron-updater'
-import { BrowserWindow, app } from 'electron'
+import { BrowserWindow, app, autoUpdater as nativeAutoUpdater } from 'electron'
 import { IPC, UpdateStatus } from '../shared/types'
 import log from './logger'
 
@@ -18,6 +18,20 @@ class UpdateManager {
    */
   private status: UpdateStatus = { kind: 'unsupported' }
   private lastCheckedAt: number | null = null
+
+  /**
+   * Claim the quit before the windows are asked to close.
+   *
+   * quitAndInstall() emits before-quit *after* closing every window, the
+   * reverse of a normal quit, so a close handler that cancels the close until
+   * it knows a quit is underway would cancel the updater's own quit — which is
+   * exactly what left the app hidden instead of restarting. The signal lives on
+   * Electron's native autoUpdater rather than on `app`, and it belongs here,
+   * beside the quitAndInstall it guards, rather than in the window code.
+   */
+  onQuitForUpdate(handler: () => void): void {
+    nativeAutoUpdater.on('before-quit-for-update', handler)
+  }
 
   init(mainWindow: BrowserWindow, channel: UpdateChannel = 'stable', autoDownload = true): void {
     if (!app.isPackaged) return
@@ -46,22 +60,25 @@ class UpdateManager {
 
     autoUpdater.on('download-progress', (progress: ProgressInfo) => {
       const current = this.status
+      const percent = Math.round(progress.percent)
+      // The event fires per received chunk — tens of times a second — and the
+      // rounded percent is identical across most of them. Dropping the repeats
+      // here keeps a multi-hundred-MB download to ~100 IPC messages instead of
+      // tens of thousands, each of which would re-render every subscriber.
+      if (current.kind === 'downloading' && current.percent === percent) return
       this.setStatus({
         kind: 'downloading',
         // The progress event carries no version, so carry it across from
         // whichever state we came from rather than losing it mid-download.
         version:
           current.kind === 'downloading' || current.kind === 'available' ? current.version : '',
-        percent: Math.round(progress.percent)
+        percent
       })
     })
 
     autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
       this.lastCheckedAt = Date.now()
       this.setStatus({ kind: 'ready', version: info.version })
-      this.mainWindow?.webContents.send(IPC.UPDATE_DOWNLOADED, {
-        version: info.version
-      })
     })
 
     autoUpdater.on('error', (err) => {

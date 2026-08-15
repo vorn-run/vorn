@@ -1,12 +1,4 @@
-import {
-  app,
-  autoUpdater as nativeAutoUpdater,
-  BrowserWindow,
-  ipcMain,
-  nativeImage,
-  screen,
-  globalShortcut
-} from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage, screen, globalShortcut } from 'electron'
 import path from 'node:path'
 import { registerIpcHandlers, setBridge } from './ipc-handlers'
 import * as browserRegistry from './browser-registry'
@@ -561,18 +553,13 @@ app.whenReady().then(async () => {
   })
 })
 
-// quitAndInstall() closes every window *before* emitting before-quit, the
-// reverse of a normal quit. The darwin branch of the window close handler
-// would therefore still see isQuitting === false and preventDefault the very
-// quit the updater asked for — the app hid instead of restarting, and the
-// update only landed on the next manual ⌘Q. The signal comes from Electron's
-// native autoUpdater rather than from app, and claiming the flag there covers
-// every path reaching quitAndInstall, not just our own install button.
-if (process.platform === 'darwin') {
-  nativeAutoUpdater.on('before-quit-for-update', () => {
-    isQuitting = true
-  })
-}
+// The updater takes the process down by a path that closes windows before
+// before-quit, so the close handler below has to know a quit is underway
+// before it decides to cancel one. updateManager owns the subscription; this
+// only records the fact.
+updateManager.onQuitForUpdate(() => {
+  isQuitting = true
+})
 
 app.on('before-quit', async () => {
   isQuitting = true

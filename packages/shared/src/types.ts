@@ -1384,7 +1384,6 @@ export const IPC = {
   DEVICE_PICKED: 'device:picked',
   /** Freehand ink over the device screen, resolved to the elements beneath. */
   DEVICE_ANNOTATE: 'device:annotate',
-  UPDATE_DOWNLOADED: 'update:downloaded',
   UPDATE_INSTALL: 'update:install',
   UPDATE_SET_CHANNEL: 'update:set-channel',
   /** Pushed on every updater transition, so the renderer holds one value. */

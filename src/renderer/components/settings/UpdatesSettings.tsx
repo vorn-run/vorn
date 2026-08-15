@@ -4,13 +4,23 @@ import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
 import { SegmentedControl } from './SegmentedControl'
 import { describeUpdateStatus } from '../../lib/update-status'
+import { TONE_DOT } from '../../lib/status-tone'
 
-const TONE_CLASS = {
-  idle: 'bg-white/[0.18]',
-  busy: 'bg-white/[0.4]',
-  accent: 'bg-bronzo',
-  danger: 'bg-danger'
+/**
+ * The one action a state is worth offering, as data rather than three near
+ * identical JSX blocks. `restart` leads because it is the only one the app is
+ * waiting on the person for.
+ */
+const ACTIONS = {
+  restart: { label: 'Restart Now', run: () => window.api.installUpdate(), lead: true },
+  download: { label: 'Download', run: () => window.api.downloadUpdate(), lead: false },
+  retry: { label: 'Retry', run: () => window.api.checkForUpdates(), lead: false }
 } as const
+
+// Read once: the version cannot change while the process is alive, and the
+// getter is a synchronous IPC round trip that would otherwise run on every
+// render of this panel — including every download-progress tick.
+const APP_VERSION = window.api.getAppVersion()
 
 export function UpdatesSettings() {
   const config = useAppStore((s) => s.config)
@@ -22,6 +32,7 @@ export function UpdatesSettings() {
   const channel = config.defaults.updateChannel ?? 'stable'
   const autoDownload = config.defaults.updateAutoDownload !== false
   const view = describeUpdateStatus(status, channel)
+  const action = view.action ? ACTIONS[view.action] : null
 
   const updateDefaults = (patch: Partial<typeof config.defaults>): void => {
     const updated = {
@@ -39,7 +50,7 @@ export function UpdatesSettings() {
       {/* Reports rather than configures, so it is not a SettingRow: the panel
           should answer "what is happening?" before it offers any control. */}
       <div className="mb-5 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg flex items-center gap-3">
-        <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${TONE_CLASS[view.tone]}`} />
+        <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${TONE_DOT[view.tone]}`} />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] text-gray-200">{view.label}</div>
           {view.detail && <div className="text-xs text-gray-500 mt-0.5">{view.detail}</div>}
@@ -52,37 +63,23 @@ export function UpdatesSettings() {
             </div>
           )}
         </div>
-        {view.action === 'restart' && (
+        {action && (
           <button
-            onClick={() => window.api.installUpdate()}
-            className="shrink-0 px-3 py-1 text-xs font-medium text-white bg-white/[0.1]
-                       hover:bg-white/[0.14] border border-white/[0.08] rounded-md transition-colors"
+            onClick={action.run}
+            className={`shrink-0 px-3 py-1 text-xs font-medium border border-white/[0.08]
+                        rounded-md transition-colors ${
+                          action.lead
+                            ? 'text-white bg-white/[0.1] hover:bg-white/[0.14]'
+                            : 'text-gray-300 bg-white/[0.06] hover:bg-white/[0.1]'
+                        }`}
           >
-            Restart Now
-          </button>
-        )}
-        {view.action === 'download' && (
-          <button
-            onClick={() => window.api.downloadUpdate()}
-            className="shrink-0 px-3 py-1 text-xs font-medium text-gray-300 bg-white/[0.06]
-                       hover:bg-white/[0.1] border border-white/[0.08] rounded-md transition-colors"
-          >
-            Download
-          </button>
-        )}
-        {view.action === 'retry' && (
-          <button
-            onClick={() => window.api.checkForUpdates()}
-            className="shrink-0 px-3 py-1 text-xs font-medium text-gray-300 bg-white/[0.06]
-                       hover:bg-white/[0.1] border border-white/[0.08] rounded-md transition-colors"
-          >
-            Retry
+            {action.label}
           </button>
         )}
       </div>
 
       <div className="space-y-1">
-        <SettingRow label="Current version" description={`Vorn ${window.api.getAppVersion()}`}>
+        <SettingRow label="Current version" description={`Vorn ${APP_VERSION}`}>
           <button
             onClick={() => window.api.checkForUpdates()}
             disabled={status.kind === 'checking' || status.kind === 'unsupported'}

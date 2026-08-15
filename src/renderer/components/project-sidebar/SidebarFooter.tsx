@@ -14,25 +14,23 @@ export function SidebarFooter({
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const setSettingsCategory = useAppStore((s) => s.setSettingsCategory)
   const setOnboardingOpen = useAppStore((s) => s.setOnboardingOpen)
-  const status = useAppStore((s) => s.appUpdateStatus)
+  // Selected down to what the footer actually draws rather than the whole
+  // status object: download-progress fires many times a second, and a new
+  // object identity each time would re-render this subtree throughout a
+  // download to produce exactly the same output.
+  const pending = useAppStore((s) => hasPendingUpdate(s.appUpdateStatus))
+  const shortLabel = useAppStore((s) =>
+    hasPendingUpdate(s.appUpdateStatus) ? describeUpdateStatus(s.appUpdateStatus).shortLabel : null
+  )
   const dismissed = useAppStore((s) => s.updateBannerDismissed)
   const setDismissed = useAppStore((s) => s.setUpdateBannerDismissed)
 
   const settingsShortcut = getShortcut('settings')?.display
-  const pending = hasPendingUpdate(status)
   // Collapsed the rail is 52px, which the banner cannot live in; dismissed the
   // user asked for it gone. Both keep the dot, so the update stays findable
   // without the banner — the old top banner simply vanished until relaunch.
   const showBanner = pending && !dismissed && !isCollapsed
-  const showDot = pending && !showBanner
-
-  const openUpdates = (): void => {
-    // Order matters: the panel opens on whatever category was last viewed, so
-    // set it before opening or this lands on Appearance.
-    setSettingsCategory('updates')
-    setSettingsOpen(true)
-    closeSidebarOnMobile()
-  }
+  const showDot = pending && (dismissed || isCollapsed)
 
   return (
     <div className="shrink-0">
@@ -40,9 +38,7 @@ export function SidebarFooter({
         <div className="mx-2 mb-1.5 px-2.5 py-2 border border-white/[0.08] bg-white/[0.03] rounded-md">
           <div className="flex items-center gap-1.5">
             <span className="w-[5px] h-[5px] rounded-full bg-bronzo shrink-0" />
-            <span className="text-[11.5px] text-gray-200 truncate">
-              {describeUpdateStatus(status).shortLabel}
-            </span>
+            <span className="text-[11.5px] text-gray-200 truncate">{shortLabel}</span>
             <button
               onClick={() => setDismissed(true)}
               aria-label="Dismiss update notice"
@@ -82,10 +78,9 @@ export function SidebarFooter({
         >
           <button
             onClick={() => {
-              if (showDot) {
-                openUpdates()
-                return
-              }
+              // The panel opens on whatever category was last viewed, so a
+              // badged gear has to name the one it is advertising.
+              if (showDot) setSettingsCategory('updates')
               setSettingsOpen(true)
               closeSidebarOnMobile()
             }}
