@@ -17,10 +17,16 @@ const ACTIONS = {
   retry: { label: 'Retry', run: () => window.api.checkForUpdates(), lead: false }
 } as const
 
-// Read once: the version cannot change while the process is alive, and the
-// getter is a synchronous IPC round trip that would otherwise run on every
-// render of this panel — including every download-progress tick.
-const APP_VERSION = window.api.getAppVersion()
+// Read once, on first render rather than at import: the version cannot change
+// while the process is alive, and the getter is a synchronous IPC round trip
+// that would otherwise run on every render of this panel — including every
+// download-progress tick. Doing it lazily keeps importers from needing
+// window.api to exist at module-evaluation time.
+let appVersion: string | null = null
+function getAppVersionOnce(): string {
+  if (appVersion === null) appVersion = window.api.getAppVersion()
+  return appVersion
+}
 
 export function UpdatesSettings() {
   const config = useAppStore((s) => s.config)
@@ -79,7 +85,7 @@ export function UpdatesSettings() {
       </div>
 
       <div className="space-y-1">
-        <SettingRow label="Current version" description={`Vorn ${APP_VERSION}`}>
+        <SettingRow label="Current version" description={`Vorn ${getAppVersionOnce()}`}>
           <button
             onClick={() => window.api.checkForUpdates()}
             disabled={status.kind === 'checking' || status.kind === 'unsupported'}
