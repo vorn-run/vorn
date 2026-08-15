@@ -35,7 +35,8 @@ import {
   DeviceSelection,
   DeviceAnnotation,
   DeviceTarget,
-  DevicePoint
+  DevicePoint,
+  UpdateStatus
 } from '../shared/types'
 
 const api = {
@@ -617,14 +618,18 @@ const api = {
   // App info
   getAppVersion: (): string => ipcRenderer.sendSync('get-app-version'),
   // Auto-update
-  onUpdateDownloaded: (callback: (info: { version: string }) => void) => {
-    const listener = (_: Electron.IpcRendererEvent, info: { version: string }): void =>
-      callback(info)
-    ipcRenderer.on(IPC.UPDATE_DOWNLOADED, listener)
+  onUpdateStatus: (callback: (status: UpdateStatus) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, status: UpdateStatus): void => callback(status)
+    ipcRenderer.on(IPC.UPDATE_STATUS, listener)
     return () => {
-      ipcRenderer.removeListener(IPC.UPDATE_DOWNLOADED, listener)
+      ipcRenderer.removeListener(IPC.UPDATE_STATUS, listener)
     }
   },
+  getUpdateStatus: (): UpdateStatus => ipcRenderer.sendSync(IPC.UPDATE_GET_STATUS),
+  checkForUpdates: () => ipcRenderer.send(IPC.UPDATE_CHECK),
+  downloadUpdate: () => ipcRenderer.send(IPC.UPDATE_DOWNLOAD),
+  setUpdateAutoDownload: (enabled: boolean) =>
+    ipcRenderer.send(IPC.UPDATE_SET_AUTO_DOWNLOAD, enabled),
   installUpdate: () => ipcRenderer.send(IPC.UPDATE_INSTALL),
   setUpdateChannel: (channel: 'stable' | 'beta') =>
     ipcRenderer.send(IPC.UPDATE_SET_CHANNEL, channel),

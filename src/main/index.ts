@@ -415,17 +415,23 @@ app.whenReady().then(async () => {
 
   // Load config for widget + update channel
   let updateChannel: 'stable' | 'beta' = 'stable'
+  let updateAutoDownload = true
   try {
     const config = await bridge.request<{
-      defaults: { widgetEnabled?: boolean; updateChannel?: 'stable' | 'beta' }
+      defaults: {
+        widgetEnabled?: boolean
+        updateChannel?: 'stable' | 'beta'
+        updateAutoDownload?: boolean
+      }
     }>(IPC.CONFIG_LOAD)
     widgetEnabled = config.defaults.widgetEnabled !== false
     updateChannel = config.defaults.updateChannel ?? 'stable'
+    updateAutoDownload = config.defaults.updateAutoDownload !== false
   } catch {
     // Config not available yet, use defaults
   }
 
-  updateManager.init(mainWindow, updateChannel)
+  updateManager.init(mainWindow, updateChannel, updateAutoDownload)
 
   // Auto show/hide widget based on main window focus
   mainWindow.on('blur', () => {
@@ -439,7 +445,7 @@ app.whenReady().then(async () => {
     hideWidget()
   })
 
-  // Widget IPC handlers
+  // Update IPC handlers
   ipcMain.on(IPC.UPDATE_INSTALL, () => {
     updateManager.installUpdate()
   })
@@ -447,6 +453,24 @@ app.whenReady().then(async () => {
   ipcMain.on(IPC.UPDATE_SET_CHANNEL, (_e, channel: 'stable' | 'beta') => {
     updateManager.setChannel(channel)
     updateManager.checkForUpdates()
+  })
+
+  ipcMain.on(IPC.UPDATE_CHECK, () => {
+    updateManager.checkForUpdates()
+  })
+
+  ipcMain.on(IPC.UPDATE_SET_AUTO_DOWNLOAD, (_e, enabled: boolean) => {
+    updateManager.setAutoDownload(enabled)
+  })
+
+  ipcMain.on(IPC.UPDATE_DOWNLOAD, () => {
+    updateManager.downloadUpdate()
+  })
+
+  // Synchronous: the Updates panel reads this on mount, before any event has
+  // had a chance to arrive.
+  ipcMain.on(IPC.UPDATE_GET_STATUS, (event) => {
+    event.returnValue = updateManager.getStatus()
   })
 
   ipcMain.on(IPC.WIDGET_HIDE, () => {
@@ -527,6 +551,14 @@ app.whenReady().then(async () => {
       createWindow()
     }
   })
+})
+
+// The updater takes the process down by a path that closes windows before
+// before-quit, so the close handler below has to know a quit is underway
+// before it decides to cancel one. updateManager owns the subscription; this
+// only records the fact.
+updateManager.onQuitForUpdate(() => {
+  isQuitting = true
 })
 
 app.on('before-quit', async () => {

@@ -3,9 +3,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
+import type { UpdateStatus } from '../src/shared/types'
+
 const mockStore = {
   setSettingsOpen: vi.fn(),
-  setOnboardingOpen: vi.fn()
+  setSettingsCategory: vi.fn(),
+  setOnboardingOpen: vi.fn(),
+  appUpdateStatus: { kind: 'unsupported' } as UpdateStatus,
+  updateBannerDismissed: false,
+  setUpdateBannerDismissed: vi.fn()
 }
 
 vi.mock('../src/renderer/stores', () => ({
@@ -18,11 +24,23 @@ vi.mock('../src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
+const installUpdate = vi.fn()
+
+Object.defineProperty(window, 'api', {
+  value: { installUpdate },
+  writable: true
+})
+
 const { SidebarFooter } = await import('../src/renderer/components/project-sidebar/SidebarFooter')
 
 beforeEach(() => {
   mockStore.setSettingsOpen.mockReset()
+  mockStore.setSettingsCategory.mockReset()
   mockStore.setOnboardingOpen.mockReset()
+  mockStore.setUpdateBannerDismissed.mockReset()
+  installUpdate.mockReset()
+  mockStore.appUpdateStatus = { kind: 'unsupported' }
+  mockStore.updateBannerDismissed = false
 })
 
 describe('SidebarFooter', () => {
@@ -50,5 +68,58 @@ describe('SidebarFooter', () => {
     render(<SidebarFooter isCollapsed={true} closeSidebarOnMobile={vi.fn()} />)
     expect(screen.getByRole('button', { name: 'Welcome Guide' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+  })
+
+  describe('update affordance', () => {
+    it('shows nothing when no update is staged', () => {
+      mockStore.appUpdateStatus = { kind: 'checking' }
+      render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+      expect(screen.queryByText(/ready/i)).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+    })
+
+    it('shows the banner with a restart action once an update is ready', () => {
+      mockStore.appUpdateStatus = { kind: 'ready', version: '0.6.0' }
+      render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+
+      expect(screen.getByText('v0.6.0 ready')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }))
+      expect(installUpdate).toHaveBeenCalled()
+    })
+
+    it('falls back to a badged gear when collapsed, since the banner cannot fit', () => {
+      mockStore.appUpdateStatus = { kind: 'ready', version: '0.6.0' }
+      render(<SidebarFooter isCollapsed={true} closeSidebarOnMobile={vi.fn()} />)
+
+      expect(screen.queryByText('v0.6.0 ready')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Settings, update ready' })).toBeInTheDocument()
+    })
+
+    it('keeps the gear badged after dismissal, so the update stays findable', () => {
+      mockStore.appUpdateStatus = { kind: 'ready', version: '0.6.0' }
+      mockStore.updateBannerDismissed = true
+      render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+
+      expect(screen.queryByText('v0.6.0 ready')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Settings, update ready' })).toBeInTheDocument()
+    })
+
+    it('dismisses the banner without clearing the staged update', () => {
+      mockStore.appUpdateStatus = { kind: 'ready', version: '0.6.0' }
+      render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss update notice' }))
+      expect(mockStore.setUpdateBannerDismissed).toHaveBeenCalledWith(true)
+    })
+
+    it('deep-links the badged gear to the Updates panel rather than the last category', () => {
+      mockStore.appUpdateStatus = { kind: 'ready', version: '0.6.0' }
+      mockStore.updateBannerDismissed = true
+      render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Settings, update ready' }))
+      expect(mockStore.setSettingsCategory).toHaveBeenCalledWith('updates')
+      expect(mockStore.setSettingsOpen).toHaveBeenCalledWith(true)
+    })
   })
 })

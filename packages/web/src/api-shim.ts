@@ -432,7 +432,15 @@ export function createApiShim(wsUrl: string) {
     getAppVersion: () => 'web',
 
     // ── Auto-Update (no-op in web) ──
-    onUpdateDownloaded: (_callback: (info: { version: string }) => void) => () => {},
+    // The browser cannot update itself, so the status is permanently
+    // `unsupported` and every action is inert. App.tsx seeds from
+    // getUpdateStatus() on mount, so this has to answer rather than be absent.
+    onUpdateStatus:
+      (_callback: (status: import('../../shared/src/types').UpdateStatus) => void) => () => {},
+    getUpdateStatus: (): import('../../shared/src/types').UpdateStatus => ({ kind: 'unsupported' }),
+    checkForUpdates: () => {},
+    downloadUpdate: () => {},
+    setUpdateAutoDownload: (_enabled: boolean) => {},
     installUpdate: () => {},
     setUpdateChannel: (_channel: 'stable' | 'beta') => {}
   }

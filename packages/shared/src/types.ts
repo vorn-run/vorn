@@ -924,6 +924,24 @@ export interface NotificationConfig {
   soundVolume?: number // 0.0 – 1.0, default 0.5
 }
 
+/**
+ * Where the updater currently is, as one value rather than a set of booleans
+ * that can contradict each other. The renderer holds the whole object and
+ * switches on `kind`.
+ *
+ * `unsupported` is the dev build: UpdateManager.init() returns early when the
+ * app is not packaged, so no event will ever arrive and the panel has to say
+ * so rather than sit forever on "checking".
+ */
+export type UpdateStatus =
+  | { kind: 'idle'; lastCheckedAt: number | null }
+  | { kind: 'checking' }
+  | { kind: 'available'; version: string }
+  | { kind: 'downloading'; version: string; percent: number }
+  | { kind: 'ready'; version: string }
+  | { kind: 'error'; message: string }
+  | { kind: 'unsupported' }
+
 export interface AppConfig {
   version: number
   defaults: {
@@ -942,6 +960,12 @@ export interface AppConfig {
     mainViewMode?: MainViewMode
     activeWorkspace?: string
     updateChannel?: 'stable' | 'beta'
+    /**
+     * Whether a found update downloads on its own. Install always waits for a
+     * restart either way; this only governs the transfer, which matters on a
+     * metered connection. Defaults to true — the behaviour before it existed.
+     */
+    updateAutoDownload?: boolean
     webAccessEnabled?: boolean
     mobileAccessEnabled?: boolean
     networkAccessEnabled?: boolean
@@ -1360,9 +1384,18 @@ export const IPC = {
   DEVICE_PICKED: 'device:picked',
   /** Freehand ink over the device screen, resolved to the elements beneath. */
   DEVICE_ANNOTATE: 'device:annotate',
-  UPDATE_DOWNLOADED: 'update:downloaded',
   UPDATE_INSTALL: 'update:install',
   UPDATE_SET_CHANNEL: 'update:set-channel',
+  /** Pushed on every updater transition, so the renderer holds one value. */
+  UPDATE_STATUS: 'update:status',
+  /** Manual check, from the Updates settings panel. */
+  UPDATE_CHECK: 'update:check',
+  /** Start a transfer the user deferred by turning auto-download off. */
+  UPDATE_DOWNLOAD: 'update:download',
+  /** Mirrors the config toggle onto the live updater, no restart needed. */
+  UPDATE_SET_AUTO_DOWNLOAD: 'update:set-auto-download',
+  /** Synchronous read, so a freshly-opened panel renders without waiting. */
+  UPDATE_GET_STATUS: 'update:get-status',
   TASK_IMAGE_SAVE: 'task:imageSave',
   TASK_IMAGE_DELETE: 'task:imageDelete',
   TASK_IMAGE_GET_PATH: 'task:imageGetPath',
