@@ -1,6 +1,13 @@
 import { StateCreator } from 'zustand'
 import { AppStore, TerminalsSlice, TerminalState } from './types'
-import { filesPaneId, editorPaneId, browserPaneId, devicePaneId } from '../lib/pane-id'
+import {
+  filesPaneId,
+  editorPaneId,
+  browserPaneId,
+  devicePaneId,
+  terminalsPaneId
+} from '../lib/pane-id'
+import { releaseFromPanels, saveTerminalPanels } from './ui-slice'
 import { clearDirty } from '../lib/editor-dirty'
 
 export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set) => ({
@@ -70,7 +77,7 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       // in their own right, and the list is the only thing that was hiding them
       // from every other surface. Their ptys are killed by the caller, which
       // owns the async side; this is the record of them.
-      const terminalsPanes = new Map(state.terminalsPanes)
+      let terminalsPanes = new Map(state.terminalsPanes)
       const heldTerminals = terminalsPanes.get(id)?.terminals ?? []
       terminalsPanes.delete(id)
       for (const heldId of heldTerminals) {
@@ -78,6 +85,16 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         minimized.delete(heldId)
         dying.add(heldId)
       }
+      // The other direction: this session may itself be a shell some panel is
+      // holding, closed from its own tab. Without releasing the claim the tab
+      // outlives the terminal — named after a raw id, drawing a pane for a
+      // session that is gone.
+      const released = releaseFromPanels(terminalsPanes, id)
+      if (released) {
+        terminalsPanes = released.panes
+        for (const ownerId of released.emptied) dying.add(terminalsPaneId(ownerId))
+      }
+      if (heldTerminals.length > 0 || released) saveTerminalPanels(terminalsPanes)
       // The remembered tabs go with the session too. A recycled id would
       // otherwise reopen its browser onto a previous session's pages.
       const browserMemory = new Map(state.browserMemory)

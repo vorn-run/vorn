@@ -129,6 +129,71 @@ describe('the terminals panel', () => {
     expect(s().terminalsPanes.has('owner')).toBe(false)
   })
 
+  it('lets go of a shell closed from its own tab', () => {
+    act(() => {
+      s().openTerminalsPane('owner', 'sh1')
+      s().openTerminalsPane('owner', 'sh2')
+    })
+
+    act(() => s().removeTerminal('sh1'))
+
+    // Closing one is the other direction from closing the session: the panel
+    // survives and has to release the claim. Left behind, the tab outlives the
+    // terminal — falling back to its raw id for a name, with nothing to draw.
+    const pane = s().terminalsPanes.get('owner')!
+    expect(pane.terminals).toEqual(['sh2'])
+    expect(activePanelTerminalId(pane)).toBe('sh2')
+    expect(s().terminals.has('sh1')).toBe(false)
+  })
+
+  it('closes the panel when its last shell is closed from its tab', () => {
+    act(() => s().openTerminalsPane('owner', 'sh1'))
+
+    act(() => s().removeTerminal('sh1'))
+    expect(s().terminalsPanes.has('owner')).toBe(false)
+    // And nothing may still be pointing at the pane that just went.
+    expect(s().maximizedPaneId).toBeNull()
+  })
+
+  it('releases a maximized panel when its last shell is closed', () => {
+    act(() => s().openTerminalsPane('owner', 'sh1'))
+    act(() => s().setMaximizedPane('terminals:owner'))
+
+    act(() => s().removeTerminal('sh1'))
+    // A maximize pointing at a pane that no longer draws hides every sibling
+    // behind nothing at all.
+    expect(s().maximizedPaneId).toBeNull()
+  })
+
+  it('drops a shell that never came back, and keeps its panel for the rest', () => {
+    act(() => {
+      s().openTerminalsPane('owner', 'sh1')
+      s().openTerminalsPane('owner', 'sh2')
+    })
+    // sh1 is gone from the live set — the restart-shaped version of the same
+    // bug, where there is no removal to hang the cleanup off.
+    act(() =>
+      useAppStore.setState({
+        terminals: new Map([...s().terminals].filter(([id]) => id !== 'sh1')) as never
+      })
+    )
+
+    act(() => s().setVisibleTerminalIds(['owner']))
+    expect(s().terminalsPanes.get('owner')?.terminals).toEqual(['sh2'])
+  })
+
+  it('drops a panel whose shells all failed to come back', () => {
+    act(() => s().openTerminalsPane('owner', 'sh1'))
+    act(() =>
+      useAppStore.setState({
+        terminals: new Map([...s().terminals].filter(([id]) => id !== 'sh1')) as never
+      })
+    )
+
+    act(() => s().setVisibleTerminalIds(['owner']))
+    expect(s().terminalsPanes.has('owner')).toBe(false)
+  })
+
   it('takes its shells down with the session, and forgets the panel', () => {
     act(() => {
       s().openTerminalsPane('owner', 'sh1')

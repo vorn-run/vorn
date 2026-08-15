@@ -286,7 +286,26 @@ function reconcilePanes(
   // A panel goes with its owner, and its remaining shells go with it — they are
   // sessions too, so a dead session's list would otherwise keep ids that hide
   // terminals which no longer exist.
-  const nextPanels = new Map([...terminalsPanes].filter(([id]) => liveSessionIds.has(id)))
+  //
+  // The shells are checked one by one for the same reason: a shell that never
+  // came back leaves its id in a panel whose owner did, and the tab would
+  // return after a restart named after the raw id with nothing behind it.
+  const nextPanels = new Map<string, TerminalsPaneState>()
+  let panelsChanged = false
+  for (const [id, pane] of terminalsPanes) {
+    if (!liveSessionIds.has(id)) {
+      panelsChanged = true
+      continue
+    }
+    const terminals = pane.terminals.filter((tid) => liveSessionIds.has(tid))
+    if (terminals.length === pane.terminals.length) {
+      nextPanels.set(id, pane)
+      continue
+    }
+    panelsChanged = true
+    if (terminals.length === 0) continue
+    nextPanels.set(id, { terminals, activeTab: Math.min(pane.activeTab, terminals.length - 1) })
+  }
   const nextSplits = Object.fromEntries(
     Object.entries(cardSplits).filter(([id]) => liveSessionIds.has(id))
   )
@@ -297,14 +316,14 @@ function reconcilePanes(
     nextBrowsers.size === browserPanes.size &&
     nextMemory.size === browserMemory.size &&
     nextDevices.size === devicePanes.size &&
-    nextPanels.size === terminalsPanes.size &&
+    !panelsChanged &&
     !splitsChanged
   ) {
     return null
   }
   savePanes(nextFiles, nextEditors, nextBrowsers)
   if (splitsChanged) saveCardSplits(nextSplits)
-  if (nextPanels.size !== terminalsPanes.size) saveTerminalPanels(nextPanels)
+  if (panelsChanged) saveTerminalPanels(nextPanels)
   return {
     filesPanes: nextFiles,
     editorPanes: nextEditors,
@@ -314,6 +333,51 @@ function reconcilePanes(
     terminalsPanes: nextPanels,
     cardSplits: nextSplits
   }
+}
+
+/**
+ * Let go of a terminal that a panel is holding.
+ *
+ * Extraction and closing both arrive here: one keeps the terminal alive and one
+ * kills it, but either way the panel has stopped claiming the id. A claim left
+ * behind outlives its terminal — the tab stays, falls back to naming itself
+ * after the raw id, and draws a pane for a session the store no longer has.
+ *
+ * Emptied panels are reported rather than quietly dropped, because a panel's
+ * pane id can be focused or maximized and that has to be released with it.
+ */
+export function releaseFromPanels(
+  panes: Map<string, TerminalsPaneState>,
+  terminalId: string
+): { panes: Map<string, TerminalsPaneState>; emptied: string[] } | null {
+  let next: Map<string, TerminalsPaneState> | null = null
+  const emptied: string[] = []
+  for (const [sessionId, pane] of panes) {
+    const index = pane.terminals.indexOf(terminalId)
+    if (index === -1) continue
+    next ??= new Map(panes)
+    const terminals = pane.terminals.filter((id) => id !== terminalId)
+    if (terminals.length === 0) {
+      // A panel with no shells is a box taking up a pane, the same rule the
+      // browser's last tab follows.
+      next.delete(sessionId)
+      emptied.push(sessionId)
+      continue
+    }
+    // Land on the neighbour rather than jumping to the far end, and shift when
+    // something ahead of the active one leaves.
+    next.set(sessionId, {
+      terminals,
+      activeTab: Math.max(
+        0,
+        Math.min(
+          index <= pane.activeTab ? pane.activeTab - 1 : pane.activeTab,
+          terminals.length - 1
+        )
+      )
+    })
+  }
+  return next ? { panes: next, emptied } : null
 }
 
 /**
@@ -425,7 +489,7 @@ function loadTerminalPanels(): Map<string, TerminalsPaneState> {
   }
 }
 
-function saveTerminalPanels(panels: Map<string, TerminalsPaneState>): void {
+export function saveTerminalPanels(panels: Map<string, TerminalsPaneState>): void {
   try {
     localStorage.setItem(TERMINAL_PANELS_STORAGE_KEY, JSON.stringify(Object.fromEntries(panels)))
   } catch {
@@ -938,35 +1002,17 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 
   extractPanelTerminal: (sessionId, terminalId) =>
     set((state) => {
-      const pane = state.terminalsPanes.get(sessionId)
-      if (!pane) return {}
-      const index = pane.terminals.indexOf(terminalId)
-      if (index === -1) return {}
-
-      const next = new Map(state.terminalsPanes)
-      const terminals = pane.terminals.filter((id) => id !== terminalId)
-      if (terminals.length === 0) {
-        // A panel with no shells is a box taking up a pane, the same rule the
-        // browser's last tab follows.
-        next.delete(sessionId)
-        saveTerminalPanels(next)
-        return {
-          terminalsPanes: next,
-          ...clearPlacement(state, terminalsPaneId(sessionId))
-        }
+      // Extraction is nothing but releasing the claim — the terminal was a
+      // session all along, and is now simply nobody's.
+      const released = releaseFromPanels(state.terminalsPanes, terminalId)
+      if (!released) return {}
+      saveTerminalPanels(released.panes)
+      return {
+        terminalsPanes: released.panes,
+        ...(released.emptied.includes(sessionId)
+          ? clearPlacement(state, terminalsPaneId(sessionId))
+          : {})
       }
-      // Land on the neighbour rather than jumping to the far end, and shift
-      // when something ahead of the active one leaves.
-      const activeTab = Math.max(
-        0,
-        Math.min(
-          index <= pane.activeTab ? pane.activeTab - 1 : pane.activeTab,
-          terminals.length - 1
-        )
-      )
-      next.set(sessionId, { terminals, activeTab })
-      saveTerminalPanels(next)
-      return { terminalsPanes: next }
     }),
 
   setMaximizedPane: (paneId) =>
