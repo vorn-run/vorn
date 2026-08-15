@@ -73,7 +73,8 @@ export const TerminalsCard = memo(
 
     if (!owner || !pane || names.length === 0) return null
 
-    const active = names[activePanelIndex(pane)]
+    const activeIndex = activePanelIndex(pane)
+    const active = names[activeIndex]
     const paneId = terminalsPaneId(sessionId)
     const close = (): void => void closeTerminalsPanel(sessionId)
 
@@ -102,7 +103,10 @@ export const TerminalsCard = memo(
             aria-label="Terminals"
           >
             {names.map((t, i) => {
-              const isActive = i === pane.activeTab
+              // The clamped index, the same one the body below is drawn from.
+              // Reading the raw value here would leave a stale one showing a
+              // terminal with no tab marked as its own.
+              const isActive = i === activeIndex
               return (
                 <div
                   key={t.id}

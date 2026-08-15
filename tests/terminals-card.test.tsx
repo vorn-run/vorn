@@ -211,5 +211,8 @@ describe('TerminalsCard', () => {
     render(<TerminalsCard sessionId="owner" />)
 
     expect(screen.getByTestId('terminal-body-sh1')).toBeInTheDocument()
+    // And the strip agrees with the body: reading the raw index here would
+    // show a terminal with no tab marked as the one it belongs to.
+    expect(screen.getByRole('tab', { name: /zsh/ })).toHaveAttribute('aria-selected', 'true')
   })
 })
