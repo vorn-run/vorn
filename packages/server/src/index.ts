@@ -19,9 +19,27 @@ import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
 import { getTailscaleStatus } from './tailscale'
-import { initRebind, checkAndRebind, isAllowedOrigin } from './server-rebind'
+import { initRebind, checkAndRebind } from './server-rebind'
+import { isAllowedUpgrade, logRefusedUpgrade, setTrustedOriginHosts } from './ws-origin'
 import { setEnvPassthrough } from './process-utils'
 import log from './logger'
+
+/**
+ * Names, beyond IP literals and `localhost`, that the web client may legitimately
+ * be served from.
+ *
+ * Best-effort by design. A refused name is a fallback rather than a lockout — a
+ * tailnet client still connects by its `100.x` literal — so this must never block
+ * startup or a config change on a Tailscale probe that may be slow or absent.
+ */
+async function refreshTrustedOrigins(): Promise<void> {
+  try {
+    const status = await getTailscaleStatus()
+    setTrustedOriginHosts(status.running ? [status.selfIP, status.selfDNSName].filter(Boolean) : [])
+  } catch {
+    setTrustedOriginHosts([])
+  }
+}
 
 export async function startServer(
   options: { host?: string; port?: number; dataDir?: string } = {}
@@ -58,14 +76,11 @@ export async function startServer(
     headlessManager.setAgentCommands(cfg.agentCommands)
     scheduler.syncSchedules(cfg.workflows ?? [])
     clientRegistry.broadcast(IPC.CONFIG_CHANGED, cfg)
-    // Auto-rebind when networkAccessEnabled changes
+    // Auto-rebind when networkAccessEnabled changes, and re-read the names the
+    // web client may be served from on the same transition.
     checkAndRebind().catch((err) => log.warn({ err }, '[server] rebind check failed'))
+    void refreshTrustedOrigins()
   })
-
-  // The hosts the web client can be served from once reachable over a tailnet.
-  // Captured from the bind decision below and handed to initRebind, which owns
-  // the origin policy from then on.
-  let tailnetHosts: string[] = []
 
   // Set up Fastify + WebSocket
   const app = Fastify({ logger: false })
@@ -85,10 +100,8 @@ export async function startServer(
       // bound on loopback — which browsers permit, since WebSocket upgrades are
       // subject to neither CORS nor same-origin policy.
       preValidation: async (req, reply) => {
-        const origin = req.headers.origin
-        if (origin === undefined) return // non-browser client; the credential is its control
-        if (!isAllowedOrigin(origin)) {
-          log.warn({ origin }, '[ws] refused upgrade from disallowed origin')
+        if (!isAllowedUpgrade(req.headers.origin, req.headers.host)) {
+          logRefusedUpgrade(req.headers.origin, req.headers.host)
           await reply.code(403).send({ error: 'Origin not allowed' })
         }
       }
@@ -180,26 +193,17 @@ export async function startServer(
     }, 100)
   })
 
-  // Determine bind address: if networkAccessEnabled AND Tailscale is running,
-  // bind to 0.0.0.0 so other devices on the tailnet can reach us.
-  // Otherwise, localhost only.
-  let host = options.host ?? '127.0.0.1'
-  if (!options.host && config.defaults.networkAccessEnabled) {
-    try {
-      const tsStatus = await getTailscaleStatus()
-      if (tsStatus.running && tsStatus.selfIP) {
-        host = '0.0.0.0'
-        tailnetHosts = [tsStatus.selfIP, tsStatus.selfDNSName].filter(
-          (h): h is string => typeof h === 'string' && h.length > 0
-        )
-        log.info(
-          `[server] remote access enabled, binding to 0.0.0.0 (tailscale IP: ${tsStatus.selfIP})`
-        )
-      }
-    } catch (err) {
-      log.warn({ err }, '[server] failed to check tailscale status, falling back to localhost')
-    }
-  }
+  // Bind wide when remote access is enabled, else loopback. Tailscale used to be
+  // required too, which made the tailnet the boundary; every connection is
+  // authenticated now, so the credential is.
+  const host = options.host ?? (config.defaults.networkAccessEnabled ? '0.0.0.0' : '127.0.0.1')
+  if (host === '0.0.0.0') log.info('[server] remote access enabled, binding to 0.0.0.0')
+
+  // Tailscale is now only a source of names the web client may be served from —
+  // it no longer decides anything. Best-effort and non-blocking: a refused origin
+  // by name still connects by IP literal, so a slow or absent Tailscale must not
+  // hold up startup.
+  void refreshTrustedOrigins()
   const port = options.port ?? 0 // 0 = OS-assigned
 
   await app.listen({ host, port })
@@ -210,7 +214,7 @@ export async function startServer(
   setServerPort(actualPort)
 
   // Enable hot-rebind when network access / Tailscale state changes
-  initRebind(app.server, host, actualPort, tailnetHosts)
+  initRebind(app.server, host, actualPort)
 
   // The `{"port":N}` line that Electron's launcher waits for is written by the
   // direct-run block below, not here: it is a contract between that entry point

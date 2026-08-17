@@ -114,7 +114,6 @@ import { buildConnectorSeededWorkflow } from './default-workflows'
 import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vornrun/shared/types'
 import { executeScript, scriptRunnerEvents } from './script-runner'
 import { getTailscaleStatus, clearBinaryCache } from './tailscale'
-import { checkAndRebind } from './server-rebind'
 import { testSshConnection } from './process-utils'
 import { captureAgentSessionId } from './agent-session-capture'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
@@ -588,10 +587,14 @@ export function registerAllMethods(): void {
   registerMethod('project:detectMobile', ({ projectPath }) => detectMobileProject(projectPath))
   registerMethod('ide:open', ({ ideId, projectPath }) => openInIDE(ideId, projectPath))
 
-  // Tailscale network access
+  // Tailscale network access. Informational only now: it supplies an address and
+  // a QR code, and no longer decides whether the server binds wide.
   registerMethod('tailscale:status', async () => {
     clearBinaryCache() // Always re-detect in case user just installed
-    await checkAndRebind() // Rebind if Tailscale state changed since startup
+    // Deliberately does not rebind. Reading status used to have that side effect,
+    // because Tailscale could start after boot and change the answer. Nothing
+    // about the bind depends on it now, and rebinding drops every connection —
+    // so it happens when the setting changes, and at no other time.
     return getTailscaleStatus(serverPort)
   })
 
