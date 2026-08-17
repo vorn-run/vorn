@@ -110,18 +110,26 @@ export async function startServer(
         return reply.code(404).send({ error: 'Image not found' })
       }
       const ext = path.extname(filename).toLowerCase()
+      // No `.svg` — see the note on ALLOWED_IMAGE_EXTENSIONS in task-images.ts.
+      // Anything not listed is served as an opaque download rather than rendered.
       const mimeTypes: Record<string, string> = {
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
         '.gif': 'image/gif',
         '.webp': 'image/webp',
-        '.svg': 'image/svg+xml',
         '.bmp': 'image/bmp'
       }
       reply.header('Content-Type', mimeTypes[ext] || 'application/octet-stream')
-      reply.header('Cache-Control', 'public, max-age=86400')
+      // `private`: this is user content, and once the port is reachable over
+      // plaintext HTTP a `public` response invites an intercepting proxy to store it.
+      reply.header('Cache-Control', 'private, max-age=86400')
       reply.header('X-Content-Type-Options', 'nosniff')
+      // Belt and braces against the SVG class above: with no script, object or
+      // frame sources and a sandbox, a document served from here can do nothing
+      // even if one ever reaches this route again.
+      reply.header('Content-Security-Policy', "default-src 'none'; sandbox")
+      reply.header('Cross-Origin-Resource-Policy', 'same-origin')
       const stream = fs.createReadStream(filePath)
       return reply.send(stream)
     } catch {
@@ -136,6 +144,16 @@ export async function startServer(
     ? path.resolve(_dirname, '../web/dist')
     : path.resolve(_dirname, '../../web/dist')
   if (fs.existsSync(webDistDir)) {
+    // The served bundle is the authenticated UI, and it is same-origin with the
+    // device token the web client stores. Without this any page could frame it and
+    // clickjack a session; the socket's Origin check does not help, because a
+    // frame is a plain document load rather than an upgrade.
+    app.addHook('onSend', async (req, reply) => {
+      if (!req.url.startsWith('/app')) return
+      reply.header('X-Frame-Options', 'DENY')
+      reply.header('Content-Security-Policy', "frame-ancestors 'none'")
+    })
+
     await app.register(fastifyStatic, {
       root: webDistDir,
       prefix: '/app/'

@@ -36,13 +36,34 @@ function resolveSafePath(...segments: string[]): string {
   return resolved
 }
 
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10 MB decoded limit
+
+/**
+ * Types a task image may be stored as.
+ *
+ * `.svg` is deliberately absent. An SVG is a document, not just a bitmap: served
+ * with `image/svg+xml` from the app's own origin, inline script inside it runs
+ * with access to that origin — including the device token the web client keeps in
+ * localStorage. Nothing navigates to an image today, so it was not reachable, but
+ * an "open in new tab" affordance would have made it so, and no format here needs
+ * to be a document.
+ */
+const ALLOWED_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
+
 export function saveTaskImage(taskId: string, sourcePath: string): string {
   if (!isSafeId(taskId)) throw new Error(`Invalid taskId: ${taskId}`)
+
+  // The same allowlist the base64 path applies. Without it this route accepted
+  // any extension, and the type it is later served with is derived from that
+  // extension — so the check has to happen on both ways in, not one.
+  const ext = path.extname(sourcePath).toLowerCase()
+  if (!ALLOWED_IMAGE_EXTENSIONS.has(ext)) {
+    throw new Error(`Unsupported image type: ${ext}`)
+  }
 
   const taskDir = resolveSafePath(taskId)
   ensureDir(taskDir)
 
-  const ext = path.extname(sourcePath)
   const filename = `${randomUUID()}${ext}`
   const destPath = resolveSafePath(taskId, filename)
 
@@ -66,9 +87,6 @@ export function getTaskImagePath(taskId: string, filename: string): string {
 
   return resolveSafePath(taskId, filename)
 }
-
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10 MB decoded limit
-const ALLOWED_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
 
 export function saveTaskImageFromBase64(
   taskId: string,
