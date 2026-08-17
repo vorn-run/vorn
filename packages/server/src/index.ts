@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import Fastify from 'fastify'
 
@@ -12,10 +11,12 @@ import fastifyStatic from '@fastify/static'
 import { handleConnection, registerMethod } from './ws-handler'
 import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
+import { getDataDir } from './database'
+import { parseServerArgs } from './server-args'
 import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
-import { setDataDir, getTaskImagePath as resolveTaskImagePath } from './task-images'
+import { getTaskImagePath as resolveTaskImagePath } from './task-images'
 import { getTailscaleStatus } from './tailscale'
 import { initRebind, checkAndRebind } from './server-rebind'
 import { setEnvPassthrough } from './process-utils'
@@ -24,13 +25,12 @@ import log from './logger'
 export async function startServer(
   options: { host?: string; port?: number; dataDir?: string } = {}
 ) {
-  // Resolve data directory
-  const dataDir = options.dataDir ?? path.join(os.homedir(), '.vorn')
-  setDataDir(dataDir)
-
-  // Initialize database + config
-  configManager.init()
+  // Initialize database + config. This resolves the data directory for the whole
+  // process; everything else reads it back with getDataDir() rather than
+  // deriving it again, so nothing can disagree about where the files are.
+  configManager.init(options.dataDir)
   configManager.watchDb()
+  const dataDir = getDataDir()
 
   // Register built-in connectors
   const { connectorRegistry } = await import('./connectors')
@@ -162,12 +162,16 @@ export async function startServer(
   // Enable hot-rebind when network access / Tailscale state changes
   initRebind(app.server, host, actualPort)
 
-  // Write port to stdout for parent process (Electron) to read
-  process.stdout.write(JSON.stringify({ port: actualPort }) + '\n')
+  // The `{"port":N}` line that Electron's launcher waits for is written by the
+  // direct-run block below, not here: it is a contract between that entry point
+  // and its parent process, not a property of the server. The CLI has no parent
+  // and prints something a person can read instead.
 
   // Write WS port to a well-known file so MCP and other tools can discover it.
   // Use JSON with PID so multiple instances don't clobber each other's port files.
-  const wsPortFile = path.join(os.homedir(), '.vorn', 'ws-port')
+  // Lives beside the database rather than always in ~/.vorn, so a server on its
+  // own data dir advertises itself there instead of over the desktop's file.
+  const wsPortFile = path.join(dataDir, 'ws-port')
   let ownsPortFile = true
   try {
     fs.mkdirSync(path.dirname(wsPortFile), { recursive: true })
@@ -249,20 +253,21 @@ const isDirectRun =
   process.argv[1]?.endsWith('index.js') ||
   process.argv[1]?.endsWith('index.cjs')
 if (isDirectRun) {
-  const portArg = process.argv.find((a) => a.startsWith('--port='))
-  const port = portArg ? parseInt(portArg.split('=')[1], 10) : 0
+  const { host, port, dataDir } = parseServerArgs(process.argv.slice(2))
 
-  const hostArg = process.argv.find((a) => a.startsWith('--host='))
-  const host = hostArg ? hostArg.split('=')[1] : undefined
-
-  const dataDirArg = process.argv.find((a) => a.startsWith('--data-dir='))
-  const dataDir = dataDirArg ? dataDirArg.split('=')[1] : undefined
-
-  startServer({ port, host, dataDir }).catch((err) => {
-    log.error({ err }, '[server] failed to start')
-    const msg =
-      '[server] failed to start: ' + (err instanceof Error ? err.stack || err.message : String(err))
-    process.stderr.write(msg + '\n')
-    process.exit(1)
-  })
+  startServer({ port: port ?? 0, host, dataDir })
+    .then(({ port: actualPort }) => {
+      // This entry point is the one Electron forks, and its launcher blocks on
+      // reading this line to learn where to connect. It belongs here rather than
+      // inside startServer, which has no parent to answer to.
+      process.stdout.write(JSON.stringify({ port: actualPort }) + '\n')
+    })
+    .catch((err) => {
+      log.error({ err }, '[server] failed to start')
+      const msg =
+        '[server] failed to start: ' +
+        (err instanceof Error ? err.stack || err.message : String(err))
+      process.stderr.write(msg + '\n')
+      process.exit(1)
+    })
 }

@@ -12,9 +12,13 @@
     "./database": "./src/database.ts",
     "./git-utils": "./src/git-utils.ts"
   },
+  "bin": {
+    "vorn-server": "./dist/cli.cjs"
+  },
   "scripts": {
     "build": "tsup --config tsup.config.ts",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "cli": "tsx src/cli.ts"
   },
   "dependencies": {
     "@fastify/static": "^10.1.2",

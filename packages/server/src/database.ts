@@ -28,13 +28,31 @@ import {
   SessionEventType,
   SourceConnection,
   TaskSourceLink,
-  ConnectorItemContext
+  ConnectorItemContext,
+  User,
+  UserRole,
+  DeviceToken
 } from '@vornrun/shared/types'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import { DEFAULT_TASK_WORKFLOW_ID, buildDefaultTaskWorkflow } from './default-workflows'
 
-const CONFIG_DIR = path.join(os.homedir(), '.vorn')
-const DB_PATH = path.join(CONFIG_DIR, 'vorn.db')
+/** Where the data directory lands when nothing overrides it. */
+const DEFAULT_DATA_DIR = path.join(os.homedir(), '.vorn')
+
+// Resolved by initDatabase() rather than fixed at module load, so a standalone
+// server can be pointed at its own directory with --data-dir. The desktop
+// passes nothing and keeps ~/.vorn — see the note in server-launcher.ts for why
+// it must not pass Electron's userData.
+//
+// Only the directory is stored; every path under it is derived. Keeping a
+// second `dbPath` variable in step by hand is how one code path ends up opening
+// one directory's database while writing another's .db-signal.
+let resolvedDataDir: string | null = null
+
+function dbPath(): string {
+  return path.join(getDataDir(), 'vorn.db')
+}
+
 const MAX_LOG_ENTRIES = 200
 
 let db: Database.Database | null = null
@@ -44,13 +62,30 @@ function getDb(): Database.Database {
   return db
 }
 
-export function initDatabase(): void {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 })
+/**
+ * The resolved data directory — the one place anything in this process should
+ * ask where Vorn's files live.
+ *
+ * Throws rather than falling back to the default, because a caller that runs
+ * before `initDatabase()` would otherwise get a plausible-looking `~/.vorn` and
+ * quietly read or watch the wrong directory forever.
+ */
+export function getDataDir(): string {
+  if (!resolvedDataDir) {
+    throw new Error('Data directory not resolved. Call initDatabase() first.')
+  }
+  return resolvedDataDir
+}
+
+export function initDatabase(dataDir?: string): void {
+  resolvedDataDir = dataDir ?? DEFAULT_DATA_DIR
+
+  if (!fs.existsSync(getDataDir())) {
+    fs.mkdirSync(getDataDir(), { recursive: true, mode: 0o700 })
   }
 
   try {
-    db = new Database(DB_PATH)
+    db = new Database(dbPath())
     db.pragma('journal_mode = WAL')
     db.pragma('foreign_keys = ON')
     createSchema()
@@ -142,15 +177,15 @@ function recoverCorruptDatabase(): void {
 
   // Back up the corrupt file
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const backupPath = `${DB_PATH}.corrupt-${timestamp}`
+  const backupPath = `${dbPath()}.corrupt-${timestamp}`
   try {
-    if (fs.existsSync(DB_PATH)) {
-      fs.copyFileSync(DB_PATH, backupPath)
+    if (fs.existsSync(dbPath())) {
+      fs.copyFileSync(dbPath(), backupPath)
       log.info(`[database] Backed up corrupt database to ${backupPath}`)
     }
     // Remove corrupt DB + WAL/SHM files
     for (const suffix of ['', '-wal', '-shm']) {
-      const file = DB_PATH + suffix
+      const file = dbPath() + suffix
       if (fs.existsSync(file)) fs.unlinkSync(file)
     }
   } catch (backupErr) {
@@ -159,7 +194,7 @@ function recoverCorruptDatabase(): void {
 
   // Create a fresh database
   try {
-    db = new Database(DB_PATH)
+    db = new Database(dbPath())
     db.pragma('journal_mode = WAL')
     db.pragma('foreign_keys = ON')
     createSchema()
@@ -179,7 +214,7 @@ function recoverCorruptDatabase(): void {
  */
 export function dbSignalChange(): void {
   try {
-    const signalPath = path.join(CONFIG_DIR, '.db-signal')
+    const signalPath = path.join(getDataDir(), '.db-signal')
     fs.writeFileSync(signalPath, Date.now().toString())
   } catch {
     // Best-effort — watcher fallback will catch it
@@ -196,6 +231,10 @@ export function closeDatabase(): void {
 /** Initialize an in-memory database for tests. Returns teardown function. */
 export function initTestDatabase(): () => void {
   if (db) closeDatabase()
+  // The database is in memory, but anything deriving a path from the data dir
+  // (dbSignalChange, task images) still needs one resolved. Point it at the temp
+  // directory so tests cannot write into the developer's real ~/.vorn.
+  resolvedDataDir = os.tmpdir()
   db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
@@ -223,6 +262,29 @@ function createSchema(): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'owner',
+      created_at TEXT NOT NULL
+    );
+
+    -- Only the hash is stored. The plaintext is shown once at creation and is
+    -- not recoverable afterwards, so a leaked database yields no usable
+    -- credential.
+    CREATE TABLE IF NOT EXISTS device_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT,
+      revoked_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_device_tokens_user
+      ON device_tokens(user_id);
 
     CREATE TABLE IF NOT EXISTS projects (
       name TEXT PRIMARY KEY,
@@ -847,6 +909,34 @@ function migrateSchema(d: Database.Database): void {
       ).run()
     })()
     log.info('[database] migrated schema to version 13 (connection-scoped inbox)')
+  }
+
+  if (version < 14) {
+    // The tables themselves are created in createSchema(), which runs before
+    // this and uses IF NOT EXISTS, so it already covered both a fresh database
+    // and an existing one. What is left is seeding the single owner — the same
+    // shape as version 1 seeding the default workspace.
+    d.transaction(() => {
+      const existing = d.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }
+      if (existing.n === 0) {
+        let name = 'owner'
+        try {
+          name = os.userInfo().username || name
+        } catch {
+          // No OS user available (some sandboxes) — the fallback is fine.
+        }
+        d.prepare("INSERT INTO users (id, name, role, created_at) VALUES (?, ?, 'owner', ?)").run(
+          randomUUID(),
+          name,
+          new Date().toISOString()
+        )
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '14')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 14 (identity and device tokens)')
   }
 }
 
@@ -2274,6 +2364,120 @@ export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition
 
 export function dbDeleteWorkflow(id: string): void {
   getDb().prepare('DELETE FROM workflows WHERE id = ?').run(id)
+}
+
+// ---------------------------------------------------------------------------
+// Targeted CRUD: Identity and device tokens
+// ---------------------------------------------------------------------------
+
+/**
+ * What verification needs, and nothing else.
+ *
+ * Deliberately NOT a superset of `DeviceToken`. An `extends DeviceToken` shape
+ * would be structurally assignable to it, so returning one from a handler typed
+ * `DeviceToken` would compile and ship `tokenHash` over the wire — and
+ * `./database` is an export of this package, so `packages/mcp` can reach it.
+ * Keeping the shapes incompatible makes the compiler enforce what would
+ * otherwise be a comment.
+ */
+export interface DeviceTokenSecret {
+  id: string
+  userId: string
+  tokenHash: string
+  revokedAt: string | null
+}
+
+/** Fields needed to persist a new token. */
+export interface NewDeviceToken {
+  id: string
+  userId: string
+  name: string
+  tokenHash: string
+  createdAt: string
+}
+
+interface DeviceTokenRow {
+  id: string
+  user_id: string
+  name: string
+  token_hash: string
+  created_at: string
+  last_seen_at: string | null
+  revoked_at: string | null
+}
+
+function rowToDeviceToken(row: Omit<DeviceTokenRow, 'token_hash'>): DeviceToken {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at,
+    revokedAt: row.revoked_at
+  }
+}
+
+/** The seeded owner. Present after migration 14 on any initialized database. */
+export function dbGetOwnerUser(): User | null {
+  const row = getDb()
+    .prepare("SELECT * FROM users WHERE role = 'owner' ORDER BY created_at LIMIT 1")
+    .get() as { id: string; name: string; role: UserRole; created_at: string } | undefined
+  if (!row) return null
+  return { id: row.id, name: row.name, role: row.role, createdAt: row.created_at }
+}
+
+export function dbInsertDeviceToken(token: NewDeviceToken): void {
+  getDb()
+    .prepare(
+      `INSERT INTO device_tokens (id, user_id, name, token_hash, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .run(token.id, token.userId, token.name, token.tokenHash, token.createdAt)
+}
+
+/** Carries the hash — for verification only. */
+export function dbGetDeviceTokenSecret(id: string): DeviceTokenSecret | null {
+  const row = getDb()
+    .prepare('SELECT id, user_id, token_hash, revoked_at FROM device_tokens WHERE id = ?')
+    .get(id) as Pick<DeviceTokenRow, 'id' | 'user_id' | 'token_hash' | 'revoked_at'> | undefined
+  if (!row) return null
+  return {
+    id: row.id,
+    userId: row.user_id,
+    tokenHash: row.token_hash,
+    revokedAt: row.revoked_at
+  }
+}
+
+/**
+ * Columns are named rather than `SELECT *`, following `dbListSSHKeys`, so the
+ * hash never leaves the data layer even if a later `...row` spread is careless.
+ */
+export function dbListDeviceTokens(): DeviceToken[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, user_id, name, created_at, last_seen_at, revoked_at
+       FROM device_tokens ORDER BY created_at`
+    )
+    .all() as Omit<DeviceTokenRow, 'token_hash'>[]
+  return rows.map(rowToDeviceToken)
+}
+
+/** Cheaper than listing when the caller only wants to know whether any exist. */
+export function dbHasDeviceTokens(): boolean {
+  return getDb().prepare('SELECT 1 FROM device_tokens LIMIT 1').get() !== undefined
+}
+
+/** Returns false when the id is unknown or the token was already revoked. */
+export function dbRevokeDeviceToken(id: string, revokedAt: string): boolean {
+  const result = getDb()
+    .prepare('UPDATE device_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
+    .run(revokedAt, id)
+  return result.changes > 0
+}
+
+export function dbTouchDeviceToken(id: string, seenAt: string): void {
+  getDb().prepare('UPDATE device_tokens SET last_seen_at = ? WHERE id = ?').run(seenAt, id)
 }
 
 // ---------------------------------------------------------------------------

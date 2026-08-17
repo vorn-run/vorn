@@ -5,10 +5,24 @@ import type {
   RequestMethod,
   RequestMethods
 } from '@vornrun/shared/protocol'
-import { createResponse, createErrorResponse } from '@vornrun/shared/protocol'
+import {
+  createResponse,
+  createErrorResponse,
+  createNotification,
+  RUNTIME_PROTOCOL_VERSION
+} from '@vornrun/shared/protocol'
 import { clientRegistry } from './broadcast'
 import { browserBridge } from './browser-bridge'
 import log from './logger'
+
+// The greeting never varies, so it is serialized once at module load rather
+// than rebuilt per connection.
+const HELLO_FRAME = JSON.stringify(
+  createNotification('server:hello', {
+    protocolVersion: RUNTIME_PROTOCOL_VERSION,
+    capabilities: {}
+  })
+)
 
 // Handler registry: method name → async handler function
 type Handler = (params: unknown) => Promise<unknown> | unknown
@@ -40,6 +54,11 @@ export function registerNotification(method: string, handler: (params: unknown) 
  */
 export function handleConnection(ws: WebSocket): void {
   clientRegistry.add(ws)
+
+  // Announce the contract before anything is dispatched, so a client knows what
+  // it is talking to without having to ask. Capabilities are empty until there
+  // is something true to put in them.
+  ws.send(HELLO_FRAME)
 
   ws.on('message', async (raw: Buffer) => {
     let msg: RpcRequest

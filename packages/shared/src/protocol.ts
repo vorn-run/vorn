@@ -38,6 +38,37 @@ import type {
   MobileProject
 } from './types'
 
+// ─── Runtime Protocol Version ───────────────────────────────────
+
+/**
+ * The wire contract between a client and this server.
+ *
+ * Once clients update on their own schedule — a phone, a browser, a desktop
+ * pointed at someone else's host — mixed versions are the normal state rather
+ * than an edge case, and negotiation cannot be added after the fact: every
+ * client that predates it is already unable to negotiate. So the handshake
+ * ships while there is exactly one client and it costs nothing.
+ *
+ * Bump this when an existing message changes shape or meaning. A new *optional*
+ * field does not need a bump, but stays safe only while every reader treats it
+ * as optional — the moment one requires it, that reader is broken against every
+ * older server, which is the same defect as removing a field, found later.
+ */
+export const RUNTIME_PROTOCOL_VERSION = 1
+
+export interface ServerHello {
+  protocolVersion: number
+  /**
+   * What this server can do, as name → version. A client sends a new message
+   * kind only after seeing it here, because `ws-handler` drops unknown methods
+   * silently: an unnegotiated feature appears to hang rather than to fail.
+   *
+   * Empty today, and correctly so. Authentication is not enforced yet, so
+   * advertising it would be a lie a future client would believe.
+   */
+  capabilities: Record<string, number>
+}
+
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
 
 export interface RpcRequest {
@@ -546,6 +577,8 @@ export interface RequestMethods {
 // ─── Server Notifications (server → client, push events) ────────
 
 export interface ServerNotifications {
+  /** First frame on every connection, before anything is dispatched. */
+  'server:hello': ServerHello
   'terminal:data': { id: string; data: string }
   'terminal:exit': { id: string; exitCode: number }
   'session:created': TerminalSession

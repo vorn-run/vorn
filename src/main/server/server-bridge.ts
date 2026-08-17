@@ -57,6 +57,11 @@ export class ServerBridge extends EventEmitter {
         } else if ('id' in msg && msg.id !== undefined) {
           this.handleResponse(msg as RpcResponse)
         } else if ('method' in msg) {
+          if (msg.method === 'server:hello') {
+            // Recorded in the log only. Pass B adds the field that gates on a
+            // capability, at the point where something actually reads it.
+            log.info({ hello: (msg as RpcNotification).params }, '[bridge] server protocol')
+          }
           this.emit('server-notification', msg.method, (msg as RpcNotification).params)
         }
       } catch {

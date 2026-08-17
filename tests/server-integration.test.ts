@@ -13,6 +13,8 @@ vi.mock('../packages/server/src/database', () => ({
   getDb: vi.fn(),
   closeDatabase: vi.fn(),
   initDatabase: vi.fn(),
+  // The single resolved data directory the whole server process reads.
+  getDataDir: vi.fn(() => '/tmp/vorn-integration-test'),
   loadFullConfig: vi.fn(() => ({
     version: 1,
     defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },

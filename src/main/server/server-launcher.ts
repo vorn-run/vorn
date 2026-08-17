@@ -26,7 +26,12 @@ export async function launchServer(): Promise<ServerBridge> {
   const serverEntryPoint = resolveServerEntry()
   log.info(`[launcher] starting server: ${serverEntryPoint}`)
 
-  const dataDir = app.getPath('userData')
+  // Deliberately does NOT pass --data-dir. Vorn's data directory is ~/.vorn —
+  // that is where the database, ws-port file and scheduler locks have always
+  // lived, and where `packages/mcp` looks for all three. This used to pass
+  // Electron's userData, which the server then ignored for everything except
+  // task images, so it was inert. Passing it once the server honours it would
+  // point the database at an empty directory and read as total data loss.
   const isDev = !!process.env.ELECTRON_RENDERER_URL
 
   let port: number
@@ -35,7 +40,7 @@ export async function launchServer(): Promise<ServerBridge> {
     // Dev mode: use npx tsx to run TypeScript directly
     const repoRoot = path.join(__dirname, '../..')
 
-    const child = spawn('npx', ['tsx', serverEntryPoint, `--data-dir=${dataDir}`], {
+    const child = spawn('npx', ['tsx', serverEntryPoint], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
@@ -75,7 +80,7 @@ export async function launchServer(): Promise<ServerBridge> {
     // here and pass them via environment variables for the server banner to use.
     const asarUnpacked = path.join(app.getAppPath() + '.unpacked', 'node_modules')
 
-    const child = utilityProcess.fork(serverEntryPoint, [`--data-dir=${dataDir}`], {
+    const child = utilityProcess.fork(serverEntryPoint, [], {
       stdio: 'pipe',
       env: {
         ...process.env,

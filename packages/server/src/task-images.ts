@@ -1,16 +1,13 @@
 import * as path from 'path'
 import * as fs from 'fs'
 import { randomUUID } from 'crypto'
+import { getDataDir } from './database'
 
-let dataDir = ''
-
-export function setDataDir(dir: string): void {
-  dataDir = dir
-}
-
+// Reads the resolved data directory rather than holding its own copy. Two
+// independently-set holders meant every entry point had to remember to set
+// both, and the CLI's token commands set only one.
 function getImagesDir(): string {
-  if (!dataDir) throw new Error('dataDir not set. Call setDataDir() first.')
-  return path.join(dataDir, 'task-images')
+  return path.join(getDataDir(), 'task-images')
 }
 
 function ensureDir(dir: string): void {

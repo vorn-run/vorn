@@ -127,6 +127,35 @@ export interface RemoteHost {
   sshOptions?: string
 }
 
+/**
+ * Who is operating Vorn. A single owner is seeded on first run — this is an
+ * identity, not a login, and it exists so that the local desktop can
+ * authenticate as somebody rather than being exempt from authentication.
+ */
+export type UserRole = 'owner'
+
+export interface User {
+  id: string
+  name: string
+  role: UserRole
+  createdAt: string
+}
+
+/**
+ * A credential belonging to one device. Deliberately carries no secret: the
+ * plaintext is returned once at creation and only its hash is ever stored, so
+ * there is nothing here for a listing to leak.
+ */
+export interface DeviceToken {
+  id: string
+  userId: string
+  /** Human label, e.g. "Javier's iPhone". */
+  name: string
+  createdAt: string
+  lastSeenAt: string | null
+  revokedAt: string | null
+}
+
 export interface WorkspaceConfig {
   id: string // 'personal' for default, UUID for user-created
   name: string

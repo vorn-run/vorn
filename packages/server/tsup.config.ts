@@ -32,7 +32,11 @@ const NATIVE_MODULE_PATCH = `
 `
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  // Two entries: `index` is what Electron's utilityProcess spawns, `cli` is the
+  // standalone `vorn-server` binary. They are bundled independently rather than
+  // code-split, because each runs as its own process and a shared chunk would
+  // only add a require() hop.
+  entry: ['src/index.ts', 'src/cli.ts'],
   format: ['cjs'],
   target: 'node22',
   clean: true,

@@ -1,11 +1,10 @@
 import fs from 'node:fs'
-import path from 'node:path'
-import os from 'node:os'
 import { AppConfig } from '@vornrun/shared/types'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import {
   initDatabase,
   closeDatabase,
+  getDataDir,
   loadConfig as dbLoadConfig,
   saveConfig as dbSaveConfig
 } from './database'
@@ -14,16 +13,14 @@ import { getDefaultShell } from './process-utils'
 
 type ConfigChangeCallback = (config: AppConfig) => void
 
-const DB_DIR = path.join(os.homedir(), '.vorn')
-
 class ConfigManager {
   private changeCallbacks: ConfigChangeCallback[] = []
   private dbWatcher: fs.FSWatcher | null = null
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
   private cachedConfig: AppConfig | null = null
 
-  init(): void {
-    initDatabase()
+  init(dataDir?: string): void {
+    initDatabase(dataDir)
   }
 
   close(): void {
@@ -88,7 +85,9 @@ class ConfigManager {
     const WATCH_SUFFIXES = ['.db-signal', '.db-wal', '.db']
 
     try {
-      this.dbWatcher = fs.watch(DB_DIR, (eventType, filename) => {
+      // Whatever directory the database actually landed in, not a second copy
+      // of the default — a server on a custom --data-dir must watch its own.
+      this.dbWatcher = fs.watch(getDataDir(), (eventType, filename) => {
         if (!filename || !WATCH_SUFFIXES.some((s) => filename.endsWith(s))) return
         // Debounce -- multiple writes can fire rapidly
         if (this.debounceTimer) clearTimeout(this.debounceTimer)
