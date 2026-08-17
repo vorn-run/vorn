@@ -503,7 +503,16 @@ export function clearTerminalSelection(terminalId: string): void {
 }
 
 export function pasteToTerminal(terminalId: string, text: string): void {
-  registry.get(terminalId)?.term.paste(text)
+  const entry = registry.get(terminalId)
+  if (!entry) return
+  // xterm's paste sends the text and *then* clears its hidden textarea, which
+  // only exists once the terminal is opened — so before that it throws after
+  // sending, and a caller's following carriage return never runs.
+  if (!entry.term.element) {
+    window.api.writeTerminal(terminalId, text)
+    return
+  }
+  entry.term.paste(text)
 }
 
 export function scrollToBottom(terminalId: string): void {

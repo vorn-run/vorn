@@ -31,10 +31,22 @@ const registryMocks = vi.hoisted(() => ({
 vi.mock('../src/renderer/lib/terminal-registry', () => registryMocks)
 
 // What the shell is doing right now decides where a keystroke belongs.
-const shellState = vi.hoisted(() => ({ value: 'prompt' as 'prompt' | 'running' | 'unknown' }))
+const shellState = vi.hoisted(() => ({
+  value: 'prompt' as 'prompt' | 'running' | 'altScreen' | 'unknown'
+}))
 vi.mock('../src/renderer/lib/command-blocks', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
   return { ...actual, getShellInputState: () => shellState.value }
+})
+
+// jsdom doesn't implement matchMedia; stub it for useIsMobile.
+Object.defineProperty(window, 'matchMedia', {
+  value: () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn()
+  }),
+  writable: true
 })
 
 Object.defineProperty(window, 'api', {
@@ -470,7 +482,10 @@ describe('interrupting a running command from the composer', () => {
     pty = vi.fn()
     // Assigned, not redefined: the module-level definition is not configurable.
     window.api = { writeTerminal: pty } as unknown as typeof window.api
-    shellState.value = 'running'
+    // 'unknown' rather than 'running': with no shell integration the bar stays
+    // mounted for the whole command, which is where interrupting from it still
+    // matters. A tracked command hides the bar and xterm takes the chord.
+    shellState.value = 'unknown'
   })
 
   afterEach(() => {
@@ -541,6 +556,115 @@ describe('interrupting a running command from the composer', () => {
     render(<IntentBar terminalId="term-1" />)
     await ready()
     fireEvent.keyDown(getInput(), { key: 'c', ctrlKey: true })
+    expect(pty).not.toHaveBeenCalled()
+  })
+
+  it('ignores a chord delivered mid-composition', async () => {
+    // Some input methods deliver Ctrl chords while composing; acting on one
+    // interrupts a command on a keystroke meant for the composer.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.keyDown(getInput(), { key: 'c', ctrlKey: true, isComposing: true })
+    expect(pty).not.toHaveBeenCalled()
+  })
+
+  it('keeps the bar for a shell it cannot instrument', async () => {
+    // No integration means no reliable "running" to hide on, and hiding on a
+    // bad guess would leave someone with no input at all.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    expect(screen.queryByRole('textbox')).not.toBeNull()
+  })
+})
+
+describe('the composer while a tracked command runs', () => {
+  async function ready() {
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    resetCommandHistoryCache()
+    seedStore()
+    shellState.value = 'running'
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    shellState.value = 'prompt'
+  })
+
+  it('leaves the pane to the command', async () => {
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    expect(screen.queryByRole('textbox')).toBeNull()
+  })
+})
+
+describe('the composer while a full-screen program is up', () => {
+  async function ready() {
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+
+  let pty: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    localStorage.clear()
+    resetCommandHistoryCache()
+    seedStore()
+    pty = vi.fn()
+    window.api = { writeTerminal: pty } as unknown as typeof window.api
+    shellState.value = 'altScreen'
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+    shellState.value = 'prompt'
+  })
+
+  it('leaves the pane entirely', async () => {
+    // Nothing the bar offers applies to vim, and a strip of chrome explaining
+    // that is still a strip of chrome.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    expect(screen.queryByRole('textbox')).toBeNull()
+  })
+
+  it('goes at once, without waiting', async () => {
+    // A full-screen program is never transient, so there is nothing to wait to
+    // find out — unlike a command, which may be over in a frame.
+    vi.useFakeTimers()
+    try {
+      render(<IntentBar terminalId="term-1" />)
+      expect(screen.queryByRole('textbox')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not take focus that was somewhere else', async () => {
+    // A command finishing in a background card must not pull the keyboard out
+    // of whatever is actually being typed into.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    expect(registryMocks.focusTerminal).not.toHaveBeenCalled()
+  })
+
+  it('cannot submit into the running program', async () => {
+    // vim reads keys, not lines: pasting `dd` and a carriage return deletes a
+    // line. Unreachable now that the bar is gone, which is the point — this
+    // asserts there is no surface left to do it from.
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    expect(registryMocks.pasteToTerminal).not.toHaveBeenCalled()
     expect(pty).not.toHaveBeenCalled()
   })
 })

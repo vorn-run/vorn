@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -21,7 +22,8 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { focusTerminal, pasteToTerminal, scrollToBottom } from '../lib/terminal-registry'
-import { getShellInputState } from '../lib/command-blocks'
+import { getShellInputState, isAtPrompt, onCommandBlocksChange } from '../lib/command-blocks'
+import { useIsMobile } from '../hooks/useIsMobile'
 import {
   ghostSuggestion,
   recordCommand,
@@ -30,7 +32,7 @@ import {
   type HistoryKind
 } from '../lib/command-history'
 import { defaultSources, getCompletions, outlineNames, type Completion } from '../lib/completions'
-import { registerIntentBarInput } from '../lib/intent-bar-focus'
+import { isIntentBarFocused, registerIntentBarInput } from '../lib/intent-bar-focus'
 import { isShellSession } from '../../shared/types'
 import { resolveIntentMode, SHELL_BUILTINS, type IntentMode } from '../lib/intent-mode'
 import { getPreferredAgent, setPreferredAgent } from '../lib/launch-prefs'
@@ -52,6 +54,8 @@ interface Props {
 }
 
 const MAX_INPUT_HEIGHT = 120
+/** Long enough that an instant command never pulls the caret out of the composer. */
+const PTY_FOCUS_DELAY_MS = 120
 const COMPLETION_DEBOUNCE_MS = 80
 /** History rows shown above completions when both are present. */
 const HISTORY_ROWS_WITH_COMPLETIONS = 3
@@ -124,15 +128,8 @@ function longestCommonPrefix(inserts: string[]): string {
  * newline, Escape returns focus to the terminal. Tab fills the longest
  * common prefix, then inserts the highlighted (or first) completion.
  */
-/**
- * Control chords forwarded to the pty while a command is running.
- *
- * The composer keeps focus after a command is submitted, so these would
- * otherwise be swallowed by the textarea and there would be no way to
- * interrupt anything without first clicking into the terminal. Ctrl, never
- * Cmd: control characters are Ctrl-based on every platform, and on macOS
- * Cmd+C is copy.
- */
+// Interrupts, forwarded while a command runs. Ctrl, never Cmd — on macOS Cmd+C
+// is copy. Not a key table: xterm encodes the rest once it has focus.
 const CONTROL_CHORDS: Record<string, string> = {
   c: '\x03', // SIGINT
   d: '\x04', // EOF
@@ -178,6 +175,49 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   const repoPath = session?.worktreePath ?? session?.projectPath ?? null
   // Completions need the RPC surface (absent in older preloads/tests).
   const completionsEnabled = typeof window.api?.listShellExecutables === 'function'
+
+  // Subscribed, not read in a handler: the bar has to disappear when a command
+  // takes the keyboard, which is a render concern.
+  const inputState = useSyncExternalStore(
+    useCallback((cb: () => void) => onCommandBlocksChange(terminalId, cb), [terminalId]),
+    useCallback(() => getShellInputState(terminalId), [terminalId])
+  )
+  const isMobile = useIsMobile()
+
+  // Whether the running command has lasted long enough to own the pane. Seeded
+  // true so arriving at a card mid-command shows no bar rather than a flash.
+  const [settled, setSettled] = useState(() => inputState === 'running')
+  const [seenState, setSeenState] = useState(inputState)
+  if (seenState !== inputState) {
+    // Adjusted during render, which React sanctions: an effect writing this
+    // would render once with the previous command's answer before correcting.
+    setSeenState(inputState)
+    setSettled(false)
+  }
+
+  useEffect(() => {
+    // Asked while the textarea is still mounted and before the state that
+    // unmounts it: afterwards there is no composer left to have held focus, and
+    // an unmount while focused drops focus to the body where keys reach nothing.
+    const yieldKeyboard = (): void => {
+      if (!isMobile && isIntentBarFocused(terminalId)) focusTerminal(terminalId)
+    }
+    // A full-screen program is never transient; only a command is worth waiting out.
+    if (inputState === 'altScreen') {
+      yieldKeyboard()
+      return
+    }
+    if (inputState !== 'running') return
+    const timer = setTimeout(() => {
+      yieldKeyboard()
+      setSettled(true)
+    }, PTY_FOCUS_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [inputState, isMobile, terminalId])
+
+  // The composer belongs to the prompt; while a command owns the terminal there
+  // is nothing for it to do. 'unknown' keeps it — no integration, no signal.
+  const composerHidden = inputState === 'altScreen' || (inputState === 'running' && settled)
 
   const inferredMode = useMemo(
     () => resolveIntentMode(value, knownCommands),
@@ -270,7 +310,9 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
     const el = textareaRef.current
     if (!el || !isShell) return
     return registerIntentBarInput(terminalId, el)
-  }, [terminalId, isShell])
+    // composerHidden remounts the textarea, and the registry would otherwise
+    // keep pointing at the detached one — which fails focusIntentBar silently.
+  }, [terminalId, isShell, composerHidden])
 
   // Runnable names for mode resolution. The executable list is cached at
   // module level for five minutes, so this is nearly free per mount.
@@ -402,17 +444,18 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      // Interrupts belong to the running command, not to this input. Shift is
-      // excluded because Ctrl+Shift+C is the terminal's copy chord, which it
-      // swallows even with nothing selected — forwarding it here would
-      // interrupt on a keystroke pressed to copy.
+      // An input method mid-word owns every key; swallowing one breaks it.
+      if (e.nativeEvent.isComposing) return
+
+      // Shift excluded: Ctrl+Shift+C is the terminal's copy chord. Anything but
+      // 'prompt', so vim and uninstrumented shells can be interrupted too.
       if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         const chord = CONTROL_CHORDS[e.key.toLowerCase()]
         const target = e.currentTarget
         const hasSelection = target.selectionStart !== target.selectionEnd
         // Copying out of the composer still wins, as it does in the terminal.
         if (chord && !(e.key.toLowerCase() === 'c' && hasSelection)) {
-          if (getShellInputState(terminalId) === 'running') {
+          if (!isAtPrompt(getShellInputState(terminalId))) {
             e.preventDefault()
             window.api.writeTerminal(terminalId, chord)
             return
@@ -529,6 +572,10 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
 
   // Agent sessions keep their own TUI input; the composer is shell-only.
   if (!session || !isShell) return null
+
+  // The running command gets the whole pane. The effect above has already handed
+  // the keyboard over by the time this renders nothing.
+  if (composerHidden) return null
 
   // The accessible name always states the mode the input is actually in, so
   // it is unambiguous once there is something to classify.
