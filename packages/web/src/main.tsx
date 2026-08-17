@@ -10,8 +10,9 @@ if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
 }
 
 import { registerSW } from 'virtual:pwa-register'
-import { createApiShim } from './api-shim'
+import { createApiShim, AuthRequiredError, storeToken } from './api-shim'
 import { getWebSocketUrl } from './env'
+import { renderTokenPrompt } from './token-prompt'
 
 // Register service worker for PWA installability and asset caching.
 // This runs independently of the WebSocket connection.
@@ -23,14 +24,29 @@ const api = createApiShim(getWebSocketUrl())
 ;(window as unknown as { api: typeof api }).api = api
 
 // Wait for WebSocket connection before rendering
-api.__ready().then(async () => {
-  // Dynamic import so React + App only load after shim is ready
-  const { createRoot } = await import('react-dom/client')
-  const { App } = await import('@renderer/App')
+api
+  .__ready()
+  .then(async () => {
+    // Dynamic import so React + App only load after shim is ready
+    const { createRoot } = await import('react-dom/client')
+    const { App } = await import('@renderer/App')
 
-  // Import the global CSS (Tailwind + custom styles)
-  await import('./global.css')
+    // Import the global CSS (Tailwind + custom styles)
+    await import('./global.css')
 
-  const root = createRoot(document.getElementById('root')!)
-  root.render(<App />)
-})
+    const root = createRoot(document.getElementById('root')!)
+    root.render(<App />)
+  })
+  .catch((err) => {
+    // The server refused the credential. Ask for one rather than leaving a blank
+    // page: this promise never settling is what an unauthenticated load used to
+    // look like.
+    if (err instanceof AuthRequiredError) {
+      renderTokenPrompt((token) => {
+        storeToken(token)
+        location.reload()
+      })
+      return
+    }
+    throw err
+  })

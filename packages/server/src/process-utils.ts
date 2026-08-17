@@ -2,6 +2,9 @@ import { execFileSync, execFile, type ExecFileSyncOptions } from 'node:child_pro
 import fs from 'node:fs'
 import path from 'node:path'
 import type { RemoteHost } from '@vornrun/shared/types'
+// Constants only — this module is on the PTY spawn path, so it must not pull in
+// anything that reaches the database.
+import { BOOTSTRAP_ENV_VAR } from '@vornrun/shared/protocol'
 
 function getUserShellEnv(): Record<string, string> {
   if (process.platform === 'win32') return { ...process.env } as Record<string, string>
@@ -145,7 +148,21 @@ export const SENSITIVE_ENV_PREFIXES = [
  * five siblings went through untouched.
  */
 export const STRIP_ENV_KEYS = ['CLAUDECODE']
-const STRIP_ENV_PREFIXES = ['CLAUDE_CODE_']
+
+/**
+ * Stripped unconditionally, with no `envPassthrough` override.
+ *
+ * `BOOTSTRAP_ENV_VAR` is how the desktop hands its per-launch credential to the
+ * server it spawns. The `SECRET_` prefix already puts it in
+ * SENSITIVE_ENV_PREFIXES, but that list is overridable by name — and a
+ * credential that authenticates as the owner has no business being forwardable
+ * by configuration.
+ *
+ * Belt and braces rather than the control: the server deletes it from
+ * `process.env` once read, so nothing can inherit it regardless of how it is
+ * spawned. This list only matters for the window before that happens.
+ */
+const STRIP_ENV_PREFIXES = ['CLAUDE_CODE_', BOOTSTRAP_ENV_VAR]
 
 // Compared uppercased. Windows environment variable names are case-insensitive
 // and Node hands back whatever casing it enumerated, so a literal match would

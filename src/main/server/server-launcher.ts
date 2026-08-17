@@ -1,8 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import log from '../logger'
+import { BOOTSTRAP_ENV_VAR } from '@vornrun/shared/protocol'
 import { ServerBridge } from './server-bridge'
 
 let serverProcess: ChildProcess | UtilityProcess | null = null
@@ -26,6 +28,12 @@ export async function launchServer(): Promise<ServerBridge> {
   const serverEntryPoint = resolveServerEntry()
   log.info(`[launcher] starting server: ${serverEntryPoint}`)
 
+  // A per-launch credential for the server we are about to spawn. Generated here
+  // rather than persisted: nothing to leak at rest, and it dies with the process.
+  // The name is stripped unconditionally by `filterEnv`, so it never reaches a
+  // PTY, headless agent or script node.
+  const bootstrapToken = randomBytes(32).toString('base64url')
+
   // Deliberately does NOT pass --data-dir. Vorn's data directory is ~/.vorn —
   // that is where the database, ws-port file and scheduler locks have always
   // lived, and where `packages/mcp` looks for all three. This used to pass
@@ -44,6 +52,7 @@ export async function launchServer(): Promise<ServerBridge> {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        [BOOTSTRAP_ENV_VAR]: bootstrapToken,
         NODE_ENV: process.env.NODE_ENV ?? 'development'
         // Connectors live in their own repository now, so a local build is
         // preferred by setting VORN_CONNECTORS_ROOT to that checkout. It
@@ -84,6 +93,7 @@ export async function launchServer(): Promise<ServerBridge> {
       stdio: 'pipe',
       env: {
         ...process.env,
+        [BOOTSTRAP_ENV_VAR]: bootstrapToken,
         NODE_ENV: 'production',
         VORN_NATIVE_MODULES_PATH: asarUnpacked,
         NODE_PATH: [path.join(app.getAppPath(), 'node_modules'), asarUnpacked].join(path.delimiter)
@@ -111,7 +121,7 @@ export async function launchServer(): Promise<ServerBridge> {
   log.info(`[launcher] server started on port ${port}`)
 
   // Connect bridge
-  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`)
+  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken)
   bridge.connect()
 
   // Wait for connection

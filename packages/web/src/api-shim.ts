@@ -1,3 +1,4 @@
+import { CLOSE_CREDENTIAL_REJECTED } from '@vornrun/shared/protocol'
 /**
  * WebSocket RPC shim that implements the same surface as the Electron preload `window.api`.
  * Components and stores call window.api.* exactly as they do in Electron,
@@ -11,29 +12,79 @@ type PendingRequest = {
   reject: (error: Error) => void
 }
 
+const TOKEN_STORAGE_KEY = 'vorn.deviceToken'
+
+export class AuthRequiredError extends Error {
+  constructor() {
+    super('A device token is required to connect to this Vorn server.')
+    this.name = 'AuthRequiredError'
+  }
+}
+
+export function readStoredToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_STORAGE_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function storeToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token.trim())
+  } catch {
+    /* private browsing — the user will be asked again next load */
+  }
+}
+
+function clearStoredToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_STORAGE_KEY)
+  } catch {
+    /* nothing to clear */
+  }
+}
+
 class RpcClient {
   private ws!: WebSocket
   private nextId = 1
   private pending = new Map<number, PendingRequest>()
   private listeners = new Map<string, Set<(params: unknown) => void>>()
   private url: string
-  private _ready: Promise<void>
+  private _ready!: Promise<void>
   private _resolveReady!: () => void
+  private _rejectReady!: (err: Error) => void
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(url: string) {
     this.url = url
-    this._ready = new Promise((resolve) => {
-      this._resolveReady = resolve
-    })
+    this.resetReady()
     this.connect()
+  }
+
+  /** A fresh readiness promise per connection attempt, captured in one place. */
+  private resetReady(): void {
+    this._ready = new Promise((resolve, reject) => {
+      this._resolveReady = resolve
+      this._rejectReady = reject
+    })
   }
 
   private connect(): void {
     this.ws = new WebSocket(this.url)
 
     this.ws.onopen = () => {
-      this._resolveReady()
+      // A browser cannot set headers on the upgrade, so the credential goes in
+      // the first message. Nothing else is accepted until the server has it, and
+      // `_ready` stays pending until it does — so no caller can send a request
+      // that would be refused.
+      this.ws.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'auth:authenticate',
+          params: { token: readStoredToken() }
+        })
+      )
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer)
         this.reconnectTimer = null
@@ -51,6 +102,13 @@ class RpcClient {
       try {
         msg = JSON.parse(event.data as string)
       } catch {
+        return
+      }
+
+      // The server confirming our credential. Only now is the connection usable,
+      // so this — not `onopen` — is what settles `_ready`.
+      if (msg.method === 'auth:ok') {
+        this._resolveReady()
         return
       }
 
@@ -83,18 +141,29 @@ class RpcClient {
       }
     }
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       // Reject all pending requests
       for (const [, p] of this.pending) {
         p.reject(new Error('WebSocket disconnected'))
       }
       this.pending.clear()
 
+      // The server rejected the credential. Retrying cannot help, and the old
+      // behaviour — reconnect every 2s forever while `__ready()` never settled —
+      // showed a blank page rather than a reason.
+      //
+      // Only on a rejection, never on CLOSE_UNAUTHENTICATED: that also covers an
+      // auth timeout, and discarding a good token because a backgrounded phone's
+      // socket stalled would send the user back to the machine running Vorn.
+      if (event.code === CLOSE_CREDENTIAL_REJECTED) {
+        clearStoredToken()
+        this._rejectReady(new AuthRequiredError())
+        return
+      }
+
       // Auto-reconnect after 2s
       this.reconnectTimer = setTimeout(() => {
-        this._ready = new Promise((resolve) => {
-          this._resolveReady = resolve
-        })
+        this.resetReady()
         this.connect()
       }, 2000)
     }

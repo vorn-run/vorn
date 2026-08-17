@@ -167,3 +167,33 @@ describe('normalizePassthrough', () => {
     expect(normalizePassthrough(['GOOD', 42, null, { a: 1 }])).toEqual(new Set(['GOOD']))
   })
 })
+
+/**
+ * The desktop hands the server it spawns a credential in the environment. That
+ * credential authenticates as the owner, so it must never reach a child process —
+ * and `filterEnv` only strips keys, so anything it does not remove is inherited by
+ * every PTY, headless agent and script node.
+ *
+ * This is not hypothetical on one platform only: `getUserShellEnv` falls back to
+ * `{ ...process.env }` on Windows and whenever the login-shell probe fails.
+ */
+describe('the desktop bootstrap credential', () => {
+  const source = { SECRET_VORN_BOOTSTRAP_TOKEN: 'owner-credential', PATH: '/usr/bin' }
+
+  it('never reaches a child process', () => {
+    expect(filterEnv(source, new Set())).toEqual({ PATH: '/usr/bin' })
+  })
+
+  it('cannot be forwarded by naming it in envPassthrough', () => {
+    // The SECRET_ prefix alone would be overridable by configuration, which is not
+    // a decision a user should be able to make about a credential.
+    const env = filterEnv(source, new Set(['SECRET_VORN_BOOTSTRAP_TOKEN']))
+    expect(env.SECRET_VORN_BOOTSTRAP_TOKEN).toBeUndefined()
+    expect(env.PATH).toBe('/usr/bin')
+  })
+
+  it('is stripped whatever the casing, because Windows env names are case-insensitive', () => {
+    const env = filterEnv({ secret_vorn_bootstrap_token: 'owner-credential' }, new Set())
+    expect(Object.keys(env)).toHaveLength(0)
+  })
+})

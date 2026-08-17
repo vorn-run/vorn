@@ -39,6 +39,18 @@ export interface MintedToken {
   plaintext: string
 }
 
+/**
+ * Compare two secrets without leaking their contents through timing.
+ *
+ * `timingSafeEqual` throws on a length mismatch, which any wrong-length guess
+ * produces — so the length is checked first and a bad credential reads as a
+ * failed comparison rather than an exception on the connection path.
+ */
+export function constantTimeEqual(a: Buffer, b: Buffer): boolean {
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
+}
+
 /** Raw digest. Stored as hex; compared as bytes. */
 function sha256(value: string): Buffer {
   return crypto.createHash('sha256').update(value, 'utf8').digest()

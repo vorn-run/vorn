@@ -24,26 +24,45 @@ export class ServerBridge extends EventEmitter {
   private nextId = 0
   private pending = new Map<number, PendingRequest>()
   private url: string
+  private credential: string | undefined
   private reconnectTimer: NodeJS.Timeout | null = null
   private shouldReconnect = true
   private inbound = new Map<string, (params: unknown) => unknown>()
 
-  constructor(url: string) {
+  constructor(url: string, credential?: string) {
     super()
     this.url = url
+    this.credential = credential
   }
 
   connect(): void {
     if (this.ws) return
 
-    this.ws = new WebSocket(this.url)
+    // Sent on the upgrade rather than as a first message, so the socket is
+    // authenticated before it sends anything. Re-supplied here on purpose:
+    // `connect()` runs again on every reconnect.
+    this.ws = new WebSocket(this.url, {
+      headers: this.credential ? { Authorization: `Bearer ${this.credential}` } : {}
+    })
 
     this.ws.on('open', () => {
       log.info('[bridge] connected to server')
       // Tell the server which socket is main's. Browser tools arrive at the
       // server but can only be answered here — a `<webview>` guest is
       // unreachable from that process — so it needs to know where to relay them.
-      this.notify('bridge:identify')
+      //
+      // Sent as a request, not a notification: the server can refuse the claim,
+      // and a silent refusal would leave main believing it holds the bridge while
+      // every browser and device tool times out after 15 seconds.
+      this.request<{ ok: boolean }>('bridge:identify')
+        .then((result) => {
+          if (!result?.ok) {
+            log.error(
+              '[bridge] refused the browser bridge claim — browser and device tools will not work'
+            )
+          }
+        })
+        .catch((err) => log.warn({ err }, '[bridge] could not claim the browser bridge'))
       this.emit('connected')
     })
 

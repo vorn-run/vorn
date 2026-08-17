@@ -63,11 +63,40 @@ export interface ServerHello {
    * kind only after seeing it here, because `ws-handler` drops unknown methods
    * silently: an unnegotiated feature appears to hang rather than to fail.
    *
-   * Empty today, and correctly so. Authentication is not enforced yet, so
-   * advertising it would be a lie a future client would believe.
+   * `auth: 1` means the server refuses every method until a credential is
+   * presented — either as `Authorization: Bearer` on the upgrade, or as an
+   * `auth:authenticate` message.
    */
   capabilities: Record<string, number>
 }
+
+// ─── Authentication ─────────────────────────────────────────────
+
+/**
+ * Close codes. Both are in the private-use range (4000–4999) reserved for
+ * applications, so they cannot collide with a protocol-level close.
+ *
+ * They are distinct because clients act on them differently: a rejected
+ * credential is worth discarding, a timeout is not. Conflating them means a
+ * backgrounded phone whose socket stalled throws away a perfectly good token.
+ */
+export const CLOSE_UNAUTHENTICATED = 4001
+export const CLOSE_CREDENTIAL_REJECTED = 4002
+
+/** JSON-RPC error code for a method sent before authenticating. */
+export const RPC_NOT_AUTHENTICATED = -32001
+
+/**
+ * The environment variable the desktop passes its per-launch credential in.
+ *
+ * Named here because three packages depend on the exact string: the desktop
+ * sets it, the server reads it, and `process-utils` strips it so it can never
+ * reach a PTY. A rename that missed any one of those would be silent.
+ */
+export const BOOTSTRAP_ENV_VAR = 'SECRET_VORN_BOOTSTRAP_TOKEN'
+
+/** Filename, under the resolved data dir, of the credential same-machine tools read. */
+export const LOCAL_TOKEN_FILENAME = 'local-token'
 
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
 
@@ -100,6 +129,8 @@ export interface RpcNotification {
 // ─── Request Methods (client → server, invoke-style) ────────────
 
 export interface RequestMethods {
+  /** Present a credential. The only method accepted before authenticating. */
+  'auth:authenticate': { params: { token: string }; result: { ok: boolean } }
   'terminal:create': { params: CreateTerminalPayload; result: TerminalSession }
   'terminal:kill': { params: string; result: void }
   'terminal:listActive': { params: void; result: TerminalSession[] }
@@ -579,6 +610,8 @@ export interface RequestMethods {
 export interface ServerNotifications {
   /** First frame on every connection, before anything is dispatched. */
   'server:hello': ServerHello
+  /** Sent once a socket is admitted, so a client knows it may start sending. */
+  'auth:ok': { userId: string }
   'terminal:data': { id: string; data: string }
   'terminal:exit': { id: string; exitCode: number }
   'session:created': TerminalSession

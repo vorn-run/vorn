@@ -2,6 +2,13 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import WebSocket from 'ws'
 import type { RpcResponse } from '@vornrun/shared/protocol'
 
+const TEST_CREDENTIAL = 'integration-test-credential'
+
+/** Presented on the upgrade, the way the desktop bridge and MCP do. */
+function authOptions(): { headers: Record<string, string> } {
+  return { headers: { Authorization: `Bearer ${TEST_CREDENTIAL}` } }
+}
+
 // Mock native modules that require compilation
 vi.mock('node-pty', () => ({
   default: { spawn: vi.fn() },
@@ -15,6 +22,12 @@ vi.mock('../packages/server/src/database', () => ({
   initDatabase: vi.fn(),
   // The single resolved data directory the whole server process reads.
   getDataDir: vi.fn(() => '/tmp/vorn-integration-test'),
+  dbGetOwnerUser: vi.fn(() => ({
+    id: 'owner-1',
+    name: 'test',
+    role: 'owner' as const,
+    createdAt: new Date().toISOString()
+  })),
   loadFullConfig: vi.fn(() => ({
     version: 1,
     defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
@@ -75,6 +88,10 @@ async function sendRpc(
 describe('server integration', () => {
   beforeAll(async () => {
     // Dynamic import to let mocks take effect
+    // The credential the desktop hands its server at spawn. Set before startServer
+    // so the real boundary is exercised rather than bypassed.
+    process.env.SECRET_VORN_BOOTSTRAP_TOKEN = TEST_CREDENTIAL
+
     const { startServer } = await import('../packages/server/src/index')
 
     // Suppress stdout port message during tests
@@ -93,6 +110,7 @@ describe('server integration', () => {
   }, 15000)
 
   afterAll(async () => {
+    delete process.env.SECRET_VORN_BOOTSTRAP_TOKEN
     await serverClose()
   })
 
@@ -104,7 +122,7 @@ describe('server integration', () => {
   })
 
   it('WebSocket connects', async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`)
+    const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
     await new Promise<void>((resolve, reject) => {
       ws.on('open', resolve)
       ws.on('error', reject)
@@ -114,7 +132,7 @@ describe('server integration', () => {
   })
 
   it('JSON-RPC request returns result', async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`)
+    const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
     await new Promise<void>((r) => ws.on('open', r))
 
     const res = await sendRpc(ws, 1, 'config:load')
@@ -127,7 +145,7 @@ describe('server integration', () => {
   })
 
   it('unknown method returns error', async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`)
+    const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
     await new Promise<void>((r) => ws.on('open', r))
 
     const res = await sendRpc(ws, 2, 'nonexistent:method')
@@ -138,8 +156,88 @@ describe('server integration', () => {
     ws.close()
   })
 
+  /**
+   * The real route, over a real socket. Browsers let any page open a connection to
+   * a loopback server, so these two are what stand between a visited website and
+   * a shell on this machine.
+   */
+  describe('the socket boundary', () => {
+    it('refuses an unauthenticated socket instead of serving it', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`)
+      const closed = new Promise<number>((resolve) => ws.on('close', resolve))
+      await new Promise<void>((r) => ws.on('open', r))
+
+      ws.send(JSON.stringify({ jsonrpc: '2.0', id: 99, method: 'config:load' }))
+
+      expect(await closed).toBe(4001)
+    })
+
+    it('greets an unauthenticated socket, so a browser knows to send a token', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`)
+      const first = await new Promise<string>((resolve) => {
+        ws.on('message', (raw) => resolve(raw.toString()))
+      })
+
+      expect(JSON.parse(first).method).toBe('server:hello')
+      expect(JSON.parse(first).params.capabilities).toEqual({ auth: 1 })
+      ws.close()
+    })
+
+    it('accepts a browser-shaped socket that authenticates by message', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`)
+      await new Promise<void>((r) => ws.on('open', r))
+
+      const ok = new Promise<void>((resolve) => {
+        ws.on('message', (raw) => {
+          if (JSON.parse(raw.toString()).method === 'auth:ok') resolve()
+        })
+      })
+      ws.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'auth:authenticate',
+          params: { token: TEST_CREDENTIAL }
+        })
+      )
+      await ok
+
+      const res = await sendRpc(ws, 50, 'config:load')
+      expect(res.result).toBeDefined()
+      ws.close()
+    })
+
+    it('refuses the upgrade outright from a foreign origin', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, {
+        headers: { ...authOptions().headers, Origin: 'https://evil.example' }
+      })
+
+      // Rejected at the HTTP upgrade, before a socket exists — a valid credential
+      // does not save it, because a hostile page could hold one it phished.
+      const status = await new Promise<number>((resolve, reject) => {
+        ws.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0))
+        ws.on('open', () => reject(new Error('upgrade should have been refused')))
+        ws.on('error', () => {
+          /* the refusal surfaces as unexpected-response */
+        })
+      })
+      expect(status).toBe(403)
+    })
+
+    it('accepts its own origin, which is where the web client is served from', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, {
+        headers: { ...authOptions().headers, Origin: `http://127.0.0.1:${serverPort}` }
+      })
+      await new Promise<void>((resolve, reject) => {
+        ws.on('open', resolve)
+        ws.on('error', reject)
+      })
+      expect(ws.readyState).toBe(WebSocket.OPEN)
+      ws.close()
+    })
+  })
+
   it('fire-and-forget notification does not crash', async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`)
+    const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
     await new Promise<void>((r) => ws.on('open', r))
 
     // Send notification (no id — server should not respond)

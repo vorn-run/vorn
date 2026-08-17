@@ -17,7 +17,12 @@ vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 
-import { initRebind, checkAndRebind, getCurrentHost } from '../packages/server/src/server-rebind'
+import {
+  initRebind,
+  checkAndRebind,
+  getCurrentHost,
+  isAllowedOrigin
+} from '../packages/server/src/server-rebind'
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -204,5 +209,64 @@ describe('server-rebind', () => {
     await checkAndRebind()
 
     expect(server.listenCalls[0].port).toBe(12345)
+  })
+})
+
+/**
+ * The Origin allowlist lives here rather than beside the socket route because
+ * reachability and origin policy are the same decision — this module is what
+ * flips the bind at runtime. Computed anywhere else it goes stale the moment
+ * someone enables remote access without restarting, and a stale list refuses the
+ * tailnet web client with a 403 on the upgrade.
+ */
+describe('isAllowedOrigin', () => {
+  beforeEach(() => {
+    initRebind(makeFakeServer(), '127.0.0.1', 4400, [])
+  })
+
+  it('allows an absent origin, which is how non-browser clients arrive', () => {
+    // The desktop bridge and MCP send none. They are still held to the
+    // credential check, which is the control that applies to them.
+    expect(isAllowedOrigin(undefined)).toBe(true)
+  })
+
+  it('allows the loopback origins the web client is served from', () => {
+    expect(isAllowedOrigin('http://127.0.0.1:4400')).toBe(true)
+    expect(isAllowedOrigin('http://localhost:4400')).toBe(true)
+  })
+
+  it.each([
+    ['a foreign site', 'https://evil.example'],
+    ['a lookalike prefix', 'http://127.0.0.1:4400.evil.example'],
+    ['the right host on another port', 'http://127.0.0.1:9999'],
+    ['empty', '']
+  ])('refuses %s', (_label, origin) => {
+    // Exact comparison only — substring or wildcard matching is the usual way an
+    // allowlist gets defeated, which is why the lookalike is asserted.
+    expect(isAllowedOrigin(origin)).toBe(false)
+  })
+
+  it('starts allowing the tailnet host as soon as the bind changes', async () => {
+    expect(isAllowedOrigin('http://100.1.2.3:4400')).toBe(false)
+
+    mockLoadConfig.mockReturnValue(makeConfig(true))
+    mockGetTailscaleStatus.mockResolvedValue(tsRunning())
+    await checkAndRebind()
+
+    // The regression this placement exists to prevent: enabling remote access at
+    // runtime used to rebind to 0.0.0.0 while the origin list stayed empty, so
+    // the tailnet web client was refused until the app was restarted.
+    expect(isAllowedOrigin('http://100.1.2.3:4400')).toBe(true)
+  })
+
+  it('stops allowing it again when remote access is turned off', async () => {
+    mockLoadConfig.mockReturnValue(makeConfig(true))
+    mockGetTailscaleStatus.mockResolvedValue(tsRunning())
+    await checkAndRebind()
+    expect(isAllowedOrigin('http://100.1.2.3:4400')).toBe(true)
+
+    mockLoadConfig.mockReturnValue(makeConfig(false))
+    await checkAndRebind()
+    expect(isAllowedOrigin('http://100.1.2.3:4400')).toBe(false)
   })
 })

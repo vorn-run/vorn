@@ -2,11 +2,29 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
 import { RUNTIME_PROTOCOL_VERSION } from '@vornrun/shared/protocol'
 
+/** The desktop's per-launch secret: the only credential that may claim the bridge. */
+const GOOD_TOKEN = 'valid-credential'
+/** A remote client's device token — authenticated, but not main. */
+const DEVICE_TOKEN = 'device-credential'
+const CLOSE_UNAUTHENTICATED = 4001
+const CLOSE_CREDENTIAL_REJECTED = 4002
+
 vi.mock('../packages/server/src/broadcast', () => ({
   clientRegistry: { add: vi.fn(), remove: vi.fn() }
 }))
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+}))
+// Credential *verification* is covered by tests/ws-auth.test.ts. Stubbed here so
+// this file stays about what the socket does before and after it is authenticated.
+vi.mock('../packages/server/src/ws-auth', () => ({
+  authenticateCredential: (raw?: string) =>
+    raw === GOOD_TOKEN
+      ? { userId: 'owner-1', kind: 'bootstrap' }
+      : raw === DEVICE_TOKEN
+        ? { userId: 'owner-1', kind: 'device', tokenId: 'tok-1' }
+        : null,
+  AUTH_TIMEOUT_MS: 10_000
 }))
 
 let registerMethod: typeof import('../packages/server/src/ws-handler').registerMethod
@@ -18,10 +36,16 @@ function createMockWs() {
   const emitter = new EventEmitter()
   const ws = Object.assign(emitter, {
     send: vi.fn(),
+    close: vi.fn(),
     readyState: 1,
     OPEN: 1
   })
   return ws as unknown as import('ws').WebSocket
+}
+
+/** Connect and authenticate, which is what every test below the handshake wants. */
+function connectAuthed(ws: ReturnType<typeof createMockWs>): void {
+  handleConnection(ws, GOOD_TOKEN)
 }
 
 function sendMessage(ws: ReturnType<typeof createMockWs>, msg: object) {
@@ -64,20 +88,20 @@ beforeEach(async () => {
 describe('handleConnection', () => {
   it('adds client to registry on connect', () => {
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
     expect(clientRegistry.add).toHaveBeenCalledWith(ws)
   })
 
   it('removes client on close', () => {
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
     ;(ws as unknown as EventEmitter).emit('close')
     expect(clientRegistry.remove).toHaveBeenCalledWith(ws)
   })
 
   it('returns -32601 for unknown method', async () => {
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
     sendMessage(ws, { jsonrpc: '2.0', id: 1, method: 'unknown:method' })
 
     await vi.waitFor(() => expect(replies(ws).length).toBeGreaterThan(0))
@@ -89,7 +113,7 @@ describe('handleConnection', () => {
     registerMethod('config:load' as never, (() => ({ ok: true })) as never)
 
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
     sendMessage(ws, { jsonrpc: '2.0', id: 2, method: 'config:load' })
 
     await vi.waitFor(() => expect(replies(ws).length).toBeGreaterThan(0))
@@ -103,7 +127,7 @@ describe('handleConnection', () => {
     registerNotification('terminal:write', handler)
 
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
     sendMessage(ws, { jsonrpc: '2.0', method: 'terminal:write', params: { data: 'hi' } })
 
     await vi.waitFor(() => expect(handler).toHaveBeenCalled())
@@ -122,7 +146,7 @@ describe('handleConnection', () => {
     )
 
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
     sendMessage(ws, { jsonrpc: '2.0', id: 3, method: 'test:error' })
 
     await vi.waitFor(() => expect(replies(ws).length).toBeGreaterThan(0))
@@ -142,20 +166,20 @@ describe('handleConnection', () => {
 describe('handshake', () => {
   it('announces the protocol before anything else is sent', () => {
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
 
     const first = sentFrames(ws)[0]
     expect(first.method).toBe('server:hello')
     expect(first.params?.protocolVersion).toBe(RUNTIME_PROTOCOL_VERSION)
   })
 
-  it('advertises no capabilities while none are true', () => {
+  it('advertises the capabilities it actually implements', () => {
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
 
-    // Authentication is not enforced yet, so it must not be advertised: a later
-    // client would read the claim and gate on a boundary that is not there.
-    expect(sentFrames(ws)[0].params?.capabilities).toEqual({})
+    // Declared by the code that enforces it, so the advertisement cannot drift
+    // from the behaviour. Pass A shipped this empty because nothing was true yet.
+    expect(sentFrames(ws)[0].params?.capabilities).toEqual({ auth: 1 })
   })
 
   it('greets every connection, not just the first', () => {
@@ -180,7 +204,7 @@ describe('bridge frames', () => {
   it('registers the socket main identifies itself on, and acknowledges', async () => {
     const { browserBridge } = await import('../packages/server/src/browser-bridge')
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
 
     sendMessage(ws, { jsonrpc: '2.0', id: 7, method: 'bridge:identify' })
 
@@ -195,7 +219,7 @@ describe('bridge frames', () => {
   it('routes a reply from main to the bridge instead of treating it as junk', async () => {
     const { browserBridge } = await import('../packages/server/src/browser-bridge')
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
     sendMessage(ws, { jsonrpc: '2.0', method: 'bridge:identify' })
 
     const inflight = browserBridge.request('browser:readPage', { sessionId: 's1' })
@@ -211,7 +235,7 @@ describe('bridge frames', () => {
   it('drops the bridge when main’s socket closes', async () => {
     const { browserBridge } = await import('../packages/server/src/browser-bridge')
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
     sendMessage(ws, { jsonrpc: '2.0', method: 'bridge:identify' })
     expect(browserBridge.isConnected).toBe(true)
     ;(ws as unknown as EventEmitter).emit('close')
@@ -224,11 +248,182 @@ describe('bridge frames', () => {
   it('drops the bridge when main’s socket errors', async () => {
     const { browserBridge } = await import('../packages/server/src/browser-bridge')
     const ws = createMockWs()
-    handleConnection(ws)
+    connectAuthed(ws)
     sendMessage(ws, { jsonrpc: '2.0', method: 'bridge:identify' })
     ;(ws as unknown as EventEmitter).emit('error', new Error('reset'))
 
     expect(browserBridge.isConnected).toBe(false)
     expect(clientRegistry.remove).toHaveBeenCalledWith(ws)
+  })
+})
+
+/**
+ * The socket boundary.
+ *
+ * Before this, any client that reached the port was fully trusted — and browsers
+ * let an arbitrary web page open a socket to a server bound on loopback, because
+ * WebSocket upgrades are subject to neither CORS nor same-origin policy. So this
+ * is not a hardening of remote access; it is what stops a visited website from
+ * spawning a terminal.
+ */
+describe('authentication', () => {
+  it('keeps an unauthenticated socket out of the broadcast registry', () => {
+    const ws = createMockWs()
+    handleConnection(ws)
+
+    // clientRegistry.broadcast fans terminal output, config and session events to
+    // every member, so joining before proving anything would hand over the work.
+    expect(clientRegistry.add).not.toHaveBeenCalled()
+  })
+
+  it('refuses a method sent before authenticating, and closes', async () => {
+    registerMethod('config:load' as never, (() => ({ secret: true })) as never)
+
+    const ws = createMockWs()
+    handleConnection(ws)
+    sendMessage(ws, { jsonrpc: '2.0', id: 1, method: 'config:load' })
+
+    await vi.waitFor(() => expect(replies(ws).length).toBeGreaterThan(0))
+    expect(replies(ws)[0].error?.code).toBe(-32001)
+    expect(ws.close).toHaveBeenCalledWith(CLOSE_UNAUTHENTICATED, expect.any(String))
+  })
+
+  it('refuses a notification sent before authenticating', async () => {
+    const handler = vi.fn()
+    registerNotification('terminal:write', handler)
+
+    const ws = createMockWs()
+    handleConnection(ws)
+    sendMessage(ws, { jsonrpc: '2.0', method: 'terminal:write', params: { data: 'rm -rf' } })
+
+    await vi.waitFor(() => expect(ws.close).toHaveBeenCalled())
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('admits a socket that authenticates by message', async () => {
+    const ws = createMockWs()
+    handleConnection(ws)
+    sendMessage(ws, { jsonrpc: '2.0', method: 'auth:authenticate', params: { token: GOOD_TOKEN } })
+
+    await vi.waitFor(() => expect(clientRegistry.add).toHaveBeenCalledWith(ws))
+    expect(replies(ws).some((f) => f.method === 'auth:ok')).toBe(true)
+    expect(ws.close).not.toHaveBeenCalled()
+  })
+
+  it('admits a socket that authenticates on the upgrade, with no message needed', () => {
+    const ws = createMockWs()
+    handleConnection(ws, GOOD_TOKEN)
+
+    // MCP opens a fresh connection per RPC call, so a mandatory round-trip here
+    // would tax every one of them.
+    expect(clientRegistry.add).toHaveBeenCalledWith(ws)
+    expect(replies(ws)).toHaveLength(0)
+  })
+
+  it('refuses a bad credential rather than leaving the socket open', async () => {
+    const ws = createMockWs()
+    handleConnection(ws)
+    sendMessage(ws, { jsonrpc: '2.0', id: 4, method: 'auth:authenticate', params: { token: 'no' } })
+
+    await vi.waitFor(() => expect(ws.close).toHaveBeenCalled())
+    expect(replies(ws)[0].error?.code).toBe(-32001)
+    expect(clientRegistry.add).not.toHaveBeenCalled()
+    // Distinct from the timeout code, so a client knows to discard the token it
+    // presented rather than keep retrying with it.
+    expect(ws.close).toHaveBeenCalledWith(CLOSE_CREDENTIAL_REJECTED, expect.any(String))
+  })
+
+  it('closes a socket that never authenticates', async () => {
+    vi.useFakeTimers()
+    try {
+      const ws = createMockWs()
+      handleConnection(ws)
+      expect(ws.close).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(ws.close).toHaveBeenCalledWith(CLOSE_UNAUTHENTICATED, expect.any(String))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('bridge authorization', () => {
+  it('refuses bridge:identify from an unauthenticated socket', async () => {
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const ws = createMockWs()
+    handleConnection(ws)
+
+    sendMessage(ws, { jsonrpc: '2.0', method: 'bridge:identify' })
+
+    await vi.waitFor(() => expect(ws.close).toHaveBeenCalled())
+    expect(browserBridge.isBridgeSocket(ws)).toBe(false)
+  })
+
+  it('refuses the bridge to an authenticated client that is not the desktop', async () => {
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const remote = createMockWs()
+    handleConnection(remote, DEVICE_TOKEN)
+
+    sendMessage(remote, { jsonrpc: '2.0', id: 21, method: 'bridge:identify' })
+
+    await vi.waitFor(() => expect(replies(remote).length).toBeGreaterThan(0))
+    // Every socket here is authenticated, so liveness alone would let a remote
+    // device token take the bridge during main's reconnect window.
+    expect(replies(remote)[0].result).toEqual({ ok: false })
+    expect(browserBridge.isBridgeSocket(remote)).toBe(false)
+  })
+
+  it('refuses a second identify while a live socket holds the bridge', async () => {
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const main = createMockWs()
+    const thief = createMockWs()
+    connectAuthed(main)
+    connectAuthed(thief)
+
+    sendMessage(main, { jsonrpc: '2.0', method: 'bridge:identify' })
+    sendMessage(thief, { jsonrpc: '2.0', id: 9, method: 'bridge:identify' })
+
+    await vi.waitFor(() => expect(replies(thief).length).toBeGreaterThan(0))
+    // Taking the bridge means receiving every page read, screenshot and
+    // app-install request meant for main — and answering them.
+    expect(replies(thief)[0].result).toEqual({ ok: false })
+    expect(browserBridge.isBridgeSocket(main)).toBe(true)
+  })
+
+  it('replaces a dead bridge socket, so main is not locked out after a reconnect', async () => {
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const stale = createMockWs()
+    connectAuthed(stale)
+    sendMessage(stale, { jsonrpc: '2.0', method: 'bridge:identify' })
+    await vi.waitFor(() => expect(browserBridge.isBridgeSocket(stale)).toBe(true))
+    ;(stale as unknown as { readyState: number }).readyState = 3 // CLOSED
+
+    const fresh = createMockWs()
+    connectAuthed(fresh)
+    sendMessage(fresh, { jsonrpc: '2.0', id: 11, method: 'bridge:identify' })
+
+    await vi.waitFor(() => expect(replies(fresh).length).toBeGreaterThan(0))
+    expect(replies(fresh)[0].result).toEqual({ ok: true })
+    expect(browserBridge.isBridgeSocket(fresh)).toBe(true)
+  })
+
+  it('ignores a bridge response from a socket that does not hold the bridge', async () => {
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const main = createMockWs()
+    const thief = createMockWs()
+    connectAuthed(main)
+    connectAuthed(thief)
+    sendMessage(main, { jsonrpc: '2.0', method: 'bridge:identify' })
+
+    const inflight = browserBridge.request('browser:readPage', { sessionId: 's1' })
+    const asked = replies(main).at(-1)!
+
+    // Bridge ids are negative and sequential, so they are guessable. Answering
+    // one from another socket would let it forge a page read's result.
+    sendMessage(thief, { jsonrpc: '2.0', id: asked.id, result: { nodes: ['forged'] } })
+    sendMessage(main, { jsonrpc: '2.0', id: asked.id, result: { nodes: ['real'] } })
+
+    await expect(inflight).resolves.toEqual({ nodes: ['real'] })
   })
 })

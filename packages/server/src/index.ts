@@ -11,6 +11,7 @@ import fastifyStatic from '@fastify/static'
 import { handleConnection, registerMethod } from './ws-handler'
 import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
+import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
 import { getDataDir } from './database'
 import { parseServerArgs } from './server-args'
 import { ptyManager } from './pty-manager'
@@ -18,7 +19,7 @@ import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
 import { getTailscaleStatus } from './tailscale'
-import { initRebind, checkAndRebind } from './server-rebind'
+import { initRebind, checkAndRebind, isAllowedOrigin } from './server-rebind'
 import { setEnvPassthrough } from './process-utils'
 import log from './logger'
 
@@ -61,14 +62,42 @@ export async function startServer(
     checkAndRebind().catch((err) => log.warn({ err }, '[server] rebind check failed'))
   })
 
+  // The hosts the web client can be served from once reachable over a tailnet.
+  // Captured from the bind decision below and handed to initRebind, which owns
+  // the origin policy from then on.
+  let tailnetHosts: string[] = []
+
   // Set up Fastify + WebSocket
   const app = Fastify({ logger: false })
   await app.register(websocket)
 
-  app.get('/ws', { websocket: true }, (socket) => {
-    handleConnection(socket)
-    scheduler.deliverPendingConnectorInbox()
-  })
+  // Resolve this process's local credential and publish it for same-machine
+  // tools, before any connection can be accepted.
+  initBootstrapSecret(dataDir)
+
+  app.get(
+    '/ws',
+    {
+      websocket: true,
+      // Refuse a foreign Origin at the upgrade rather than accepting the socket
+      // and closing it. Browsers set this header and page script cannot forge it,
+      // so this is what stops an arbitrary website opening a socket to a server
+      // bound on loopback — which browsers permit, since WebSocket upgrades are
+      // subject to neither CORS nor same-origin policy.
+      preValidation: async (req, reply) => {
+        const origin = req.headers.origin
+        if (origin === undefined) return // non-browser client; the credential is its control
+        if (!isAllowedOrigin(origin)) {
+          log.warn({ origin }, '[ws] refused upgrade from disallowed origin')
+          await reply.code(403).send({ error: 'Origin not allowed' })
+        }
+      }
+    },
+    (socket, req) => {
+      handleConnection(socket, bearerFrom(req.headers.authorization))
+      scheduler.deliverPendingConnectorInbox()
+    }
+  )
 
   app.get('/health', async () => ({ status: 'ok' }))
 
@@ -142,6 +171,9 @@ export async function startServer(
       const tsStatus = await getTailscaleStatus()
       if (tsStatus.running && tsStatus.selfIP) {
         host = '0.0.0.0'
+        tailnetHosts = [tsStatus.selfIP, tsStatus.selfDNSName].filter(
+          (h): h is string => typeof h === 'string' && h.length > 0
+        )
         log.info(
           `[server] remote access enabled, binding to 0.0.0.0 (tailscale IP: ${tsStatus.selfIP})`
         )
@@ -160,7 +192,7 @@ export async function startServer(
   setServerPort(actualPort)
 
   // Enable hot-rebind when network access / Tailscale state changes
-  initRebind(app.server, host, actualPort)
+  initRebind(app.server, host, actualPort, tailnetHosts)
 
   // The `{"port":N}` line that Electron's launcher waits for is written by the
   // direct-run block below, not here: it is a contract between that entry point
@@ -217,6 +249,7 @@ export async function startServer(
     sessionManager.stopAutoSave()
     sessionManager.persistNow()
     hookServer.stop()
+    clearLocalCredential()
     uninstallHooks()
     uninstallAllCopilotHooks()
     hookStatusMapper.clear()
