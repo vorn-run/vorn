@@ -32,7 +32,7 @@ import {
   type HistoryKind
 } from '../lib/command-history'
 import { defaultSources, getCompletions, outlineNames, type Completion } from '../lib/completions'
-import { isIntentBarFocused, registerIntentBarInput } from '../lib/intent-bar-focus'
+import { registerIntentBarInput } from '../lib/intent-bar-focus'
 import { isShellSession } from '../../shared/types'
 import { resolveIntentMode, SHELL_BUILTINS, type IntentMode } from '../lib/intent-mode'
 import { getPreferredAgent, setPreferredAgent } from '../lib/launch-prefs'
@@ -187,6 +187,13 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   // Whether the running command has lasted long enough to own the pane. Seeded
   // true so arriving at a card mid-command shows no bar rather than a flash.
   const [settled, setSettled] = useState(() => inputState === 'running')
+  // Mirrors of focus and typed text, read by the handover below after the
+  // textarea may already have been removed. State would be stale in that closure.
+  const hadFocusRef = useRef(false)
+  const draftRef = useRef('')
+  useEffect(() => {
+    draftRef.current = value
+  }, [value])
   const [seenState, setSeenState] = useState(inputState)
   if (seenState !== inputState) {
     // Adjusted during render, which React sanctions: an effect writing this
@@ -196,11 +203,13 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   }
 
   useEffect(() => {
-    // Asked while the textarea is still mounted and before the state that
-    // unmounts it: afterwards there is no composer left to have held focus, and
-    // an unmount while focused drops focus to the body where keys reach nothing.
+    // Read from a ref, not the DOM: the alternate screen hides the composer in
+    // the same render that reports it, so by now the textarea may already be
+    // gone — and asking a detached node whether it had focus always says no.
     const yieldKeyboard = (): void => {
-      if (!isMobile && isIntentBarFocused(terminalId)) focusTerminal(terminalId)
+      // A half-typed command means the keyboard is still being used. Moving it
+      // would split the rest of the word into the pty's line buffer.
+      if (hadFocusRef.current && !draftRef.current) focusTerminal(terminalId)
     }
     // A full-screen program is never transient; only a command is worth waiting out.
     if (inputState === 'altScreen') {
@@ -213,11 +222,15 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
       setSettled(true)
     }, PTY_FOCUS_DELAY_MS)
     return () => clearTimeout(timer)
-  }, [inputState, isMobile, terminalId])
+  }, [inputState, terminalId])
 
   // The composer belongs to the prompt; while a command owns the terminal there
   // is nothing for it to do. 'unknown' keeps it — no integration, no signal.
-  const composerHidden = inputState === 'altScreen' || (inputState === 'running' && settled)
+  //
+  // Never on mobile: focus cannot move there, so hiding would leave the phone
+  // with no input at all rather than with the terminal's.
+  const composerHidden =
+    !isMobile && (inputState === 'altScreen' || (inputState === 'running' && settled))
 
   const inferredMode = useMemo(
     () => resolveIntentMode(value, knownCommands),
@@ -305,13 +318,14 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
     }
   }, [])
 
-  // Expose the input for keystroke redirection from the raw terminal.
-  useEffect(() => {
+  // Expose the input for keystroke redirection from the raw terminal. A layout
+  // effect because the composer remounts when a command ends: a passive one
+  // leaves a window where the box is on screen but unregistered, and the first
+  // keystroke goes to the pty instead.
+  useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el || !isShell) return
     return registerIntentBarInput(terminalId, el)
-    // composerHidden remounts the textarea, and the registry would otherwise
-    // keep pointing at the detached one — which fails focusIntentBar silently.
   }, [terminalId, isShell, composerHidden])
 
   // Runnable names for mode resolution. The executable list is cached at
@@ -706,8 +720,12 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
               aria-label={label}
               onChange={(e) => handleChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              onFocus={() => setIsFocused(true)}
+              onFocus={() => {
+                hadFocusRef.current = true
+                setIsFocused(true)
+              }}
               onBlur={() => {
+                hadFocusRef.current = false
                 setIsFocused(false)
                 closeDropdown()
               }}

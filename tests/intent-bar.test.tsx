@@ -34,9 +34,19 @@ vi.mock('../src/renderer/lib/terminal-registry', () => registryMocks)
 const shellState = vi.hoisted(() => ({
   value: 'prompt' as 'prompt' | 'running' | 'altScreen' | 'unknown'
 }))
+// Listeners are captured so a test can drive a real state transition; several
+// of these only reproduce on the change, not on the state they land in.
+const blocks = vi.hoisted(() => ({ listeners: new Set<() => void>() }))
 vi.mock('../src/renderer/lib/command-blocks', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
-  return { ...actual, getShellInputState: () => shellState.value }
+  return {
+    ...actual,
+    getShellInputState: () => shellState.value,
+    onCommandBlocksChange: (_id: string, cb: () => void) => {
+      blocks.listeners.add(cb)
+      return () => blocks.listeners.delete(cb)
+    }
+  }
 })
 
 // jsdom doesn't implement matchMedia; stub it for useIsMobile.
@@ -88,6 +98,14 @@ function seedStore(overrides: Partial<ReturnType<typeof useAppStore.getState>> =
       terminals: new Map([['term-1', mockTerminal]]),
       ...overrides
     })
+  })
+}
+
+/** Move the shell to a new state the way a command boundary would. */
+function moveTo(next: 'prompt' | 'running' | 'altScreen' | 'unknown'): void {
+  shellState.value = next
+  act(() => {
+    blocks.listeners.forEach((cb) => cb())
   })
 }
 
@@ -628,6 +646,55 @@ describe('the composer while a full-screen program is up', () => {
     cleanup()
     vi.clearAllMocks()
     shellState.value = 'prompt'
+  })
+
+  it('hands the keyboard over as the pane is taken', async () => {
+    // The regression this exists for: the composer is hidden in the same render
+    // that reports the alternate screen, so a check against the live DOM asks a
+    // node that is already detached and always answers no. Focus then lands on
+    // the body and vim receives nothing at all.
+    shellState.value = 'prompt'
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.focus(getInput())
+
+    moveTo('altScreen')
+
+    expect(registryMocks.focusTerminal).toHaveBeenCalledWith('term-1')
+    expect(screen.queryByRole('textbox')).toBeNull()
+  })
+
+  it('hands it over for a command too, once it has settled', async () => {
+    shellState.value = 'prompt'
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    fireEvent.focus(getInput())
+
+    moveTo('running')
+    expect(registryMocks.focusTerminal).not.toHaveBeenCalled()
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 160))
+    })
+
+    expect(registryMocks.focusTerminal).toHaveBeenCalledWith('term-1')
+  })
+
+  it('keeps a half-typed command rather than splitting it across two inputs', async () => {
+    // Moving the keyboard mid-word sends the rest to the pty's line buffer, and
+    // the two halves are then interleaved when the composer submits its share.
+    shellState.value = 'prompt'
+    render(<IntentBar terminalId="term-1" />)
+    await ready()
+    const input = getInput()
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'npm ru' } })
+
+    moveTo('running')
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 160))
+    })
+
+    expect(registryMocks.focusTerminal).not.toHaveBeenCalled()
   })
 
   it('leaves the pane entirely', async () => {
