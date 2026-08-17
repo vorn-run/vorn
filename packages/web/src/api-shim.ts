@@ -54,6 +54,15 @@ class RpcClient {
   private _ready!: Promise<void>
   private _resolveReady!: () => void
   private _rejectReady!: (err: Error) => void
+  /**
+   * Called when the server rejects our credential, on any connection.
+   *
+   * A callback rather than only the readiness promise: `_ready` is replaced on
+   * every reconnect, and the bootstrap only ever observes the first one — so
+   * rejecting it after a reconnect rejects a promise nobody is watching, and the
+   * page silently stops updating instead of asking for a token.
+   */
+  private onAuthRequired: (() => void) | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(url: string) {
@@ -68,6 +77,13 @@ class RpcClient {
       this._resolveReady = resolve
       this._rejectReady = reject
     })
+    // Nothing awaits a replacement promise, so an unobserved rejection would
+    // surface as an unhandled rejection in the console.
+    this._ready.catch(() => {})
+  }
+
+  setOnAuthRequired(handler: () => void): void {
+    this.onAuthRequired = handler
   }
 
   private connect(): void {
@@ -157,7 +173,11 @@ class RpcClient {
       // socket stalled would send the user back to the machine running Vorn.
       if (event.code === CLOSE_CREDENTIAL_REJECTED) {
         clearStoredToken()
+        // Rejects the promise for a first load, and fires the callback for a
+        // reconnect — where the promise the bootstrap is awaiting has long since
+        // resolved and a rejection would go unobserved.
         this._rejectReady(new AuthRequiredError())
+        this.onAuthRequired?.()
         return
       }
 
@@ -295,6 +315,8 @@ export function createApiShim(wsUrl: string) {
   const api = {
     // ── Ready (web-only, not in Electron API) ──
     __ready: () => rpc.ready(),
+    /** Fires whenever the server rejects our credential, including on a reconnect. */
+    __onAuthRequired: (handler: () => void) => rpc.setOnAuthRequired(handler),
 
     // ── Terminal Management ──
     createTerminal: (payload: unknown) => rpc.invoke('terminal:create', payload),

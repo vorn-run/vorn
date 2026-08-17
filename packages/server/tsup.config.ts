@@ -1,5 +1,13 @@
 import { defineConfig } from 'tsup'
 
+// Prepended to both entries. `cli.cjs` is the `vorn-server` binary, and Yarn
+// links a bin as a plain symlink — without this the shell runs it as sh and it
+// dies with a syntax error partway through the bundle. It has to live in the
+// banner rather than at the top of `src/cli.ts`, because the banner is emitted
+// first and a shebang is only honoured on line 1. Node ignores it in
+// `index.cjs`, which is required rather than executed.
+const SHEBANG = '#!/usr/bin/env node'
+
 const NATIVE_MODULE_PATCH = `
 // Patch module resolution for Electron's utilityProcess.
 //
@@ -41,7 +49,7 @@ export default defineConfig({
   target: 'node22',
   clean: true,
   banner: {
-    js: NATIVE_MODULE_PATCH
+    js: `${SHEBANG}\n${NATIVE_MODULE_PATCH}`
   },
   // Bundle ALL JS dependencies so the server runs standalone in Electron's
   // utilityProcess (which cannot access modules inside the asar archive).

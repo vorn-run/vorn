@@ -23,6 +23,17 @@ registerSW({ immediate: true })
 const api = createApiShim(getWebSocketUrl())
 ;(window as unknown as { api: typeof api }).api = api
 
+// A rejected credential can arrive at any time — on first load, or on a
+// reconnect after the token was revoked. Registered before __ready() so the
+// first-load case is covered too.
+const askForToken = (): void =>
+  renderTokenPrompt((token) => {
+    storeToken(token)
+    location.reload()
+  })
+
+api.__onAuthRequired(askForToken)
+
 // Wait for WebSocket connection before rendering
 api
   .__ready()
@@ -38,15 +49,8 @@ api
     root.render(<App />)
   })
   .catch((err) => {
-    // The server refused the credential. Ask for one rather than leaving a blank
-    // page: this promise never settling is what an unauthenticated load used to
-    // look like.
-    if (err instanceof AuthRequiredError) {
-      renderTokenPrompt((token) => {
-        storeToken(token)
-        location.reload()
-      })
-      return
-    }
+    // The prompt is rendered by the __onAuthRequired handler above, which also
+    // covers the reconnect case this promise cannot see.
+    if (err instanceof AuthRequiredError) return
     throw err
   })
