@@ -182,12 +182,20 @@ describe('CommandBlockTracker.inputState', () => {
     expect(tracker.inputState()).toBe('prompt')
   })
 
-  it('is running while the alternate buffer is active', () => {
+  it('is altScreen while the alternate buffer is active', () => {
     tracker.handleSequence('A')
     alternate = true
-    expect(tracker.inputState()).toBe('running')
+    expect(tracker.inputState()).toBe('altScreen')
     alternate = false
     expect(tracker.inputState()).toBe('prompt')
+  })
+
+  it('is altScreen even with no shell integration at all', () => {
+    // The alternate buffer is the one answer that does not depend on the shell
+    // reporting anything, and a TUI opened from an uninstrumented shell still
+    // needs the terminal to have the keys.
+    alternate = true
+    expect(tracker.inputState()).toBe('altScreen')
   })
 })
 
@@ -296,18 +304,29 @@ describe('attachCommandBlocks', () => {
     registerDecoration: ReturnType<typeof vi.fn>
     handlers: Map<number, (data: string) => boolean>
     csiHandlers: Map<string, (params: number[]) => boolean>
+    bufferListeners: Set<() => void>
   }
 
   function fakeTerminal(): { term: FakeTerm; asTerminal: Terminal } {
     const handlers = new Map<number, (data: string) => boolean>()
     const csiHandlers = new Map<string, (params: number[]) => boolean>()
+    const bufferListeners = new Set<() => void>()
     const term = {
       registerDecoration: vi.fn(() => undefined),
       handlers,
       csiHandlers,
+      bufferListeners,
       options: { theme: { background: '#141416', cursor: '#d4d4d8' } },
       cols: 80,
-      buffer: { active: { type: 'normal', baseY: 0, cursorY: 0 } },
+      buffer: {
+        active: { type: 'normal', baseY: 0, cursorY: 0 },
+        // Entering or leaving the alternate screen carries no OSC, so this is
+        // the only thing that can announce a full-screen program opening.
+        onBufferChange: (cb: () => void) => {
+          bufferListeners.add(cb)
+          return { dispose: () => bufferListeners.delete(cb) }
+        }
+      },
       registerMarker: (offset: number) => new FakeMarker(offset),
       parser: {
         registerOscHandler: (id: number, cb: (data: string) => boolean) => {
@@ -463,7 +482,10 @@ describe('clear', () => {
       options: { theme: {} },
       cols: 80,
       clear: vi.fn(),
-      buffer: { active: { type: 'normal', baseY: 0, cursorY: 0, length: 1 } },
+      buffer: {
+        active: { type: 'normal', baseY: 0, cursorY: 0, length: 1 },
+        onBufferChange: () => ({ dispose: () => {} })
+      },
       registerMarker: (offset: number) => new FakeMarker(offset),
       parser: {
         registerOscHandler: (id: number, cb: (data: string) => boolean) => {
@@ -532,12 +554,19 @@ describe('shell integration detection', () => {
    */
   function fake(): { term: Terminal; handlers: Map<number, (d: string) => boolean> } {
     const handlers = new Map<number, (d: string) => boolean>()
+    const bufferListeners = new Set<() => void>()
     const term = {
       registerDecoration: vi.fn(() => undefined),
       options: { theme: {} },
       cols: 80,
       clear: vi.fn(),
-      buffer: { active: { type: 'normal', baseY: 0, cursorY: 0, length: 1 } },
+      buffer: {
+        active: { type: 'normal', baseY: 0, cursorY: 0, length: 1 },
+        onBufferChange: (cb: () => void) => {
+          bufferListeners.add(cb)
+          return { dispose: () => bufferListeners.delete(cb) }
+        }
+      },
       registerMarker: (offset: number) => new FakeMarker(offset),
       parser: {
         registerOscHandler: (id: number, cb: (d: string) => boolean) => {
@@ -547,13 +576,33 @@ describe('shell integration detection', () => {
         registerCsiHandler: () => ({ dispose: () => {} })
       }
     }
-    return { term: term as unknown as Terminal, handlers }
+    return { term: term as unknown as Terminal, handlers, bufferListeners }
   }
 
   it('reports nothing until a boundary actually arrives', () => {
     const { term } = fake()
     attachCommandBlocks('unmarked', term)
     expect(hasShellIntegration('unmarked')).toBe(false)
+  })
+
+  it('announces an alternate-buffer switch, which carries no OSC', () => {
+    // A program can take the whole screen without the shell saying anything, so
+    // this is the only thing that can tell a listener vim opened.
+    const { term, bufferListeners } = fake()
+    attachCommandBlocks('tui', term)
+    let notified = 0
+    onCommandBlocksChange('tui', () => notified++)
+    expect(bufferListeners.size).toBe(1)
+    bufferListeners.forEach((cb) => cb())
+    expect(notified).toBe(1)
+  })
+
+  it('stops listening to the buffer when torn down', () => {
+    const { term, bufferListeners } = fake()
+    const dispose = attachCommandBlocks('tui-gone', term)
+    expect(bufferListeners.size).toBe(1)
+    dispose()
+    expect(bufferListeners.size).toBe(0)
   })
 
   it('reports integration from the first prompt marker', () => {

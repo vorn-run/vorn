@@ -53,7 +53,16 @@ export interface TrackerHost {
 
 const MAX_BLOCKS = 200
 
-export type ShellInputState = 'prompt' | 'running' | 'unknown'
+/** Split because the composer waits before yielding to a command, but never to a TUI. */
+export type ShellInputState = 'prompt' | 'running' | 'altScreen' | 'unknown'
+
+/**
+ * Whether the composer still owns input. Named so adding a fifth state forces a
+ * decision here rather than silently changing every `!== 'prompt'` comparison.
+ */
+export function isAtPrompt(state: ShellInputState): boolean {
+  return state === 'prompt'
+}
 
 export class CommandBlockTracker {
   readonly blocks: CommandBlock[] = []
@@ -72,12 +81,11 @@ export class CommandBlockTracker {
   constructor(private host: TrackerHost) {}
 
   /**
-   * Whether the shell is waiting at its prompt ('prompt'), executing a
-   * command or showing a full-screen app ('running'), or has never reported
-   * boundaries ('unknown' — no shell integration; degrade to raw input).
+   * Prompt, running, full-screen app, or no shell integration at all. The
+   * alternate buffer wins: it is the one answer integration cannot give.
    */
   inputState(): ShellInputState {
-    if (this.host.isAlternateBuffer()) return 'running'
+    if (this.host.isAlternateBuffer()) return 'altScreen'
     if (!this.sawPrompt) return 'unknown'
     return this.promptMarker && !this.promptMarker.isDisposed ? 'prompt' : 'running'
   }
@@ -437,7 +445,7 @@ export function attachCommandBlocks(terminalId: string, term: Terminal): () => v
   const applyCursorVisibility = (): void => {
     const theme = term.options.theme ?? {}
     const background = theme.background ?? TERMINAL_BACKGROUND
-    const hide = tracker.inputState() === 'prompt'
+    const hide = isAtPrompt(tracker.inputState())
     const cursor = hide ? background : defaultCursor
     if (theme.cursor !== cursor) {
       term.options.theme = { ...theme, cursor, cursorAccent: hide ? background : undefined }
@@ -471,11 +479,18 @@ export function attachCommandBlocks(terminalId: string, term: Terminal): () => v
     // xterm still runs its own handler; this one only observes.
     return false
   })
+  // No OSC accompanies an alternate-buffer switch, so without this nothing
+  // would hear vim open.
+  const d4 = term.buffer.onBufferChange(() => {
+    applyCursorVisibility()
+    emitBlocksChanged(terminalId)
+  })
 
   return () => {
     d1.dispose()
     d2.dispose()
     d3.dispose()
+    d4.dispose()
     trackers.delete(terminalId)
     blockListeners.delete(terminalId)
     integrated.delete(terminalId)

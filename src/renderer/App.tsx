@@ -51,7 +51,12 @@ import {
   disposeGlobalDataListener,
   setKeyRedirectHandler
 } from './lib/terminal-registry'
-import { setCwdReporter, getShellInputState, setDomBlockRendering } from './lib/command-blocks'
+import {
+  setCwdReporter,
+  getShellInputState,
+  isAtPrompt,
+  setDomBlockRendering
+} from './lib/command-blocks'
 import { focusIntentBar } from './lib/intent-bar-focus'
 import { WorktreeCleanupDialog } from './components/WorktreeCleanupDialog'
 import { WorktreeCleanupToastBridge } from './components/WorktreeCleanupToastBridge'
@@ -152,7 +157,7 @@ export function App() {
       if (e.key.length !== 1) return false
       const session = useAppStore.getState().terminals.get(terminalId)?.session
       if (session?.agentType !== 'shell') return false
-      if (getShellInputState(terminalId) !== 'prompt') return false
+      if (!isAtPrompt(getShellInputState(terminalId))) return false
       return focusIntentBar(terminalId)
     })
     ;(async () => {

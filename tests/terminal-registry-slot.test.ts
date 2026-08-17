@@ -7,7 +7,10 @@ vi.mock('@xterm/xterm', () => {
     cols = 80
     rows = 24
     options = { fontSize: 13 }
-    buffer = { active: { viewportY: 0, baseY: 0, type: 'normal' } }
+    buffer = {
+      active: { viewportY: 0, baseY: 0, type: 'normal' },
+      onBufferChange: vi.fn().mockReturnValue({ dispose: vi.fn() })
+    }
     parser = {
       registerOscHandler: vi.fn().mockReturnValue({ dispose: vi.fn() }),
       registerCsiHandler: vi.fn().mockReturnValue({ dispose: vi.fn() })
