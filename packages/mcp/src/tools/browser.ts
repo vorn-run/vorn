@@ -341,4 +341,22 @@ export function registerBrowserTools(server: McpServer): void {
         return { content: [{ type: 'text', text: `Navigated to ${result.url}` }] }
       })
   )
+
+  server.tool(
+    'browser_history',
+    "Step back or forward through your session browser pane's own history — the same thing " +
+      "the pane's back and forward buttons do. Fails when there is no page to move to, rather " +
+      'than quietly staying put.',
+    { direction: z.enum(['back', 'forward']).describe('Which way to step') },
+    async (args) =>
+      withSession(async (id) => {
+        const result = await rpcCall<{ url: string }>('browser:history', {
+          sessionId: id,
+          direction: args.direction
+        })
+        return {
+          content: [{ type: 'text', text: `Went ${args.direction} to ${result.url}` }]
+        }
+      })
+  )
 }

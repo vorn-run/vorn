@@ -647,6 +647,38 @@ export async function navigate(params: {
   return { url: normalized }
 }
 
+/**
+ * Step through the pane's own history.
+ *
+ * Separate from `navigate` because there is no url to hand it: the destination
+ * is whatever the guest visited before, which only the guest knows. Running out
+ * of history is a hard failure rather than a quiet no-op — an agent that asked
+ * to go back and was told "ok" would carry on believing it had moved, and read
+ * the same page a second time thinking it was the previous one.
+ */
+export async function goHistory(params: {
+  sessionId: string
+  direction: 'back' | 'forward'
+}): Promise<{ url: string }> {
+  const { wc } = contentsFor(params.sessionId)
+  const { currentIndex, entries: history } = await send<{
+    currentIndex: number
+    entries: { id: number; url: string }[]
+  }>(wc, 'Page.getNavigationHistory')
+
+  const target = history[currentIndex + (params.direction === 'back' ? -1 : 1)]
+  if (!target) {
+    throw new Error(
+      params.direction === 'back'
+        ? 'No page to go back to — this is the first page in this tab.'
+        : 'No page to go forward to — this is the newest page in this tab.'
+    )
+  }
+
+  await send(wc, 'Page.navigateToHistoryEntry', { entryId: target.id })
+  return { url: target.url }
+}
+
 // ─── Element picker ─────────────────────────────────────────────
 
 /**

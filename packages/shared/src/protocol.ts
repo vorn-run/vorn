@@ -452,6 +452,11 @@ export interface RequestMethods {
     params: { sessionId: string; url: string }
     result: { url: string }
   }
+  'browser:history': {
+    params: { sessionId: string; direction: 'back' | 'forward' }
+    /** Where the pane landed. */
+    result: { url: string }
+  }
   'browser:find': {
     params: { sessionId: string; text: string; limit?: number }
     result: BrowserNode[]
