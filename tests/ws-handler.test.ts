@@ -449,3 +449,58 @@ describe('a credential offered on the upgrade and rejected', () => {
     expect(ws.close).not.toHaveBeenCalled()
   })
 })
+
+describe('revoking a token that a socket is holding', () => {
+  it('closes it now rather than at its next reconnect', async () => {
+    // The point of revoking a lost phone is that it stops working immediately.
+    // clientRegistry keeps a bare set of sockets with no identity, so there was no
+    // way to ask which of them held a given token.
+    const { disconnectToken, resetTokenTracking } =
+      await import('../packages/server/src/ws-handler')
+    resetTokenTracking()
+    const ws = createMockWs()
+    handleConnection(ws, DEVICE_TOKEN)
+
+    const closed = disconnectToken('tok-1')
+
+    expect(closed).toBe(1)
+    expect(ws.close).toHaveBeenCalledWith(CLOSE_CREDENTIAL_REJECTED, 'token revoked')
+  })
+
+  it('uses the code that makes a browser ask for a new token', async () => {
+    // Anything else and the web client simply retries — an endless loop against a
+    // door that will not open again.
+    const { disconnectToken, resetTokenTracking } =
+      await import('../packages/server/src/ws-handler')
+    resetTokenTracking()
+    const ws = createMockWs()
+    handleConnection(ws, DEVICE_TOKEN)
+
+    disconnectToken('tok-1')
+
+    expect((ws.close as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(CLOSE_CREDENTIAL_REJECTED)
+  })
+
+  it('does not track the desktop bootstrap credential, which cannot be revoked', async () => {
+    const { disconnectToken, resetTokenTracking } =
+      await import('../packages/server/src/ws-handler')
+    resetTokenTracking()
+    const ws = createMockWs()
+    handleConnection(ws, GOOD_TOKEN)
+
+    // It carries no tokenId — there is no device-token row behind it.
+    expect(disconnectToken('tok-1')).toBe(0)
+    expect(ws.close).not.toHaveBeenCalled()
+  })
+
+  it('leaves sockets holding a different token alone', async () => {
+    const { disconnectToken, resetTokenTracking } =
+      await import('../packages/server/src/ws-handler')
+    resetTokenTracking()
+    const ws = createMockWs()
+    handleConnection(ws, DEVICE_TOKEN)
+
+    expect(disconnectToken('some-other-token-id')).toBe(0)
+    expect(ws.close).not.toHaveBeenCalled()
+  })
+})

@@ -76,6 +76,61 @@ export function registerNotification(method: string, handler: (params: unknown) 
  * Handle a new WebSocket connection. Sets up message parsing,
  * request dispatching, and cleanup on close.
  */
+/**
+ * Which live sockets are holding which device token.
+ *
+ * `clientRegistry` keeps a bare set of sockets with no identity attached, so
+ * there was no way to answer "who is using this token" — and revoking one only
+ * took effect whenever that device next happened to reconnect. For a lost phone
+ * that is the wrong answer: the point of revoking is that it stops now.
+ *
+ * A Set per token because one device can hold several sockets at once — MCP opens
+ * a fresh connection per call.
+ */
+const socketsByToken = new Map<string, Set<WebSocket>>()
+
+function trackToken(tokenId: string, ws: WebSocket): void {
+  const existing = socketsByToken.get(tokenId)
+  if (existing) existing.add(ws)
+  else socketsByToken.set(tokenId, new Set([ws]))
+}
+
+function untrackToken(tokenId: string, ws: WebSocket): void {
+  const sockets = socketsByToken.get(tokenId)
+  if (!sockets) return
+  sockets.delete(ws)
+  if (sockets.size === 0) socketsByToken.delete(tokenId)
+}
+
+/**
+ * Close every socket authenticated with this token.
+ *
+ * Closed with CLOSE_CREDENTIAL_REJECTED rather than a generic code on purpose:
+ * that is the one the web client turns into a request for a new token, where
+ * anything else it simply retries — which for a revoked token is an endless loop
+ * against a door that will not open again.
+ */
+export function disconnectToken(tokenId: string): number {
+  const sockets = socketsByToken.get(tokenId)
+  if (!sockets) return 0
+  const count = sockets.size
+  for (const ws of [...sockets]) {
+    try {
+      ws.close(CLOSE_CREDENTIAL_REJECTED, 'token revoked')
+    } catch {
+      // Already gone; `teardown` on its close event clears the entry.
+    }
+  }
+  socketsByToken.delete(tokenId)
+  if (count > 0) log.info({ tokenId, count }, '[ws] closed sockets for revoked token')
+  return count
+}
+
+/** Test seam — module state outlives a single connection. */
+export function resetTokenTracking(): void {
+  socketsByToken.clear()
+}
+
 export function handleConnection(ws: WebSocket, credential?: string): void {
   // Announce the contract first, so a client that has to authenticate by message
   // knows that it must before it is refused for not having.
@@ -98,6 +153,7 @@ export function handleConnection(ws: WebSocket, credential?: string): void {
   const admit = (result: Authenticated): void => {
     session = result
     clientRegistry.add(ws)
+    if (result.tokenId) trackToken(result.tokenId, ws)
     if (authTimer) {
       clearTimeout(authTimer)
       authTimer = null
@@ -239,6 +295,7 @@ export function handleConnection(ws: WebSocket, credential?: string): void {
       clearTimeout(authTimer)
       authTimer = null
     }
+    if (session?.tokenId) untrackToken(session.tokenId, ws)
     session = null
     clientRegistry.remove(ws)
     browserBridge.clearSocket(ws)

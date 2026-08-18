@@ -40,6 +40,9 @@ function reachable(overrides: Partial<ReachableUrls> = {}): ReachableUrls {
   return { urls: ['http://192.168.1.20:4000/app/'], port: 4000, remote: true, ...overrides }
 }
 
+const listDeviceTokens = vi.fn()
+const createDeviceToken = vi.fn()
+const revokeDeviceToken = vi.fn()
 const getTailscaleStatus = vi.fn()
 const getReachableUrls = vi.fn()
 const saveConfig = vi.fn()
@@ -57,10 +60,19 @@ beforeEach(() => {
   store.config = { defaults: { networkAccessEnabled: false } }
   getTailscaleStatus.mockResolvedValue(tailscale())
   getReachableUrls.mockResolvedValue(reachable())
+  listDeviceTokens.mockResolvedValue([])
+  createDeviceToken.mockResolvedValue({
+    token: { id: 'tok1', name: 'My phone', createdAt: '', lastSeenAt: null, revokedAt: null },
+    plaintext: 'vorn_tok1_secret'
+  })
+  revokeDeviceToken.mockResolvedValue({ revoked: true })
   ;(window as unknown as { api: unknown }).api = {
     getTailscaleStatus,
     getReachableUrls,
-    saveConfig
+    saveConfig,
+    listDeviceTokens,
+    createDeviceToken,
+    revokeDeviceToken
   }
 })
 
@@ -97,12 +109,15 @@ describe('NetworkSettings', () => {
     expect(screen.getByText('http://192.168.1.20:4000/app/')).toBeInTheDocument()
   })
 
-  it('shows how to create a token, which exists nowhere else in the app', async () => {
+  it('manages devices in the app rather than sending you to a terminal', async () => {
+    // This used to print `vorn-server token create` and leave you to it, which
+    // stopped making sense the moment the server could be another machine.
     store.config = { defaults: { networkAccessEnabled: true } }
 
     await renderPanel()
 
-    expect(screen.getByText(/vorn-server token create/)).toBeInTheDocument()
+    expect(screen.getByText('Add device')).toBeInTheDocument()
+    expect(screen.queryByText(/vorn-server token create/)).not.toBeInTheDocument()
   })
 
   it('shows no address while remote access is off', async () => {
@@ -254,5 +269,88 @@ describe('NetworkSettings', () => {
     })
 
     await waitFor(() => expect(getReachableUrls).toHaveBeenCalled())
+  })
+})
+
+describe('the device list', () => {
+  beforeEach(() => {
+    store.config = { defaults: { networkAccessEnabled: true } }
+  })
+
+  it('lists the devices allowed to connect, with when each was last seen', async () => {
+    listDeviceTokens.mockResolvedValue([
+      {
+        id: 'a',
+        name: 'My phone',
+        createdAt: '',
+        lastSeenAt: '2026-08-17T10:00:00Z',
+        revokedAt: null
+      },
+      { id: 'b', name: 'Work laptop', createdAt: '', lastSeenAt: null, revokedAt: null }
+    ])
+
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText('My phone')).toBeInTheDocument())
+    expect(screen.getByText('Work laptop')).toBeInTheDocument()
+    expect(screen.getByText('Never connected')).toBeInTheDocument()
+  })
+
+  it('hides a revoked device instead of listing it as usable', async () => {
+    listDeviceTokens.mockResolvedValue([
+      {
+        id: 'a',
+        name: 'Lost phone',
+        createdAt: '',
+        lastSeenAt: null,
+        revokedAt: '2026-08-17T10:00:00Z'
+      }
+    ])
+
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText('Add device')).toBeInTheDocument())
+    expect(screen.queryByText('Lost phone')).not.toBeInTheDocument()
+  })
+
+  it('shows the token once, and says that is the only time', async () => {
+    // It is stored as a hash, so there is no second chance to read it. The UI has
+    // to say so rather than let someone close the panel and find out.
+    const user = userEvent.setup()
+    await renderPanel()
+
+    await user.click(screen.getByText('Add device'))
+    await user.type(screen.getByLabelText('What is this device?'), 'My phone')
+    await user.click(screen.getByText('Create token'))
+
+    await waitFor(() => expect(screen.getByText('vorn_tok1_secret')).toBeInTheDocument())
+    expect(screen.getByText(/only time it can be shown/)).toBeInTheDocument()
+    expect(createDeviceToken).toHaveBeenCalledWith('My phone')
+  })
+
+  it('asks before revoking, since a revoked device stops working at once', async () => {
+    const user = userEvent.setup()
+    listDeviceTokens.mockResolvedValue([
+      { id: 'a', name: 'My phone', createdAt: '', lastSeenAt: null, revokedAt: null }
+    ])
+    await renderPanel()
+    await waitFor(() => expect(screen.getByText('My phone')).toBeInTheDocument())
+
+    await user.click(screen.getByText('Remove'))
+    expect(revokeDeviceToken).not.toHaveBeenCalled()
+
+    await user.click(screen.getByText('Revoke'))
+    expect(revokeDeviceToken).toHaveBeenCalledWith('a')
+  })
+
+  it('says so when the list cannot be read, rather than looking empty', async () => {
+    listDeviceTokens.mockRejectedValue(new Error('server unreachable'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await renderPanel()
+
+    await waitFor(() =>
+      expect(screen.getByText('Could not read the device list.')).toBeInTheDocument()
+    )
   })
 })

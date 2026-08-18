@@ -565,6 +565,12 @@ export function createApiShim(wsUrl: string) {
     getTailscaleStatus: () => rpc.invoke('tailscale:status'),
     getReachableUrls: () => rpc.invoke('server:reachableUrls'),
 
+    // Device tokens. A real implementation rather than a stub — unlike SSH keys,
+    // these need nothing from Electron, so a phone can manage them too.
+    listDeviceTokens: () => rpc.invoke('token:list'),
+    createDeviceToken: (name: string) => rpc.invoke('token:create', { name }),
+    revokeDeviceToken: (id: string) => rpc.invoke('token:revoke', id),
+
     // ── App Info (web-specific) ──
     getAppVersion: () => 'web',
 

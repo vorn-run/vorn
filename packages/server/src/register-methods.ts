@@ -115,6 +115,8 @@ import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vor
 import { executeScript, scriptRunnerEvents } from './script-runner'
 import { getTailscaleStatus, clearBinaryCache } from './tailscale'
 import { reachableUrls } from './reachable-urls'
+import { listTokens, mintOwnerToken, revokeToken } from './token-manager'
+import { disconnectToken } from './ws-handler'
 import { testSshConnection } from './process-utils'
 import { captureAgentSessionId } from './agent-session-capture'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
@@ -630,6 +632,23 @@ export function registerAllMethods(): void {
   registerMethod('credential:listKeys', () => dbListSSHKeys())
   registerMethod('credential:deleteKey', (id) => dbDeleteSSHKey(id))
   registerMethod('credential:getEncryptedKey', (id) => dbGetSSHKey(id))
+
+  // Device tokens. Until now these existed only behind `vorn-server token`, so
+  // pairing a phone meant finding a terminal on the machine running the server.
+  registerMethod('token:list', () => listTokens())
+  registerMethod('token:create', ({ name }) => {
+    // The plaintext is returned exactly once and never stored — only its hash
+    // reaches the database — so the caller has to show it and then drop it.
+    const minted = mintOwnerToken(name.trim() || 'Device')
+    return { token: minted.token, plaintext: minted.plaintext }
+  })
+  registerMethod('token:revoke', (id) => {
+    const revoked = revokeToken(id)
+    // Revoking has to reach a socket already holding the token, or a lost phone
+    // keeps working until it happens to reconnect.
+    if (revoked) disconnectToken(id)
+    return { revoked }
+  })
 
   // File explorer
   registerMethod('file:listDir', ({ dirPath, remoteHostId }) => {

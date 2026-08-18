@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import QRCode from 'qrcode'
 import { useAppStore } from '../../stores'
-import { TailscaleStatus, ReachableUrls } from '../../../shared/types'
+import { TailscaleStatus, ReachableUrls, DeviceToken } from '../../../shared/types'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
@@ -253,7 +253,7 @@ function TailscaleCard({
 
 // ─── Device List ─────────────────────────────────────────────────
 
-function DeviceList({ status }: { status: TailscaleStatus }) {
+function TailnetPeerList({ status }: { status: TailscaleStatus }) {
   const allDevices = [
     {
       ip: status.selfIP,
@@ -394,21 +394,187 @@ function ConnectionInfo({ reachable }: { reachable: ReachableUrls | null }) {
 }
 
 /**
- * Token management is CLI-only, so the panel has to say the command out loud —
- * otherwise a user reaches the address, is asked for a token, and has nowhere to get
- * one. The web client's own prompt already prints this same line.
+ * The devices allowed to connect, and the only place to make one.
+ *
+ * Until this existed, pairing a phone meant finding a terminal on the machine
+ * running the server and typing `vorn-server token create` — which the panel could
+ * only tell you about, not do. That was tolerable when the server was always the
+ * machine in front of you; it is not once the server is somewhere else.
  */
-function TokenCard() {
-  const command = 'vorn-server token create --name "My phone"'
+function DeviceTokenList() {
+  const [tokens, setTokens] = useState<DeviceToken[] | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState('')
+  /** Shown once, then unrecoverable — only its hash is stored. */
+  const [minted, setMinted] = useState<{ name: string; plaintext: string } | null>(null)
+  const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      setTokens(await window.api.listDeviceTokens())
+    } catch (err) {
+      console.error('[NetworkSettings] failed to list device tokens:', err)
+      setError('Could not read the device list.')
+    }
+  }, [])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: read the device list once on open
+    load()
+  }, [load])
+
+  const create = async (): Promise<void> => {
+    setError(null)
+    try {
+      const result = await window.api.createDeviceToken(name.trim() || 'Device')
+      setMinted({ name: result.token.name, plaintext: result.plaintext })
+      setName('')
+      setCreating(false)
+      await load()
+    } catch (err) {
+      console.error('[NetworkSettings] failed to create a device token:', err)
+      setError('Could not create a token.')
+    }
+  }
+
+  const revoke = async (id: string): Promise<void> => {
+    setConfirmRevokeId(null)
+    try {
+      await window.api.revokeDeviceToken(id)
+      await load()
+    } catch (err) {
+      console.error('[NetworkSettings] failed to revoke a device token:', err)
+      setError('Could not revoke that token.')
+    }
+  }
+
+  const active = (tokens ?? []).filter((t) => !t.revokedAt)
+
   return (
-    <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
-      <div className="text-xs font-medium text-gray-400 mb-1">Connecting a device</div>
-      <p className="text-xs text-gray-600 mb-3">
-        The browser will ask for a device token. Create one in a terminal on this machine:
-      </p>
-      <div className="flex items-center rounded-lg bg-white/[0.04] border border-white/[0.06] px-3 py-2">
-        <code className="text-xs text-gray-300 font-mono flex-1 truncate">{command}</code>
-        <CopyButton text={command} />
+    <div className="mt-6">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] text-gray-600 uppercase tracking-wider font-medium">
+          Devices {active.length > 0 && `(${active.length})`}
+        </div>
+        {!creating && (
+          <button
+            onClick={() => setCreating(true)}
+            className="text-xs text-gray-400 hover:text-white px-2 py-1 rounded-md hover:bg-white/[0.06] transition-colors"
+          >
+            Add device
+          </button>
+        )}
+      </div>
+
+      {/* The one moment the token is readable. Said plainly rather than left to
+          be discovered after the dialog closes. */}
+      {minted && (
+        <div className="mb-3 rounded-lg border border-white/[0.08] bg-white/[0.03] p-4">
+          <div className="text-sm font-medium text-gray-200 mb-1">
+            Token for &ldquo;{minted.name}&rdquo;
+          </div>
+          <p className="text-xs text-gray-500 mb-3">
+            Copy it now. It is stored only as a hash, so this is the only time it can be shown.
+          </p>
+          <div className="flex items-center rounded-lg bg-white/[0.04] border border-white/[0.06] px-3 py-2">
+            <code className="text-xs text-emerald-400 font-mono flex-1 truncate">
+              {minted.plaintext}
+            </code>
+            <CopyButton text={minted.plaintext} />
+          </div>
+          <button
+            onClick={() => setMinted(null)}
+            className="mt-3 text-xs text-gray-500 hover:text-white px-2 py-1 rounded-md hover:bg-white/[0.06] transition-colors"
+          >
+            Done
+          </button>
+        </div>
+      )}
+
+      {creating && (
+        <div className="mb-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
+          <label className="block text-xs text-gray-400 mb-2" htmlFor="device-token-name">
+            What is this device?
+          </label>
+          <input
+            id="device-token-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void create()
+            }}
+            placeholder="My phone"
+            autoFocus
+            className="w-full rounded-md bg-white/[0.04] border border-white/[0.08] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-600 outline-none focus:border-white/20"
+          />
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => void create()}
+              className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-200 border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
+            >
+              Create token
+            </button>
+            <button
+              onClick={() => {
+                setCreating(false)
+                setName('')
+              }}
+              className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-xs text-amber-400/80 mb-2">{error}</p>}
+
+      {tokens !== null && active.length === 0 && !creating && (
+        <p className="text-xs text-gray-600">
+          No devices yet. Add one, then open the address above on that device.
+        </p>
+      )}
+
+      <div className="space-y-1.5">
+        {active.map((token) => (
+          <div
+            key={token.id}
+            className="flex items-center gap-3 rounded-lg bg-white/[0.02] border border-white/[0.06] px-4 py-3"
+          >
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-gray-200 truncate">{token.name}</div>
+              <div className="text-[10px] text-gray-600">
+                {token.lastSeenAt
+                  ? `Last seen ${new Date(token.lastSeenAt).toLocaleString()}`
+                  : 'Never connected'}
+              </div>
+            </div>
+            {confirmRevokeId === token.id ? (
+              <div className="flex gap-1.5 shrink-0">
+                <button
+                  onClick={() => void revoke(token.id)}
+                  className="px-2 py-1 text-xs font-medium rounded-md text-red-300 border border-red-500/20 hover:bg-red-500/10 transition-colors"
+                >
+                  Revoke
+                </button>
+                <button
+                  onClick={() => setConfirmRevokeId(null)}
+                  className="px-2 py-1 text-xs rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmRevokeId(token.id)}
+                className="shrink-0 text-xs text-gray-500 hover:text-white px-2 py-1 rounded-md hover:bg-white/[0.06] transition-colors"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -559,7 +725,7 @@ export function NetworkSettings() {
 
       {/* Connection info + QR */}
       {enabled && <ConnectionInfo reachable={reachable} />}
-      {enabled && <TokenCard />}
+      {enabled && <DeviceTokenList />}
 
       {/* Tailscale, as a recommendation rather than a prerequisite */}
       {showTailscaleCard && (
@@ -569,7 +735,7 @@ export function NetworkSettings() {
       )}
 
       {/* Device list */}
-      {enabled && onTailnet && status && <DeviceList status={status} />}
+      {enabled && onTailnet && status && <TailnetPeerList status={status} />}
 
       {/* How it works — always visible */}
       {status && (

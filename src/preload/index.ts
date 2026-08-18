@@ -21,6 +21,7 @@ import {
   RemoteHost,
   TailscaleStatus,
   ReachableUrls,
+  DeviceToken,
   FileEntry,
   SourceConnection,
   TaskSourceLink,
@@ -566,6 +567,13 @@ const api = {
   // Tailscale
   getTailscaleStatus: (): Promise<TailscaleStatus> => ipcRenderer.invoke(IPC.TAILSCALE_STATUS),
   getReachableUrls: (): Promise<ReachableUrls> => ipcRenderer.invoke(IPC.SERVER_REACHABLE_URLS),
+
+  // Device tokens
+  listDeviceTokens: (): Promise<DeviceToken[]> => ipcRenderer.invoke(IPC.TOKEN_LIST),
+  createDeviceToken: (name: string): Promise<{ token: DeviceToken; plaintext: string }> =>
+    ipcRenderer.invoke(IPC.TOKEN_CREATE, { name }),
+  revokeDeviceToken: (id: string): Promise<{ revoked: boolean }> =>
+    ipcRenderer.invoke(IPC.TOKEN_REVOKE, id),
 
   // SSH
   testSshConnection: (

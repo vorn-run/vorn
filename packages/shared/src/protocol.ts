@@ -36,7 +36,8 @@ import type {
   DeviceTarget,
   DevicePoint,
   MobileProject,
-  ReachableUrls
+  ReachableUrls,
+  DeviceToken
 } from './types'
 
 // ─── Runtime Protocol Version ───────────────────────────────────
@@ -133,6 +134,11 @@ export interface RequestMethods {
   /** Present a credential. The only method accepted before authenticating. */
   'auth:authenticate': { params: { token: string }; result: { ok: boolean } }
   'server:reachableUrls': { params: void; result: ReachableUrls }
+  // Device tokens. Namespaced `token:` rather than `device:`, which belongs
+  // entirely to the simulator registry — thirteen methods of it.
+  'token:list': { params: void; result: DeviceToken[] }
+  'token:create': { params: { name: string }; result: { token: DeviceToken; plaintext: string } }
+  'token:revoke': { params: string; result: { revoked: boolean } }
   'terminal:create': { params: CreateTerminalPayload; result: TerminalSession }
   'terminal:kill': { params: string; result: void }
   'terminal:listActive': { params: void; result: TerminalSession[] }
