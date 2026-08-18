@@ -764,7 +764,34 @@ describe('BrowserCard', () => {
       ready = true
       // Without an id in the registry the session's agent is told "no pane
       // open" while the person is looking straight at one.
-      await waitFor(() => expect(attach).toHaveBeenCalledWith('t1', 42))
+      // The session's own directory rides along: it is what bounds the file
+      // urls this pane may open, and only the renderer knows it.
+      await waitFor(() => expect(attach).toHaveBeenCalledWith('t1', 42, '/repo'))
+    } finally {
+      delete proto.getWebContentsId
+    }
+  })
+
+  it("scopes the pane to the session's worktree when it has one", async () => {
+    // A session working in a worktree may read that worktree, not the whole
+    // project it was cut from — the narrowest root that still works.
+    const attach = (window as unknown as { api: { attachBrowser: ReturnType<typeof vi.fn> } }).api
+      .attachBrowser
+    attach.mockClear()
+    const terminals = new Map()
+    terminals.set('t1', {
+      id: 't1',
+      session: session('t1', { worktreePath: '/repo-wt' }),
+      status: 'idle',
+      lastOutputTimestamp: 1
+    })
+    act(() => useAppStore.setState({ terminals }))
+    const proto = window.HTMLElement.prototype as unknown as { getWebContentsId?: () => number }
+    proto.getWebContentsId = () => 42
+    try {
+      act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+      render(<BrowserCard sessionId="t1" />)
+      await waitFor(() => expect(attach).toHaveBeenCalledWith('t1', 42, '/repo-wt'))
     } finally {
       delete proto.getWebContentsId
     }

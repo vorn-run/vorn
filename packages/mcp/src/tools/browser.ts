@@ -271,7 +271,10 @@ export function registerBrowserTools(server: McpServer): void {
     'browser_interact',
     'Act on your session browser pane: click, hover, type, press a key, or scroll. Address the ' +
       'target by "ref" from read_page where possible — refs survive reflow, coordinates do not. ' +
-      'A ref from before a navigation is refused rather than guessed at; re-read the page.',
+      'A ref from before a navigation is refused rather than guessed at; re-read the page. ' +
+      'A ref target is scrolled into view first, so it does not need to be on screen already. ' +
+      '"ok" means the input was dispatched, not that the page did what you expected — read the ' +
+      'state back after anything that matters.',
     {
       action: z
         .enum(['click', 'hover', 'type', 'key', 'scroll'])
@@ -342,9 +345,10 @@ export function registerBrowserTools(server: McpServer): void {
 
   server.tool(
     'browser_navigate',
-    'Navigate your session browser pane to a URL. Opens the pane first if none is open. Only ' +
-      'http and https are allowed — the same restriction the address bar enforces for the ' +
-      'person using the app.',
+    'Navigate your session browser pane to a URL. Opens the pane first if none is open. ' +
+      "http and https, plus file: urls inside your session's own project or worktree — " +
+      'anything outside it is refused, so serve files from elsewhere over http instead. ' +
+      'The pane carries no claude.ai login, so artifact URLs will not load in it.',
     { url: V.url.describe('URL to open') },
     async (args) =>
       withSession(async (id) => {

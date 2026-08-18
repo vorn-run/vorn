@@ -108,6 +108,12 @@ export const BrowserCard = memo(
     // url against the tab the person just left.
     const tabIndexRef = useRef(pane?.activeTab ?? 0)
     tabIndexRef.current = pane?.activeTab ?? 0
+    // Where this pane may reach on disk: the session's worktree when it has
+    // one, since that is where it actually works, else its project. Read at
+    // fire time for the same reason as the tab index — `onAttached` retries on
+    // a timer, and the session's own record can land between tries.
+    const fileRootRef = useRef<string | undefined>(undefined)
+    fileRootRef.current = terminal?.session.worktreePath ?? terminal?.session.projectPath
     const [draft, setDraft] = useState(url ?? '')
     const [loading, setLoading] = useState(false)
     const [failed, setFailed] = useState<string | null>(null)
@@ -194,7 +200,10 @@ export const BrowserCard = memo(
           retry = window.setTimeout(onAttached, 50)
           return
         }
-        window.api.attachBrowser(sessionId, id)
+        // The session's own directory travels with the attach: a worktree when
+        // the session has one, since that is where it actually works, else the
+        // project. It bounds what `file:` urls this pane may open at all.
+        window.api.attachBrowser(sessionId, id, fileRootRef.current)
       }
       // A popped-out tab deliberately does not bind. Main keeps one browser
       // handle per session, so a card that attached would steal it from the

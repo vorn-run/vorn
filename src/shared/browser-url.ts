@@ -22,13 +22,31 @@ const ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'about:'])
 const SCHEME_NAMES = new Set(['javascript', 'file', 'data', 'blob', 'vbscript', 'about', 'chrome'])
 
 /**
+ * How far a caller is allowed to reach.
+ *
+ * `allowFile` exists because the invariant this module states — the schemes a
+ * person cannot type are the ones an agent cannot reach — is deliberately
+ * broken in exactly one place: a session whose pane is scoped to a project
+ * directory may open files inside it. Breaking it takes an explicit argument
+ * rather than a quiet edit to the allowlist, and it is off unless asked for, so
+ * the address bar and every existing caller keep the old behaviour.
+ *
+ * This says nothing about *which* files. A `file:` url that passes here has
+ * only been judged well-formed; whether it is inside the session's root is a
+ * filesystem question, answered in main where the filesystem is.
+ */
+export interface UrlOptions {
+  allowFile?: boolean
+}
+
+/**
  * Turn whatever the user typed into a loadable URL, or null if it can't be one.
  *
  * Bare hosts and `host:port` get `http://` when they look local and `https://`
  * otherwise — dev servers are the common case for a coding tool, and they rarely
  * speak TLS.
  */
-export function normalizeUrl(input: string): string | null {
+export function normalizeUrl(input: string, opts: UrlOptions = {}): string | null {
   const raw = input.trim()
   if (!raw) return null
 
@@ -49,6 +67,17 @@ export function normalizeUrl(input: string): string | null {
       // covers `about:srcdoc`, `about:cache` and friends, which are browser
       // internals rather than pages anyone meant to open.
       if (parsed.protocol === 'about:') return raw === 'about:blank' ? 'about:blank' : null
+      // A file url only ever survives when the caller asked for it. `hostname`
+      // must be empty: `file://evil.com/etc/passwd` is a UNC path to another
+      // machine, not a local file, and it would be read as one.
+      if (parsed.protocol === 'file:') {
+        if (!opts.allowFile || parsed.hostname) return null
+        // Query and fragment cannot address a file, and carrying them would
+        // hand the containment check below a path that is not the path read.
+        parsed.search = ''
+        parsed.hash = ''
+        return parsed.toString()
+      }
       return ALLOWED_PROTOCOLS.has(parsed.protocol) ? parsed.toString() : null
     } catch {
       return null

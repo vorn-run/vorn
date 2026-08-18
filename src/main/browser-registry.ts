@@ -1,6 +1,7 @@
 import { webContents } from 'electron'
 import type { WebContents } from 'electron'
 import { normalizeUrl } from '../shared/browser-url'
+import { fileRoot, allowsFileUrl } from './browser-file-scope'
 import type {
   BrowserNode,
   BrowserSelection,
@@ -112,11 +113,31 @@ function waitForAttach(sessionId: string, timeoutMs = 8000): Promise<void> {
  * browser tool depended on a person having clicked the pane open first, so an
  * agent told "go read this page" could only ask for help.
  */
+/**
+ * The one place that decides whether a session may load a url.
+ *
+ * Two questions, deliberately kept apart. `normalizeUrl` answers whether the
+ * url is a shape a pane may load at all — and only opens `file:` up when this
+ * session has a root. `allowsFileUrl` then answers whether that particular file
+ * is inside it, which is a filesystem question and cannot be settled by looking
+ * at the string.
+ *
+ * Returns null rather than throwing so each caller can name what it was doing.
+ */
+function loadableUrl(sessionId: string, url: string): string | null {
+  const root = fileRoot(sessionId)
+  const normalized = normalizeUrl(url, { allowFile: root !== undefined })
+  if (!normalized) return null
+  if (normalized.startsWith('file:') && !allowsFileUrl(sessionId, normalized)) return null
+  return normalized
+}
+
 export async function openPane(
   params: { sessionId: string; url?: string },
   timeoutMs?: number
 ): Promise<{ url: string }> {
-  const normalized = params.url === undefined ? undefined : normalizeUrl(params.url)
+  const normalized =
+    params.url === undefined ? undefined : (loadableUrl(params.sessionId, params.url) ?? undefined)
   if (params.url !== undefined && !normalized) {
     throw new Error(`Refusing to open "${params.url}" — not an allowed web address.`)
   }
@@ -141,7 +162,11 @@ export async function tabs(params: {
   // Throws if the session has no pane, which is the honest answer for a tab
   // command: there is nothing to add a tab to.
   contentsFor(params.sessionId)
-  if (params.action === 'add' && params.url !== undefined && !normalizeUrl(params.url)) {
+  if (
+    params.action === 'add' &&
+    params.url !== undefined &&
+    !loadableUrl(params.sessionId, params.url)
+  ) {
     throw new Error(`Refusing to open "${params.url}" — not an allowed web address.`)
   }
   if (params.action !== 'add' && typeof params.index !== 'number') {
@@ -663,14 +688,19 @@ async function click(wc: WebContents, pt: { x: number; y: number }): Promise<voi
 
 /**
  * Navigate the pane. Runs the same `normalizeUrl` the address bar does, so the
- * schemes a person cannot type here (`file:`, `javascript:`, `data:`) are the
- * same ones an agent cannot reach.
+ * schemes a person cannot type here (`javascript:`, `data:`) are the same ones
+ * an agent cannot reach.
+ *
+ * `file:` is the one deliberate exception, and only inside the session's own
+ * directory — see `loadableUrl`. Refusing here is not the whole guard: a guest
+ * already on a file page can fetch others itself, which never passes through
+ * this function. The session partition's request filter is what covers those.
  */
 export async function navigate(params: {
   sessionId: string
   url: string
 }): Promise<{ url: string }> {
-  const normalized = normalizeUrl(params.url)
+  const normalized = loadableUrl(params.sessionId, params.url)
   if (!normalized) {
     throw new Error(`Refusing to navigate to "${params.url}" — not an allowed web address.`)
   }

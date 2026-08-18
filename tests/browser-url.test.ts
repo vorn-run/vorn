@@ -48,6 +48,44 @@ describe('normalizeUrl', () => {
     expect(normalizeUrl('ftp://h.com')).toBeNull()
   })
 
+  it('keeps refusing file: for anyone who did not ask for it', () => {
+    // The address bar and every existing caller pass no options, so opening
+    // the capability up cannot change what a person can type.
+    expect(normalizeUrl('file:///etc/passwd', {})).toBeNull()
+    expect(normalizeUrl('file:///etc/passwd', { allowFile: false })).toBeNull()
+  })
+
+  it('lets a caller that asked for it form a file url, and nothing else', () => {
+    // Well-formed only. Whether the path is inside the session's root is a
+    // filesystem question, answered in main — this says the shape is a file.
+    expect(normalizeUrl('file:///proj/index.html', { allowFile: true })).toBe(
+      'file:///proj/index.html'
+    )
+    // The permission is for file:, not a general amnesty.
+    expect(normalizeUrl('javascript:alert(1)', { allowFile: true })).toBeNull()
+    expect(normalizeUrl('data:text/html,<h1>x', { allowFile: true })).toBeNull()
+  })
+
+  it('refuses a file url naming another machine even when file: is allowed', () => {
+    // `file://host/share` is a UNC path: it reads as a local file and reaches
+    // the network. An empty hostname is what makes a file url local.
+    expect(normalizeUrl('file://evil.example/share/secret', { allowFile: true })).toBeNull()
+  })
+
+  it('drops a query and fragment from a file url', () => {
+    // Neither can address a file, and carrying them would hand the containment
+    // check a string that is not the path actually read.
+    expect(normalizeUrl('file:///proj/a.html?x=1#frag', { allowFile: true })).toBe(
+      'file:///proj/a.html'
+    )
+  })
+
+  it('still refuses a bare host that merely looks like the file scheme', () => {
+    // `file:1234` is shape-identical to `myhost:1234`; the host:port fast path
+    // must not turn a refusal into `https://file:1234/`.
+    expect(normalizeUrl('file:1234', { allowFile: true })).toBeNull()
+  })
+
   it('rejects input that is not a url at all', () => {
     expect(normalizeUrl('')).toBeNull()
     expect(normalizeUrl('   ')).toBeNull()
