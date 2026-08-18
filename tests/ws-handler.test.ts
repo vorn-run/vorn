@@ -504,3 +504,64 @@ describe('revoking a token that a socket is holding', () => {
     expect(ws.close).not.toHaveBeenCalled()
   })
 })
+
+describe('sockets that connect and say nothing', () => {
+  it('stops accepting once too many are waiting', async () => {
+    // Each holds a slot for the whole grace window while proving nothing, so
+    // without a ceiling a loop that connects and stays silent — no credential
+    // needed — holds every slot open.
+    const { resetTokenTracking } = await import('../packages/server/src/ws-handler')
+    resetTokenTracking()
+
+    const sockets = Array.from({ length: 64 }, () => createMockWs())
+    for (const ws of sockets) handleConnection(ws)
+    expect(sockets.every((ws) => !(ws.close as ReturnType<typeof vi.fn>).mock.calls.length)).toBe(
+      true
+    )
+
+    const overflow = createMockWs()
+    handleConnection(overflow)
+
+    expect(overflow.close).toHaveBeenCalledWith(
+      CLOSE_UNAUTHENTICATED,
+      'too many pending connections'
+    )
+  })
+
+  it('frees the slot when one authenticates', async () => {
+    const { resetTokenTracking } = await import('../packages/server/src/ws-handler')
+    resetTokenTracking()
+
+    const sockets = Array.from({ length: 64 }, () => createMockWs())
+    for (const ws of sockets) handleConnection(ws)
+
+    // A browser cannot set headers, so it takes a slot and then authenticates in
+    // band — which is what has to release it.
+    sendMessage(sockets[0], {
+      jsonrpc: '2.0',
+      method: 'auth:authenticate',
+      params: { token: GOOD_TOKEN }
+    })
+    await vi.waitFor(() => expect(clientRegistry.add).toHaveBeenCalled())
+
+    const next = createMockWs()
+    handleConnection(next)
+
+    expect(next.close).not.toHaveBeenCalled()
+  })
+
+  it('frees the slot when one disconnects mid-window', async () => {
+    // A leak here would close the door on everyone, permanently.
+    const { resetTokenTracking } = await import('../packages/server/src/ws-handler')
+    resetTokenTracking()
+
+    const sockets = Array.from({ length: 64 }, () => createMockWs())
+    for (const ws of sockets) handleConnection(ws)
+    ;(sockets[0] as unknown as import('events').EventEmitter).emit('close')
+
+    const next = createMockWs()
+    handleConnection(next)
+
+    expect(next.close).not.toHaveBeenCalled()
+  })
+})

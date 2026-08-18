@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { CLOSE_CREDENTIAL_REJECTED, CLOSE_UNAUTHENTICATED } from '@vornrun/shared/protocol'
+import {
+  CLOSE_CREDENTIAL_REJECTED,
+  CLOSE_UNAUTHENTICATED,
+  RUNTIME_PROTOCOL_VERSION
+} from '@vornrun/shared/protocol'
 
 /**
  * The web client's half of the auth boundary.
@@ -216,5 +220,67 @@ describe('a first connection that fails before authenticating', () => {
     sockets[1].authOk()
     await Promise.resolve()
     expect(afterDrop).toHaveBeenCalled()
+  })
+})
+
+describe('a bundle and a server that disagree', () => {
+  function hello(ws: FakeSocket, protocolVersion: number): void {
+    ws.onmessage?.({
+      data: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'server:hello',
+        params: { protocolVersion, capabilities: {} }
+      })
+    })
+  }
+
+  it('reports a server newer than this page', async () => {
+    // The stale-cache case: a service worker serving a build from before the
+    // server was updated. Left undetected it fails later, in ways that read as
+    // the app being broken rather than merely out of date.
+    const api = createApiShim('ws://localhost:1234/ws')
+    const seen = vi.fn()
+    api.__onVersionMismatch(seen)
+
+    sockets[0].open()
+    hello(sockets[0], RUNTIME_PROTOCOL_VERSION + 1)
+
+    expect(seen).toHaveBeenCalledWith(RUNTIME_PROTOCOL_VERSION + 1, RUNTIME_PROTOCOL_VERSION)
+  })
+
+  it('reports a server older than this page', async () => {
+    const api = createApiShim('ws://localhost:1234/ws')
+    const seen = vi.fn()
+    api.__onVersionMismatch(seen)
+
+    sockets[0].open()
+    hello(sockets[0], RUNTIME_PROTOCOL_VERSION - 1)
+
+    expect(seen).toHaveBeenCalledWith(RUNTIME_PROTOCOL_VERSION - 1, RUNTIME_PROTOCOL_VERSION)
+  })
+
+  it('says nothing when they agree', async () => {
+    const api = createApiShim('ws://localhost:1234/ws')
+    const seen = vi.fn()
+    api.__onVersionMismatch(seen)
+
+    sockets[0].open()
+    hello(sockets[0], RUNTIME_PROTOCOL_VERSION)
+
+    expect(seen).not.toHaveBeenCalled()
+  })
+
+  it('does not mistake the handshake for a response', async () => {
+    // `server:hello` carries no id and must not settle readiness — that is what
+    // `auth:ok` is for.
+    const api = createApiShim('ws://localhost:1234/ws')
+    const ready = vi.fn()
+    api.__ready().then(ready)
+
+    sockets[0].open()
+    hello(sockets[0], RUNTIME_PROTOCOL_VERSION)
+    await Promise.resolve()
+
+    expect(ready).not.toHaveBeenCalled()
   })
 })

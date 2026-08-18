@@ -89,6 +89,19 @@ export function registerNotification(method: string, handler: (params: unknown) 
  */
 const socketsByToken = new Map<string, Set<WebSocket>>()
 
+/**
+ * How many sockets may sit unauthenticated at once.
+ *
+ * Each one holds a slot for the full grace window while it proves nothing, so
+ * without a ceiling anyone who can reach the port can hold every slot open with a
+ * loop that connects and says nothing — no credential needed, which is the point.
+ * The number is far above any real client: a browser uses one, and MCP opens one
+ * per call but authenticates on the upgrade and so never counts here.
+ */
+const MAX_PENDING_SOCKETS = 64
+
+let pendingSockets = 0
+
 function trackToken(tokenId: string, ws: WebSocket): void {
   const existing = socketsByToken.get(tokenId)
   if (existing) existing.add(ws)
@@ -129,6 +142,7 @@ export function disconnectToken(tokenId: string): number {
 /** Test seam — module state outlives a single connection. */
 export function resetTokenTracking(): void {
   socketsByToken.clear()
+  pendingSockets = 0
 }
 
 export function handleConnection(ws: WebSocket, credential?: string): void {
@@ -157,6 +171,7 @@ export function handleConnection(ws: WebSocket, credential?: string): void {
     if (authTimer) {
       clearTimeout(authTimer)
       authTimer = null
+      pendingSockets -= 1
     }
   }
 
@@ -181,8 +196,15 @@ export function handleConnection(ws: WebSocket, credential?: string): void {
   } else {
     // Browsers cannot set headers, so they get a window to send one message.
     // Bounded, or an unauthenticated socket could sit open indefinitely.
+    if (pendingSockets >= MAX_PENDING_SOCKETS) {
+      log.warn({ pendingSockets }, '[ws] too many sockets waiting to authenticate')
+      refuse('too many pending connections')
+      return
+    }
+    pendingSockets += 1
     authTimer = setTimeout(() => {
       authTimer = null
+      pendingSockets -= 1
       refuse('authentication timeout')
     }, AUTH_TIMEOUT_MS)
   }
@@ -294,6 +316,10 @@ export function handleConnection(ws: WebSocket, credential?: string): void {
     if (authTimer) {
       clearTimeout(authTimer)
       authTimer = null
+      // Released here as well as on admission and timeout: a socket that simply
+      // goes away mid-window would otherwise leak its slot, and enough of those
+      // would close the door on everyone.
+      pendingSockets -= 1
     }
     if (session?.tokenId) untrackToken(session.tokenId, ws)
     session = null

@@ -1,4 +1,4 @@
-import { CLOSE_CREDENTIAL_REJECTED } from '@vornrun/shared/protocol'
+import { CLOSE_CREDENTIAL_REJECTED, RUNTIME_PROTOCOL_VERSION } from '@vornrun/shared/protocol'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import type { AppConfig } from '@vornrun/shared/types'
 /**
@@ -126,6 +126,12 @@ class RpcClient {
     this.onAuthRequired = handler
   }
 
+  private onVersionMismatch: ((server: number, client: number) => void) | null = null
+
+  setOnVersionMismatch(handler: (server: number, client: number) => void): void {
+    this.onVersionMismatch = handler
+  }
+
   private connect(): void {
     this.ws = new WebSocket(this.url)
 
@@ -158,6 +164,18 @@ class RpcClient {
       try {
         msg = JSON.parse(event.data as string)
       } catch {
+        return
+      }
+
+      // The handshake, sent before anything else. Compared rather than ignored so
+      // a mismatch says so plainly: an old cached bundle against a newer server
+      // otherwise fails later, in ways that read as the app being broken.
+      if (msg.method === 'server:hello') {
+        const serverVersion = (msg.params as { protocolVersion?: number } | undefined)
+          ?.protocolVersion
+        if (typeof serverVersion === 'number' && serverVersion !== RUNTIME_PROTOCOL_VERSION) {
+          this.onVersionMismatch?.(serverVersion, RUNTIME_PROTOCOL_VERSION)
+        }
         return
       }
 
@@ -357,6 +375,8 @@ export function createApiShim(wsUrl: string) {
     __ready: () => rpc.ready(),
     /** Fires whenever the server rejects our credential, including on a reconnect. */
     __onAuthRequired: (handler: () => void) => rpc.setOnAuthRequired(handler),
+    __onVersionMismatch: (handler: (server: number, client: number) => void) =>
+      rpc.setOnVersionMismatch(handler),
 
     // ── Terminal Management ──
     createTerminal: (payload: unknown) => rpc.invoke('terminal:create', payload),
