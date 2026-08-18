@@ -1,11 +1,11 @@
 import { app, dialog, BrowserWindow, session, shell } from 'electron'
 import { ipcMain } from 'electron'
 import { safeHandle } from './ipc-safe-handle'
-import { IPC, ResizePayload } from '../shared/types'
+import { IPC, ResizePayload, browserPartition } from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
 import type { RequestMethods } from '@vornrun/shared/protocol'
 import * as browserRegistry from './browser-registry'
-import { setFileRoot, clearFileRoot, allowsFileUrl } from './browser-file-scope'
+import { setFileRoot, allowsFileUrl } from './browser-file-scope'
 import * as deviceRegistry from './device-registry'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
 import log from './logger'
@@ -84,7 +84,7 @@ const guardedPartitions = new Set<string>()
  * (`persist:vorn-browser-<id>`), so the root it enforces is the right one.
  */
 function guardFileRequests(sessionId: string): void {
-  const partition = `persist:vorn-browser-${sessionId}`
+  const partition = browserPartition(sessionId)
   if (guardedPartitions.has(partition)) return
   guardedPartitions.add(partition)
 
@@ -420,7 +420,7 @@ export function registerIpcHandlers(): void {
   })
   ipcMain.on(IPC.BROWSER_DETACH, (_, sessionId: string) => {
     browserRegistry.detach(sessionId)
-    clearFileRoot(sessionId)
+    setFileRoot(sessionId, undefined)
   })
   ipcMain.on(IPC.BROWSER_TABS_CHANGED, (_, { sessionId, tabs }) => {
     browserRegistry.syncTabs(sessionId, tabs)

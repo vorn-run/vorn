@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
+import { browserPartition } from '../../shared/types'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON } from '../lib/icon-button'
@@ -617,7 +618,7 @@ export const BrowserCard = memo(
               src={tab.url}
               // Each session browses in its own partition, so logins and cookies
               // in one session's pane don't leak into another's.
-              partition={`persist:vorn-browser-${sessionId}`}
+              partition={browserPartition(sessionId)}
               className="absolute inset-0 w-full h-full"
               style={i === pane.activeTab ? undefined : { visibility: 'hidden' }}
             />

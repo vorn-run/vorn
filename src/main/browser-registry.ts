@@ -1,7 +1,7 @@
 import { webContents } from 'electron'
 import type { WebContents } from 'electron'
 import { normalizeUrl } from '../shared/browser-url'
-import { fileRoot, allowsFileUrl } from './browser-file-scope'
+import { hasFileRoot, allowsFileUrl } from './browser-file-scope'
 import type {
   BrowserNode,
   BrowserSelection,
@@ -107,13 +107,6 @@ function waitForAttach(sessionId: string, timeoutMs = 8000): Promise<void> {
 }
 
 /**
- * Open the session's browser pane, or point the existing one at `url`.
- *
- * This is what makes the agent self-sufficient: before it existed, every
- * browser tool depended on a person having clicked the pane open first, so an
- * agent told "go read this page" could only ask for help.
- */
-/**
  * The one place that decides whether a session may load a url.
  *
  * Two questions, deliberately kept apart. `normalizeUrl` answers whether the
@@ -125,13 +118,19 @@ function waitForAttach(sessionId: string, timeoutMs = 8000): Promise<void> {
  * Returns null rather than throwing so each caller can name what it was doing.
  */
 function loadableUrl(sessionId: string, url: string): string | null {
-  const root = fileRoot(sessionId)
-  const normalized = normalizeUrl(url, { allowFile: root !== undefined })
+  const normalized = normalizeUrl(url, { allowFile: hasFileRoot(sessionId) })
   if (!normalized) return null
   if (normalized.startsWith('file:') && !allowsFileUrl(sessionId, normalized)) return null
   return normalized
 }
 
+/**
+ * Open the session's browser pane, or point the existing one at `url`.
+ *
+ * This is what makes the agent self-sufficient: before it existed, every
+ * browser tool depended on a person having clicked the pane open first, so an
+ * agent told "go read this page" could only ask for help.
+ */
 export async function openPane(
   params: { sessionId: string; url?: string },
   timeoutMs?: number

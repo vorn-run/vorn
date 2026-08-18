@@ -39,12 +39,9 @@ export function setFileRoot(sessionId: string, root: string | undefined): void {
   else roots.delete(sessionId)
 }
 
-export function fileRoot(sessionId: string): string | undefined {
-  return roots.get(sessionId)
-}
-
-export function clearFileRoot(sessionId: string): void {
-  roots.delete(sessionId)
+/** Whether this session may reach the disk at all. */
+export function hasFileRoot(sessionId: string): boolean {
+  return roots.has(sessionId)
 }
 
 /** Only for tests, which must not inherit roots across cases. */
@@ -66,6 +63,9 @@ function realPathOrNull(path: string): string | null {
 /**
  * Is this path inside the root, once every link has been followed?
  *
+ * Exported for tests; production goes through `allowsFileUrl`, which knows its
+ * root is already resolved.
+ *
  * `realpathSync` on both sides is the whole check. A symlink at
  * `<root>/escape -> /etc` is textually inside the root and points anywhere at
  * all, so comparing the strings as given would hand out the filesystem while
@@ -77,8 +77,19 @@ function realPathOrNull(path: string): string | null {
  */
 export function containsPath(root: string, path: string): boolean {
   const realRoot = realPathOrNull(root)
+  return realRoot !== null && isUnder(realRoot, path)
+}
+
+/**
+ * The same question, for a root already known to be canonical.
+ *
+ * Roots are resolved once by `setFileRoot`, so re-resolving on every request
+ * would be a blocking `realpath` per subresource on the main thread — the one
+ * driving every window's IPC — for an answer that cannot have changed.
+ */
+function isUnder(realRoot: string, path: string): boolean {
   const realPath = realPathOrNull(path)
-  if (!realRoot || !realPath) return false
+  if (!realPath) return false
   if (realPath === realRoot) return true
   // The separator matters: without it `/proj` would contain `/projects-secret`,
   // which shares a prefix and nothing else.
@@ -104,5 +115,7 @@ export function allowsFileUrl(sessionId: string, url: string): boolean {
     // `file://host/share` among them.
     return false
   }
-  return containsPath(root, path)
+  // The stored root is canonical by construction, so only the requested path
+  // needs resolving.
+  return isUnder(root, path)
 }

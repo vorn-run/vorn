@@ -6,8 +6,7 @@ import { pathToFileURL } from 'node:url'
 
 import {
   setFileRoot,
-  fileRoot,
-  clearFileRoot,
+  hasFileRoot,
   resetFileRoots,
   containsPath,
   allowsFileUrl
@@ -89,7 +88,7 @@ describe('file urls a session may open', () => {
   it('refuses everything when the session has no root at all', () => {
     // A session that never reported one — a headless run, or a pane belonging
     // to no project. Absent must mean nothing, never everything.
-    clearFileRoot('sess')
+    setFileRoot('sess', undefined)
     expect(allowsFileUrl('sess', url(join(project, 'index.html')))).toBe(false)
   })
 
@@ -120,7 +119,7 @@ describe('file urls a session may open', () => {
     // An unresolvable root kept as a plain string could still prefix-match a
     // path that does exist. Dropping it means the session simply has no reach.
     setFileRoot('ghost', join(tmp, 'not-a-real-dir'))
-    expect(fileRoot('ghost')).toBeUndefined()
+    expect(hasFileRoot('ghost')).toBe(false)
     expect(allowsFileUrl('ghost', url(join(project, 'index.html')))).toBe(false)
   })
 
@@ -130,7 +129,7 @@ describe('file urls a session may open', () => {
     const linked = join(tmp, 'linked-project')
     symlinkSync(project, linked)
     setFileRoot('via-link', linked)
-    expect(fileRoot('via-link')).toBe(project)
+    expect(hasFileRoot('via-link')).toBe(true)
     expect(allowsFileUrl('via-link', url(join(project, 'index.html')))).toBe(true)
   })
 })

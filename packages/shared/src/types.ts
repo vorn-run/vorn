@@ -1708,6 +1708,19 @@ export interface BrowserNetworkRequest {
 }
 
 /**
+ * The Chromium partition a session's browser guests live in.
+ *
+ * Shared because two sides must agree exactly: the renderer puts its
+ * `<webview>` in this partition, and main installs the filter that bounds what
+ * files those guests may read on the same one. Spelled out twice, a rename
+ * would leave the filter attached to a partition no guest uses — installing
+ * successfully, logging nothing, and enforcing nothing.
+ */
+export function browserPartition(sessionId: string): string {
+  return `persist:vorn-browser-${sessionId}`
+}
+
+/**
  * One tab in a session's browser pane, as the agent sees it.
  *
  * `url` is where the guest actually is, not where the tab was originally sent —
