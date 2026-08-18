@@ -1177,6 +1177,23 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     }),
     ...(map.hasSeededDefaultTaskWorkflow !== undefined && {
       hasSeededDefaultTaskWorkflow: map.hasSeededDefaultTaskWorkflow as boolean
+    }),
+    // The four below were declared in AppConfig and consumed, but never listed
+    // here — exactly the failure the comment above describes. Each was written on
+    // save and dropped on the next load, so the setting appeared to work until a
+    // reload. `worktreeRetention` is the worst of them: it is read server-side
+    // (register-methods.ts) and so always resolved to undefined.
+    ...(map.updateAutoDownload !== undefined && {
+      updateAutoDownload: map.updateAutoDownload as boolean
+    }),
+    ...(map.headlessStepTimeoutMinutes !== undefined && {
+      headlessStepTimeoutMinutes: map.headlessStepTimeoutMinutes as number
+    }),
+    ...(map.enableHoverPreview !== undefined && {
+      enableHoverPreview: map.enableHoverPreview as boolean
+    }),
+    ...(map.worktreeRetention !== undefined && {
+      worktreeRetention: map.worktreeRetention as AppConfig['defaults']['worktreeRetention']
     })
   }
 }
@@ -1300,13 +1317,27 @@ export function saveConfig(config: AppConfig): void {
   const d = getDb()
 
   const run = d.transaction(() => {
-    // Defaults
-    d.prepare('DELETE FROM defaults').run()
-    const insertDefault = d.prepare('INSERT INTO defaults (key, value) VALUES (?, ?)')
+    // Defaults are upserted key by key, never wiped.
+    //
+    // A client sends whatever object its build happens to hold, so deleting the
+    // difference destroys every key that client does not know about. That is not
+    // hypothetical: it silently reverted `serverPort`, which exists so the web
+    // client's origin — and therefore its stored token — survives a restart. An
+    // ordinary settings save undid it.
+    //
+    // It is also what keeps an older client safe against a newer host, where the
+    // gap between the two is a whole release rather than one key.
+    //
+    // An explicit `undefined` still deletes, which is how a setting is cleared;
+    // absent means untouched.
+    const upsertDefault = d.prepare(
+      `INSERT INTO defaults (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    )
+    const deleteDefault = d.prepare('DELETE FROM defaults WHERE key = ?')
     for (const [key, value] of Object.entries(config.defaults)) {
-      if (value !== undefined) {
-        insertDefault.run(key, JSON.stringify(value))
-      }
+      if (value === undefined) deleteDefault.run(key)
+      else upsertDefault.run(key, JSON.stringify(value))
     }
 
     // Projects
