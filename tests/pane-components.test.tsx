@@ -604,6 +604,39 @@ describe('BrowserCard', () => {
     expect(tab?.liveUrl).toBe('https://vorn.dev/docs')
   })
 
+  it('ignores a subframe navigating, which is not where the person is', () => {
+    // Ads, embedded docs and OAuth widgets route in place constantly. Taking a
+    // subframe's url would have the strip, the address bar and `browser_tabs
+    // list` all name a page nobody is on — and that listing exists precisely so
+    // the url can be trusted.
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('did-navigate-in-page'), {
+          url: 'https://ads.example/frame',
+          isMainFrame: false
+        })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.liveUrl).toBeUndefined()
+
+    // The main frame in the same event still counts.
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('did-navigate-in-page'), {
+          url: 'http://localhost:5173/settings',
+          isMainFrame: true
+        })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.liveUrl).toBe(
+      'http://localhost:5173/settings'
+    )
+  })
+
   it('follows same-document routing, which is every navigation in a single-page app', () => {
     act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
     render(<BrowserCard sessionId="t1" />)

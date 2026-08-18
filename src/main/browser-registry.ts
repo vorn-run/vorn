@@ -162,17 +162,22 @@ export async function tabs(params: {
   // Throws if the session has no pane, which is the honest answer for a tab
   // command: there is nothing to add a tab to.
   contentsFor(params.sessionId)
-  if (
-    params.action === 'add' &&
-    params.url !== undefined &&
-    !loadableUrl(params.sessionId, params.url)
-  ) {
-    throw new Error(`Refusing to open "${params.url}" — not an allowed web address.`)
+  let url = params.url
+  if (params.action === 'add' && url !== undefined) {
+    // Forward the *normalized* url, not the one that arrived. The renderer
+    // takes a vetted url as given — it has no filesystem to re-check a `file:`
+    // path against — so handing it the raw string would have it store something
+    // this never approved.
+    const normalized = loadableUrl(params.sessionId, url)
+    if (!normalized) {
+      throw new Error(`Refusing to open "${url}" — not an allowed web address.`)
+    }
+    url = normalized
   }
   if (params.action !== 'add' && typeof params.index !== 'number') {
     throw new Error(`A tab index is required to ${params.action} a tab.`)
   }
-  sendToRenderer(IPC.BROWSER_TAB_COMMAND, params)
+  sendToRenderer(IPC.BROWSER_TAB_COMMAND, { ...params, url })
   return { ok: true }
 }
 

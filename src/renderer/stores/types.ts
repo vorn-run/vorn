@@ -438,11 +438,20 @@ export interface UISlice {
    * the pane on its current page rather than blanking it. Omitting `url`
    * reveals the session's browser without changing the page it is showing.
    */
-  openBrowserPane: (sessionId: string, url?: string) => void
+  /**
+   * Show a session's browser, optionally at a url.
+   *
+   * `trusted` marks a url main has already vetted — it decided the scheme was
+   * allowed *and*, for `file:`, that the path is inside the session's root.
+   * The renderer cannot redo the second half: containment is a filesystem
+   * question and it has no filesystem. Re-normalizing here would quietly drop
+   * a `file:` url main just approved, so a trusted url is taken as given.
+   */
+  openBrowserPane: (sessionId: string, url?: string, opts?: { trusted?: boolean }) => void
   closeBrowserPane: (paneId: string) => void
   toggleBrowserPane: (sessionId: string) => void
-  /** Add a tab to the browser and make it active. */
-  addBrowserTab: (paneId: string, url?: string) => void
+  /** Add a tab to the browser and make it active. See `openBrowserPane` for `trusted`. */
+  addBrowserTab: (paneId: string, url?: string, opts?: { trusted?: boolean }) => void
   /**
    * Close one tab. Closing the last one closes the pane, since a browser with
    * no page is just an empty box.

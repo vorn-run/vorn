@@ -816,14 +816,18 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       }
     }),
 
-  openBrowserPane: (sessionId, url) =>
+  openBrowserPane: (sessionId, url, opts) =>
     set((state) => {
       // No url means "show me this session's browser" — keep whatever page it
       // already had rather than resetting it to blank.
       const next = new Map(state.browserPanes)
       const existing = next.get(sessionId)
       if (url !== undefined) {
-        const normalized = normalizeUrl(url)
+        // A url main vetted is taken as given: it already decided the scheme is
+        // allowed and, for `file:`, that the path is inside the session's root.
+        // Re-normalizing here has no filesystem to ask, so it would refuse
+        // every `file:` url main just approved.
+        const normalized = opts?.trusted ? url : normalizeUrl(url)
         if (!normalized) return {}
         if (existing) {
           // Navigating replaces the page in the tab the user is looking at,
@@ -877,11 +881,12 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     else openBrowserPane(sessionId)
   },
 
-  addBrowserTab: (paneId, url) =>
+  addBrowserTab: (paneId, url, opts) =>
     set((state) => {
       const existing = state.browserPanes.get(paneId)
       if (!existing) return {}
-      const normalized = url === undefined ? DEFAULT_BROWSER_URL : normalizeUrl(url)
+      const normalized =
+        url === undefined ? DEFAULT_BROWSER_URL : opts?.trusted ? url : normalizeUrl(url)
       if (!normalized) return {}
       const next = new Map(state.browserPanes)
       const tabs = [...existing.tabs, { url: normalized }]
@@ -941,15 +946,20 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       if (!existing || index < 0 || index >= existing.tabs.length) return {}
       const tab = existing.tabs[index]
 
+      // A new page drops the old page's title. Titles only ever arrived and
+      // never left, so a guest that navigated to a page with no <title> — whose
+      // report is dropped as unset — kept advertising the *previous* page's
+      // name against the new url, indefinitely.
+      const movedOn = seen.url !== undefined && seen.url !== tab.liveUrl
       const liveUrl = seen.url ?? tab.liveUrl
-      const title = seen.title ?? tab.title
+      const title = seen.title ?? (movedOn ? undefined : tab.title)
       // A guest re-reports the same url on every load event. Rebuilding the map
       // for no change would rerender the pane — and remount nothing, but the
       // work is pure waste on a page that reloads itself.
       if (liveUrl === tab.liveUrl && title === tab.title) return {}
 
       const tabs = [...existing.tabs]
-      tabs[index] = { ...tab, ...(liveUrl ? { liveUrl } : {}), ...(title ? { title } : {}) }
+      tabs[index] = { url: tab.url, ...(liveUrl ? { liveUrl } : {}), ...(title ? { title } : {}) }
       const next = new Map(state.browserPanes)
       next.set(paneId, { ...existing, tabs })
       // Not persisted: `savePanes` writes intent only, so an observation is
@@ -1113,9 +1123,12 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   promoteBrowserTab: (paneId, index) => {
     const pane = get().browserPanes.get(paneId)
     if (!pane || index < 0 || index >= pane.tabs.length) return null
-    // The whole tab, not just its url. It is the same page moving to a new
-    // frame, so what the guest reported about itself is still true there.
-    const tab = pane.tabs[index]
+    // Intent travels; observation does not. The card mounts a *fresh* guest on
+    // `url`, so carrying `liveUrl` and `title` across would have the card's
+    // address bar assert the redirected location while its guest is still at
+    // the original one — and for a page that always redirects, permanently.
+    // The new guest reports for itself the moment it navigates.
+    const tab = { url: pane.tabs[index].url }
     const cardId = nextCardId(pane.sessionId)
     // Out of the strip before into the card: leaving it in both would mount two
     // guests on one url, each with its own scroll position and half-typed form,
@@ -1157,20 +1170,28 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // Where each guest actually is, not where it was first sent: a tab that
       // followed a link would otherwise snap back to the page it started on.
       const [first, ...rest] = browser.tabs.map(tabUrl)
-      if (state.browserPanes.has(browser.sessionId)) state.addBrowserTab(browser.sessionId, first)
+      // Trusted: these urls were vetted when they first entered the card, and a
+      // `file:` one cannot be re-checked here — the renderer has no filesystem.
+      // Left untrusted, returning a card sitting on an in-root file page would
+      // no-op every add below and then close the card holding the only copy.
+      const before = get().browserPanes.get(browser.sessionId)?.tabs.length ?? 0
+      if (state.browserPanes.has(browser.sessionId))
+        state.addBrowserTab(browser.sessionId, first, { trusted: true })
       // If that browser is closed, opening it on this page is the landing spot —
       // a tab with nowhere to go would leave the card the only thing holding it,
       // and it is about to close.
-      else state.openBrowserPane(browser.sessionId, first)
+      else state.openBrowserPane(browser.sessionId, first, { trusted: true })
 
       // If the landing failed — a url that no longer normalizes, from a
       // corrupted store — every add below would no-op and the close would take
       // the whole card with it. Keep the card instead; it is the only copy.
+      // Landing has to have *added* something: an existing browser already has
+      // tabs, so its mere presence proves nothing about whether this one landed.
       const landed = get().browserPanes.get(browser.sessionId)
-      if (!landed) return
+      if (!landed || landed.tabs.length === before) return
 
       const firstIndex = landed.tabs.length - 1
-      for (const url of rest) state.addBrowserTab(browser.sessionId, url)
+      for (const url of rest) state.addBrowserTab(browser.sessionId, url, { trusted: true })
       // `addBrowserTab` activates what it adds, so without this the strip ends
       // up showing the card's *last* page rather than the one being looked at.
       state.setActiveBrowserTab(browser.sessionId, firstIndex + browser.activeTab)

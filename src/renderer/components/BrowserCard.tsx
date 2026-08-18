@@ -167,7 +167,14 @@ export const BrowserCard = memo(
       // The tab index is read at fire time, not captured here: capturing it
       // would rebuild the stale closure the ref exists to avoid.
       const onNavigate = (e: Event): void => {
-        const detail = e as Event & { url?: string }
+        const detail = e as Event & { url?: string; isMainFrame?: boolean }
+        // Subframes navigate constantly — an ad, an embedded doc, an OAuth
+        // widget routing in place. Taking their url would have the strip, the
+        // address bar and `browser_tabs list` all name a page nobody is on,
+        // and that listing exists precisely so the url can be trusted.
+        // `did-navigate` has no isMainFrame and is always the main frame;
+        // `did-navigate-in-page` carries one, so only its false is a subframe.
+        if (detail.isMainFrame === false) return
         if (detail.url) syncBrowserTab(key, tabIndexRef.current, { url: detail.url })
         syncNav()
       }
