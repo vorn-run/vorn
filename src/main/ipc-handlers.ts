@@ -1,12 +1,14 @@
-import { app, dialog, BrowserWindow, shell } from 'electron'
+import { app, dialog, BrowserWindow, session, shell } from 'electron'
 import { ipcMain } from 'electron'
 import { safeHandle } from './ipc-safe-handle'
-import { IPC, ResizePayload } from '../shared/types'
+import { IPC, ResizePayload, browserPartition } from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
 import type { RequestMethods } from '@vornrun/shared/protocol'
 import * as browserRegistry from './browser-registry'
+import { setFileRoot, allowsFileUrl } from './browser-file-scope'
 import * as deviceRegistry from './device-registry'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
+import log from './logger'
 
 let bridge: ServerBridge | null = null
 
@@ -39,6 +41,8 @@ function registerInboundHandlers(b: ServerBridge): void {
   b.handle('browser:tabs', (p) => browserRegistry.tabs(p as P<'browser:tabs'>))
   b.handle('browser:openPane', (p) => browserRegistry.openPane(p as P<'browser:openPane'>))
   b.handle('browser:navigate', (p) => browserRegistry.navigate(p as P<'browser:navigate'>))
+  b.handle('browser:history', (p) => browserRegistry.goHistory(p as P<'browser:history'>))
+  b.handle('browser:listTabs', (p) => browserRegistry.listTabs(p as P<'browser:listTabs'>))
   b.handle('browser:find', (p) => browserRegistry.find(p as P<'browser:find'>))
 
   // The device family answers here for a sharper version of the same reason:
@@ -62,6 +66,42 @@ function registerInboundHandlers(b: ServerBridge): void {
 function requireBridge(): ServerBridge {
   if (!bridge) throw new Error('Server bridge not initialized')
   return bridge
+}
+
+/** Sessions whose partition already carries the filter, so it is installed once. */
+const guardedPartitions = new Set<string>()
+
+/**
+ * Refuse every file request this session's pane is not entitled to make.
+ *
+ * Checking the url an agent navigates to is not the guard — it is only the
+ * first of many requests. Once a guest is on a file page, its own scripts can
+ * `fetch`, `iframe` or `XHR` any other path, and none of those pass through
+ * `navigate`. Without a filter here the scoping would be decorative: one hop
+ * inside the root and the whole disk is readable again.
+ *
+ * Installed on the session partition, which is already per session
+ * (`persist:vorn-browser-<id>`), so the root it enforces is the right one.
+ */
+function guardFileRequests(sessionId: string): void {
+  const partition = browserPartition(sessionId)
+  if (guardedPartitions.has(partition)) return
+  guardedPartitions.add(partition)
+
+  session.fromPartition(partition).webRequest.onBeforeRequest((details, callback) => {
+    if (!details.url.startsWith('file:')) return callback({})
+    const allowed = allowsFileUrl(sessionId, details.url)
+    if (!allowed) {
+      // The path is deliberately not logged. A refused one is by definition
+      // outside the project — a home directory, a key, whatever the page asked
+      // for — and `main.log` outlives the session and travels with a bug
+      // report. The refusal is the fact worth keeping; `debug` carries the
+      // path for anyone actually chasing one.
+      log.warn(`[browser] refused a file request outside session ${sessionId}`)
+      log.debug(`[browser] refused url for session ${sessionId}: ${details.url}`)
+    }
+    callback({ cancel: !allowed })
+  })
 }
 
 export function registerIpcHandlers(): void {
@@ -380,11 +420,20 @@ export function registerIpcHandlers(): void {
   // A `<webview>` carries no session identity — only a partition string — so
   // the renderer tells us which guest belongs to which session as soon as it
   // attaches. Everything the agent does to the pane keys off that mapping.
-  ipcMain.on(IPC.BROWSER_ATTACH, (_, { sessionId, webContentsId }) => {
+  ipcMain.on(IPC.BROWSER_ATTACH, (_, { sessionId, webContentsId, fileRoot }) => {
     browserRegistry.attach(sessionId, webContentsId)
+    // The pane's reach into the disk, which only the renderer knows: the
+    // session's worktree if it has one, else its project. Set after attach so a
+    // pane that failed to attach is left with no root rather than a live one.
+    setFileRoot(sessionId, fileRoot)
+    guardFileRequests(sessionId)
   })
   ipcMain.on(IPC.BROWSER_DETACH, (_, sessionId: string) => {
     browserRegistry.detach(sessionId)
+    setFileRoot(sessionId, undefined)
+  })
+  ipcMain.on(IPC.BROWSER_TABS_CHANGED, (_, { sessionId, tabs }) => {
+    browserRegistry.syncTabs(sessionId, tabs)
   })
 
   // The picker is user-initiated and answers back to the renderer that armed

@@ -101,6 +101,7 @@ Object.defineProperty(window, 'api', {
     openInIDE: vi.fn(),
     // The browser pane reports its guest to main so the agent can drive it.
     attachBrowser: vi.fn(),
+    syncBrowserTabs: vi.fn(),
     detachBrowser: vi.fn(),
     startBrowserPick: vi.fn().mockResolvedValue(null),
     cancelBrowserPick: vi.fn(),

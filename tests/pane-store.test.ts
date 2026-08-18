@@ -219,7 +219,7 @@ describe('pane store actions', () => {
     const s = () => useAppStore.getState()
     act(() => s().openBrowserPane('t1', 'example.com'))
     expect(JSON.parse(localStorage.getItem('vorn:panes') as string).browsers).toEqual({
-      t1: { tabs: ['https://example.com/'], activeTab: 0, sessionId: 't1' }
+      t1: { tabs: [{ url: 'https://example.com/' }], activeTab: 0, sessionId: 't1' }
     })
 
     act(() => s().removeTerminal('t1'))
@@ -233,7 +233,7 @@ describe('pane store actions', () => {
     // Owned by its key, which is what a session-keyed entry always meant — so
     // an upgraded entry reads back as the session's own browser, not as a card.
     expect(panes.get('t1')).toEqual({
-      tabs: ['https://old.example/'],
+      tabs: [{ url: 'https://old.example/' }],
       activeTab: 0,
       sessionId: 't1'
     })
@@ -281,8 +281,8 @@ describe('pane store actions', () => {
     act(() => s().openBrowserPane('t1', 'example.org'))
     // Typing an address replaces the current page rather than spawning a tab.
     expect(s().browserPanes.get('t1')?.tabs).toEqual([
-      'https://example.com/',
-      'https://example.org/'
+      { url: 'https://example.com/' },
+      { url: 'https://example.org/' }
     ])
   })
 
@@ -433,6 +433,147 @@ describe('pane store actions', () => {
   })
 })
 
+describe('urls main has already vetted', () => {
+  const s = () => useAppStore.getState()
+
+  beforeEach(() => {
+    localStorage.clear()
+    seed(['t1'])
+  })
+
+  // Main allows `file:` inside the session's own root, and it is the only side
+  // that can decide that: containment is a filesystem question and the renderer
+  // has no filesystem. So a vetted url has to be taken as given here. Re-running
+  // `normalizeUrl` on arrival would refuse every one of them, and the refusal is
+  // silent — the pane simply never appears.
+  const FILE_URL = 'file:///repo/index.html'
+
+  it('opens a pane on a file url main approved', () => {
+    act(() => s().openBrowserPane('t1', FILE_URL, { trusted: true }))
+    expect(browserUrl('t1')).toBe(FILE_URL)
+  })
+
+  it('still refuses a file url nobody vetted', () => {
+    // Anything reaching the store on its own — the address bar, a restored
+    // session — goes through normalizeUrl exactly as before.
+    act(() => s().openBrowserPane('t1', FILE_URL))
+    expect(s().browserPanes.has('t1')).toBe(false)
+  })
+
+  it('adds a tab on a vetted file url', () => {
+    act(() => {
+      s().openBrowserPane('t1', 'localhost:5173')
+      s().addBrowserTab('t1', FILE_URL, { trusted: true })
+    })
+    expect(
+      s()
+        .browserPanes.get('t1')
+        ?.tabs.map((t) => t.url)
+    ).toEqual(['http://localhost:5173/', FILE_URL])
+  })
+
+  it('returns a card sitting on a file page instead of destroying it', () => {
+    // The card holds the only copy of that page. Before the landing check
+    // counted tabs, an add that no-opped still looked like a success — the
+    // card was closed and the page went with it.
+    act(() => s().openBrowserPane('t1', 'localhost:5173'))
+    let cardId = ''
+    act(() => {
+      s().addBrowserTab('t1', FILE_URL, { trusted: true })
+      cardId = s().promoteBrowserTab('t1', 1) as string
+    })
+    expect(s().browserPanes.get(cardId)?.tabs[0]?.url).toBe(FILE_URL)
+
+    act(() => s().returnCardToSession(cardId))
+
+    expect(s().browserPanes.has(cardId)).toBe(false)
+    expect(
+      s()
+        .browserPanes.get('t1')
+        ?.tabs.map((t) => t.url)
+    ).toEqual(['http://localhost:5173/', FILE_URL])
+  })
+})
+
+describe('what a tab reports about itself', () => {
+  const s = () => useAppStore.getState()
+
+  beforeEach(() => {
+    localStorage.clear()
+    seed(['t1'])
+    act(() => s().openBrowserPane('t1', 'example.com'))
+  })
+
+  it('drops the old page’s title when the guest moves to a new one', () => {
+    act(() => s().syncBrowserTab('t1', 0, { title: 'Old page' }))
+    expect(s().browserPanes.get('t1')?.tabs[0]?.title).toBe('Old page')
+
+    // A page with no <title> reports its url with explicitSet false, which the
+    // card drops — so nothing would ever overwrite the old title, and the strip
+    // would advertise the previous page's name against the new url forever.
+    act(() => s().syncBrowserTab('t1', 0, { url: 'https://elsewhere.example/' }))
+
+    const tab = s().browserPanes.get('t1')?.tabs[0]
+    expect(tab?.liveUrl).toBe('https://elsewhere.example/')
+    expect(tab?.title).toBeUndefined()
+  })
+
+  it('keeps a title the page set before its first navigation report', () => {
+    // `page-title-updated` can land before `did-navigate`. That first url
+    // report names the page the tab was already on, so it is not a move — and
+    // treating it as one threw away the name the page had just given.
+    act(() => s().syncBrowserTab('t1', 0, { title: 'Dev server' }))
+    act(() => s().syncBrowserTab('t1', 0, { url: 'https://example.com/' }))
+    expect(s().browserPanes.get('t1')?.tabs[0]?.title).toBe('Dev server')
+
+    // A real move still drops it.
+    act(() => s().syncBrowserTab('t1', 0, { url: 'https://elsewhere.example/' }))
+    expect(s().browserPanes.get('t1')?.tabs[0]?.title).toBeUndefined()
+  })
+
+  it('lets a page clear its own name', () => {
+    // An explicitly empty title is a page saying it has none, not a missing
+    // report. Treated as absent it would leave the previous name in place.
+    act(() => s().syncBrowserTab('t1', 0, { title: 'Named' }))
+    act(() => s().syncBrowserTab('t1', 0, { title: '' }))
+    expect(s().browserPanes.get('t1')?.tabs[0]?.title).toBeUndefined()
+  })
+
+  it('keeps the title when the guest re-reports the same page', () => {
+    // A reload or a repeated load event is not a new page, and clearing the
+    // title on every one would make the strip flicker between name and host.
+    act(() => s().syncBrowserTab('t1', 0, { url: 'https://example.com/', title: 'Example' }))
+    act(() => s().syncBrowserTab('t1', 0, { url: 'https://example.com/' }))
+    expect(s().browserPanes.get('t1')?.tabs[0]?.title).toBe('Example')
+  })
+
+  it('leaves intent alone when the guest wanders', () => {
+    // `src` is bound to intent. If an observation could rewrite it, every
+    // navigation would re-set `src` and reload the page it just reached.
+    act(() => s().syncBrowserTab('t1', 0, { url: 'https://redirected.example/' }))
+    expect(s().browserPanes.get('t1')?.tabs[0]?.url).toBe('https://example.com/')
+  })
+
+  it('gives a promoted card the page it will actually load', () => {
+    // The card mounts a fresh guest on intent. Carrying the old observation
+    // across would have its address bar assert the redirected location while
+    // the guest is still at the original — permanently, for a page that always
+    // redirects.
+    act(() =>
+      s().syncBrowserTab('t1', 0, { url: 'https://redirected.example/', title: 'Redirected' })
+    )
+    let cardId = ''
+    act(() => {
+      cardId = s().promoteBrowserTab('t1', 0) as string
+    })
+
+    const tab = s().browserPanes.get(cardId)?.tabs[0]
+    expect(tab?.url).toBe('https://example.com/')
+    expect(tab?.liveUrl).toBeUndefined()
+    expect(tab?.title).toBeUndefined()
+  })
+})
+
 describe('claiming a device before showing it', () => {
   const device = { udid: 'u1', name: 'iPhone 17' }
 
@@ -550,8 +691,10 @@ describe('popping an item out to its own card', () => {
 
     // Left in both places it would be two guests on one url, each with its own
     // scroll position — and closing either would look like a refusal to go.
-    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/'])
-    expect(s().browserPanes.get(cardId as unknown as string)?.tabs).toEqual(['https://vorn.dev/'])
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([{ url: 'https://example.com/' }])
+    expect(s().browserPanes.get(cardId as unknown as string)?.tabs).toEqual([
+      { url: 'https://vorn.dev/' }
+    ])
   })
 
   it('closes the strip when its last tab is popped out', () => {
@@ -597,7 +740,10 @@ describe('popping an item out to its own card', () => {
     act(() => s().returnCardToSession(cardId))
 
     expect(s().browserPanes.has(cardId)).toBe(false)
-    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/', 'https://vorn.dev/'])
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([
+      { url: 'https://example.com/' },
+      { url: 'https://vorn.dev/' }
+    ])
   })
 
   it('opens a browser to receive a tab whose strip has since closed', () => {
@@ -611,7 +757,7 @@ describe('popping an item out to its own card', () => {
     act(() => s().returnCardToSession(cardId))
     // Refusing would strand the page: the card is closing either way, so with
     // nowhere to land the tab would simply be gone.
-    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/'])
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([{ url: 'https://example.com/' }])
   })
 
   it('un-minimizes nothing but forgets the card it closed', () => {
@@ -819,7 +965,7 @@ describe('popping an item out to its own card', () => {
     const pane = s().browserPanes.get('t1')!
     // `addBrowserTab` activates what it adds, so the strip ended up on the
     // card's *last* page rather than the one being looked at.
-    expect(pane.tabs[pane.activeTab]).toBe('https://two.example/')
+    expect(pane.tabs[pane.activeTab]?.url).toBe('https://two.example/')
   })
 
   it('surfaces the existing card when a file is popped out twice', () => {
@@ -898,9 +1044,9 @@ describe('popping an item out to its own card', () => {
 
     act(() => s().returnCardToSession(cardId))
     expect(s().browserPanes.get('t1')?.tabs).toEqual([
-      'https://example.com/',
-      'https://second.example/',
-      'https://third.example/'
+      { url: 'https://example.com/' },
+      { url: 'https://second.example/' },
+      { url: 'https://third.example/' }
     ])
   })
 

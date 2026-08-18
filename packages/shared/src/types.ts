@@ -1416,6 +1416,10 @@ export const IPC = {
   BROWSER_OPEN_PANE: 'browser:openPane',
   /** Main asks the renderer to add, close, or switch a tab in that pane. */
   BROWSER_TAB_COMMAND: 'browser:tabCommand',
+  /** Renderer reports what its tab strip holds, after any change to it. The
+   *  strip is renderer state, so this is the only way main can answer a
+   *  listing without keeping a second copy that would drift. */
+  BROWSER_TABS_CHANGED: 'browser:tabsChanged',
   /** Main asks the renderer to open a session's device pane. As with the
    *  browser, the pane is renderer state, so main can only ask. */
   DEVICE_OPEN_PANE: 'device:openPane',
@@ -1758,6 +1762,35 @@ export interface BrowserNetworkRequest {
   url: string
   status?: number
   timestamp: number
+}
+
+/**
+ * The Chromium partition a session's browser guests live in.
+ *
+ * Shared because two sides must agree exactly: the renderer puts its
+ * `<webview>` in this partition, and main installs the filter that bounds what
+ * files those guests may read on the same one. Spelled out twice, a rename
+ * would leave the filter attached to a partition no guest uses — installing
+ * successfully, logging nothing, and enforcing nothing.
+ */
+export function browserPartition(sessionId: string): string {
+  return `persist:vorn-browser-${sessionId}`
+}
+
+/**
+ * One tab in a session's browser pane, as the agent sees it.
+ *
+ * `url` is where the guest actually is, not where the tab was originally sent —
+ * a tab that redirected or followed a link would otherwise be listed under a
+ * page nobody is looking at, and `index` would name it wrongly.
+ */
+export interface BrowserTabInfo {
+  /** Zero-based, and what `browser_tabs` close/select take. */
+  index: number
+  url: string
+  /** The page's own title, when it has reported one. */
+  title?: string
+  active: boolean
 }
 
 /** Where an interaction lands: a ref from `read_page`, or raw viewport coords. */

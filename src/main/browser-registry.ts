@@ -1,6 +1,7 @@
 import { webContents } from 'electron'
 import type { WebContents } from 'electron'
 import { normalizeUrl } from '../shared/browser-url'
+import { hasFileRoot, allowsFileUrl } from './browser-file-scope'
 import type {
   BrowserNode,
   BrowserSelection,
@@ -9,6 +10,7 @@ import type {
   BrowserPageRead,
   BrowserConsoleMessage,
   BrowserNetworkRequest,
+  BrowserTabInfo,
   BrowserTarget
 } from '../shared/types'
 import { IPC } from '../shared/types'
@@ -58,6 +60,22 @@ export interface Entry {
 const entries = new Map<string, Entry>()
 
 /**
+ * What the renderer last said its tab strips hold.
+ *
+ * Deliberately a mirror and never a second source of truth. Tab bookkeeping
+ * belongs to the renderer store — a person clicking a tab is not something main
+ * can observe — so this is only ever overwritten wholesale by the renderer, and
+ * nothing here ever edits it. Answering `list` from a copy main maintained
+ * itself would drift the first time someone touched the strip by hand.
+ */
+const tabMirror = new Map<string, BrowserTabInfo[]>()
+
+/** The renderer reporting its tab strip, after any change to it. */
+export function syncTabs(sessionId: string, tabs: BrowserTabInfo[]): void {
+  tabMirror.set(sessionId, tabs)
+}
+
+/**
  * How main asks the renderer to do something to a pane.
  *
  * Panes are renderer state — a `<webview>` element in a React tree — so main
@@ -89,6 +107,24 @@ function waitForAttach(sessionId: string, timeoutMs = 8000): Promise<void> {
 }
 
 /**
+ * The one place that decides whether a session may load a url.
+ *
+ * Two questions, deliberately kept apart. `normalizeUrl` answers whether the
+ * url is a shape a pane may load at all — and only opens `file:` up when this
+ * session has a root. `allowsFileUrl` then answers whether that particular file
+ * is inside it, which is a filesystem question and cannot be settled by looking
+ * at the string.
+ *
+ * Returns null rather than throwing so each caller can name what it was doing.
+ */
+function loadableUrl(sessionId: string, url: string): string | null {
+  const normalized = normalizeUrl(url, { allowFile: hasFileRoot(sessionId) })
+  if (!normalized) return null
+  if (normalized.startsWith('file:') && !allowsFileUrl(sessionId, normalized)) return null
+  return normalized
+}
+
+/**
  * Open the session's browser pane, or point the existing one at `url`.
  *
  * This is what makes the agent self-sufficient: before it existed, every
@@ -99,7 +135,8 @@ export async function openPane(
   params: { sessionId: string; url?: string },
   timeoutMs?: number
 ): Promise<{ url: string }> {
-  const normalized = params.url === undefined ? undefined : normalizeUrl(params.url)
+  const normalized =
+    params.url === undefined ? undefined : (loadableUrl(params.sessionId, params.url) ?? undefined)
   if (params.url !== undefined && !normalized) {
     throw new Error(`Refusing to open "${params.url}" — not an allowed web address.`)
   }
@@ -124,14 +161,40 @@ export async function tabs(params: {
   // Throws if the session has no pane, which is the honest answer for a tab
   // command: there is nothing to add a tab to.
   contentsFor(params.sessionId)
-  if (params.action === 'add' && params.url !== undefined && !normalizeUrl(params.url)) {
-    throw new Error(`Refusing to open "${params.url}" — not an allowed web address.`)
+  let url = params.url
+  if (params.action === 'add' && url !== undefined) {
+    // Forward the *normalized* url, not the one that arrived. The renderer
+    // takes a vetted url as given — it has no filesystem to re-check a `file:`
+    // path against — so handing it the raw string would have it store something
+    // this never approved.
+    const normalized = loadableUrl(params.sessionId, url)
+    if (!normalized) {
+      throw new Error(`Refusing to open "${url}" — not an allowed web address.`)
+    }
+    url = normalized
   }
   if (params.action !== 'add' && typeof params.index !== 'number') {
     throw new Error(`A tab index is required to ${params.action} a tab.`)
   }
-  sendToRenderer(IPC.BROWSER_TAB_COMMAND, params)
+  sendToRenderer(IPC.BROWSER_TAB_COMMAND, { ...params, url })
   return { ok: true }
+}
+
+/**
+ * What the pane's tab strip currently holds.
+ *
+ * Answered from the renderer's own report rather than from anything main
+ * tracks. `close` and `select` take an index, and until this existed an agent
+ * could only guess what any index named — so it either acted on a tab it had
+ * never seen or had to switch to one to find out what it was.
+ */
+export function listTabs(params: { sessionId: string }): { tabs: BrowserTabInfo[] } {
+  // Same honest failure as every other tab command: no pane, nothing to list.
+  contentsFor(params.sessionId)
+  // A pane whose strip has not reported yet is empty rather than absent: the
+  // report follows the pane by a frame, and an error here would read as "this
+  // session has no browser" a moment after one opened.
+  return { tabs: tabMirror.get(params.sessionId) ?? [] }
 }
 
 function contentsFor(sessionId: string): { wc: WebContents; entry: Entry } {
@@ -274,6 +337,10 @@ export function detach(sessionId: string): void {
   const entry = entries.get(sessionId)
   if (!entry) return
   entries.delete(sessionId)
+  // The strip goes with the pane. Left behind, a later `list` would answer
+  // from a report about a pane that no longer exists — and `contentsFor` above
+  // is the only thing that would have caught it.
+  tabMirror.delete(sessionId)
   const wc = webContents.fromId(entry.webContentsId)
   if (!wc || wc.isDestroyed()) return
   try {
@@ -537,6 +604,20 @@ async function pointFor(
     )
   }
 
+  // Scroll first, measure second. `DOM.getBoxModel` reports layout-viewport
+  // coordinates, so an element below the fold yields a plausible off-screen
+  // point rather than an error: the click dispatches into nothing and the call
+  // still reports success. Bringing the node into view before measuring is what
+  // makes "ok" mean the element was actually hit.
+  //
+  // Best-effort: a node that cannot be scrolled to is not necessarily
+  // unclickable, and the box model below is the real check.
+  try {
+    await send(wc, 'DOM.scrollIntoViewIfNeeded', { backendNodeId })
+  } catch {
+    // Fall through — `getBoxModel` decides whether this ref is usable.
+  }
+
   const { model } = await send<{ model?: { content: number[] } }>(wc, 'DOM.getBoxModel', {
     backendNodeId
   })
@@ -611,14 +692,29 @@ async function click(wc: WebContents, pt: { x: number; y: number }): Promise<voi
 
 /**
  * Navigate the pane. Runs the same `normalizeUrl` the address bar does, so the
- * schemes a person cannot type here (`file:`, `javascript:`, `data:`) are the
- * same ones an agent cannot reach.
+ * schemes a person cannot type here (`javascript:`, `data:`) are the same ones
+ * an agent cannot reach.
+ *
+ * `file:` is the one deliberate exception, and only inside the session's own
+ * directory — see `loadableUrl`. Refusing here is not the whole guard: a guest
+ * already on a file page can fetch others itself, which never passes through
+ * this function. The session partition's request filter is what covers those.
  */
 export async function navigate(params: {
   sessionId: string
   url: string
 }): Promise<{ url: string }> {
-  const normalized = normalizeUrl(params.url)
+  // A `file:` url cannot be judged before the pane exists: the session's root
+  // arrives with the attach, and until it does every file url is refused as an
+  // unallowed scheme. Opening the pane first is what lets "show me this local
+  // page" work from a standing start, which is the whole point of the
+  // capability — otherwise it only worked once something else had opened a
+  // pane, and failed with a message about the address rather than the timing.
+  if (/^\s*file:/i.test(params.url) && !entries.get(params.sessionId)?.attached) {
+    await openPane({ sessionId: params.sessionId })
+  }
+
+  const normalized = loadableUrl(params.sessionId, params.url)
   if (!normalized) {
     throw new Error(`Refusing to navigate to "${params.url}" — not an allowed web address.`)
   }
@@ -631,6 +727,38 @@ export async function navigate(params: {
   const { wc } = contentsFor(params.sessionId)
   await send(wc, 'Page.navigate', { url: normalized })
   return { url: normalized }
+}
+
+/**
+ * Step through the pane's own history.
+ *
+ * Separate from `navigate` because there is no url to hand it: the destination
+ * is whatever the guest visited before, which only the guest knows. Running out
+ * of history is a hard failure rather than a quiet no-op — an agent that asked
+ * to go back and was told "ok" would carry on believing it had moved, and read
+ * the same page a second time thinking it was the previous one.
+ */
+export async function goHistory(params: {
+  sessionId: string
+  direction: 'back' | 'forward'
+}): Promise<{ url: string }> {
+  const { wc } = contentsFor(params.sessionId)
+  const { currentIndex, entries: history } = await send<{
+    currentIndex: number
+    entries: { id: number; url: string }[]
+  }>(wc, 'Page.getNavigationHistory')
+
+  const target = history[currentIndex + (params.direction === 'back' ? -1 : 1)]
+  if (!target) {
+    throw new Error(
+      params.direction === 'back'
+        ? 'No page to go back to — this is the first page in this tab.'
+        : 'No page to go forward to — this is the newest page in this tab.'
+    )
+  }
+
+  await send(wc, 'Page.navigateToHistoryEntry', { entryId: target.id })
+  return { url: target.url }
 }
 
 // ─── Element picker ─────────────────────────────────────────────

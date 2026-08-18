@@ -97,13 +97,40 @@ export function isPromotedPane(paneId: string, pane: { sessionId: string }): boo
  * are reading against it are the common pair, and forcing one to replace the
  * other made the pane far less useful than the space it costs.
  */
+/**
+ * One tab, split by who is speaking.
+ *
+ * `url` is intent — what the pane was *told* to show — and is what drives the
+ * guest's `src`. `liveUrl` and `title` are observation: where the guest
+ * actually ended up and what it calls itself, which only it can report.
+ *
+ * They are separate fields rather than one because `src` is bound to `url`.
+ * Writing an observed url back into it re-sets `src` to a page the guest is
+ * already on, and the reload that follows throws away the scroll position and
+ * any half-typed form — on every navigation. Keeping intent stable means the
+ * label can follow the guest anywhere without touching it.
+ */
+export interface BrowserTabState {
+  /** Normalized absolute url the pane was asked to load. Drives the guest's `src`. */
+  url: string
+  /** Where the guest actually is, once it reports. Absent until it does. */
+  liveUrl?: string
+  /** The guest's own title, once it reports one. */
+  title?: string
+}
+
 export interface BrowserPaneState {
-  /** Normalized absolute URLs, one per tab. Never empty while the pane exists. */
-  tabs: string[]
+  /** One entry per tab. Never empty while the pane exists. */
+  tabs: BrowserTabState[]
   /** Index into `tabs`. Always in range. */
   activeTab: number
   /** The session this browser belongs to. See `EditorPaneState.sessionId`. */
   sessionId: string
+}
+
+/** Where a tab actually is: what the guest reports, or the intent until it does. */
+export function tabUrl(tab: BrowserTabState): string {
+  return tab.liveUrl ?? tab.url
 }
 
 /**
@@ -146,9 +173,16 @@ export function activePanelTerminalId(pane: TerminalsPaneState | undefined): str
   return pane ? (pane.terminals[activePanelIndex(pane)] ?? null) : null
 }
 
-/** The page a browser pane is currently showing. */
+/**
+ * The page a browser pane is currently showing.
+ *
+ * Where the guest actually is, not where it was sent — these differ whenever
+ * the page redirected, followed a link, or was navigated by an agent, and the
+ * label has to name the page in front of the person.
+ */
 export function activeBrowserUrl(pane: BrowserPaneState | undefined): string | null {
-  return pane ? (pane.tabs[pane.activeTab] ?? null) : null
+  const tab = pane?.tabs[pane.activeTab]
+  return tab ? tabUrl(tab) : null
 }
 
 /**
@@ -404,17 +438,39 @@ export interface UISlice {
    * the pane on its current page rather than blanking it. Omitting `url`
    * reveals the session's browser without changing the page it is showing.
    */
-  openBrowserPane: (sessionId: string, url?: string) => void
+  /**
+   * Show a session's browser, optionally at a url.
+   *
+   * `trusted` marks a url main has already vetted — it decided the scheme was
+   * allowed *and*, for `file:`, that the path is inside the session's root.
+   * The renderer cannot redo the second half: containment is a filesystem
+   * question and it has no filesystem. Re-normalizing here would quietly drop
+   * a `file:` url main just approved, so a trusted url is taken as given.
+   */
+  openBrowserPane: (sessionId: string, url?: string, opts?: { trusted?: boolean }) => void
   closeBrowserPane: (paneId: string) => void
   toggleBrowserPane: (sessionId: string) => void
-  /** Add a tab to the browser and make it active. */
-  addBrowserTab: (paneId: string, url?: string) => void
+  /** Add a tab to the browser and make it active. See `openBrowserPane` for `trusted`. */
+  addBrowserTab: (paneId: string, url?: string, opts?: { trusted?: boolean }) => void
   /**
    * Close one tab. Closing the last one closes the pane, since a browser with
    * no page is just an empty box.
    */
   closeBrowserTab: (paneId: string, index: number) => void
   setActiveBrowserTab: (paneId: string, index: number) => void
+  /**
+   * Record where a guest actually went, and what it calls itself.
+   *
+   * Reported by the `<webview>` rather than asked for: a page redirects, a
+   * link is followed, an agent navigates over CDP. None of those pass through
+   * `openBrowserPane`, so without this the strip keeps naming the page the tab
+   * was originally sent to — a label describing something nobody is looking at.
+   *
+   * Deliberately separate from the navigation actions. It writes `liveUrl` and
+   * `title`, never `url`, so the guest's own `src` binding is untouched and
+   * observing a navigation cannot cause one.
+   */
+  syncBrowserTab: (paneId: string, index: number, seen: { url?: string; title?: string }) => void
   /**
    * Open the pane for a device main already holds. Used when main itself asks
    * for the pane (the agent claimed the device), where the claim is a

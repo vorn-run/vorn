@@ -26,6 +26,7 @@ Object.defineProperty(window, 'api', {
     notifyWidgetStatus: vi.fn(),
     // The browser pane reports its guest to main so the agent can drive it.
     attachBrowser: vi.fn(),
+    syncBrowserTabs: vi.fn(),
     detachBrowser: vi.fn(),
     startBrowserPick: (...args: unknown[]) => mockStartPick(...(args as [string])),
     cancelBrowserPick: vi.fn(),
@@ -576,7 +577,127 @@ describe('BrowserCard', () => {
     expect(screen.getByRole('button', { name: /Open this page as its own card/ })).toBeTruthy()
 
     fireEvent.click(perTab)
-    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['https://vorn.dev/'])
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual([
+      { url: 'https://vorn.dev/' }
+    ])
+  })
+
+  it('follows the guest when it navigates itself, rather than naming where it was sent', () => {
+    // A redirect, a followed link and an agent's `Page.navigate` all move the
+    // guest without passing through the store. Before the pane observed them,
+    // the strip kept naming the page the tab was originally opened on — a
+    // label describing something nobody was looking at.
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(Object.assign(new Event('did-navigate'), { url: 'https://vorn.dev/docs' }))
+    })
+
+    expect(screen.getByRole('tab', { name: /vorn\.dev/ })).toBeTruthy()
+    // Intent is untouched. `src` is bound to it, so writing the observed url
+    // back would re-set `src` to the page the guest already reached and reload
+    // it — losing scroll position and any half-typed form, on every navigation.
+    const tab = useAppStore.getState().browserPanes.get('t1')?.tabs[0]
+    expect(tab?.url).toBe('http://localhost:5173/')
+    expect(tab?.liveUrl).toBe('https://vorn.dev/docs')
+  })
+
+  it('lets the guest clear its own title', () => {
+    // An explicitly empty title is a page saying it has none. Read as a
+    // missing report it would leave the previous page's name on the strip.
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('page-title-updated'), { title: 'Named', explicitSet: true })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.title).toBe('Named')
+
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('page-title-updated'), { title: '', explicitSet: true })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.title).toBeUndefined()
+  })
+
+  it('ignores a subframe navigating, which is not where the person is', () => {
+    // Ads, embedded docs and OAuth widgets route in place constantly. Taking a
+    // subframe's url would have the strip, the address bar and `browser_tabs
+    // list` all name a page nobody is on — and that listing exists precisely so
+    // the url can be trusted.
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('did-navigate-in-page'), {
+          url: 'https://ads.example/frame',
+          isMainFrame: false
+        })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.liveUrl).toBeUndefined()
+
+    // The main frame in the same event still counts.
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('did-navigate-in-page'), {
+          url: 'http://localhost:5173/settings',
+          isMainFrame: true
+        })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.liveUrl).toBe(
+      'http://localhost:5173/settings'
+    )
+  })
+
+  it('follows same-document routing, which is every navigation in a single-page app', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('did-navigate-in-page'), { url: 'http://localhost:5173/settings' })
+      )
+    })
+
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.liveUrl).toBe(
+      'http://localhost:5173/settings'
+    )
+  })
+
+  it('ignores a title the guest did not actually set', () => {
+    // A page with no <title> reports its own url as the title. Taking that
+    // would put a second copy of the address where the page's name belongs.
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('page-title-updated'), {
+          title: 'http://localhost:5173/',
+          explicitSet: false
+        })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.title).toBeUndefined()
+
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('page-title-updated'), { title: 'Vorn', explicitSet: true })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.title).toBe('Vorn')
   })
 
   it('pops the tab being looked at from the control cluster', () => {
@@ -588,7 +709,9 @@ describe('BrowserCard', () => {
 
     // addBrowserTab activates what it adds, so the cluster acts on vorn.dev.
     fireEvent.click(screen.getByRole('button', { name: /Open this page as its own card/ }))
-    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['http://localhost:5173/'])
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual([
+      { url: 'http://localhost:5173/' }
+    ])
   })
 
   it("sends what the user picked to the session's agent", async () => {
@@ -696,7 +819,34 @@ describe('BrowserCard', () => {
       ready = true
       // Without an id in the registry the session's agent is told "no pane
       // open" while the person is looking straight at one.
-      await waitFor(() => expect(attach).toHaveBeenCalledWith('t1', 42))
+      // The session's own directory rides along: it is what bounds the file
+      // urls this pane may open, and only the renderer knows it.
+      await waitFor(() => expect(attach).toHaveBeenCalledWith('t1', 42, '/repo'))
+    } finally {
+      delete proto.getWebContentsId
+    }
+  })
+
+  it("scopes the pane to the session's worktree when it has one", async () => {
+    // A session working in a worktree may read that worktree, not the whole
+    // project it was cut from — the narrowest root that still works.
+    const attach = (window as unknown as { api: { attachBrowser: ReturnType<typeof vi.fn> } }).api
+      .attachBrowser
+    attach.mockClear()
+    const terminals = new Map()
+    terminals.set('t1', {
+      id: 't1',
+      session: session('t1', { worktreePath: '/repo-wt' }),
+      status: 'idle',
+      lastOutputTimestamp: 1
+    })
+    act(() => useAppStore.setState({ terminals }))
+    const proto = window.HTMLElement.prototype as unknown as { getWebContentsId?: () => number }
+    proto.getWebContentsId = () => 42
+    try {
+      act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+      render(<BrowserCard sessionId="t1" />)
+      await waitFor(() => expect(attach).toHaveBeenCalledWith('t1', 42, '/repo-wt'))
     } finally {
       delete proto.getWebContentsId
     }
@@ -794,7 +944,9 @@ describe('BrowserCard', () => {
     render(<BrowserCard sessionId="t1" />)
 
     fireEvent.click(screen.getByLabelText('Close tab example.com'))
-    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['http://localhost:5173/'])
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual([
+      { url: 'http://localhost:5173/' }
+    ])
   })
 
   it('navigates on submit, normalizing what was typed', () => {
