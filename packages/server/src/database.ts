@@ -1313,6 +1313,33 @@ function loadWorkspaces(d: Database.Database): WorkspaceConfig[] {
 // Config: save inside a transaction
 // ---------------------------------------------------------------------------
 
+/**
+ * Delete the rows of `table` whose key is not in `keep`.
+ *
+ * The counterpart to an upsert loop, and the half that has to be deliberate: the
+ * naive `DELETE FROM table` that used to precede these loops takes out every row
+ * the saving client did not happen to carry, and fires every foreign-key cascade
+ * hanging off them on the way.
+ *
+ * Identifiers are interpolated because SQLite cannot parameterise them; both
+ * arguments are literals at every call site below, never user input.
+ */
+function pruneMissing(
+  d: Database.Database,
+  table: string,
+  keyColumn: string,
+  keep: Array<string | null | undefined>
+): void {
+  const wanted = new Set(keep.filter((k): k is string => typeof k === 'string'))
+  const existing = d.prepare(`SELECT ${keyColumn} AS key FROM ${table}`).all() as Array<{
+    key: string
+  }>
+  const remove = d.prepare(`DELETE FROM ${table} WHERE ${keyColumn} = ?`)
+  for (const { key } of existing) {
+    if (!wanted.has(key)) remove.run(key)
+  }
+}
+
 export function saveConfig(config: AppConfig): void {
   const d = getDb()
 
@@ -1341,9 +1368,27 @@ export function saveConfig(config: AppConfig): void {
     }
 
     // Projects
-    d.prepare('DELETE FROM projects').run()
+    //
+    // Diff-and-upsert rather than wipe-and-rewrite, the same treatment the
+    // workflows block below already gets and for the same underlying reason: a row
+    // deleted and reinserted is a *different* row to anything referencing it, and
+    // in the meantime every FK cascade fires. Tasks reference projects by name.
+    pruneMissing(
+      d,
+      'projects',
+      'name',
+      config.projects.map((p) => p.name)
+    )
     const insertProject = d.prepare(
-      'INSERT INTO projects (name, path, preferred_agents, icon, icon_color, host_ids, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      `INSERT INTO projects (name, path, preferred_agents, icon, icon_color, host_ids, workspace_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(name) DO UPDATE SET
+         path = excluded.path,
+         preferred_agents = excluded.preferred_agents,
+         icon = excluded.icon,
+         icon_color = excluded.icon_color,
+         host_ids = excluded.host_ids,
+         workspace_id = excluded.workspace_id`
     )
     for (const p of config.projects) {
       insertProject.run(
@@ -1400,9 +1445,16 @@ export function saveConfig(config: AppConfig): void {
     }
 
     // Agent commands
-    d.prepare('DELETE FROM agent_commands').run()
+    pruneMissing(d, 'agent_commands', 'agent_type', Object.keys(config.agentCommands ?? {}))
     const insertAgent = d.prepare(
-      'INSERT INTO agent_commands (agent_type, command, args, headless_args, fallback_command, fallback_args) VALUES (?, ?, ?, ?, ?, ?)'
+      `INSERT INTO agent_commands (agent_type, command, args, headless_args, fallback_command, fallback_args)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(agent_type) DO UPDATE SET
+         command = excluded.command,
+         args = excluded.args,
+         headless_args = excluded.headless_args,
+         fallback_command = excluded.fallback_command,
+         fallback_args = excluded.fallback_args`
     )
     if (config.agentCommands) {
       for (const [agentType, cmd] of Object.entries(config.agentCommands)) {
@@ -1420,9 +1472,25 @@ export function saveConfig(config: AppConfig): void {
     }
 
     // Remote hosts
-    d.prepare('DELETE FROM remote_hosts').run()
+    pruneMissing(
+      d,
+      'remote_hosts',
+      'id',
+      (config.remoteHosts ?? []).map((h) => h.id)
+    )
     const insertHost = d.prepare(
-      'INSERT INTO remote_hosts (id, label, hostname, user, port, auth_method, ssh_key_path, credential_id, encrypted_password, ssh_options) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      `INSERT INTO remote_hosts (id, label, hostname, user, port, auth_method, ssh_key_path, credential_id, encrypted_password, ssh_options)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         label = excluded.label,
+         hostname = excluded.hostname,
+         user = excluded.user,
+         port = excluded.port,
+         auth_method = excluded.auth_method,
+         ssh_key_path = excluded.ssh_key_path,
+         credential_id = excluded.credential_id,
+         encrypted_password = excluded.encrypted_password,
+         ssh_options = excluded.ssh_options`
     )
     for (const h of config.remoteHosts ?? []) {
       insertHost.run(
@@ -1439,11 +1507,36 @@ export function saveConfig(config: AppConfig): void {
       )
     }
 
-    // Tasks
-    d.prepare('DELETE FROM tasks').run()
+    // Tasks — the highest-churn collection here, and the one where a wipe hurt
+    // most: task_source_links cascades off it, so a rewrite orphaned the link
+    // between a task and the external issue it came from.
+    pruneMissing(
+      d,
+      'tasks',
+      'id',
+      (config.tasks ?? []).map((t) => t.id)
+    )
     const insertTask = d.prepare(
       `INSERT INTO tasks (id, project_name, title, description, status, "order", assigned_session_id, assigned_agent, agent_session_id, branch, use_worktree, created_at, updated_at, completed_at, archived_at, source_connector_id, source_external_url, source_external_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         project_name = excluded.project_name,
+         title = excluded.title,
+         description = excluded.description,
+         status = excluded.status,
+         "order" = excluded."order",
+         assigned_session_id = excluded.assigned_session_id,
+         assigned_agent = excluded.assigned_agent,
+         agent_session_id = excluded.agent_session_id,
+         branch = excluded.branch,
+         use_worktree = excluded.use_worktree,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at,
+         completed_at = excluded.completed_at,
+         archived_at = excluded.archived_at,
+         source_connector_id = excluded.source_connector_id,
+         source_external_url = excluded.source_external_url,
+         source_external_id = excluded.source_external_id`
     )
     for (const t of config.tasks ?? []) {
       insertTask.run(
@@ -1469,11 +1562,22 @@ export function saveConfig(config: AppConfig): void {
     }
 
     // Workspaces
-    d.prepare('DELETE FROM workspaces').run()
-    const insertWorkspace = d.prepare(
-      `INSERT INTO workspaces (id, name, icon, icon_color, "order") VALUES (?, ?, ?, ?, ?)`
+    const workspaces = config.workspaces ?? [DEFAULT_WORKSPACE]
+    pruneMissing(
+      d,
+      'workspaces',
+      'id',
+      workspaces.map((ws) => ws.id)
     )
-    for (const ws of config.workspaces ?? [DEFAULT_WORKSPACE]) {
+    const insertWorkspace = d.prepare(
+      `INSERT INTO workspaces (id, name, icon, icon_color, "order") VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         icon = excluded.icon,
+         icon_color = excluded.icon_color,
+         "order" = excluded."order"`
+    )
+    for (const ws of workspaces) {
       insertWorkspace.run(ws.id, ws.name, ws.icon ?? null, ws.iconColor ?? null, ws.order)
     }
   })

@@ -8,7 +8,14 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...actual, existsSync: vi.fn(() => true), mkdirSync: vi.fn() }
 })
 
-import { initTestDatabase, loadConfig, saveConfig } from '../packages/server/src/database'
+import {
+  initTestDatabase,
+  loadConfig,
+  saveConfig,
+  dbInsertSourceConnection,
+  dbInsertTaskSourceLink,
+  dbGetTaskSourceLink
+} from '../packages/server/src/database'
 import type { AppConfig } from '../packages/shared/src/types'
 
 /**
@@ -128,5 +135,101 @@ describe('a key the saving client did not send', () => {
     saveConfig(configWith({ widgetEnabled: undefined }))
 
     expect(loadConfig().defaults.widgetEnabled).toBeUndefined()
+  })
+})
+
+describe('collections survive a save that did not carry them', () => {
+  // The tables were wiped and rewritten from the client's snapshot, so a save
+  // from one client deleted rows another had just added — and fired every
+  // foreign-key cascade hanging off them on the way through.
+  function withCollections(over: Partial<AppConfig>): AppConfig {
+    return {
+      version: 1,
+      defaults: { shell: '/bin/zsh', fontSize: 13, theme: 'dark' },
+      projects: [],
+      ...over
+    } as AppConfig
+  }
+
+  const task = (id: string, title: string) => ({
+    id,
+    projectName: 'vorn',
+    title,
+    description: '',
+    status: 'todo',
+    order: 0,
+    createdAt: '2026-08-17T00:00:00.000Z',
+    updatedAt: '2026-08-17T00:00:00.000Z'
+  })
+
+  it('updates a task without cascading away what references it', () => {
+    // The real cost of wipe-and-rewrite, and the reason a title change looked
+    // harmless: `task_source_links.task_id` is ON DELETE CASCADE, so deleting the
+    // row severed the task from the external issue it was imported from. The link
+    // never came back, and nothing said so.
+    saveConfig(withCollections({ tasks: [task('t1', 'first')] } as Partial<AppConfig>))
+    dbInsertSourceConnection({
+      id: 'conn1',
+      connectorId: 'github',
+      name: 'repo',
+      filters: {},
+      syncIntervalMinutes: 15,
+      statusMapping: {},
+      createdAt: '2026-08-17T00:00:00.000Z'
+    } as never)
+    dbInsertTaskSourceLink({
+      taskId: 't1',
+      connectionId: 'conn1',
+      connectorId: 'github',
+      externalId: '42',
+      externalUrl: 'https://example.test/42',
+      sourceStatusRaw: 'open',
+      sourceUpdatedAt: '2026-08-17T00:00:00.000Z',
+      lastSyncedAt: '2026-08-17T00:00:00.000Z',
+      conflictState: 'none'
+    } as never)
+
+    saveConfig(withCollections({ tasks: [task('t1', 'renamed')] } as Partial<AppConfig>))
+
+    expect(loadConfig().tasks?.[0].title).toBe('renamed')
+    expect(dbGetTaskSourceLink('t1')).not.toBeNull()
+  })
+
+  it('still removes a task the client actually dropped', () => {
+    // Pruning has to stay real, or deleting a task would never take effect.
+    saveConfig(
+      withCollections({ tasks: [task('t1', 'first'), task('t2', 'second')] } as Partial<AppConfig>)
+    )
+
+    saveConfig(withCollections({ tasks: [task('t1', 'first')] } as Partial<AppConfig>))
+
+    expect(loadConfig().tasks?.map((t) => t.id)).toEqual(['t1'])
+  })
+
+  it('keeps a workspace across an unrelated save', () => {
+    const workspaces = [
+      { id: 'personal', name: 'Personal', order: 0 },
+      { id: 'work', name: 'Work', order: 1 }
+    ]
+    saveConfig(withCollections({ workspaces } as Partial<AppConfig>))
+
+    saveConfig(withCollections({ workspaces } as Partial<AppConfig>))
+
+    expect(
+      loadConfig()
+        .workspaces?.map((w) => w.id)
+        .sort()
+    ).toEqual(['personal', 'work'])
+  })
+
+  it('updates a project in place, since tasks reference it by name', () => {
+    const project = { name: 'vorn', path: '/a', preferredAgents: [] }
+    saveConfig(withCollections({ projects: [project] } as Partial<AppConfig>))
+
+    saveConfig(withCollections({ projects: [{ ...project, path: '/b' }] } as Partial<AppConfig>))
+
+    const loaded = loadConfig()
+    expect(loaded.projects).toHaveLength(1)
+    expect(loaded.projects[0].path).toBe('/b')
   })
 })
