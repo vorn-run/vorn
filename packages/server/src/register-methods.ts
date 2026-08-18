@@ -32,6 +32,8 @@ import {
 import type {
   SourceConnection,
   TaskStatus,
+  ConnectorManifest,
+  ExternalItem,
   ProjectConfig,
   WorktreeRetentionConfig
 } from '@vornrun/shared/types'
@@ -260,7 +262,7 @@ function logSessionEvent(
       ...(metadata ? { metadata } : {})
     })
   } catch (err) {
-    log.error('[session-events] failed to log event:', err)
+    log.error({ err }, '[session-events] failed to log event:')
   }
 }
 
@@ -1306,7 +1308,7 @@ export function registerAllMethods(): void {
       try {
         installHooks(port, hookServer.getAuthToken())
       } catch (err) {
-        log.error('[hooks] failed to install hooks:', err)
+        log.error({ err }, '[hooks] failed to install hooks:')
       }
 
       hookServer.on('permission-cancelled', (requestId: string) => {
@@ -1341,7 +1343,7 @@ export function registerAllMethods(): void {
                 )
               }
             } catch (err) {
-              log.error('[hooks] failed to persist agentSessionId:', err)
+              log.error({ err }, '[hooks] failed to persist agentSessionId:')
             }
           }
         }

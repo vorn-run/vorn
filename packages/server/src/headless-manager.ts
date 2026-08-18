@@ -146,7 +146,10 @@ class HeadlessManager extends EventEmitter {
     this.processes.set(id, child)
     this.outputBuffers.set(id, [])
 
-    const branch = effectiveBranch || getGitBranch(effectivePath)
+    // getGitBranch answers null for a detached head or a non-repo; the session
+    // field is optional rather than nullable, so it is normalised here instead of
+    // widening the type everything else reads.
+    const branch = effectiveBranch || getGitBranch(effectivePath) || undefined
     const worktreePath =
       payload.existingWorktreePath ||
       (payload.useWorktree && payload.branch ? effectivePath : undefined)
@@ -207,7 +210,7 @@ class HeadlessManager extends EventEmitter {
     })
 
     child.on('error', (err) => {
-      log.error(`[headless] process ${id} error:`, err.message)
+      log.error({ err }, `[headless] process ${id} error`)
       this.appendOutput(id, `Error: ${err.message}\n`)
       this.emit('client-message', IPC.HEADLESS_DATA, { id, data: `Error: ${err.message}\n` })
 

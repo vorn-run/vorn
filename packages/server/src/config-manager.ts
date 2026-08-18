@@ -35,7 +35,7 @@ class ConfigManager {
       this.cachedConfig = config
       return config
     } catch (err) {
-      log.error('[config-manager] loadConfig failed, returning defaults:', err)
+      log.error({ err }, '[config-manager] loadConfig failed, returning defaults:')
       return {
         version: 1,
         defaults: {
@@ -56,7 +56,7 @@ class ConfigManager {
       dbSaveConfig(config)
       this.cachedConfig = null
     } catch (err) {
-      log.error('[config-manager] saveConfig failed:', err)
+      log.error({ err }, '[config-manager] saveConfig failed:')
       throw err
     }
   }

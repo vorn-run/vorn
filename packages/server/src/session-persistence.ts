@@ -51,7 +51,7 @@ class SessionManager {
       dbSaveSessions(sessions)
       log.info(`[session-persistence] saved ${sessions.length} session(s)`)
     } catch (err) {
-      log.warn(`[session-persistence] saveSessions failed (${sessions.length} sessions):`, err)
+      log.warn({ err }, `[session-persistence] saveSessions failed (${sessions.length} sessions):`)
     }
   }
 
@@ -61,7 +61,7 @@ class SessionManager {
       log.info(`[session-persistence] loaded ${sessions.length} previous session(s)`)
       return sessions
     } catch (err) {
-      log.warn('[session-persistence] getPreviousSessions failed:', err)
+      log.warn({ err }, '[session-persistence] getPreviousSessions failed:')
       return []
     }
   }
@@ -70,7 +70,7 @@ class SessionManager {
     try {
       dbClearSessions()
     } catch (err) {
-      log.warn('[session-persistence] clear failed:', err)
+      log.warn({ err }, '[session-persistence] clear failed:')
     }
   }
 }

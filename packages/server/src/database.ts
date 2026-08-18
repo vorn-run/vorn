@@ -91,7 +91,7 @@ export function initDatabase(dataDir?: string): void {
     createSchema()
     seedSystemDefaults()
   } catch (err) {
-    log.error('[database] Failed to open database:', err)
+    log.error({ err }, '[database] Failed to open database:')
 
     // Detect corruption: libsql throws on open or pragma for corrupt files
     const message = err instanceof Error ? err.message : String(err)
@@ -189,7 +189,7 @@ function recoverCorruptDatabase(): void {
       if (fs.existsSync(file)) fs.unlinkSync(file)
     }
   } catch (backupErr) {
-    log.error('[database] Failed to back up corrupt database:', backupErr)
+    log.error({ backupErr }, '[database] Failed to back up corrupt database:')
   }
 
   // Create a fresh database
@@ -201,7 +201,7 @@ function recoverCorruptDatabase(): void {
     seedSystemDefaults()
     log.info('[database] Successfully created fresh database after corruption recovery')
   } catch (freshErr) {
-    log.error('[database] Failed to create fresh database after corruption:', freshErr)
+    log.error({ freshErr }, '[database] Failed to create fresh database after corruption:')
     throw freshErr
   }
 
@@ -1130,7 +1130,7 @@ function verifySchema(d: Database.Database): void {
         d.exec(ddl)
         log.warn(`[database] self-heal: added missing column ${table}.${column}`)
       } catch (err) {
-        log.error(`[database] self-heal: failed to add ${table}.${column}:`, err)
+        log.error({ err }, `[database] self-heal: failed to add ${table}.${column}:`)
       }
     }
   }

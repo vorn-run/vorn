@@ -12,7 +12,9 @@ import {
   RUNTIME_PROTOCOL_VERSION,
   CLOSE_UNAUTHENTICATED,
   CLOSE_CREDENTIAL_REJECTED,
-  RPC_NOT_AUTHENTICATED
+  RPC_NOT_AUTHENTICATED,
+  type ClientNotification,
+  type ClientNotifications
 } from '@vornrun/shared/protocol'
 import { authenticateCredential, AUTH_TIMEOUT_MS, type Authenticated } from './ws-auth'
 import { clientRegistry } from './broadcast'
@@ -67,8 +69,17 @@ export function registerMethod<M extends RequestMethod>(
 
 /**
  * Register a fire-and-forget notification handler (no response sent).
+ *
+ * Typed against `ClientNotifications` the way `registerMethod` is against
+ * `RequestMethods`. It used to take a bare `string` and `unknown`, so a handler
+ * could not destructure its own parameters without an implicit `any`, and the
+ * payload shape was checked on neither side of the wire — for `terminal:write`,
+ * whose params reach a PTY.
  */
-export function registerNotification(method: string, handler: (params: unknown) => void): void {
+export function registerNotification<N extends ClientNotification>(
+  method: N,
+  handler: (params: ClientNotifications[N]) => void
+): void {
   handlers.set(`notify:${method}`, handler as Handler)
 }
 

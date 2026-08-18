@@ -223,7 +223,7 @@ class Scheduler extends EventEmitter {
           })
           this.cronJobs.set(wf.id, task)
         } catch (err) {
-          log.error(`[scheduler] failed to schedule workflow "${wf.name}":`, err)
+          log.error({ err }, `[scheduler] failed to schedule workflow "${wf.name}":`)
         }
       }
 

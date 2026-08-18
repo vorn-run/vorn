@@ -11,7 +11,7 @@ class ScheduleLogManager {
     try {
       dbAddEntry(entry)
     } catch (err) {
-      log.warn('[schedule-log] addEntry failed:', err)
+      log.warn({ err }, '[schedule-log] addEntry failed:')
     }
   }
 
@@ -19,7 +19,7 @@ class ScheduleLogManager {
     try {
       return dbGetEntries(workflowId)
     } catch (err) {
-      log.warn('[schedule-log] getEntries failed:', err)
+      log.warn({ err }, '[schedule-log] getEntries failed:')
       return []
     }
   }
@@ -28,7 +28,7 @@ class ScheduleLogManager {
     try {
       dbClear()
     } catch (err) {
-      log.warn('[schedule-log] clear failed:', err)
+      log.warn({ err }, '[schedule-log] clear failed:')
     }
   }
 }
