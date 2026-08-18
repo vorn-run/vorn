@@ -76,6 +76,12 @@ function normaliseHostHeader(raw: string | undefined): string | null {
 function isIpLiteral(hostname: string): boolean {
   // The parser has already canonicalised these by the time we see them: IPv4
   // shorthands like `127.1` arrive as `127.0.0.1`, and IPv6 keeps its brackets.
+  //
+  // This is a shape test, not a validity test, and it does not need to be: a
+  // hostname whose last label is numeric is parsed as IPv4, and `new URL` rejects
+  // it outright when an octet is out of range. So `999.999.999.999` never arrives
+  // here at all, and a numeric-looking name that is not an address cannot reach
+  // this and be mistaken for an unrebindable one.
   if (hostname.startsWith('[') && hostname.endsWith(']')) return true
   return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)
 }

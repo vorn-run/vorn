@@ -206,4 +206,20 @@ describe('IPv6 and IPv4 canonical forms', () => {
   it('still allows the canonical form the parser produces from those', () => {
     expect(isAllowedUpgrade(`http://127.0.0.1:${PORT}`, `127.0.0.1:${PORT}`)).toBe(true)
   })
+
+  it.each(['999.999.999.999', '256.1.1.1', '1.2.3.999'])(
+    'refuses %s, which looks like an IP literal but is not one',
+    (host) => {
+      // Raised in review of #464: the literal check is a shape test, so an
+      // out-of-range octet would pass it — and a numeric-looking name that is not a
+      // real address is still resolvable, so treating it as unrebindable would
+      // weaken the rule it exists to enforce.
+      //
+      // It never reaches that check. WHATWG parsing treats a hostname whose last
+      // label is numeric as IPv4 and rejects it outright, so `new URL` throws and
+      // the guard above refuses. Pinned here because the defence lives in the
+      // parser rather than in code anyone reading ws-origin.ts would see.
+      expect(isAllowedUpgrade(`http://${host}:${PORT}`, `${host}:${PORT}`)).toBe(false)
+    }
+  )
 })
