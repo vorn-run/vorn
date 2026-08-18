@@ -639,9 +639,13 @@ export function registerAllMethods(): void {
   // pairing a phone meant finding a terminal on the machine running the server.
   registerMethod('token:list', () => listTokens())
   registerMethod('token:create', ({ name }) => {
+    // Coerced rather than trusted: a malformed param would otherwise fail inside
+    // `.trim()` with a TypeError that reaches the client verbatim, saying nothing
+    // about what was wrong.
+    const label = typeof name === 'string' ? name.trim() : ''
     // The plaintext is returned exactly once and never stored — only its hash
     // reaches the database — so the caller has to show it and then drop it.
-    const minted = mintOwnerToken(name.trim() || 'Device')
+    const minted = mintOwnerToken(label || 'Device')
     return { token: minted.token, plaintext: minted.plaintext }
   })
   registerMethod('token:revoke', (id) => {

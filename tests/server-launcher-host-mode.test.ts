@@ -19,6 +19,8 @@ vi.mock('../src/main/server/host-store', () => ({
 }))
 
 const bridges: FakeBridge[] = []
+/** Set when the test wants a host that accepts the socket but never identifies. */
+const connectHangs = { value: false }
 
 class FakeBridge extends EventEmitter {
   requests: string[] = []
@@ -31,7 +33,9 @@ class FakeBridge extends EventEmitter {
     bridges.push(this)
   }
   connect(): void {
-    // The real bridge emits this once the socket opens and identifies.
+    // The real bridge emits this once the socket opens and identifies. A host that
+    // never answers simply never emits, which is the case the timeout exists for.
+    if (connectHangs.value) return
     setImmediate(() => this.emit('connected'))
   }
   async request(method: string): Promise<unknown> {
@@ -66,6 +70,7 @@ beforeEach(() => {
   vi.resetModules()
   spawned.length = 0
   bridges.length = 0
+  connectHangs.value = false
   hostSettings.value = { mode: 'local', url: '', token: undefined }
 })
 
@@ -102,6 +107,28 @@ describe('launching in host mode', () => {
 
     expect(lastBridge()?.requests).not.toContain('server:shutdown')
     expect(lastBridge()?.closed).toBe(true)
+  })
+
+  it('gives up the socket when the host never answers', async () => {
+    // The bridge reconnects every two seconds on its own, and nothing acts on a
+    // late success once startup has moved to the connect window. Leaving it running
+    // meant a timer and a listener churning for as long as the app was open.
+    hostSettings.value = { mode: 'host', url: 'ws://box:61601/ws', token: 'vorn_a_b' }
+    connectHangs.value = true
+    vi.useFakeTimers()
+    const { launchServer, getServerBridge } = await import('../src/main/server/server-launcher')
+
+    const attempt = launchServer()
+    const settled = attempt.then(
+      () => 'resolved',
+      () => 'rejected'
+    )
+    await vi.advanceTimersByTimeAsync(20_000)
+
+    expect(await settled).toBe('rejected')
+    expect(lastBridge()?.closed).toBe(true)
+    expect(getServerBridge()).toBeNull()
+    vi.useRealTimers()
   })
 
   it('asks for a token rather than quietly opening a local database', async () => {

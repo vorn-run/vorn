@@ -25,16 +25,26 @@ async function connectToHost(url: string, token: string): Promise<ServerBridge> 
   bridge = new ServerBridge(url, token)
   bridge.connect()
 
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error(`Could not reach ${url}`)),
-      HOST_CONNECT_TIMEOUT_MS
-    )
-    bridge!.once('connected', () => {
-      clearTimeout(timeout)
-      resolve()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error(`Could not reach ${url}`)),
+        HOST_CONNECT_TIMEOUT_MS
+      )
+      bridge!.once('connected', () => {
+        clearTimeout(timeout)
+        resolve()
+      })
     })
-  })
+  } catch (err) {
+    // Give up on the socket as well as the wait. The bridge reconnects every two
+    // seconds on its own and nothing here would ever act on a late success, so
+    // leaving it running means a timer and a listener churning behind the connect
+    // window for as long as the app is open, against a host that may never answer.
+    bridge?.close()
+    bridge = null
+    throw err
+  }
 
   return bridge
 }
