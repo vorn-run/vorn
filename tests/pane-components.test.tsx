@@ -604,6 +604,28 @@ describe('BrowserCard', () => {
     expect(tab?.liveUrl).toBe('https://vorn.dev/docs')
   })
 
+  it('lets the guest clear its own title', () => {
+    // An explicitly empty title is a page saying it has none. Read as a
+    // missing report it would leave the previous page's name on the strip.
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('page-title-updated'), { title: 'Named', explicitSet: true })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.title).toBe('Named')
+
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('page-title-updated'), { title: '', explicitSet: true })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.title).toBeUndefined()
+  })
+
   it('ignores a subframe navigating, which is not where the person is', () => {
     // Ads, embedded docs and OAuth widgets route in place constantly. Taking a
     // subframe's url would have the strip, the address bar and `browser_tabs

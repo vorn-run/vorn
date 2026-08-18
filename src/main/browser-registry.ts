@@ -704,6 +704,16 @@ export async function navigate(params: {
   sessionId: string
   url: string
 }): Promise<{ url: string }> {
+  // A `file:` url cannot be judged before the pane exists: the session's root
+  // arrives with the attach, and until it does every file url is refused as an
+  // unallowed scheme. Opening the pane first is what lets "show me this local
+  // page" work from a standing start, which is the whole point of the
+  // capability — otherwise it only worked once something else had opened a
+  // pane, and failed with a message about the address rather than the timing.
+  if (/^\s*file:/i.test(params.url) && !entries.get(params.sessionId)?.attached) {
+    await openPane({ sessionId: params.sessionId })
+  }
+
   const normalized = loadableUrl(params.sessionId, params.url)
   if (!normalized) {
     throw new Error(`Refusing to navigate to "${params.url}" — not an allowed web address.`)

@@ -184,7 +184,11 @@ export const BrowserCard = memo(
         // A guest with no <title> reports its url as the title, which would put
         // a second copy of the address where the page's name belongs.
         if (detail.explicitSet === false) return
-        if (detail.title) syncBrowserTab(key, tabIndexRef.current, { title: detail.title })
+        // An explicit empty title is a page clearing its name, not a missing
+        // report — treated as absent, the strip would keep the old one.
+        if (typeof detail.title === 'string') {
+          syncBrowserTab(key, tabIndexRef.current, { title: detail.title })
+        }
       }
 
       // The guest only has a webContentsId once it has attached. Reporting it

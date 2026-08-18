@@ -518,6 +518,14 @@ describe('what a tab reports about itself', () => {
     expect(tab?.title).toBeUndefined()
   })
 
+  it('lets a page clear its own name', () => {
+    // An explicitly empty title is a page saying it has none, not a missing
+    // report. Treated as absent it would leave the previous name in place.
+    act(() => s().syncBrowserTab('t1', 0, { title: 'Named' }))
+    act(() => s().syncBrowserTab('t1', 0, { title: '' }))
+    expect(s().browserPanes.get('t1')?.tabs[0]?.title).toBeUndefined()
+  })
+
   it('keeps the title when the guest re-reports the same page', () => {
     // A reload or a repeated load event is not a new page, and clearing the
     // title on every one would make the strip flicker between name and host.
