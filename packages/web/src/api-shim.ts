@@ -21,6 +21,20 @@ export class AuthRequiredError extends Error {
   }
 }
 
+/**
+ * A call that depends on the machine running the server, refused where it cannot work.
+ *
+ * Rejecting rather than resolving with a plausible-looking empty value: these are
+ * writes and device actions, and a caller that believes one succeeded is worse off
+ * than one that sees why it did not.
+ */
+function unsupportedInWeb(what: string): () => Promise<never> {
+  return () =>
+    Promise.reject(
+      new Error(`${what} is only available in the Vorn app on the machine running the server.`)
+    )
+}
+
 export function readStoredToken(): string {
   try {
     return localStorage.getItem(TOKEN_STORAGE_KEY) ?? ''
@@ -534,7 +548,130 @@ export function createApiShim(wsUrl: string) {
     downloadUpdate: () => {},
     setUpdateAutoDownload: (_enabled: boolean) => {},
     installUpdate: () => {},
-    setUpdateChannel: (_channel: 'stable' | 'beta') => {}
+    setUpdateChannel: (_channel: 'stable' | 'beta') => {},
+
+    // ── Git ──
+    isGitRepo: (projectPath: string) => rpc.invoke('git:isGitRepo', projectPath),
+    getGitBranch: (cwd: string) => rpc.invoke('git:getBranch', cwd),
+    checkoutBranch: (cwd: string, branch: string) =>
+      rpc.invoke('git:checkoutBranch', { cwd, branch }),
+    getWorktreeBranch: (worktreePath: string) => rpc.invoke('git:getWorktreeBranch', worktreePath),
+    renameWorktree: (worktreePath: string, newName: string) =>
+      rpc.invoke('git:renameWorktree', { worktreePath, newName }),
+
+    // ── Files ──
+    listDir: (dirPath: string, remoteHostId?: string) =>
+      rpc.invoke('file:listDir', { dirPath, remoteHostId }),
+    readFileContent: (filePath: string, maxBytes?: number, remoteHostId?: string) =>
+      rpc.invoke('file:readContent', { filePath, maxBytes, remoteHostId }),
+    writeFileContent: (filePath: string, content: string, remoteHostId?: string) =>
+      rpc.invoke('file:writeContent', { filePath, content, remoteHostId }),
+
+    // ── Shells ──
+    listShellExecutables: () => rpc.invoke('shell:listExecutables'),
+    listInstalledShells: () => rpc.invoke('shell:listInstalled'),
+
+    // ── Sessions, headless and events ──
+    listHeadlessSessions: () => rpc.invoke('headless:list'),
+    listSessionEventsBySession: (sessionId: string, limit?: number) =>
+      rpc.invoke('sessionEvent:listBySession', { sessionId, limit }),
+
+    // ── Workflow runs ──
+    // The two list calls send `{}` rather than nothing, matching what the main
+    // process sends — the server reads a property off the params object.
+    listAllWorkflowRuns: (workspaceId?: string, limit?: number) =>
+      rpc.invoke('workflowRun:listAll', { workspaceId, limit }),
+    listRunningWorkflowRuns: () => rpc.invoke('workflowRun:listRunning', {}),
+    listRunsWithWaitingGates: () => rpc.invoke('workflowRun:listWaiting', {}),
+    claimWorkflowRun: (req: { workflowId: string; params?: string; windowMs?: number }) =>
+      rpc.invoke('workflowRun:claim', req),
+    releaseWorkflowRun: (req: { workflowId: string; params?: string; runId: string }) =>
+      rpc.invoke('workflowRun:release', req),
+    runWorkflowManual: (workflowId: string, inputs?: Record<string, unknown>) =>
+      rpc.invoke('workflow:runManual', { workflowId, inputs }),
+
+    // ── Connections and connectors ──
+    listConnections: (connectorId?: string) => rpc.invoke('connection:list', { connectorId }),
+    createConnection: (params: unknown) => rpc.invoke('connection:create', params),
+    updateConnection: (id: string, updates: unknown) =>
+      rpc.invoke('connection:update', { id, updates }),
+    deleteConnection: (id: string) => rpc.invoke('connection:delete', id),
+    backfillConnection: (connectionId: string) =>
+      rpc.invoke('connection:backfill', { connectionId }),
+    listConnectionActions: (connectionId: string) =>
+      rpc.invoke('connection:listActions', connectionId),
+    executeConnectorAction: (params: {
+      connectionId: string
+      action: string
+      args: Record<string, unknown>
+    }) => rpc.invoke('connection:executeAction', params),
+    listMcpTools: (connectionId: string) => rpc.invoke('connection:listMcpTools', connectionId),
+    refreshMcpTools: (connectionId: string) =>
+      rpc.invoke('connection:refreshMcpTools', connectionId),
+    getTaskSourceLink: (taskId: string) => rpc.invoke('connection:getSourceLink', taskId),
+    upsertTaskFromItem: (params: unknown) => rpc.invoke('connection:upsertFromItem', params),
+    listConnectors: () => rpc.invoke('connector:list'),
+    getConnector: (id: string) => rpc.invoke('connector:get', id),
+    getConnectorStatus: () => rpc.invoke('connector:status'),
+    listConnectorCatalog: () => rpc.invoke('connector:catalog'),
+    refreshConnectorCatalog: () => rpc.invoke('connector:catalogRefresh'),
+    probeSdkConnector: (request: unknown) => rpc.invoke('connector:probeSdk', request),
+    detectRepo: (projectPath: string) => rpc.invoke('connector:detectRepo', projectPath),
+    seedConnectorWorkflow: (connectionId: string, event: string) =>
+      rpc.invoke('connector:seedWorkflow', { connectionId, event }),
+
+    // ── Projects and remote hosts ──
+    detectMobileProject: (projectPath: string) =>
+      rpc.invoke('project:detectMobile', { projectPath }),
+    testSshConnection: (host: unknown) => rpc.invoke('ssh:testConnection', host),
+
+    // ── Opening a link ──
+    // The one Electron-only call with a real browser equivalent. `noopener` because
+    // the opened page would otherwise get a handle on this one.
+    openExternal: async (url: string): Promise<void> => {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    },
+
+    // ── Window chrome (no-op in web) ──
+    // The browser owns the window, so there is nothing to report or subscribe to.
+    isWindowMaximized: async (): Promise<boolean> => false,
+    onWindowMaximizedChange: (_callback: (maximized: boolean) => void) => () => {},
+
+    // ── Credential vault (unavailable in web) ──
+    // Backed by Electron's safeStorage, which is an OS keychain binding with no
+    // browser equivalent. `isSafeStorageAvailable` answering false is the honest
+    // reply and is what the SSH settings UI already gates on, so the panel explains
+    // itself rather than offering controls that would fail. The list is genuinely
+    // empty here; the writes reject, because silently discarding a private key the
+    // person believed they had saved is the worse failure.
+    isSafeStorageAvailable: async (): Promise<boolean> => false,
+    listSSHKeys: async () => [],
+    storeSSHKey: unsupportedInWeb('Storing an SSH key'),
+    importSSHKeyFile: unsupportedInWeb('Importing an SSH key'),
+    deleteSSHKey: unsupportedInWeb('Deleting an SSH key'),
+    encryptString: unsupportedInWeb('Encrypting a credential'),
+
+    // ── Browser and device panes (unavailable in web) ──
+    // Both drive something on the host machine — an embedded Electron view, and a
+    // simulator over its local control socket. Neither is reachable from a browser
+    // on another device, so the queries answer empty and the actions say why. The
+    // subscriptions return an unsubscribe that does nothing: App registers them at
+    // mount, and a missing one throws during render and takes the whole app down.
+    onBrowserOpenPane: (_callback: (p: { sessionId: string; url?: string }) => void) => () => {},
+    onBrowserTabCommand: (_callback: (p: unknown) => void) => () => {},
+    onDeviceOpenPane: (_callback: (p: unknown) => void) => () => {},
+    attachBrowser: (_sessionId: string, _webContentsId: number): void => {},
+    detachBrowser: (_sessionId: string): void => {},
+    cancelBrowserPick: (_sessionId: string): void => {},
+    startBrowserPick: async () => null,
+    annotateBrowser: unsupportedInWeb('Annotating the browser pane'),
+    deviceList: async () => [],
+    deviceClaim: unsupportedInWeb('Claiming a device'),
+    deviceRelease: async () => ({ released: false }),
+    deviceScreenshot: unsupportedInWeb('Taking a device screenshot'),
+    deviceInteract: unsupportedInWeb('Interacting with a device'),
+    pickDeviceElement: unsupportedInWeb('Picking a device element'),
+    annotateDevice: unsupportedInWeb('Annotating the device pane')
   }
 
   return api
