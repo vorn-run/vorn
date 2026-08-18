@@ -30,7 +30,7 @@
     "ci:local": "bash scripts/ci-local.sh",
     "deps:install": "bash scripts/yarn-install.sh",
     "prepare": "simple-git-hooks",
-    "typecheck:mcp": "tsc --build packages/shared packages/server && tsc --noEmit -p packages/mcp/tsconfig.json"
+    "typecheck:mcp": "tsc --build --force packages/shared packages/server && tsc --noEmit -p packages/mcp/tsconfig.json"
   },
   "simple-git-hooks": {
     "pre-commit": "bash scripts/sync-versions.sh && yarn lint-staged",
