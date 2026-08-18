@@ -89,7 +89,13 @@ export function writeHostSettings(settings: HostSettings): void {
   }
 
   try {
-    fs.writeFileSync(FILE(), JSON.stringify(stored, null, 2), { encoding: 'utf-8', mode: 0o600 })
+    const file = FILE()
+    fs.writeFileSync(file, JSON.stringify(stored, null, 2), { encoding: 'utf-8', mode: 0o600 })
+    // `mode` above only applies when the file is created, so a host.json left
+    // world-readable by an older build or a hand edit would keep those permissions
+    // for good. It holds an encrypted credential, so the mode is asserted on every
+    // write rather than hoped for.
+    fs.chmodSync(file, 0o600)
   } catch (err) {
     log.error({ err }, '[host-store] could not write host.json')
   }

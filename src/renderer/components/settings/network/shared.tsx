@@ -19,15 +19,25 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
   const [copied, setCopied] = useState(false)
 
   const copy = useCallback(() => {
-    navigator.clipboard.writeText(text).then(
-      () => {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      },
-      () => {
-        window.prompt('Copy this URL:', text)
-      }
-    )
+    // `navigator.clipboard` is absent entirely outside a secure context, so
+    // reaching for `.writeText` throws before any promise exists and the rejection
+    // handler below never runs. That is not a corner case here: this panel's whole
+    // subject is a plain-HTTP address on a LAN, which is precisely where the API is
+    // missing and the fallback is the only thing that works.
+    const fallback = (): void => {
+      window.prompt('Copy this URL:', text)
+    }
+    const done = (): void => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+    try {
+      const clipboard = navigator.clipboard
+      if (!clipboard?.writeText) return fallback()
+      clipboard.writeText(text).then(done, fallback)
+    } catch {
+      fallback()
+    }
   }, [text])
 
   return (

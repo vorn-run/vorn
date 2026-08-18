@@ -8,6 +8,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
  */
 
 const files = new Map<string, string>()
+/** Permissions the store asked for, so a test can check they were actually set. */
+const modes = new Map<string, number>()
 const encryptionAvailable = { value: true }
 
 vi.mock('node:fs', async (importOriginal) => {
@@ -21,7 +23,15 @@ vi.mock('node:fs', async (importOriginal) => {
         if (found === undefined) throw new Error('ENOENT')
         return found
       },
-      writeFileSync: (p: string, data: string) => files.set(p, data),
+      writeFileSync: (p: string, data: string, opts?: { mode?: number }) => {
+        // Real `fs` applies `mode` only when it creates the file. Modelling that is
+        // the whole point here: a mock that honoured it unconditionally would let a
+        // missing chmod pass, which is exactly the bug under test.
+        const isNew = !files.has(p)
+        files.set(p, data)
+        if (isNew && opts?.mode !== undefined) modes.set(p, opts.mode)
+      },
+      chmodSync: (p: string, mode: number) => modes.set(p, mode),
       rmSync: (p: string) => files.delete(p)
     }
   }
@@ -54,6 +64,7 @@ import { normaliseHostUrl } from '../src/main/server/connect-window'
 
 beforeEach(() => {
   files.clear()
+  modes.clear()
   encryptionAvailable.value = true
 })
 
@@ -148,5 +159,25 @@ describe('normalising what someone pastes', () => {
 
   it('hands back unparseable input rather than inventing a URL', () => {
     expect(normaliseHostUrl('http://')).toBe('http://')
+  })
+})
+
+describe('permissions on the stored credential', () => {
+  it('narrows an existing file rather than trusting the create mode', () => {
+    // `mode` on writeFileSync only applies when the file is created, so a host.json
+    // left world-readable by an older build or a hand edit would keep those
+    // permissions for good. It holds an encrypted credential.
+    files.set('/userData/host.json', '{}')
+    modes.set('/userData/host.json', 0o644)
+
+    writeHostSettings({ mode: 'host', url: 'ws://box:61601/ws', token: 'vorn_a_b' })
+
+    expect(modes.get('/userData/host.json')).toBe(0o600)
+  })
+
+  it('creates a new file already narrowed', () => {
+    writeHostSettings({ mode: 'host', url: 'ws://box:61601/ws', token: 'vorn_a_b' })
+
+    expect(modes.get('/userData/host.json')).toBe(0o600)
   })
 })

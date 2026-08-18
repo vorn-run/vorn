@@ -55,7 +55,8 @@ const HOST_CONNECT_TIMEOUT_MS = 15_000
  * NOTE: Previously this used `spawn(process.execPath, ...)` in production,
  * which caused an infinite app spawn loop because process.execPath is the
  * Electron binary — spawning it launches another full Electron app instance.
- */ export async function launchServer(): Promise<ServerBridge> {
+ */
+export async function launchServer(): Promise<ServerBridge> {
   const host = readHostSettings()
   if (host.mode === 'host' && host.url) {
     // Configured for a host but holding no credential — safeStorage was
