@@ -233,3 +233,75 @@ describe('collections survive a save that did not carry them', () => {
     expect(loaded.projects[0].path).toBe('/b')
   })
 })
+
+describe('two clients saving against the same server', () => {
+  // The failure this prevents: Vorn open on a laptop and a phone, both holding a
+  // config loaded moments apart. Whichever saved second sent a snapshot that
+  // predated the other's addition, and the prune removed it. No error, no log —
+  // the task was simply gone.
+  function base(over: Partial<AppConfig>): AppConfig {
+    return {
+      version: 1,
+      defaults: { shell: '/bin/zsh', fontSize: 13, theme: 'dark' },
+      projects: [],
+      ...over
+    } as AppConfig
+  }
+
+  const task = (id: string) => ({
+    id,
+    projectName: 'vorn',
+    title: id,
+    description: '',
+    status: 'todo',
+    order: 0,
+    createdAt: '2026-08-17T00:00:00.000Z',
+    updatedAt: '2026-08-17T00:00:00.000Z'
+  })
+
+  it('keeps a task added by the client that saved first', () => {
+    saveConfig(base({ tasks: [task('shared')] } as Partial<AppConfig>))
+    const laptop = loadConfig()
+    const phone = loadConfig()
+
+    // Phone adds a task and saves.
+    saveConfig({ ...phone, tasks: [...(phone.tasks ?? []), task('from-phone')] })
+    // Laptop saves a settings change from the snapshot it loaded earlier, which
+    // knows nothing about the phone's task.
+    saveConfig({ ...laptop, defaults: { ...laptop.defaults, fontSize: 15 } })
+
+    const after = loadConfig()
+    expect(after.tasks?.map((t) => t.id).sort()).toEqual(['from-phone', 'shared'])
+    expect(after.defaults.fontSize).toBe(15)
+  })
+
+  it('still deletes a task the client actually removed', () => {
+    // The other half: pruning has to keep working for a real deletion, or nothing
+    // could ever be removed.
+    saveConfig(base({ tasks: [task('a'), task('b')] } as Partial<AppConfig>))
+    const client = loadConfig()
+
+    saveConfig({ ...client, tasks: (client.tasks ?? []).filter((t) => t.id !== 'b') })
+
+    expect(loadConfig().tasks?.map((t) => t.id)).toEqual(['a'])
+  })
+
+  it('prunes everything absent when the caller tracks no revision', () => {
+    // The CLI, a test, or the server persisting its own port send no revision, and
+    // must keep the old semantics rather than silently never deleting anything.
+    saveConfig(base({ tasks: [task('a'), task('b')] } as Partial<AppConfig>))
+
+    saveConfig(base({ tasks: [task('a')] } as Partial<AppConfig>))
+
+    expect(loadConfig().tasks?.map((t) => t.id)).toEqual(['a'])
+  })
+
+  it('hands back a revision that moves forward', () => {
+    saveConfig(base({}))
+    const first = loadConfig().revision ?? 0
+
+    saveConfig(base({}))
+
+    expect(loadConfig().revision).toBeGreaterThan(first)
+  })
+})

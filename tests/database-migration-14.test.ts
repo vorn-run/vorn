@@ -32,6 +32,15 @@ function query<T>(fn: (d: Database.Database) => T): T {
   }
 }
 
+/**
+ * The version identity landed on, not a literal.
+ *
+ * These assertions used to name 14, which made every later migration fail a test
+ * that has nothing to say about it. What matters here is that migration 14 ran,
+ * so the floor is what gets checked.
+ */
+const IDENTITY_SCHEMA_VERSION = 14
+
 const readSchemaVersion = (): number =>
   query((d) => {
     const row = d.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'").get() as
@@ -67,7 +76,7 @@ describe('migration 14 — identity and device tokens', () => {
     initDatabase(dataDir)
     closeDatabase()
 
-    expect(readSchemaVersion()).toBe(14)
+    expect(readSchemaVersion()).toBeGreaterThanOrEqual(IDENTITY_SCHEMA_VERSION)
     expect(countUsers()).toBe(1)
   })
 
@@ -77,7 +86,7 @@ describe('migration 14 — identity and device tokens', () => {
 
     rewindToVersion13()
     expect(countUsers()).toBe(0)
-    expect(readSchemaVersion()).toBe(13)
+    expect(readSchemaVersion()).toBe(IDENTITY_SCHEMA_VERSION - 1)
 
     initDatabase(dataDir)
     const owner = dbGetOwnerUser()
@@ -85,7 +94,7 @@ describe('migration 14 — identity and device tokens', () => {
 
     expect(owner).not.toBeNull()
     expect(owner?.role).toBe('owner')
-    expect(readSchemaVersion()).toBe(14)
+    expect(readSchemaVersion()).toBeGreaterThanOrEqual(IDENTITY_SCHEMA_VERSION)
     expect(countUsers()).toBe(1)
   })
 
@@ -137,7 +146,7 @@ describe('corrupt database recovery', () => {
     )
 
     // Rebuilt, migrated, and seeded — not merely opened.
-    expect(readSchemaVersion()).toBe(14)
+    expect(readSchemaVersion()).toBeGreaterThanOrEqual(IDENTITY_SCHEMA_VERSION)
     expect(owner?.role).toBe('owner')
   })
 })

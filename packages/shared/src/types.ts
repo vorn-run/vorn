@@ -980,6 +980,14 @@ export type UpdateStatus =
 
 export interface AppConfig {
   version: number
+  /**
+   * Which save produced this snapshot.
+   *
+   * Round-tripped by the client — every call site spreads the whole config, so it
+   * returns untouched — and used by the server to tell a row the client deleted
+   * from one it never saw. Absent from a caller that does not track it.
+   */
+  revision?: number
   defaults: {
     shell: string
     fontSize: number

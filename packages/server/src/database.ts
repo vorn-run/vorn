@@ -938,6 +938,56 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 14 (identity and device tokens)')
   }
+
+  if (version < 15) {
+    // Every row in the config blob learns which save wrote it.
+    //
+    // `saveConfig` receives a whole snapshot and prunes anything absent from it,
+    // which is correct for a deletion and destructive for a row that simply did
+    // not exist when the saving client last loaded. Two clients is now ordinary,
+    // so that difference has to be visible: a row stamped after the client's base
+    // revision is one it could not have known about, and is not its to remove.
+    d.transaction(() => {
+      for (const table of REVISIONED_TABLES) {
+        // Guarded the way every other ALTER here is: the column can already exist
+        // when a database has been rewound, or repaired by verifySchema on an
+        // earlier boot, and an unguarded ALTER aborts the whole transaction.
+        const columns = d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+        if (columns.some((c) => c.name === 'row_revision')) continue
+        d.exec(`ALTER TABLE ${table} ADD COLUMN row_revision INTEGER NOT NULL DEFAULT 0`)
+      }
+      // Existing rows keep revision 0, below any future base, so the first saves
+      // after upgrading prune exactly as they did before.
+      d.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run(
+        CONFIG_REVISION_KEY,
+        '0'
+      )
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '15')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 15 (config row revisions)')
+  }
+}
+
+/** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
+const REVISIONED_TABLES = [
+  'projects',
+  'tasks',
+  'workspaces',
+  'remote_hosts',
+  'agent_commands'
+] as const
+
+const CONFIG_REVISION_KEY = 'config_revision'
+
+/** Monotonic counter, bumped once per `saveConfig`. */
+function readConfigRevision(d: Database.Database): number {
+  const row = d.prepare('SELECT value FROM schema_meta WHERE key = ?').get(CONFIG_REVISION_KEY) as
+    | { value: string }
+    | undefined
+  const parsed = Number(row?.value)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 /**
@@ -1056,6 +1106,20 @@ function verifySchema(d: Database.Database): void {
     ]
   }
 
+  // Migration 15, appended rather than written into the literal above so it cannot
+  // be shadowed by a table that already has an entry there. Repaired at all because
+  // a version bump whose ALTER did not stick leaves `pruneMissing` selecting a
+  // column that is not there — and that runs on every config save.
+  for (const table of REVISIONED_TABLES) {
+    expectedByTable[table] = [
+      ...(expectedByTable[table] ?? []),
+      {
+        column: 'row_revision',
+        ddl: `ALTER TABLE ${table} ADD COLUMN row_revision INTEGER NOT NULL DEFAULT 0`
+      }
+    ]
+  }
+
   for (const [table, columns] of Object.entries(expectedByTable)) {
     const existing = new Set(
       (d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name)
@@ -1089,6 +1153,7 @@ export function loadConfig(): AppConfig {
 
   return {
     version: 1,
+    revision: readConfigRevision(d),
     defaults,
     projects,
     agentCommands:
@@ -1328,15 +1393,23 @@ function pruneMissing(
   d: Database.Database,
   table: string,
   keyColumn: string,
-  keep: Array<string | null | undefined>
+  keep: Array<string | null | undefined>,
+  baseRevision: number
 ): void {
   const wanted = new Set(keep.filter((k): k is string => typeof k === 'string'))
-  const existing = d.prepare(`SELECT ${keyColumn} AS key FROM ${table}`).all() as Array<{
-    key: string
-  }>
+  const existing = d
+    .prepare(`SELECT ${keyColumn} AS key, row_revision AS revision FROM ${table}`)
+    .all() as Array<{ key: string; revision: number }>
   const remove = d.prepare(`DELETE FROM ${table} WHERE ${keyColumn} = ?`)
-  for (const { key } of existing) {
-    if (!wanted.has(key)) remove.run(key)
+  for (const { key, revision } of existing) {
+    if (wanted.has(key)) continue
+    // Absent from the snapshot means one of two things, and the revision is what
+    // separates them: a row the client deleted, or a row it never saw because
+    // another client added it after this one last loaded. Only the first is a
+    // deletion. Without this, Vorn open on a laptop and a phone meant whichever
+    // saved second quietly removed the other's tasks.
+    if (revision > baseRevision) continue
+    remove.run(key)
   }
 }
 
@@ -1344,6 +1417,11 @@ export function saveConfig(config: AppConfig): void {
   const d = getDb()
 
   const run = d.transaction(() => {
+    // What the saving client last saw. Absent means a caller that does not track
+    // revisions — the CLI, a test, the server persisting its own port — and those
+    // keep the old behaviour of pruning everything their snapshot omits.
+    const baseRevision = config.revision ?? Number.MAX_SAFE_INTEGER
+    const revision = readConfigRevision(d) + 1
     // Defaults are upserted key by key, never wiped.
     //
     // A client sends whatever object its build happens to hold, so deleting the
@@ -1377,12 +1455,14 @@ export function saveConfig(config: AppConfig): void {
       d,
       'projects',
       'name',
-      config.projects.map((p) => p.name)
+      config.projects.map((p) => p.name),
+      baseRevision
     )
     const insertProject = d.prepare(
-      `INSERT INTO projects (name, path, preferred_agents, icon, icon_color, host_ids, workspace_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO projects (name, path, preferred_agents, icon, icon_color, host_ids, workspace_id, row_revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(name) DO UPDATE SET
+         row_revision = excluded.row_revision,
          path = excluded.path,
          preferred_agents = excluded.preferred_agents,
          icon = excluded.icon,
@@ -1398,7 +1478,8 @@ export function saveConfig(config: AppConfig): void {
         p.icon ?? null,
         p.iconColor ?? null,
         p.hostIds ? JSON.stringify(p.hostIds) : null,
-        p.workspaceId ?? 'personal'
+        p.workspaceId ?? 'personal',
+        revision
       )
     }
 
@@ -1445,11 +1526,18 @@ export function saveConfig(config: AppConfig): void {
     }
 
     // Agent commands
-    pruneMissing(d, 'agent_commands', 'agent_type', Object.keys(config.agentCommands ?? {}))
+    pruneMissing(
+      d,
+      'agent_commands',
+      'agent_type',
+      Object.keys(config.agentCommands ?? {}),
+      baseRevision
+    )
     const insertAgent = d.prepare(
-      `INSERT INTO agent_commands (agent_type, command, args, headless_args, fallback_command, fallback_args)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO agent_commands (agent_type, command, args, headless_args, fallback_command, fallback_args, row_revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(agent_type) DO UPDATE SET
+         row_revision = excluded.row_revision,
          command = excluded.command,
          args = excluded.args,
          headless_args = excluded.headless_args,
@@ -1465,7 +1553,8 @@ export function saveConfig(config: AppConfig): void {
             JSON.stringify(cmd.args),
             cmd.headlessArgs ? JSON.stringify(cmd.headlessArgs) : null,
             cmd.fallbackCommand ?? null,
-            cmd.fallbackArgs ? JSON.stringify(cmd.fallbackArgs) : null
+            cmd.fallbackArgs ? JSON.stringify(cmd.fallbackArgs) : null,
+            revision
           )
         }
       }
@@ -1476,12 +1565,14 @@ export function saveConfig(config: AppConfig): void {
       d,
       'remote_hosts',
       'id',
-      (config.remoteHosts ?? []).map((h) => h.id)
+      (config.remoteHosts ?? []).map((h) => h.id),
+      baseRevision
     )
     const insertHost = d.prepare(
-      `INSERT INTO remote_hosts (id, label, hostname, user, port, auth_method, ssh_key_path, credential_id, encrypted_password, ssh_options)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO remote_hosts (id, label, hostname, user, port, auth_method, ssh_key_path, credential_id, encrypted_password, ssh_options, row_revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
+         row_revision = excluded.row_revision,
          label = excluded.label,
          hostname = excluded.hostname,
          user = excluded.user,
@@ -1503,7 +1594,8 @@ export function saveConfig(config: AppConfig): void {
         h.sshKeyPath ?? null,
         h.credentialId ?? null,
         h.encryptedPassword ?? null,
-        h.sshOptions ?? null
+        h.sshOptions ?? null,
+        revision
       )
     }
 
@@ -1514,12 +1606,14 @@ export function saveConfig(config: AppConfig): void {
       d,
       'tasks',
       'id',
-      (config.tasks ?? []).map((t) => t.id)
+      (config.tasks ?? []).map((t) => t.id),
+      baseRevision
     )
     const insertTask = d.prepare(
-      `INSERT INTO tasks (id, project_name, title, description, status, "order", assigned_session_id, assigned_agent, agent_session_id, branch, use_worktree, created_at, updated_at, completed_at, archived_at, source_connector_id, source_external_url, source_external_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO tasks (id, project_name, title, description, status, "order", assigned_session_id, assigned_agent, agent_session_id, branch, use_worktree, created_at, updated_at, completed_at, archived_at, source_connector_id, source_external_url, source_external_id, row_revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
+         row_revision = excluded.row_revision,
          project_name = excluded.project_name,
          title = excluded.title,
          description = excluded.description,
@@ -1557,7 +1651,8 @@ export function saveConfig(config: AppConfig): void {
         t.archivedAt ?? null,
         t.sourceConnectorId ?? null,
         t.sourceExternalUrl ?? null,
-        t.sourceExternalId ?? null
+        t.sourceExternalId ?? null,
+        revision
       )
     }
 
@@ -1567,19 +1662,26 @@ export function saveConfig(config: AppConfig): void {
       d,
       'workspaces',
       'id',
-      workspaces.map((ws) => ws.id)
+      workspaces.map((ws) => ws.id),
+      baseRevision
     )
     const insertWorkspace = d.prepare(
-      `INSERT INTO workspaces (id, name, icon, icon_color, "order") VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO workspaces (id, name, icon, icon_color, "order", row_revision) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
+         row_revision = excluded.row_revision,
          name = excluded.name,
          icon = excluded.icon,
          icon_color = excluded.icon_color,
          "order" = excluded."order"`
     )
     for (const ws of workspaces) {
-      insertWorkspace.run(ws.id, ws.name, ws.icon ?? null, ws.iconColor ?? null, ws.order)
+      insertWorkspace.run(ws.id, ws.name, ws.icon ?? null, ws.iconColor ?? null, ws.order, revision)
     }
+
+    d.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run(
+      CONFIG_REVISION_KEY,
+      String(revision)
+    )
   })
 
   run()
