@@ -700,7 +700,7 @@ class PtyManager extends EventEmitter {
         try {
           p.kill()
         } catch (err) {
-          log.warn(`[pty] kill failed for ${id} (already dead?):`, err)
+          log.warn({ err }, `[pty] kill failed for ${id} (already dead?)`)
         }
       })
     } else {

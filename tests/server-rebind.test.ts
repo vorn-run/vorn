@@ -100,9 +100,8 @@ describe('server-rebind', () => {
     expect(server.listenCalls).toHaveLength(0)
   })
 
-  it('rebinds to 0.0.0.0 when networkAccessEnabled and Tailscale running', async () => {
+  it('rebinds to 0.0.0.0 when remote access is enabled', async () => {
     mockLoadConfig.mockReturnValue(makeConfig(true))
-    mockGetTailscaleStatus.mockResolvedValue(tsRunning())
 
     await checkAndRebind()
 
@@ -124,24 +123,37 @@ describe('server-rebind', () => {
     expect(getCurrentHost()).toBe('127.0.0.1')
   })
 
-  it('stays on localhost when Tailscale is not running', async () => {
+  it('binds wide with Tailscale stopped, which used to be refused', async () => {
+    // The gate was `networkAccessEnabled && tailscaleRunning`, so remote access
+    // was impossible without a tailnet. Every connection is authenticated now, so
+    // the credential is the boundary and Tailscale is only a convenient address.
     mockLoadConfig.mockReturnValue(makeConfig(true))
     mockGetTailscaleStatus.mockResolvedValue(tsStopped())
 
     await checkAndRebind()
 
-    expect(server.closeCalls).toBe(0)
-    expect(getCurrentHost()).toBe('127.0.0.1')
+    expect(server.listenCalls).toEqual([{ port: 59081, host: '0.0.0.0' }])
+    expect(getCurrentHost()).toBe('0.0.0.0')
   })
 
-  it('stays on localhost when Tailscale check throws', async () => {
+  it('does not consult Tailscale at all', async () => {
+    // It used to, on a path that serialises every other rebind behind it — so a
+    // hung `tailscale status` stalled the flip for its full ten-second timeout.
+    mockLoadConfig.mockReturnValue(makeConfig(true))
+
+    await checkAndRebind()
+
+    expect(mockGetTailscaleStatus).not.toHaveBeenCalled()
+  })
+
+  it('still binds wide when a Tailscale probe would have thrown', async () => {
     mockLoadConfig.mockReturnValue(makeConfig(true))
     mockGetTailscaleStatus.mockRejectedValue(new Error('tailscale not found'))
 
     await checkAndRebind()
 
-    expect(server.closeCalls).toBe(0)
-    expect(getCurrentHost()).toBe('127.0.0.1')
+    expect(server.listenCalls).toEqual([{ port: 59081, host: '0.0.0.0' }])
+    expect(getCurrentHost()).toBe('0.0.0.0')
   })
 
   it('handles listen error gracefully without crashing', async () => {

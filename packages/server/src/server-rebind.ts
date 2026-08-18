@@ -1,5 +1,4 @@
 import type { Server } from 'node:http'
-import { getTailscaleStatus } from './tailscale'
 import { configManager } from './config-manager'
 import log from './logger'
 
@@ -19,8 +18,12 @@ export function getCurrentHost(): string {
 }
 
 /**
- * Check if the server needs to rebind based on current config + Tailscale state.
- * Binds to 0.0.0.0 when networkAccessEnabled AND Tailscale is running, else 127.0.0.1.
+ * Rebind if the reachability setting has changed.
+ *
+ * Binds 0.0.0.0 when remote access is enabled, else loopback. Tailscale used to be
+ * required as well, which made the tailnet the security boundary; every connection
+ * is authenticated now, so the credential is. Tailscale remains the recommended
+ * way to reach the server — it is just no longer what protects it.
  */
 export async function checkAndRebind(): Promise<void> {
   // Serialize: if a rebind is already running, just wait for it
@@ -41,18 +44,10 @@ async function doRebind(): Promise<void> {
   if (!httpServer) return
 
   const config = configManager.loadConfig()
-  let desiredHost = '127.0.0.1'
-
-  if (config.defaults.networkAccessEnabled) {
-    try {
-      const tsStatus = await getTailscaleStatus()
-      if (tsStatus.running) {
-        desiredHost = '0.0.0.0'
-      }
-    } catch {
-      // Tailscale check failed, stay on localhost
-    }
-  }
+  // No Tailscale probe here any more. It used to gate this, which also meant a
+  // hung `tailscale status` stalled the rebind for its full ten-second timeout
+  // with every other rebind queued behind it.
+  const desiredHost = config.defaults.networkAccessEnabled ? '0.0.0.0' : '127.0.0.1'
 
   if (desiredHost === currentHost) return
 

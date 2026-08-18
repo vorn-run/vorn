@@ -36,8 +36,77 @@ import type {
   DeviceScreenRead,
   DeviceTarget,
   DevicePoint,
-  MobileProject
+  MobileProject,
+  ReachableUrls,
+  DeviceToken,
+  ConnectorActionDef,
+  ConnectorCatalogSnapshot,
+  SdkProbeRequest,
+  SdkProbeResult,
+  InstalledShell,
+  TailscaleStatus,
+  RemoteHost
 } from './types'
+
+// ─── Runtime Protocol Version ───────────────────────────────────
+
+/**
+ * The wire contract between a client and this server.
+ *
+ * Once clients update on their own schedule — a phone, a browser, a desktop
+ * pointed at someone else's host — mixed versions are the normal state rather
+ * than an edge case, and negotiation cannot be added after the fact: every
+ * client that predates it is already unable to negotiate. So the handshake
+ * ships while there is exactly one client and it costs nothing.
+ *
+ * Bump this when an existing message changes shape or meaning. A new *optional*
+ * field does not need a bump, but stays safe only while every reader treats it
+ * as optional — the moment one requires it, that reader is broken against every
+ * older server, which is the same defect as removing a field, found later.
+ */
+export const RUNTIME_PROTOCOL_VERSION = 1
+
+export interface ServerHello {
+  protocolVersion: number
+  /**
+   * What this server can do, as name → version. A client sends a new message
+   * kind only after seeing it here, because `ws-handler` drops unknown methods
+   * silently: an unnegotiated feature appears to hang rather than to fail.
+   *
+   * `auth: 1` means the server refuses every method until a credential is
+   * presented — either as `Authorization: Bearer` on the upgrade, or as an
+   * `auth:authenticate` message.
+   */
+  capabilities: Record<string, number>
+}
+
+// ─── Authentication ─────────────────────────────────────────────
+
+/**
+ * Close codes. Both are in the private-use range (4000–4999) reserved for
+ * applications, so they cannot collide with a protocol-level close.
+ *
+ * They are distinct because clients act on them differently: a rejected
+ * credential is worth discarding, a timeout is not. Conflating them means a
+ * backgrounded phone whose socket stalled throws away a perfectly good token.
+ */
+export const CLOSE_UNAUTHENTICATED = 4001
+export const CLOSE_CREDENTIAL_REJECTED = 4002
+
+/** JSON-RPC error code for a method sent before authenticating. */
+export const RPC_NOT_AUTHENTICATED = -32001
+
+/**
+ * The environment variable the desktop passes its per-launch credential in.
+ *
+ * Named here because three packages depend on the exact string: the desktop
+ * sets it, the server reads it, and `process-utils` strips it so it can never
+ * reach a PTY. A rename that missed any one of those would be silent.
+ */
+export const BOOTSTRAP_ENV_VAR = 'SECRET_VORN_BOOTSTRAP_TOKEN'
+
+/** Filename, under the resolved data dir, of the credential same-machine tools read. */
+export const LOCAL_TOKEN_FILENAME = 'local-token'
 
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
 
@@ -70,6 +139,91 @@ export interface RpcNotification {
 // ─── Request Methods (client → server, invoke-style) ────────────
 
 export interface RequestMethods {
+  /** Present a credential. The only method accepted before authenticating. */
+  'auth:authenticate': { params: { token: string }; result: { ok: boolean } }
+  'server:reachableUrls': { params: void; result: ReachableUrls }
+  // Device tokens. Namespaced `token:` rather than `device:`, which belongs
+  // entirely to the simulator registry — thirteen methods of it.
+  'token:list': { params: void; result: DeviceToken[] }
+  'token:create': { params: { name: string }; result: { token: DeviceToken; plaintext: string } }
+  'token:revoke': { params: string; result: { revoked: boolean } }
+
+  // ── Declared late ────────────────────────────────────────────────
+  //
+  // These have had live handlers and live callers for a long time while being
+  // absent from this map, so `registerMethod` fell back to `unknown` and every
+  // one of them was untyped end to end — a renamed field or a changed shape would
+  // have been caught by nothing. The signatures below are taken from the handlers
+  // as they actually behave, not from what they arguably should.
+
+  // Git
+  'git:getBranch': { params: string; result: string | null }
+  'git:getWorktreeBranch': { params: string; result: string | null }
+  'git:checkoutBranch': {
+    params: { cwd: string; branch: string }
+    result: { ok: boolean; error?: string }
+  }
+  'git:renameWorktree': {
+    params: { worktreePath: string; newName: string }
+    result: { newPath: string; name: string } | null
+  }
+
+  // Connections and connectors
+  'connection:listActions': { params: string; result: ConnectorActionDef[] }
+  'connection:listMcpTools': {
+    params: string
+    result: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>
+  }
+  'connection:refreshMcpTools': {
+    params: string
+    result: { ok: boolean; count?: number; error?: string }
+  }
+  'connector:catalog': { params: void; result: ConnectorCatalogSnapshot }
+  'connector:catalogRefresh': { params: void; result: ConnectorCatalogSnapshot }
+  'connector:probeSdk': { params: SdkProbeRequest; result: SdkProbeResult }
+
+  // Workflow runs
+  'workflowRun:claim': {
+    params: { workflowId: string; params?: string; windowMs?: number }
+    result: { granted: boolean; runId: string }
+  }
+  'workflowRun:release': {
+    params: { workflowId: string; params?: string; runId: string }
+    result: void
+  }
+  'workflowRun:listRunning': { params: void; result: WorkflowExecution[] }
+  'workflowRun:listWaiting': { params: void; result: WorkflowExecution[] }
+  'workflowRun:listAll': {
+    params: { workspaceId?: string; limit?: number }
+    result: (WorkflowExecution & { workflowName?: string })[]
+  }
+  'workflow:executionComplete': {
+    params: {
+      workflowId: string
+      workflowName: string
+      completedAt: string
+      status: 'success' | 'error' | 'cancelled'
+      sessionsLaunched: number
+      source?: 'scheduler' | 'manual'
+    }
+    result: void
+  }
+
+  // Host and shell
+  'shell:listInstalled': { params: void; result: InstalledShell[] }
+  'ssh:testConnection': {
+    params: RemoteHost
+    result: { success: boolean; message: string; durationMs: number }
+  }
+  'tailscale:status': { params: void; result: TailscaleStatus }
+
+  // Task images and UI
+  'task:imageUpload': {
+    params: { taskId: string; base64: string; filename: string }
+    result: string
+  }
+  'permission:resolve-top': { params: { allow: boolean }; result: void }
+  'widget:requestUpdate': { params: void; result: void }
   'terminal:create': { params: CreateTerminalPayload; result: TerminalSession }
   'terminal:kill': { params: string; result: void }
   'terminal:listActive': { params: void; result: TerminalSession[] }
@@ -89,8 +243,8 @@ export interface RequestMethods {
   }
   'git:listRemoteBranches': { params: string; result: string[] }
   'git:createWorktree': {
-    params: { projectPath: string; branch: string }
-    result: string
+    params: { projectPath: string; branch: string; worktreeName?: string }
+    result: { worktreePath: string; branch: string; name: string }
   }
   'git:removeWorktree': {
     params: {
@@ -137,10 +291,10 @@ export interface RequestMethods {
   'git:worktreeDirty': { params: string; result: boolean }
   'git:listWorktrees': {
     params: string
-    result: Array<{ path: string; branch: string; isBare: boolean }>
+    result: Array<{ path: string; branch: string; isMain: boolean; name: string }>
   }
-  'git:diffStat': { params: string; result: GitDiffStat }
-  'git:diffFull': { params: string; result: GitDiffResult }
+  'git:diffStat': { params: string; result: GitDiffStat | null }
+  'git:diffFull': { params: string; result: GitDiffResult | null }
   'git:commit': {
     params: { cwd: string; message: string; includeUnstaged: boolean }
     result: { success: boolean; error?: string }
@@ -170,7 +324,10 @@ export interface RequestMethods {
   }
   'headless:kill': { params: string; result: void }
   'headless:list': { params: void; result: HeadlessSession[] }
-  'script:execute': { params: ScriptConfig; result: { output: string; exitCode: number } }
+  'script:execute': {
+    params: ScriptConfig
+    result: { success: boolean; output: string; error?: string; exitCode?: number }
+  }
   'workflowRun:save': { params: WorkflowExecution; result: void }
   'workflowRun:list': {
     params: { workflowId: string; limit?: number }
@@ -556,6 +713,10 @@ export interface RequestMethods {
 // ─── Server Notifications (server → client, push events) ────────
 
 export interface ServerNotifications {
+  /** First frame on every connection, before anything is dispatched. */
+  'server:hello': ServerHello
+  /** Sent once a socket is admitted, so a client knows it may start sending. */
+  'auth:ok': { userId: string }
   'terminal:data': { id: string; data: string }
   'terminal:exit': { id: string; exitCode: number }
   'session:created': TerminalSession

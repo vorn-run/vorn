@@ -21,7 +21,7 @@ import {
   listWorkflowRunsByTask,
   listAllWorkflowRuns,
   dbSignalChange
-} from '@vornrun/server/database'
+} from '../data-access'
 import { rpcCall } from '../ws-client'
 import {
   toPortable,
@@ -446,7 +446,7 @@ export function registerWorkflowTools(server: McpServer): void {
       workspace_id: V.id.optional().describe('Filter by workspace ID')
     },
     async (args) => {
-      let workflows = dbListWorkflows()
+      let workflows = await dbListWorkflows()
       if (args.workspace_id) {
         workflows = workflows.filter((w) => (w.workspaceId ?? 'personal') === args.workspace_id)
       }
@@ -518,7 +518,7 @@ export function registerWorkflowTools(server: McpServer): void {
         ...(args.stagger_delay_ms && { staggerDelayMs: args.stagger_delay_ms })
       }
 
-      dbInsertWorkflow(workflow)
+      await dbInsertWorkflow(workflow)
       dbSignalChange()
 
       return { content: [{ type: 'text', text: JSON.stringify(workflow, null, 2) }] }
@@ -544,7 +544,7 @@ export function registerWorkflowTools(server: McpServer): void {
       if ('error' in resolved) {
         return { content: [{ type: 'text', text: `Error: ${resolved.error}` }], isError: true }
       }
-      const workflows = dbListWorkflows()
+      const workflows = await dbListWorkflows()
       const workflow = workflows.find((w) => w.id === resolved.id)
       if (!workflow) {
         return {
@@ -578,7 +578,7 @@ export function registerWorkflowTools(server: McpServer): void {
       if (args.enabled !== undefined) updates.enabled = args.enabled
       if (args.stagger_delay_ms !== undefined) updates.staggerDelayMs = args.stagger_delay_ms
 
-      dbUpdateWorkflow(resolved.id, updates)
+      await dbUpdateWorkflow(resolved.id, updates)
       dbSignalChange()
 
       return {
@@ -599,7 +599,7 @@ export function registerWorkflowTools(server: McpServer): void {
       if ('error' in resolved) {
         return { content: [{ type: 'text', text: `Error: ${resolved.error}` }], isError: true }
       }
-      const workflows = dbListWorkflows()
+      const workflows = await dbListWorkflows()
       const workflow = workflows.find((w) => w.id === resolved.id)
       if (!workflow) {
         return {
@@ -608,7 +608,7 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      dbDeleteWorkflow(resolved.id)
+      await dbDeleteWorkflow(resolved.id)
       dbSignalChange()
 
       return { content: [{ type: 'text', text: `Deleted workflow: ${workflow.name}` }] }
@@ -631,11 +631,11 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
       if (args.task_id) {
-        const runs = listWorkflowRunsByTask(args.task_id, args.limit ?? 20)
+        const runs = await listWorkflowRunsByTask(args.task_id, args.limit ?? 20)
         return { content: [{ type: 'text', text: JSON.stringify(runs, null, 2) }] }
       }
       if (args.workflow_id) {
-        const runs = listWorkflowRuns(args.workflow_id, args.limit ?? 20)
+        const runs = await listWorkflowRuns(args.workflow_id, args.limit ?? 20)
         return { content: [{ type: 'text', text: JSON.stringify(runs, null, 2) }] }
       }
       return {
@@ -655,7 +655,7 @@ export function registerWorkflowTools(server: McpServer): void {
       // Scanning recent runs beats broadcasting a typo that nothing answers:
       // the stop is fire-and-forget, so an id that matches nothing would
       // otherwise report success and do nothing at all.
-      const run = listAllWorkflowRuns(undefined, 500).find((r) => r.runId === args.run_id)
+      const run = (await listAllWorkflowRuns(undefined, 500)).find((r) => r.runId === args.run_id)
       if (!run) {
         return {
           content: [
@@ -755,7 +755,7 @@ export function registerWorkflowTools(server: McpServer): void {
         .describe('Values for the declared parameters, keyed by input key ({{inputs.<key>}})')
     },
     async (args) => {
-      const workflow = dbListWorkflows().find((w) => w.id === args.workflow_id)
+      const workflow = (await dbListWorkflows()).find((w) => w.id === args.workflow_id)
       if (!workflow) {
         return {
           content: [{ type: 'text', text: `Error: workflow "${args.workflow_id}" not found` }],
@@ -832,7 +832,7 @@ export function registerWorkflowTools(server: McpServer): void {
         return { content: [{ type: 'text', text: `Error: ${resolved.error}` }], isError: true }
       }
 
-      const workflow = dbListWorkflows().find((w) => w.id === resolved.id)
+      const workflow = (await dbListWorkflows()).find((w) => w.id === resolved.id)
       if (!workflow) {
         return {
           content: [{ type: 'text', text: `Error: workflow "${resolved.id}" not found` }],
@@ -858,7 +858,7 @@ export function registerWorkflowTools(server: McpServer): void {
 
       // The project the workflow's own steps point at is what its paths are
       // relative to; without it there is nothing to rewrite against.
-      const projects = dbListProjects()
+      const projects = await dbListProjects()
       const projectName = workflow.nodes
         .map((n) => (n.config as Record<string, unknown>).projectName)
         .find((name): name is string => typeof name === 'string' && name.length > 0)
@@ -936,7 +936,7 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      const project = dbListProjects().find((p) => p.name === args.project_name)
+      const project = (await dbListProjects()).find((p) => p.name === args.project_name)
       if (!project) {
         return {
           content: [
@@ -991,11 +991,11 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      const existing = dbListWorkflows().find((w) => w.id === definition.id)
+      const existing = (await dbListWorkflows()).find((w) => w.id === definition.id)
       if (existing) {
-        dbUpdateWorkflow(definition.id, definition)
+        await dbUpdateWorkflow(definition.id, definition)
       } else {
-        dbInsertWorkflow(definition)
+        await dbInsertWorkflow(definition)
       }
       dbSignalChange()
 

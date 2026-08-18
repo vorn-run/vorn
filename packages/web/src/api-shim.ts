@@ -1,3 +1,6 @@
+import { CLOSE_CREDENTIAL_REJECTED, RUNTIME_PROTOCOL_VERSION } from '@vornrun/shared/protocol'
+import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
+import type { AppConfig } from '@vornrun/shared/types'
 /**
  * WebSocket RPC shim that implements the same surface as the Electron preload `window.api`.
  * Components and stores call window.api.* exactly as they do in Electron,
@@ -11,29 +14,139 @@ type PendingRequest = {
   reject: (error: Error) => void
 }
 
+const TOKEN_STORAGE_KEY = 'vorn.deviceToken'
+
+export class AuthRequiredError extends Error {
+  constructor() {
+    super('A device token is required to connect to this Vorn server.')
+    this.name = 'AuthRequiredError'
+  }
+}
+
+/**
+ * A call that depends on the machine running the server, refused where it cannot work.
+ *
+ * Rejecting rather than resolving with a plausible-looking empty value: these are
+ * writes and device actions, and a caller that believes one succeeded is worse off
+ * than one that sees why it did not.
+ */
+function unsupportedInWeb(what: string): () => Promise<never> {
+  return () =>
+    Promise.reject(
+      new Error(`${what} is only available in the Vorn app on the machine running the server.`)
+    )
+}
+
+export function readStoredToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_STORAGE_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function storeToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token.trim())
+  } catch {
+    /* private browsing — the user will be asked again next load */
+  }
+}
+
+function clearStoredToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_STORAGE_KEY)
+  } catch {
+    /* nothing to clear */
+  }
+}
+
 class RpcClient {
   private ws!: WebSocket
   private nextId = 1
   private pending = new Map<number, PendingRequest>()
   private listeners = new Map<string, Set<(params: unknown) => void>>()
   private url: string
-  private _ready: Promise<void>
+  private _ready!: Promise<void>
   private _resolveReady!: () => void
+  private _rejectReady!: (err: Error) => void
+  /** Whether `_ready` has settled, so `resetReady` knows if replacing it is safe. */
+  private readySettled = false
+  /**
+   * Called when the server rejects our credential, on any connection.
+   *
+   * A callback rather than only the readiness promise: `_ready` is replaced on
+   * every reconnect, and the bootstrap only ever observes the first one — so
+   * rejecting it after a reconnect rejects a promise nobody is watching, and the
+   * page silently stops updating instead of asking for a token.
+   */
+  private onAuthRequired: (() => void) | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(url: string) {
     this.url = url
-    this._ready = new Promise((resolve) => {
-      this._resolveReady = resolve
-    })
+    this.resetReady()
     this.connect()
+  }
+
+  /**
+   * A fresh readiness promise per connection attempt — but only once the current
+   * one has settled.
+   *
+   * `main.tsx` awaits `__ready()` exactly once, at startup, and renders when it
+   * resolves. Replacing an unsettled promise orphans that await: the retry can
+   * connect and authenticate perfectly, resolving the *new* promise, while the one
+   * the app is holding stays pending forever and the loading screen never lifts.
+   * That is easy to hit — the first attempt loses whenever the page opens a moment
+   * before the server is listening.
+   *
+   * So a pending promise is kept and allowed to settle on a later attempt, and only
+   * a settled one is replaced, which is what `invoke()` needs so a call made after a
+   * drop waits for the next connection rather than resolving against the closed one.
+   */
+  private resetReady(): void {
+    if (this._ready && !this.readySettled) return
+    this.readySettled = false
+    this._ready = new Promise((resolve, reject) => {
+      this._resolveReady = () => {
+        this.readySettled = true
+        resolve()
+      }
+      this._rejectReady = (err) => {
+        this.readySettled = true
+        reject(err)
+      }
+    })
+    // Nothing awaits a replacement promise, so an unobserved rejection would
+    // surface as an unhandled rejection in the console.
+    this._ready.catch(() => {})
+  }
+
+  setOnAuthRequired(handler: () => void): void {
+    this.onAuthRequired = handler
+  }
+
+  private onVersionMismatch: ((server: number, client: number) => void) | null = null
+
+  setOnVersionMismatch(handler: (server: number, client: number) => void): void {
+    this.onVersionMismatch = handler
   }
 
   private connect(): void {
     this.ws = new WebSocket(this.url)
 
     this.ws.onopen = () => {
-      this._resolveReady()
+      // A browser cannot set headers on the upgrade, so the credential goes in
+      // the first message. Nothing else is accepted until the server has it, and
+      // `_ready` stays pending until it does — so no caller can send a request
+      // that would be refused.
+      this.ws.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'auth:authenticate',
+          params: { token: readStoredToken() }
+        })
+      )
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer)
         this.reconnectTimer = null
@@ -51,6 +164,25 @@ class RpcClient {
       try {
         msg = JSON.parse(event.data as string)
       } catch {
+        return
+      }
+
+      // The handshake, sent before anything else. Compared rather than ignored so
+      // a mismatch says so plainly: an old cached bundle against a newer server
+      // otherwise fails later, in ways that read as the app being broken.
+      if (msg.method === 'server:hello') {
+        const serverVersion = (msg.params as { protocolVersion?: number } | undefined)
+          ?.protocolVersion
+        if (typeof serverVersion === 'number' && serverVersion !== RUNTIME_PROTOCOL_VERSION) {
+          this.onVersionMismatch?.(serverVersion, RUNTIME_PROTOCOL_VERSION)
+        }
+        return
+      }
+
+      // The server confirming our credential. Only now is the connection usable,
+      // so this — not `onopen` — is what settles `_ready`.
+      if (msg.method === 'auth:ok') {
+        this._resolveReady()
         return
       }
 
@@ -83,18 +215,33 @@ class RpcClient {
       }
     }
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       // Reject all pending requests
       for (const [, p] of this.pending) {
         p.reject(new Error('WebSocket disconnected'))
       }
       this.pending.clear()
 
+      // The server rejected the credential. Retrying cannot help, and the old
+      // behaviour — reconnect every 2s forever while `__ready()` never settled —
+      // showed a blank page rather than a reason.
+      //
+      // Only on a rejection, never on CLOSE_UNAUTHENTICATED: that also covers an
+      // auth timeout, and discarding a good token because a backgrounded phone's
+      // socket stalled would send the user back to the machine running Vorn.
+      if (event.code === CLOSE_CREDENTIAL_REJECTED) {
+        clearStoredToken()
+        // Rejects the promise for a first load, and fires the callback for a
+        // reconnect — where the promise the bootstrap is awaiting has long since
+        // resolved and a rejection would go unobserved.
+        this._rejectReady(new AuthRequiredError())
+        this.onAuthRequired?.()
+        return
+      }
+
       // Auto-reconnect after 2s
       this.reconnectTimer = setTimeout(() => {
-        this._ready = new Promise((resolve) => {
-          this._resolveReady = resolve
-        })
+        this.resetReady()
         this.connect()
       }, 2000)
     }
@@ -226,6 +373,10 @@ export function createApiShim(wsUrl: string) {
   const api = {
     // ── Ready (web-only, not in Electron API) ──
     __ready: () => rpc.ready(),
+    /** Fires whenever the server rejects our credential, including on a reconnect. */
+    __onAuthRequired: (handler: () => void) => rpc.setOnAuthRequired(handler),
+    __onVersionMismatch: (handler: (server: number, client: number) => void) =>
+      rpc.setOnVersionMismatch(handler),
 
     // ── Terminal Management ──
     createTerminal: (payload: unknown) => rpc.invoke('terminal:create', payload),
@@ -243,10 +394,15 @@ export function createApiShim(wsUrl: string) {
       rpc.on('session:created', callback as (p: unknown) => void),
 
     // ── Configuration ──
-    loadConfig: () => rpc.invoke('config:load'),
-    saveConfig: (config: unknown) => rpc.invoke('config:save', config),
+    // See the note in src/preload/index.ts — the same two hooks, so a browser and a
+    // desktop pointed at one server each keep their own view.
+    loadConfig: async () => withViewerSettings((await rpc.invoke('config:load')) as AppConfig),
+    saveConfig: (config: unknown) => {
+      captureViewerSettings(config as AppConfig)
+      return rpc.invoke('config:save', config)
+    },
     onConfigChanged: (callback: (config: unknown) => void) =>
-      rpc.on('config:changed', callback as (p: unknown) => void),
+      rpc.on('config:changed', (p: unknown) => callback(withViewerSettings(p as AppConfig))),
 
     // ── Menu Events (Electron-only, no-op in web) ──
     onMenuNewAgent: (_callback: () => void) => () => {},
@@ -427,6 +583,19 @@ export function createApiShim(wsUrl: string) {
 
     // ── Tailscale Network Access ──
     getTailscaleStatus: () => rpc.invoke('tailscale:status'),
+    getReachableUrls: () => rpc.invoke('server:reachableUrls'),
+
+    // Connect window (Electron-only). A browser reaches a server by its address,
+    // so there is nothing to point somewhere else — it is already there.
+    getConnectSettings: async () => null,
+    saveConnectSettings: unsupportedInWeb('Pointing at another server'),
+    useLocalServer: unsupportedInWeb('Switching to a local server'),
+
+    // Device tokens. A real implementation rather than a stub — unlike SSH keys,
+    // these need nothing from Electron, so a phone can manage them too.
+    listDeviceTokens: () => rpc.invoke('token:list'),
+    createDeviceToken: (name: string) => rpc.invoke('token:create', { name }),
+    revokeDeviceToken: (id: string) => rpc.invoke('token:revoke', id),
 
     // ── App Info (web-specific) ──
     getAppVersion: () => 'web',
@@ -442,7 +611,130 @@ export function createApiShim(wsUrl: string) {
     downloadUpdate: () => {},
     setUpdateAutoDownload: (_enabled: boolean) => {},
     installUpdate: () => {},
-    setUpdateChannel: (_channel: 'stable' | 'beta') => {}
+    setUpdateChannel: (_channel: 'stable' | 'beta') => {},
+
+    // ── Git ──
+    isGitRepo: (projectPath: string) => rpc.invoke('git:isGitRepo', projectPath),
+    getGitBranch: (cwd: string) => rpc.invoke('git:getBranch', cwd),
+    checkoutBranch: (cwd: string, branch: string) =>
+      rpc.invoke('git:checkoutBranch', { cwd, branch }),
+    getWorktreeBranch: (worktreePath: string) => rpc.invoke('git:getWorktreeBranch', worktreePath),
+    renameWorktree: (worktreePath: string, newName: string) =>
+      rpc.invoke('git:renameWorktree', { worktreePath, newName }),
+
+    // ── Files ──
+    listDir: (dirPath: string, remoteHostId?: string) =>
+      rpc.invoke('file:listDir', { dirPath, remoteHostId }),
+    readFileContent: (filePath: string, maxBytes?: number, remoteHostId?: string) =>
+      rpc.invoke('file:readContent', { filePath, maxBytes, remoteHostId }),
+    writeFileContent: (filePath: string, content: string, remoteHostId?: string) =>
+      rpc.invoke('file:writeContent', { filePath, content, remoteHostId }),
+
+    // ── Shells ──
+    listShellExecutables: () => rpc.invoke('shell:listExecutables'),
+    listInstalledShells: () => rpc.invoke('shell:listInstalled'),
+
+    // ── Sessions, headless and events ──
+    listHeadlessSessions: () => rpc.invoke('headless:list'),
+    listSessionEventsBySession: (sessionId: string, limit?: number) =>
+      rpc.invoke('sessionEvent:listBySession', { sessionId, limit }),
+
+    // ── Workflow runs ──
+    // The two list calls send `{}` rather than nothing, matching what the main
+    // process sends — the server reads a property off the params object.
+    listAllWorkflowRuns: (workspaceId?: string, limit?: number) =>
+      rpc.invoke('workflowRun:listAll', { workspaceId, limit }),
+    listRunningWorkflowRuns: () => rpc.invoke('workflowRun:listRunning', {}),
+    listRunsWithWaitingGates: () => rpc.invoke('workflowRun:listWaiting', {}),
+    claimWorkflowRun: (req: { workflowId: string; params?: string; windowMs?: number }) =>
+      rpc.invoke('workflowRun:claim', req),
+    releaseWorkflowRun: (req: { workflowId: string; params?: string; runId: string }) =>
+      rpc.invoke('workflowRun:release', req),
+    runWorkflowManual: (workflowId: string, inputs?: Record<string, unknown>) =>
+      rpc.invoke('workflow:runManual', { workflowId, inputs }),
+
+    // ── Connections and connectors ──
+    listConnections: (connectorId?: string) => rpc.invoke('connection:list', { connectorId }),
+    createConnection: (params: unknown) => rpc.invoke('connection:create', params),
+    updateConnection: (id: string, updates: unknown) =>
+      rpc.invoke('connection:update', { id, updates }),
+    deleteConnection: (id: string) => rpc.invoke('connection:delete', id),
+    backfillConnection: (connectionId: string) =>
+      rpc.invoke('connection:backfill', { connectionId }),
+    listConnectionActions: (connectionId: string) =>
+      rpc.invoke('connection:listActions', connectionId),
+    executeConnectorAction: (params: {
+      connectionId: string
+      action: string
+      args: Record<string, unknown>
+    }) => rpc.invoke('connection:executeAction', params),
+    listMcpTools: (connectionId: string) => rpc.invoke('connection:listMcpTools', connectionId),
+    refreshMcpTools: (connectionId: string) =>
+      rpc.invoke('connection:refreshMcpTools', connectionId),
+    getTaskSourceLink: (taskId: string) => rpc.invoke('connection:getSourceLink', taskId),
+    upsertTaskFromItem: (params: unknown) => rpc.invoke('connection:upsertFromItem', params),
+    listConnectors: () => rpc.invoke('connector:list'),
+    getConnector: (id: string) => rpc.invoke('connector:get', id),
+    getConnectorStatus: () => rpc.invoke('connector:status'),
+    listConnectorCatalog: () => rpc.invoke('connector:catalog'),
+    refreshConnectorCatalog: () => rpc.invoke('connector:catalogRefresh'),
+    probeSdkConnector: (request: unknown) => rpc.invoke('connector:probeSdk', request),
+    detectRepo: (projectPath: string) => rpc.invoke('connector:detectRepo', projectPath),
+    seedConnectorWorkflow: (connectionId: string, event: string) =>
+      rpc.invoke('connector:seedWorkflow', { connectionId, event }),
+
+    // ── Projects and remote hosts ──
+    detectMobileProject: (projectPath: string) =>
+      rpc.invoke('project:detectMobile', { projectPath }),
+    testSshConnection: (host: unknown) => rpc.invoke('ssh:testConnection', host),
+
+    // ── Opening a link ──
+    // The one Electron-only call with a real browser equivalent. `noopener` because
+    // the opened page would otherwise get a handle on this one.
+    openExternal: async (url: string): Promise<void> => {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    },
+
+    // ── Window chrome (no-op in web) ──
+    // The browser owns the window, so there is nothing to report or subscribe to.
+    isWindowMaximized: async (): Promise<boolean> => false,
+    onWindowMaximizedChange: (_callback: (maximized: boolean) => void) => () => {},
+
+    // ── Credential vault (unavailable in web) ──
+    // Backed by Electron's safeStorage, which is an OS keychain binding with no
+    // browser equivalent. `isSafeStorageAvailable` answering false is the honest
+    // reply and is what the SSH settings UI already gates on, so the panel explains
+    // itself rather than offering controls that would fail. The list is genuinely
+    // empty here; the writes reject, because silently discarding a private key the
+    // person believed they had saved is the worse failure.
+    isSafeStorageAvailable: async (): Promise<boolean> => false,
+    listSSHKeys: async () => [],
+    storeSSHKey: unsupportedInWeb('Storing an SSH key'),
+    importSSHKeyFile: unsupportedInWeb('Importing an SSH key'),
+    deleteSSHKey: unsupportedInWeb('Deleting an SSH key'),
+    encryptString: unsupportedInWeb('Encrypting a credential'),
+
+    // ── Browser and device panes (unavailable in web) ──
+    // Both drive something on the host machine — an embedded Electron view, and a
+    // simulator over its local control socket. Neither is reachable from a browser
+    // on another device, so the queries answer empty and the actions say why. The
+    // subscriptions return an unsubscribe that does nothing: App registers them at
+    // mount, and a missing one throws during render and takes the whole app down.
+    onBrowserOpenPane: (_callback: (p: { sessionId: string; url?: string }) => void) => () => {},
+    onBrowserTabCommand: (_callback: (p: unknown) => void) => () => {},
+    onDeviceOpenPane: (_callback: (p: unknown) => void) => () => {},
+    attachBrowser: (_sessionId: string, _webContentsId: number): void => {},
+    detachBrowser: (_sessionId: string): void => {},
+    cancelBrowserPick: (_sessionId: string): void => {},
+    startBrowserPick: async () => null,
+    annotateBrowser: unsupportedInWeb('Annotating the browser pane'),
+    deviceList: async () => [],
+    deviceClaim: unsupportedInWeb('Claiming a device'),
+    deviceRelease: async () => ({ released: false }),
+    deviceScreenshot: unsupportedInWeb('Taking a device screenshot'),
+    deviceInteract: unsupportedInWeb('Interacting with a device'),
+    pickDeviceElement: unsupportedInWeb('Picking a device element'),
+    annotateDevice: unsupportedInWeb('Annotating the device pane')
   }
 
   return api

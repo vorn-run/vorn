@@ -28,13 +28,31 @@ import {
   SessionEventType,
   SourceConnection,
   TaskSourceLink,
-  ConnectorItemContext
+  ConnectorItemContext,
+  User,
+  UserRole,
+  DeviceToken
 } from '@vornrun/shared/types'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import { DEFAULT_TASK_WORKFLOW_ID, buildDefaultTaskWorkflow } from './default-workflows'
 
-const CONFIG_DIR = path.join(os.homedir(), '.vorn')
-const DB_PATH = path.join(CONFIG_DIR, 'vorn.db')
+/** Where the data directory lands when nothing overrides it. */
+const DEFAULT_DATA_DIR = path.join(os.homedir(), '.vorn')
+
+// Resolved by initDatabase() rather than fixed at module load, so a standalone
+// server can be pointed at its own directory with --data-dir. The desktop
+// passes nothing and keeps ~/.vorn — see the note in server-launcher.ts for why
+// it must not pass Electron's userData.
+//
+// Only the directory is stored; every path under it is derived. Keeping a
+// second `dbPath` variable in step by hand is how one code path ends up opening
+// one directory's database while writing another's .db-signal.
+let resolvedDataDir: string | null = null
+
+function dbPath(): string {
+  return path.join(getDataDir(), 'vorn.db')
+}
+
 const MAX_LOG_ENTRIES = 200
 
 let db: Database.Database | null = null
@@ -44,19 +62,36 @@ function getDb(): Database.Database {
   return db
 }
 
-export function initDatabase(): void {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 })
+/**
+ * The resolved data directory — the one place anything in this process should
+ * ask where Vorn's files live.
+ *
+ * Throws rather than falling back to the default, because a caller that runs
+ * before `initDatabase()` would otherwise get a plausible-looking `~/.vorn` and
+ * quietly read or watch the wrong directory forever.
+ */
+export function getDataDir(): string {
+  if (!resolvedDataDir) {
+    throw new Error('Data directory not resolved. Call initDatabase() first.')
+  }
+  return resolvedDataDir
+}
+
+export function initDatabase(dataDir?: string): void {
+  resolvedDataDir = dataDir ?? DEFAULT_DATA_DIR
+
+  if (!fs.existsSync(getDataDir())) {
+    fs.mkdirSync(getDataDir(), { recursive: true, mode: 0o700 })
   }
 
   try {
-    db = new Database(DB_PATH)
+    db = new Database(dbPath())
     db.pragma('journal_mode = WAL')
     db.pragma('foreign_keys = ON')
     createSchema()
     seedSystemDefaults()
   } catch (err) {
-    log.error('[database] Failed to open database:', err)
+    log.error({ err }, '[database] Failed to open database:')
 
     // Detect corruption: libsql throws on open or pragma for corrupt files
     const message = err instanceof Error ? err.message : String(err)
@@ -142,31 +177,31 @@ function recoverCorruptDatabase(): void {
 
   // Back up the corrupt file
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const backupPath = `${DB_PATH}.corrupt-${timestamp}`
+  const backupPath = `${dbPath()}.corrupt-${timestamp}`
   try {
-    if (fs.existsSync(DB_PATH)) {
-      fs.copyFileSync(DB_PATH, backupPath)
+    if (fs.existsSync(dbPath())) {
+      fs.copyFileSync(dbPath(), backupPath)
       log.info(`[database] Backed up corrupt database to ${backupPath}`)
     }
     // Remove corrupt DB + WAL/SHM files
     for (const suffix of ['', '-wal', '-shm']) {
-      const file = DB_PATH + suffix
+      const file = dbPath() + suffix
       if (fs.existsSync(file)) fs.unlinkSync(file)
     }
   } catch (backupErr) {
-    log.error('[database] Failed to back up corrupt database:', backupErr)
+    log.error({ backupErr }, '[database] Failed to back up corrupt database:')
   }
 
   // Create a fresh database
   try {
-    db = new Database(DB_PATH)
+    db = new Database(dbPath())
     db.pragma('journal_mode = WAL')
     db.pragma('foreign_keys = ON')
     createSchema()
     seedSystemDefaults()
     log.info('[database] Successfully created fresh database after corruption recovery')
   } catch (freshErr) {
-    log.error('[database] Failed to create fresh database after corruption:', freshErr)
+    log.error({ freshErr }, '[database] Failed to create fresh database after corruption:')
     throw freshErr
   }
 
@@ -179,7 +214,7 @@ function recoverCorruptDatabase(): void {
  */
 export function dbSignalChange(): void {
   try {
-    const signalPath = path.join(CONFIG_DIR, '.db-signal')
+    const signalPath = path.join(getDataDir(), '.db-signal')
     fs.writeFileSync(signalPath, Date.now().toString())
   } catch {
     // Best-effort — watcher fallback will catch it
@@ -196,6 +231,10 @@ export function closeDatabase(): void {
 /** Initialize an in-memory database for tests. Returns teardown function. */
 export function initTestDatabase(): () => void {
   if (db) closeDatabase()
+  // The database is in memory, but anything deriving a path from the data dir
+  // (dbSignalChange, task images) still needs one resolved. Point it at the temp
+  // directory so tests cannot write into the developer's real ~/.vorn.
+  resolvedDataDir = os.tmpdir()
   db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
@@ -223,6 +262,29 @@ function createSchema(): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'owner',
+      created_at TEXT NOT NULL
+    );
+
+    -- Only the hash is stored. The plaintext is shown once at creation and is
+    -- not recoverable afterwards, so a leaked database yields no usable
+    -- credential.
+    CREATE TABLE IF NOT EXISTS device_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT,
+      revoked_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_device_tokens_user
+      ON device_tokens(user_id);
 
     CREATE TABLE IF NOT EXISTS projects (
       name TEXT PRIMARY KEY,
@@ -848,6 +910,84 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 13 (connection-scoped inbox)')
   }
+
+  if (version < 14) {
+    // The tables themselves are created in createSchema(), which runs before
+    // this and uses IF NOT EXISTS, so it already covered both a fresh database
+    // and an existing one. What is left is seeding the single owner — the same
+    // shape as version 1 seeding the default workspace.
+    d.transaction(() => {
+      const existing = d.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }
+      if (existing.n === 0) {
+        let name = 'owner'
+        try {
+          name = os.userInfo().username || name
+        } catch {
+          // No OS user available (some sandboxes) — the fallback is fine.
+        }
+        d.prepare("INSERT INTO users (id, name, role, created_at) VALUES (?, ?, 'owner', ?)").run(
+          randomUUID(),
+          name,
+          new Date().toISOString()
+        )
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '14')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 14 (identity and device tokens)')
+  }
+
+  if (version < 15) {
+    // Every row in the config blob learns which save wrote it.
+    //
+    // `saveConfig` receives a whole snapshot and prunes anything absent from it,
+    // which is correct for a deletion and destructive for a row that simply did
+    // not exist when the saving client last loaded. Two clients is now ordinary,
+    // so that difference has to be visible: a row stamped after the client's base
+    // revision is one it could not have known about, and is not its to remove.
+    d.transaction(() => {
+      for (const table of REVISIONED_TABLES) {
+        // Guarded the way every other ALTER here is: the column can already exist
+        // when a database has been rewound, or repaired by verifySchema on an
+        // earlier boot, and an unguarded ALTER aborts the whole transaction.
+        const columns = d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+        if (columns.some((c) => c.name === 'row_revision')) continue
+        d.exec(`ALTER TABLE ${table} ADD COLUMN row_revision INTEGER NOT NULL DEFAULT 0`)
+      }
+      // Existing rows keep revision 0, below any future base, so the first saves
+      // after upgrading prune exactly as they did before.
+      d.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run(
+        CONFIG_REVISION_KEY,
+        '0'
+      )
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '15')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 15 (config row revisions)')
+  }
+}
+
+/** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
+const REVISIONED_TABLES = [
+  'projects',
+  'tasks',
+  'workspaces',
+  'remote_hosts',
+  'agent_commands'
+] as const
+
+const CONFIG_REVISION_KEY = 'config_revision'
+
+/** Monotonic counter, bumped once per `saveConfig`. */
+function readConfigRevision(d: Database.Database): number {
+  const row = d.prepare('SELECT value FROM schema_meta WHERE key = ?').get(CONFIG_REVISION_KEY) as
+    | { value: string }
+    | undefined
+  const parsed = Number(row?.value)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 /**
@@ -966,6 +1106,20 @@ function verifySchema(d: Database.Database): void {
     ]
   }
 
+  // Migration 15, appended rather than written into the literal above so it cannot
+  // be shadowed by a table that already has an entry there. Repaired at all because
+  // a version bump whose ALTER did not stick leaves `pruneMissing` selecting a
+  // column that is not there — and that runs on every config save.
+  for (const table of REVISIONED_TABLES) {
+    expectedByTable[table] = [
+      ...(expectedByTable[table] ?? []),
+      {
+        column: 'row_revision',
+        ddl: `ALTER TABLE ${table} ADD COLUMN row_revision INTEGER NOT NULL DEFAULT 0`
+      }
+    ]
+  }
+
   for (const [table, columns] of Object.entries(expectedByTable)) {
     const existing = new Set(
       (d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name)
@@ -976,7 +1130,7 @@ function verifySchema(d: Database.Database): void {
         d.exec(ddl)
         log.warn(`[database] self-heal: added missing column ${table}.${column}`)
       } catch (err) {
-        log.error(`[database] self-heal: failed to add ${table}.${column}:`, err)
+        log.error({ err }, `[database] self-heal: failed to add ${table}.${column}:`)
       }
     }
   }
@@ -999,6 +1153,7 @@ export function loadConfig(): AppConfig {
 
   return {
     version: 1,
+    revision: readConfigRevision(d),
     defaults,
     projects,
     agentCommands:
@@ -1075,6 +1230,7 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     ...(map.mobileAccessEnabled !== undefined && {
       mobileAccessEnabled: map.mobileAccessEnabled as boolean
     }),
+    ...(map.serverPort !== undefined && { serverPort: map.serverPort as number }),
     ...(map.networkAccessEnabled !== undefined && {
       networkAccessEnabled: map.networkAccessEnabled as boolean
     }),
@@ -1086,6 +1242,23 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     }),
     ...(map.hasSeededDefaultTaskWorkflow !== undefined && {
       hasSeededDefaultTaskWorkflow: map.hasSeededDefaultTaskWorkflow as boolean
+    }),
+    // The four below were declared in AppConfig and consumed, but never listed
+    // here — exactly the failure the comment above describes. Each was written on
+    // save and dropped on the next load, so the setting appeared to work until a
+    // reload. `worktreeRetention` is the worst of them: it is read server-side
+    // (register-methods.ts) and so always resolved to undefined.
+    ...(map.updateAutoDownload !== undefined && {
+      updateAutoDownload: map.updateAutoDownload as boolean
+    }),
+    ...(map.headlessStepTimeoutMinutes !== undefined && {
+      headlessStepTimeoutMinutes: map.headlessStepTimeoutMinutes as number
+    }),
+    ...(map.enableHoverPreview !== undefined && {
+      enableHoverPreview: map.enableHoverPreview as boolean
+    }),
+    ...(map.worktreeRetention !== undefined && {
+      worktreeRetention: map.worktreeRetention as AppConfig['defaults']['worktreeRetention']
     })
   }
 }
@@ -1205,23 +1378,97 @@ function loadWorkspaces(d: Database.Database): WorkspaceConfig[] {
 // Config: save inside a transaction
 // ---------------------------------------------------------------------------
 
+/**
+ * Delete the rows of `table` whose key is not in `keep`.
+ *
+ * The counterpart to an upsert loop, and the half that has to be deliberate: the
+ * naive `DELETE FROM table` that used to precede these loops takes out every row
+ * the saving client did not happen to carry, and fires every foreign-key cascade
+ * hanging off them on the way.
+ *
+ * Identifiers are interpolated because SQLite cannot parameterise them; both
+ * arguments are literals at every call site below, never user input.
+ */
+function pruneMissing(
+  d: Database.Database,
+  table: string,
+  keyColumn: string,
+  keep: Array<string | null | undefined>,
+  baseRevision: number
+): void {
+  const wanted = new Set(keep.filter((k): k is string => typeof k === 'string'))
+  const existing = d
+    .prepare(`SELECT ${keyColumn} AS key, row_revision AS revision FROM ${table}`)
+    .all() as Array<{ key: string; revision: number }>
+  const remove = d.prepare(`DELETE FROM ${table} WHERE ${keyColumn} = ?`)
+  for (const { key, revision } of existing) {
+    if (wanted.has(key)) continue
+    // Absent from the snapshot means one of two things, and the revision is what
+    // separates them: a row the client deleted, or a row it never saw because
+    // another client added it after this one last loaded. Only the first is a
+    // deletion. Without this, Vorn open on a laptop and a phone meant whichever
+    // saved second quietly removed the other's tasks.
+    if (revision > baseRevision) continue
+    remove.run(key)
+  }
+}
+
 export function saveConfig(config: AppConfig): void {
   const d = getDb()
 
   const run = d.transaction(() => {
-    // Defaults
-    d.prepare('DELETE FROM defaults').run()
-    const insertDefault = d.prepare('INSERT INTO defaults (key, value) VALUES (?, ?)')
+    // What the saving client last saw. Absent means a caller that does not track
+    // revisions — the CLI, a test, the server persisting its own port — and those
+    // keep the old behaviour of pruning everything their snapshot omits.
+    const baseRevision = config.revision ?? Number.MAX_SAFE_INTEGER
+    const revision = readConfigRevision(d) + 1
+    // Defaults are upserted key by key, never wiped.
+    //
+    // A client sends whatever object its build happens to hold, so deleting the
+    // difference destroys every key that client does not know about. That is not
+    // hypothetical: it silently reverted `serverPort`, which exists so the web
+    // client's origin — and therefore its stored token — survives a restart. An
+    // ordinary settings save undid it.
+    //
+    // It is also what keeps an older client safe against a newer host, where the
+    // gap between the two is a whole release rather than one key.
+    //
+    // An explicit `undefined` still deletes, which is how a setting is cleared;
+    // absent means untouched.
+    const upsertDefault = d.prepare(
+      `INSERT INTO defaults (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    )
+    const deleteDefault = d.prepare('DELETE FROM defaults WHERE key = ?')
     for (const [key, value] of Object.entries(config.defaults)) {
-      if (value !== undefined) {
-        insertDefault.run(key, JSON.stringify(value))
-      }
+      if (value === undefined) deleteDefault.run(key)
+      else upsertDefault.run(key, JSON.stringify(value))
     }
 
     // Projects
-    d.prepare('DELETE FROM projects').run()
+    //
+    // Diff-and-upsert rather than wipe-and-rewrite, the same treatment the
+    // workflows block below already gets and for the same underlying reason: a row
+    // deleted and reinserted is a *different* row to anything referencing it, and
+    // in the meantime every FK cascade fires. Tasks reference projects by name.
+    pruneMissing(
+      d,
+      'projects',
+      'name',
+      config.projects.map((p) => p.name),
+      baseRevision
+    )
     const insertProject = d.prepare(
-      'INSERT INTO projects (name, path, preferred_agents, icon, icon_color, host_ids, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      `INSERT INTO projects (name, path, preferred_agents, icon, icon_color, host_ids, workspace_id, row_revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(name) DO UPDATE SET
+         row_revision = excluded.row_revision,
+         path = excluded.path,
+         preferred_agents = excluded.preferred_agents,
+         icon = excluded.icon,
+         icon_color = excluded.icon_color,
+         host_ids = excluded.host_ids,
+         workspace_id = excluded.workspace_id`
     )
     for (const p of config.projects) {
       insertProject.run(
@@ -1231,7 +1478,8 @@ export function saveConfig(config: AppConfig): void {
         p.icon ?? null,
         p.iconColor ?? null,
         p.hostIds ? JSON.stringify(p.hostIds) : null,
-        p.workspaceId ?? 'personal'
+        p.workspaceId ?? 'personal',
+        revision
       )
     }
 
@@ -1278,9 +1526,23 @@ export function saveConfig(config: AppConfig): void {
     }
 
     // Agent commands
-    d.prepare('DELETE FROM agent_commands').run()
+    pruneMissing(
+      d,
+      'agent_commands',
+      'agent_type',
+      Object.keys(config.agentCommands ?? {}),
+      baseRevision
+    )
     const insertAgent = d.prepare(
-      'INSERT INTO agent_commands (agent_type, command, args, headless_args, fallback_command, fallback_args) VALUES (?, ?, ?, ?, ?, ?)'
+      `INSERT INTO agent_commands (agent_type, command, args, headless_args, fallback_command, fallback_args, row_revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(agent_type) DO UPDATE SET
+         row_revision = excluded.row_revision,
+         command = excluded.command,
+         args = excluded.args,
+         headless_args = excluded.headless_args,
+         fallback_command = excluded.fallback_command,
+         fallback_args = excluded.fallback_args`
     )
     if (config.agentCommands) {
       for (const [agentType, cmd] of Object.entries(config.agentCommands)) {
@@ -1291,16 +1553,35 @@ export function saveConfig(config: AppConfig): void {
             JSON.stringify(cmd.args),
             cmd.headlessArgs ? JSON.stringify(cmd.headlessArgs) : null,
             cmd.fallbackCommand ?? null,
-            cmd.fallbackArgs ? JSON.stringify(cmd.fallbackArgs) : null
+            cmd.fallbackArgs ? JSON.stringify(cmd.fallbackArgs) : null,
+            revision
           )
         }
       }
     }
 
     // Remote hosts
-    d.prepare('DELETE FROM remote_hosts').run()
+    pruneMissing(
+      d,
+      'remote_hosts',
+      'id',
+      (config.remoteHosts ?? []).map((h) => h.id),
+      baseRevision
+    )
     const insertHost = d.prepare(
-      'INSERT INTO remote_hosts (id, label, hostname, user, port, auth_method, ssh_key_path, credential_id, encrypted_password, ssh_options) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      `INSERT INTO remote_hosts (id, label, hostname, user, port, auth_method, ssh_key_path, credential_id, encrypted_password, ssh_options, row_revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         row_revision = excluded.row_revision,
+         label = excluded.label,
+         hostname = excluded.hostname,
+         user = excluded.user,
+         port = excluded.port,
+         auth_method = excluded.auth_method,
+         ssh_key_path = excluded.ssh_key_path,
+         credential_id = excluded.credential_id,
+         encrypted_password = excluded.encrypted_password,
+         ssh_options = excluded.ssh_options`
     )
     for (const h of config.remoteHosts ?? []) {
       insertHost.run(
@@ -1313,15 +1594,43 @@ export function saveConfig(config: AppConfig): void {
         h.sshKeyPath ?? null,
         h.credentialId ?? null,
         h.encryptedPassword ?? null,
-        h.sshOptions ?? null
+        h.sshOptions ?? null,
+        revision
       )
     }
 
-    // Tasks
-    d.prepare('DELETE FROM tasks').run()
+    // Tasks — the highest-churn collection here, and the one where a wipe hurt
+    // most: task_source_links cascades off it, so a rewrite orphaned the link
+    // between a task and the external issue it came from.
+    pruneMissing(
+      d,
+      'tasks',
+      'id',
+      (config.tasks ?? []).map((t) => t.id),
+      baseRevision
+    )
     const insertTask = d.prepare(
-      `INSERT INTO tasks (id, project_name, title, description, status, "order", assigned_session_id, assigned_agent, agent_session_id, branch, use_worktree, created_at, updated_at, completed_at, archived_at, source_connector_id, source_external_url, source_external_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (id, project_name, title, description, status, "order", assigned_session_id, assigned_agent, agent_session_id, branch, use_worktree, created_at, updated_at, completed_at, archived_at, source_connector_id, source_external_url, source_external_id, row_revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         row_revision = excluded.row_revision,
+         project_name = excluded.project_name,
+         title = excluded.title,
+         description = excluded.description,
+         status = excluded.status,
+         "order" = excluded."order",
+         assigned_session_id = excluded.assigned_session_id,
+         assigned_agent = excluded.assigned_agent,
+         agent_session_id = excluded.agent_session_id,
+         branch = excluded.branch,
+         use_worktree = excluded.use_worktree,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at,
+         completed_at = excluded.completed_at,
+         archived_at = excluded.archived_at,
+         source_connector_id = excluded.source_connector_id,
+         source_external_url = excluded.source_external_url,
+         source_external_id = excluded.source_external_id`
     )
     for (const t of config.tasks ?? []) {
       insertTask.run(
@@ -1342,18 +1651,37 @@ export function saveConfig(config: AppConfig): void {
         t.archivedAt ?? null,
         t.sourceConnectorId ?? null,
         t.sourceExternalUrl ?? null,
-        t.sourceExternalId ?? null
+        t.sourceExternalId ?? null,
+        revision
       )
     }
 
     // Workspaces
-    d.prepare('DELETE FROM workspaces').run()
-    const insertWorkspace = d.prepare(
-      `INSERT INTO workspaces (id, name, icon, icon_color, "order") VALUES (?, ?, ?, ?, ?)`
+    const workspaces = config.workspaces ?? [DEFAULT_WORKSPACE]
+    pruneMissing(
+      d,
+      'workspaces',
+      'id',
+      workspaces.map((ws) => ws.id),
+      baseRevision
     )
-    for (const ws of config.workspaces ?? [DEFAULT_WORKSPACE]) {
-      insertWorkspace.run(ws.id, ws.name, ws.icon ?? null, ws.iconColor ?? null, ws.order)
+    const insertWorkspace = d.prepare(
+      `INSERT INTO workspaces (id, name, icon, icon_color, "order", row_revision) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         row_revision = excluded.row_revision,
+         name = excluded.name,
+         icon = excluded.icon,
+         icon_color = excluded.icon_color,
+         "order" = excluded."order"`
+    )
+    for (const ws of workspaces) {
+      insertWorkspace.run(ws.id, ws.name, ws.icon ?? null, ws.iconColor ?? null, ws.order, revision)
     }
+
+    d.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run(
+      CONFIG_REVISION_KEY,
+      String(revision)
+    )
   })
 
   run()
@@ -2274,6 +2602,120 @@ export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition
 
 export function dbDeleteWorkflow(id: string): void {
   getDb().prepare('DELETE FROM workflows WHERE id = ?').run(id)
+}
+
+// ---------------------------------------------------------------------------
+// Targeted CRUD: Identity and device tokens
+// ---------------------------------------------------------------------------
+
+/**
+ * What verification needs, and nothing else.
+ *
+ * Deliberately NOT a superset of `DeviceToken`. An `extends DeviceToken` shape
+ * would be structurally assignable to it, so returning one from a handler typed
+ * `DeviceToken` would compile and ship `tokenHash` over the wire — and
+ * `./database` is an export of this package, so `packages/mcp` can reach it.
+ * Keeping the shapes incompatible makes the compiler enforce what would
+ * otherwise be a comment.
+ */
+export interface DeviceTokenSecret {
+  id: string
+  userId: string
+  tokenHash: string
+  revokedAt: string | null
+}
+
+/** Fields needed to persist a new token. */
+export interface NewDeviceToken {
+  id: string
+  userId: string
+  name: string
+  tokenHash: string
+  createdAt: string
+}
+
+interface DeviceTokenRow {
+  id: string
+  user_id: string
+  name: string
+  token_hash: string
+  created_at: string
+  last_seen_at: string | null
+  revoked_at: string | null
+}
+
+function rowToDeviceToken(row: Omit<DeviceTokenRow, 'token_hash'>): DeviceToken {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    createdAt: row.created_at,
+    lastSeenAt: row.last_seen_at,
+    revokedAt: row.revoked_at
+  }
+}
+
+/** The seeded owner. Present after migration 14 on any initialized database. */
+export function dbGetOwnerUser(): User | null {
+  const row = getDb()
+    .prepare("SELECT * FROM users WHERE role = 'owner' ORDER BY created_at LIMIT 1")
+    .get() as { id: string; name: string; role: UserRole; created_at: string } | undefined
+  if (!row) return null
+  return { id: row.id, name: row.name, role: row.role, createdAt: row.created_at }
+}
+
+export function dbInsertDeviceToken(token: NewDeviceToken): void {
+  getDb()
+    .prepare(
+      `INSERT INTO device_tokens (id, user_id, name, token_hash, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .run(token.id, token.userId, token.name, token.tokenHash, token.createdAt)
+}
+
+/** Carries the hash — for verification only. */
+export function dbGetDeviceTokenSecret(id: string): DeviceTokenSecret | null {
+  const row = getDb()
+    .prepare('SELECT id, user_id, token_hash, revoked_at FROM device_tokens WHERE id = ?')
+    .get(id) as Pick<DeviceTokenRow, 'id' | 'user_id' | 'token_hash' | 'revoked_at'> | undefined
+  if (!row) return null
+  return {
+    id: row.id,
+    userId: row.user_id,
+    tokenHash: row.token_hash,
+    revokedAt: row.revoked_at
+  }
+}
+
+/**
+ * Columns are named rather than `SELECT *`, following `dbListSSHKeys`, so the
+ * hash never leaves the data layer even if a later `...row` spread is careless.
+ */
+export function dbListDeviceTokens(): DeviceToken[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, user_id, name, created_at, last_seen_at, revoked_at
+       FROM device_tokens ORDER BY created_at`
+    )
+    .all() as Omit<DeviceTokenRow, 'token_hash'>[]
+  return rows.map(rowToDeviceToken)
+}
+
+/** Cheaper than listing when the caller only wants to know whether any exist. */
+export function dbHasDeviceTokens(): boolean {
+  return getDb().prepare('SELECT 1 FROM device_tokens LIMIT 1').get() !== undefined
+}
+
+/** Returns false when the id is unknown or the token was already revoked. */
+export function dbRevokeDeviceToken(id: string, revokedAt: string): boolean {
+  const result = getDb()
+    .prepare('UPDATE device_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
+    .run(revokedAt, id)
+  return result.changes > 0
+}
+
+export function dbTouchDeviceToken(id: string, seenAt: string): void {
+  getDb().prepare('UPDATE device_tokens SET last_seen_at = ? WHERE id = ?').run(seenAt, id)
 }
 
 // ---------------------------------------------------------------------------

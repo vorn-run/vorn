@@ -32,6 +32,8 @@ import {
 import type {
   SourceConnection,
   TaskStatus,
+  ConnectorManifest,
+  ExternalItem,
   ProjectConfig,
   WorktreeRetentionConfig
 } from '@vornrun/shared/types'
@@ -114,7 +116,9 @@ import { buildConnectorSeededWorkflow } from './default-workflows'
 import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vornrun/shared/types'
 import { executeScript, scriptRunnerEvents } from './script-runner'
 import { getTailscaleStatus, clearBinaryCache } from './tailscale'
-import { checkAndRebind } from './server-rebind'
+import { reachableUrls } from './reachable-urls'
+import { listTokens, mintOwnerToken, revokeToken } from './token-manager'
+import { disconnectToken } from './ws-handler'
 import { testSshConnection } from './process-utils'
 import { captureAgentSessionId } from './agent-session-capture'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
@@ -258,7 +262,7 @@ function logSessionEvent(
       ...(metadata ? { metadata } : {})
     })
   } catch (err) {
-    log.error('[session-events] failed to log event:', err)
+    log.error({ err }, '[session-events] failed to log event:')
   }
 }
 
@@ -588,10 +592,28 @@ export function registerAllMethods(): void {
   registerMethod('project:detectMobile', ({ projectPath }) => detectMobileProject(projectPath))
   registerMethod('ide:open', ({ ideId, projectPath }) => openInIDE(ideId, projectPath))
 
-  // Tailscale network access
+  // Where a browser can reach this server. Asked separately from Tailscale status
+  // because it has to answer even when Tailscale is absent — that is the case the
+  // old UI could not express at all.
+  registerMethod('server:reachableUrls', async () => {
+    let tailscaleIps: string[] = []
+    try {
+      const status = await getTailscaleStatus()
+      if (status.running && status.selfIP) tailscaleIps = [status.selfIP]
+    } catch {
+      // Not installed or not answering; LAN addresses still stand.
+    }
+    return reachableUrls(serverPort, tailscaleIps)
+  })
+
+  // Tailscale network access. Informational only now: it supplies an address and
+  // a QR code, and no longer decides whether the server binds wide.
   registerMethod('tailscale:status', async () => {
     clearBinaryCache() // Always re-detect in case user just installed
-    await checkAndRebind() // Rebind if Tailscale state changed since startup
+    // Deliberately does not rebind. Reading status used to have that side effect,
+    // because Tailscale could start after boot and change the answer. Nothing
+    // about the bind depends on it now, and rebinding drops every connection —
+    // so it happens when the setting changes, and at no other time.
     return getTailscaleStatus(serverPort)
   })
 
@@ -612,6 +634,27 @@ export function registerAllMethods(): void {
   registerMethod('credential:listKeys', () => dbListSSHKeys())
   registerMethod('credential:deleteKey', (id) => dbDeleteSSHKey(id))
   registerMethod('credential:getEncryptedKey', (id) => dbGetSSHKey(id))
+
+  // Device tokens. Until now these existed only behind `vorn-server token`, so
+  // pairing a phone meant finding a terminal on the machine running the server.
+  registerMethod('token:list', () => listTokens())
+  registerMethod('token:create', ({ name }) => {
+    // Coerced rather than trusted: a malformed param would otherwise fail inside
+    // `.trim()` with a TypeError that reaches the client verbatim, saying nothing
+    // about what was wrong.
+    const label = typeof name === 'string' ? name.trim() : ''
+    // The plaintext is returned exactly once and never stored — only its hash
+    // reaches the database — so the caller has to show it and then drop it.
+    const minted = mintOwnerToken(label || 'Device')
+    return { token: minted.token, plaintext: minted.plaintext }
+  })
+  registerMethod('token:revoke', (id) => {
+    const revoked = revokeToken(id)
+    // Revoking has to reach a socket already holding the token, or a lost phone
+    // keeps working until it happens to reconnect.
+    if (revoked) disconnectToken(id)
+    return { revoked }
+  })
 
   // File explorer
   registerMethod('file:listDir', ({ dirPath, remoteHostId }) => {
@@ -1271,7 +1314,7 @@ export function registerAllMethods(): void {
       try {
         installHooks(port, hookServer.getAuthToken())
       } catch (err) {
-        log.error('[hooks] failed to install hooks:', err)
+        log.error({ err }, '[hooks] failed to install hooks:')
       }
 
       hookServer.on('permission-cancelled', (requestId: string) => {
@@ -1306,7 +1349,7 @@ export function registerAllMethods(): void {
                 )
               }
             } catch (err) {
-              log.error('[hooks] failed to persist agentSessionId:', err)
+              log.error({ err }, '[hooks] failed to persist agentSessionId:')
             }
           }
         }

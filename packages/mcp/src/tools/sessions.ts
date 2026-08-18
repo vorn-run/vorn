@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type {
-  AgentType,
+  AiAgentType,
   CreateTerminalPayload,
   TerminalSession,
   HeadlessSession,
@@ -11,7 +11,16 @@ import type {
 import { V } from '../validation'
 import { rpcCall, rpcNotify } from '../ws-client'
 
-const AGENT_TYPES: [AgentType, ...AgentType[]] = [
+/**
+ * Deliberately `AiAgentType`, not `AgentType`.
+ *
+ * `AgentType` also admits `'shell'`, which is a plain PTY and not something a
+ * task or project can be assigned to — the config types have always said so. The
+ * list below never contained it either, so the wider annotation only ever
+ * described these values incorrectly, and every use of it needed a cast that
+ * quietly disagreed with the field being assigned.
+ */
+const AGENT_TYPES: [AiAgentType, ...AiAgentType[]] = [
   'claude',
   'copilot',
   'codex',
@@ -76,7 +85,7 @@ export function registerSessionTools(server: McpServer): void {
     },
     async (args) => {
       const payload: CreateTerminalPayload = {
-        agentType: args.agent_type as AgentType,
+        agentType: args.agent_type as AiAgentType,
         projectName: args.project_name,
         projectPath: args.project_path,
         ...(args.prompt && { initialPrompt: args.prompt }),

@@ -3,9 +3,63 @@ import path from 'node:path'
 import os from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { WebSocket } from 'ws'
-import type { RpcResponse } from '@vornrun/shared/protocol'
+import { LOCAL_TOKEN_FILENAME, type RpcResponse } from '@vornrun/shared/protocol'
 
-const PORT_FILE = path.join(os.homedir(), '.vorn', 'ws-port')
+/**
+ * Where the running server keeps its port and credential files.
+ *
+ * Both live in the server's data directory, which `vorn-server serve --data-dir`
+ * can move. Hard-coding `~/.vorn` meant that a server started anywhere else was
+ * invisible here: not just unauthenticated, but undiscoverable, since the port file
+ * moves with it. `VORN_DATA_DIR` is how that server tells us where it went.
+ */
+const DATA_DIR = process.env.VORN_DATA_DIR || path.join(os.homedir(), '.vorn')
+const PORT_FILE = path.join(DATA_DIR, 'ws-port')
+const LOCAL_TOKEN_FILE = path.join(DATA_DIR, LOCAL_TOKEN_FILENAME)
+
+const TOKEN_FILE_MISSING_MSG = `Vorn local credential not found (${LOCAL_TOKEN_FILE}).
+The server writes it on startup and removes it on shutdown, so this usually means
+Vorn is not running. Start Vorn (or \`vorn-server serve\`) and try again.
+If the server runs with --data-dir, set VORN_DATA_DIR to the same directory.`
+
+/**
+ * The running server's local credential.
+ *
+ * Read on every call rather than cached: it is regenerated each time the server
+ * starts, so a cached value would go stale exactly when Vorn is restarted — the
+ * moment MCP is most likely to be mid-session.
+ */
+function readLocalToken(): string {
+  try {
+    const token = fs.readFileSync(LOCAL_TOKEN_FILE, 'utf-8').trim()
+    if (!token) throw new Error('empty')
+    return token
+  } catch {
+    throw new Error(TOKEN_FILE_MISSING_MSG)
+  }
+}
+
+/**
+ * Where to connect and how to prove it, resolved together — both halves fail
+ * with their own guidance, and neither is useful without the other.
+ *
+ * The credential is presented on the upgrade so the socket is authenticated
+ * before its first frame: every call here opens a fresh connection, so a
+ * handshake round-trip would be paid on all of them.
+ */
+function connection(): { url: string; options: { headers: Record<string, string> } } {
+  const result = readPort()
+  if (!result.port) {
+    // Narrowed through the union rather than reaching for `.reason` directly,
+    // which only exists on the failure arm.
+    const reason = 'reason' in result ? result.reason : 'missing'
+    throw new Error(reason === 'invalid' ? PORT_FILE_INVALID_MSG : PORT_FILE_MISSING_MSG)
+  }
+  return {
+    url: `ws://127.0.0.1:${result.port}/ws`,
+    options: { headers: { Authorization: `Bearer ${readLocalToken()}` } }
+  }
+}
 const TIMEOUT_MS = 10_000
 
 const IS_WIN = process.platform === 'win32'
@@ -36,10 +90,13 @@ let cachedPort: number | null = null
 let cacheTimestamp = 0
 const CACHE_TTL_MS = 5_000
 
+// `stdio` is a plain array rather than `as const`: the readonly tuple that
+// produced does not satisfy execFileSync's mutable `StdioOptions`, so every call
+// site using these options failed to typecheck.
 const EXEC_OPTS = {
   encoding: 'utf-8' as const,
   timeout: 5000,
-  stdio: ['pipe', 'pipe', 'pipe'] as const
+  stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe']
 }
 
 /**
@@ -166,13 +223,10 @@ export async function rpcCall<T = unknown>(
    */
   timeoutMs: number = TIMEOUT_MS
 ): Promise<T> {
-  const result = readPort()
-  if (!result.port) {
-    throw new Error(result.reason === 'invalid' ? PORT_FILE_INVALID_MSG : PORT_FILE_MISSING_MSG)
-  }
+  const { url, options } = connection()
 
   return new Promise<T>((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${result.port}/ws`)
+    const ws = new WebSocket(url, options)
     const id = ++rpcId
 
     const timer = setTimeout(() => {
@@ -211,13 +265,10 @@ export async function rpcCall<T = unknown>(
  * Send a fire-and-forget JSON-RPC notification (no response expected).
  */
 export async function rpcNotify(method: string, params?: unknown): Promise<void> {
-  const result = readPort()
-  if (!result.port) {
-    throw new Error(result.reason === 'invalid' ? PORT_FILE_INVALID_MSG : PORT_FILE_MISSING_MSG)
-  }
+  const { url, options } = connection()
 
   return new Promise<void>((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${result.port}/ws`)
+    const ws = new WebSocket(url, options)
 
     ws.on('open', () => {
       // No id = fire-and-forget notification per JSON-RPC spec

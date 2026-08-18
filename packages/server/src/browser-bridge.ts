@@ -37,10 +37,31 @@ class BrowserBridge {
   private socket: WebSocket | null = null
   private pending = new Map<number, Pending>()
 
-  /** Called when main identifies itself, so we know which socket to ask. */
-  setSocket(ws: WebSocket): void {
+  /**
+   * Called when main identifies itself, so we know which socket to ask.
+   *
+   * Returns false when a *live* socket already holds the bridge. This used to
+   * overwrite unconditionally, which meant any client that sent
+   * `bridge:identify` took over the browser and device tools — receiving every
+   * page read, screenshot, console dump and app-install request, and supplying
+   * the answers.
+   *
+   * A socket that is no longer OPEN is replaced rather than honoured: main
+   * reconnects every two seconds, and a half-open socket that never fired
+   * 'close' would otherwise lock the bridge out for the life of the process.
+   * Re-identifying on the same socket stays idempotent.
+   */
+  setSocket(ws: WebSocket): boolean {
+    const held = this.socket
+    if (held && held !== ws && held.readyState === held.OPEN) return false
     this.socket = ws
     log.info('[browser-bridge] main process registered')
+    return true
+  }
+
+  /** Whether this socket is the one holding the bridge. */
+  isBridgeSocket(ws: WebSocket): boolean {
+    return this.socket === ws
   }
 
   clearSocket(ws: WebSocket): void {
