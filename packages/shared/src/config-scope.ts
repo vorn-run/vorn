@@ -69,6 +69,30 @@ export function extractViewerSettings(config: AppConfig): ViewerSettings {
  * what the server said, and starts diverging only once someone changes something.
  */
 export function applyViewerSettings(config: AppConfig, local: ViewerSettings): AppConfig {
-  if (!local || Object.keys(local).length === 0) return config
-  return { ...config, defaults: { ...config.defaults, ...local } }
+  const overlay = pickViewerSettings(local)
+  if (Object.keys(overlay).length === 0) return config
+  return { ...config, defaults: { ...config.defaults, ...overlay } }
+}
+
+/**
+ * The viewer-owned subset of an arbitrary object.
+ *
+ * Applied to anything coming back from device storage, which is not trustworthy
+ * input: it is reachable by any script on the origin, and it survives across
+ * versions, so it also holds whatever an older build wrote there. Spreading it
+ * unfiltered let it set `shell`, which is read when spawning a PTY, and
+ * `networkAccessEnabled`, which decides the bind. Those then round-tripped to the
+ * server on the next save, because every call site sends the whole config.
+ *
+ * Filtering here rather than only at the read means a caller cannot reintroduce the
+ * hole by constructing a `ViewerSettings` some other way.
+ */
+export function pickViewerSettings(source: unknown): ViewerSettings {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return {}
+  const input = source as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const key of VIEWER_SETTING_KEYS) {
+    if (input[key] !== undefined) out[key] = input[key]
+  }
+  return out as ViewerSettings
 }

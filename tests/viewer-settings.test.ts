@@ -181,3 +181,50 @@ describe('the device store', () => {
     expect(Object.keys(extracted).sort()).toEqual([...VIEWER_SETTING_KEYS].sort())
   })
 })
+
+describe('device storage as untrusted input', () => {
+  // localStorage is writable by any script on the origin and outlives the build
+  // that wrote it, so what comes back is not necessarily what this build stored.
+  // Spreading it unfiltered let it set `shell`, which is read when spawning a PTY,
+  // and those values then round-tripped to the server because every save call site
+  // sends the whole config.
+  it('ignores server-owned keys in a crafted overlay', () => {
+    const merged = applyViewerSettings(
+      config({ shell: '/bin/zsh', networkAccessEnabled: false, serverPort: 61601 }),
+      {
+        mainViewMode: 'tasks',
+        shell: '/bin/attacker',
+        networkAccessEnabled: true,
+        serverPort: 1
+      } as never
+    )
+
+    expect(merged.defaults.shell).toBe('/bin/zsh')
+    expect(merged.defaults.networkAccessEnabled).toBe(false)
+    expect(merged.defaults.serverPort).toBe(61601)
+    // The legitimate half still applies.
+    expect(merged.defaults.mainViewMode).toBe('tasks')
+  })
+
+  it('drops unknown keys rather than passing them through', () => {
+    const merged = applyViewerSettings(config({}), { somethingNew: 'x' } as never)
+
+    expect(merged.defaults).not.toHaveProperty('somethingNew')
+  })
+
+  it('filters what it reads back from storage, not only what it merges', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () =>
+        JSON.stringify({ mainViewMode: 'tasks', shell: '/bin/attacker', serverPort: 1 }),
+      setItem: () => {},
+      removeItem: () => {}
+    })
+    const { readViewerSettings, withViewerSettings } =
+      await import('../packages/shared/src/viewer-settings-store')
+
+    expect(readViewerSettings()).toEqual({ mainViewMode: 'tasks' })
+    const merged = withViewerSettings(config({ shell: '/bin/zsh', serverPort: 61601 }))
+    expect(merged.defaults.shell).toBe('/bin/zsh')
+    expect(merged.defaults.serverPort).toBe(61601)
+  })
+})

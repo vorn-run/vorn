@@ -1,5 +1,10 @@
 import type { AppConfig } from './types'
-import { applyViewerSettings, extractViewerSettings, type ViewerSettings } from './config-scope'
+import {
+  applyViewerSettings,
+  extractViewerSettings,
+  pickViewerSettings,
+  type ViewerSettings
+} from './config-scope'
 
 /**
  * Where a device keeps the settings that are its own.
@@ -18,9 +23,9 @@ export function readViewerSettings(): ViewerSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return {}
-    const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return parsed as ViewerSettings
+    // Narrowed to known keys rather than cast: this is device storage, which any
+    // script on the origin can write and which outlives the build that wrote it.
+    return pickViewerSettings(JSON.parse(raw))
   } catch {
     return {}
   }
