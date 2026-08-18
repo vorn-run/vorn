@@ -9,11 +9,11 @@ import {
   dbUpdateWorkspace,
   dbDeleteWorkspace,
   dbSignalChange
-} from '@vornrun/server/database'
+} from '../data-access'
 
 export function registerWorkspaceTools(server: McpServer): void {
   server.tool('list_workspaces', 'List all workspaces', async () => {
-    const workspaces = dbListWorkspaces()
+    const workspaces = await dbListWorkspaces()
     return { content: [{ type: 'text', text: JSON.stringify(workspaces, null, 2) }] }
   })
 
@@ -26,7 +26,7 @@ export function registerWorkspaceTools(server: McpServer): void {
       icon_color: V.hexColor.optional().describe('Hex color for icon')
     },
     async (args) => {
-      const existing = dbListWorkspaces()
+      const existing = await dbListWorkspaces()
       const maxOrder = existing.reduce((max, w) => Math.max(max, w.order), 0)
 
       const workspace: WorkspaceConfig = {
@@ -37,7 +37,7 @@ export function registerWorkspaceTools(server: McpServer): void {
         ...(args.icon_color && { iconColor: args.icon_color })
       }
 
-      dbInsertWorkspace(workspace)
+      await dbInsertWorkspace(workspace)
       dbSignalChange()
 
       return { content: [{ type: 'text', text: JSON.stringify(workspace, null, 2) }] }
@@ -55,7 +55,7 @@ export function registerWorkspaceTools(server: McpServer): void {
       order: z.number().int().min(0).optional().describe('Sort order')
     },
     async (args) => {
-      const existing = dbListWorkspaces()
+      const existing = await dbListWorkspaces()
       if (!existing.find((w) => w.id === args.id)) {
         return {
           content: [{ type: 'text', text: `Error: workspace "${args.id}" not found` }],
@@ -69,10 +69,10 @@ export function registerWorkspaceTools(server: McpServer): void {
       if (args.icon_color !== undefined) updates.iconColor = args.icon_color
       if (args.order !== undefined) updates.order = args.order
 
-      dbUpdateWorkspace(args.id, updates)
+      await dbUpdateWorkspace(args.id, updates)
       dbSignalChange()
 
-      const updated = dbListWorkspaces().find((w) => w.id === args.id)
+      const updated = (await dbListWorkspaces()).find((w) => w.id === args.id)
       return { content: [{ type: 'text', text: JSON.stringify(updated, null, 2) }] }
     }
   )
@@ -88,7 +88,7 @@ export function registerWorkspaceTools(server: McpServer): void {
           isError: true
         }
       }
-      const existing = dbListWorkspaces()
+      const existing = await dbListWorkspaces()
       const workspace = existing.find((w) => w.id === args.id)
       if (!workspace) {
         return {
@@ -96,7 +96,7 @@ export function registerWorkspaceTools(server: McpServer): void {
           isError: true
         }
       }
-      dbDeleteWorkspace(args.id)
+      await dbDeleteWorkspace(args.id)
       dbSignalChange()
       return { content: [{ type: 'text', text: `Deleted workspace: ${workspace.name}` }] }
     }

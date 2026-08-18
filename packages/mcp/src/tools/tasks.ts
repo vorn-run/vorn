@@ -3,7 +3,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { isTerminalTaskStatus } from '@vornrun/shared/types'
-import type { TaskConfig, TaskStatus, AgentType } from '@vornrun/shared/types'
+import type { TaskConfig, TaskStatus, AiAgentType } from '@vornrun/shared/types'
 import { V } from '../validation'
 import {
   dbListTasks,
@@ -15,11 +15,20 @@ import {
   dbGetProject,
   dbListProjects,
   dbSignalChange
-} from '@vornrun/server/database'
+} from '../data-access'
 import type { ProjectConfig } from '@vornrun/shared/types'
 
 const TASK_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done', 'cancelled']
-const AGENT_TYPES: [AgentType, ...AgentType[]] = [
+/**
+ * Deliberately `AiAgentType`, not `AgentType`.
+ *
+ * `AgentType` also admits `'shell'`, which is a plain PTY and not something a
+ * task or project can be assigned to — the config types have always said so. The
+ * list below never contained it either, so the wider annotation only ever
+ * described these values incorrectly, and every use of it needed a cast that
+ * quietly disagreed with the field being assigned.
+ */
+const AGENT_TYPES: [AiAgentType, ...AiAgentType[]] = [
   'claude',
   'copilot',
   'codex',
@@ -47,14 +56,14 @@ export function registerTaskTools(server: McpServer): void {
         .describe('Include archived tasks in the result (default: false)')
     },
     async (args) => {
-      let tasks = dbListTasks(args.project_name, args.status)
+      let tasks = await dbListTasks(args.project_name, args.status)
 
       if (!args.include_archived) {
         tasks = tasks.filter((t) => !t.archivedAt)
       }
 
       if (args.workspace_id) {
-        const projects = dbListProjects()
+        const projects = await dbListProjects()
         const wsProjectNames = new Set(
           projects
             .filter((p: ProjectConfig) => (p.workspaceId ?? 'personal') === args.workspace_id)
@@ -87,7 +96,7 @@ export function registerTaskTools(server: McpServer): void {
       assigned_agent: z.enum(AGENT_TYPES).optional().describe('Assign to an agent type')
     },
     async (args) => {
-      const project = dbGetProject(args.project_name)
+      const project = await dbGetProject(args.project_name)
       if (!project) {
         return {
           content: [{ type: 'text', text: `Error: project "${args.project_name}" not found` }],
@@ -95,7 +104,7 @@ export function registerTaskTools(server: McpServer): void {
         }
       }
 
-      const maxOrder = dbGetMaxTaskOrder(args.project_name)
+      const maxOrder = await dbGetMaxTaskOrder(args.project_name)
       const now = new Date().toISOString()
       const status = (args.status as TaskStatus) ?? 'todo'
 
@@ -110,11 +119,11 @@ export function registerTaskTools(server: McpServer): void {
         updatedAt: now,
         ...(args.branch && { branch: args.branch }),
         ...(args.use_worktree && { useWorktree: args.use_worktree }),
-        ...(args.assigned_agent && { assignedAgent: args.assigned_agent as AgentType }),
+        ...(args.assigned_agent && { assignedAgent: args.assigned_agent as AiAgentType }),
         ...((status === 'done' || status === 'cancelled') && { completedAt: now })
       }
 
-      dbInsertTask(task)
+      await dbInsertTask(task)
       dbSignalChange()
 
       return { content: [{ type: 'text', text: JSON.stringify(task, null, 2) }] }
@@ -122,7 +131,7 @@ export function registerTaskTools(server: McpServer): void {
   )
 
   server.tool('get_task', 'Get a task by ID', { id: V.id.describe('Task ID') }, async (args) => {
-    const task = dbGetTask(args.id)
+    const task = await dbGetTask(args.id)
     if (!task) {
       return {
         content: [{ type: 'text', text: `Error: task "${args.id}" not found` }],
@@ -149,7 +158,7 @@ export function registerTaskTools(server: McpServer): void {
       order: z.number().optional().describe('Queue order')
     },
     async (args) => {
-      const task = dbGetTask(args.id)
+      const task = await dbGetTask(args.id)
       if (!task) {
         return {
           content: [{ type: 'text', text: `Error: task "${args.id}" not found` }],
@@ -163,7 +172,7 @@ export function registerTaskTools(server: McpServer): void {
       if (args.branch !== undefined) updates.branch = args.branch
       if (args.use_worktree !== undefined) updates.useWorktree = args.use_worktree
       if (args.assigned_agent !== undefined)
-        updates.assignedAgent = args.assigned_agent as AgentType
+        updates.assignedAgent = args.assigned_agent as AiAgentType
       if (args.order !== undefined) updates.order = args.order
 
       if (args.status !== undefined) {
@@ -178,10 +187,10 @@ export function registerTaskTools(server: McpServer): void {
         }
       }
 
-      dbUpdateTask(args.id, updates)
+      await dbUpdateTask(args.id, updates)
       dbSignalChange()
 
-      const updated = dbGetTask(args.id)
+      const updated = await dbGetTask(args.id)
       return { content: [{ type: 'text', text: JSON.stringify(updated, null, 2) }] }
     }
   )
@@ -191,14 +200,14 @@ export function registerTaskTools(server: McpServer): void {
     'Delete a task by ID',
     { id: V.id.describe('Task ID') },
     async (args) => {
-      const task = dbGetTask(args.id)
+      const task = await dbGetTask(args.id)
       if (!task) {
         return {
           content: [{ type: 'text', text: `Error: task "${args.id}" not found` }],
           isError: true
         }
       }
-      dbDeleteTask(args.id)
+      await dbDeleteTask(args.id)
       dbSignalChange()
 
       return { content: [{ type: 'text', text: `Deleted task: ${task.title}` }] }
@@ -210,7 +219,7 @@ export function registerTaskTools(server: McpServer): void {
     'Archive a finished task (status must be done or cancelled). Archived tasks are hidden from default views but preserved and restorable.',
     { id: V.id.describe('Task ID') },
     async (args) => {
-      const task = dbGetTask(args.id)
+      const task = await dbGetTask(args.id)
       if (!task) {
         return {
           content: [{ type: 'text', text: `Error: task "${args.id}" not found` }],
@@ -229,9 +238,9 @@ export function registerTaskTools(server: McpServer): void {
         }
       }
       const now = new Date().toISOString()
-      dbUpdateTask(args.id, { archivedAt: now, updatedAt: now })
+      await dbUpdateTask(args.id, { archivedAt: now, updatedAt: now })
       dbSignalChange()
-      const updated = dbGetTask(args.id)
+      const updated = await dbGetTask(args.id)
       return { content: [{ type: 'text', text: JSON.stringify(updated, null, 2) }] }
     }
   )
@@ -241,7 +250,7 @@ export function registerTaskTools(server: McpServer): void {
     'Restore an archived task so it shows in default views again.',
     { id: V.id.describe('Task ID') },
     async (args) => {
-      const task = dbGetTask(args.id)
+      const task = await dbGetTask(args.id)
       if (!task) {
         return {
           content: [{ type: 'text', text: `Error: task "${args.id}" not found` }],
@@ -249,9 +258,9 @@ export function registerTaskTools(server: McpServer): void {
         }
       }
       const now = new Date().toISOString()
-      dbUpdateTask(args.id, { archivedAt: undefined, updatedAt: now })
+      await dbUpdateTask(args.id, { archivedAt: undefined, updatedAt: now })
       dbSignalChange()
-      const updated = dbGetTask(args.id)
+      const updated = await dbGetTask(args.id)
       return { content: [{ type: 'text', text: JSON.stringify(updated, null, 2) }] }
     }
   )
@@ -274,15 +283,15 @@ export function registerTaskTools(server: McpServer): void {
     async (args) => {
       // If a specific task ID is provided, return its context directly
       if (args.task_id) {
-        const task = dbGetTask(args.task_id)
+        const task = await dbGetTask(args.task_id)
         if (!task) {
           return {
             content: [{ type: 'text', text: `Error: task "${args.task_id}" not found` }],
             isError: true
           }
         }
-        const project = dbGetProject(task.projectName)
-        const siblingTasks = dbListTasks(task.projectName)
+        const project = await dbGetProject(task.projectName)
+        const siblingTasks = await dbListTasks(task.projectName)
         return {
           content: [
             {
@@ -311,7 +320,7 @@ export function registerTaskTools(server: McpServer): void {
       // Auto-detect by matching cwd to projects and task worktrees
       const cwd = args.cwd || process.cwd()
       const normalizedCwd = path.resolve(cwd)
-      const projects = dbListProjects()
+      const projects = await dbListProjects()
 
       // Find the best matching project (longest path prefix match)
       let matchedProject = null
@@ -344,7 +353,7 @@ export function registerTaskTools(server: McpServer): void {
       }
 
       // Get all tasks for this project
-      const projectTasks = dbListTasks(matchedProject.name)
+      const projectTasks = await dbListTasks(matchedProject.name)
 
       // Try to find the specific task by matching worktree path or assigned session
       let matchedTask: TaskConfig | null = null

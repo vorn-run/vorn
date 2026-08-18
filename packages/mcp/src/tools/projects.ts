@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { AgentType } from '@vornrun/shared/types'
+import type { AiAgentType } from '@vornrun/shared/types'
 import { V } from '../validation'
 import {
   dbListProjects,
@@ -9,9 +9,18 @@ import {
   dbUpdateProject,
   dbDeleteProject,
   dbSignalChange
-} from '@vornrun/server/database'
+} from '../data-access'
 
-const AGENT_TYPES: [AgentType, ...AgentType[]] = [
+/**
+ * Deliberately `AiAgentType`, not `AgentType`.
+ *
+ * `AgentType` also admits `'shell'`, which is a plain PTY and not something a
+ * task or project can be assigned to — the config types have always said so. The
+ * list below never contained it either, so the wider annotation only ever
+ * described these values incorrectly, and every use of it needed a cast that
+ * quietly disagreed with the field being assigned.
+ */
+const AGENT_TYPES: [AiAgentType, ...AiAgentType[]] = [
   'claude',
   'copilot',
   'codex',
@@ -27,7 +36,7 @@ export function registerProjectTools(server: McpServer): void {
       workspace_id: V.id.optional().describe('Filter by workspace ID (e.g. "personal")')
     },
     async (args) => {
-      let projects = dbListProjects()
+      let projects = await dbListProjects()
       if (args.workspace_id) {
         projects = projects.filter((p) => (p.workspaceId ?? 'personal') === args.workspace_id)
       }
@@ -46,7 +55,7 @@ export function registerProjectTools(server: McpServer): void {
       icon_color: V.hexColor.optional().describe('Hex color for icon')
     },
     async (args) => {
-      if (dbGetProject(args.name)) {
+      if (await dbGetProject(args.name)) {
         return {
           content: [{ type: 'text', text: `Error: project "${args.name}" already exists` }],
           isError: true
@@ -56,12 +65,12 @@ export function registerProjectTools(server: McpServer): void {
       const project = {
         name: args.name,
         path: args.path,
-        preferredAgents: (args.preferred_agents as AgentType[]) ?? [],
+        preferredAgents: (args.preferred_agents as AiAgentType[]) ?? [],
         ...(args.icon && { icon: args.icon }),
         ...(args.icon_color && { iconColor: args.icon_color })
       }
 
-      dbInsertProject(project)
+      await dbInsertProject(project)
       dbSignalChange()
 
       return { content: [{ type: 'text', text: JSON.stringify(project, null, 2) }] }
@@ -79,7 +88,7 @@ export function registerProjectTools(server: McpServer): void {
       icon_color: V.hexColor.optional().describe('Hex color for icon')
     },
     async (args) => {
-      if (!dbGetProject(args.name)) {
+      if (!(await dbGetProject(args.name))) {
         return {
           content: [{ type: 'text', text: `Error: project "${args.name}" not found` }],
           isError: true
@@ -89,14 +98,14 @@ export function registerProjectTools(server: McpServer): void {
       const updates: Record<string, unknown> = {}
       if (args.path !== undefined) updates.path = args.path
       if (args.preferred_agents !== undefined)
-        updates.preferredAgents = args.preferred_agents as AgentType[]
+        updates.preferredAgents = args.preferred_agents as AiAgentType[]
       if (args.icon !== undefined) updates.icon = args.icon
       if (args.icon_color !== undefined) updates.iconColor = args.icon_color
 
-      dbUpdateProject(args.name, updates)
+      await dbUpdateProject(args.name, updates)
       dbSignalChange()
 
-      const updated = dbGetProject(args.name)
+      const updated = await dbGetProject(args.name)
       return { content: [{ type: 'text', text: JSON.stringify(updated, null, 2) }] }
     }
   )
@@ -106,14 +115,14 @@ export function registerProjectTools(server: McpServer): void {
     'Delete a project and all its tasks',
     { name: V.name.describe('Project name') },
     async (args) => {
-      if (!dbGetProject(args.name)) {
+      if (!(await dbGetProject(args.name))) {
         return {
           content: [{ type: 'text', text: `Error: project "${args.name}" not found` }],
           isError: true
         }
       }
 
-      dbDeleteProject(args.name)
+      await dbDeleteProject(args.name)
       dbSignalChange()
 
       return { content: [{ type: 'text', text: `Deleted project: ${args.name}` }] }

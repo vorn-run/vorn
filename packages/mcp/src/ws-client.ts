@@ -50,7 +50,10 @@ function readLocalToken(): string {
 function connection(): { url: string; options: { headers: Record<string, string> } } {
   const result = readPort()
   if (!result.port) {
-    throw new Error(result.reason === 'invalid' ? PORT_FILE_INVALID_MSG : PORT_FILE_MISSING_MSG)
+    // Narrowed through the union rather than reaching for `.reason` directly,
+    // which only exists on the failure arm.
+    const reason = 'reason' in result ? result.reason : 'missing'
+    throw new Error(reason === 'invalid' ? PORT_FILE_INVALID_MSG : PORT_FILE_MISSING_MSG)
   }
   return {
     url: `ws://127.0.0.1:${result.port}/ws`,
@@ -87,10 +90,13 @@ let cachedPort: number | null = null
 let cacheTimestamp = 0
 const CACHE_TTL_MS = 5_000
 
+// `stdio` is a plain array rather than `as const`: the readonly tuple that
+// produced does not satisfy execFileSync's mutable `StdioOptions`, so every call
+// site using these options failed to typecheck.
 const EXEC_OPTS = {
   encoding: 'utf-8' as const,
   timeout: 5000,
-  stdio: ['pipe', 'pipe', 'pipe'] as const
+  stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe']
 }
 
 /**

@@ -8,7 +8,6 @@ import { registerWorkspaceTools } from './tools/workspaces'
 import { registerConnectorTools } from './tools/connectors'
 import { registerBrowserTools } from './tools/browser'
 import { registerDeviceTools } from './tools/device'
-import { guardLocalData } from './local-data-guard'
 
 export function createMcpServer(version: string): McpServer {
   const server = new McpServer({ name: 'vorn', version }, { capabilities: { tools: {} } })
@@ -19,16 +18,13 @@ export function createMcpServer(version: string): McpServer {
   registerBrowserTools(server)
   registerDeviceTools(server)
 
-  // These four open this machine's SQLite themselves rather than going over the
-  // socket, so they only mean anything when this machine is the one serving that
-  // data. Guarded rather than trusted: pointed at a host they would keep answering
-  // from the local file, and a wrong task list returned confidently is worse than
-  // an error. See local-data-guard.ts.
-  const localOnly = guardLocalData(server)
-  registerProjectTools(localOnly)
-  registerTaskTools(localOnly)
-  registerWorkflowTools(localOnly)
-  registerWorkspaceTools(localOnly)
+  // These four used to open this machine's SQLite directly and were guarded so a
+  // host-mode desktop could not read a stale local file. They go over the socket
+  // now, so they reach whichever server MCP is talking to and need no guard.
+  registerProjectTools(server)
+  registerTaskTools(server)
+  registerWorkflowTools(server)
+  registerWorkspaceTools(server)
 
   return server
 }
