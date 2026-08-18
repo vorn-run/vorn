@@ -1,4 +1,6 @@
 import { CLOSE_CREDENTIAL_REJECTED } from '@vornrun/shared/protocol'
+import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
+import type { AppConfig } from '@vornrun/shared/types'
 /**
  * WebSocket RPC shim that implements the same surface as the Electron preload `window.api`.
  * Components and stores call window.api.* exactly as they do in Electron,
@@ -372,10 +374,15 @@ export function createApiShim(wsUrl: string) {
       rpc.on('session:created', callback as (p: unknown) => void),
 
     // ── Configuration ──
-    loadConfig: () => rpc.invoke('config:load'),
-    saveConfig: (config: unknown) => rpc.invoke('config:save', config),
+    // See the note in src/preload/index.ts — the same two hooks, so a browser and a
+    // desktop pointed at one server each keep their own view.
+    loadConfig: async () => withViewerSettings((await rpc.invoke('config:load')) as AppConfig),
+    saveConfig: (config: unknown) => {
+      captureViewerSettings(config as AppConfig)
+      return rpc.invoke('config:save', config)
+    },
     onConfigChanged: (callback: (config: unknown) => void) =>
-      rpc.on('config:changed', callback as (p: unknown) => void),
+      rpc.on('config:changed', (p: unknown) => callback(withViewerSettings(p as AppConfig))),
 
     // ── Menu Events (Electron-only, no-op in web) ──
     onMenuNewAgent: (_callback: () => void) => () => {},

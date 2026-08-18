@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import {
   CreateTerminalPayload,
   TerminalSession,
@@ -82,12 +83,22 @@ const api = {
     }
   },
 
-  loadConfig: (): Promise<AppConfig> => ipcRenderer.invoke(IPC.CONFIG_LOAD),
+  // Settings that belong to this device are laid over the server's on the way in
+  // and remembered on the way out, so two clients on one server stop overwriting
+  // each other's view mode, font size and workspace. See config-scope.ts for which
+  // keys those are and why. Done here rather than in the renderer so both
+  // transports behave identically and no call site has to know.
+  loadConfig: async (): Promise<AppConfig> =>
+    withViewerSettings(await ipcRenderer.invoke(IPC.CONFIG_LOAD)),
 
-  saveConfig: (config: AppConfig) => ipcRenderer.invoke(IPC.CONFIG_SAVE, config),
+  saveConfig: (config: AppConfig) => {
+    captureViewerSettings(config)
+    return ipcRenderer.invoke(IPC.CONFIG_SAVE, config)
+  },
 
   onConfigChanged: (callback: (config: AppConfig) => void) => {
-    const listener = (_: Electron.IpcRendererEvent, config: AppConfig): void => callback(config)
+    const listener = (_: Electron.IpcRendererEvent, config: AppConfig): void =>
+      callback(withViewerSettings(config))
     ipcRenderer.on(IPC.CONFIG_CHANGED, listener)
     return () => {
       ipcRenderer.removeListener(IPC.CONFIG_CHANGED, listener)
