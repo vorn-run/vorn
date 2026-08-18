@@ -950,7 +950,12 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // never left, so a guest that navigated to a page with no <title> — whose
       // report is dropped as unset — kept advertising the *previous* page's
       // name against the new url, indefinitely.
-      const movedOn = seen.url !== undefined && seen.url !== tab.liveUrl
+      // Against where the tab effectively was, not just its last observation. A
+      // tab that has reported a title but not yet a url still *is* somewhere —
+      // its intent — and comparing against an absent `liveUrl` made the first
+      // navigation report look like a move even when it named that same page,
+      // clearing a title the page had just set.
+      const movedOn = seen.url !== undefined && seen.url !== (tab.liveUrl ?? tab.url)
       const liveUrl = seen.url ?? tab.liveUrl
       const title = seen.title ?? (movedOn ? undefined : tab.title)
       // A guest re-reports the same url on every load event. Rebuilding the map

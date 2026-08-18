@@ -518,6 +518,19 @@ describe('what a tab reports about itself', () => {
     expect(tab?.title).toBeUndefined()
   })
 
+  it('keeps a title the page set before its first navigation report', () => {
+    // `page-title-updated` can land before `did-navigate`. That first url
+    // report names the page the tab was already on, so it is not a move — and
+    // treating it as one threw away the name the page had just given.
+    act(() => s().syncBrowserTab('t1', 0, { title: 'Dev server' }))
+    act(() => s().syncBrowserTab('t1', 0, { url: 'https://example.com/' }))
+    expect(s().browserPanes.get('t1')?.tabs[0]?.title).toBe('Dev server')
+
+    // A real move still drops it.
+    act(() => s().syncBrowserTab('t1', 0, { url: 'https://elsewhere.example/' }))
+    expect(s().browserPanes.get('t1')?.tabs[0]?.title).toBeUndefined()
+  })
+
   it('lets a page clear its own name', () => {
     // An explicitly empty title is a page saying it has none, not a missing
     // report. Treated as absent it would leave the previous name in place.
