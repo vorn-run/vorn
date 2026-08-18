@@ -427,3 +427,25 @@ describe('bridge authorization', () => {
     await expect(inflight).resolves.toEqual({ nodes: ['real'] })
   })
 })
+
+describe('a credential offered on the upgrade and rejected', () => {
+  it('closes at once rather than waiting out the grace window', () => {
+    // Both cases used to land in the timeout branch, so a wrong token was answered
+    // ten seconds later with 4001 — the code a client retries on, not the one that
+    // means the token itself is bad. MCP opens a connection per RPC call, so a stale
+    // token parked a socket for ten seconds on every one of them.
+    const ws = createMockWs()
+
+    handleConnection(ws, 'vorn_deadbeef_nope')
+
+    expect(ws.close).toHaveBeenCalledWith(CLOSE_CREDENTIAL_REJECTED, 'credential rejected')
+  })
+
+  it('still gives a socket that offered nothing its window', () => {
+    const ws = createMockWs()
+
+    handleConnection(ws, undefined)
+
+    expect(ws.close).not.toHaveBeenCalled()
+  })
+})

@@ -115,6 +115,13 @@ export function handleConnection(ws: WebSocket, credential?: string): void {
   const upgraded = authenticateCredential(credential)
   if (upgraded) {
     admit(upgraded)
+  } else if (credential !== undefined) {
+    // Offered one and it was wrong. Distinct from offering none: waiting out the
+    // grace window would answer with a timeout ten seconds later, and a timeout is
+    // the code a client retries rather than the one that says the token is bad.
+    // MCP opens a connection per call, so a stale token would otherwise leave one
+    // socket parked for ten seconds on every single RPC.
+    refuse('credential rejected', CLOSE_CREDENTIAL_REJECTED)
   } else {
     // Browsers cannot set headers, so they get a window to send one message.
     // Bounded, or an unauthenticated socket could sit open indefinitely.
