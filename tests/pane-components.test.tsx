@@ -576,7 +576,72 @@ describe('BrowserCard', () => {
     expect(screen.getByRole('button', { name: /Open this page as its own card/ })).toBeTruthy()
 
     fireEvent.click(perTab)
-    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['https://vorn.dev/'])
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual([
+      { url: 'https://vorn.dev/' }
+    ])
+  })
+
+  it('follows the guest when it navigates itself, rather than naming where it was sent', () => {
+    // A redirect, a followed link and an agent's `Page.navigate` all move the
+    // guest without passing through the store. Before the pane observed them,
+    // the strip kept naming the page the tab was originally opened on — a
+    // label describing something nobody was looking at.
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(Object.assign(new Event('did-navigate'), { url: 'https://vorn.dev/docs' }))
+    })
+
+    expect(screen.getByRole('tab', { name: /vorn\.dev/ })).toBeTruthy()
+    // Intent is untouched. `src` is bound to it, so writing the observed url
+    // back would re-set `src` to the page the guest already reached and reload
+    // it — losing scroll position and any half-typed form, on every navigation.
+    const tab = useAppStore.getState().browserPanes.get('t1')?.tabs[0]
+    expect(tab?.url).toBe('http://localhost:5173/')
+    expect(tab?.liveUrl).toBe('https://vorn.dev/docs')
+  })
+
+  it('follows same-document routing, which is every navigation in a single-page app', () => {
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('did-navigate-in-page'), { url: 'http://localhost:5173/settings' })
+      )
+    })
+
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.liveUrl).toBe(
+      'http://localhost:5173/settings'
+    )
+  })
+
+  it('ignores a title the guest did not actually set', () => {
+    // A page with no <title> reports its own url as the title. Taking that
+    // would put a second copy of the address where the page's name belongs.
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('page-title-updated'), {
+          title: 'http://localhost:5173/',
+          explicitSet: false
+        })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.title).toBeUndefined()
+
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('page-title-updated'), { title: 'Vorn', explicitSet: true })
+      )
+    })
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.title).toBe('Vorn')
   })
 
   it('pops the tab being looked at from the control cluster', () => {
@@ -588,7 +653,9 @@ describe('BrowserCard', () => {
 
     // addBrowserTab activates what it adds, so the cluster acts on vorn.dev.
     fireEvent.click(screen.getByRole('button', { name: /Open this page as its own card/ }))
-    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['http://localhost:5173/'])
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual([
+      { url: 'http://localhost:5173/' }
+    ])
   })
 
   it("sends what the user picked to the session's agent", async () => {
@@ -794,7 +861,9 @@ describe('BrowserCard', () => {
     render(<BrowserCard sessionId="t1" />)
 
     fireEvent.click(screen.getByLabelText('Close tab example.com'))
-    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual(['http://localhost:5173/'])
+    expect(useAppStore.getState().browserPanes.get('t1')?.tabs).toEqual([
+      { url: 'http://localhost:5173/' }
+    ])
   })
 
   it('navigates on submit, normalizing what was typed', () => {

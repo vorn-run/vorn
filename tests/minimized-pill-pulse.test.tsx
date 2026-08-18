@@ -90,7 +90,7 @@ describe('MinimizedPill for a popped-out card', () => {
 
   it('names a popped-out page by its host', () => {
     browserPanes.set('card:t1:1', {
-      tabs: ['https://vorn.dev/docs'],
+      tabs: [{ url: 'https://vorn.dev/docs' }],
       activeTab: 0,
       sessionId: 't1'
     })

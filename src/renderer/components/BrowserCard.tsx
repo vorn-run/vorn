@@ -11,6 +11,7 @@ import {
   X
 } from 'lucide-react'
 import { useAppStore } from '../stores'
+import { tabUrl } from '../stores/types'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON } from '../lib/icon-button'
@@ -77,6 +78,7 @@ export const BrowserCard = memo(
       addBrowserTab,
       closeBrowserTab,
       setActiveBrowserTab,
+      syncBrowserTab,
       promoteBrowserTab
     } = useAppStore(
       useShallow((s) => ({
@@ -87,12 +89,25 @@ export const BrowserCard = memo(
         addBrowserTab: s.addBrowserTab,
         closeBrowserTab: s.closeBrowserTab,
         setActiveBrowserTab: s.setActiveBrowserTab,
+        syncBrowserTab: s.syncBrowserTab,
         promoteBrowserTab: s.promoteBrowserTab
       }))
     )
 
-    const url = pane ? (pane.tabs[pane.activeTab] ?? null) : null
+    const activeTabState = pane ? (pane.tabs[pane.activeTab] ?? null) : null
+    // Observation, not intent: where the guest actually is. The address bar and
+    // the pane title read this, so both follow a redirect, a followed link, or
+    // an agent's navigation instead of naming the page originally requested.
+    // Intent stays on the tab itself, where `src` reads it — see the webview
+    // map below.
+    const url = activeTabState ? tabUrl(activeTabState) : null
     const viewRef = useRef<WebviewElement | null>(null)
+    // Which tab the listeners below are bound to. A ref rather than the value
+    // itself: the effect re-runs on a tab switch, but an in-flight navigation
+    // can still land afterwards, and a stale closure would file the new page's
+    // url against the tab the person just left.
+    const tabIndexRef = useRef(pane?.activeTab ?? 0)
+    tabIndexRef.current = pane?.activeTab ?? 0
     const [draft, setDraft] = useState(url ?? '')
     const [loading, setLoading] = useState(false)
     const [failed, setFailed] = useState<string | null>(null)
@@ -112,7 +127,15 @@ export const BrowserCard = memo(
       if (!view) return
 
       const syncNav = (): void => {
-        setNav({ back: view.canGoBack(), forward: view.canGoForward() })
+        // The guest's imperative API only exists once it has attached, and a
+        // navigation event can land before that — reading it then throws out of
+        // an event handler, where nothing is left to catch it. Back and forward
+        // being briefly unknown is the harmless half of that trade.
+        try {
+          setNav({ back: view.canGoBack(), forward: view.canGoForward() })
+        } catch {
+          setNav({ back: false, forward: false })
+        }
       }
       const onStart = (): void => {
         setLoading(true)
@@ -128,6 +151,26 @@ export const BrowserCard = memo(
         if (detail.errorCode === -3) return
         setLoading(false)
         setFailed(detail.errorDescription || 'Failed to load')
+      }
+
+      // Where the guest actually went. A redirect, a followed link and an
+      // agent's `Page.navigate` all land here and nowhere else — none of them
+      // pass through the store, so this is the only thing that can tell the
+      // strip its label is out of date.
+      //
+      // The tab index is read at fire time, not captured here: capturing it
+      // would rebuild the stale closure the ref exists to avoid.
+      const onNavigate = (e: Event): void => {
+        const detail = e as Event & { url?: string }
+        if (detail.url) syncBrowserTab(key, tabIndexRef.current, { url: detail.url })
+        syncNav()
+      }
+      const onTitle = (e: Event): void => {
+        const detail = e as Event & { title?: string; explicitSet?: boolean }
+        // A guest with no <title> reports its url as the title, which would put
+        // a second copy of the address where the page's name belongs.
+        if (detail.explicitSet === false) return
+        if (detail.title) syncBrowserTab(key, tabIndexRef.current, { title: detail.title })
       }
 
       // The guest only has a webContentsId once it has attached. Reporting it
@@ -163,6 +206,11 @@ export const BrowserCard = memo(
       view.addEventListener('did-start-loading', onStart)
       view.addEventListener('did-stop-loading', onStop)
       view.addEventListener('did-fail-load', onFail)
+      // Both: `did-navigate` misses same-document routing, which is every
+      // navigation in a single-page app.
+      view.addEventListener('did-navigate', onNavigate)
+      view.addEventListener('did-navigate-in-page', onNavigate)
+      view.addEventListener('page-title-updated', onTitle)
       return () => {
         cancelled = true
         window.clearTimeout(retry)
@@ -170,8 +218,11 @@ export const BrowserCard = memo(
         view.removeEventListener('did-start-loading', onStart)
         view.removeEventListener('did-stop-loading', onStop)
         view.removeEventListener('did-fail-load', onFail)
+        view.removeEventListener('did-navigate', onNavigate)
+        view.removeEventListener('did-navigate-in-page', onNavigate)
+        view.removeEventListener('page-title-updated', onTitle)
       }
-    }, [pane?.activeTab, sessionId, isCard])
+    }, [pane?.activeTab, sessionId, isCard, key, syncBrowserTab])
 
     // Closing the pane or the session unmounts this card; either way the CDP
     // session must be released, or main keeps a debugger attached to a guest
@@ -332,8 +383,10 @@ export const BrowserCard = memo(
             role="tablist"
             aria-label="Browser tabs"
           >
-            {pane.tabs.map((tabUrl, i) => {
+            {pane.tabs.map((tab, i) => {
               const active = i === pane.activeTab
+              // The label names where the guest actually is, not where it was sent.
+              const shown = tabUrl(tab)
               return (
                 <div
                   key={i}
@@ -344,7 +397,7 @@ export const BrowserCard = memo(
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') setActiveBrowserTab(key, i)
                   }}
-                  title={tabUrl}
+                  title={shown}
                   className={`group/tab flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-md max-w-[170px]
                               cursor-default select-none transition-colors ${
                                 active
@@ -352,7 +405,7 @@ export const BrowserCard = memo(
                                   : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.03]'
                               }`}
                 >
-                  <span className="text-[11px] truncate">{displayHost(tabUrl)}</span>
+                  <span className="text-[11px] truncate">{displayHost(shown)}</span>
                   {/* A card already holds exactly one page — popping its tab out
                       again would swap one card for another. */}
                   {!isCard && (
@@ -362,7 +415,7 @@ export const BrowserCard = memo(
                         e.stopPropagation()
                         promoteBrowserTab(key, i)
                       }}
-                      aria-label={`Open tab ${displayHost(tabUrl)} as its own card`}
+                      aria-label={`Open tab ${displayHost(shown)} as its own card`}
                       title="Open as its own card"
                       className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
                                  hover:bg-white/[0.08] transition-colors"
@@ -376,7 +429,7 @@ export const BrowserCard = memo(
                       e.stopPropagation()
                       closeBrowserTab(key, i)
                     }}
-                    aria-label={`Close tab ${displayHost(tabUrl)}`}
+                    aria-label={`Close tab ${displayHost(shown)}`}
                     className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
                                opacity-0 group-hover/tab:opacity-100 focus:opacity-100 transition-opacity"
                   >
@@ -507,13 +560,15 @@ export const BrowserCard = memo(
         {/* Every tab stays mounted so switching back keeps the page and its
             scroll position; only the active one is visible. */}
         <div className="flex-1 min-h-0 relative" style={{ background: PANE_SURFACE }}>
-          {pane.tabs.map((tabUrl, i) => (
+          {pane.tabs.map((tab, i) => (
             <webview
               key={i}
               ref={
                 i === pane.activeTab ? (viewRef as unknown as React.Ref<HTMLElement>) : undefined
               }
-              src={tabUrl}
+              // Intent, never the observed url: re-setting `src` to the page the
+              // guest already reached would reload it and drop scroll position.
+              src={tab.url}
               // Each session browses in its own partition, so logins and cookies
               // in one session's pane don't leak into another's.
               partition={`persist:vorn-browser-${sessionId}`}

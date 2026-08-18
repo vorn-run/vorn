@@ -219,7 +219,7 @@ describe('pane store actions', () => {
     const s = () => useAppStore.getState()
     act(() => s().openBrowserPane('t1', 'example.com'))
     expect(JSON.parse(localStorage.getItem('vorn:panes') as string).browsers).toEqual({
-      t1: { tabs: ['https://example.com/'], activeTab: 0, sessionId: 't1' }
+      t1: { tabs: [{ url: 'https://example.com/' }], activeTab: 0, sessionId: 't1' }
     })
 
     act(() => s().removeTerminal('t1'))
@@ -233,7 +233,7 @@ describe('pane store actions', () => {
     // Owned by its key, which is what a session-keyed entry always meant — so
     // an upgraded entry reads back as the session's own browser, not as a card.
     expect(panes.get('t1')).toEqual({
-      tabs: ['https://old.example/'],
+      tabs: [{ url: 'https://old.example/' }],
       activeTab: 0,
       sessionId: 't1'
     })
@@ -281,8 +281,8 @@ describe('pane store actions', () => {
     act(() => s().openBrowserPane('t1', 'example.org'))
     // Typing an address replaces the current page rather than spawning a tab.
     expect(s().browserPanes.get('t1')?.tabs).toEqual([
-      'https://example.com/',
-      'https://example.org/'
+      { url: 'https://example.com/' },
+      { url: 'https://example.org/' }
     ])
   })
 
@@ -550,8 +550,10 @@ describe('popping an item out to its own card', () => {
 
     // Left in both places it would be two guests on one url, each with its own
     // scroll position — and closing either would look like a refusal to go.
-    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/'])
-    expect(s().browserPanes.get(cardId as unknown as string)?.tabs).toEqual(['https://vorn.dev/'])
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([{ url: 'https://example.com/' }])
+    expect(s().browserPanes.get(cardId as unknown as string)?.tabs).toEqual([
+      { url: 'https://vorn.dev/' }
+    ])
   })
 
   it('closes the strip when its last tab is popped out', () => {
@@ -597,7 +599,10 @@ describe('popping an item out to its own card', () => {
     act(() => s().returnCardToSession(cardId))
 
     expect(s().browserPanes.has(cardId)).toBe(false)
-    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/', 'https://vorn.dev/'])
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([
+      { url: 'https://example.com/' },
+      { url: 'https://vorn.dev/' }
+    ])
   })
 
   it('opens a browser to receive a tab whose strip has since closed', () => {
@@ -611,7 +616,7 @@ describe('popping an item out to its own card', () => {
     act(() => s().returnCardToSession(cardId))
     // Refusing would strand the page: the card is closing either way, so with
     // nowhere to land the tab would simply be gone.
-    expect(s().browserPanes.get('t1')?.tabs).toEqual(['https://example.com/'])
+    expect(s().browserPanes.get('t1')?.tabs).toEqual([{ url: 'https://example.com/' }])
   })
 
   it('un-minimizes nothing but forgets the card it closed', () => {
@@ -819,7 +824,7 @@ describe('popping an item out to its own card', () => {
     const pane = s().browserPanes.get('t1')!
     // `addBrowserTab` activates what it adds, so the strip ended up on the
     // card's *last* page rather than the one being looked at.
-    expect(pane.tabs[pane.activeTab]).toBe('https://two.example/')
+    expect(pane.tabs[pane.activeTab]?.url).toBe('https://two.example/')
   })
 
   it('surfaces the existing card when a file is popped out twice', () => {
@@ -898,9 +903,9 @@ describe('popping an item out to its own card', () => {
 
     act(() => s().returnCardToSession(cardId))
     expect(s().browserPanes.get('t1')?.tabs).toEqual([
-      'https://example.com/',
-      'https://second.example/',
-      'https://third.example/'
+      { url: 'https://example.com/' },
+      { url: 'https://second.example/' },
+      { url: 'https://third.example/' }
     ])
   })
 

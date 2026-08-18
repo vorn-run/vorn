@@ -8,10 +8,12 @@ import {
   TaskSourceFilter,
   EditorPaneState,
   BrowserPaneState,
+  BrowserTabState,
   DevicePaneState,
   TerminalsPaneState,
   CardSplit,
-  isPromotedPane
+  isPromotedPane,
+  tabUrl
 } from './types'
 import {
   filesPaneId,
@@ -196,20 +198,41 @@ export function parsePersistedEditors(
 /**
  * Read the persisted browser panes.
  *
- * Older builds stored a single url string per session, before a pane could
- * hold tabs. Those are read as a one-tab pane rather than discarded, so
- * upgrading doesn't silently close the page someone had open. As with editors,
- * an entry with no recorded owner is owned by its key.
+ * Two older shapes have to keep working. The oldest stored a single url string
+ * per session, before a pane could hold tabs; the next stored `tabs` as a bare
+ * string array, before a tab carried what the guest reported about itself.
+ * Both are read rather than discarded, so upgrading doesn't silently close the
+ * page someone had open. As with editors, an entry with no recorded owner is
+ * owned by its key.
+ *
+ * A persisted tab restores as intent only: `liveUrl` and `title` are things a
+ * live guest reports, and reviving them from disk would state as observed fact
+ * something no guest has said this run.
  */
 export function parsePersistedBrowsers(
   saved:
-    | Record<string, string | { tabs?: string[]; activeTab?: number; sessionId?: string }>
+    | Record<
+        string,
+        | string
+        | {
+            tabs?: (string | { url?: string })[]
+            activeTab?: number
+            sessionId?: string
+          }
+      >
     | undefined
 ): Map<string, BrowserPaneState> {
   return new Map(
     Object.entries(saved ?? {}).map(([id, entry]) => {
-      if (typeof entry === 'string') return [id, { tabs: [entry], activeTab: 0, sessionId: id }]
-      const tabs = entry.tabs?.length ? entry.tabs : [DEFAULT_BROWSER_URL]
+      if (typeof entry === 'string') {
+        return [id, { tabs: [{ url: entry }], activeTab: 0, sessionId: id }]
+      }
+      const urls = (entry.tabs ?? [])
+        .map((t) => (typeof t === 'string' ? t : t?.url))
+        .filter((u): u is string => typeof u === 'string' && u.length > 0)
+      const tabs: BrowserTabState[] = (urls.length ? urls : [DEFAULT_BROWSER_URL]).map((url) => ({
+        url
+      }))
       const activeTab = Math.min(Math.max(entry.activeTab ?? 0, 0), tabs.length - 1)
       return [id, { tabs, activeTab, sessionId: entry.sessionId ?? id }]
     })
@@ -232,7 +255,14 @@ function savePanes(
         browsers: Object.fromEntries(
           [...browserPanes].map(([id, s]) => [
             id,
-            { tabs: s.tabs, activeTab: s.activeTab, sessionId: s.sessionId }
+            {
+              // Intent only. `liveUrl` and `title` are what a live guest
+              // reported; writing them to disk would have the next run assert
+              // as observed fact something no guest has said yet.
+              tabs: s.tabs.map((t) => ({ url: t.url })),
+              activeTab: s.activeTab,
+              sessionId: s.sessionId
+            }
           ])
         )
       })
@@ -797,18 +827,23 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
         if (!normalized) return {}
         if (existing) {
           // Navigating replaces the page in the tab the user is looking at,
-          // the way an address bar does — it does not spawn a tab.
+          // the way an address bar does — it does not spawn a tab. New intent
+          // drops the old observation with it: what the previous page reported
+          // about itself says nothing about the one now loading.
           const tabs = [...existing.tabs]
-          tabs[existing.activeTab] = normalized
+          tabs[existing.activeTab] = { url: normalized }
           next.set(sessionId, { ...existing, tabs })
         } else {
-          next.set(sessionId, { tabs: [normalized], activeTab: 0, sessionId })
+          next.set(sessionId, { tabs: [{ url: normalized }], activeTab: 0, sessionId })
         }
       } else if (!existing) {
         // Reopening picks up where the pane left off. Closing it is how you get
         // the space back, not how you throw the tabs away.
         const remembered = state.browserMemory.get(sessionId)
-        next.set(sessionId, remembered ?? { tabs: [DEFAULT_BROWSER_URL], activeTab: 0, sessionId })
+        next.set(
+          sessionId,
+          remembered ?? { tabs: [{ url: DEFAULT_BROWSER_URL }], activeTab: 0, sessionId }
+        )
       } else {
         return {}
       }
@@ -849,7 +884,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const normalized = url === undefined ? DEFAULT_BROWSER_URL : normalizeUrl(url)
       if (!normalized) return {}
       const next = new Map(state.browserPanes)
-      const tabs = [...existing.tabs, normalized]
+      const tabs = [...existing.tabs, { url: normalized }]
       next.set(paneId, { ...existing, tabs, activeTab: tabs.length - 1 })
       savePanes(state.filesPanes, state.editorPanes, next)
       return { browserPanes: next }
@@ -897,6 +932,29 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const next = new Map(state.browserPanes)
       next.set(paneId, { ...existing, activeTab: index })
       savePanes(state.filesPanes, state.editorPanes, next)
+      return { browserPanes: next }
+    }),
+
+  syncBrowserTab: (paneId, index, seen) =>
+    set((state) => {
+      const existing = state.browserPanes.get(paneId)
+      if (!existing || index < 0 || index >= existing.tabs.length) return {}
+      const tab = existing.tabs[index]
+
+      const liveUrl = seen.url ?? tab.liveUrl
+      const title = seen.title ?? tab.title
+      // A guest re-reports the same url on every load event. Rebuilding the map
+      // for no change would rerender the pane — and remount nothing, but the
+      // work is pure waste on a page that reloads itself.
+      if (liveUrl === tab.liveUrl && title === tab.title) return {}
+
+      const tabs = [...existing.tabs]
+      tabs[index] = { ...tab, ...(liveUrl ? { liveUrl } : {}), ...(title ? { title } : {}) }
+      const next = new Map(state.browserPanes)
+      next.set(paneId, { ...existing, tabs })
+      // Not persisted: `savePanes` writes intent only, so an observation is
+      // never worth a write. Leaving it out also keeps a page that reloads on a
+      // timer from touching localStorage forever.
       return { browserPanes: next }
     }),
 
@@ -1055,7 +1113,9 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   promoteBrowserTab: (paneId, index) => {
     const pane = get().browserPanes.get(paneId)
     if (!pane || index < 0 || index >= pane.tabs.length) return null
-    const url = pane.tabs[index]
+    // The whole tab, not just its url. It is the same page moving to a new
+    // frame, so what the guest reported about itself is still true there.
+    const tab = pane.tabs[index]
     const cardId = nextCardId(pane.sessionId)
     // Out of the strip before into the card: leaving it in both would mount two
     // guests on one url, each with its own scroll position and half-typed form,
@@ -1063,7 +1123,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     get().closeBrowserTab(paneId, index)
     set((state) => {
       const next = new Map(state.browserPanes)
-      next.set(cardId, { tabs: [url], activeTab: 0, sessionId: pane.sessionId })
+      next.set(cardId, { tabs: [tab], activeTab: 0, sessionId: pane.sessionId })
       savePanes(state.filesPanes, state.editorPanes, next)
       return { browserPanes: next }
     })
@@ -1093,7 +1153,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // Every tab, not just the active one. A card can gather tabs of its own —
       // its strip keeps its `+` — and returning it used to carry back whichever
       // page happened to be in front and drop the rest without a word.
-      const [first, ...rest] = browser.tabs
+      //
+      // Where each guest actually is, not where it was first sent: a tab that
+      // followed a link would otherwise snap back to the page it started on.
+      const [first, ...rest] = browser.tabs.map(tabUrl)
       if (state.browserPanes.has(browser.sessionId)) state.addBrowserTab(browser.sessionId, first)
       // If that browser is closed, opening it on this page is the landing spot —
       // a tab with nowhere to go would leave the card the only thing holding it,
