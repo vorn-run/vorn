@@ -537,6 +537,20 @@ async function pointFor(
     )
   }
 
+  // Scroll first, measure second. `DOM.getBoxModel` reports layout-viewport
+  // coordinates, so an element below the fold yields a plausible off-screen
+  // point rather than an error: the click dispatches into nothing and the call
+  // still reports success. Bringing the node into view before measuring is what
+  // makes "ok" mean the element was actually hit.
+  //
+  // Best-effort: a node that cannot be scrolled to is not necessarily
+  // unclickable, and the box model below is the real check.
+  try {
+    await send(wc, 'DOM.scrollIntoViewIfNeeded', { backendNodeId })
+  } catch {
+    // Fall through — `getBoxModel` decides whether this ref is usable.
+  }
+
   const { model } = await send<{ model?: { content: number[] } }>(wc, 'DOM.getBoxModel', {
     backendNodeId
   })
