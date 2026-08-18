@@ -171,3 +171,50 @@ describe('a timeout or a dropped socket', () => {
     expect(sockets).toHaveLength(2)
   })
 })
+
+describe('a first connection that fails before authenticating', () => {
+  it('still settles the readiness the app is holding', async () => {
+    // main.tsx awaits __ready() exactly once and renders when it resolves. The
+    // reconnect used to replace that promise, so a retry could connect and
+    // authenticate perfectly while the promise the app held stayed pending — the
+    // loading screen never lifted. Easy to hit: the page opens a moment before the
+    // server is listening and the first attempt loses.
+    const api = createApiShim('ws://localhost:1234/ws')
+    const settled = vi.fn()
+    api.__ready().then(settled)
+
+    sockets[0].open()
+    sockets[0].closeWith(CLOSE_UNAUTHENTICATED)
+    await vi.advanceTimersByTimeAsync(2100)
+
+    expect(sockets).toHaveLength(2)
+    sockets[1].open()
+    sockets[1].authOk()
+    await Promise.resolve()
+
+    expect(settled).toHaveBeenCalled()
+  })
+
+  it('gives a later call a promise tied to the live socket', async () => {
+    // The reason a settled promise is still replaced: a call made after a drop must
+    // wait for the next connection rather than resolve against the closed one.
+    const api = createApiShim('ws://localhost:1234/ws')
+    api.__ready()
+
+    sockets[0].open()
+    sockets[0].authOk()
+    await Promise.resolve()
+    sockets[0].closeWith(1006)
+    await vi.advanceTimersByTimeAsync(2100)
+
+    const afterDrop = vi.fn()
+    api.__ready().then(afterDrop)
+    await Promise.resolve()
+    expect(afterDrop).not.toHaveBeenCalled()
+
+    sockets[1].open()
+    sockets[1].authOk()
+    await Promise.resolve()
+    expect(afterDrop).toHaveBeenCalled()
+  })
+})

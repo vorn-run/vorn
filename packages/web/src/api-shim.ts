@@ -68,6 +68,8 @@ class RpcClient {
   private _ready!: Promise<void>
   private _resolveReady!: () => void
   private _rejectReady!: (err: Error) => void
+  /** Whether `_ready` has settled, so `resetReady` knows if replacing it is safe. */
+  private readySettled = false
   /**
    * Called when the server rejects our credential, on any connection.
    *
@@ -85,11 +87,33 @@ class RpcClient {
     this.connect()
   }
 
-  /** A fresh readiness promise per connection attempt, captured in one place. */
+  /**
+   * A fresh readiness promise per connection attempt — but only once the current
+   * one has settled.
+   *
+   * `main.tsx` awaits `__ready()` exactly once, at startup, and renders when it
+   * resolves. Replacing an unsettled promise orphans that await: the retry can
+   * connect and authenticate perfectly, resolving the *new* promise, while the one
+   * the app is holding stays pending forever and the loading screen never lifts.
+   * That is easy to hit — the first attempt loses whenever the page opens a moment
+   * before the server is listening.
+   *
+   * So a pending promise is kept and allowed to settle on a later attempt, and only
+   * a settled one is replaced, which is what `invoke()` needs so a call made after a
+   * drop waits for the next connection rather than resolving against the closed one.
+   */
   private resetReady(): void {
+    if (this._ready && !this.readySettled) return
+    this.readySettled = false
     this._ready = new Promise((resolve, reject) => {
-      this._resolveReady = resolve
-      this._rejectReady = reject
+      this._resolveReady = () => {
+        this.readySettled = true
+        resolve()
+      }
+      this._rejectReady = (err) => {
+        this.readySettled = true
+        reject(err)
+      }
     })
     // Nothing awaits a replacement promise, so an unobserved rejection would
     // surface as an unhandled rejection in the console.

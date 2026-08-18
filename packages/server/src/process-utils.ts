@@ -257,9 +257,29 @@ export function getSafeEnv(): Record<string, string> {
  *
  * Not the SSH session either: that connects to another machine, which is
  * precisely the widening this split exists to avoid.
+ *
+ * `VORN_DATA_DIR` is added rather than passed through, so anything launched from a
+ * session can find the running server's port and credential files. They live in the
+ * data directory, which `--data-dir` moves; without this, a tool started from a Vorn
+ * terminal would look in `~/.vorn` and find a server that is not there.
  */
 export function getLaunchEnv(): Record<string, string> {
-  return filterEnv(resolvedEnv(), envPassthrough)
+  const env = filterEnv(resolvedEnv(), envPassthrough)
+  if (launchDataDir) env.VORN_DATA_DIR = launchDataDir
+  return env
+}
+
+/**
+ * Told to us at startup rather than read from the database module.
+ *
+ * This module is on the PTY spawn path and must not import anything that reaches
+ * the database — see the note at the top of the file — so the server pushes the
+ * value in instead of us pulling it out.
+ */
+let launchDataDir: string | null = null
+
+export function setLaunchDataDir(dir: string): void {
+  launchDataDir = dir
 }
 
 function isWindowsStylePath(p: string): boolean {

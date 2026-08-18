@@ -5,12 +5,22 @@ import { execFileSync } from 'node:child_process'
 import { WebSocket } from 'ws'
 import { LOCAL_TOKEN_FILENAME, type RpcResponse } from '@vornrun/shared/protocol'
 
-const PORT_FILE = path.join(os.homedir(), '.vorn', 'ws-port')
-const LOCAL_TOKEN_FILE = path.join(os.homedir(), '.vorn', LOCAL_TOKEN_FILENAME)
+/**
+ * Where the running server keeps its port and credential files.
+ *
+ * Both live in the server's data directory, which `vorn-server serve --data-dir`
+ * can move. Hard-coding `~/.vorn` meant that a server started anywhere else was
+ * invisible here: not just unauthenticated, but undiscoverable, since the port file
+ * moves with it. `VORN_DATA_DIR` is how that server tells us where it went.
+ */
+const DATA_DIR = process.env.VORN_DATA_DIR || path.join(os.homedir(), '.vorn')
+const PORT_FILE = path.join(DATA_DIR, 'ws-port')
+const LOCAL_TOKEN_FILE = path.join(DATA_DIR, LOCAL_TOKEN_FILENAME)
 
-const TOKEN_FILE_MISSING_MSG = `Vorn local credential not found (~/.vorn/local-token).
+const TOKEN_FILE_MISSING_MSG = `Vorn local credential not found (${LOCAL_TOKEN_FILE}).
 The server writes it on startup and removes it on shutdown, so this usually means
-Vorn is not running. Start Vorn (or \`vorn-server serve\`) and try again.`
+Vorn is not running. Start Vorn (or \`vorn-server serve\`) and try again.
+If the server runs with --data-dir, set VORN_DATA_DIR to the same directory.`
 
 /**
  * The running server's local credential.

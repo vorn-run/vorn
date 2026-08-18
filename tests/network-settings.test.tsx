@@ -221,6 +221,25 @@ describe('NetworkSettings', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it('drops the addresses when a refresh fails', async () => {
+    // Keeping the previous ones would leave the panel advertising a URL while it
+    // cannot reach the server to confirm it — which reads as "still reachable" at
+    // exactly the moment it is not.
+    const user = userEvent.setup()
+    store.config = { defaults: { networkAccessEnabled: true } }
+    await renderPanel()
+    expect(screen.getByText('http://192.168.1.20:4000/app/')).toBeInTheDocument()
+
+    getTailscaleStatus.mockRejectedValue(new Error('server unreachable'))
+    getReachableUrls.mockRejectedValue(new Error('server unreachable'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    await user.click(screen.getByTitle('Check again'))
+
+    await waitFor(() =>
+      expect(screen.queryByText('http://192.168.1.20:4000/app/')).not.toBeInTheDocument()
+    )
+  })
+
   it('re-reads the addresses after the setting changes', async () => {
     // The server rebinds on the config change, so the addresses it reports change too.
     vi.useFakeTimers({ shouldAdvanceTime: true })

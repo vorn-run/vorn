@@ -437,7 +437,11 @@ export function NetworkSettings() {
       setStatus(result)
       setReachable(urls)
     } catch (err) {
-      console.error('[NetworkSettings] failed to get tailscale status:', err)
+      console.error('[NetworkSettings] failed to get network status:', err)
+      // Drop the addresses with the status. Keeping the previous ones would leave
+      // the panel advertising a URL while it cannot reach the server to confirm it,
+      // which reads as "still reachable" at the exact moment it is not.
+      setReachable(null)
       setStatus({
         installed: false,
         running: false,

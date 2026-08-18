@@ -21,7 +21,7 @@ import { getTaskImagePath as resolveTaskImagePath } from './task-images'
 import { getTailscaleStatus } from './tailscale'
 import { initRebind, checkAndRebind } from './server-rebind'
 import { isAllowedUpgrade, logRefusedUpgrade, setTrustedOriginHosts } from './ws-origin'
-import { setEnvPassthrough } from './process-utils'
+import { setEnvPassthrough, setLaunchDataDir } from './process-utils'
 import log from './logger'
 
 /**
@@ -50,6 +50,10 @@ export async function startServer(
   configManager.init(options.dataDir)
   configManager.watchDb()
   const dataDir = getDataDir()
+  // Hand it to the spawn path, which cannot import the database module to ask.
+  // Anything launched from a session inherits VORN_DATA_DIR and can then find the
+  // port and credential files even when --data-dir moved them.
+  setLaunchDataDir(dataDir)
 
   // Register built-in connectors
   const { connectorRegistry } = await import('./connectors')
