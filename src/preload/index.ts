@@ -19,6 +19,7 @@ import {
   SSHKeyMeta,
   RemoteHost,
   TailscaleStatus,
+  ReachableUrls,
   FileEntry,
   SourceConnection,
   TaskSourceLink,
@@ -553,6 +554,7 @@ const api = {
 
   // Tailscale
   getTailscaleStatus: (): Promise<TailscaleStatus> => ipcRenderer.invoke(IPC.TAILSCALE_STATUS),
+  getReachableUrls: (): Promise<ReachableUrls> => ipcRenderer.invoke(IPC.SERVER_REACHABLE_URLS),
 
   // SSH
   testSshConnection: (

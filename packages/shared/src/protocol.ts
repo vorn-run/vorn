@@ -35,7 +35,8 @@ import type {
   DeviceScreenRead,
   DeviceTarget,
   DevicePoint,
-  MobileProject
+  MobileProject,
+  ReachableUrls
 } from './types'
 
 // ─── Runtime Protocol Version ───────────────────────────────────
@@ -131,6 +132,7 @@ export interface RpcNotification {
 export interface RequestMethods {
   /** Present a credential. The only method accepted before authenticating. */
   'auth:authenticate': { params: { token: string }; result: { ok: boolean } }
+  'server:reachableUrls': { params: void; result: ReachableUrls }
   'terminal:create': { params: CreateTerminalPayload; result: TerminalSession }
   'terminal:kill': { params: string; result: void }
   'terminal:listActive': { params: void; result: TerminalSession[] }

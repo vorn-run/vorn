@@ -204,11 +204,37 @@ export async function startServer(
   // by name still connects by IP literal, so a slow or absent Tailscale must not
   // hold up startup.
   void refreshTrustedOrigins()
-  const port = options.port ?? 0 // 0 = OS-assigned
 
-  await app.listen({ host, port })
+  // Keep the same port across restarts. A browser keys localStorage by origin, so
+  // an ephemeral port hands a paired device a new origin every launch and its
+  // token goes with it — the user would experience that as Vorn forgetting them.
+  // An explicit --port always wins; otherwise take the remembered one, falling
+  // back if something else has claimed it meanwhile.
+  const preferredPort = options.port ?? config.defaults.serverPort ?? 0
+  try {
+    await app.listen({ host, port: preferredPort })
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE' || preferredPort === 0) throw err
+    log.warn(`[server] port ${preferredPort} is in use, taking another`)
+    await app.listen({ host, port: 0 })
+  }
+
   const address = app.server.address()
-  const actualPort = typeof address === 'object' && address ? address.port : port
+  const actualPort = typeof address === 'object' && address ? address.port : preferredPort
+
+  // Remember it, so the next launch is the same origin. Written straight to the
+  // database rather than through notifyChanged: a config broadcast here would
+  // re-enter checkAndRebind during startup.
+  if (!options.port && config.defaults.serverPort !== actualPort) {
+    try {
+      configManager.saveConfig({
+        ...config,
+        defaults: { ...config.defaults, serverPort: actualPort }
+      })
+    } catch (err) {
+      log.warn({ err }, '[server] could not remember the port; it may change next launch')
+    }
+  }
 
   // Store port for RPC methods (e.g. tailscale:status needs it)
   setServerPort(actualPort)

@@ -933,6 +933,13 @@ export interface TailscalePeer {
   online: boolean
 }
 
+/** Where the web client can be reached, independent of Tailscale. */
+export interface ReachableUrls {
+  urls: string[]
+  port: number
+  remote: boolean
+}
+
 export interface TailscaleStatus {
   installed: boolean
   running: boolean
@@ -998,6 +1005,15 @@ export interface AppConfig {
     webAccessEnabled?: boolean
     mobileAccessEnabled?: boolean
     networkAccessEnabled?: boolean
+    /**
+     * The port the server listens on, remembered across restarts.
+     *
+     * Not cosmetic: a browser keys `localStorage` by origin, so an ephemeral port
+     * means a new origin every launch and a paired device loses the token it was
+     * given. Chosen on first run and kept; if it is taken at startup the server
+     * takes another and remembers that one instead.
+     */
+    serverPort?: number
     showHeadlessAgents?: boolean
     headlessRetentionMinutes?: number
     /**
@@ -1450,6 +1466,7 @@ export const IPC = {
   SESSION_EVENT_LIST_BY_SESSION: 'sessionEvent:listBySession',
   AGENT_DETECT_INSTALLED: 'agent:detectInstalled',
   TAILSCALE_STATUS: 'tailscale:status',
+  SERVER_REACHABLE_URLS: 'server:reachableUrls',
   CREDENTIAL_STORE_KEY: 'credential:storeKey',
   CREDENTIAL_IMPORT_KEY_FILE: 'credential:importKeyFile',
   CREDENTIAL_DELETE_KEY: 'credential:deleteKey',

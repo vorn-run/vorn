@@ -518,6 +518,7 @@ export function createApiShim(wsUrl: string) {
 
     // ── Tailscale Network Access ──
     getTailscaleStatus: () => rpc.invoke('tailscale:status'),
+    getReachableUrls: () => rpc.invoke('server:reachableUrls'),
 
     // ── App Info (web-specific) ──
     getAppVersion: () => 'web',

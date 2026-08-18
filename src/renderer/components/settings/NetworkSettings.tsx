@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import QRCode from 'qrcode'
 import { useAppStore } from '../../stores'
-import { TailscaleStatus } from '../../../shared/types'
+import { TailscaleStatus, ReachableUrls } from '../../../shared/types'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
@@ -143,7 +143,14 @@ function CopyButton({ text }: { text: string }) {
 
 // ─── Prerequisites Card ──────────────────────────────────────────
 
-function PrerequisitesCard({
+/**
+ * Tailscale used to be a prerequisite: without it the toggle did not render and the
+ * server refused to bind wide. It is a recommendation now — every connection carries
+ * a device token, so the credential is the boundary and the tailnet is what keeps
+ * that credential off the wire in the clear. Hence the neutral treatment: this is
+ * advice, not a blocked state.
+ */
+function TailscaleCard({
   status,
   onRefresh,
   loading
@@ -156,10 +163,10 @@ function PrerequisitesCard({
   const notRunning = status.installed && !status.running
 
   return (
-    <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-4 mb-6">
+    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-4 mb-6">
       <div className="flex items-start gap-3">
         {/* Warning icon */}
-        <div className="mt-0.5 text-amber-400 shrink-0">
+        <div className="mt-0.5 text-gray-500 shrink-0">
           <svg
             width="20"
             height="20"
@@ -168,26 +175,25 @@ function PrerequisitesCard({
             stroke="currentColor"
             strokeWidth="1.5"
           >
-            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            <line x1="12" y1="9" x2="12" y2="13" />
-            <line x1="12" y1="17" x2="12.01" y2="17" />
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
           </svg>
         </div>
         <div className="flex-1 min-w-0">
           {notInstalled && (
             <>
-              <div className="text-sm font-medium text-amber-200 mb-1">
+              <div className="text-sm font-medium text-gray-200 mb-1">
                 Tailscale is not installed
               </div>
               <p className="text-xs text-gray-400 mb-3">
-                Tailscale creates a secure private network between your devices. Install it to
-                access Vorn from your phone, tablet, or other computers.
+                Remote access works without it. Tailscale adds encryption in transit and reaches
+                your devices from anywhere, not just this network — which is what you want on wifi
+                you do not control.
               </p>
               <a
                 href="https://tailscale.com/download"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-gray-300 border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
               >
                 Download Tailscale
                 <svg
@@ -207,7 +213,7 @@ function PrerequisitesCard({
           )}
           {notRunning && (
             <>
-              <div className="text-sm font-medium text-amber-200 mb-1">
+              <div className="text-sm font-medium text-gray-200 mb-1">
                 Tailscale is not connected
               </div>
               <p className="text-xs text-gray-400">
@@ -342,27 +348,67 @@ function QRCodeDisplay({ url }: { url: string }) {
 
 // ─── Connection Info ─────────────────────────────────────────────
 
-function ConnectionInfo({ status }: { status: TailscaleStatus }) {
-  if (!status.appUrl) return null
+/**
+ * Every address this server answers on, not just the tailnet one.
+ *
+ * The old version read `status.appUrl` and returned null without it, so with
+ * Tailscale absent the panel said remote access was on and never said where to point
+ * a browser. A machine usually has several addresses and only the person looking at
+ * the screen knows which network the other device is on, so list them all rather than
+ * guess.
+ */
+function ConnectionInfo({ reachable }: { reachable: ReachableUrls | null }) {
+  if (!reachable || reachable.urls.length === 0) return null
+  const [primary, ...rest] = reachable.urls
 
   return (
     <div className="mt-4 space-y-4">
-      {/* URL display */}
       <div>
         <div className="text-[10px] text-gray-600 uppercase tracking-wider font-medium mb-2">
-          Access URL
+          Access {reachable.urls.length > 1 ? 'URLs' : 'URL'}
         </div>
-        <div className="flex items-center rounded-lg bg-white/[0.04] border border-white/[0.06] px-4 py-3">
-          <code className="text-sm text-emerald-400 font-mono flex-1 truncate">
-            {status.appUrl}
-          </code>
-          <CopyButton text={status.appUrl} />
+        <div className="space-y-1.5">
+          {reachable.urls.map((url) => (
+            <div
+              key={url}
+              className="flex items-center rounded-lg bg-white/[0.04] border border-white/[0.06] px-4 py-3"
+            >
+              <code className="text-sm text-emerald-400 font-mono flex-1 truncate">{url}</code>
+              <CopyButton text={url} />
+            </div>
+          ))}
         </div>
+        {rest.length > 0 && (
+          <p className="text-[10px] text-gray-600 mt-2">
+            Use whichever address the other device shares a network with.
+          </p>
+        )}
       </div>
 
-      {/* QR code */}
+      {/* The QR encodes the first, which is the tailnet address when there is one. */}
       <div className="flex justify-center py-2">
-        <QRCodeDisplay url={status.appUrl} />
+        <QRCodeDisplay url={primary} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Token management is CLI-only, so the panel has to say the command out loud —
+ * otherwise a user reaches the address, is asked for a token, and has nowhere to get
+ * one. The web client's own prompt already prints this same line.
+ */
+function TokenCard() {
+  const command = 'vorn-server token create --name "My phone"'
+  return (
+    <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
+      <div className="text-xs font-medium text-gray-400 mb-1">Connecting a device</div>
+      <p className="text-xs text-gray-600 mb-3">
+        The browser will ask for a device token. Create one in a terminal on this machine:
+      </p>
+      <div className="flex items-center rounded-lg bg-white/[0.04] border border-white/[0.06] px-3 py-2">
+        <code className="text-xs text-gray-300 font-mono flex-1 truncate">{command}</code>
+        <CopyButton text={command} />
       </div>
     </div>
   )
@@ -374,13 +420,22 @@ export function NetworkSettings() {
   const config = useAppStore((s) => s.config)
   const setConfig = useAppStore((s) => s.setConfig)
   const [status, setStatus] = useState<TailscaleStatus | null>(null)
+  const [reachable, setReachable] = useState<ReachableUrls | null>(null)
   const [loading, setLoading] = useState(true)
+  /** Set when the toggle is flipped on without a tailnet; see the panel below. */
+  const [confirming, setConfirming] = useState(false)
 
   const fetchStatus = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await window.api.getTailscaleStatus()
+      // Independent questions, so asked together: a missing Tailscale must not stop
+      // the panel from showing an address, which is the whole point of this pass.
+      const [result, urls] = await Promise.all([
+        window.api.getTailscaleStatus(),
+        window.api.getReachableUrls()
+      ])
       setStatus(result)
+      setReachable(urls)
     } catch (err) {
       console.error('[NetworkSettings] failed to get tailscale status:', err)
       setStatus({
@@ -397,6 +452,7 @@ export function NetworkSettings() {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: read the network status once on open
     fetchStatus()
   }, [fetchStatus])
 
@@ -412,14 +468,22 @@ export function NetworkSettings() {
   }
 
   const enabled = config.defaults.networkAccessEnabled ?? false
-  const showPrereqs = status && (!status.installed || !status.running)
-  const showConnectionInfo = status?.running && enabled
+  const onTailnet = status?.running === true
+  const showTailscaleCard = status !== null && !onTailnet
+
+  const setEnabled = (value: boolean): void => {
+    setConfirming(false)
+    updateDefaults({ networkAccessEnabled: value })
+    // The server rebinds on the config change, which takes a moment; the addresses
+    // it reports are what changes, so re-ask once it has settled.
+    setTimeout(fetchStatus, 500)
+  }
 
   return (
     <div>
       <SettingsPageHeader
         title="Remote Access"
-        description="Access Vorn from other devices on your Tailscale network"
+        description="Reach this Vorn from your phone or another computer"
       />
 
       {/* Loading state */}
@@ -437,52 +501,86 @@ export function NetworkSettings() {
             <polyline points="23 4 23 10 17 10" />
             <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
           </svg>
-          <span className="text-sm text-gray-500">Checking Tailscale status...</span>
+          <span className="text-sm text-gray-500">Checking network status...</span>
         </div>
       )}
 
-      {/* Prerequisites warning */}
-      {status && showPrereqs && (
-        <PrerequisitesCard status={status} onRefresh={fetchStatus} loading={loading} />
-      )}
+      {/* Enable toggle — no longer gated on Tailscale */}
+      <div className="space-y-1">
+        <SettingRow
+          label="Enable Remote Access"
+          description="Let other devices on this network open Vorn in a browser"
+        >
+          <ToggleSwitch
+            checked={enabled}
+            onChange={(value) => {
+              // Turning it off is never worth a confirmation, and neither is turning
+              // it on over a tailnet, where the traffic is encrypted either way.
+              if (!value || onTailnet) return setEnabled(value)
+              setConfirming(true)
+            }}
+          />
+        </SettingRow>
+      </div>
 
-      {/* Enable toggle */}
-      {status && status.running && (
-        <div className="space-y-1">
-          <SettingRow
-            label="Enable Remote Access"
-            description="Allow other devices on your Tailscale network to access Vorn"
-          >
-            <ToggleSwitch
-              checked={enabled}
-              onChange={(value) => {
-                updateDefaults({ networkAccessEnabled: value })
-                // Re-fetch status to get updated appUrl
-                setTimeout(fetchStatus, 500)
-              }}
-            />
-          </SettingRow>
+      {/* The acknowledgement. Stating what the wide bind actually costs is the whole
+          reason this pass touches the UI at all. */}
+      {confirming && (
+        <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-4">
+          <div className="text-sm font-medium text-amber-200 mb-1">Enable without Tailscale?</div>
+          <div className="text-xs text-gray-400 space-y-1.5">
+            <p>
+              Vorn will accept connections from anything on this network, over plain HTTP. A device
+              token is still required, but it travels unencrypted — anyone who can read this
+              network&apos;s traffic can take it, and a token runs commands on this machine.
+            </p>
+            <p>Fine on a home or office network you trust. Not on shared or public wifi.</p>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => setEnabled(true)}
+              className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-200 border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
+            >
+              Enable anyway
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
       {/* Connection info + QR */}
-      {showConnectionInfo && status && <ConnectionInfo status={status} />}
+      {enabled && <ConnectionInfo reachable={reachable} />}
+      {enabled && <TokenCard />}
+
+      {/* Tailscale, as a recommendation rather than a prerequisite */}
+      {showTailscaleCard && (
+        <div className="mt-6">
+          <TailscaleCard status={status} onRefresh={fetchStatus} loading={loading} />
+        </div>
+      )}
 
       {/* Device list */}
-      {showConnectionInfo && status && <DeviceList status={status} />}
+      {enabled && onTailnet && status && <DeviceList status={status} />}
 
       {/* How it works — always visible */}
-      {status && !showPrereqs && (
+      {status && (
         <div className="mt-8 rounded-lg border border-white/[0.04] bg-white/[0.02] p-4">
           <div className="text-xs font-medium text-gray-400 mb-2">How it works</div>
           <div className="text-xs text-gray-600 space-y-1.5">
             <p>
-              Tailscale creates an encrypted mesh network between your devices. When remote access
-              is enabled, other devices on your tailnet can connect to Vorn.
+              Every connection to Vorn carries a device token, on this machine and from anywhere
+              else. Enabling remote access opens the port to the rest of the network; the token is
+              what decides who gets in.
             </p>
             <p>
-              Only devices signed into your Tailscale account can reach this address. No passwords,
-              no port forwarding, no firewall rules.
+              Tailscale is the recommended way to reach it. It encrypts the connection and works
+              from any network, so the token is never readable in transit and you are not limited to
+              devices sitting on the same wifi.
             </p>
           </div>
         </div>

@@ -114,6 +114,7 @@ import { buildConnectorSeededWorkflow } from './default-workflows'
 import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vornrun/shared/types'
 import { executeScript, scriptRunnerEvents } from './script-runner'
 import { getTailscaleStatus, clearBinaryCache } from './tailscale'
+import { reachableUrls } from './reachable-urls'
 import { testSshConnection } from './process-utils'
 import { captureAgentSessionId } from './agent-session-capture'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
@@ -586,6 +587,20 @@ export function registerAllMethods(): void {
   registerMethod('ide:detect', () => detectIDEs())
   registerMethod('project:detectMobile', ({ projectPath }) => detectMobileProject(projectPath))
   registerMethod('ide:open', ({ ideId, projectPath }) => openInIDE(ideId, projectPath))
+
+  // Where a browser can reach this server. Asked separately from Tailscale status
+  // because it has to answer even when Tailscale is absent — that is the case the
+  // old UI could not express at all.
+  registerMethod('server:reachableUrls', async () => {
+    let tailscaleIps: string[] = []
+    try {
+      const status = await getTailscaleStatus()
+      if (status.running && status.selfIP) tailscaleIps = [status.selfIP]
+    } catch {
+      // Not installed or not answering; LAN addresses still stand.
+    }
+    return reachableUrls(serverPort, tailscaleIps)
+  })
 
   // Tailscale network access. Informational only now: it supplies an address and
   // a QR code, and no longer decides whether the server binds wide.
