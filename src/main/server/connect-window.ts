@@ -21,8 +21,15 @@ let connectWindow: BrowserWindow | null = null
  *  spawn-or-connect decision lives. Cheaper than teaching every subsystem to be
  *  re-initialisable, and it happens at most once per attempt. */
 function restart(): void {
-  app.relaunch()
-  app.exit(0)
+  // Deferred by a tick so the IPC handler that called this can return first.
+  // `app.exit` is immediate, so restarting inline killed the process before the
+  // reply was flushed: the connect window never minds, but Settings awaits that
+  // reply, and a caller waiting on a promise that can never settle is a hang with
+  // nothing on screen to explain it.
+  setImmediate(() => {
+    app.relaunch()
+    app.exit(0)
+  })
 }
 
 export function registerConnectHandlers(): void {

@@ -19,7 +19,7 @@ export type ServerMode = 'local' | 'host'
 
 export interface HostSettings {
   mode: ServerMode
-  /** `ws://host:port/ws`, or an https origin behind a proxy. Empty in local mode. */
+  /** Always `ws://host:port/ws` or `wss://…`, as `normaliseHostUrl` produces. Empty in local mode. */
   url: string
   /** Present only when a token has been stored and safeStorage can decrypt it. */
   token?: string
