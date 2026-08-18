@@ -265,3 +265,25 @@ describe('normalizePath', () => {
     expect(normalizePath('C:\\')).toBe('c:\\')
   })
 })
+
+describe('the data directory handed to spawned processes', () => {
+  it('is absent until the server says where it is', async () => {
+    // process-utils is on the PTY spawn path and must not import the database
+    // module to ask, so the value is pushed in at startup rather than pulled.
+    vi.resetModules()
+    const { getLaunchEnv } = await import('../packages/server/src/process-utils')
+
+    expect(getLaunchEnv().VORN_DATA_DIR).toBeUndefined()
+  })
+
+  it('travels to anything launched from a session', async () => {
+    // Without it, a tool started from a Vorn terminal looks in ~/.vorn for the
+    // port and credential files while a --data-dir server keeps them elsewhere —
+    // so the server is not merely unauthenticated but undiscoverable.
+    vi.resetModules()
+    const mod = await import('../packages/server/src/process-utils')
+    mod.setLaunchDataDir('/tmp/some-other-vorn')
+
+    expect(mod.getLaunchEnv().VORN_DATA_DIR).toBe('/tmp/some-other-vorn')
+  })
+})

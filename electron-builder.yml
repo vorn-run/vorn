@@ -61,6 +61,12 @@ extraResources:
     to: 'server'
     filter:
       - '**/*'
+      # The standalone CLI re-bundles the whole server (it imports ./index), so
+      # shipping it here would double the server payload in every installer for
+      # a binary the app never runs. Excluded explicitly rather than relying on
+      # which build ran last: `build:server` passes one entry and cleans, while
+      # a workspace build emits both.
+      - '!cli.cjs'
   - from: 'packages/web/dist'
     to: 'web/dist'
     filter:

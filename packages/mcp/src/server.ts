@@ -13,14 +13,18 @@ export function createMcpServer(version: string): McpServer {
   const server = new McpServer({ name: 'vorn', version }, { capabilities: { tools: {} } })
 
   registerConfigTools(server)
-  registerProjectTools(server)
-  registerTaskTools(server)
   registerSessionTools(server)
-  registerWorkflowTools(server)
-  registerWorkspaceTools(server)
   registerConnectorTools(server)
   registerBrowserTools(server)
   registerDeviceTools(server)
+
+  // These four used to open this machine's SQLite directly and were guarded so a
+  // host-mode desktop could not read a stale local file. They go over the socket
+  // now, so they reach whichever server MCP is talking to and need no guard.
+  registerProjectTools(server)
+  registerTaskTools(server)
+  registerWorkflowTools(server)
+  registerWorkspaceTools(server)
 
   return server
 }

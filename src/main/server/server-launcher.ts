@@ -1,12 +1,56 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import log from '../logger'
+import { BOOTSTRAP_ENV_VAR } from '@vornrun/shared/protocol'
 import { ServerBridge } from './server-bridge'
+import { readHostSettings } from './host-store'
 
 let serverProcess: ChildProcess | UtilityProcess | null = null
 let bridge: ServerBridge | null = null
+
+/**
+ * Connect to a server running on another machine.
+ *
+ * No spawn: two servers means two databases, and the local one would silently
+ * shadow the host the user asked for. The credential also changes with the mode —
+ * the per-launch bootstrap secret only authenticates a server this app started, so
+ * a remote host needs a device token, which is why one has to exist before this
+ * can work.
+ */
+async function connectToHost(url: string, token: string): Promise<ServerBridge> {
+  log.info(`[launcher] connecting to host ${url}`)
+  bridge = new ServerBridge(url, token)
+  bridge.connect()
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error(`Could not reach ${url}`)),
+        HOST_CONNECT_TIMEOUT_MS
+      )
+      bridge!.once('connected', () => {
+        clearTimeout(timeout)
+        resolve()
+      })
+    })
+  } catch (err) {
+    // Give up on the socket as well as the wait. The bridge reconnects every two
+    // seconds on its own and nothing here would ever act on a late success, so
+    // leaving it running means a timer and a listener churning behind the connect
+    // window for as long as the app is open, against a host that may never answer.
+    bridge?.close()
+    bridge = null
+    throw err
+  }
+
+  return bridge
+}
+
+/** Longer than the local wait: a remote host is a network away, not a fork away. */
+const HOST_CONNECT_TIMEOUT_MS = 15_000
 
 /**
  * Spawns the @vornrun/server process and returns a connected ServerBridge.
@@ -23,10 +67,32 @@ let bridge: ServerBridge | null = null
  * Electron binary — spawning it launches another full Electron app instance.
  */
 export async function launchServer(): Promise<ServerBridge> {
+  const host = readHostSettings()
+  if (host.mode === 'host' && host.url) {
+    // Configured for a host but holding no credential — safeStorage was
+    // unavailable when it was saved, or the keychain has moved since. Falling
+    // through to a local server would quietly open a different database than the
+    // one the user asked for, and everything would look empty rather than wrong.
+    // Failing here puts the connect window up asking for the token.
+    if (!host.token) throw new Error(`No stored token for ${host.url}`)
+    return connectToHost(host.url, host.token)
+  }
+
   const serverEntryPoint = resolveServerEntry()
   log.info(`[launcher] starting server: ${serverEntryPoint}`)
 
-  const dataDir = app.getPath('userData')
+  // A per-launch credential for the server we are about to spawn. Generated here
+  // rather than persisted: nothing to leak at rest, and it dies with the process.
+  // The name is stripped unconditionally by `filterEnv`, so it never reaches a
+  // PTY, headless agent or script node.
+  const bootstrapToken = randomBytes(32).toString('base64url')
+
+  // Deliberately does NOT pass --data-dir. Vorn's data directory is ~/.vorn —
+  // that is where the database, ws-port file and scheduler locks have always
+  // lived, and where `packages/mcp` looks for all three. This used to pass
+  // Electron's userData, which the server then ignored for everything except
+  // task images, so it was inert. Passing it once the server honours it would
+  // point the database at an empty directory and read as total data loss.
   const isDev = !!process.env.ELECTRON_RENDERER_URL
 
   let port: number
@@ -35,10 +101,11 @@ export async function launchServer(): Promise<ServerBridge> {
     // Dev mode: use npx tsx to run TypeScript directly
     const repoRoot = path.join(__dirname, '../..')
 
-    const child = spawn('npx', ['tsx', serverEntryPoint, `--data-dir=${dataDir}`], {
+    const child = spawn('npx', ['tsx', serverEntryPoint], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        [BOOTSTRAP_ENV_VAR]: bootstrapToken,
         NODE_ENV: process.env.NODE_ENV ?? 'development'
         // Connectors live in their own repository now, so a local build is
         // preferred by setting VORN_CONNECTORS_ROOT to that checkout. It
@@ -75,10 +142,11 @@ export async function launchServer(): Promise<ServerBridge> {
     // here and pass them via environment variables for the server banner to use.
     const asarUnpacked = path.join(app.getAppPath() + '.unpacked', 'node_modules')
 
-    const child = utilityProcess.fork(serverEntryPoint, [`--data-dir=${dataDir}`], {
+    const child = utilityProcess.fork(serverEntryPoint, [], {
       stdio: 'pipe',
       env: {
         ...process.env,
+        [BOOTSTRAP_ENV_VAR]: bootstrapToken,
         NODE_ENV: 'production',
         VORN_NATIVE_MODULES_PATH: asarUnpacked,
         NODE_PATH: [path.join(app.getAppPath(), 'node_modules'), asarUnpacked].join(path.delimiter)
@@ -106,7 +174,7 @@ export async function launchServer(): Promise<ServerBridge> {
   log.info(`[launcher] server started on port ${port}`)
 
   // Connect bridge
-  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`)
+  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken)
   bridge.connect()
 
   // Wait for connection
@@ -127,10 +195,18 @@ export function getServerBridge(): ServerBridge | null {
 
 export async function stopServer(): Promise<void> {
   if (bridge) {
-    try {
-      await bridge.request('server:shutdown', undefined, 5000)
-    } catch {
-      // Server may already be gone
+    // Only ask a server to stop if this app is the one that started it.
+    //
+    // `serverProcess` is the test for that, and it is null in host mode. Sending
+    // `server:shutdown` to a host would take the server down for everyone
+    // connected to it — every other desktop, every phone — because one person
+    // closed their laptop.
+    if (serverProcess) {
+      try {
+        await bridge.request('server:shutdown', undefined, 5000)
+      } catch {
+        // Server may already be gone
+      }
     }
     bridge.close()
     bridge = null

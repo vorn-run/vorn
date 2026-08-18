@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
-import type { RemoteHost } from '@vornrun/shared/types'
+import type { RemoteHost, GitFileDiff } from '@vornrun/shared/types'
 import { sshExecSync, shellEscape, getSafeEnv } from './process-utils'
 import { resolveExecutable } from './resolve-executable'
 
@@ -586,7 +586,7 @@ export function getGitDiffFull(
   remote?: RemoteHost
 ): {
   stat: { filesChanged: number; insertions: number; deletions: number }
-  files: { filePath: string; status: string; insertions: number; deletions: number; diff: string }[]
+  files: GitFileDiff[]
 } | null {
   try {
     const stat = getGitDiffStat(cwd, remote)
@@ -621,13 +621,7 @@ export function getGitDiffFull(
     }
 
     // Split raw diff by file boundaries
-    const fileDiffs: {
-      filePath: string
-      status: string
-      insertions: number
-      deletions: number
-      diff: string
-    }[] = []
+    const fileDiffs: GitFileDiff[] = []
     const diffSections = rawDiff.split(/^diff --git /m).filter(Boolean)
 
     for (const section of diffSections) {
@@ -638,7 +632,7 @@ export function getGitDiffFull(
       const filePath = plusMatch?.[1] || minusMatch?.[1]?.replace(/^\/dev\/null$/, '') || 'unknown'
 
       // Determine status
-      let status: string = 'modified'
+      let status: GitFileDiff['status'] = 'modified'
       if (fullSection.includes('--- /dev/null')) {
         status = 'added'
       } else if (fullSection.includes('+++ /dev/null')) {

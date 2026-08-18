@@ -4,10 +4,14 @@ const mockInitDb = vi.fn()
 const mockCloseDb = vi.fn()
 const mockLoadConfig = vi.fn()
 const mockSaveConfig = vi.fn()
+const mockDataDir = '/tmp/vorn-test-data-dir'
 
 vi.mock('../packages/server/src/database', () => ({
-  initDatabase: () => mockInitDb(),
+  initDatabase: (dataDir?: string) => mockInitDb(dataDir),
   closeDatabase: () => mockCloseDb(),
+  // The watcher watches wherever the database actually landed, so it asks the
+  // database rather than rebuilding the default path itself.
+  getDataDir: () => mockDataDir,
   loadConfig: () => mockLoadConfig(),
   saveConfig: (...args: unknown[]) => mockSaveConfig(...args)
 }))
@@ -92,7 +96,9 @@ describe('configManager', () => {
   it('watchDb calls fs.watch on the DB directory', async () => {
     const cm = await getConfigManager()
     cm.watchDb()
-    expect(fs.watch).toHaveBeenCalled()
+    // Specifically the directory the database reported, not a second copy of
+    // the default: a server on its own --data-dir must watch its own files.
+    expect(fs.watch).toHaveBeenCalledWith(mockDataDir, expect.any(Function))
   })
 
   it('watchDb triggers notifyChanged for .db-signal files', async () => {

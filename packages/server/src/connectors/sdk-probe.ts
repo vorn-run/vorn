@@ -21,8 +21,13 @@ import type {
   SdkEnvVar,
   SdkProbeRequest,
   SdkProbeResult,
-  SdkTrigger
+  SdkTrigger,
+  TaskStatus
 } from '@vornrun/shared/types'
+
+// Re-exported because register-methods imports it from here rather than from
+// shared, and a type-only import is not itself an export.
+export type { SdkProbeRequest }
 import { getSafeEnv } from '../process-utils'
 import log from '../logger'
 

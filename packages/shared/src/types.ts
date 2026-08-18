@@ -127,6 +127,35 @@ export interface RemoteHost {
   sshOptions?: string
 }
 
+/**
+ * Who is operating Vorn. A single owner is seeded on first run — this is an
+ * identity, not a login, and it exists so that the local desktop can
+ * authenticate as somebody rather than being exempt from authentication.
+ */
+export type UserRole = 'owner'
+
+export interface User {
+  id: string
+  name: string
+  role: UserRole
+  createdAt: string
+}
+
+/**
+ * A credential belonging to one device. Deliberately carries no secret: the
+ * plaintext is returned once at creation and only its hash is ever stored, so
+ * there is nothing here for a listing to leak.
+ */
+export interface DeviceToken {
+  id: string
+  userId: string
+  /** Human label, e.g. "Javier's iPhone". */
+  name: string
+  createdAt: string
+  lastSeenAt: string | null
+  revokedAt: string | null
+}
+
 export interface WorkspaceConfig {
   id: string // 'personal' for default, UUID for user-created
   name: string
@@ -904,6 +933,13 @@ export interface TailscalePeer {
   online: boolean
 }
 
+/** Where the web client can be reached, independent of Tailscale. */
+export interface ReachableUrls {
+  urls: string[]
+  port: number
+  remote: boolean
+}
+
 export interface TailscaleStatus {
   installed: boolean
   running: boolean
@@ -944,6 +980,14 @@ export type UpdateStatus =
 
 export interface AppConfig {
   version: number
+  /**
+   * Which save produced this snapshot.
+   *
+   * Round-tripped by the client — every call site spreads the whole config, so it
+   * returns untouched — and used by the server to tell a row the client deleted
+   * from one it never saw. Absent from a caller that does not track it.
+   */
+  revision?: number
   defaults: {
     shell: string
     fontSize: number
@@ -969,6 +1013,15 @@ export interface AppConfig {
     webAccessEnabled?: boolean
     mobileAccessEnabled?: boolean
     networkAccessEnabled?: boolean
+    /**
+     * The port the server listens on, remembered across restarts.
+     *
+     * Not cosmetic: a browser keys `localStorage` by origin, so an ephemeral port
+     * means a new origin every launch and a paired device loses the token it was
+     * given. Chosen on first run and kept; if it is taken at startup the server
+     * takes another and remembers that one instead.
+     */
+    serverPort?: number
     showHeadlessAgents?: boolean
     headlessRetentionMinutes?: number
     /**
@@ -1421,6 +1474,10 @@ export const IPC = {
   SESSION_EVENT_LIST_BY_SESSION: 'sessionEvent:listBySession',
   AGENT_DETECT_INSTALLED: 'agent:detectInstalled',
   TAILSCALE_STATUS: 'tailscale:status',
+  SERVER_REACHABLE_URLS: 'server:reachableUrls',
+  TOKEN_LIST: 'token:list',
+  TOKEN_CREATE: 'token:create',
+  TOKEN_REVOKE: 'token:revoke',
   CREDENTIAL_STORE_KEY: 'credential:storeKey',
   CREDENTIAL_IMPORT_KEY_FILE: 'credential:importKeyFile',
   CREDENTIAL_DELETE_KEY: 'credential:deleteKey',

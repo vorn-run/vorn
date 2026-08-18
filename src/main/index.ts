@@ -10,6 +10,8 @@ import { updateManager } from './update-manager'
 import { IPC, PermissionRequestInfo } from '../shared/types'
 import { SURFACE } from '../shared/surface'
 import { launchServer, stopServer, getServerBridge } from './server/server-launcher'
+import { readHostSettings } from './server/host-store'
+import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
 import type { ServerBridge } from './server/server-bridge'
 import log from './logger'
 
@@ -353,11 +355,23 @@ function hardenWebviews(): void {
 
 app.whenReady().then(async () => {
   hardenWebviews()
+  // Before launchServer, unlike everything else: these are what let someone
+  // correct an unreachable host, so they cannot depend on reaching one.
+  registerConnectHandlers()
   let bridge: ServerBridge
   try {
     bridge = await launchServer()
   } catch (err) {
     log.error('[main] Failed to launch server:', err)
+    // A local server that will not start is fatal — there is nothing to show and
+    // nothing to retry. A host that will not answer is ordinary: the machine is
+    // asleep, the wifi changed, someone is on a train. Quitting there means the
+    // app vanishes on launch with no way back, and no way to correct a mistyped
+    // address, so host mode gets a window that explains itself instead.
+    if (readHostSettings().mode === 'host') {
+      showConnectWindow(err instanceof Error ? err.message : String(err))
+      return
+    }
     app.quit()
     return
   }

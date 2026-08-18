@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import {
   AiAgentType,
+  AgentType,
   AgentCommandConfig,
   CreateTerminalPayload,
   supportsExactSessionResume,
@@ -55,7 +56,7 @@ export function buildAgentLaunchLine(
   agentCommands: Record<AiAgentType, AgentCommandConfig>,
   env: Record<string, string>
 ): string {
-  if (payload.agentType === 'shell') {
+  if ((payload.agentType as AgentType) === 'shell') {
     throw new Error('buildAgentLaunchLine called for shell session — use createShellPty instead')
   }
   const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
@@ -127,7 +128,7 @@ export function buildHeadlessLaunchLine(
   agentCommands: Record<AiAgentType, AgentCommandConfig>,
   env: Record<string, string>
 ): string {
-  if (payload.agentType === 'shell') {
+  if ((payload.agentType as AgentType) === 'shell') {
     throw new Error('buildHeadlessLaunchLine called for shell session')
   }
   const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
@@ -191,7 +192,7 @@ export function buildHeadlessSpawnArgs(
   agentCommands: Record<AiAgentType, AgentCommandConfig>,
   env: Record<string, string>
 ): HeadlessSpawnArgs {
-  if (payload.agentType === 'shell') {
+  if ((payload.agentType as AgentType) === 'shell') {
     throw new Error('buildHeadlessSpawnArgs called for shell session')
   }
   const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]

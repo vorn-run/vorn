@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import {
-  AgentType,
+  AiAgentType,
   RecentSession,
   getRecentSessionActivityLabel,
   supportsExactSessionResume
@@ -174,7 +174,7 @@ const claudeProvider: AgentHistoryProvider = {
       return Array.from(sessionMap.entries())
         .map(([sessionId, data]) => ({
           sessionId,
-          agentType: 'claude' as AgentType,
+          agentType: 'claude' as AiAgentType,
           display: data.display,
           projectPath: data.projectPath,
           timestamp: data.lastTimestamp,
@@ -355,7 +355,7 @@ const codexProvider: AgentHistoryProvider = {
       const mapRows = (rows: Record<string, unknown>[]): RecentSession[] =>
         rows.map((row) => ({
           sessionId: String(row.id),
-          agentType: 'codex' as AgentType,
+          agentType: 'codex' as AiAgentType,
           display: String(row.title || row.first_user_message || '').slice(0, 80),
           projectPath: String(row.cwd || ''),
           timestamp: Number(row.updated_at) * 1000,
@@ -397,7 +397,7 @@ const copilotProvider: AgentHistoryProvider = {
       const mapRows = (rows: Record<string, unknown>[]): RecentSession[] =>
         rows.map((row) => ({
           sessionId: String(row.id),
-          agentType: 'copilot' as AgentType,
+          agentType: 'copilot' as AiAgentType,
           display: String(row.summary || '').slice(0, 80),
           projectPath: String(row.cwd || ''),
           timestamp: new Date(String(row.updated_at)).getTime(),
@@ -439,7 +439,7 @@ const opencodeProvider: AgentHistoryProvider = {
       const mapRows = (rows: Record<string, unknown>[]): RecentSession[] =>
         rows.map((row) => ({
           sessionId: String(row.id),
-          agentType: 'opencode' as AgentType,
+          agentType: 'opencode' as AiAgentType,
           display: String(row.title || '').slice(0, 80),
           projectPath: String(row.directory || ''),
           timestamp: Number(row.time_updated) || 0,

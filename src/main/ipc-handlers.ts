@@ -247,6 +247,10 @@ export function registerIpcHandlers(): void {
 
   // Tailscale
   safeHandle(IPC.TAILSCALE_STATUS, () => requireBridge().request(IPC.TAILSCALE_STATUS))
+  safeHandle(IPC.SERVER_REACHABLE_URLS, () => requireBridge().request(IPC.SERVER_REACHABLE_URLS))
+  safeHandle(IPC.TOKEN_LIST, () => requireBridge().request(IPC.TOKEN_LIST))
+  safeHandle(IPC.TOKEN_CREATE, (_, params) => requireBridge().request(IPC.TOKEN_CREATE, params))
+  safeHandle(IPC.TOKEN_REVOKE, (_, id) => requireBridge().request(IPC.TOKEN_REVOKE, id))
 
   // SSH
   safeHandle(IPC.SSH_TEST_CONNECTION, (_, host) =>
