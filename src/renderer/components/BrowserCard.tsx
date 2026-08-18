@@ -232,6 +232,36 @@ export const BrowserCard = memo(
       return () => window.api.detachBrowser(sessionId)
     }, [sessionId, isCard])
 
+    // Report the strip to main, so an agent can ask what the indices it passes
+    // to close and select actually name. Main keeps this only as a mirror —
+    // the store stays the single source of truth, since a person clicking a tab
+    // is not something main can see.
+    //
+    // A popped-out card is left out for the same reason it does not attach: the
+    // session's own browser is the one the tools address, and a card reporting
+    // over it would describe a strip the agent cannot act on.
+    const paneRef = useRef(pane)
+    paneRef.current = pane
+    const tabsSignature = pane?.tabs
+      .map((t, i) => `${i === pane.activeTab ? '*' : ''}${tabUrl(t)}\u0000${t.title ?? ''}`)
+      .join('\u0001')
+    useEffect(() => {
+      const current = paneRef.current
+      if (isCard || !current) return
+      window.api.syncBrowserTabs(
+        sessionId,
+        current.tabs.map((t, i) => ({
+          index: i,
+          url: tabUrl(t),
+          ...(t.title ? { title: t.title } : {}),
+          active: i === current.activeTab
+        }))
+      )
+      // Keyed on the strip's content rather than the pane object: the store
+      // hands back a new object for changes that leave the tabs alone, and
+      // resending then is pure IPC chatter.
+    }, [sessionId, isCard, tabsSignature])
+
     const [picking, setPicking] = useState(false)
 
     /**

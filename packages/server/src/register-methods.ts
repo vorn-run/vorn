@@ -1147,6 +1147,7 @@ export function registerAllMethods(): void {
   registerMethod('browser:openPane', (p) => browserBridge.request('browser:openPane', p))
   registerMethod('browser:navigate', (p) => browserBridge.request('browser:navigate', p))
   registerMethod('browser:history', (p) => browserBridge.request('browser:history', p))
+  registerMethod('browser:listTabs', (p) => browserBridge.request('browser:listTabs', p))
   registerMethod('browser:find', (p) => browserBridge.request('browser:find', p))
 
   // Device pane (relayed to Electron main, same bridge, same reasoning: the

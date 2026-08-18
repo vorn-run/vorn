@@ -29,6 +29,7 @@ import type {
   BrowserConsoleMessage,
   BrowserNetworkRequest,
   BrowserNode,
+  BrowserTabInfo,
   BrowserTarget,
   DeviceInfo,
   DeviceElement,
@@ -451,6 +452,10 @@ export interface RequestMethods {
   'browser:navigate': {
     params: { sessionId: string; url: string }
     result: { url: string }
+  }
+  'browser:listTabs': {
+    params: { sessionId: string }
+    result: { tabs: BrowserTabInfo[] }
   }
   'browser:history': {
     params: { sessionId: string; direction: 'back' | 'forward' }

@@ -30,6 +30,7 @@ import {
   BranchDeleteResult,
   BrowserSelection,
   BrowserStroke,
+  BrowserTabInfo,
   BrowserAnnotation,
   DeviceInfo,
   DeviceSelection,
@@ -565,6 +566,10 @@ const api = {
   attachBrowser: (sessionId: string, webContentsId: number): void =>
     ipcRenderer.send(IPC.BROWSER_ATTACH, { sessionId, webContentsId }),
   detachBrowser: (sessionId: string): void => ipcRenderer.send(IPC.BROWSER_DETACH, sessionId),
+  /** Report this session's tab strip, so main can answer a listing from what
+   *  the renderer actually holds rather than a copy of its own. */
+  syncBrowserTabs: (sessionId: string, tabs: BrowserTabInfo[]): void =>
+    ipcRenderer.send(IPC.BROWSER_TABS_CHANGED, { sessionId, tabs }),
   /** Arm the element picker. Resolves with the pick, or null if cancelled. */
   startBrowserPick: (sessionId: string): Promise<BrowserSelection | null> =>
     ipcRenderer.invoke(IPC.BROWSER_PICK_START, sessionId),

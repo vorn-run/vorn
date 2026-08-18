@@ -6,6 +6,7 @@ import type {
   BrowserPageRead,
   BrowserConsoleMessage,
   BrowserNetworkRequest,
+  BrowserTabInfo,
   BrowserTarget
 } from '@vornrun/shared/types'
 import { V } from '../validation'
@@ -81,7 +82,10 @@ export function errorResult(err: unknown): ToolResult {
  * discount the fence it most needs to respect.
  */
 function source(label: string): string {
-  return label.includes('WEB PAGE') ? 'page' : 'device'
+  // Anything read out of the browser pane is authored by a page, whichever
+  // page it is: a tab's title and url are written by whatever sits in that tab
+  // just as much as the body text is.
+  return label.includes('WEB PAGE') || label.includes('BROWSER') ? 'page' : 'device'
 }
 
 /**
@@ -307,15 +311,25 @@ export function registerBrowserTools(server: McpServer): void {
 
   server.tool(
     'browser_tabs',
-    'Add, close, or switch tabs in your session browser pane. "close" and "select" take a ' +
-      'zero-based index; closing the last remaining tab closes the pane.',
+    'List, add, close, or switch tabs in your session browser pane. "close" and "select" take ' +
+      'a zero-based index — call "list" first to see what those indices name, since a tab that ' +
+      'redirected or followed a link is no longer on the page it was opened with. Closing the ' +
+      'last remaining tab closes the pane.',
     {
-      action: z.enum(['add', 'close', 'select']).describe('What to do with tabs'),
+      action: z.enum(['list', 'add', 'close', 'select']).describe('What to do with tabs'),
       url: V.url.optional().describe('URL for "add"'),
       index: z.number().int().min(0).optional().describe('Zero-based tab index for close/select')
     },
     async (args) =>
       withSession(async (id) => {
+        if (args.action === 'list') {
+          const result = await rpcCall<{ tabs: BrowserTabInfo[] }>('browser:listTabs', {
+            sessionId: id
+          })
+          // Fenced like any other page read: a tab's title and url are written
+          // by whatever page is sitting in that tab.
+          return pageResult(result.tabs, 'BROWSER TAB LIST')
+        }
         await rpcCall<{ ok: true }>('browser:tabs', {
           sessionId: id,
           action: args.action,

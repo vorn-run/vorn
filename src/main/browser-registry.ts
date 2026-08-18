@@ -9,6 +9,7 @@ import type {
   BrowserPageRead,
   BrowserConsoleMessage,
   BrowserNetworkRequest,
+  BrowserTabInfo,
   BrowserTarget
 } from '../shared/types'
 import { IPC } from '../shared/types'
@@ -56,6 +57,22 @@ export interface Entry {
 }
 
 const entries = new Map<string, Entry>()
+
+/**
+ * What the renderer last said its tab strips hold.
+ *
+ * Deliberately a mirror and never a second source of truth. Tab bookkeeping
+ * belongs to the renderer store — a person clicking a tab is not something main
+ * can observe — so this is only ever overwritten wholesale by the renderer, and
+ * nothing here ever edits it. Answering `list` from a copy main maintained
+ * itself would drift the first time someone touched the strip by hand.
+ */
+const tabMirror = new Map<string, BrowserTabInfo[]>()
+
+/** The renderer reporting its tab strip, after any change to it. */
+export function syncTabs(sessionId: string, tabs: BrowserTabInfo[]): void {
+  tabMirror.set(sessionId, tabs)
+}
 
 /**
  * How main asks the renderer to do something to a pane.
@@ -132,6 +149,23 @@ export async function tabs(params: {
   }
   sendToRenderer(IPC.BROWSER_TAB_COMMAND, params)
   return { ok: true }
+}
+
+/**
+ * What the pane's tab strip currently holds.
+ *
+ * Answered from the renderer's own report rather than from anything main
+ * tracks. `close` and `select` take an index, and until this existed an agent
+ * could only guess what any index named — so it either acted on a tab it had
+ * never seen or had to switch to one to find out what it was.
+ */
+export function listTabs(params: { sessionId: string }): { tabs: BrowserTabInfo[] } {
+  // Same honest failure as every other tab command: no pane, nothing to list.
+  contentsFor(params.sessionId)
+  // A pane whose strip has not reported yet is empty rather than absent: the
+  // report follows the pane by a frame, and an error here would read as "this
+  // session has no browser" a moment after one opened.
+  return { tabs: tabMirror.get(params.sessionId) ?? [] }
 }
 
 function contentsFor(sessionId: string): { wc: WebContents; entry: Entry } {
@@ -274,6 +308,10 @@ export function detach(sessionId: string): void {
   const entry = entries.get(sessionId)
   if (!entry) return
   entries.delete(sessionId)
+  // The strip goes with the pane. Left behind, a later `list` would answer
+  // from a report about a pane that no longer exists — and `contentsFor` above
+  // is the only thing that would have caught it.
+  tabMirror.delete(sessionId)
   const wc = webContents.fromId(entry.webContentsId)
   if (!wc || wc.isDestroyed()) return
   try {

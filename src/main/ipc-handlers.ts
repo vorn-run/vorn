@@ -40,6 +40,7 @@ function registerInboundHandlers(b: ServerBridge): void {
   b.handle('browser:openPane', (p) => browserRegistry.openPane(p as P<'browser:openPane'>))
   b.handle('browser:navigate', (p) => browserRegistry.navigate(p as P<'browser:navigate'>))
   b.handle('browser:history', (p) => browserRegistry.goHistory(p as P<'browser:history'>))
+  b.handle('browser:listTabs', (p) => browserRegistry.listTabs(p as P<'browser:listTabs'>))
   b.handle('browser:find', (p) => browserRegistry.find(p as P<'browser:find'>))
 
   // The device family answers here for a sharper version of the same reason:
@@ -382,6 +383,9 @@ export function registerIpcHandlers(): void {
   })
   ipcMain.on(IPC.BROWSER_DETACH, (_, sessionId: string) => {
     browserRegistry.detach(sessionId)
+  })
+  ipcMain.on(IPC.BROWSER_TABS_CHANGED, (_, { sessionId, tabs }) => {
+    browserRegistry.syncTabs(sessionId, tabs)
   })
 
   // The picker is user-initiated and answers back to the renderer that armed

@@ -26,6 +26,7 @@ Object.defineProperty(window, 'api', {
     notifyWidgetStatus: vi.fn(),
     // The browser pane reports its guest to main so the agent can drive it.
     attachBrowser: vi.fn(),
+    syncBrowserTabs: vi.fn(),
     detachBrowser: vi.fn(),
     startBrowserPick: (...args: unknown[]) => mockStartPick(...(args as [string])),
     cancelBrowserPick: vi.fn(),
