@@ -268,11 +268,21 @@ export function handleConnection(ws: WebSocket, credential?: string): void {
 
     // Main identifying itself, so the reverse bridge knows which socket to use.
     if (method === 'bridge:identify') {
-      // Only the process holding the per-launch secret can be main. Every socket
-      // reaching this line is authenticated, so without this a remote client with
-      // a valid device token could claim the bridge during main's reconnect window
-      // and receive every screenshot, page read and app-install request.
-      const claimed = session.kind === 'bootstrap' && browserBridge.setSocket(ws)
+      // Any authenticated socket may claim this, and the reason it can is that the
+      // claim is not an escalation: a device token already reaches `terminal:create`
+      // and `script:execute`, so anything the bridge could reveal — a screenshot, a
+      // page read — its holder could already take with a shell.
+      //
+      // It used to be restricted to the bootstrap credential, on the reasoning that
+      // only the process holding the per-launch secret can be main. That stopped
+      // being true when the desktop learned to connect to a server on another
+      // machine: it authenticates there with a device token, so the restriction
+      // silently cost host mode its browser and device panes while the connection
+      // itself looked healthy.
+      //
+      // `setSocket` refusing while a live holder exists is what still matters, and
+      // it is unchanged: one holder, first to ask, and a dead one is replaceable.
+      const claimed = browserBridge.setSocket(ws)
       if (!claimed) {
         log.warn('[ws] refused a second bridge:identify while one is live')
       }

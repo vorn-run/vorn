@@ -360,7 +360,16 @@ describe('bridge authorization', () => {
     expect(browserBridge.isBridgeSocket(ws)).toBe(false)
   })
 
-  it('refuses the bridge to an authenticated client that is not the desktop', async () => {
+  it('lets a desktop holding a device token claim it, which host mode needs', async () => {
+    // This was restricted to the bootstrap credential, on the reasoning that only
+    // the process holding the per-launch secret can be main. That stopped being
+    // true when the desktop learned to connect to a server on another machine —
+    // it authenticates there with a device token — and the restriction silently
+    // cost host mode its browser and device panes.
+    //
+    // Allowing it is not an escalation: a device token already reaches
+    // `terminal:create`, so anything the bridge exposes its holder could take
+    // with a shell anyway.
     const { browserBridge } = await import('../packages/server/src/browser-bridge')
     const remote = createMockWs()
     handleConnection(remote, DEVICE_TOKEN)
@@ -368,10 +377,24 @@ describe('bridge authorization', () => {
     sendMessage(remote, { jsonrpc: '2.0', id: 21, method: 'bridge:identify' })
 
     await vi.waitFor(() => expect(replies(remote).length).toBeGreaterThan(0))
-    // Every socket here is authenticated, so liveness alone would let a remote
-    // device token take the bridge during main's reconnect window.
-    expect(replies(remote)[0].result).toEqual({ ok: false })
-    expect(browserBridge.isBridgeSocket(remote)).toBe(false)
+    expect(replies(remote)[0].result).toEqual({ ok: true })
+    expect(browserBridge.isBridgeSocket(remote)).toBe(true)
+  })
+
+  it('still lets only one hold it at a time, whatever it authenticated with', async () => {
+    // The rule that actually protects the bridge, and the one left unchanged.
+    const { browserBridge } = await import('../packages/server/src/browser-bridge')
+    const desktop = createMockWs()
+    const other = createMockWs()
+    connectAuthed(desktop)
+    handleConnection(other, DEVICE_TOKEN)
+
+    sendMessage(desktop, { jsonrpc: '2.0', method: 'bridge:identify' })
+    sendMessage(other, { jsonrpc: '2.0', id: 22, method: 'bridge:identify' })
+
+    await vi.waitFor(() => expect(replies(other).length).toBeGreaterThan(0))
+    expect(replies(other)[0].result).toEqual({ ok: false })
+    expect(browserBridge.isBridgeSocket(desktop)).toBe(true)
   })
 
   it('refuses a second identify while a live socket holds the bridge', async () => {
