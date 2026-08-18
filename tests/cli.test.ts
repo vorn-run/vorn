@@ -64,7 +64,7 @@ describe('usage and dispatch', () => {
   it('prints usage to stdout and succeeds for --help', async () => {
     const io = capture()
     expect(await runCli(['--help'], io)).toBe(0)
-    expect(io.out()).toContain('vorn-server —')
+    expect(io.out()).toContain('vorn-server: run a Vorn server')
     expect(io.err()).toBe('')
   })
 

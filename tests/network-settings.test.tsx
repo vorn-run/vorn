@@ -50,11 +50,23 @@ const getTailscaleStatus = vi.fn()
 const getReachableUrls = vi.fn()
 const saveConfig = vi.fn()
 
-/** Render and wait for the two status calls the panel makes on mount. */
+/**
+ * Render and wait for the panel to settle.
+ *
+ * Three calls resolve on mount and all of them gate what is on screen, so waiting on
+ * the last one to be *called* is not enough — the mode switch only appears once
+ * `getConnectSettings` has answered.
+ */
 async function renderPanel() {
   const result = render(<NetworkSettings />)
   await waitFor(() => expect(getReachableUrls).toHaveBeenCalled())
+  await act(async () => {})
   return result
+}
+
+/** Move to the other half of the panel, which is a radio rather than a switch. */
+async function switchTo(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(screen.getByRole('radio', { name: label }))
 }
 
 beforeEach(() => {
@@ -87,13 +99,70 @@ beforeEach(() => {
 
 // ─── Tests ───────────────────────────────────────────────────────
 
-describe('NetworkSettings', () => {
-  it('offers the toggle with Tailscale absent', async () => {
-    // It used to render only when Tailscale was running, so there was no way to turn
-    // remote access on without it — the gate this pass removes.
+describe('the two directions remote access can point', () => {
+  it('asks which one before showing either', async () => {
+    // The panel used to stack both at once, which was not merely busy: host mode
+    // never starts a local server, so the sharing controls described something that
+    // was not running.
     await renderPanel()
 
-    expect(screen.getByText('Enable Remote Access')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'This machine' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Another machine' })).toBeInTheDocument()
+  })
+
+  it('shows sharing controls and no host form by default', async () => {
+    await renderPanel()
+
+    expect(screen.getByText('Share this machine')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Server address')).not.toBeInTheDocument()
+  })
+
+  it('shows the host form and no sharing controls on the other side', async () => {
+    const user = userEvent.setup()
+    await renderPanel()
+
+    await switchTo(user, 'Another machine')
+
+    expect(screen.getByLabelText('Server address')).toBeInTheDocument()
+    expect(screen.queryByText('Share this machine')).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+  })
+
+  it('opens on the side the app is actually using', async () => {
+    // Someone already connected to a host should not have to find the switch to see
+    // where they are connected.
+    getConnectSettings.mockResolvedValue({
+      mode: 'host',
+      url: 'ws://box:61601/ws',
+      hasToken: true
+    })
+
+    await renderPanel()
+
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+  })
+
+  it('offers no switch in the browser, which cannot point anywhere else', async () => {
+    // `getConnectSettings` answers null in the web build: a browser reached its
+    // server by address and has nothing to repoint. Showing a half that cannot work
+    // there would be worse than hiding it.
+    getConnectSettings.mockResolvedValue(null)
+
+    await renderPanel()
+
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+    expect(screen.getByText('Share this machine')).toBeInTheDocument()
+  })
+})
+
+describe('sharing this machine', () => {
+  it('offers the toggle with Tailscale absent', async () => {
+    // It used to render only when Tailscale was running, so there was no way to turn
+    // remote access on without it.
+    await renderPanel()
+
+    expect(screen.getByText('Share this machine')).toBeInTheDocument()
+    expect(screen.getByRole('switch')).toBeInTheDocument()
   })
 
   it('shows an address with Tailscale absent', async () => {
@@ -106,7 +175,16 @@ describe('NetworkSettings', () => {
     expect(screen.getByText('http://192.168.1.20:4000/app/')).toBeInTheDocument()
   })
 
-  it('lists every address, since only the user knows which network the phone is on', async () => {
+  it('shows no address while remote access is off', async () => {
+    await renderPanel()
+
+    expect(screen.queryByText('http://192.168.1.20:4000/app/')).not.toBeInTheDocument()
+  })
+
+  it('leads with one address and folds the rest away', async () => {
+    // A machine answers on several, but they are not equally useful: the server
+    // returns them tailnet first, and that one is encrypted. Three identical boxes
+    // made the reader choose before anything had told them how to.
     store.config = { defaults: { networkAccessEnabled: true } }
     getReachableUrls.mockResolvedValue(
       reachable({ urls: ['http://100.1.2.3:4000/app/', 'http://192.168.1.20:4000/app/'] })
@@ -115,24 +193,53 @@ describe('NetworkSettings', () => {
     await renderPanel()
 
     expect(screen.getByText('http://100.1.2.3:4000/app/')).toBeInTheDocument()
+    expect(screen.queryByText('http://192.168.1.20:4000/app/')).not.toBeInTheDocument()
+  })
+
+  it('still gives every address to whoever asks', async () => {
+    // Only the person looking at the screen knows which network the other device is
+    // on, so the others stay reachable rather than being dropped.
+    const user = userEvent.setup()
+    store.config = { defaults: { networkAccessEnabled: true } }
+    getReachableUrls.mockResolvedValue(
+      reachable({ urls: ['http://100.1.2.3:4000/app/', 'http://192.168.1.20:4000/app/'] })
+    )
+    await renderPanel()
+
+    await user.click(screen.getByText('1 other address'))
+
     expect(screen.getByText('http://192.168.1.20:4000/app/')).toBeInTheDocument()
   })
 
+  it('says the connection is encrypted on a tailnet', async () => {
+    store.config = { defaults: { networkAccessEnabled: true } }
+    getTailscaleStatus.mockResolvedValue(
+      tailscale({ installed: true, running: true, selfIP: '100.1.2.3' })
+    )
+
+    await renderPanel()
+
+    expect(screen.getByText(/Encrypted via Tailscale/)).toBeInTheDocument()
+  })
+
+  it('says it is not, and offers Tailscale, when there is no tailnet', async () => {
+    // The card that used to say this at length is gone; the qualifier under the
+    // address is the honest difference between the two cases.
+    store.config = { defaults: { networkAccessEnabled: true } }
+
+    await renderPanel()
+
+    expect(screen.getByText(/This network only, unencrypted/)).toBeInTheDocument()
+    expect(screen.getByText('Add Tailscale')).toBeInTheDocument()
+  })
+
   it('manages devices in the app rather than sending you to a terminal', async () => {
-    // This used to print `vorn-server token create` and leave you to it, which
-    // stopped making sense the moment the server could be another machine.
     store.config = { defaults: { networkAccessEnabled: true } }
 
     await renderPanel()
 
     expect(screen.getByText('Add device')).toBeInTheDocument()
     expect(screen.queryByText(/vorn-server token create/)).not.toBeInTheDocument()
-  })
-
-  it('shows no address while remote access is off', async () => {
-    await renderPanel()
-
-    expect(screen.queryByText('http://192.168.1.20:4000/app/')).not.toBeInTheDocument()
   })
 
   it('asks before enabling without a tailnet, and does not save until confirmed', async () => {
@@ -198,72 +305,6 @@ describe('NetworkSettings', () => {
     )
   })
 
-  it('presents Tailscale as advice, not as a blocked state', async () => {
-    await renderPanel()
-
-    expect(screen.getByText('Tailscale is not installed')).toBeInTheDocument()
-    expect(screen.getByText(/Remote access works without it/)).toBeInTheDocument()
-  })
-
-  it('drops the Tailscale card once connected', async () => {
-    getTailscaleStatus.mockResolvedValue(
-      tailscale({ installed: true, running: true, selfIP: '100.1.2.3' })
-    )
-
-    await renderPanel()
-
-    expect(screen.queryByText('Tailscale is not installed')).not.toBeInTheDocument()
-    expect(screen.queryByText('Tailscale is not connected')).not.toBeInTheDocument()
-  })
-
-  it('no longer claims the tailnet is what keeps people out', async () => {
-    // The old copy said "Only devices signed into your Tailscale account can reach
-    // this address. No passwords" — both clauses are false now that the bind is wide
-    // and a token is mandatory.
-    await renderPanel()
-
-    expect(screen.queryByText(/No passwords/)).not.toBeInTheDocument()
-    expect(screen.getByText(/carries a device token/)).toBeInTheDocument()
-  })
-
-  it('still renders when the status calls fail', async () => {
-    // A server that is down must not leave the panel stuck on its spinner.
-    getTailscaleStatus.mockRejectedValue(new Error('server unreachable'))
-    getReachableUrls.mockRejectedValue(new Error('server unreachable'))
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    render(<NetworkSettings />)
-
-    await waitFor(() => expect(screen.getByText('Enable Remote Access')).toBeInTheDocument())
-  })
-
-  it('renders nothing before the config has loaded', async () => {
-    store.config = null as unknown as typeof store.config
-
-    const { container } = render(<NetworkSettings />)
-
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('drops the addresses when a refresh fails', async () => {
-    // Keeping the previous ones would leave the panel advertising a URL while it
-    // cannot reach the server to confirm it — which reads as "still reachable" at
-    // exactly the moment it is not.
-    const user = userEvent.setup()
-    store.config = { defaults: { networkAccessEnabled: true } }
-    await renderPanel()
-    expect(screen.getByText('http://192.168.1.20:4000/app/')).toBeInTheDocument()
-
-    getTailscaleStatus.mockRejectedValue(new Error('server unreachable'))
-    getReachableUrls.mockRejectedValue(new Error('server unreachable'))
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    await user.click(screen.getByTitle('Check again'))
-
-    await waitFor(() =>
-      expect(screen.queryByText('http://192.168.1.20:4000/app/')).not.toBeInTheDocument()
-    )
-  })
-
   it('re-reads the addresses after the setting changes', async () => {
     // The server rebinds on the config change, so the addresses it reports change too.
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -278,6 +319,29 @@ describe('NetworkSettings', () => {
     })
 
     await waitFor(() => expect(getReachableUrls).toHaveBeenCalled())
+  })
+
+  it('drops the addresses when the status calls fail', async () => {
+    // Keeping the previous ones would leave the panel advertising a URL while it
+    // cannot reach the server to confirm it, which reads as "still reachable" at
+    // exactly the moment it is not.
+    store.config = { defaults: { networkAccessEnabled: true } }
+    getTailscaleStatus.mockRejectedValue(new Error('server unreachable'))
+    getReachableUrls.mockRejectedValue(new Error('server unreachable'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText('Share this machine')).toBeInTheDocument())
+    expect(screen.queryByText('http://192.168.1.20:4000/app/')).not.toBeInTheDocument()
+  })
+
+  it('renders nothing before the config has loaded', async () => {
+    store.config = null as unknown as typeof store.config
+
+    const { container } = render(<NetworkSettings />)
+
+    expect(container).toBeEmptyDOMElement()
   })
 })
 
@@ -323,8 +387,7 @@ describe('the device list', () => {
   })
 
   it('shows the token once, and says that is the only time', async () => {
-    // It is stored as a hash, so there is no second chance to read it. The UI has
-    // to say so rather than let someone close the panel and find out.
+    // It is stored as a hash, so there is no second chance to read it.
     const user = userEvent.setup()
     await renderPanel()
 
@@ -364,38 +427,12 @@ describe('the device list', () => {
   })
 })
 
-describe('pointing this desktop at another Vorn', () => {
-  beforeEach(() => {
-    getConnectSettings.mockResolvedValue({ mode: 'local', url: '', hasToken: false })
-  })
-
-  it('offers to connect to a server on another machine', async () => {
-    await renderPanel()
-
-    await waitFor(() => expect(screen.getByText('Connect to another Vorn')).toBeInTheDocument())
-  })
-
-  it('says the app restarts and what still needs a desktop', async () => {
-    // Workflow execution lives in the renderer, so a host with nothing attached
-    // holds state and runs terminals but fires no schedules. Better said here than
-    // discovered when a scheduled workflow silently does not run.
+describe('using another machine', () => {
+  it('takes an address and a token together', async () => {
     const user = userEvent.setup()
     await renderPanel()
-    await waitFor(() => expect(screen.getByText('Connect')).toBeInTheDocument())
+    await switchTo(user, 'Another machine')
 
-    await user.click(screen.getByText('Connect'))
-
-    expect(screen.getByText(/Vorn restarts to apply this/)).toBeInTheDocument()
-    expect(screen.getByText(/only while a desktop is\s+attached/)).toBeInTheDocument()
-  })
-
-  it('sends the address and token together', async () => {
-    const user = userEvent.setup()
-    saveConnectSettings.mockResolvedValue({ ok: true })
-    await renderPanel()
-    await waitFor(() => expect(screen.getByText('Connect')).toBeInTheDocument())
-
-    await user.click(screen.getByText('Connect'))
     await user.type(screen.getByLabelText('Server address'), '192.168.0.4:61601')
     await user.type(screen.getByLabelText('Device token from that machine'), 'vorn_a_b')
     await user.click(screen.getByText('Connect and restart'))
@@ -406,7 +443,33 @@ describe('pointing this desktop at another Vorn', () => {
     })
   })
 
-  it('shows which host it is on, and offers a way back', async () => {
+  it('says the app restarts and what still needs a desktop', async () => {
+    // Workflow execution lives in the renderer, so a host with nothing attached holds
+    // state and runs terminals but fires no schedules. Better said here than
+    // discovered when a scheduled workflow silently does not run.
+    const user = userEvent.setup()
+    await renderPanel()
+
+    await switchTo(user, 'Another machine')
+
+    expect(screen.getByText(/Vorn restarts to apply this/)).toBeInTheDocument()
+    expect(screen.getByText(/fires no schedules/)).toBeInTheDocument()
+  })
+
+  it('reports a rejected address instead of appearing to succeed', async () => {
+    const user = userEvent.setup()
+    saveConnectSettings.mockResolvedValue({ ok: false, error: 'Both an address and a token.' })
+    await renderPanel()
+    await switchTo(user, 'Another machine')
+
+    await user.click(screen.getByText('Connect and restart'))
+
+    await waitFor(() =>
+      expect(screen.getByText('Both an address and a token.')).toBeInTheDocument()
+    )
+  })
+
+  it('shows which host it is on, and the way back', async () => {
     const user = userEvent.setup()
     getConnectSettings.mockResolvedValue({
       mode: 'host',
@@ -415,19 +478,24 @@ describe('pointing this desktop at another Vorn', () => {
     })
     await renderPanel()
 
-    await waitFor(() => expect(screen.getByText('Connected to another Vorn')).toBeInTheDocument())
-    await user.click(screen.getByText('Change'))
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+    expect(screen.getByText('ws://box:61601/ws')).toBeInTheDocument()
 
-    await user.click(screen.getByText('Use this machine'))
+    await user.click(screen.getByText('Disconnect'))
     expect(useLocalServer).toHaveBeenCalled()
   })
 
-  it('stays out of the way in the browser, which is already on a host', async () => {
-    getConnectSettings.mockResolvedValue(null)
-
+  it('lets a connected host be changed without disconnecting first', async () => {
+    const user = userEvent.setup()
+    getConnectSettings.mockResolvedValue({
+      mode: 'host',
+      url: 'ws://box:61601/ws',
+      hasToken: true
+    })
     await renderPanel()
 
-    await waitFor(() => expect(screen.getByText('Enable Remote Access')).toBeInTheDocument())
-    expect(screen.queryByText('Connect to another Vorn')).not.toBeInTheDocument()
+    await user.click(screen.getByText('Change'))
+
+    expect(screen.getByLabelText('Server address')).toHaveValue('ws://box:61601/ws')
   })
 })

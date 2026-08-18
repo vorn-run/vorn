@@ -22,7 +22,7 @@ export interface CliDeps {
   writeErr(text: string): void
 }
 
-const USAGE = `vorn-server — run a Vorn server without the desktop app
+const USAGE = `vorn-server: run a Vorn server without the desktop app
 
 Usage
   vorn-server serve [options]              Start the server
