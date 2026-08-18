@@ -107,12 +107,25 @@ function isUnder(realRoot: string, path: string): boolean {
 export function allowsFileUrl(sessionId: string, url: string): boolean {
   const root = roots.get(sessionId)
   if (!root) return false
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  // An empty host is what makes a file url local, and it is checked here rather
+  // than left to `fileURLToPath`. That throws for a named host on macOS and
+  // Linux, but on Windows it turns `file://host/share` into the UNC path
+  // `\\host\share` — a reach across the network from a check that only ever
+  // thought about disks, and one this would otherwise resolve and compare as
+  // though it were a local file. (`localhost` needs no special case: the url
+  // spec erases it, so `file://localhost/x` arrives here as `file:///x`.)
+  if (parsed.protocol !== 'file:' || parsed.hostname) return false
+
   let path: string
   try {
     path = fileURLToPath(url)
   } catch {
-    // Not a file url, or not one that names a path on this machine — a UNC
-    // `file://host/share` among them.
     return false
   }
   // The stored root is canonical by construction, so only the requested path

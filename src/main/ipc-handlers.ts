@@ -92,7 +92,13 @@ function guardFileRequests(sessionId: string): void {
     if (!details.url.startsWith('file:')) return callback({})
     const allowed = allowsFileUrl(sessionId, details.url)
     if (!allowed) {
-      log.warn(`[browser] refused a file request outside session ${sessionId}: ${details.url}`)
+      // The path is deliberately not logged. A refused one is by definition
+      // outside the project — a home directory, a key, whatever the page asked
+      // for — and `main.log` outlives the session and travels with a bug
+      // report. The refusal is the fact worth keeping; `debug` carries the
+      // path for anyone actually chasing one.
+      log.warn(`[browser] refused a file request outside session ${sessionId}`)
+      log.debug(`[browser] refused url for session ${sessionId}: ${details.url}`)
     }
     callback({ cancel: !allowed })
   })

@@ -105,6 +105,15 @@ describe('file urls a session may open', () => {
     expect(allowsFileUrl('sess', encoded)).toBe(false)
   })
 
+  it('treats a localhost host the way the url spec does, and still bounds it', () => {
+    // WHATWG erases `localhost` from a file url, so this parses with an empty
+    // host and is an ordinary local path — the same answer `normalizeUrl`
+    // gives. What keeps it honest is the root, not the host: in-root passes,
+    // out-of-root does not.
+    expect(allowsFileUrl('sess', `file://localhost${join(project, 'index.html')}`)).toBe(true)
+    expect(allowsFileUrl('sess', `file://localhost${join(outside, 'secret.txt')}`)).toBe(false)
+  })
+
   it('refuses a UNC url naming another machine', () => {
     // `file://host/share` is not a local file, and reading it as one would
     // reach the network from a check that only ever thought about disks.
