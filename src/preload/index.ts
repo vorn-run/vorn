@@ -568,6 +568,16 @@ const api = {
   getTailscaleStatus: (): Promise<TailscaleStatus> => ipcRenderer.invoke(IPC.TAILSCALE_STATUS),
   getReachableUrls: (): Promise<ReachableUrls> => ipcRenderer.invoke(IPC.SERVER_REACHABLE_URLS),
 
+  // Connect window. Handled in the main process without a bridge — they are the
+  // only methods that work when there is no server to talk to.
+  getConnectSettings: (): Promise<{ mode: string; url: string; hasToken: boolean }> =>
+    ipcRenderer.invoke('connect:get'),
+  saveConnectSettings: (params: {
+    url: string
+    token: string
+  }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('connect:save', params),
+  useLocalServer: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('connect:useLocal'),
+
   // Device tokens
   listDeviceTokens: (): Promise<DeviceToken[]> => ipcRenderer.invoke(IPC.TOKEN_LIST),
   createDeviceToken: (name: string): Promise<{ token: DeviceToken; plaintext: string }> =>

@@ -40,6 +40,9 @@ function reachable(overrides: Partial<ReachableUrls> = {}): ReachableUrls {
   return { urls: ['http://192.168.1.20:4000/app/'], port: 4000, remote: true, ...overrides }
 }
 
+const getConnectSettings = vi.fn()
+const saveConnectSettings = vi.fn()
+const useLocalServer = vi.fn()
 const listDeviceTokens = vi.fn()
 const createDeviceToken = vi.fn()
 const revokeDeviceToken = vi.fn()
@@ -66,13 +69,19 @@ beforeEach(() => {
     plaintext: 'vorn_tok1_secret'
   })
   revokeDeviceToken.mockResolvedValue({ revoked: true })
+  getConnectSettings.mockResolvedValue({ mode: 'local', url: '', hasToken: false })
+  saveConnectSettings.mockResolvedValue({ ok: true })
+  useLocalServer.mockResolvedValue({ ok: true })
   ;(window as unknown as { api: unknown }).api = {
     getTailscaleStatus,
     getReachableUrls,
     saveConfig,
     listDeviceTokens,
     createDeviceToken,
-    revokeDeviceToken
+    revokeDeviceToken,
+    getConnectSettings,
+    saveConnectSettings,
+    useLocalServer
   }
 })
 
@@ -352,5 +361,73 @@ describe('the device list', () => {
     await waitFor(() =>
       expect(screen.getByText('Could not read the device list.')).toBeInTheDocument()
     )
+  })
+})
+
+describe('pointing this desktop at another Vorn', () => {
+  beforeEach(() => {
+    getConnectSettings.mockResolvedValue({ mode: 'local', url: '', hasToken: false })
+  })
+
+  it('offers to connect to a server on another machine', async () => {
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText('Connect to another Vorn')).toBeInTheDocument())
+  })
+
+  it('says the app restarts and what still needs a desktop', async () => {
+    // Workflow execution lives in the renderer, so a host with nothing attached
+    // holds state and runs terminals but fires no schedules. Better said here than
+    // discovered when a scheduled workflow silently does not run.
+    const user = userEvent.setup()
+    await renderPanel()
+    await waitFor(() => expect(screen.getByText('Connect')).toBeInTheDocument())
+
+    await user.click(screen.getByText('Connect'))
+
+    expect(screen.getByText(/Vorn restarts to apply this/)).toBeInTheDocument()
+    expect(screen.getByText(/only while a desktop is\s+attached/)).toBeInTheDocument()
+  })
+
+  it('sends the address and token together', async () => {
+    const user = userEvent.setup()
+    saveConnectSettings.mockResolvedValue({ ok: true })
+    await renderPanel()
+    await waitFor(() => expect(screen.getByText('Connect')).toBeInTheDocument())
+
+    await user.click(screen.getByText('Connect'))
+    await user.type(screen.getByLabelText('Server address'), '192.168.0.4:61601')
+    await user.type(screen.getByLabelText('Device token from that machine'), 'vorn_a_b')
+    await user.click(screen.getByText('Connect and restart'))
+
+    expect(saveConnectSettings).toHaveBeenCalledWith({
+      url: '192.168.0.4:61601',
+      token: 'vorn_a_b'
+    })
+  })
+
+  it('shows which host it is on, and offers a way back', async () => {
+    const user = userEvent.setup()
+    getConnectSettings.mockResolvedValue({
+      mode: 'host',
+      url: 'ws://box:61601/ws',
+      hasToken: true
+    })
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText('Connected to another Vorn')).toBeInTheDocument())
+    await user.click(screen.getByText('Change'))
+
+    await user.click(screen.getByText('Use this machine'))
+    expect(useLocalServer).toHaveBeenCalled()
+  })
+
+  it('stays out of the way in the browser, which is already on a host', async () => {
+    getConnectSettings.mockResolvedValue(null)
+
+    await renderPanel()
+
+    await waitFor(() => expect(screen.getByText('Enable Remote Access')).toBeInTheDocument())
+    expect(screen.queryByText('Connect to another Vorn')).not.toBeInTheDocument()
   })
 })

@@ -565,6 +565,12 @@ export function createApiShim(wsUrl: string) {
     getTailscaleStatus: () => rpc.invoke('tailscale:status'),
     getReachableUrls: () => rpc.invoke('server:reachableUrls'),
 
+    // Connect window (Electron-only). A browser reaches a server by its address,
+    // so there is nothing to point somewhere else — it is already there.
+    getConnectSettings: async () => null,
+    saveConnectSettings: unsupportedInWeb('Pointing at another server'),
+    useLocalServer: unsupportedInWeb('Switching to a local server'),
+
     // Device tokens. A real implementation rather than a stub — unlike SSH keys,
     // these need nothing from Electron, so a phone can manage them too.
     listDeviceTokens: () => rpc.invoke('token:list'),

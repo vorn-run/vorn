@@ -580,6 +580,140 @@ function DeviceTokenList() {
   )
 }
 
+/**
+ * Point this desktop at a Vorn running somewhere else.
+ *
+ * The other half of remote access: the panel above shares *this* machine's server
+ * with other devices, and this connects to a server someone else is sharing. One
+ * at a time — two servers means two databases, and the local one would shadow the
+ * remote without saying so.
+ *
+ * Applying restarts the app, because the spawn-or-connect decision is made once at
+ * startup and everything downstream assumes its answer.
+ */
+function HostModeCard() {
+  const [expanded, setExpanded] = useState(false)
+  const [current, setCurrent] = useState<{ mode: string; url: string } | null>(null)
+  const [url, setUrl] = useState('')
+  const [token, setToken] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api
+      .getConnectSettings?.()
+      .then((s) => {
+        if (cancelled || !s) return
+        setCurrent({ mode: s.mode, url: s.url })
+        setUrl(s.url)
+      })
+      .catch(() => {
+        /* Electron-only; the web client is already talking to a host. */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // The web client reaches a server by its address, so it has nothing to point.
+  if (!current) return null
+
+  const connected = current.mode === 'host'
+
+  const apply = async (): Promise<void> => {
+    setError(null)
+    const result = await window.api.saveConnectSettings({ url, token })
+    if (!result.ok) setError(result.error ?? 'Could not save those details.')
+  }
+
+  return (
+    <div className="mt-8 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-gray-200 mb-1">
+            {connected ? 'Connected to another Vorn' : 'Connect to another Vorn'}
+          </div>
+          <p className="text-xs text-gray-600">
+            {connected
+              ? `Using ${current.url}. Sessions and data live on that machine.`
+              : 'Use a server running on another machine instead of this one. Its sessions, tasks and projects become yours.'}
+          </p>
+        </div>
+        {!expanded && (
+          <button
+            onClick={() => setExpanded(true)}
+            className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-md text-gray-300 border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
+          >
+            {connected ? 'Change' : 'Connect'}
+          </button>
+        )}
+      </div>
+
+      {expanded && (
+        <div className="mt-4">
+          <label className="block text-xs text-gray-400 mb-1.5" htmlFor="host-url">
+            Server address
+          </label>
+          <input
+            id="host-url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="192.168.0.4:61601"
+            spellCheck={false}
+            className="w-full rounded-md bg-white/[0.04] border border-white/[0.08] px-3 py-2 text-sm text-gray-200 font-mono placeholder:text-gray-600 outline-none focus:border-white/20"
+          />
+          <label className="block text-xs text-gray-400 mb-1.5 mt-3" htmlFor="host-token">
+            Device token from that machine
+          </label>
+          <input
+            id="host-token"
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="vorn_..."
+            spellCheck={false}
+            className="w-full rounded-md bg-white/[0.04] border border-white/[0.08] px-3 py-2 text-sm text-gray-200 font-mono placeholder:text-gray-600 outline-none focus:border-white/20"
+          />
+
+          {error && <p className="text-xs text-amber-400/80 mt-2">{error}</p>}
+
+          <p className="text-xs text-gray-600 mt-3">
+            Vorn restarts to apply this. Workflows and schedules run only while a desktop is
+            attached to the host — they do not execute on the server by itself.
+          </p>
+
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => void apply()}
+              className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-200 border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
+            >
+              Connect and restart
+            </button>
+            {connected && (
+              <button
+                onClick={() => void window.api.useLocalServer()}
+                className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors"
+              >
+                Use this machine
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setExpanded(false)
+                setError(null)
+                setToken('')
+              }}
+              className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Component ──────────────────────────────────────────────
 
 export function NetworkSettings() {
@@ -736,6 +870,8 @@ export function NetworkSettings() {
 
       {/* Device list */}
       {enabled && onTailnet && status && <TailnetPeerList status={status} />}
+
+      <HostModeCard />
 
       {/* How it works — always visible */}
       {status && (
