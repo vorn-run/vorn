@@ -1,6 +1,6 @@
 {
   "name": "vorn",
-  "version": "0.6.1-beta.1",
+  "version": "0.6.1-beta.2",
   "packageManager": "yarn@4.13.0",
   "author": "Javier Canizalez <javier-canizalez@outlook.com>",
   "description": "AI Agent Terminal Manager - Stage Manager for coding agents",
