@@ -27,7 +27,10 @@ export function McpSettings() {
   return (
     <div>
       <h2 className="text-xl font-semibold text-white mb-1">MCP Integration</h2>
-      <p className="text-sm text-gray-500 mb-6">Connect your coding agents to Vorn via MCP</p>
+      <p className="text-sm text-gray-500 mb-6">
+        Connect your coding agents to Vorn. The plugin installs the MCP server and the skills that
+        explain what its tools are for.
+      </p>
 
       {/* Per-agent commands */}
       <h3 className="text-sm font-medium text-gray-200 mb-3">Agent Setup</h3>
@@ -45,15 +48,20 @@ export function McpSettings() {
                 <AgentIcon agentType={setup.agentType} size={20} />
                 <span className="text-sm font-medium text-gray-200">{agent.displayName}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <code
-                  className="flex-1 px-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-md
+              <div className="space-y-2">
+                {setup.commands.map((command) => (
+                  <div key={command} className="flex items-center gap-2">
+                    <code
+                      className="flex-1 px-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-md
                                text-xs text-gray-300 font-mono overflow-x-auto whitespace-nowrap"
-                >
-                  {setup.command}
-                </code>
-                <CopyButton text={setup.command} />
+                    >
+                      {command}
+                    </code>
+                    <CopyButton text={command} />
+                  </div>
+                ))}
               </div>
+              {setup.note && <p className="mt-2 text-[11px] text-gray-500">{setup.note}</p>}
             </div>
           )
         })}
