@@ -23,7 +23,8 @@ import {
   executeWorkflow as runWorkflow,
   rescheduleWaitingGateTimers,
   reconcileRunningExecutions,
-  stopWorkflowRun
+  stopWorkflowRun,
+  applyGateDecision
 } from './lib/workflow-execution'
 import type { WorkflowExecution } from '../shared/types'
 import { CommandPalette } from './components/CommandPalette'
@@ -367,6 +368,15 @@ export function App() {
       )
     })
 
+    // A gate answered elsewhere — a phone, or another window. Broadcast for the
+    // same reason a stop is: whoever answered is usually not who is holding the
+    // run. applyGateDecision no-ops unless this instance is.
+    const removeGateListener = window.api.onWorkflowGateResolved(({ runId, nodeId, decision }) => {
+      void applyGateDecision(runId, nodeId, decision).catch((err) =>
+        console.warn(`[workflow] gate decision for ${runId} failed:`, err)
+      )
+    })
+
     // Seed from main first: the events fire once, and a window opened after
     // one has already passed would otherwise sit on 'unsupported' forever.
     useAppStore.getState().setAppUpdateStatus(window.api.getUpdateStatus())
@@ -513,6 +523,7 @@ export function App() {
       removeHeadlessExitListener()
       removeHeadlessDataListener()
       removeStopRunListener()
+      removeGateListener()
       clearInterval(headlessPollInterval)
       clearInterval(pruneInterval)
     }

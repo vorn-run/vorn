@@ -7,6 +7,7 @@ import type {
   FileEntry,
   GitDiffStat,
   GitDiffResult,
+  WorkflowDefinition,
   WorkflowExecution,
   ScriptConfig,
   ScheduleLogEntry,
@@ -21,6 +22,7 @@ import type {
   TaskSourceLink,
   ConnectorManifest,
   ConnectorItemContext,
+  TaskConfig,
   TaskStatus,
   WorktreeInventory,
   WorktreeActionResult,
@@ -218,6 +220,48 @@ export interface RequestMethods {
   'tailscale:status': { params: void; result: TailscaleStatus }
 
   // Task images and UI
+  /**
+   * The task board on its own, rather than as part of the whole configuration.
+   *
+   * Tasks live in `AppConfig.tasks`, so reading the board has meant loading the
+   * entire config and changing one status has meant sending all of it back. On
+   * a real board that is around 95 KB of a 104 KB payload, which is invisible on
+   * a desk and the difference between usable and not on a phone.
+   */
+  'task:list': {
+    params: { projectName?: string; status?: TaskStatus; includeDescription?: boolean } | void
+    result: TaskConfig[]
+  }
+  'task:setStatus': { params: { id: string; status: TaskStatus }; result: { ok: boolean } }
+  /** One task, description included. The listing omits descriptions. */
+  'task:get': { params: { id: string }; result: TaskConfig | null }
+
+  /**
+   * One workflow's definition.
+   *
+   * A run records node ids and their outcome, not what the nodes are called, so
+   * anything drawing a trace needs the definition beside it. `config:load`
+   * carries every workflow, and on a phone that is a hundred kilobytes to label
+   * a handful of rows
+   */
+  'workflow:get': { params: { id: string }; result: WorkflowDefinition | null }
+
+  /**
+   * Answer a run that is parked on an approval gate.
+   *
+   * The decision is recorded by whichever instance is holding the run, not here:
+   * resuming means re-entering the execution engine, and that lives in a desktop
+   * window rather than in this process. So this broadcasts and returns, the same
+   * way stopping a run does — every instance hears it and only the owner acts.
+   *
+   * `accepted` says the message went out, not that a run resumed. If no desktop
+   * is open there is nothing to act on it, and the gate stays open until one is.
+   */
+  'workflow:resolveGate': {
+    params: { runId: string; nodeId: string; decision: 'approve' | 'reject' }
+    result: { accepted: boolean }
+  }
+
   'task:imageUpload': {
     params: { taskId: string; base64: string; filename: string }
     result: string
@@ -762,6 +806,8 @@ export interface ServerNotifications {
     missedAt: string
   }>
   'workflow:executionComplete': WorkflowExecution
+  /** A person answered a gate. Only the instance holding the run acts on it. */
+  'workflow:gateResolved': { runId: string; nodeId: string; decision: 'approve' | 'reject' }
   'session-exit': TerminalSession
   'database:corruption-recovered': { message: string }
 }

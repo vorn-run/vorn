@@ -446,6 +446,16 @@ const api = {
       ipcRenderer.removeListener(IPC.SCHEDULER_STOP_RUN, listener)
     }
   },
+  onWorkflowGateResolved: (
+    callback: (event: { runId: string; nodeId: string; decision: 'approve' | 'reject' }) => void
+  ) => {
+    const listener = (
+      _e: unknown,
+      event: { runId: string; nodeId: string; decision: 'approve' | 'reject' }
+    ) => callback(event)
+    ipcRenderer.on(IPC.WORKFLOW_GATE_RESOLVED, listener)
+    return () => ipcRenderer.removeListener(IPC.WORKFLOW_GATE_RESOLVED, listener)
+  },
 
   onSchedulerMissed: (
     callback: (missed: { workflow: { id: string; name: string }; scheduledFor: string }[]) => void
