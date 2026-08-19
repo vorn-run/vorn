@@ -332,6 +332,8 @@ export function registerAllMethods(): void {
     ({ id }) => configManager.loadConfig().workflows?.find((w) => w.id === id) ?? null
   )
 
+  registerMethod('project:list', () => configManager.loadConfig().projects ?? [])
+
   registerMethod('task:get', ({ id }) => dbGetTask(id))
 
   registerMethod('task:setStatus', ({ id, status }) => {
