@@ -11,6 +11,7 @@ import type {
   WorkflowExecution,
   ScriptConfig,
   ScheduleLogEntry,
+  ProjectConfig,
   RecentSession,
   PermissionRequestInfo,
   WidgetAgentInfo,
@@ -233,6 +234,15 @@ export interface RequestMethods {
     result: TaskConfig[]
   }
   'task:setStatus': { params: { id: string; status: TaskStatus }; result: { ok: boolean } }
+  /**
+   * The projects a session can be launched into.
+   *
+   * Small, and inside the configuration with everything else — so asking for it
+   * alone costs a few hundred bytes rather than the hundred kilobytes that
+   * carrying the task board along with it does.
+   */
+  'project:list': { params: void; result: ProjectConfig[] }
+
   /** One task, description included. The listing omits descriptions. */
   'task:get': { params: { id: string }; result: TaskConfig | null }
 
