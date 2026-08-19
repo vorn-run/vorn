@@ -12,6 +12,7 @@ import { detectIDEs, openInIDE } from './ide-detector'
 import { detectMobileProject } from './mobile-detector'
 import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
 import { clientRegistry } from './broadcast'
+import { readScrollback } from './terminal-scrollback'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
@@ -294,6 +295,7 @@ export function registerAllMethods(): void {
     sessionManager.scheduleSave()
     broadcastWidgetUpdate()
   })
+  registerMethod('terminal:readScrollback', ({ id }) => ({ data: readScrollback(id) }))
   registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.getOutput(id, lines))
   registerMethod('shell:create', (cwd) => {
     const session = ptyManager.createShellPty(cwd)
@@ -1209,16 +1211,32 @@ export function registerAllMethods(): void {
   registerMethod('device:logs', (p) => browserBridge.request('device:logs', p))
   registerMethod('device:openPane', (p) => browserBridge.request('device:openPane', p))
 
+  /**
+   * Which instance a manager notification is about, or nothing.
+   *
+   * `terminal:data` and its siblings all carry the terminal's id, and a client
+   * that only wants one terminal's output subscribes to `terminal:data#<id>`.
+   * Payloads without an `id` simply have no instance, and match by name alone.
+   */
+  const terminalScope = (payload: unknown): string | undefined => {
+    const id = (payload as { id?: unknown } | null)?.id
+    return typeof id === 'string' ? id : undefined
+  }
+
   // Wire manager events → broadcast to WS clients
   ptyManager.on('client-message', (channel: string, payload: unknown) => {
-    clientRegistry.broadcast(channel, payload)
+    // A payload's `id` is the instance this notification is about, which lets a
+    // client subscribe to one terminal rather than to all of them. Read
+    // generically rather than per channel: every id-bearing payload here means
+    // the same thing by it.
+    clientRegistry.broadcast(channel, payload, terminalScope(payload))
     if (channel === IPC.TERMINAL_EXIT) {
       const p = payload as { id: string; exitCode: number }
       logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })
     }
   })
   headlessManager.on('client-message', (channel: string, payload: unknown) => {
-    clientRegistry.broadcast(channel, payload)
+    clientRegistry.broadcast(channel, payload, terminalScope(payload))
     if (channel === IPC.HEADLESS_EXIT) {
       const p = payload as { id: string; exitCode: number }
       logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })

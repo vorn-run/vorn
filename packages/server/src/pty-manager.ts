@@ -37,6 +37,7 @@ import {
 import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
+import { appendScrollback, clearScrollback } from './terminal-scrollback'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 
 const MAX_OUTPUT_LINES = 1000
@@ -600,6 +601,10 @@ class PtyManager extends EventEmitter {
     ptyProcess.onData((data: string) => {
       this.bufferData(id, data)
       this.appendOutput(id, data)
+      // Kept unstripped, and deliberately alongside `appendOutput` rather than
+      // instead of it: one answers what the agent said, the other what a
+      // terminal should draw, and neither can be derived from the other.
+      appendScrollback(id, data)
     })
 
     ptyProcess.onExit(({ exitCode }) => {
@@ -612,6 +617,7 @@ class PtyManager extends EventEmitter {
       this.clearBuffer(id)
       this.deleteTempKey(id)
       this.clearSessionTracking(id)
+      clearScrollback(id)
       this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
 
       this.ptys.delete(id)
