@@ -92,7 +92,9 @@ import {
   dbInsertWorkflow,
   dbDeleteWorkflow,
   dbGetWorkflow,
-  dbListWorkflows
+  dbListWorkflows,
+  dbListTasks,
+  dbGetTask
 } from './database'
 import {
   connectorRegistry,
@@ -295,6 +297,53 @@ export function registerAllMethods(): void {
     sessionManager.scheduleSave()
     broadcastWidgetUpdate()
   })
+  /**
+   * The board without the rest of the configuration around it.
+   *
+   * `config:load` carries every task inline, so a client that wants the board
+   * pulls roughly a hundred kilobytes and a client that moves one card sends all
+   * of it back. The database already stores tasks individually; only the wire
+   * treated them as one object.
+   */
+  registerMethod('task:list', (params) => {
+    const filter = (params ?? {}) as {
+      projectName?: string
+      status?: TaskStatus
+      includeDescription?: boolean
+    }
+    const tasks = dbListTasks(filter.projectName, filter.status)
+    if (filter.includeDescription) return tasks
+    // A board renders titles. Descriptions are most of the bytes and none of
+    // what is drawn, so they are left out until something asks for one task.
+    return tasks.map((task) => ({ ...task, description: '' }))
+  })
+
+  registerMethod('workflow:resolveGate', ({ runId, nodeId, decision }) => {
+    // Broadcast rather than claimed, for the same reason stopping a run is: the
+    // client that answers is not necessarily the one holding the run, and on a
+    // phone it never is.
+    log.info({ runId, nodeId, decision }, '[workflow] broadcasting a gate decision')
+    clientRegistry.broadcast(IPC.WORKFLOW_GATE_RESOLVED, { runId, nodeId, decision })
+    return { accepted: true }
+  })
+
+  registerMethod(
+    'workflow:get',
+    ({ id }) => configManager.loadConfig().workflows?.find((w) => w.id === id) ?? null
+  )
+
+  registerMethod('task:get', ({ id }) => dbGetTask(id))
+
+  registerMethod('task:setStatus', ({ id, status }) => {
+    if (!dbGetTask(id)) return { ok: false }
+    dbUpdateTask(id, { status })
+    // Everything else reads the board through the cached config, so a direct
+    // row write has to invalidate it. This also broadcasts `config:changed`,
+    // which is how other clients learn the card moved.
+    configManager.notifyChanged()
+    return { ok: true }
+  })
+
   registerMethod('terminal:readScrollback', ({ id }) => ({ data: readScrollback(id) }))
   registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.getOutput(id, lines))
   registerMethod('shell:create', (cwd) => {

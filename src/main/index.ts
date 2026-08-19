@@ -243,6 +243,7 @@ function wireServerNotifications(bridge: ServerBridge): void {
       case IPC.SCHEDULER_STOP_RUN:
       case IPC.SCHEDULER_MISSED:
       case IPC.WORKFLOW_EXECUTION_COMPLETE:
+      case IPC.WORKFLOW_GATE_RESOLVED:
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send(method, params)
         }

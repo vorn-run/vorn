@@ -550,6 +550,9 @@ export function createApiShim(wsUrl: string) {
     ) => rpc.on('scheduler:execute', callback as (p: unknown) => void),
     onSchedulerStopRun: (callback: (event: { runId: string }) => void) =>
       rpc.on('scheduler:stopRun', callback as (p: unknown) => void),
+    onWorkflowGateResolved: (
+      callback: (event: { runId: string; nodeId: string; decision: 'approve' | 'reject' }) => void
+    ) => rpc.on('workflow:gateResolved', callback as (p: unknown) => void),
     onSchedulerMissed: (callback: (missed: unknown[]) => void) =>
       rpc.on('scheduler:missed', callback as (p: unknown) => void),
     completeConnectorInbox: (params: {
