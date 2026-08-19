@@ -1761,6 +1761,22 @@ export interface BrowserPageRead {
   nextCursor?: string
   /** Bumped on every navigation; refs from an older generation are refused. */
   generation: number
+  /**
+   * What the page declares itself to be, when it declares anything.
+   *
+   * Present only for a design artifact. An agent asked to change one needs to
+   * know which values it derives from before it starts editing rules.
+   */
+  artifact?: ArtifactManifest
+  /**
+   * The values the design is *currently* showing, which are not the defaults
+   * written in the file.
+   *
+   * A person can turn a control without spending an agent turn, so the file
+   * says 6000 while the screen says 9000. An agent asked to make the
+   * over-budget case louder has to work from the second number.
+   */
+  artifactValues?: Record<string, unknown>
 }
 
 export interface BrowserConsoleMessage {

@@ -463,12 +463,26 @@ export async function readPage(params: {
     out.push(node)
   }
 
+  // What this page claims to be, and what it is currently showing. Only a
+  // design answers; for every other page this is one cheap evaluate that comes
+  // back empty. An agent asked to change a design needs the value on screen,
+  // not the default written in the file — a person can turn a control without
+  // spending a turn, so the two routinely disagree.
+  //
+  // Best-effort: a page read must not fail because the manifest read did.
+  const artifact = await readManifest({ sessionId: params.sessionId }).catch(() => ({
+    manifest: null,
+    values: undefined
+  }))
+
   return {
     url: wc.getURL(),
     title: wc.getTitle(),
     nodes: out,
     generation: entry.generation,
-    ...(i < ax.length ? { nextCursor: `${entry.generation}:${i}` } : {})
+    ...(i < ax.length ? { nextCursor: `${entry.generation}:${i}` } : {}),
+    ...(artifact.manifest ? { artifact: artifact.manifest } : {}),
+    ...(artifact.values ? { artifactValues: artifact.values } : {})
   }
 }
 

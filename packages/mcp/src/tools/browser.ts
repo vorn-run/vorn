@@ -152,7 +152,10 @@ export function registerBrowserTools(server: McpServer): void {
     'read_page',
     'Read your session browser pane as an accessibility tree. Interactive elements carry a ' +
       '"ref" you can pass to browser_interact. Prefer this over screenshot: it is far cheaper ' +
-      'and gives you actionable handles. Long pages paginate — pass the returned nextCursor back as `cursor`.',
+      'and gives you actionable handles. Long pages paginate — pass the returned nextCursor back as `cursor`. ' +
+      'When the page is a design artifact it also returns "artifact" (what the file declares) and ' +
+      '"artifactValues" (what it is currently showing). Work from artifactValues: a person can turn ' +
+      'a control without spending a turn, so the value on screen is routinely not the default in the file.',
     {
       filter: z
         .enum(['interactive', 'all'])
