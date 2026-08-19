@@ -9,6 +9,7 @@ const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(pro
 import websocket from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { handleConnection, registerMethod } from './ws-handler'
+import { parseTopics } from './broadcast'
 import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
 import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
@@ -111,7 +112,7 @@ export async function startServer(
       }
     },
     (socket, req) => {
-      handleConnection(socket, bearerFrom(req.headers.authorization))
+      handleConnection(socket, bearerFrom(req.headers.authorization), parseTopics(req.query))
       scheduler.deliverPendingConnectorInbox()
     }
   )

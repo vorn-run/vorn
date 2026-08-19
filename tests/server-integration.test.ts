@@ -179,7 +179,7 @@ describe('server integration', () => {
       })
 
       expect(JSON.parse(first).method).toBe('server:hello')
-      expect(JSON.parse(first).params.capabilities).toEqual({ auth: 1 })
+      expect(JSON.parse(first).params.capabilities).toEqual({ auth: 1, subscribe: 1 })
       ws.close()
     })
 
@@ -233,6 +233,61 @@ describe('server integration', () => {
       })
       expect(ws.readyState).toBe(WebSocket.OPEN)
       ws.close()
+    })
+  })
+
+  /**
+   * A phone connects over cellular and renders no terminals, but the registry
+   * used to hand every socket every notification — including every byte of every
+   * PTY on the machine.
+   */
+  describe('a socket that asked for less', () => {
+    /**
+     * Collect notifications until the server has plainly finished sending.
+     *
+     * Idle-based rather than a fixed sleep: the assertion is partly that certain
+     * frames never arrive, and a fixed wait either ends before a slow one lands —
+     * passing for the wrong reason on a loaded machine — or pads every run to be
+     * sure. Each frame restarts the clock, so this settles as fast as the server
+     * allows and still waits when the server is slow.
+     */
+    async function notificationsFor(query: string): Promise<string[]> {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws${query}`, authOptions())
+      const methods: string[] = []
+      let idle: ReturnType<typeof setTimeout>
+      const settled = new Promise<void>((resolve) => {
+        const restart = (): void => {
+          clearTimeout(idle)
+          idle = setTimeout(resolve, 60)
+        }
+        ws.on('message', (raw) => {
+          const frame = JSON.parse(raw.toString())
+          if (frame.method && frame.method !== 'server:hello') methods.push(frame.method)
+          restart()
+        })
+        restart()
+      })
+      await new Promise<void>((r) => ws.on('open', r))
+
+      const { clientRegistry } = await import('../packages/server/src/broadcast')
+      clientRegistry.broadcast('terminal:data', { id: 'a', data: 'x' })
+      clientRegistry.broadcast('session:updated', { id: 'a' })
+
+      await settled
+      clearTimeout(idle)
+      ws.close()
+      return methods
+    }
+
+    it('still receives everything when it asks for nothing', async () => {
+      expect(await notificationsFor('')).toEqual(['terminal:data', 'session:updated'])
+    })
+
+    it('receives only what the URL asked for', async () => {
+      // On the URL rather than in a later frame: by the time a frame could arrive
+      // the socket is already in the broadcast set, and that gap repeats on every
+      // reconnect.
+      expect(await notificationsFor('?topics=session:*')).toEqual(['session:updated'])
     })
   })
 

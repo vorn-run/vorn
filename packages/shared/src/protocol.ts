@@ -761,6 +761,21 @@ export interface ServerNotifications {
 export interface ClientNotifications {
   'terminal:write': { id: string; data: string }
   'terminal:resize': ResizePayload
+  /**
+   * Narrow which server notifications this socket receives.
+   *
+   * An entry is an exact name (`config:changed`) or a namespace wildcard
+   * (`session:*`). Omitting `topics` restores everything, which is also the
+   * default, so a client that never sends this is unaffected. An empty list
+   * does the same rather than silencing the socket: there is no way to ask for
+   * nothing, because a client that wants nothing can close, whereas one that
+   * sent `[]` by accident would look broken with no signal saying why.
+   *
+   * Only honoured when `server:hello` advertised the `subscribe` capability.
+   * Prefer the `topics` query parameter on the socket URL for the initial set:
+   * this message can only take effect after the socket is already receiving.
+   */
+  'subscribe:set': { topics?: readonly string[] }
 }
 
 // ─── Typed helpers ──────────────────────────────────────────────
