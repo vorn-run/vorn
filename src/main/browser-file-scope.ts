@@ -44,6 +44,17 @@ export function hasFileRoot(sessionId: string): boolean {
   return roots.has(sessionId)
 }
 
+/**
+ * The session's root, already resolved.
+ *
+ * Handed out so a caller can check containment itself rather than re-deriving
+ * the root from somewhere else — there is one source for this, and a second
+ * would be the one that disagrees.
+ */
+export function fileRootFor(sessionId: string): string | undefined {
+  return roots.get(sessionId)
+}
+
 /** Only for tests, which must not inherit roots across cases. */
 export function resetFileRoots(): void {
   roots.clear()

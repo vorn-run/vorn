@@ -240,6 +240,9 @@ export const BrowserCard = memo(
           .then(({ manifest: m, values }) => {
             if (stale) return
             setManifest(m)
+            // Only a design gets watched, and only while it is the page in
+            // front. An ordinary web page has no file to change.
+            window.api.watchBrowserFile(sessionId, m ? filePathRef.current : null)
             if (!m?.tweaks) {
               setTweakValues({})
               return
@@ -346,12 +349,29 @@ export const BrowserCard = memo(
       }
     }, [pane?.activeTab, sessionId, isCard, key, syncBrowserTab])
 
+    // The design changed on disk, so show the new one. A reload rather than a
+    // patch: the file is the source, and phase-two storage is what makes this
+    // cheap — the values you set are put back as soon as it loads.
+    useEffect(() => {
+      if (isCard) return
+      return window.api.onBrowserFileChanged(({ sessionId: id, path }) => {
+        if (id !== sessionId) return
+        // A pane that has since moved on is not repainted onto a file it is no
+        // longer showing.
+        if (path !== filePathRef.current) return
+        viewRef.current?.reload()
+      })
+    }, [sessionId, isCard])
+
     // Closing the pane or the session unmounts this card; either way the CDP
     // session must be released, or main keeps a debugger attached to a guest
     // nobody can reach.
     useEffect(() => {
       if (isCard) return
-      return () => window.api.detachBrowser(sessionId)
+      return () => {
+        window.api.watchBrowserFile(sessionId, null)
+        window.api.detachBrowser(sessionId)
+      }
     }, [sessionId, isCard])
 
     // Report the strip to main, so an agent can ask what the indices it passes

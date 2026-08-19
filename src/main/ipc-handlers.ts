@@ -6,6 +6,7 @@ import type { ServerBridge } from './server/server-bridge'
 import type { RequestMethods } from '@vornrun/shared/protocol'
 import * as browserRegistry from './browser-registry'
 import { setFileRoot, allowsFileUrl } from './browser-file-scope'
+import { watchArtifact, stopWatching } from './artifact-watcher'
 import * as deviceRegistry from './device-registry'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
 import log from './logger'
@@ -431,7 +432,16 @@ export function registerIpcHandlers(): void {
   ipcMain.on(IPC.BROWSER_DETACH, (_, sessionId: string) => {
     browserRegistry.detach(sessionId)
     setFileRoot(sessionId, undefined)
+    // The watcher outlives nothing. A pane that closed has no design showing,
+    // and a descriptor left open would report changes to a session that is gone.
+    stopWatching(sessionId)
   })
+  ipcMain.on(
+    IPC.BROWSER_WATCH_FILE,
+    (_, { sessionId, path }: { sessionId: string; path: string | null }) => {
+      watchArtifact(sessionId, path)
+    }
+  )
   ipcMain.on(IPC.BROWSER_TABS_CHANGED, (_, { sessionId, tabs }) => {
     browserRegistry.syncTabs(sessionId, tabs)
   })

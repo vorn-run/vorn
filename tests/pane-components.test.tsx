@@ -18,6 +18,9 @@ const mockStartPick = vi.fn<(sessionId: string) => Promise<unknown>>()
 const mockWriteTerminal = vi.fn()
 const mockAnnotate = vi.fn<(p: unknown) => Promise<unknown>>()
 const mockReadManifest = vi.fn<() => Promise<unknown>>()
+const mockWatchFile = vi.fn<(s: string, p: string | null) => void>()
+/** Handlers the card registered for "a watched design changed". */
+let fileChangedHandlers: ((p: { sessionId: string; path: string }) => void)[] = []
 const mockSetTweak = vi.fn<(s: string, k: string, v: unknown) => Promise<unknown>>()
 
 Object.defineProperty(window, 'api', {
@@ -29,6 +32,13 @@ Object.defineProperty(window, 'api', {
     // The browser pane reports its guest to main so the agent can drive it.
     attachBrowser: vi.fn(),
     syncBrowserTabs: vi.fn(),
+    watchBrowserFile: (...args: unknown[]) => mockWatchFile(...(args as [string, string | null])),
+    onBrowserFileChanged: (cb: (p: { sessionId: string; path: string }) => void) => {
+      fileChangedHandlers.push(cb)
+      return () => {
+        fileChangedHandlers = fileChangedHandlers.filter((h) => h !== cb)
+      }
+    },
     readBrowserManifest: () => mockReadManifest(),
     setBrowserTweak: (...args: unknown[]) => mockSetTweak(...(args as [string, string, unknown])),
     detachBrowser: vi.fn(),
@@ -768,6 +778,82 @@ describe('BrowserCard', () => {
     expect(await screen.findByLabelText('plan')).toHaveValue(9000)
     await waitFor(() => expect(mockSetTweak).toHaveBeenCalledWith('t1', 'plan', 9000))
     resetTweaks()
+  })
+
+  it('asks main to watch the design it is showing, and only a design', async () => {
+    mockWatchFile.mockClear()
+    mockReadManifest.mockResolvedValue({ manifest: { kind: 'design', title: 'D' } })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/d.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    await waitFor(() => expect(mockWatchFile).toHaveBeenCalledWith('t1', '/repo/d.dc.html'))
+  })
+
+  it('watches nothing for a page that is not a design', async () => {
+    // An ordinary web page has no file to change, and a watcher aimed at one
+    // would repaint the pane for edits nobody is looking at.
+    mockWatchFile.mockClear()
+    mockReadManifest.mockResolvedValue({ manifest: null })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    await waitFor(() => expect(mockWatchFile).toHaveBeenCalledWith('t1', null))
+  })
+
+  it('repaints when its own design changes on disk', async () => {
+    // The half of the loop that makes a design live: the agent writes, and the
+    // pane shows the new one without anyone touching it.
+    fileChangedHandlers = []
+    mockReadManifest.mockResolvedValue({ manifest: { kind: 'design', title: 'D' } })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/d.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    const view = document.querySelector('webview') as HTMLElement & { reload: () => void }
+    const reload = vi.fn()
+    view.reload = reload
+    act(() => void view.dispatchEvent(new Event('did-stop-loading')))
+    await waitFor(() => expect(fileChangedHandlers.length).toBeGreaterThan(0))
+
+    act(() => fileChangedHandlers.forEach((h) => h({ sessionId: 't1', path: '/repo/d.dc.html' })))
+    expect(reload).toHaveBeenCalled()
+  })
+
+  it('ignores a change to a file it is no longer showing', async () => {
+    // A watcher event can land after the pane moved on. Repainting then would
+    // show the wrong page for a file nobody asked about.
+    fileChangedHandlers = []
+    mockReadManifest.mockResolvedValue({ manifest: { kind: 'design', title: 'D' } })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/d.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    const view = document.querySelector('webview') as HTMLElement & { reload: () => void }
+    const reload = vi.fn()
+    view.reload = reload
+    act(() => void view.dispatchEvent(new Event('did-stop-loading')))
+    await waitFor(() => expect(fileChangedHandlers.length).toBeGreaterThan(0))
+
+    act(() =>
+      fileChangedHandlers.forEach((h) =>
+        h({ sessionId: 't1', path: '/repo/somewhere-else.dc.html' })
+      )
+    )
+    expect(reload).not.toHaveBeenCalled()
   })
 
   it('ignores a subframe navigating, which is not where the person is', () => {

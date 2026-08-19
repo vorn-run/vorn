@@ -602,6 +602,18 @@ const api = {
    *  the renderer actually holds rather than a copy of its own. */
   syncBrowserTabs: (sessionId: string, tabs: BrowserTabInfo[]): void =>
     ipcRenderer.send(IPC.BROWSER_TABS_CHANGED, { sessionId, tabs }),
+  /** Name the design this pane is showing so main can watch it; null stops. */
+  watchBrowserFile: (sessionId: string, path: string | null): void =>
+    ipcRenderer.send(IPC.BROWSER_WATCH_FILE, { sessionId, path }),
+  /** A watched design changed on disk. */
+  onBrowserFileChanged: (callback: (p: { sessionId: string; path: string }) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, p: { sessionId: string; path: string }): void =>
+      callback(p)
+    ipcRenderer.on(IPC.BROWSER_FILE_CHANGED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.BROWSER_FILE_CHANGED, listener)
+    }
+  },
   /** What the loaded page declares itself to be, plus its live tweak values.
    *  `manifest` is null for an ordinary web page, which is most of them. */
   readBrowserManifest: (

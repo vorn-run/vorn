@@ -1405,6 +1405,12 @@ export const IPC = {
    *  is the only thread tying a `<webview>` back to the session that owns it. */
   BROWSER_ATTACH: 'browser:attach',
   BROWSER_DETACH: 'browser:detach',
+  /** Renderer names the design file its pane is showing, so main can watch it.
+   *  Null stops watching. The renderer decides because it is the side that read
+   *  the manifest and knows the page is a design. */
+  BROWSER_WATCH_FILE: 'browser:watchFile',
+  /** Main tells the renderer a watched design changed on disk. */
+  BROWSER_FILE_CHANGED: 'browser:fileChanged',
   /** Renderer asks what the loaded page declares itself to be, so the pane can
    *  draw artifact chrome instead of an address bar. Only main can ask the
    *  guest — the renderer has no CDP. */
