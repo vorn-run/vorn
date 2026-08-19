@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import { dirname, basename, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { containsPath, fileRootFor } from './browser-file-scope'
+import { allowsFileUrl } from './browser-file-scope'
 import log from './logger'
 
 /**
@@ -58,26 +58,20 @@ export function watchArtifact(sessionId: string, url: string | null): void {
     return
   }
 
-  // The renderer sends the url, not a path: it has no `fileURLToPath`, and a
-  // hand-rolled conversion gets Windows drive letters wrong. Converting here
-  // means the watcher and `allowsFileUrl` agree about what a url names.
-  let path: string
-  try {
-    path = fileURLToPath(url)
-  } catch {
-    stopWatching(sessionId)
-    return
-  }
-
-  const root = fileRootFor(sessionId)
-  if (!root || !containsPath(root, path)) {
+  // The one question, asked the one way. `allowsFileUrl` already resolves the
+  // url, refuses a named host, and checks containment against a root it knows
+  // is canonical — re-deriving any of that here would be a second answer to
+  // "may this session touch this file", which is what that module exists to
+  // prevent.
+  if (!allowsFileUrl(sessionId, url)) {
     // Same answer the pane gives for a file outside the root: nothing happens,
     // and the session simply has no watcher.
     stopWatching(sessionId)
     return
   }
 
-  const target = resolve(path)
+  // Safe by the check above, which parsed it already.
+  const target = resolve(fileURLToPath(url))
   // Already aimed here. Re-opening on every load would churn a descriptor per
   // repaint, and a design repaints often by design.
   if (existing?.path === target) return

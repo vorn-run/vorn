@@ -1,12 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
-import {
-  loadTweaks,
-  saveTweak,
-  forgetTweaks,
-  mergeTweaks,
-  resetTweaks
-} from '../src/renderer/lib/design-tweaks'
+import { loadTweaks, saveTweak, mergeTweaks, resetTweaks } from '../src/renderer/lib/design-tweaks'
 
 /**
  * What survives a repaint.
@@ -52,12 +46,6 @@ describe('remembering what you set', () => {
 
   it('answers nothing for a file it has never seen', () => {
     expect(loadTweaks('/repo/never-opened.dc.html')).toEqual({})
-  })
-
-  it('forgets a file on request', () => {
-    saveTweak(FILE, 'plan', 9000)
-    forgetTweaks(FILE)
-    expect(loadTweaks(FILE)).toEqual({})
   })
 })
 
@@ -131,6 +119,23 @@ describe('what a design opens with', () => {
     const withOptions = { variance: { default: 'Both', options: ['Amount', 'Both'] } }
     expect(mergeTweaks(withOptions, { variance: 'Pct' }).variance).toBe('Both')
     expect(mergeTweaks(withOptions, { variance: 'Amount' }).variance).toBe('Amount')
+  })
+
+  it('takes what the page holds when you have set nothing', () => {
+    // A page can arrive holding something other than its declared default —
+    // its own script may have decided. With no adjustment of yours, that is
+    // what is on screen and what the controls should show.
+    expect(mergeTweaks(declared, {}, { plan: 7500 }).plan).toBe(7500)
+  })
+
+  it('puts your value above what the page holds', () => {
+    // The precedence that matters: a freshly loaded page reports its defaults,
+    // and letting those win would undo your adjustment on every repaint.
+    expect(mergeTweaks(declared, { plan: 9000 }, { plan: 6000 }).plan).toBe(9000)
+  })
+
+  it('ignores a page value of the wrong type', () => {
+    expect(mergeTweaks(declared, {}, { plan: 'lots' }).plan).toBe(6000)
   })
 
   it('has nothing to merge for a design with no tweaks', () => {

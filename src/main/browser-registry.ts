@@ -463,17 +463,22 @@ export async function readPage(params: {
     out.push(node)
   }
 
-  // What this page claims to be, and what it is currently showing. Only a
-  // design answers; for every other page this is one cheap evaluate that comes
-  // back empty. An agent asked to change a design needs the value on screen,
-  // not the default written in the file — a person can turn a control without
-  // spending a turn, so the two routinely disagree.
+  // What this page claims to be, and what it is currently showing. An agent
+  // asked to change a design needs the value on screen, not the default written
+  // in the file — a person can turn a control without spending a turn, so the
+  // two routinely disagree.
+  //
+  // Only asked of a `file:` page. A design is a file, and every other page
+  // would otherwise pay a CDP round trip on every read to be told "no" — a
+  // design's cost charged to the generic page read.
   //
   // Best-effort: a page read must not fail because the manifest read did.
-  const artifact = await readManifest({ sessionId: params.sessionId }).catch(() => ({
-    manifest: null,
-    values: undefined
-  }))
+  const artifact = wc.getURL().startsWith('file:')
+    ? await readManifest({ sessionId: params.sessionId }).catch(() => ({
+        manifest: null,
+        values: undefined
+      }))
+    : { manifest: null, values: undefined }
 
   return {
     url: wc.getURL(),
@@ -514,6 +519,15 @@ const MANIFEST_BUDGET = 16_000
 
 /** Tweak names a control can be drawn for, bounded so a page cannot fill the bar. */
 const MAX_TWEAKS = 24
+
+/**
+ * What a tweak may be called.
+ *
+ * One definition, because `setTweak` refuses names `parseManifest` accepted if
+ * the two ever disagree — and a design whose control silently stops working is
+ * a hard thing to attribute to a regex.
+ */
+const TWEAK_NAME = /^[a-zA-Z_][\w]{0,39}$/
 
 /**
  * Validate one declared tweak, or drop it.
@@ -607,7 +621,7 @@ export function parseManifest(text: string): ArtifactManifest | null {
       if (Object.keys(tweaks).length >= MAX_TWEAKS) break
       // A key that is not a plain identifier cannot be written back into the
       // page without quoting, and a page needing that is not declaring a tweak.
-      if (!/^[a-zA-Z_][\w]{0,39}$/.test(key)) continue
+      if (!TWEAK_NAME.test(key)) continue
       const parsed = parseTweak(value)
       if (parsed) tweaks[key] = parsed
     }
@@ -648,9 +662,10 @@ export async function setTweak(params: {
   value: unknown
 }): Promise<{ ok: true }> {
   const { wc } = contentsFor(params.sessionId)
-  // Same rule the manifest reader applies. A key that could not have been
-  // declared cannot be set, so a renderer bug cannot write arbitrary names.
-  if (!/^[a-zA-Z_][\w]{0,39}$/.test(params.key)) {
+  // The same rule the manifest reader applies, by construction rather than by
+  // convention. A key that could not have been declared cannot be set, so a
+  // renderer bug cannot write arbitrary names.
+  if (!TWEAK_NAME.test(params.key)) {
     throw new Error(`"${params.key}" is not a tweak name this page could have declared.`)
   }
   // Both arguments arrive as JSON literals, the same shape the annotation
@@ -697,7 +712,7 @@ export async function readManifest(params: { sessionId: string }): Promise<{
             if (typeof v === 'number' || typeof v === 'boolean') out[k] = v
             else if (typeof v === 'string' && v.length <= 200) out[k] = v
           }
-          live = JSON.stringify(out)
+          live = out
         }
       } catch { /* a page may define __artifact as anything */ }
       return JSON.stringify({ declared: declared, live: live })
@@ -705,7 +720,7 @@ export async function readManifest(params: { sessionId: string }): Promise<{
     returnByValue: true
   })
 
-  let payload: { declared?: string; live?: string | null }
+  let payload: { declared?: string; live?: Record<string, unknown> | null }
   try {
     payload = JSON.parse(result.value ?? '{}')
   } catch {
@@ -720,21 +735,16 @@ export async function readManifest(params: { sessionId: string }): Promise<{
   // agent page-chosen keys as though the design had asked for them.
   let values: Record<string, unknown> | undefined
   if (payload.live && manifest.tweaks) {
-    try {
-      const live = JSON.parse(payload.live) as Record<string, unknown>
-      const declared = manifest.tweaks
-      values = Object.fromEntries(
-        Object.keys(declared)
-          // `hasOwnProperty` rather than a truthiness check: a tweak may
-          // legitimately be named `toString` or `constructor`, and reading
-          // through the prototype would copy a function into a value that then
-          // fails to cross IPC — taking the design's chrome with it.
-          .filter((k) => Object.prototype.hasOwnProperty.call(live, k))
-          .map((k) => [k, live[k]])
-      )
-    } catch {
-      /* unreadable live state is simply absent */
-    }
+    const live = payload.live
+    values = Object.fromEntries(
+      Object.keys(manifest.tweaks)
+        // `hasOwnProperty` rather than a truthiness check: a tweak may
+        // legitimately be named `toString` or `constructor`, and reading
+        // through the prototype would copy a function into a value that then
+        // fails to cross IPC — taking the design's chrome with it.
+        .filter((k) => Object.prototype.hasOwnProperty.call(live, k))
+        .map((k) => [k, live[k]])
+    )
   }
 
   return { manifest, ...(values && Object.keys(values).length > 0 && { values }) }

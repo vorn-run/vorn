@@ -1,20 +1,12 @@
 import { memo, forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import {
-  ArrowLeft,
-  ArrowRight,
-  MousePointerClick,
-  Pencil,
-  Plus,
-  RotateCw,
-  SquareArrowOutUpRight,
-  X
-} from 'lucide-react'
+import { MousePointerClick, Pencil, Plus, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
 import { browserPartition } from '../../shared/types'
 import type { ArtifactManifest } from '../../shared/types'
 import { TweakBar } from './browser/TweakBar'
+import { AddressBar } from './browser/AddressBar'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON } from '../lib/icon-button'
@@ -58,23 +50,21 @@ interface WebviewElement extends HTMLElement {
 }
 
 /**
- * The key a design's adjustments are stored under, and the url main is asked to
- * watch — both the `file:` url itself, unchanged.
+ * The url a design is known by: the key its adjustments are stored under, and
+ * what main is asked to watch.
  *
- * Deliberately not a filesystem path. `fileURLToPath` is a node API the
- * renderer does not have, and deriving one by hand gets Windows wrong:
- * `file:///C:/repo/d.dc.html` has the pathname `/C:/repo/d.dc.html`, which is
- * not a path any platform will resolve. Main converts it with the same helper
- * `allowsFileUrl` already uses, so there is one answer rather than two.
+ * `normalizeUrl` rather than the raw url, because it drops the query and
+ * fragment — an anchor click changes the url without changing the file, and a
+ * key that moved with it would file adjustments under a page that does not
+ * exist and stop matching the repaints main sends. It also refuses a named
+ * host, which is a UNC path rather than this machine's file.
+ *
+ * A url rather than a path: `fileURLToPath` is a node API the renderer does not
+ * have, and deriving one by hand gets Windows wrong.
  */
 function designUrlOf(url: string | null): string | null {
-  if (!url || !url.startsWith('file:')) return null
-  try {
-    // A named host is a UNC path on Windows, not this machine's file.
-    return new URL(url).hostname ? null : url
-  } catch {
-    return null
-  }
+  const normalized = url ? normalizeUrl(url, { allowFile: true }) : null
+  return normalized?.startsWith('file:') ? normalized : null
 }
 
 /**
@@ -273,28 +263,16 @@ export const BrowserCard = memo(
             // this file before now has to be put back, or a repaint silently
             // resets every value the moment the agent touches the design.
             const path = filePathRef.current
-            const stored = path ? loadTweaks(path) : {}
-            // Precedence, widest to narrowest: what the design declared, then
-            // whatever the page itself holds, then what you set. Your value has
-            // to come last — a freshly loaded page reports its own defaults,
-            // and letting those win would undo the adjustment on every repaint.
-            const merged = mergeTweaks(m.tweaks, stored)
-            for (const [k, v] of Object.entries(values ?? {})) {
-              if (stored[k] === undefined && k in merged) merged[k] = v as (typeof merged)[string]
-            }
+            const merged = mergeTweaks(m.tweaks, path ? loadTweaks(path) : {}, values)
             setTweakValues(merged)
             // Pushing is best-effort and deliberately last: the chrome is
             // already correct, and a guest that went away mid-load must not
             // cost the pane the controls it just drew.
-            try {
-              for (const [k, v] of Object.entries(merged)) {
-                // Only what differs from what the page already holds, so a
-                // design with no overrides is not rewritten on every load.
-                if (values && values[k] === v) continue
-                void Promise.resolve(window.api.setBrowserTweak(sessionId, k, v)).catch(() => {})
-              }
-            } catch {
-              /* the page is gone; the next load re-reads everything */
+            for (const [k, v] of Object.entries(merged)) {
+              // Only what differs from what the page already holds, so a design
+              // with no overrides is not rewritten on every load.
+              if (values && values[k] === v) continue
+              void window.api.setBrowserTweak(sessionId, k, v).catch(() => {})
             }
           })
           .catch(() => {
@@ -688,55 +666,19 @@ export const BrowserCard = memo(
               <span className="flex-1" />
             </>
           ) : (
-            <>
-              <button
-                onClick={() => viewRef.current?.goBack()}
-                disabled={!nav.back}
-                aria-label="Go back"
-                className={btn}
-              >
-                <ArrowLeft size={14} strokeWidth={2} />
-              </button>
-              <button
-                onClick={() => viewRef.current?.goForward()}
-                disabled={!nav.forward}
-                aria-label="Go forward"
-                className={btn}
-              >
-                <ArrowRight size={14} strokeWidth={2} />
-              </button>
-              <button
-                onClick={() => (loading ? viewRef.current?.stop() : viewRef.current?.reload())}
-                aria-label={loading ? 'Stop loading' : 'Reload'}
-                className={btn}
-              >
-                {loading ? <X size={14} strokeWidth={2} /> : <RotateCw size={14} strokeWidth={2} />}
-              </button>
-
-              <form
-                className="flex-1 min-w-0 ml-1"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  commitUrl(draft)
-                }}
-              >
-                <input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') setDraft(url === 'about:blank' ? '' : url)
-                    e.stopPropagation()
-                  }}
-                  spellCheck={false}
-                  aria-label="Address"
-                  placeholder="Type a URL"
-                  className="w-full bg-white/[0.04] hover:bg-white/[0.06] focus:bg-white/[0.07]
-                           rounded-full px-3 py-1 text-[11px] text-gray-300 outline-none
-                           text-center focus:text-left focus:font-mono placeholder:text-gray-500
-                           transition-colors"
-                />
-              </form>
-            </>
+            <AddressBar
+              draft={draft}
+              onDraftChange={setDraft}
+              onSubmit={() => commitUrl(draft)}
+              onRevert={() => setDraft(url === 'about:blank' ? '' : (url ?? ''))}
+              onBack={() => viewRef.current?.goBack()}
+              onForward={() => viewRef.current?.goForward()}
+              onReloadOrStop={() => (loading ? viewRef.current?.stop() : viewRef.current?.reload())}
+              canGoBack={nav.back}
+              canGoForward={nav.forward}
+              loading={loading}
+              btn={btn}
+            />
           )}
 
           {/* The two agent-facing tools sit after the address bar, away from

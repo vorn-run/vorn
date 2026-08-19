@@ -113,16 +113,17 @@ export function saveTweak(path: string, key: string, value: unknown): void {
   saveAll(all)
 }
 
-/** Forget a file's adjustments — for a design that no longer declares them. */
-export function forgetTweaks(path: string): void {
-  const all = loadAll()
-  if (!all[path]) return
-  delete all[path]
-  saveAll(all)
-}
-
 /**
- * The values a design should open with: what you set, over what it declared.
+ * The values a design should open with.
+ *
+ * Three layers, widest to narrowest: what the design declared, then whatever
+ * the page itself holds, then what you set. Yours has to come last — a freshly
+ * loaded page reports its own defaults, and letting those win would undo the
+ * adjustment on every repaint, which is the thing this module exists to stop.
+ *
+ * All three resolved here rather than patched afterwards by the caller: split
+ * across two places, the ordering is something a reader has to reassemble, and
+ * it was already got wrong once that way.
  *
  * Only names the manifest still declares survive. A design that dropped a tweak
  * has no control for it and no code reading it, so carrying the old value
@@ -130,22 +131,24 @@ export function forgetTweaks(path: string): void {
  */
 export function mergeTweaks(
   declared: Record<string, { default: TweakValue; options?: string[] }> | undefined,
-  stored: TweakOverrides
+  stored: TweakOverrides,
+  live?: Record<string, unknown>
 ): TweakOverrides {
   if (!declared) return {}
   const out: TweakOverrides = {}
   for (const [key, decl] of Object.entries(declared)) {
-    const override = stored[key]
-    // Types must agree. A design that changed `plan` from a number to a select
-    // would otherwise be handed the old number as its selected option.
-    const typeMatches = override !== undefined && typeof override === typeof decl.default
-    // And a value has to still be on offer. If the design dropped an option you
-    // had selected, keeping it would push a value into the page that the control
-    // cannot display — the bar would show the first option while the design
-    // rendered the old one, with no event to reconcile them.
-    const stillOffered =
-      !decl.options || (typeof override === 'string' && decl.options.includes(override))
-    out[key] = typeMatches && stillOffered ? override : decl.default
+    const usable = (v: unknown): v is TweakValue => {
+      // Types must agree. A design that changed `plan` from a number to a
+      // select would otherwise be handed the old number as its selected option.
+      if (v === undefined || typeof v !== typeof decl.default) return false
+      // And a value has to still be on offer. If the design dropped an option
+      // you had selected, keeping it would push a value into the page the
+      // control cannot display — the bar showing one thing while the design
+      // renders another, with no event to reconcile them.
+      return !decl.options || (typeof v === 'string' && decl.options.includes(v))
+    }
+    const fromPage = live ? live[key] : undefined
+    out[key] = usable(stored[key]) ? stored[key] : usable(fromPage) ? fromPage : decl.default
   }
   return out
 }

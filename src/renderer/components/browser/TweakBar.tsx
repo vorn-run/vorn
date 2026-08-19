@@ -74,15 +74,14 @@ function Control({
   onChange: (value: unknown) => void
 }): React.JSX.Element {
   const label = labelFor(name, tweak)
+  // One fallback rule, not one per branch. `BrowserCard` seeds every declared
+  // key, so this is belt and braces — but five copies of it is five chances for
+  // the branches to disagree about what a control shows.
+  const current = typeof value === typeof tweak.default ? value : tweak.default
 
   if (tweak.type === 'boolean') {
-    return (
-      <Switch
-        on={typeof value === 'boolean' ? value : tweak.default}
-        label={label}
-        onToggle={() => onChange(!(typeof value === 'boolean' ? value : tweak.default))}
-      />
-    )
+    const on = current as boolean
+    return <Switch on={on} label={label} onToggle={() => onChange(!on)} />
   }
 
   if (tweak.type === 'number') {
@@ -91,7 +90,7 @@ function Control({
         <input
           type="number"
           aria-label={label}
-          value={typeof value === 'number' ? value : tweak.default}
+          value={current as number}
           min={tweak.min}
           max={tweak.max}
           step={tweak.step}
@@ -113,11 +112,11 @@ function Control({
   }
 
   if (tweak.type === 'select') {
-    const current = typeof value === 'string' ? value : tweak.default
+    const picked = current as string
     return (
       <select
         aria-label={label}
-        value={tweak.options.includes(current) ? current : tweak.options[0]}
+        value={tweak.options.includes(picked) ? picked : tweak.options[0]}
         onChange={(e) => onChange(e.target.value)}
         className={FIELD}
       >
@@ -132,7 +131,7 @@ function Control({
 
   // Colour. A declared set becomes swatches, because picking from the design's
   // own palette is the common case; anything else gets the native picker.
-  const current = typeof value === 'string' ? value : tweak.default
+  const colour = current as string
   if (tweak.options?.length) {
     return (
       <span className="flex items-center gap-1" role="group" aria-label={label}>
@@ -141,12 +140,12 @@ function Control({
             key={c}
             type="button"
             aria-label={c}
-            aria-pressed={c === current}
+            aria-pressed={c === colour}
             onClick={() => onChange(c)}
             style={{ background: c }}
             className={`w-4 h-4 rounded-sm border border-white/20 shrink-0
                         focus:outline-none focus:ring-1 focus:ring-white/40
-                        ${c === current ? 'ring-1 ring-white/70' : ''}`}
+                        ${c === colour ? 'ring-1 ring-white/70' : ''}`}
           />
         ))}
       </span>
@@ -156,7 +155,7 @@ function Control({
     <input
       type="color"
       aria-label={label}
-      value={current}
+      value={colour}
       onChange={(e) => onChange(e.target.value)}
       className="w-5 h-5 rounded-sm bg-transparent border border-white/20 shrink-0 p-0"
     />
