@@ -9,7 +9,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     id: 'agents',
     title: 'Coding Agents',
-    subtitle: 'Detect agents & connect MCP',
+    subtitle: 'Detect agents & install skills',
     icon: 'Bot'
   },
   {

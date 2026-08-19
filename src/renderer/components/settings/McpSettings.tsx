@@ -26,14 +26,14 @@ function CopyButton({ text }: { text: string }) {
 export function McpSettings() {
   return (
     <div>
-      <h2 className="text-xl font-semibold text-white mb-1">MCP Integration</h2>
+      <h2 className="text-xl font-semibold text-white mb-1">Skills &amp; MCP</h2>
       <p className="text-sm text-gray-500 mb-6">
         Connect your coding agents to Vorn. The plugin installs the MCP server and the skills that
         explain what its tools are for.
       </p>
 
       {/* Per-agent commands */}
-      <h3 className="text-sm font-medium text-gray-200 mb-3">Agent Setup</h3>
+      <h3 className="text-sm font-medium text-gray-200 mb-3">Install the Vorn plugin</h3>
       <div className="space-y-3">
         {AGENT_MCP_SETUPS.map((setup) => {
           const agent = AGENT_DEFINITIONS[setup.agentType]

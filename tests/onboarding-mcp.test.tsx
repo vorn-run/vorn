@@ -49,7 +49,7 @@ const opencode = AGENT_MCP_SETUPS.find((s) => s.agentType === 'opencode')!
 /** The commands sit behind a disclosure that starts closed. */
 function openMcpSection(): void {
   render(<OnboardingModal />)
-  fireEvent.click(screen.getByText(/Connect MCP Server/i))
+  fireEvent.click(screen.getByText(/Install skills & MCP server/i))
 }
 
 afterEach(() => vi.unstubAllGlobals())

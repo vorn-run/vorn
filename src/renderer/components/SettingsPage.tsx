@@ -155,7 +155,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
       },
       {
         key: 'mcp',
-        label: 'MCP',
+        label: 'Skills & MCP',
         icon: (
           <svg
             width="16"

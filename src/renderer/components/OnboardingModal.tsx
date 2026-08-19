@@ -227,7 +227,9 @@ function StepAgents() {
           className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-white/[0.02] transition-colors"
         >
           <Plug size={13} className="text-bronzo" />
-          <span className="text-[12px] font-medium text-gray-200 flex-1">Connect MCP Server</span>
+          <span className="text-[12px] font-medium text-gray-200 flex-1">
+            Install skills &amp; MCP server
+          </span>
           <span className="text-[10px] font-medium px-1.5 py-0.5 rounded text-bronzo bg-bronzo/[0.08]">
             Recommended
           </span>
