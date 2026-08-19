@@ -13,10 +13,15 @@ import log from './logger'
  * Absent means everything, so nothing that exists today has to opt in and no
  * behaviour changes for a client that never asks.
  *
- * An entry is either an exact notification name (`config:changed`) or a namespace
- * wildcard (`session:*`). The wildcard is what keeps a shipped client correct:
- * a phone that asked for `session:*` also receives whatever is added to that
- * namespace after it was built.
+ * An entry is an exact notification name (`config:changed`), a namespace wildcard
+ * (`session:*`), or one instance of a notification (`terminal:data#<id>`). The
+ * wildcard is what keeps a shipped client correct: a phone that asked for
+ * `session:*` also receives whatever is added to that namespace after it was
+ * built.
+ *
+ * The instance form exists for `terminal:data`, where subscribing by name is
+ * useless on a phone: it means every byte of every terminal on the machine when
+ * what is wanted is the one on screen.
  */
 export type TopicFilter = readonly string[] | undefined
 
@@ -31,8 +36,11 @@ class Subscription {
     }
   }
 
-  wants(method: string): boolean {
+  wants(method: string, scope: string | undefined): boolean {
+    // The bare name still means every instance, so a desktop asking for
+    // `terminal:data` is unaffected by the instance form existing.
     if (this.exact.has(method)) return true
+    if (scope !== undefined && this.exact.has(`${method}#${scope}`)) return true
     for (const prefix of this.prefixes) if (method.startsWith(prefix)) return true
     return false
   }
@@ -99,14 +107,19 @@ export class ClientRegistry {
     this.clients.set(ws, subscriptionFrom(topics))
   }
 
-  broadcast(method: string, params: unknown): void {
+  /**
+   * `scope` names which instance of `method` this is, for notifications that
+   * have instances. Derived by the caller rather than dug out of `params` here,
+   * so the registry keeps knowing nothing about any particular payload shape.
+   */
+  broadcast(method: string, params: unknown, scope?: string): void {
     // Serialised on the first socket that actually wants it. With only a
     // filtered client attached, an unwanted notification now costs a map walk
     // instead of a full JSON encode of the payload.
     let msg: string | undefined
     for (const [ws, subscription] of this.clients) {
       if (ws.readyState !== ws.OPEN) continue
-      if (subscription && !subscription.wants(method)) continue
+      if (subscription && !subscription.wants(method, scope)) continue
       msg ??= JSON.stringify(createNotification(method, params))
       ws.send(msg)
     }

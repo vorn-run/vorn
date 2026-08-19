@@ -230,6 +230,16 @@ export interface RequestMethods {
   'terminal:rename': { params: { id: string; displayName: string }; result: void }
   'terminal:reorder': { params: string[]; result: void }
   'terminal:readOutput': { params: { id: string; lines?: number }; result: string[] }
+  /**
+   * The terminal's output as it was emitted, escape sequences intact.
+   *
+   * `terminal:readOutput` is the same output with every sequence removed, which
+   * is right for reading and useless for drawing. A client attaching a terminal
+   * emulator feeds this in first, then applies live `terminal:data`; without it
+   * the screen stays blank until the program next repaints, which for an idle
+   * agent may be never.
+   */
+  'terminal:readScrollback': { params: { id: string }; result: { data: string } }
   'shell:create': { params: string | undefined; result: TerminalSession }
   'config:load': { params: void; result: AppConfig }
   'config:save': { params: AppConfig; result: void }
