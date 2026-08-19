@@ -26,11 +26,14 @@ function CopyButton({ text }: { text: string }) {
 export function McpSettings() {
   return (
     <div>
-      <h2 className="text-xl font-semibold text-white mb-1">MCP Integration</h2>
-      <p className="text-sm text-gray-500 mb-6">Connect your coding agents to Vorn via MCP</p>
+      <h2 className="text-xl font-semibold text-white mb-1">Skills &amp; MCP</h2>
+      <p className="text-sm text-gray-500 mb-6">
+        Connect your coding agents to Vorn. Each setup below installs the MCP server along with the
+        guidance that explains what its tools are for.
+      </p>
 
       {/* Per-agent commands */}
-      <h3 className="text-sm font-medium text-gray-200 mb-3">Agent Setup</h3>
+      <h3 className="text-sm font-medium text-gray-200 mb-3">Set up an agent</h3>
       <div className="space-y-3">
         {AGENT_MCP_SETUPS.map((setup) => {
           const agent = AGENT_DEFINITIONS[setup.agentType]
@@ -44,16 +47,24 @@ export function McpSettings() {
               <div className="flex items-center gap-3 mb-3">
                 <AgentIcon agentType={setup.agentType} size={20} />
                 <span className="text-sm font-medium text-gray-200">{agent.displayName}</span>
+                <span className="text-[11px] text-gray-500">
+                  {setup.inAgent ? `Run in ${agent.displayName}` : 'Run in your terminal'}
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <code
-                  className="flex-1 px-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-md
+              <div className="space-y-2">
+                {setup.commands.map((command) => (
+                  <div key={command} className="flex items-center gap-2">
+                    <code
+                      className="flex-1 px-3 py-1.5 bg-white/[0.04] border border-white/[0.08] rounded-md
                                text-xs text-gray-300 font-mono overflow-x-auto whitespace-nowrap"
-                >
-                  {setup.command}
-                </code>
-                <CopyButton text={setup.command} />
+                    >
+                      {command}
+                    </code>
+                    <CopyButton text={command} />
+                  </div>
+                ))}
               </div>
+              {setup.note && <p className="mt-2 text-[11px] text-gray-500">{setup.note}</p>}
             </div>
           )
         })}

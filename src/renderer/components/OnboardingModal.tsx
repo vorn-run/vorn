@@ -227,7 +227,9 @@ function StepAgents() {
           className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-white/[0.02] transition-colors"
         >
           <Plug size={13} className="text-bronzo" />
-          <span className="text-[12px] font-medium text-gray-200 flex-1">Connect MCP Server</span>
+          <span className="text-[12px] font-medium text-gray-200 flex-1">
+            Install skills &amp; MCP server
+          </span>
           <span className="text-[10px] font-medium px-1.5 py-0.5 rounded text-bronzo bg-bronzo/[0.08]">
             Recommended
           </span>
@@ -258,24 +260,31 @@ function StepAgents() {
               )}
             </div>
 
-            <div className="space-y-1.5">
-              <div className="text-[10px] text-gray-600 uppercase tracking-wider font-medium">
-                Run in your terminal
-              </div>
-              {mcpToShow.map(({ agentType, command }) => {
+            <div className="space-y-2.5">
+              {mcpToShow.map(({ agentType, commands, inAgent, note }) => {
                 const def = AGENT_DEFINITIONS[agentType]
                 return (
-                  <div key={agentType} className="flex items-center gap-2">
-                    <div
-                      className="w-5 h-5 rounded flex items-center justify-center shrink-0"
-                      style={{ background: def.bgColor }}
-                    >
-                      <AgentIcon agentType={agentType} size={10} />
+                  <div key={agentType} className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-5 h-5 rounded flex items-center justify-center shrink-0"
+                        style={{ background: def.bgColor }}
+                      >
+                        <AgentIcon agentType={agentType} size={10} />
+                      </div>
+                      <span className="text-[10px] text-gray-600 uppercase tracking-wider font-medium">
+                        {inAgent ? `Run in ${def.displayName}` : 'Run in your terminal'}
+                      </span>
                     </div>
-                    <code className="flex-1 text-[11px] font-mono text-gray-400 truncate">
-                      {command}
-                    </code>
-                    <CopyBtn text={command} />
+                    {commands.map((command) => (
+                      <div key={command} className="flex items-center gap-2 pl-7">
+                        <code className="flex-1 text-[11px] font-mono text-gray-400 overflow-x-auto whitespace-nowrap">
+                          {command}
+                        </code>
+                        <CopyBtn text={command} />
+                      </div>
+                    ))}
+                    {note && <p className="pl-7 text-[10px] text-gray-600">{note}</p>}
                   </div>
                 )
               })}
