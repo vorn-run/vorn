@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { WorkflowExecution } from '../packages/shared/src/types'
 
 /**
@@ -45,6 +45,10 @@ function parkedRun(
 }
 
 let applyGateDecision: typeof import('../src/renderer/lib/workflow-execution').applyGateDecision
+
+// `window` is stubbed per case, so put it back afterwards: a stubbed global left
+// standing leaks into whatever else this worker runs.
+afterEach(() => vi.unstubAllGlobals())
 
 beforeEach(async () => {
   // This module runs in a renderer. Only the two calls this path makes are

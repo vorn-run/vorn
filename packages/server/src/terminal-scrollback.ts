@@ -19,10 +19,16 @@
  *
  * Enough to redraw a full-screen application several times over, and small
  * enough that a hundred idle sessions do not add up to something worth
- * worrying about. This is bytes, not lines, because the cost being bounded is
- * memory and the thing being stored is a byte stream.
+ * worrying about. A length, not a line count, because the cost being bounded is
+ * memory and the thing being stored is a stream.
+ *
+ * Counted in UTF-16 code units — what `String.length` returns — rather than
+ * encoded bytes. For ASCII, which terminal output overwhelmingly is, they are
+ * the same; CJK runs at three bytes per unit, so a buffer of entirely CJK output
+ * costs about three times this. That is an acceptable ceiling, and measuring it
+ * exactly would mean encoding every write to count it.
  */
-const MAX_BYTES = 256 * 1024
+const MAX_UNITS = 256 * 1024
 
 const buffers = new Map<string, string>()
 
@@ -39,8 +45,8 @@ const buffers = new Map<string, string>()
  * Losing the head of one line is better than growing without bound.
  */
 function trim(data: string): string {
-  if (data.length <= MAX_BYTES) return data
-  const cut = data.length - MAX_BYTES
+  if (data.length <= MAX_UNITS) return data
+  const cut = data.length - MAX_UNITS
   const boundary = data.indexOf('\n', cut)
   return boundary === -1 ? data.slice(cut) : data.slice(boundary + 1)
 }

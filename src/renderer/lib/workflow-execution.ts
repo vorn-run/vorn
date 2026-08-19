@@ -1504,12 +1504,6 @@ function latestRunForWorkflow(workflowId: string): WorkflowExecution | undefined
 }
 
 /**
- * Stop a run: kill the agents it launched, then close it as `cancelled`.
- *
- * Worktrees are deliberately left on disk. A stopped run has usually done
- * partial work, and discarding it silently is not something the user can undo.
- */
-/**
  * Apply a gate decision that came from somewhere else.
  *
  * Someone answered a gate on another client — a phone, or a second window — and
@@ -1539,6 +1533,12 @@ export async function applyGateDecision(
   else await rejectWorkflowGate(execution, nodeId)
 }
 
+/**
+ * Stop a run: kill the agents it launched, then close it as `cancelled`.
+ *
+ * Worktrees are deliberately left on disk. A stopped run has usually done
+ * partial work, and discarding it silently is not something the user can undo.
+ */
 export async function stopWorkflowRun(runId: string): Promise<void> {
   const handle = activeRuns.get(runId)
   // Prefer the live object over the store's copy so the run the engine is
