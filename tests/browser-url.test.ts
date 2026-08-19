@@ -104,6 +104,23 @@ describe('displayHost', () => {
     expect(displayHost('https://example.com/a/b')).toBe('example.com')
   })
 
+  it('names a local file by its filename, not its whole path', () => {
+    // A tab is a few characters wide. The leading directories push the only
+    // part that identifies the file off the end, so a design in a repo showed
+    // as an unreadable run of path with the name invisible.
+    expect(displayHost('file:///Users/j/dev/vorn/design/true-black.dc.html')).toBe(
+      'true-black.dc.html'
+    )
+    expect(displayHost('file:///repo/a%20b.dc.html')).toBe('a b.dc.html')
+  })
+
+  it('keeps the filename when its escaping is malformed', () => {
+    // A stray `%` is a legal filename character and an invalid escape, so
+    // decoding throws. Falling through to the outer handler would return the
+    // whole url — the unreadable label this fix exists to remove.
+    expect(displayHost('file:///repo/%ZZ.dc.html')).toBe('%ZZ.dc.html')
+  })
+
   it('names a blank page "New tab" rather than showing the scheme', () => {
     // `about:blank` parses cleanly but has an empty hostname, and the raw
     // string is jargon — a tab you have not navigated yet should read as a
