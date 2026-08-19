@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /** What the guest answers when asked to evaluate something. */
 const guest = {
@@ -267,26 +268,31 @@ describe('what the injected snippet does inside the guest', () => {
    * only way to cover the half of this feature that never runs in this process.
    */
   const START = 'expression: `(() => {'
-  const END = '`,\n    returnByValue'
+  // Regex rather than a literal, so reindentation or CRLF does not move the
+  // marker out from under the search.
+  const END = /`,\s*\n\s*returnByValue/
+  // Anchored to this file, not the working directory — the convention the
+  // other source-reading tests already follow.
+  const REGISTRY = join(__dirname, '..', 'src', 'main', 'browser-registry.ts')
 
   /** The cap the snippet is built with, read from source so the test cannot drift. */
   const maxTweaks = (): number => {
-    const m = readFileSync('src/main/browser-registry.ts', 'utf8').match(/const MAX_TWEAKS = (\d+)/)
+    const m = readFileSync(REGISTRY, 'utf8').match(/const MAX_TWEAKS = (\d+)/)
     if (!m) throw new Error('Could not read MAX_TWEAKS from browser-registry.ts')
     return Number(m[1])
   }
 
   const snippet = (): string => {
-    const src = readFileSync('src/main/browser-registry.ts', 'utf8')
+    const src = readFileSync(REGISTRY, 'utf8')
     const from = src.indexOf(START)
     // Guarded rather than sliced blindly: a moved or reworded snippet would
     // otherwise yield garbage, and `new Function` would fail with a syntax
     // error pointing at nothing. This says which end went missing.
     if (from === -1) throw new Error(`Could not find the injected snippet (${START})`)
     const body = src.slice(from + 'expression: `'.length)
-    const to = body.indexOf(END)
-    if (to === -1) throw new Error('Found the injected snippet start but not its end')
-    return body.slice(0, to).replace(/\$\{MAX_TWEAKS\}/g, String(maxTweaks()))
+    const end = body.match(END)
+    if (!end?.index) throw new Error('Found the injected snippet start but not its end')
+    return body.slice(0, end.index).replace(/\$\{MAX_TWEAKS\}/g, String(maxTweaks()))
   }
 
   const run = (
