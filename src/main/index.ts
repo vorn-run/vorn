@@ -8,6 +8,7 @@ import { installConnectorCredentialsSync } from './connector-credentials-sync'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
 import { IPC, PermissionRequestInfo } from '../shared/types'
+import { setArtifactNotify } from './artifact-watcher'
 import { SURFACE } from '../shared/surface'
 import { launchServer, stopServer, getServerBridge } from './server/server-launcher'
 import { readHostSettings } from './server/host-store'
@@ -396,6 +397,13 @@ app.whenReady().then(async () => {
     }
   browserRegistry.setRendererSend(paneSend('browser'))
   deviceRegistry.setRendererSend(paneSend('device'))
+  // A watcher firing is not a request anyone is waiting on, so a closed window
+  // is an ordinary outcome rather than a failure — the opposite of `paneSend`,
+  // where a dropped send would leave the caller waiting out a timeout.
+  setArtifactNotify((sessionId, path) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send(IPC.BROWSER_FILE_CHANGED, { sessionId, path })
+  })
   // A companion outlives the app otherwise: it holds a unix socket and a booted
   // simulator, and nothing reaps it once Vorn is gone.
   installCompanionQuitHook()

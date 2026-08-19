@@ -17,6 +17,11 @@ const mockReadFileContent = vi.fn<(path: string) => Promise<string | null>>()
 const mockStartPick = vi.fn<(sessionId: string) => Promise<unknown>>()
 const mockWriteTerminal = vi.fn()
 const mockAnnotate = vi.fn<(p: unknown) => Promise<unknown>>()
+const mockReadManifest = vi.fn<() => Promise<unknown>>()
+const mockWatchFile = vi.fn<(s: string, p: string | null) => void>()
+/** Handlers that the card registered for "a watched design changed". */
+let fileChangedHandlers: ((p: { sessionId: string; path: string }) => void)[] = []
+const mockSetTweak = vi.fn<(s: string, k: string, v: unknown) => Promise<unknown>>()
 
 Object.defineProperty(window, 'api', {
   value: {
@@ -27,6 +32,15 @@ Object.defineProperty(window, 'api', {
     // The browser pane reports its guest to main so the agent can drive it.
     attachBrowser: vi.fn(),
     syncBrowserTabs: vi.fn(),
+    watchBrowserFile: (...args: unknown[]) => mockWatchFile(...(args as [string, string | null])),
+    onBrowserFileChanged: (cb: (p: { sessionId: string; path: string }) => void) => {
+      fileChangedHandlers.push(cb)
+      return () => {
+        fileChangedHandlers = fileChangedHandlers.filter((h) => h !== cb)
+      }
+    },
+    readBrowserManifest: () => mockReadManifest(),
+    setBrowserTweak: (...args: unknown[]) => mockSetTweak(...(args as [string, string, unknown])),
     detachBrowser: vi.fn(),
     startBrowserPick: (...args: unknown[]) => mockStartPick(...(args as [string])),
     cancelBrowserPick: vi.fn(),
@@ -97,6 +111,11 @@ beforeEach(() => {
   clearDirty('t1')
   mockListDir.mockResolvedValue(ENTRIES)
   mockReadFileContent.mockResolvedValue('hello')
+  // Every pane asks what its page is on load and on every tab switch, so this
+  // needs an answer even in tests about something else. "Not an artifact" is
+  // what almost every page says.
+  mockReadManifest.mockResolvedValue({ manifest: null })
+  mockSetTweak.mockResolvedValue({ ok: true })
   seed()
 })
 
@@ -624,6 +643,307 @@ describe('BrowserCard', () => {
       )
     })
     expect(useAppStore.getState().browserPanes.get('t1')?.tabs[0]?.title).toBeUndefined()
+  })
+
+  it('keeps the address bar for a page that declares nothing', async () => {
+    // Most pages are not artifacts. The pane must not lose its address bar on
+    // the strength of a read that came back empty.
+    mockReadManifest.mockResolvedValue({ manifest: null })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => void view.dispatchEvent(new Event('did-stop-loading')))
+
+    await waitFor(() => expect(mockReadManifest).toHaveBeenCalled())
+    expect(screen.getByLabelText('Address')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Design controls' })).toBeNull()
+  })
+
+  it('shows a design its own controls instead of an address', async () => {
+    mockReadManifest.mockResolvedValue({
+      manifest: {
+        kind: 'design',
+        title: 'Budget Wireframes',
+        tweaks: {
+          plan: { type: 'number', default: 6000, unit: '$' },
+          sketchy: { type: 'boolean', default: true },
+          variance: { type: 'select', default: 'Both', options: ['Amount', 'Both'] }
+        }
+      },
+      values: { plan: 9000 }
+    })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => void view.dispatchEvent(new Event('did-stop-loading')))
+
+    // The title stands in for the url, and the declared controls appear.
+    expect(await screen.findByText('Budget Wireframes')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Address')).toBeNull()
+    // The live value wins over the declared default — 9000, not 6000.
+    expect(screen.getByLabelText('plan')).toHaveValue(9000)
+    expect(screen.getByRole('switch', { name: 'sketchy' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByLabelText('variance')).toHaveValue('Both')
+  })
+
+  it('keeps pick and ink in design mode, because a design is what you point at', async () => {
+    mockReadManifest.mockResolvedValue({ manifest: { kind: 'design', title: 'D' } })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    await screen.findByText('D')
+    expect(screen.getByLabelText('Pick an element for the agent')).toBeInTheDocument()
+    expect(screen.getByLabelText('Draw on the page for the agent')).toBeInTheDocument()
+  })
+
+  it('writes a turned control into the page', async () => {
+    mockSetTweak.mockResolvedValue({ ok: true })
+    mockReadManifest.mockResolvedValue({
+      manifest: { kind: 'design', tweaks: { sketchy: { type: 'boolean', default: false } } }
+    })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    const sw = await screen.findByRole('switch', { name: 'sketchy' })
+    fireEvent.click(sw)
+
+    expect(mockSetTweak).toHaveBeenCalledWith('t1', 'sketchy', true)
+    // And it shows immediately rather than waiting for the round trip.
+    expect(sw).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('drops the bar when the guest navigates away from the design', async () => {
+    // The previous page's controls must not sit above a page that never
+    // declared them — they would drive nothing and describe nothing.
+    mockReadManifest.mockResolvedValue({
+      manifest: {
+        kind: 'design',
+        title: 'Budget',
+        tweaks: { plan: { type: 'number', default: 1 } }
+      }
+    })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => void view.dispatchEvent(new Event('did-stop-loading')))
+    await screen.findByText('Budget')
+
+    act(() => {
+      view.dispatchEvent(Object.assign(new Event('did-navigate'), { url: 'https://example.com/' }))
+    })
+
+    expect(screen.queryByText('Budget')).toBeNull()
+    expect(screen.getByLabelText('Address')).toBeInTheDocument()
+  })
+
+  it('puts your adjustments back after the design reloads', async () => {
+    // The whole point of storing them. The guest opens on the file's declared
+    // defaults every time, so without this a repaint resets every value the
+    // moment the agent touches the design — punishing you for its turn.
+    const { saveTweak, resetTweaks } = await import('../src/renderer/lib/design-tweaks')
+    resetTweaks()
+    saveTweak('file:///repo/budget.dc.html', 'plan', 9000)
+
+    mockSetTweak.mockResolvedValue({ ok: true })
+    mockReadManifest.mockResolvedValue({
+      manifest: {
+        kind: 'design',
+        title: 'Budget',
+        tweaks: { plan: { type: 'number', default: 6000, unit: '$' } }
+      },
+      // What the freshly-loaded page holds: its declared default.
+      values: { plan: 6000 }
+    })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/budget.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    // The control shows what you set, and the page is told to match.
+    expect(await screen.findByLabelText('plan')).toHaveValue(9000)
+    await waitFor(() => expect(mockSetTweak).toHaveBeenCalledWith('t1', 'plan', 9000))
+    resetTweaks()
+  })
+
+  it('asks main to watch the design it is showing, and only a design', async () => {
+    mockWatchFile.mockClear()
+    mockReadManifest.mockResolvedValue({ manifest: { kind: 'design', title: 'D' } })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/d.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    await waitFor(() => expect(mockWatchFile).toHaveBeenCalledWith('t1', 'file:///repo/d.dc.html'))
+  })
+
+  it('watches nothing for a page that is not a design', async () => {
+    // An ordinary web page has no file to change, and a watcher aimed at one
+    // would repaint the pane for edits nobody is looking at.
+    mockWatchFile.mockClear()
+    mockReadManifest.mockResolvedValue({ manifest: null })
+    act(() => useAppStore.getState().openBrowserPane('t1', 'localhost:5173'))
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    await waitFor(() => expect(mockWatchFile).toHaveBeenCalledWith('t1', null))
+  })
+
+  it('repaints when its own design changes on disk', async () => {
+    // The half of the loop that makes a design live: the agent writes, and the
+    // pane shows the new one without anyone touching it.
+    fileChangedHandlers = []
+    mockReadManifest.mockResolvedValue({ manifest: { kind: 'design', title: 'D' } })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/d.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    const view = document.querySelector('webview') as HTMLElement & { reload: () => void }
+    const reload = vi.fn()
+    view.reload = reload
+    act(() => void view.dispatchEvent(new Event('did-stop-loading')))
+    await waitFor(() => expect(fileChangedHandlers.length).toBeGreaterThan(0))
+
+    act(() =>
+      fileChangedHandlers.forEach((h) => h({ sessionId: 't1', path: 'file:///repo/d.dc.html' }))
+    )
+    expect(reload).toHaveBeenCalled()
+  })
+
+  it('ignores a change to a file it is no longer showing', async () => {
+    // A watcher event can land after the pane moved on. Repainting then would
+    // show the wrong page for a file nobody asked about.
+    fileChangedHandlers = []
+    mockReadManifest.mockResolvedValue({ manifest: { kind: 'design', title: 'D' } })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/d.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    const view = document.querySelector('webview') as HTMLElement & { reload: () => void }
+    const reload = vi.fn()
+    view.reload = reload
+    act(() => void view.dispatchEvent(new Event('did-stop-loading')))
+    await waitFor(() => expect(fileChangedHandlers.length).toBeGreaterThan(0))
+
+    act(() =>
+      fileChangedHandlers.forEach((h) =>
+        h({ sessionId: 't1', path: 'file:///repo/somewhere-else.dc.html' })
+      )
+    )
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('drops a design’s chrome when the tab switches to another page', async () => {
+    // Switching to a tab whose guest already loaded fires no load event, so
+    // without an explicit reset the previous design's title and controls would
+    // sit above an unrelated page — and turning one would write into it.
+    mockReadManifest.mockResolvedValue({
+      manifest: {
+        kind: 'design',
+        title: 'Budget',
+        tweaks: { plan: { type: 'number', default: 1 } }
+      }
+    })
+    act(() => {
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/d.dc.html', { trusted: true })
+      useAppStore.getState().addBrowserTab('t1', 'https://example.com/', { trusted: true })
+    })
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+    await screen.findByText('Budget')
+
+    // Back to the design's own tab, then away to the plain page.
+    mockReadManifest.mockResolvedValue({ manifest: null })
+    act(() => useAppStore.getState().setActiveBrowserTab('t1', 0))
+    act(() => useAppStore.getState().setActiveBrowserTab('t1', 1))
+
+    await waitFor(() => expect(screen.queryByText('Budget')).toBeNull())
+    expect(screen.getByLabelText('Address')).toBeInTheDocument()
+  })
+
+  it('keeps the controls through an in-page route change', async () => {
+    // Same document, same design. Clearing on `did-navigate-in-page` cost a
+    // design with a hash route its controls on the first anchor click, and
+    // nothing brought them back — that event fires no load to re-read on.
+    mockReadManifest.mockResolvedValue({
+      manifest: {
+        kind: 'design',
+        title: 'Budget',
+        tweaks: { plan: { type: 'number', default: 1 } }
+      }
+    })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/d.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    const view = document.querySelector('webview') as HTMLElement
+    act(() => void view.dispatchEvent(new Event('did-stop-loading')))
+    await screen.findByText('Budget')
+
+    act(() => {
+      view.dispatchEvent(
+        Object.assign(new Event('did-navigate-in-page'), {
+          url: 'file:///repo/d.dc.html#board-2',
+          isMainFrame: true
+        })
+      )
+    })
+
+    expect(screen.getByText('Budget')).toBeInTheDocument()
+  })
+
+  it('does not ask about a design from a popped-out card', async () => {
+    // A card deliberately does not attach, so main would answer from the
+    // session's guest — drawing another page's controls over this one.
+    mockReadManifest.mockClear()
+    act(() =>
+      useAppStore.getState().openBrowserPane('card:t1:1', 'https://example.com/', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" paneKey="card:t1:1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    await waitFor(() => expect(screen.getByLabelText('Address')).toBeInTheDocument())
+    expect(mockReadManifest).not.toHaveBeenCalled()
   })
 
   it('ignores a subframe navigating, which is not where the person is', () => {

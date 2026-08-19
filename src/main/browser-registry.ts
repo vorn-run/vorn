@@ -11,7 +11,9 @@ import type {
   BrowserConsoleMessage,
   BrowserNetworkRequest,
   BrowserTabInfo,
-  BrowserTarget
+  BrowserTarget,
+  ArtifactManifest,
+  ArtifactTweak
 } from '../shared/types'
 import { IPC } from '../shared/types'
 import log from './logger'
@@ -461,12 +463,31 @@ export async function readPage(params: {
     out.push(node)
   }
 
+  // What this page claims to be, and what it is currently showing. An agent
+  // asked to change a design needs the value on screen, not the default written
+  // in the file — a person can turn a control without spending a turn, so the
+  // two routinely disagree.
+  //
+  // Only asked of a `file:` page. A design is a file, and every other page
+  // would otherwise pay a CDP round trip on every read to be told "no" — a
+  // design's cost charged to the generic page read.
+  //
+  // Best-effort: a page read must not fail because the manifest read did.
+  const artifact = wc.getURL().startsWith('file:')
+    ? await readManifest({ sessionId: params.sessionId }).catch(() => ({
+        manifest: null,
+        values: undefined
+      }))
+    : { manifest: null, values: undefined }
+
   return {
     url: wc.getURL(),
     title: wc.getTitle(),
     nodes: out,
     generation: entry.generation,
-    ...(i < ax.length ? { nextCursor: `${entry.generation}:${i}` } : {})
+    ...(i < ax.length ? { nextCursor: `${entry.generation}:${i}` } : {}),
+    ...(artifact.manifest ? { artifact: artifact.manifest } : {}),
+    ...(artifact.values ? { artifactValues: artifact.values } : {})
   }
 }
 
@@ -486,6 +507,259 @@ export function parseCursor(cursor: string | undefined, generation: number): num
 
 /** Character budget for one `get_page_text` page. */
 const TEXT_BUDGET = 20_000
+
+// ─── Artifact manifest ──────────────────────────────────────────
+
+/**
+ * How much declared manifest we will read. A design's manifest is a handful of
+ * lines; anything larger is a page doing something else with that id, and
+ * parsing megabytes of it would be work done on behalf of whoever wrote it.
+ */
+const MANIFEST_BUDGET = 16_000
+
+/** Tweak names a control can be drawn for, bounded so a page cannot fill the bar. */
+const MAX_TWEAKS = 24
+
+/**
+ * What a tweak may be called.
+ *
+ * One definition, because `setTweak` refuses names `parseManifest` accepted if
+ * the two ever disagree — and a design whose control silently stops working is
+ * a hard thing to attribute to a regex.
+ */
+const TWEAK_NAME = /^[a-zA-Z_][\w]{0,39}$/
+
+/**
+ * Validate one declared tweak, or drop it.
+ *
+ * Every field here was written by the page. A malformed entry is skipped rather
+ * than defaulted, because a control whose type we guessed would write a value
+ * the design never expected — and the design derives from it.
+ */
+function parseTweak(raw: unknown): ArtifactTweak | null {
+  if (!raw || typeof raw !== 'object') return null
+  const t = raw as Record<string, unknown>
+  const label = typeof t.label === 'string' ? t.label.slice(0, 40) : undefined
+
+  if (t.type === 'number' && typeof t.default === 'number' && Number.isFinite(t.default)) {
+    const num = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) ? v : undefined
+    return {
+      type: 'number',
+      default: t.default,
+      ...(label && { label }),
+      ...(typeof t.unit === 'string' && { unit: t.unit.slice(0, 8) }),
+      ...(num(t.min) !== undefined && { min: num(t.min) }),
+      ...(num(t.max) !== undefined && { max: num(t.max) }),
+      ...(num(t.step) !== undefined && { step: num(t.step) })
+    }
+  }
+
+  if (t.type === 'boolean' && typeof t.default === 'boolean') {
+    return { type: 'boolean', default: t.default, ...(label && { label }) }
+  }
+
+  const strings = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.every((o) => typeof o === 'string')
+      ? (v as string[]).slice(0, 12).map((o) => o.slice(0, 40))
+      : undefined
+
+  if (t.type === 'color' && typeof t.default === 'string') {
+    return {
+      type: 'color',
+      default: t.default.slice(0, 40),
+      ...(label && { label }),
+      ...(strings(t.options) && { options: strings(t.options) })
+    }
+  }
+
+  // A select with no options is a control with nothing to pick, so it is
+  // dropped rather than rendered as an empty menu.
+  if (t.type === 'select' && typeof t.default === 'string') {
+    const options = strings(t.options)
+    if (!options || options.length === 0) return null
+    // A default outside its own options is a control that opens showing
+    // something it cannot be set back to. The first option is the honest
+    // reading of what the design meant.
+    const fallback = t.default.slice(0, 40)
+    return {
+      type: 'select',
+      default: options.includes(fallback) ? fallback : options[0],
+      options,
+      ...(label && { label })
+    }
+  }
+
+  return null
+}
+
+/**
+ * Turn the page's declaration into a manifest, or into nothing.
+ *
+ * Exported for tests. "Not an artifact" is the ordinary answer — a page with no
+ * block, an unparseable block, or one declaring a kind we do not know is just a
+ * web page, and saying so is not an error worth surfacing to an agent.
+ */
+export function parseManifest(text: string): ArtifactManifest | null {
+  if (!text || text.length > MANIFEST_BUDGET) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const m = raw as Record<string, unknown>
+  if (m.kind !== 'design') return null
+
+  const manifest: ArtifactManifest = { kind: 'design' }
+  if (typeof m.title === 'string' && m.title.trim()) manifest.title = m.title.trim().slice(0, 120)
+
+  if (m.tweaks && typeof m.tweaks === 'object' && !Array.isArray(m.tweaks)) {
+    const tweaks: Record<string, ArtifactTweak> = {}
+    for (const [key, value] of Object.entries(m.tweaks as Record<string, unknown>)) {
+      if (Object.keys(tweaks).length >= MAX_TWEAKS) break
+      // A key that is not a plain identifier cannot be written back into the
+      // page without quoting, and a page needing that is not declaring a tweak.
+      if (!TWEAK_NAME.test(key)) continue
+      const parsed = parseTweak(value)
+      if (parsed) tweaks[key] = parsed
+    }
+    if (Object.keys(tweaks).length > 0) manifest.tweaks = tweaks
+  }
+
+  return manifest
+}
+
+/**
+ * Set a value and let the page redraw itself.
+ *
+ * Kept as a string for the same reason `HIT_TEST_FN` is: it runs in the guest,
+ * not here, and reading it as source next to its call site is what makes the
+ * boundary obvious.
+ */
+const SET_TWEAK_FN = `function (key, value) {
+  window.__artifact = window.__artifact || {}
+  window.__artifact.tweaks = window.__artifact.tweaks || {}
+  window.__artifact.tweaks[key] = value
+  if (typeof window.__artifactRender === 'function') window.__artifactRender()
+}`
+
+/**
+ * Write one declared tweak into the page, and ask it to redraw.
+ *
+ * The value goes in as a JSON argument to a function rather than interpolated
+ * into source: the alternative builds a program out of something a control
+ * produced, and the day a string value contains a quote it stops being a value.
+ *
+ * The page's own `__artifactRender` is called when it exposes one. A design that
+ * reads `window.__artifact.tweaks` at render time needs no hook and simply gets
+ * the new value on its next paint.
+ */
+export async function setTweak(params: {
+  sessionId: string
+  key: string
+  value: unknown
+}): Promise<{ ok: true }> {
+  const { wc } = contentsFor(params.sessionId)
+  // The same rule the manifest reader applies, by construction rather than by
+  // convention. A key that could not have been declared cannot be set, so a
+  // renderer bug cannot write arbitrary names.
+  if (!TWEAK_NAME.test(params.key)) {
+    throw new Error(`"${params.key}" is not a tweak name this page could have declared.`)
+  }
+  // Both arguments arrive as JSON literals, the same shape the annotation
+  // hit-test uses. `JSON.stringify` of a JSON value is a valid JS literal, so
+  // the value stays data — a quote inside a select option cannot end it and
+  // start being source.
+  await send(wc, 'Runtime.evaluate', {
+    expression: `(${SET_TWEAK_FN})(${JSON.stringify(params.key)}, ${JSON.stringify(
+      params.value ?? null
+    )})`,
+    returnByValue: true
+  })
+  return { ok: true }
+}
+
+/**
+ * What the loaded page says it is, plus the values it is currently showing.
+ *
+ * The live values come from the guest rather than from anything stored, because
+ * the page is what is on screen — an agent told to change "the over-budget case"
+ * needs the plan the person actually set, not the default written in the file.
+ */
+export async function readManifest(params: { sessionId: string }): Promise<{
+  manifest: ArtifactManifest | null
+  values?: Record<string, unknown>
+}> {
+  const { wc } = contentsFor(params.sessionId)
+  const { result } = await send<{ result: { value?: string } }>(wc, 'Runtime.evaluate', {
+    expression: `(() => {
+      const el = document.getElementById('artifact')
+      const declared = el && el.textContent ? el.textContent : ''
+      let live = null
+      try {
+        const t = window.__artifact && window.__artifact.tweaks
+        if (t && typeof t === 'object') {
+          // Only scalars, only short ones, and only so many. A declared tweak
+          // holds a number, a boolean or a short string; anything else on this
+          // object is the page using the name for something of its own, and it
+          // would travel verbatim into an agent's context inside the untrusted
+          // fence. The count is capped because the filtering that keeps only
+          // declared names happens after this crosses CDP — a page hanging a
+          // hundred thousand keys here would build and ship all of them first.
+          var out = {}
+          var kept = 0
+          for (var k in t) {
+            if (kept >= ${MAX_TWEAKS}) break
+            if (!Object.prototype.hasOwnProperty.call(t, k)) continue
+            var v = t[k]
+            // Non-finite numbers do not survive JSON — they arrive as null and
+            // fail the type check downstream — but saying so here means the
+            // guarantee holds if the transport ever stops being JSON.
+            if (typeof v === 'number' && isFinite(v)) out[k] = v
+            else if (typeof v === 'boolean') out[k] = v
+            else if (typeof v === 'string' && v.length <= 200) out[k] = v
+            else continue
+            kept++
+          }
+          live = out
+        }
+      } catch { /* a page may define __artifact as anything */ }
+      return JSON.stringify({ declared: declared, live: live })
+    })()`,
+    returnByValue: true
+  })
+
+  let payload: { declared?: string; live?: Record<string, unknown> | null }
+  try {
+    payload = JSON.parse(result.value ?? '{}')
+  } catch {
+    return { manifest: null }
+  }
+
+  const manifest = parseManifest(payload.declared ?? '')
+  if (!manifest) return { manifest: null }
+
+  // Live values are reported only for names the manifest declared. A page can
+  // put anything on `window.__artifact`, and forwarding the rest would hand an
+  // agent page-chosen keys as though the design had asked for them.
+  let values: Record<string, unknown> | undefined
+  if (payload.live && manifest.tweaks) {
+    const live = payload.live
+    values = Object.fromEntries(
+      Object.keys(manifest.tweaks)
+        // `hasOwnProperty` rather than a truthiness check: a tweak may
+        // legitimately be named `toString` or `constructor`, and reading
+        // through the prototype would copy a function into a value that then
+        // fails to cross IPC — taking the design's chrome with it.
+        .filter((k) => Object.prototype.hasOwnProperty.call(live, k))
+        .map((k) => [k, live[k]])
+    )
+  }
+
+  return { manifest, ...(values && Object.keys(values).length > 0 && { values }) }
+}
 
 export async function getText(params: {
   sessionId: string

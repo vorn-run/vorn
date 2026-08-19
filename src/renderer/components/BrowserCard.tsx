@@ -1,23 +1,18 @@
 import { memo, forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import {
-  ArrowLeft,
-  ArrowRight,
-  MousePointerClick,
-  Pencil,
-  Plus,
-  RotateCw,
-  SquareArrowOutUpRight,
-  X
-} from 'lucide-react'
+import { MousePointerClick, Pencil, Plus, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
 import { browserPartition } from '../../shared/types'
+import type { ArtifactManifest } from '../../shared/types'
+import { TweakBar } from './browser/TweakBar'
+import { AddressBar } from './browser/AddressBar'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON } from '../lib/icon-button'
 import { browserPaneId, isPromotedCardId } from '../lib/pane-id'
 import { normalizeUrl, displayHost, flattenPageText } from '../lib/browser-url'
+import { loadTweaks, saveTweak, mergeTweaks } from '../lib/design-tweaks'
 
 interface Props {
   /** Session that owns this browser. */
@@ -52,6 +47,24 @@ interface WebviewElement extends HTMLElement {
   /** Identifies this guest to the main process, which is the only place that
    *  can drive it. A `<webview>` carries no session identity of its own. */
   getWebContentsId(): number
+}
+
+/**
+ * The url a design is known by: the key its adjustments are stored under, and
+ * what main is asked to watch.
+ *
+ * `normalizeUrl` rather than the raw url, because it drops the query and
+ * fragment — an anchor click changes the url without changing the file, and a
+ * key that moved with it would file adjustments under a page that does not
+ * exist and stop matching the repaints main sends. It also refuses a named
+ * host, which is a UNC path rather than this machine's file.
+ *
+ * A url rather than a path: `fileURLToPath` is a node API the renderer does not
+ * have, and deriving one by hand gets Windows wrong.
+ */
+function designUrlOf(url: string | null): string | null {
+  const normalized = url ? normalizeUrl(url, { allowFile: true }) : null
+  return normalized?.startsWith('file:') ? normalized : null
 }
 
 /**
@@ -115,9 +128,40 @@ export const BrowserCard = memo(
     // a timer, and the session's own record can land between tries.
     const fileRootRef = useRef<string | undefined>(undefined)
     fileRootRef.current = terminal?.session.worktreePath ?? terminal?.session.projectPath
+    // Which design this tab is showing, when it is showing one. Adjustments are
+    // remembered per file, and only a `file:` url names one — a page served over
+    // http has no stable key, and a design is a file either way.
+    const filePathRef = useRef<string | null>(null)
+    filePathRef.current = designUrlOf(url)
     const [draft, setDraft] = useState(url ?? '')
+    // What the loaded page declares itself to be, and the values it is showing.
+    // Null for an ordinary web page, which is nearly all of them — so the pane
+    // keeps its address bar unless a page says otherwise.
+    const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
+    const [tweakValues, setTweakValues] = useState<Record<string, unknown>>({})
     const [loading, setLoading] = useState(false)
     const [failed, setFailed] = useState<string | null>(null)
+
+    /**
+     * Turn one control, and show the result immediately.
+     *
+     * The value is written into the page, and mirrored here so the control does
+     * not snap back while that round trip is in flight. The page is still the
+     * source of truth — the next manifest read replaces this with whatever it
+     * actually holds.
+     */
+    const applyTweak = useCallback(
+      (tweakKey: string, value: unknown) => {
+        setTweakValues((prev) => ({ ...prev, [tweakKey]: value }))
+        const path = filePathRef.current
+        if (path) saveTweak(path, tweakKey, value)
+        void window.api.setBrowserTweak(sessionId, tweakKey, value).catch(() => {
+          // The guest went away mid-turn. The next load re-reads everything, so
+          // there is nothing to repair here.
+        })
+      },
+      [sessionId]
+    )
     const [nav, setNav] = useState({ back: false, forward: false })
 
     // Follow store-driven navigation, including a tab switch — the address bar
@@ -127,6 +171,12 @@ export const BrowserCard = memo(
       setDraft(url === null || url === 'about:blank' ? '' : url)
       setFailed(null)
       setNav({ back: false, forward: false })
+      // Deliberately not resetting the manifest here. This fires on any url
+      // change, and a hash route changes the url without changing the document
+      // — clearing then would cost a design its controls on the first anchor
+      // click, with no load event coming to bring them back. A tab switch is
+      // handled by the effect below, which re-reads; a real navigation is
+      // handled by `did-navigate`, which clears.
     }, [url])
 
     useEffect(() => {
@@ -151,6 +201,7 @@ export const BrowserCard = memo(
       const onStop = (): void => {
         setLoading(false)
         syncNav()
+        readManifest()
       }
       const onFail = (e: Event): void => {
         // -3 is ERR_ABORTED, which fires for ordinary navigation cancellation.
@@ -167,7 +218,7 @@ export const BrowserCard = memo(
       //
       // The tab index is read at fire time, not captured here: capturing it
       // would rebuild the stale closure the ref exists to avoid.
-      const onNavigate = (e: Event): void => {
+      const onNavigate = (e: Event, sameDocument = false): void => {
         const detail = e as Event & { url?: string; isMainFrame?: boolean }
         // Subframes navigate constantly — an ad, an embedded doc, an OAuth
         // widget routing in place. Taking their url would have the strip, the
@@ -177,8 +228,60 @@ export const BrowserCard = memo(
         // `did-navigate-in-page` carries one, so only its false is a subframe.
         if (detail.isMainFrame === false) return
         if (detail.url) syncBrowserTab(key, tabIndexRef.current, { url: detail.url })
+        // A new document is a new claim, so the old one goes and `did-stop-loading`
+        // brings the next. Same-document routing is *not* — a design with a hash
+        // route would otherwise lose its controls on the first anchor click and
+        // not get them back until something reloaded the page.
+        if (!sameDocument) {
+          setManifest(null)
+          setTweakValues({})
+        }
         syncNav()
       }
+      // Ask what this page is once it has a document. A page that declares
+      // nothing simply answers null and the address bar stays.
+      let stale = false
+      const readManifest = (): void => {
+        // A popped-out card deliberately does not attach, so main would answer
+        // from the *session's* guest — drawing another page's title and
+        // controls over this one, and writing a turned control into a design
+        // nobody here is looking at. Same reason pick and ink are absent.
+        if (isCard) return
+        void window.api
+          .readBrowserManifest(sessionId)
+          .then(({ manifest: m, values }) => {
+            if (stale) return
+            setManifest(m)
+            // Only a design gets watched, and only while it is the page in
+            // front. An ordinary web page has no file to change.
+            window.api.watchBrowserFile(sessionId, m ? filePathRef.current : null)
+            if (!m?.tweaks) {
+              setTweakValues({})
+              return
+            }
+            // The guest opened on its declared defaults; anything you set for
+            // this file before now has to be put back, or a repaint silently
+            // resets every value the moment the agent touches the design.
+            const path = filePathRef.current
+            const merged = mergeTweaks(m.tweaks, path ? loadTweaks(path) : {}, values)
+            setTweakValues(merged)
+            // Pushing is best-effort and deliberately last: the chrome is
+            // already correct, and a guest that went away mid-load must not
+            // cost the pane the controls it just drew.
+            for (const [k, v] of Object.entries(merged)) {
+              // Only what differs from what the page already holds, so a design
+              // with no overrides is not rewritten on every load.
+              if (values && values[k] === v) continue
+              void window.api.setBrowserTweak(sessionId, k, v).catch(() => {})
+            }
+          })
+          .catch(() => {
+            // A pane mid-navigation or already gone. Falling back to the
+            // address bar is the honest default.
+            if (!stale) setManifest(null)
+          })
+      }
+
       const onTitle = (e: Event): void => {
         const detail = e as Event & { title?: string; explicitSet?: boolean }
         // A guest with no <title> reports its url as the title, which would put
@@ -222,6 +325,9 @@ export const BrowserCard = memo(
       // session's own browser, and the agent's browser tools would silently act
       // on a page nobody asked them about.
       if (!isCard) onAttached()
+      // Switching to a tab whose guest already finished loading fires no load
+      // event at all, so this is that tab's only chance to say what it is.
+      readManifest()
 
       if (!isCard) view.addEventListener('dom-ready', onAttached)
       view.addEventListener('did-start-loading', onStart)
@@ -229,28 +335,47 @@ export const BrowserCard = memo(
       view.addEventListener('did-fail-load', onFail)
       // Both: `did-navigate` misses same-document routing, which is every
       // navigation in a single-page app.
+      const onNavigateInPage = (e: Event): void => onNavigate(e, true)
       view.addEventListener('did-navigate', onNavigate)
-      view.addEventListener('did-navigate-in-page', onNavigate)
+      view.addEventListener('did-navigate-in-page', onNavigateInPage)
       view.addEventListener('page-title-updated', onTitle)
       return () => {
         cancelled = true
+        stale = true
         window.clearTimeout(retry)
         view.removeEventListener('dom-ready', onAttached)
         view.removeEventListener('did-start-loading', onStart)
         view.removeEventListener('did-stop-loading', onStop)
         view.removeEventListener('did-fail-load', onFail)
         view.removeEventListener('did-navigate', onNavigate)
-        view.removeEventListener('did-navigate-in-page', onNavigate)
+        view.removeEventListener('did-navigate-in-page', onNavigateInPage)
         view.removeEventListener('page-title-updated', onTitle)
       }
     }, [pane?.activeTab, sessionId, isCard, key, syncBrowserTab])
+
+    // The design changed on disk, so show the new one. A reload rather than a
+    // patch: the file is the source, and phase-two storage is what makes this
+    // cheap — the values you set are put back as soon as it loads.
+    useEffect(() => {
+      if (isCard) return
+      return window.api.onBrowserFileChanged(({ sessionId: id, path }) => {
+        if (id !== sessionId) return
+        // A pane that has since moved on is not repainted onto a file it is no
+        // longer showing.
+        if (path !== filePathRef.current) return
+        viewRef.current?.reload()
+      })
+    }, [sessionId, isCard])
 
     // Closing the pane or the session unmounts this card; either way the CDP
     // session must be released, or main keeps a debugger attached to a guest
     // nobody can reach.
     useEffect(() => {
       if (isCard) return
-      return () => window.api.detachBrowser(sessionId)
+      return () => {
+        window.api.watchBrowserFile(sessionId, null)
+        window.api.detachBrowser(sessionId)
+      }
     }, [sessionId, isCard])
 
     // Report the strip to main, so an agent can ask what the indices it passes
@@ -525,55 +650,36 @@ export const BrowserCard = memo(
           )}
         </div>
 
-        {/* Address bar */}
+        {/* The address bar — or the design's own controls, when the loaded page
+            declares them. Pick and ink stay in both: they are how a person
+            hands the agent something, and a design is exactly what you point
+            at. */}
         <div className="flex items-center gap-0.5 px-1.5 py-1 shrink-0">
-          <button
-            onClick={() => viewRef.current?.goBack()}
-            disabled={!nav.back}
-            aria-label="Go back"
-            className={btn}
-          >
-            <ArrowLeft size={14} strokeWidth={2} />
-          </button>
-          <button
-            onClick={() => viewRef.current?.goForward()}
-            disabled={!nav.forward}
-            aria-label="Go forward"
-            className={btn}
-          >
-            <ArrowRight size={14} strokeWidth={2} />
-          </button>
-          <button
-            onClick={() => (loading ? viewRef.current?.stop() : viewRef.current?.reload())}
-            aria-label={loading ? 'Stop loading' : 'Reload'}
-            className={btn}
-          >
-            {loading ? <X size={14} strokeWidth={2} /> : <RotateCw size={14} strokeWidth={2} />}
-          </button>
-
-          <form
-            className="flex-1 min-w-0 ml-1"
-            onSubmit={(e) => {
-              e.preventDefault()
-              commitUrl(draft)
-            }}
-          >
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setDraft(url === 'about:blank' ? '' : url)
-                e.stopPropagation()
-              }}
-              spellCheck={false}
-              aria-label="Address"
-              placeholder="Type a URL"
-              className="w-full bg-white/[0.04] hover:bg-white/[0.06] focus:bg-white/[0.07]
-                         rounded-full px-3 py-1 text-[11px] text-gray-300 outline-none
-                         text-center focus:text-left focus:font-mono placeholder:text-gray-500
-                         transition-colors"
+          {manifest ? (
+            <>
+              {manifest.title && (
+                <span className="text-[11px] text-ink font-medium px-1 shrink-0 truncate max-w-[38%]">
+                  {manifest.title}
+                </span>
+              )}
+              <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
+              <span className="flex-1" />
+            </>
+          ) : (
+            <AddressBar
+              draft={draft}
+              onDraftChange={setDraft}
+              onSubmit={() => commitUrl(draft)}
+              onRevert={() => setDraft(url === 'about:blank' ? '' : (url ?? ''))}
+              onBack={() => viewRef.current?.goBack()}
+              onForward={() => viewRef.current?.goForward()}
+              onReloadOrStop={() => (loading ? viewRef.current?.stop() : viewRef.current?.reload())}
+              canGoBack={nav.back}
+              canGoForward={nav.forward}
+              loading={loading}
+              btn={btn}
             />
-          </form>
+          )}
 
           {/* The two agent-facing tools sit after the address bar, away from
               back/forward: they arm a mode over the page rather than navigate,

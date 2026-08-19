@@ -6,6 +6,7 @@ import type { ServerBridge } from './server/server-bridge'
 import type { RequestMethods } from '@vornrun/shared/protocol'
 import * as browserRegistry from './browser-registry'
 import { setFileRoot, allowsFileUrl } from './browser-file-scope'
+import { watchArtifact, stopWatching } from './artifact-watcher'
 import * as deviceRegistry from './device-registry'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
 import log from './logger'
@@ -431,7 +432,16 @@ export function registerIpcHandlers(): void {
   ipcMain.on(IPC.BROWSER_DETACH, (_, sessionId: string) => {
     browserRegistry.detach(sessionId)
     setFileRoot(sessionId, undefined)
+    // The watcher outlives nothing. A pane that closed has no design showing,
+    // and a descriptor left open would report changes to a session that is gone.
+    stopWatching(sessionId)
   })
+  ipcMain.on(
+    IPC.BROWSER_WATCH_FILE,
+    (_, { sessionId, path }: { sessionId: string; path: string | null }) => {
+      watchArtifact(sessionId, path)
+    }
+  )
   ipcMain.on(IPC.BROWSER_TABS_CHANGED, (_, { sessionId, tabs }) => {
     browserRegistry.syncTabs(sessionId, tabs)
   })
@@ -439,6 +449,17 @@ export function registerIpcHandlers(): void {
   // The picker is user-initiated and answers back to the renderer that armed
   // it, not to an agent. A cancel resolves as `null` rather than an error: the
   // person changing their mind is an ordinary outcome, not a failure.
+  // What the loaded page declares itself to be. The renderer draws the pane's
+  // chrome from this, and only main can ask — a `<webview>` guest is reachable
+  // from here and nowhere else.
+  safeHandle(IPC.BROWSER_READ_MANIFEST, async (_, sessionId: string) =>
+    browserRegistry.readManifest({ sessionId })
+  )
+  safeHandle(
+    IPC.BROWSER_SET_TWEAK,
+    async (_, { sessionId, key, value }: { sessionId: string; key: string; value: unknown }) =>
+      browserRegistry.setTweak({ sessionId, key, value })
+  )
   safeHandle(IPC.BROWSER_PICK_START, async (_, sessionId: string) => {
     try {
       return await browserRegistry.startPick({ sessionId })
