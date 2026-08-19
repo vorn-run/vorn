@@ -124,6 +124,15 @@ describe('what a design opens with', () => {
     expect(mergeTweaks(declared, { sketchy: 1 }).sketchy).toBe(true)
   })
 
+  it('drops a selected option the design no longer offers', () => {
+    // The loop's own failure mode: you pick 'Pct', the agent rewrites the design
+    // without it, and on the repaint the bar would show the first option while
+    // the page held the old one — two states with no event to reconcile them.
+    const withOptions = { variance: { default: 'Both', options: ['Amount', 'Both'] } }
+    expect(mergeTweaks(withOptions, { variance: 'Pct' }).variance).toBe('Both')
+    expect(mergeTweaks(withOptions, { variance: 'Amount' }).variance).toBe('Amount')
+  })
+
   it('has nothing to merge for a design with no tweaks', () => {
     expect(mergeTweaks(undefined, { plan: 9000 })).toEqual({})
   })

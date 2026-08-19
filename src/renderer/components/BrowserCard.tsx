@@ -57,14 +57,21 @@ interface WebviewElement extends HTMLElement {
   getWebContentsId(): number
 }
 
-/** The path a `file:` url names, or null for anything else. */
-function filePathOf(url: string | null): string | null {
+/**
+ * The key a design's adjustments are stored under, and the url main is asked to
+ * watch — both the `file:` url itself, unchanged.
+ *
+ * Deliberately not a filesystem path. `fileURLToPath` is a node API the
+ * renderer does not have, and deriving one by hand gets Windows wrong:
+ * `file:///C:/repo/d.dc.html` has the pathname `/C:/repo/d.dc.html`, which is
+ * not a path any platform will resolve. Main converts it with the same helper
+ * `allowsFileUrl` already uses, so there is one answer rather than two.
+ */
+function designUrlOf(url: string | null): string | null {
   if (!url || !url.startsWith('file:')) return null
   try {
-    const { hostname, pathname } = new URL(url)
-    // A named host is a UNC path on Windows and not this machine's file.
-    if (hostname) return null
-    return decodeURIComponent(pathname)
+    // A named host is a UNC path on Windows, not this machine's file.
+    return new URL(url).hostname ? null : url
   } catch {
     return null
   }
@@ -131,11 +138,11 @@ export const BrowserCard = memo(
     // a timer, and the session's own record can land between tries.
     const fileRootRef = useRef<string | undefined>(undefined)
     fileRootRef.current = terminal?.session.worktreePath ?? terminal?.session.projectPath
-    // Which file this tab is showing, when it is showing one. Adjustments are
-    // remembered per file, and only a `file:` url names a file — a page served
-    // over http has no stable key, and a design is a file either way.
+    // Which design this tab is showing, when it is showing one. Adjustments are
+    // remembered per file, and only a `file:` url names one — a page served over
+    // http has no stable key, and a design is a file either way.
     const filePathRef = useRef<string | null>(null)
-    filePathRef.current = filePathOf(url)
+    filePathRef.current = designUrlOf(url)
     const [draft, setDraft] = useState(url ?? '')
     // What the loaded page declares itself to be, and the values it is showing.
     // Null for an ordinary web page, which is nearly all of them — so the pane
@@ -174,6 +181,12 @@ export const BrowserCard = memo(
       setDraft(url === null || url === 'about:blank' ? '' : url)
       setFailed(null)
       setNav({ back: false, forward: false })
+      // Deliberately not resetting the manifest here. This fires on any url
+      // change, and a hash route changes the url without changing the document
+      // — clearing then would cost a design its controls on the first anchor
+      // click, with no load event coming to bring them back. A tab switch is
+      // handled by the effect below, which re-reads; a real navigation is
+      // handled by `did-navigate`, which clears.
     }, [url])
 
     useEffect(() => {
@@ -215,7 +228,7 @@ export const BrowserCard = memo(
       //
       // The tab index is read at fire time, not captured here: capturing it
       // would rebuild the stale closure the ref exists to avoid.
-      const onNavigate = (e: Event): void => {
+      const onNavigate = (e: Event, sameDocument = false): void => {
         const detail = e as Event & { url?: string; isMainFrame?: boolean }
         // Subframes navigate constantly — an ad, an embedded doc, an OAuth
         // widget routing in place. Taking their url would have the strip, the
@@ -225,16 +238,25 @@ export const BrowserCard = memo(
         // `did-navigate-in-page` carries one, so only its false is a subframe.
         if (detail.isMainFrame === false) return
         if (detail.url) syncBrowserTab(key, tabIndexRef.current, { url: detail.url })
-        // Whatever the last page declared is not this page's claim. Clearing
-        // now means the bar never outlives the design that asked for it.
-        setManifest(null)
-        setTweakValues({})
+        // A new document is a new claim, so the old one goes and `did-stop-loading`
+        // brings the next. Same-document routing is *not* — a design with a hash
+        // route would otherwise lose its controls on the first anchor click and
+        // not get them back until something reloaded the page.
+        if (!sameDocument) {
+          setManifest(null)
+          setTweakValues({})
+        }
         syncNav()
       }
       // Ask what this page is once it has a document. A page that declares
       // nothing simply answers null and the address bar stays.
       let stale = false
       const readManifest = (): void => {
+        // A popped-out card deliberately does not attach, so main would answer
+        // from the *session's* guest — drawing another page's title and
+        // controls over this one, and writing a turned control into a design
+        // nobody here is looking at. Same reason pick and ink are absent.
+        if (isCard) return
         void window.api
           .readBrowserManifest(sessionId)
           .then(({ manifest: m, values }) => {
@@ -325,6 +347,9 @@ export const BrowserCard = memo(
       // session's own browser, and the agent's browser tools would silently act
       // on a page nobody asked them about.
       if (!isCard) onAttached()
+      // Switching to a tab whose guest already finished loading fires no load
+      // event at all, so this is that tab's only chance to say what it is.
+      readManifest()
 
       if (!isCard) view.addEventListener('dom-ready', onAttached)
       view.addEventListener('did-start-loading', onStart)
@@ -332,8 +357,9 @@ export const BrowserCard = memo(
       view.addEventListener('did-fail-load', onFail)
       // Both: `did-navigate` misses same-document routing, which is every
       // navigation in a single-page app.
+      const onNavigateInPage = (e: Event): void => onNavigate(e, true)
       view.addEventListener('did-navigate', onNavigate)
-      view.addEventListener('did-navigate-in-page', onNavigate)
+      view.addEventListener('did-navigate-in-page', onNavigateInPage)
       view.addEventListener('page-title-updated', onTitle)
       return () => {
         cancelled = true
@@ -344,7 +370,7 @@ export const BrowserCard = memo(
         view.removeEventListener('did-stop-loading', onStop)
         view.removeEventListener('did-fail-load', onFail)
         view.removeEventListener('did-navigate', onNavigate)
-        view.removeEventListener('did-navigate-in-page', onNavigate)
+        view.removeEventListener('did-navigate-in-page', onNavigateInPage)
         view.removeEventListener('page-title-updated', onTitle)
       }
     }, [pane?.activeTab, sessionId, isCard, key, syncBrowserTab])

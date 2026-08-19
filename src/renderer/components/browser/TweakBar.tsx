@@ -96,9 +96,13 @@ function Control({
           max={tweak.max}
           step={tweak.step}
           onChange={(e) => {
-            const next = Number(e.target.value)
-            // A half-typed number is not a value to push into the design. The
-            // input keeps the text either way; only a real number travels.
+            const text = e.target.value
+            // An empty field is the most common half-typed state — backspacing
+            // 6000 to type 9000 passes through it — and `Number('')` is 0. Left
+            // unguarded that writes 0 into the design, persists it, and snaps
+            // the field back to "0" so the next keystrokes read "09000".
+            if (text.trim() === '') return
+            const next = Number(text)
             if (Number.isFinite(next)) onChange(next)
           }}
           className={`${FIELD} w-[68px] tabular-nums`}

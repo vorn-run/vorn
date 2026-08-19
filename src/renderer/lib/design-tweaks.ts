@@ -129,7 +129,7 @@ export function forgetTweaks(path: string): void {
  * forward would keep it alive in storage forever with nothing to spend it on.
  */
 export function mergeTweaks(
-  declared: Record<string, { default: TweakValue }> | undefined,
+  declared: Record<string, { default: TweakValue; options?: string[] }> | undefined,
   stored: TweakOverrides
 ): TweakOverrides {
   if (!declared) return {}
@@ -138,8 +138,14 @@ export function mergeTweaks(
     const override = stored[key]
     // Types must agree. A design that changed `plan` from a number to a select
     // would otherwise be handed the old number as its selected option.
-    out[key] =
-      override !== undefined && typeof override === typeof decl.default ? override : decl.default
+    const typeMatches = override !== undefined && typeof override === typeof decl.default
+    // And a value has to still be on offer. If the design dropped an option you
+    // had selected, keeping it would push a value into the page that the control
+    // cannot display — the bar would show the first option while the design
+    // rendered the old one, with no event to reconcile them.
+    const stillOffered =
+      !decl.options || (typeof override === 'string' && decl.options.includes(override))
+    out[key] = typeMatches && stillOffered ? override : decl.default
   }
   return out
 }

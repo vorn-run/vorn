@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import { dirname, basename, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { containsPath, fileRootFor } from './browser-file-scope'
 import log from './logger'
 
@@ -26,6 +27,8 @@ const DEBOUNCE_MS = 120
 interface Watch {
   /** The file this session's pane is showing, absolute and resolved. */
   path: string
+  /** The url the renderer named it by, reported back so the pane can match. */
+  url: string
   watcher: fs.FSWatcher
   timer?: NodeJS.Timeout
 }
@@ -33,7 +36,7 @@ interface Watch {
 const watches = new Map<string, Watch>()
 
 /** Told when a watched file changes, so the pane can be repainted. */
-type Notify = (sessionId: string, path: string) => void
+type Notify = (sessionId: string, url: string) => void
 let notify: Notify = () => {}
 export function setArtifactNotify(fn: Notify): void {
   notify = fn
@@ -47,10 +50,21 @@ export function setArtifactNotify(fn: Notify): void {
  * reached this could otherwise aim a watcher at any directory on the machine
  * and learn when its contents changed.
  */
-export function watchArtifact(sessionId: string, path: string | null): void {
+export function watchArtifact(sessionId: string, url: string | null): void {
   const existing = watches.get(sessionId)
 
-  if (!path) {
+  if (!url) {
+    stopWatching(sessionId)
+    return
+  }
+
+  // The renderer sends the url, not a path: it has no `fileURLToPath`, and a
+  // hand-rolled conversion gets Windows drive letters wrong. Converting here
+  // means the watcher and `allowsFileUrl` agree about what a url names.
+  let path: string
+  try {
+    path = fileURLToPath(url)
+  } catch {
     stopWatching(sessionId)
     return
   }
@@ -85,7 +99,7 @@ export function watchArtifact(sessionId: string, path: string | null): void {
         // that replaces the file leaves a moment where it is briefly absent,
         // and repainting a pane onto nothing is worse than skipping a beat.
         if (!fs.existsSync(w.path)) return
-        notify(sessionId, w.path)
+        notify(sessionId, w.url)
       }, DEBOUNCE_MS)
     })
     // A watcher whose directory is removed emits an error; without a handler
@@ -94,7 +108,7 @@ export function watchArtifact(sessionId: string, path: string | null): void {
       log.debug({ err }, `[artifact] watch on ${dir} ended`)
       stopWatching(sessionId)
     })
-    watches.set(sessionId, { path: target, watcher })
+    watches.set(sessionId, { path: target, url, watcher })
   } catch (err) {
     // The directory may not exist, or the platform may refuse another watch.
     // A design that does not repaint by itself is a smaller loss than a throw

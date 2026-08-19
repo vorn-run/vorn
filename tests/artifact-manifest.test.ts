@@ -132,6 +132,13 @@ describe('tweaks a page declares', () => {
     expect(Object.keys(m?.tweaks ?? {})).toEqual(['real'])
   })
 
+  it('pulls a select default back onto its own options', () => {
+    // A control that opens showing something it cannot be set back to is a
+    // control whose first interaction is a surprise.
+    const m = withTweaks({ v: { type: 'select', default: 'Missing', options: ['A', 'B'] } })
+    expect(m?.tweaks?.v).toMatchObject({ default: 'A' })
+  })
+
   it('drops an unknown control type instead of guessing one', () => {
     const m = withTweaks({ mystery: { type: 'slider', default: 5 } })
     expect(m?.tweaks).toBeUndefined()
@@ -219,6 +226,20 @@ describe('what a page read tells an agent about a design', () => {
 
     const read = await readPage({ sessionId: 'sess-read' })
     expect(read.artifactValues).toEqual({ plan: 2 })
+  })
+
+  it('does not report a value read through the prototype', async () => {
+    // A tweak may legitimately be named `toString`. Reading it off an object
+    // that never set it would copy a *function* into the values, which then
+    // fails to cross IPC and takes the design's chrome with it.
+    guest.declared = JSON.stringify({
+      kind: 'design',
+      tweaks: { toString: { type: 'boolean', default: false } }
+    })
+    guest.live = JSON.stringify({})
+
+    const read = await readPage({ sessionId: 'sess-read' })
+    expect(read.artifactValues).toBeUndefined()
   })
 
   it('still reads the page when the design claim is malformed', async () => {

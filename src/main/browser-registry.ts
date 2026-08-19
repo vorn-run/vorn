@@ -564,7 +564,16 @@ function parseTweak(raw: unknown): ArtifactTweak | null {
   if (t.type === 'select' && typeof t.default === 'string') {
     const options = strings(t.options)
     if (!options || options.length === 0) return null
-    return { type: 'select', default: t.default.slice(0, 40), options, ...(label && { label }) }
+    // A default outside its own options is a control that opens showing
+    // something it cannot be set back to. The first option is the honest
+    // reading of what the design meant.
+    const fallback = t.default.slice(0, 40)
+    return {
+      type: 'select',
+      default: options.includes(fallback) ? fallback : options[0],
+      options,
+      ...(label && { label })
+    }
   }
 
   return null
@@ -676,7 +685,20 @@ export async function readManifest(params: { sessionId: string }): Promise<{
       let live = null
       try {
         const t = window.__artifact && window.__artifact.tweaks
-        if (t && typeof t === 'object') live = JSON.stringify(t)
+        if (t && typeof t === 'object') {
+          // Only scalars, and only short ones. A declared tweak holds a number,
+          // a boolean or a short string; anything else on this object is the
+          // page using the name for something of its own, and it would travel
+          // verbatim into an agent's context inside the untrusted fence.
+          var out = {}
+          for (var k in t) {
+            if (!Object.prototype.hasOwnProperty.call(t, k)) continue
+            var v = t[k]
+            if (typeof v === 'number' || typeof v === 'boolean') out[k] = v
+            else if (typeof v === 'string' && v.length <= 200) out[k] = v
+          }
+          live = JSON.stringify(out)
+        }
       } catch { /* a page may define __artifact as anything */ }
       return JSON.stringify({ declared: declared, live: live })
     })()`,
@@ -703,7 +725,11 @@ export async function readManifest(params: { sessionId: string }): Promise<{
       const declared = manifest.tweaks
       values = Object.fromEntries(
         Object.keys(declared)
-          .filter((k) => live[k] !== undefined)
+          // `hasOwnProperty` rather than a truthiness check: a tweak may
+          // legitimately be named `toString` or `constructor`, and reading
+          // through the prototype would copy a function into a value that then
+          // fails to cross IPC — taking the design's chrome with it.
+          .filter((k) => Object.prototype.hasOwnProperty.call(live, k))
           .map((k) => [k, live[k]])
       )
     } catch {
