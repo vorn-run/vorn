@@ -40,20 +40,32 @@ const ESCAPES = new RegExp(
 )
 
 /**
- * Apply a carriage return the way a terminal does: by moving to the start of the
- * line, so what follows overwrites what came before.
+ * Apply a carriage return the way a terminal does: by moving the cursor to
+ * column 0, so what follows overwrites character by character.
  *
  * Deleting the `\r` instead — which is what this used to do — concatenates the
  * two, so an agent redrawing a spinner in place turned one line reading
  * `Working` into `WoWorkWorking`, and a progress bar became every frame it had
  * ever drawn, joined end to end.
  *
- * Only the text after the last `\r` survives, which is what the reader would
- * have seen on a real terminal.
+ * Overwriting rather than truncating, because a `\r` clears nothing: it only
+ * moves the cursor. A shorter repaint leaves the tail of the longer line behind,
+ * which is why `abc\rXX` reads `XXc` on a terminal and why a line ending in a
+ * bare `\r` still shows its text. Truncating loses output that was on screen.
  */
 function applyCarriageReturns(line: string): string {
-  const last = line.lastIndexOf('\r')
-  return last === -1 ? line : line.slice(last + 1)
+  if (!line.includes('\r')) return line
+  let out = ''
+  let col = 0
+  for (const ch of line) {
+    if (ch === '\r') {
+      col = 0
+      continue
+    }
+    out = out.slice(0, col) + ch + out.slice(col + 1)
+    col++
+  }
+  return out
 }
 
 export function stripAnsi(data: string): string {

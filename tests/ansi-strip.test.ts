@@ -80,9 +80,17 @@ describe('carriage returns', () => {
     expect(stripAnsi(frames)).toBe('100%')
   })
 
-  it('drops a line that was erased and not redrawn', () => {
-    // What the reader would see on a real terminal: nothing.
-    expect(stripAnsi('transient\r')).toBe('')
+  it('keeps a line that a bare carriage return did not overwrite', () => {
+    // A `\r` moves the cursor; it erases nothing. The text is still on screen,
+    // and dropping it would lose output the reader saw.
+    expect(stripAnsi('transient\r')).toBe('transient')
+  })
+
+  it('leaves behind the tail of a longer line a shorter repaint did not cover', () => {
+    // The case that separates overwriting from truncating: a terminal shows
+    // `XXc`, because nothing cleared the `c`.
+    expect(stripAnsi('abc\rXX')).toBe('XXc')
+    expect(stripAnsi('abcdef\rXY')).toBe('XYcdef')
   })
 })
 
