@@ -134,6 +134,13 @@ describe('what a design opens with', () => {
     expect(mergeTweaks(declared, { plan: 9000 }, { plan: 6000 }).plan).toBe(9000)
   })
 
+  it('refuses a non-finite number from either side', () => {
+    // `typeof NaN` is 'number', so a type check alone lets it through — and it
+    // would render as "NaN" in the control and be done arithmetic with.
+    expect(mergeTweaks(declared, {}, { plan: Number.NaN }).plan).toBe(6000)
+    expect(mergeTweaks(declared, {}, { plan: Number.POSITIVE_INFINITY }).plan).toBe(6000)
+  })
+
   it('ignores a page value of the wrong type', () => {
     expect(mergeTweaks(declared, {}, { plan: 'lots' }).plan).toBe(6000)
   })

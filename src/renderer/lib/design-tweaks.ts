@@ -141,6 +141,9 @@ export function mergeTweaks(
       // Types must agree. A design that changed `plan` from a number to a
       // select would otherwise be handed the old number as its selected option.
       if (v === undefined || typeof v !== typeof decl.default) return false
+      // A non-finite number is the wrong kind of number: it would render as
+      // "NaN" in the control and be done arithmetic with by the design.
+      if (typeof v === 'number' && !Number.isFinite(v)) return false
       // And a value has to still be on offer. If the design dropped an option
       // you had selected, keeping it would push a value into the page the
       // control cannot display — the bar showing one thing while the design

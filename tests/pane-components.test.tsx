@@ -19,7 +19,7 @@ const mockWriteTerminal = vi.fn()
 const mockAnnotate = vi.fn<(p: unknown) => Promise<unknown>>()
 const mockReadManifest = vi.fn<() => Promise<unknown>>()
 const mockWatchFile = vi.fn<(s: string, p: string | null) => void>()
-/** Handlers the card registered for "a watched design changed". */
+/** Handlers that the card registered for "a watched design changed". */
 let fileChangedHandlers: ((p: { sessionId: string; path: string }) => void)[] = []
 const mockSetTweak = vi.fn<(s: string, k: string, v: unknown) => Promise<unknown>>()
 

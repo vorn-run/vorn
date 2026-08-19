@@ -701,16 +701,27 @@ export async function readManifest(params: { sessionId: string }): Promise<{
       try {
         const t = window.__artifact && window.__artifact.tweaks
         if (t && typeof t === 'object') {
-          // Only scalars, and only short ones. A declared tweak holds a number,
-          // a boolean or a short string; anything else on this object is the
-          // page using the name for something of its own, and it would travel
-          // verbatim into an agent's context inside the untrusted fence.
+          // Only scalars, only short ones, and only so many. A declared tweak
+          // holds a number, a boolean or a short string; anything else on this
+          // object is the page using the name for something of its own, and it
+          // would travel verbatim into an agent's context inside the untrusted
+          // fence. The count is capped because the filtering that keeps only
+          // declared names happens after this crosses CDP — a page hanging a
+          // hundred thousand keys here would build and ship all of them first.
           var out = {}
+          var kept = 0
           for (var k in t) {
+            if (kept >= ${MAX_TWEAKS}) break
             if (!Object.prototype.hasOwnProperty.call(t, k)) continue
             var v = t[k]
-            if (typeof v === 'number' || typeof v === 'boolean') out[k] = v
+            // Non-finite numbers do not survive JSON — they arrive as null and
+            // fail the type check downstream — but saying so here means the
+            // guarantee holds if the transport ever stops being JSON.
+            if (typeof v === 'number' && isFinite(v)) out[k] = v
+            else if (typeof v === 'boolean') out[k] = v
             else if (typeof v === 'string' && v.length <= 200) out[k] = v
+            else continue
+            kept++
           }
           live = out
         }
