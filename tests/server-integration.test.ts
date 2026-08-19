@@ -242,13 +242,30 @@ describe('server integration', () => {
    * PTY on the machine.
    */
   describe('a socket that asked for less', () => {
-    /** Collect notifications until the server has plainly finished sending. */
+    /**
+     * Collect notifications until the server has plainly finished sending.
+     *
+     * Idle-based rather than a fixed sleep: the assertion is partly that certain
+     * frames never arrive, and a fixed wait either ends before a slow one lands —
+     * passing for the wrong reason on a loaded machine — or pads every run to be
+     * sure. Each frame restarts the clock, so this settles as fast as the server
+     * allows and still waits when the server is slow.
+     */
     async function notificationsFor(query: string): Promise<string[]> {
       const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws${query}`, authOptions())
       const methods: string[] = []
-      ws.on('message', (raw) => {
-        const frame = JSON.parse(raw.toString())
-        if (frame.method && frame.method !== 'server:hello') methods.push(frame.method)
+      let idle: ReturnType<typeof setTimeout>
+      const settled = new Promise<void>((resolve) => {
+        const restart = (): void => {
+          clearTimeout(idle)
+          idle = setTimeout(resolve, 60)
+        }
+        ws.on('message', (raw) => {
+          const frame = JSON.parse(raw.toString())
+          if (frame.method && frame.method !== 'server:hello') methods.push(frame.method)
+          restart()
+        })
+        restart()
       })
       await new Promise<void>((r) => ws.on('open', r))
 
@@ -256,7 +273,8 @@ describe('server integration', () => {
       clientRegistry.broadcast('terminal:data', { id: 'a', data: 'x' })
       clientRegistry.broadcast('session:updated', { id: 'a' })
 
-      await new Promise((r) => setTimeout(r, 100))
+      await settled
+      clearTimeout(idle)
       ws.close()
       return methods
     }

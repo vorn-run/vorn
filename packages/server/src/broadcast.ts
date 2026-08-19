@@ -52,6 +52,9 @@ function subscriptionFrom(topics: TopicFilter): Subscription | null {
     log.warn('[ws] ignoring a malformed topic list; this client will receive everything')
     return null
   }
+  // An empty list widens to everything rather than narrowing to nothing, for
+  // the same reason malformed input does. There is deliberately no way to
+  // subscribe to nothing: a client that wants nothing can close the socket.
   if (topics.length === 0) return null
   return new Subscription(topics)
 }
