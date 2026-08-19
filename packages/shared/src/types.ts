@@ -1405,6 +1405,12 @@ export const IPC = {
    *  is the only thread tying a `<webview>` back to the session that owns it. */
   BROWSER_ATTACH: 'browser:attach',
   BROWSER_DETACH: 'browser:detach',
+  /** Renderer asks what the loaded page declares itself to be, so the pane can
+   *  draw artifact chrome instead of an address bar. Only main can ask the
+   *  guest — the renderer has no CDP. */
+  BROWSER_READ_MANIFEST: 'browser:readManifest',
+  /** Renderer writes one declared tweak value into the page. */
+  BROWSER_SET_TWEAK: 'browser:setTweak',
   /** Renderer arms the element picker; main pushes the result back on pick. */
   BROWSER_PICK_START: 'browser:pickStart',
   BROWSER_PICK_CANCEL: 'browser:pickCancel',
@@ -1791,6 +1797,53 @@ export interface BrowserTabInfo {
   /** The page's own title, when it has reported one. */
   title?: string
   active: boolean
+}
+
+/**
+ * One adjustable value a design artifact declares.
+ *
+ * A tweak earns its place when one value drives many places at once, or switches
+ * between two treatments. Text and single colours are not tweaks — a person can
+ * already edit copy and recolour an element directly, and declaring those would
+ * put a control beside every word.
+ */
+export type ArtifactTweak =
+  | {
+      type: 'number'
+      label?: string
+      default: number
+      unit?: string
+      min?: number
+      max?: number
+      step?: number
+    }
+  | { type: 'boolean'; label?: string; default: boolean }
+  | { type: 'color'; label?: string; default: string; options?: string[] }
+  | { type: 'select'; label?: string; default: string; options: string[] }
+
+/**
+ * What a file says it is, read out of its own `<script id="artifact">` block.
+ *
+ * The block's *presence* is what marks a page as an artifact — not the presence
+ * of tweaks. A design with nothing to adjust is still a design, and gating the
+ * chrome on tweaks would leave it indistinguishable from an ordinary web page.
+ *
+ * Authored by the page, so everything here is validated rather than trusted:
+ * `parseManifest` in the main process drops anything malformed instead of
+ * throwing, because "this is not an artifact" is an ordinary answer.
+ */
+export interface ArtifactManifest {
+  /**
+   * What sort of artifact this is. Deliberately one value for now — a second
+   * earns its place only when it needs different chrome, and a vocabulary of
+   * kinds that all render identically is how `lib/task-status.ts` ended up with
+   * five colour maps that disagreed.
+   */
+  kind: 'design'
+  /** Shown in the pane header in place of the address. */
+  title?: string
+  /** Declared inputs, keyed by name. Absent when the artifact has none. */
+  tweaks?: Record<string, ArtifactTweak>
 }
 
 /** Where an interaction lands: a ref from `read_page`, or raw viewport coords. */

@@ -439,6 +439,17 @@ export function registerIpcHandlers(): void {
   // The picker is user-initiated and answers back to the renderer that armed
   // it, not to an agent. A cancel resolves as `null` rather than an error: the
   // person changing their mind is an ordinary outcome, not a failure.
+  // What the loaded page declares itself to be. The renderer draws the pane's
+  // chrome from this, and only main can ask — a `<webview>` guest is reachable
+  // from here and nowhere else.
+  safeHandle(IPC.BROWSER_READ_MANIFEST, async (_, sessionId: string) =>
+    browserRegistry.readManifest({ sessionId })
+  )
+  safeHandle(
+    IPC.BROWSER_SET_TWEAK,
+    async (_, { sessionId, key, value }: { sessionId: string; key: string; value: unknown }) =>
+      browserRegistry.setTweak({ sessionId, key, value })
+  )
   safeHandle(IPC.BROWSER_PICK_START, async (_, sessionId: string) => {
     try {
       return await browserRegistry.startPick({ sessionId })

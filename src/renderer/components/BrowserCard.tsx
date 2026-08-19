@@ -13,6 +13,8 @@ import {
 import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
 import { browserPartition } from '../../shared/types'
+import type { ArtifactManifest } from '../../shared/types'
+import { TweakBar } from './browser/TweakBar'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON } from '../lib/icon-button'
@@ -116,8 +118,32 @@ export const BrowserCard = memo(
     const fileRootRef = useRef<string | undefined>(undefined)
     fileRootRef.current = terminal?.session.worktreePath ?? terminal?.session.projectPath
     const [draft, setDraft] = useState(url ?? '')
+    // What the loaded page declares itself to be, and the values it is showing.
+    // Null for an ordinary web page, which is nearly all of them — so the pane
+    // keeps its address bar unless a page says otherwise.
+    const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
+    const [tweakValues, setTweakValues] = useState<Record<string, unknown>>({})
     const [loading, setLoading] = useState(false)
     const [failed, setFailed] = useState<string | null>(null)
+
+    /**
+     * Turn one control, and show the result immediately.
+     *
+     * The value is written into the page, and mirrored here so the control does
+     * not snap back while that round trip is in flight. The page is still the
+     * source of truth — the next manifest read replaces this with whatever it
+     * actually holds.
+     */
+    const applyTweak = useCallback(
+      (tweakKey: string, value: unknown) => {
+        setTweakValues((prev) => ({ ...prev, [tweakKey]: value }))
+        void window.api.setBrowserTweak(sessionId, tweakKey, value).catch(() => {
+          // The guest went away mid-turn. The next load re-reads everything, so
+          // there is nothing to repair here.
+        })
+      },
+      [sessionId]
+    )
     const [nav, setNav] = useState({ back: false, forward: false })
 
     // Follow store-driven navigation, including a tab switch — the address bar
@@ -151,6 +177,7 @@ export const BrowserCard = memo(
       const onStop = (): void => {
         setLoading(false)
         syncNav()
+        readManifest()
       }
       const onFail = (e: Event): void => {
         // -3 is ERR_ABORTED, which fires for ordinary navigation cancellation.
@@ -177,8 +204,30 @@ export const BrowserCard = memo(
         // `did-navigate-in-page` carries one, so only its false is a subframe.
         if (detail.isMainFrame === false) return
         if (detail.url) syncBrowserTab(key, tabIndexRef.current, { url: detail.url })
+        // Whatever the last page declared is not this page's claim. Clearing
+        // now means the bar never outlives the design that asked for it.
+        setManifest(null)
+        setTweakValues({})
         syncNav()
       }
+      // Ask what this page is once it has a document. A page that declares
+      // nothing simply answers null and the address bar stays.
+      let stale = false
+      const readManifest = (): void => {
+        void window.api
+          .readBrowserManifest(sessionId)
+          .then(({ manifest: m, values }) => {
+            if (stale) return
+            setManifest(m)
+            setTweakValues(values ?? {})
+          })
+          .catch(() => {
+            // A pane mid-navigation or already gone. Falling back to the
+            // address bar is the honest default.
+            if (!stale) setManifest(null)
+          })
+      }
+
       const onTitle = (e: Event): void => {
         const detail = e as Event & { title?: string; explicitSet?: boolean }
         // A guest with no <title> reports its url as the title, which would put
@@ -234,6 +283,7 @@ export const BrowserCard = memo(
       view.addEventListener('page-title-updated', onTitle)
       return () => {
         cancelled = true
+        stale = true
         window.clearTimeout(retry)
         view.removeEventListener('dom-ready', onAttached)
         view.removeEventListener('did-start-loading', onStart)
@@ -525,55 +575,72 @@ export const BrowserCard = memo(
           )}
         </div>
 
-        {/* Address bar */}
+        {/* The address bar — or the design's own controls, when the loaded page
+            declares them. Pick and ink stay in both: they are how a person
+            hands the agent something, and a design is exactly what you point
+            at. */}
         <div className="flex items-center gap-0.5 px-1.5 py-1 shrink-0">
-          <button
-            onClick={() => viewRef.current?.goBack()}
-            disabled={!nav.back}
-            aria-label="Go back"
-            className={btn}
-          >
-            <ArrowLeft size={14} strokeWidth={2} />
-          </button>
-          <button
-            onClick={() => viewRef.current?.goForward()}
-            disabled={!nav.forward}
-            aria-label="Go forward"
-            className={btn}
-          >
-            <ArrowRight size={14} strokeWidth={2} />
-          </button>
-          <button
-            onClick={() => (loading ? viewRef.current?.stop() : viewRef.current?.reload())}
-            aria-label={loading ? 'Stop loading' : 'Reload'}
-            className={btn}
-          >
-            {loading ? <X size={14} strokeWidth={2} /> : <RotateCw size={14} strokeWidth={2} />}
-          </button>
+          {manifest ? (
+            <>
+              {manifest.title && (
+                <span className="text-[11px] text-ink font-medium px-1 shrink-0 truncate max-w-[38%]">
+                  {manifest.title}
+                </span>
+              )}
+              <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
+              <span className="flex-1" />
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => viewRef.current?.goBack()}
+                disabled={!nav.back}
+                aria-label="Go back"
+                className={btn}
+              >
+                <ArrowLeft size={14} strokeWidth={2} />
+              </button>
+              <button
+                onClick={() => viewRef.current?.goForward()}
+                disabled={!nav.forward}
+                aria-label="Go forward"
+                className={btn}
+              >
+                <ArrowRight size={14} strokeWidth={2} />
+              </button>
+              <button
+                onClick={() => (loading ? viewRef.current?.stop() : viewRef.current?.reload())}
+                aria-label={loading ? 'Stop loading' : 'Reload'}
+                className={btn}
+              >
+                {loading ? <X size={14} strokeWidth={2} /> : <RotateCw size={14} strokeWidth={2} />}
+              </button>
 
-          <form
-            className="flex-1 min-w-0 ml-1"
-            onSubmit={(e) => {
-              e.preventDefault()
-              commitUrl(draft)
-            }}
-          >
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setDraft(url === 'about:blank' ? '' : url)
-                e.stopPropagation()
-              }}
-              spellCheck={false}
-              aria-label="Address"
-              placeholder="Type a URL"
-              className="w-full bg-white/[0.04] hover:bg-white/[0.06] focus:bg-white/[0.07]
-                         rounded-full px-3 py-1 text-[11px] text-gray-300 outline-none
-                         text-center focus:text-left focus:font-mono placeholder:text-gray-500
-                         transition-colors"
-            />
-          </form>
+              <form
+                className="flex-1 min-w-0 ml-1"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  commitUrl(draft)
+                }}
+              >
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setDraft(url === 'about:blank' ? '' : url)
+                    e.stopPropagation()
+                  }}
+                  spellCheck={false}
+                  aria-label="Address"
+                  placeholder="Type a URL"
+                  className="w-full bg-white/[0.04] hover:bg-white/[0.06] focus:bg-white/[0.07]
+                           rounded-full px-3 py-1 text-[11px] text-gray-300 outline-none
+                           text-center focus:text-left focus:font-mono placeholder:text-gray-500
+                           transition-colors"
+                />
+              </form>
+            </>
+          )}
 
           {/* The two agent-facing tools sit after the address bar, away from
               back/forward: they arm a mode over the page rather than navigate,

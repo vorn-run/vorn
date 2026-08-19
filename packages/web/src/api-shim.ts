@@ -726,6 +726,11 @@ export function createApiShim(wsUrl: string) {
     attachBrowser: (_sessionId: string, _webContentsId: number, _fileRoot?: string): void => {},
     detachBrowser: (_sessionId: string): void => {},
     syncBrowserTabs: (_sessionId: string, _tabs: unknown[]): void => {},
+    // A design artifact is a `<webview>` guest read over CDP, and a browser on
+    // another device has neither. Answering "not an artifact" keeps the pane on
+    // its address bar rather than leaving a control strip that drives nothing.
+    readBrowserManifest: async () => ({ manifest: null }),
+    setBrowserTweak: async () => ({ ok: true as const }),
     cancelBrowserPick: (_sessionId: string): void => {},
     startBrowserPick: async () => null,
     annotateBrowser: unsupportedInWeb('Annotating the browser pane'),

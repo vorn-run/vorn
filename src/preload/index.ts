@@ -31,6 +31,7 @@ import {
   WorktreeInventory,
   WorktreeActionResult,
   BranchDeleteResult,
+  ArtifactManifest,
   BrowserSelection,
   BrowserStroke,
   BrowserTabInfo,
@@ -601,6 +602,15 @@ const api = {
    *  the renderer actually holds rather than a copy of its own. */
   syncBrowserTabs: (sessionId: string, tabs: BrowserTabInfo[]): void =>
     ipcRenderer.send(IPC.BROWSER_TABS_CHANGED, { sessionId, tabs }),
+  /** What the loaded page declares itself to be, plus its live tweak values.
+   *  `manifest` is null for an ordinary web page, which is most of them. */
+  readBrowserManifest: (
+    sessionId: string
+  ): Promise<{ manifest: ArtifactManifest | null; values?: Record<string, unknown> }> =>
+    ipcRenderer.invoke(IPC.BROWSER_READ_MANIFEST, sessionId),
+  /** Write one declared tweak value into the page. */
+  setBrowserTweak: (sessionId: string, key: string, value: unknown): Promise<{ ok: true }> =>
+    ipcRenderer.invoke(IPC.BROWSER_SET_TWEAK, { sessionId, key, value }),
   /** Arm the element picker. Resolves with the pick, or null if cancelled. */
   startBrowserPick: (sessionId: string): Promise<BrowserSelection | null> =>
     ipcRenderer.invoke(IPC.BROWSER_PICK_START, sessionId),
