@@ -697,6 +697,12 @@ export async function readManifest(params: { sessionId: string }): Promise<{
     expression: `(() => {
       const el = document.getElementById('artifact')
       const declared = el && el.textContent ? el.textContent : ''
+      // Tell the page a pane is driving it. A design that carries its own
+      // controls for the standalone case needs to stand them down here, or it
+      // sits under an identical row in the pane's header — and it cannot work
+      // this out for itself: this read happens after its script has run, so
+      // there is nothing yet to detect.
+      window.__artifactHost = 'vorn'
       let live = null
       try {
         const t = window.__artifact && window.__artifact.tweaks

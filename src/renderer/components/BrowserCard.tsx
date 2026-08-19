@@ -1,6 +1,6 @@
 import { memo, forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { MousePointerClick, Pencil, Plus, SquareArrowOutUpRight, X } from 'lucide-react'
+import { MousePointerClick, Pencil, Plus, Shapes, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
 import { browserPartition } from '../../shared/types'
@@ -581,7 +581,17 @@ export const BrowserCard = memo(
                                   : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.03]'
                               }`}
                 >
-                  <span className="text-[11px] truncate">{displayHost(shown)}</span>
+                  {/* A design is marked, because a tab that is a file in the
+                      repo behaves differently from a web page — it repaints when
+                      the file changes, and its header holds controls rather than
+                      an address. Only the active tab's manifest is known, so the
+                      mark appears where the claim has actually been read. */}
+                  {active && manifest && (
+                    <Shapes size={11} strokeWidth={2} className="shrink-0 text-bronzo" />
+                  )}
+                  <span className="text-[11px] truncate">
+                    {(active && manifest?.title) || displayHost(shown)}
+                  </span>
                   {/* A card already holds exactly one page — popping its tab out
                       again would swap one card for another. */}
                   {!isCard && (
@@ -657,11 +667,9 @@ export const BrowserCard = memo(
         <div className="flex items-center gap-0.5 px-1.5 py-1 shrink-0">
           {manifest ? (
             <>
-              {manifest.title && (
-                <span className="text-[11px] text-ink font-medium px-1 shrink-0 truncate max-w-[38%]">
-                  {manifest.title}
-                </span>
-              )}
+              {/* Controls only. The name lives on the tab, where every other
+                  page's name lives — repeating it here would spend header
+                  width on something already on screen. */}
               <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
               <span className="flex-1" />
             </>

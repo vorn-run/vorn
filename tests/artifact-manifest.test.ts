@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 
 /** What the guest answers when asked to evaluate something. */
 const guest = {
@@ -255,5 +256,90 @@ describe('what a page read tells an agent about a design', () => {
     const read = await readPage({ sessionId: 'sess-read' })
     expect(read.url).toBe('file:///repo/budget.dc.html')
     expect(read.artifact).toBeUndefined()
+  })
+})
+
+describe('what the injected snippet does inside the guest', () => {
+  /**
+   * The mock above answers `Runtime.evaluate` with a canned value, so it proves
+   * nothing about the code that actually runs in the page. This reads the real
+   * snippet out of the source and executes it against a stand-in guest — the
+   * only way to cover the half of this feature that never runs in this process.
+   */
+  const snippet = (): string => {
+    const src = readFileSync('src/main/browser-registry.ts', 'utf8')
+    const from = src.indexOf('expression: `(() => {')
+    const body = src.slice(from + 'expression: `'.length)
+    return body.slice(0, body.indexOf('`,\n    returnByValue')).replace(/\$\{MAX_TWEAKS\}/g, '24')
+  }
+
+  const run = (
+    win: Record<string, unknown>,
+    declared: unknown
+  ): { declared: string; live: Record<string, unknown> | null } => {
+    const doc = {
+      getElementById: () => (declared === null ? null : { textContent: JSON.stringify(declared) })
+    }
+    const out = new Function('window', 'document', `return ${snippet()}`)(win, doc)
+    return JSON.parse(out as string)
+  }
+
+  it('tells the page a pane is driving it', () => {
+    // A design that carries its own controls for the standalone case has to
+    // stand them down, and it cannot work this out for itself: the manifest is
+    // read after the page's script has already run, so there is nothing there
+    // to detect at first paint. Vorn has to say so.
+    const win: Record<string, unknown> = {}
+    run(win, { kind: 'design' })
+    expect(win.__artifactHost).toBe('vorn')
+  })
+
+  it('says so even for a page that declares nothing', () => {
+    // Cheap and unconditional. A page checking the flag must not have to also
+    // know whether its own manifest parsed.
+    const win: Record<string, unknown> = {}
+    run(win, null)
+    expect(win.__artifactHost).toBe('vorn')
+  })
+
+  it('takes only scalars, and only short ones', () => {
+    const win: Record<string, unknown> = {
+      __artifact: {
+        tweaks: {
+          n: 42,
+          b: true,
+          short: 'ok',
+          long: 'x'.repeat(500),
+          obj: { nested: true },
+          fn: () => {}
+        }
+      }
+    }
+    const { live } = run(win, { kind: 'design' })
+    expect(live).toEqual({ n: 42, b: true, short: 'ok' })
+  })
+
+  it('drops a non-finite number at the source', () => {
+    // These become null crossing JSON and fail the type check downstream, so
+    // the outcome was already right — but by accident of the transport.
+    const win: Record<string, unknown> = { __artifact: { tweaks: { a: NaN, b: Infinity, c: 1 } } }
+    const { live } = run(win, { kind: 'design' })
+    expect(live).toEqual({ c: 1 })
+  })
+
+  it('caps how many keys a page can put on the way out', () => {
+    // The filter that keeps only declared names runs in main, after this has
+    // crossed CDP — so a page hanging thousands of keys here would have all of
+    // them built and shipped first.
+    const tweaks = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`k${i}`, i]))
+    const win: Record<string, unknown> = { __artifact: { tweaks } }
+    const { live } = run(win, { kind: 'design' })
+    expect(Object.keys(live ?? {})).toHaveLength(24)
+  })
+
+  it('survives a page that put something else on __artifact', () => {
+    const win: Record<string, unknown> = { __artifact: 'not an object' }
+    const { live } = run(win, { kind: 'design' })
+    expect(live).toBeNull()
   })
 })

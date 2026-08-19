@@ -946,6 +946,50 @@ describe('BrowserCard', () => {
     expect(mockReadManifest).not.toHaveBeenCalled()
   })
 
+  it('names a design by its title on the tab, and not twice', async () => {
+    // The name belongs where every other page's name is. Repeating it beside
+    // the controls spends header width on something already on screen.
+    mockReadManifest.mockResolvedValue({
+      manifest: {
+        kind: 'design',
+        title: 'True Black',
+        tweaks: { lift: { type: 'number', default: 6 } }
+      }
+    })
+    act(() =>
+      useAppStore
+        .getState()
+        .openBrowserPane('t1', 'file:///repo/true-black.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    // Once, on the tab — not again in the control row.
+    await waitFor(() => expect(screen.getAllByText('True Black')).toHaveLength(1))
+    expect(screen.getByRole('tab')).toHaveTextContent('True Black')
+  })
+
+  it('falls back to the filename for a file that declares no title', async () => {
+    mockReadManifest.mockResolvedValue({ manifest: { kind: 'design' } })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/sketch.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    await waitFor(() => expect(screen.getByRole('tab')).toHaveTextContent('sketch.dc.html'))
+  })
+
   it('ignores a subframe navigating, which is not where the person is', () => {
     // Ads, embedded docs and OAuth widgets route in place constantly. Taking a
     // subframe's url would have the strip, the address bar and `browser_tabs

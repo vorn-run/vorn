@@ -128,6 +128,13 @@ export function displayHost(url: string): string {
   if (url === 'about:blank') return 'New tab'
   try {
     const parsed = new URL(url)
+    // A local file has no host, and its path is the whole of it — a tab is a
+    // few characters wide, so the leading directories push the only part that
+    // identifies the file off the end. The filename is what a person calls it.
+    if (parsed.protocol === 'file:') {
+      const name = parsed.pathname.split('/').filter(Boolean).pop()
+      return name ? decodeURIComponent(name) : url
+    }
     // Other schemes without a hostname parse cleanly but have nothing to show;
     // an empty header is worse than showing the url itself.
     if (!parsed.hostname) return url
