@@ -114,6 +114,13 @@ describe('displayHost', () => {
     expect(displayHost('file:///repo/a%20b.dc.html')).toBe('a b.dc.html')
   })
 
+  it('keeps the filename when its escaping is malformed', () => {
+    // A stray `%` is a legal filename character and an invalid escape, so
+    // decoding throws. Falling through to the outer handler would return the
+    // whole url — the unreadable label this fix exists to remove.
+    expect(displayHost('file:///repo/%ZZ.dc.html')).toBe('%ZZ.dc.html')
+  })
+
   it('names a blank page "New tab" rather than showing the scheme', () => {
     // `about:blank` parses cleanly but has an empty hostname, and the raw
     // string is jargon — a tab you have not navigated yet should read as a

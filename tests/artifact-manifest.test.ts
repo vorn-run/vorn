@@ -266,11 +266,27 @@ describe('what the injected snippet does inside the guest', () => {
    * snippet out of the source and executes it against a stand-in guest — the
    * only way to cover the half of this feature that never runs in this process.
    */
+  const START = 'expression: `(() => {'
+  const END = '`,\n    returnByValue'
+
+  /** The cap the snippet is built with, read from source so the test cannot drift. */
+  const maxTweaks = (): number => {
+    const m = readFileSync('src/main/browser-registry.ts', 'utf8').match(/const MAX_TWEAKS = (\d+)/)
+    if (!m) throw new Error('Could not read MAX_TWEAKS from browser-registry.ts')
+    return Number(m[1])
+  }
+
   const snippet = (): string => {
     const src = readFileSync('src/main/browser-registry.ts', 'utf8')
-    const from = src.indexOf('expression: `(() => {')
+    const from = src.indexOf(START)
+    // Guarded rather than sliced blindly: a moved or reworded snippet would
+    // otherwise yield garbage, and `new Function` would fail with a syntax
+    // error pointing at nothing. This says which end went missing.
+    if (from === -1) throw new Error(`Could not find the injected snippet (${START})`)
     const body = src.slice(from + 'expression: `'.length)
-    return body.slice(0, body.indexOf('`,\n    returnByValue')).replace(/\$\{MAX_TWEAKS\}/g, '24')
+    const to = body.indexOf(END)
+    if (to === -1) throw new Error('Found the injected snippet start but not its end')
+    return body.slice(0, to).replace(/\$\{MAX_TWEAKS\}/g, String(maxTweaks()))
   }
 
   const run = (
@@ -334,7 +350,7 @@ describe('what the injected snippet does inside the guest', () => {
     const tweaks = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`k${i}`, i]))
     const win: Record<string, unknown> = { __artifact: { tweaks } }
     const { live } = run(win, { kind: 'design' })
-    expect(Object.keys(live ?? {})).toHaveLength(24)
+    expect(Object.keys(live ?? {})).toHaveLength(maxTweaks())
   })
 
   it('survives a page that put something else on __artifact', () => {

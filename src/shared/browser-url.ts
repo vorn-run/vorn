@@ -133,7 +133,15 @@ export function displayHost(url: string): string {
     // identifies the file off the end. The filename is what a person calls it.
     if (parsed.protocol === 'file:') {
       const name = parsed.pathname.split('/').filter(Boolean).pop()
-      return name ? decodeURIComponent(name) : url
+      if (!name) return url
+      try {
+        return decodeURIComponent(name)
+      } catch {
+        // A stray `%` is a legal filename character and a malformed escape.
+        // Caught here rather than left to the outer handler, which would fall
+        // back to the whole url — the unreadable label this exists to avoid.
+        return name
+      }
     }
     // Other schemes without a hostname parse cleanly but have nothing to show;
     // an empty header is worse than showing the url itself.
