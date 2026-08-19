@@ -10,7 +10,7 @@ const CLOSE_UNAUTHENTICATED = 4001
 const CLOSE_CREDENTIAL_REJECTED = 4002
 
 vi.mock('../packages/server/src/broadcast', () => ({
-  clientRegistry: { add: vi.fn(), remove: vi.fn() }
+  clientRegistry: { add: vi.fn(), remove: vi.fn(), setTopics: vi.fn() }
 }))
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -89,7 +89,7 @@ describe('handleConnection', () => {
   it('adds client to registry on connect', () => {
     const ws = createMockWs()
     connectAuthed(ws)
-    expect(clientRegistry.add).toHaveBeenCalledWith(ws)
+    expect(clientRegistry.add).toHaveBeenCalledWith(ws, undefined)
   })
 
   it('removes client on close', () => {
@@ -179,7 +179,7 @@ describe('handshake', () => {
 
     // Declared by the code that enforces it, so the advertisement cannot drift
     // from the behaviour. Pass A shipped this empty because nothing was true yet.
-    expect(sentFrames(ws)[0].params?.capabilities).toEqual({ auth: 1 })
+    expect(sentFrames(ws)[0].params?.capabilities).toEqual({ auth: 1, subscribe: 1 })
   })
 
   it('greets every connection, not just the first', () => {
@@ -305,7 +305,7 @@ describe('authentication', () => {
     handleConnection(ws)
     sendMessage(ws, { jsonrpc: '2.0', method: 'auth:authenticate', params: { token: GOOD_TOKEN } })
 
-    await vi.waitFor(() => expect(clientRegistry.add).toHaveBeenCalledWith(ws))
+    await vi.waitFor(() => expect(clientRegistry.add).toHaveBeenCalledWith(ws, undefined))
     expect(replies(ws).some((f) => f.method === 'auth:ok')).toBe(true)
     expect(ws.close).not.toHaveBeenCalled()
   })
@@ -316,7 +316,7 @@ describe('authentication', () => {
 
     // MCP opens a fresh connection per RPC call, so a mandatory round-trip here
     // would tax every one of them.
-    expect(clientRegistry.add).toHaveBeenCalledWith(ws)
+    expect(clientRegistry.add).toHaveBeenCalledWith(ws, undefined)
     expect(replies(ws)).toHaveLength(0)
   })
 
@@ -586,5 +586,64 @@ describe('sockets that connect and say nothing', () => {
     handleConnection(next)
 
     expect(next.close).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * A phone wants the session and workflow pushes and none of the PTY output. The
+ * socket carries that preference, so it is set here rather than in a handler,
+ * which only ever sees its own params.
+ */
+describe('narrowing what a socket receives', () => {
+  it('takes the initial list from the upgrade', () => {
+    // On the upgrade, not a later frame: `subscribe:set` can only arrive after the
+    // socket is already in the broadcast set, and that gap is enough PTY output to
+    // matter on a phone — on every reconnect.
+    const ws = createMockWs()
+    handleConnection(ws, GOOD_TOKEN, ['session:*'])
+
+    expect(clientRegistry.add).toHaveBeenCalledWith(ws, ['session:*'])
+  })
+
+  it('changes the list on request', () => {
+    const ws = createMockWs()
+    connectAuthed(ws)
+
+    sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { topics: ['session:*'] } })
+
+    expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, ['session:*'])
+  })
+
+  it('acknowledges when asked with an id', async () => {
+    const ws = createMockWs()
+    connectAuthed(ws)
+
+    sendMessage(ws, { jsonrpc: '2.0', id: 7, method: 'subscribe:set', params: { topics: [] } })
+
+    await vi.waitFor(() => expect(replies(ws).length).toBeGreaterThan(0))
+    expect(replies(ws)[0]).toMatchObject({ id: 7, result: { ok: true } })
+  })
+
+  it('does not answer -32601 for a subscribe it handled', async () => {
+    // It is dispatched before the handler map, so it must not fall through to the
+    // unknown-method branch.
+    const ws = createMockWs()
+    connectAuthed(ws)
+
+    sendMessage(ws, { jsonrpc: '2.0', id: 8, method: 'subscribe:set', params: { topics: ['a'] } })
+
+    await vi.waitFor(() => expect(replies(ws).length).toBeGreaterThan(0))
+    expect(replies(ws)[0].error).toBeUndefined()
+  })
+
+  it('refuses one from a socket that has not authenticated', () => {
+    // Everything past the credential check requires a session; a filter is not an
+    // exception just because it only narrows.
+    const ws = createMockWs()
+    handleConnection(ws)
+
+    sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { topics: ['session:*'] } })
+
+    expect(clientRegistry.setTopics).not.toHaveBeenCalled()
   })
 })

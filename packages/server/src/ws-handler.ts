@@ -54,6 +54,11 @@ const handlers = new Map<string, Handler>()
 
 registerCapability('auth', 1)
 
+// Declared so a client knows the server will honour a topic list before it sends
+// one. Without the check, an older server silently drops `subscribe:set` and the
+// client believes it is filtered while receiving everything.
+registerCapability('subscribe', 1)
+
 /**
  * Register a method handler. Called during server startup to wire up
  * manager methods to the WS protocol.
@@ -156,7 +161,11 @@ export function resetTokenTracking(): void {
   pendingSockets = 0
 }
 
-export function handleConnection(ws: WebSocket, credential?: string): void {
+export function handleConnection(
+  ws: WebSocket,
+  credential?: string,
+  initialTopics?: readonly string[]
+): void {
   // Announce the contract first, so a client that has to authenticate by message
   // knows that it must before it is refused for not having.
   ws.send(helloFrame())
@@ -177,7 +186,11 @@ export function handleConnection(ws: WebSocket, credential?: string): void {
   /** Admit the socket: only from here does it receive broadcasts. */
   const admit = (result: Authenticated): void => {
     session = result
-    clientRegistry.add(ws)
+    // Topics from the upgrade rather than a later frame, so a filtered client is
+    // never briefly unfiltered. `subscribe:set` can only run after admission, and
+    // in that gap a busy machine can push a lot of PTY output at a phone that
+    // asked for none — on every reconnect, which on a mobile network is often.
+    clientRegistry.add(ws, initialTopics)
     if (result.tokenId) trackToken(result.tokenId, ws)
     if (authTimer) {
       clearTimeout(authTimer)
@@ -299,6 +312,18 @@ export function handleConnection(ws: WebSocket, credential?: string): void {
       }
       if (id !== undefined && id !== null) {
         ws.send(JSON.stringify(createResponse(id, { ok: claimed })))
+      }
+      return
+    }
+
+    // Changing what this socket receives. Handled here rather than through
+    // `registerNotification` because it is the socket that is being configured,
+    // and a registered handler is given only its params.
+    if (method === 'subscribe:set') {
+      const topics = (params as { topics?: readonly string[] } | undefined)?.topics
+      clientRegistry.setTopics(ws, topics)
+      if (id !== undefined && id !== null) {
+        ws.send(JSON.stringify(createResponse(id, { ok: true })))
       }
       return
     }

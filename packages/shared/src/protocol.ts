@@ -761,6 +761,18 @@ export interface ServerNotifications {
 export interface ClientNotifications {
   'terminal:write': { id: string; data: string }
   'terminal:resize': ResizePayload
+  /**
+   * Narrow which server notifications this socket receives.
+   *
+   * An entry is an exact name (`config:changed`) or a namespace wildcard
+   * (`session:*`). Omitting `topics` restores everything, which is also the
+   * default, so a client that never sends this is unaffected.
+   *
+   * Only honoured when `server:hello` advertised the `subscribe` capability.
+   * Prefer the `topics` query parameter on the socket URL for the initial set:
+   * this message can only take effect after the socket is already receiving.
+   */
+  'subscribe:set': { topics?: readonly string[] }
 }
 
 // ─── Typed helpers ──────────────────────────────────────────────

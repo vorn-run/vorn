@@ -179,7 +179,7 @@ describe('server integration', () => {
       })
 
       expect(JSON.parse(first).method).toBe('server:hello')
-      expect(JSON.parse(first).params.capabilities).toEqual({ auth: 1 })
+      expect(JSON.parse(first).params.capabilities).toEqual({ auth: 1, subscribe: 1 })
       ws.close()
     })
 
@@ -233,6 +233,43 @@ describe('server integration', () => {
       })
       expect(ws.readyState).toBe(WebSocket.OPEN)
       ws.close()
+    })
+  })
+
+  /**
+   * A phone connects over cellular and renders no terminals, but the registry
+   * used to hand every socket every notification — including every byte of every
+   * PTY on the machine.
+   */
+  describe('a socket that asked for less', () => {
+    /** Collect notifications until the server has plainly finished sending. */
+    async function notificationsFor(query: string): Promise<string[]> {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws${query}`, authOptions())
+      const methods: string[] = []
+      ws.on('message', (raw) => {
+        const frame = JSON.parse(raw.toString())
+        if (frame.method && frame.method !== 'server:hello') methods.push(frame.method)
+      })
+      await new Promise<void>((r) => ws.on('open', r))
+
+      const { clientRegistry } = await import('../packages/server/src/broadcast')
+      clientRegistry.broadcast('terminal:data', { id: 'a', data: 'x' })
+      clientRegistry.broadcast('session:updated', { id: 'a' })
+
+      await new Promise((r) => setTimeout(r, 100))
+      ws.close()
+      return methods
+    }
+
+    it('still receives everything when it asks for nothing', async () => {
+      expect(await notificationsFor('')).toEqual(['terminal:data', 'session:updated'])
+    })
+
+    it('receives only what the URL asked for', async () => {
+      // On the URL rather than in a later frame: by the time a frame could arrive
+      // the socket is already in the broadcast set, and that gap repeats on every
+      // reconnect.
+      expect(await notificationsFor('?topics=session:*')).toEqual(['session:updated'])
     })
   })
 
