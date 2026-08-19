@@ -22,11 +22,15 @@ vi.hoisted(() => {
       detectInstalledAgents: () => Promise.resolve(['claude', 'opencode']),
       listDir: () => Promise.resolve([])
     },
-    writable: true
+    writable: true,
+    // Configurable so a later test file can redefine it — many re-stub `window.api`,
+    // and a non-configurable stub here would make them throw.
+    configurable: true
   })
   Object.defineProperty(window, 'matchMedia', {
     value: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
-    writable: true
+    writable: true,
+    configurable: true
   })
 })
 

@@ -28,8 +28,8 @@ export function McpSettings() {
     <div>
       <h2 className="text-xl font-semibold text-white mb-1">Skills &amp; MCP</h2>
       <p className="text-sm text-gray-500 mb-6">
-        Connect your coding agents to Vorn. Each setup below installs the MCP server and the skills
-        that explain what its tools are for.
+        Connect your coding agents to Vorn. Each setup below installs the MCP server along with the
+        guidance that explains what its tools are for.
       </p>
 
       {/* Per-agent commands */}
