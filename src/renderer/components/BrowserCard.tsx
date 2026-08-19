@@ -20,6 +20,7 @@ import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON } from '../lib/icon-button'
 import { browserPaneId, isPromotedCardId } from '../lib/pane-id'
 import { normalizeUrl, displayHost, flattenPageText } from '../lib/browser-url'
+import { loadTweaks, saveTweak, mergeTweaks } from '../lib/design-tweaks'
 
 interface Props {
   /** Session that owns this browser. */
@@ -54,6 +55,19 @@ interface WebviewElement extends HTMLElement {
   /** Identifies this guest to the main process, which is the only place that
    *  can drive it. A `<webview>` carries no session identity of its own. */
   getWebContentsId(): number
+}
+
+/** The path a `file:` url names, or null for anything else. */
+function filePathOf(url: string | null): string | null {
+  if (!url || !url.startsWith('file:')) return null
+  try {
+    const { hostname, pathname } = new URL(url)
+    // A named host is a UNC path on Windows and not this machine's file.
+    if (hostname) return null
+    return decodeURIComponent(pathname)
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -117,6 +131,11 @@ export const BrowserCard = memo(
     // a timer, and the session's own record can land between tries.
     const fileRootRef = useRef<string | undefined>(undefined)
     fileRootRef.current = terminal?.session.worktreePath ?? terminal?.session.projectPath
+    // Which file this tab is showing, when it is showing one. Adjustments are
+    // remembered per file, and only a `file:` url names a file — a page served
+    // over http has no stable key, and a design is a file either way.
+    const filePathRef = useRef<string | null>(null)
+    filePathRef.current = filePathOf(url)
     const [draft, setDraft] = useState(url ?? '')
     // What the loaded page declares itself to be, and the values it is showing.
     // Null for an ordinary web page, which is nearly all of them — so the pane
@@ -137,6 +156,8 @@ export const BrowserCard = memo(
     const applyTweak = useCallback(
       (tweakKey: string, value: unknown) => {
         setTweakValues((prev) => ({ ...prev, [tweakKey]: value }))
+        const path = filePathRef.current
+        if (path) saveTweak(path, tweakKey, value)
         void window.api.setBrowserTweak(sessionId, tweakKey, value).catch(() => {
           // The guest went away mid-turn. The next load re-reads everything, so
           // there is nothing to repair here.
@@ -219,7 +240,37 @@ export const BrowserCard = memo(
           .then(({ manifest: m, values }) => {
             if (stale) return
             setManifest(m)
-            setTweakValues(values ?? {})
+            if (!m?.tweaks) {
+              setTweakValues({})
+              return
+            }
+            // The guest opened on its declared defaults; anything you set for
+            // this file before now has to be put back, or a repaint silently
+            // resets every value the moment the agent touches the design.
+            const path = filePathRef.current
+            const stored = path ? loadTweaks(path) : {}
+            // Precedence, widest to narrowest: what the design declared, then
+            // whatever the page itself holds, then what you set. Your value has
+            // to come last — a freshly loaded page reports its own defaults,
+            // and letting those win would undo the adjustment on every repaint.
+            const merged = mergeTweaks(m.tweaks, stored)
+            for (const [k, v] of Object.entries(values ?? {})) {
+              if (stored[k] === undefined && k in merged) merged[k] = v as (typeof merged)[string]
+            }
+            setTweakValues(merged)
+            // Pushing is best-effort and deliberately last: the chrome is
+            // already correct, and a guest that went away mid-load must not
+            // cost the pane the controls it just drew.
+            try {
+              for (const [k, v] of Object.entries(merged)) {
+                // Only what differs from what the page already holds, so a
+                // design with no overrides is not rewritten on every load.
+                if (values && values[k] === v) continue
+                void Promise.resolve(window.api.setBrowserTweak(sessionId, k, v)).catch(() => {})
+              }
+            } catch {
+              /* the page is gone; the next load re-reads everything */
+            }
           })
           .catch(() => {
             // A pane mid-navigation or already gone. Falling back to the

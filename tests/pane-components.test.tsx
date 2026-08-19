@@ -735,6 +735,41 @@ describe('BrowserCard', () => {
     expect(screen.getByLabelText('Address')).toBeInTheDocument()
   })
 
+  it('puts your adjustments back after the design reloads', async () => {
+    // The whole point of storing them. The guest opens on the file's declared
+    // defaults every time, so without this a repaint resets every value the
+    // moment the agent touches the design — punishing you for its turn.
+    const { saveTweak, resetTweaks } = await import('../src/renderer/lib/design-tweaks')
+    resetTweaks()
+    saveTweak('/repo/budget.dc.html', 'plan', 9000)
+
+    mockSetTweak.mockResolvedValue({ ok: true })
+    mockReadManifest.mockResolvedValue({
+      manifest: {
+        kind: 'design',
+        title: 'Budget',
+        tweaks: { plan: { type: 'number', default: 6000, unit: '$' } }
+      },
+      // What the freshly-loaded page holds: its declared default.
+      values: { plan: 6000 }
+    })
+    act(() =>
+      useAppStore.getState().openBrowserPane('t1', 'file:///repo/budget.dc.html', { trusted: true })
+    )
+    render(<BrowserCard sessionId="t1" />)
+    act(
+      () =>
+        void (document.querySelector('webview') as HTMLElement).dispatchEvent(
+          new Event('did-stop-loading')
+        )
+    )
+
+    // The control shows what you set, and the page is told to match.
+    expect(await screen.findByLabelText('plan')).toHaveValue(9000)
+    await waitFor(() => expect(mockSetTweak).toHaveBeenCalledWith('t1', 'plan', 9000))
+    resetTweaks()
+  })
+
   it('ignores a subframe navigating, which is not where the person is', () => {
     // Ads, embedded docs and OAuth widgets route in place constantly. Taking a
     // subframe's url would have the strip, the address bar and `browser_tabs
