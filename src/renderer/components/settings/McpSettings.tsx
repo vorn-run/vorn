@@ -47,6 +47,9 @@ export function McpSettings() {
               <div className="flex items-center gap-3 mb-3">
                 <AgentIcon agentType={setup.agentType} size={20} />
                 <span className="text-sm font-medium text-gray-200">{agent.displayName}</span>
+                <span className="text-[11px] text-gray-500">
+                  {setup.inAgent ? `Run in ${agent.displayName}` : 'Run in your terminal'}
+                </span>
               </div>
               <div className="space-y-2">
                 {setup.commands.map((command) => (

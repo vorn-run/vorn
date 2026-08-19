@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
@@ -52,6 +52,8 @@ function openMcpSection(): void {
   fireEvent.click(screen.getByText(/Connect MCP Server/i))
 }
 
+afterEach(() => vi.unstubAllGlobals())
+
 beforeEach(() => {
   cleanup()
   useAppStore.setState({ isOnboardingOpen: true })
@@ -87,7 +89,7 @@ describe('onboarding — connecting an agent', () => {
 
   it('gives each command its own copy button', () => {
     const writeText = vi.fn()
-    Object.assign(navigator, { clipboard: { writeText } })
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
     openMcpSection()
 
     const second = claude.commands[1]
