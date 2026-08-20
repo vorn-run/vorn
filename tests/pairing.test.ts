@@ -230,3 +230,30 @@ describe('waiting on a person', () => {
     expect(mintOwnerTokenMock).toHaveBeenCalledWith('Javier iPhone')
   })
 })
+
+describe('one pairing not disturbing the next', () => {
+  it('a late collect leaves the code now on screen alive', () => {
+    // The case the approval window exists for: a phone that lost its network
+    // between scanning and collecting. Meanwhile the owner gave up and showed
+    // a new code, which must still work.
+    const first = startPairing()
+    const stranded = scan(first.code)
+    approveRequest(stranded)
+
+    const second = startPairing()
+    pollRequest(stranded, 'mac')
+
+    expect(redeemCode(second.code, 'Another phone', FROM).ok).toBe(true)
+  })
+
+  it('still retires the code it belongs to', () => {
+    const { code } = startPairing()
+    const requestId = scan(code)
+    approveRequest(requestId)
+
+    pollRequest(requestId, 'mac')
+
+    // Nothing is showing now, so nothing can be offered.
+    expect(redeemCode(code, 'Another phone', FROM).ok).toBe(false)
+  })
+})

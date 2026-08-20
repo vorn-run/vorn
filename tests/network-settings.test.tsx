@@ -46,6 +46,14 @@ const useLocalServer = vi.fn()
 const listDeviceTokens = vi.fn()
 const createDeviceToken = vi.fn()
 const revokeDeviceToken = vi.fn()
+const startPairing = vi.fn()
+const pendingPairings = vi.fn()
+const approvePairing = vi.fn()
+const denyPairing = vi.fn()
+const cancelPairing = vi.fn()
+/** Subscriptions: the panel keeps the unsubscribe, so one has to come back. */
+const onPairingRequested = vi.fn()
+const onPairingCollected = vi.fn()
 const getTailscaleStatus = vi.fn()
 const getReachableUrls = vi.fn()
 const saveConfig = vi.fn()
@@ -81,6 +89,13 @@ beforeEach(() => {
     plaintext: 'vorn_tok1_secret'
   })
   revokeDeviceToken.mockResolvedValue({ revoked: true })
+  startPairing.mockResolvedValue({ code: 'ABCD-EFGH', expiresAt: Date.now() + 300_000 })
+  pendingPairings.mockResolvedValue([])
+  approvePairing.mockResolvedValue({ ok: true })
+  denyPairing.mockResolvedValue({ ok: true })
+  cancelPairing.mockResolvedValue({ ok: true })
+  onPairingRequested.mockReturnValue(() => {})
+  onPairingCollected.mockReturnValue(() => {})
   getConnectSettings.mockResolvedValue({ mode: 'local', url: '', hasToken: false })
   saveConnectSettings.mockResolvedValue({ ok: true })
   useLocalServer.mockResolvedValue({ ok: true })
@@ -91,6 +106,13 @@ beforeEach(() => {
     listDeviceTokens,
     createDeviceToken,
     revokeDeviceToken,
+    startPairing,
+    pendingPairings,
+    approvePairing,
+    denyPairing,
+    cancelPairing,
+    onPairingRequested,
+    onPairingCollected,
     getConnectSettings,
     saveConnectSettings,
     useLocalServer
@@ -392,12 +414,83 @@ describe('the device list', () => {
     await renderPanel()
 
     await user.click(screen.getByText('Add device'))
+    await user.click(screen.getByText('Pair manually instead'))
     await user.type(screen.getByLabelText('What is this device?'), 'My phone')
     await user.click(screen.getByText('Create token'))
 
     await waitFor(() => expect(screen.getByText('vorn_tok1_secret')).toBeInTheDocument())
     expect(screen.getByText(/only time it can be shown/)).toBeInTheDocument()
     expect(createDeviceToken).toHaveBeenCalledWith('My phone')
+  })
+
+  it('leads with a code to scan, because that is what a phone wants', async () => {
+    const user = userEvent.setup()
+    await renderPanel()
+
+    await user.click(screen.getByText('Add device'))
+
+    // No question first: showing a code is the answer almost every time.
+    await waitFor(() => expect(screen.getByText('ABCD-EFGH')).toBeInTheDocument())
+    expect(startPairing).toHaveBeenCalled()
+    expect(screen.getByAltText('Pairing code')).toBeInTheDocument()
+  })
+
+  it('offers a code for each address, so a phone can be met on its own network', async () => {
+    // Sorting puts the tailnet first, which silently made it the only address a
+    // code ever carried.
+    getReachableUrls.mockResolvedValue({
+      urls: ['http://100.79.17.117:5199/app/', 'http://192.168.0.12:5199/app/'],
+      port: 5199,
+      remote: true
+    })
+    const user = userEvent.setup()
+    await renderPanel()
+
+    await user.click(screen.getByText('Add device'))
+
+    await waitFor(() => expect(screen.getByText('100.79.17.117')).toBeInTheDocument())
+    expect(screen.getByText('192.168.0.12')).toBeInTheDocument()
+  })
+
+  it('will not hand over a token until a person says so', async () => {
+    let announce: ((request: unknown) => void) | undefined
+    onPairingRequested.mockImplementation((cb: (request: unknown) => void) => {
+      announce = cb
+      return () => {}
+    })
+    const user = userEvent.setup()
+    await renderPanel()
+
+    act(() =>
+      announce?.({
+        requestId: 'req-1',
+        deviceName: 'Javier iPhone',
+        address: '192.168.0.31',
+        askedAt: Date.now(),
+        status: 'pending'
+      })
+    )
+
+    // Named, so the person approving can tell whether they recognise it.
+    await waitFor(() => expect(screen.getByText('Javier iPhone')).toBeInTheDocument())
+    expect(screen.getByText('192.168.0.31')).toBeInTheDocument()
+    expect(approvePairing).not.toHaveBeenCalled()
+
+    await user.click(screen.getByText('Approve'))
+    expect(approvePairing).toHaveBeenCalledWith('req-1')
+  })
+
+  it('retires a code when it is put away, not just hides it', async () => {
+    // Taking it off screen while the server still honours it is the opposite
+    // of stopping: whoever photographed it could use it for five more minutes.
+    const user = userEvent.setup()
+    await renderPanel()
+    await user.click(screen.getByText('Add device'))
+    await waitFor(() => expect(screen.getByText('ABCD-EFGH')).toBeInTheDocument())
+
+    await user.click(screen.getByText('Cancel'))
+
+    expect(cancelPairing).toHaveBeenCalled()
   })
 
   it('asks before revoking, since a revoked device stops working at once', async () => {

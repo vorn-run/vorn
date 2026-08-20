@@ -5,7 +5,13 @@ import { addressKind, addressHost } from './address-kind'
 
 /** Ticks once a second so a shown code says how long it has left. */
 function useCountdown(expiresAt: number | null): number {
-  const [remaining, setRemaining] = useState(0)
+  // Seeded from the deadline rather than from zero. Effects run after paint, so
+  // a zero start means the first frame of a freshly issued code reports no time
+  // left, and anything reading that renders the expired state for a frame
+  // before the first tick corrects it.
+  const [remaining, setRemaining] = useState(() =>
+    expiresAt === null ? 0 : Math.max(0, expiresAt - Date.now())
+  )
   useEffect(() => {
     if (expiresAt === null) return
     const tick = (): void => setRemaining(Math.max(0, expiresAt - Date.now()))
@@ -121,6 +127,12 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
     setExpiresAt(null)
     setAsking(null)
     setName('')
+    setChosenUrl(null)
+    // Retired, not merely hidden. Taking a code off screen while the server
+    // still honours it is the opposite of what stopping means: whoever
+    // photographed it a moment ago could still use it for the rest of the five
+    // minutes, after it was explicitly put away.
+    void window.api.cancelPairing()
   }, [])
 
   const decide = async (approve: boolean): Promise<void> => {
@@ -285,7 +297,12 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
             </div>
             <div className="mt-4 flex flex-col items-start gap-1">
               <button
-                onClick={() => setAdding('token')}
+                onClick={() => {
+                  void window.api.cancelPairing()
+                  setCode(null)
+                  setExpiresAt(null)
+                  setAdding('token')
+                }}
                 className="px-2 py-1 -ml-2 text-xs rounded-md text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors"
               >
                 Pair manually instead

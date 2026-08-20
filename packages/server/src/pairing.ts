@@ -61,6 +61,17 @@ interface ActiveCode {
 
 interface StoredRequest extends PairingRequest {
   decidedAt: number | null
+  /**
+   * The code this request came from.
+   *
+   * A request outlives the code that made it: it can be approved, sit
+   * uncollected while a phone is off the network, and be collected after the
+   * owner has given up and started showing a different code. Without knowing
+   * which code it belongs to, collecting it retires whichever code happens to
+   * be current, and the screen goes on displaying a live countdown for one the
+   * server has already forgotten.
+   */
+  code: string
 }
 
 let active: ActiveCode | null = null
@@ -156,7 +167,8 @@ export function redeemCode(rawCode: unknown, deviceName: unknown, address: strin
     address,
     askedAt: now,
     status: 'pending',
-    decidedAt: null
+    decidedAt: null,
+    code: active.code
   })
   log.info({ requestId, deviceName: name }, '[pairing] a device asked to pair')
   return { ok: true, requestId }
@@ -167,7 +179,7 @@ export function pendingRequests(): PairingRequest[] {
   const now = Date.now()
   return [...requests.values()]
     .filter((r) => r.status === 'pending' && now - r.askedAt < CODE_TTL_MS)
-    .map(({ decidedAt: _decidedAt, ...request }) => request)
+    .map(({ decidedAt: _decidedAt, code: _code, ...request }) => request)
 }
 
 export function approveRequest(requestId: unknown): boolean {
@@ -225,7 +237,9 @@ export function pollRequest(requestId: unknown, machineName: string): PollResult
 
   const minted = mintOwnerToken(request.deviceName)
   request.status = 'collected'
-  active = null
+  // Only if this is still the code that produced the request. A late collect
+  // must not retire a code the owner is currently showing for someone else.
+  if (active?.code === request.code) active = null
   log.info({ requestId: request.requestId }, '[pairing] token collected')
   return { status: 'approved', token: minted.plaintext, name: machineName }
 }
