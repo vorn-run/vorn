@@ -51,22 +51,16 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
   )
 }
 
-/**
- * The address as something you can point a phone at.
- *
- * Sized to sit beside the address rather than below it. It used to be 200px in its
- * own centred block, which made scanning the panel mean scrolling past a picture to
- * reach the device list.
- */
-export function QRCode128({ url }: { url: string }) {
+export function ScannableQRCode({ url }: { url: string }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
     QRCode.toDataURL(url, {
-      width: 256,
-      margin: 1,
-      color: { dark: '#ffffffFF', light: '#00000000' }
+      width: 640,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#000000ff', light: '#ffffffff' }
     })
       .then((data) => {
         if (mounted) setDataUrl(data)
@@ -82,9 +76,9 @@ export function QRCode128({ url }: { url: string }) {
   return (
     <img
       src={dataUrl}
-      alt="QR code to connect"
-      title="Scan with your phone"
-      className="w-[104px] h-[104px] shrink-0 rounded-md bg-white/[0.06] p-1.5 border border-white/[0.06]"
+      alt="Pairing code"
+      title="Scan with the Vorn app"
+      className="w-[212px] h-[212px] shrink-0 rounded-lg bg-white p-2"
     />
   )
 }

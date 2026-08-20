@@ -4,7 +4,6 @@ import { TailscaleStatus, ReachableUrls } from '../../../shared/types'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SegmentedControl } from './SegmentedControl'
 import { ShareThisMachine } from './network/ShareThisMachine'
-import { PairAPhone } from './network/PairAPhone'
 import { UseAnotherMachine } from './network/UseAnotherMachine'
 
 /**
@@ -155,17 +154,12 @@ export function NetworkSettings() {
       {viewing === 'host' && connect ? (
         <UseAnotherMachine mode={connect.mode} url={connect.url} />
       ) : (
-        <>
-          <ShareThisMachine
-            enabled={enabled}
-            status={status}
-            reachable={reachable}
-            onChange={setEnabled}
-          />
-          {/* Under the addresses, because pairing is what you do once one of
-              them is reachable. Renders nothing while bound to loopback. */}
-          <PairAPhone reachable={reachable} />
-        </>
+        <ShareThisMachine
+          enabled={enabled}
+          status={status}
+          reachable={reachable}
+          onChange={setEnabled}
+        />
       )}
     </div>
   )

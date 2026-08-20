@@ -1,6 +1,24 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { DeviceToken } from '../../../../shared/types'
-import { CopyButton } from './shared'
+import type { DeviceToken, PairingRequest, ReachableUrls } from '../../../../shared/types'
+import { CopyButton, ScannableQRCode } from './shared'
+
+/** Ticks once a second so a shown code says how long it has left. */
+function useCountdown(expiresAt: number | null): number {
+  const [remaining, setRemaining] = useState(0)
+  useEffect(() => {
+    if (expiresAt === null) return
+    const tick = (): void => setRemaining(Math.max(0, expiresAt - Date.now()))
+    tick()
+    const timer = setInterval(tick, 1000)
+    return () => clearInterval(timer)
+  }, [expiresAt])
+  return remaining
+}
+
+function formatRemaining(ms: number): string {
+  const total = Math.ceil(ms / 1000)
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
 
 /**
  * The devices allowed to connect, and the only place to make one.
@@ -9,11 +27,23 @@ import { CopyButton } from './shared'
  * server and typing `vorn-server token create`, which the panel could only tell you
  * about rather than do. That was tolerable while the server was always the machine
  * in front of you. It stopped being tolerable once the server could be elsewhere.
+ *
+ * Adding a device asks how, rather than offering two separate controls that both
+ * add one. Showing a code is the good way and leads; a token to copy stays for
+ * the machines a camera cannot reach, and for a device with no camera at all.
  */
-export function DeviceTokenList() {
+export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null }) {
   const [tokens, setTokens] = useState<DeviceToken[] | null>(null)
-  const [creating, setCreating] = useState(false)
+  /**
+   * How a device is being added, if one is. Adding goes straight to a code:
+   * that is what nearly every device wants, and asking first is a question
+   * with a predictable answer. Typing is reachable from there.
+   */
+  const [adding, setAdding] = useState<'scan' | 'token' | null>(null)
   const [name, setName] = useState('')
+  const [code, setCode] = useState<string | null>(null)
+  const [expiresAt, setExpiresAt] = useState<number | null>(null)
+  const [asking, setAsking] = useState<PairingRequest | null>(null)
   /** Shown once, then unrecoverable: only its hash is stored. */
   const [minted, setMinted] = useState<{ name: string; plaintext: string } | null>(null)
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null)
@@ -33,18 +63,61 @@ export function DeviceTokenList() {
     load()
   }, [load])
 
+  useEffect(() => window.api.onPairingRequested((request) => setAsking(request)), [])
+
+  useEffect(() => {
+    return () => {
+      // Closing the panel puts any code away: it is only safe while watched.
+      void window.api.cancelPairing()
+    }
+  }, [])
+
   const create = async (): Promise<void> => {
     setError(null)
     try {
       const result = await window.api.createDeviceToken(name.trim() || 'Device')
       setMinted({ name: result.token.name, plaintext: result.plaintext })
       setName('')
-      setCreating(false)
+      setAdding(null)
       await load()
     } catch (err) {
       console.error('[NetworkSettings] failed to create a device token:', err)
       setError('Could not create a token.')
     }
+  }
+
+  const startScan = async (): Promise<void> => {
+    setError(null)
+    try {
+      const started = await window.api.startPairing()
+      setCode(started.code)
+      setExpiresAt(started.expiresAt)
+      setAdding('scan')
+    } catch {
+      setError('Could not start pairing.')
+    }
+  }
+
+  const closeAdding = useCallback((): void => {
+    setAdding(null)
+    setCode(null)
+    setExpiresAt(null)
+    setAsking(null)
+    setName('')
+  }, [])
+
+  const decide = async (approve: boolean): Promise<void> => {
+    if (!asking) return
+    const request = asking
+    setAsking(null)
+    try {
+      if (approve) await window.api.approvePairing(request.requestId)
+      else await window.api.denyPairing(request.requestId)
+    } catch {
+      setError('Could not answer that request.')
+    }
+    closeAdding()
+    await load()
   }
 
   const revoke = async (id: string): Promise<void> => {
@@ -58,6 +131,14 @@ export function DeviceTokenList() {
     }
   }
 
+  const remaining = useCountdown(expiresAt)
+  // Derived rather than cleared by an effect: a code past its countdown is one
+  // the server has already forgotten.
+  const showingCode = code !== null && remaining > 0
+  // A phone cannot reach a server bound to loopback, so a code it could never
+  // redeem is not worth offering.
+  const canScan = reachable?.remote === true && (reachable?.urls.length ?? 0) > 0
+
   const active = (tokens ?? []).filter((t) => !t.revokedAt)
 
   return (
@@ -66,9 +147,9 @@ export function DeviceTokenList() {
         <div className="text-[10px] text-gray-600 uppercase tracking-wider font-medium">
           Devices{active.length > 0 && ` · ${active.length}`}
         </div>
-        {!creating && !minted && (
+        {!adding && !minted && (
           <button
-            onClick={() => setCreating(true)}
+            onClick={() => void (canScan ? startScan() : setAdding('token'))}
             className="text-xs text-gray-400 hover:text-white px-2 py-1 -mr-2 rounded-md hover:bg-white/[0.06] transition-colors"
           >
             Add device
@@ -101,7 +182,95 @@ export function DeviceTokenList() {
         </div>
       )}
 
-      {creating && (
+      {asking && (
+        <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3">
+          <div className="text-sm text-gray-200 font-medium">A phone is asking to pair</div>
+          <dl className="mt-2 space-y-1 text-xs">
+            <div className="flex justify-between gap-3">
+              <dt className="text-gray-500">Device</dt>
+              <dd className="text-gray-300 font-mono truncate">{asking.deviceName}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-gray-500">Address</dt>
+              <dd className="text-gray-300 font-mono">{asking.address}</dd>
+            </div>
+          </dl>
+          <p className="mt-2 text-[11px] leading-4 text-gray-500">
+            This lets it run terminals on this machine. Only approve a phone you are holding.
+          </p>
+          <div className="flex gap-2 mt-2.5">
+            <button
+              onClick={() => void decide(true)}
+              className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-200 border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
+            >
+              Approve
+            </button>
+            <button
+              onClick={() => void decide(false)}
+              className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+            >
+              Deny
+            </button>
+          </div>
+        </div>
+      )}
+
+      {adding === 'scan' && !asking && showingCode && reachable && (
+        <div className="mt-3 flex items-start gap-4">
+          <ScannableQRCode
+            url={`vorn://pair?url=${encodeURIComponent(reachable.urls[0])}&code=${code}`}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-gray-200">Scan this in the Vorn app.</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Then approve the phone here. It will ask by name.
+            </p>
+            <div className="mt-3 text-[10px] text-gray-600 uppercase tracking-wider">
+              Or type this code
+            </div>
+            <div className="font-mono text-base text-gray-200 tracking-widest mt-0.5">{code}</div>
+            <div className="mt-1 text-[11px] text-gray-500 tabular-nums">
+              Expires in {formatRemaining(remaining)}
+            </div>
+            <div className="mt-4 flex flex-col items-start gap-1">
+              <button
+                onClick={() => setAdding('token')}
+                className="px-2 py-1 -ml-2 text-xs rounded-md text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors"
+              >
+                Pair manually instead
+              </button>
+              <button
+                onClick={closeAdding}
+                className="px-2 py-1 -ml-2 text-xs rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {adding === 'scan' && !asking && !showingCode && (
+        <div className="mt-3">
+          <p className="text-xs text-gray-500">That code expired.</p>
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={() => void startScan()}
+              className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-200 border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
+            >
+              Show another
+            </button>
+            <button
+              onClick={closeAdding}
+              className="px-3 py-1.5 text-xs rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {adding === 'token' && !asking && (
         <div className="mt-3">
           <label className="block text-xs text-gray-400 mb-1.5" htmlFor="device-token-name">
             What is this device?
@@ -125,10 +294,7 @@ export function DeviceTokenList() {
               Create token
             </button>
             <button
-              onClick={() => {
-                setCreating(false)
-                setName('')
-              }}
+              onClick={closeAdding}
               className="px-3 py-1.5 text-xs font-medium rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
             >
               Cancel
@@ -139,7 +305,7 @@ export function DeviceTokenList() {
 
       {error && <p className="text-xs text-amber-400/80 mt-2">{error}</p>}
 
-      {tokens !== null && active.length === 0 && !creating && !minted && (
+      {tokens !== null && active.length === 0 && !adding && !minted && (
         <p className="text-xs text-gray-600 mt-2">
           No devices yet. Add one, then open the address above on it.
         </p>
