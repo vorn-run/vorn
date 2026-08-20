@@ -174,7 +174,7 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
       {/* The one moment the token is readable. Said plainly rather than left to be
           discovered after the panel closes. */}
       {minted && (
-        <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-3">
+        <div className="mt-3 rounded-lg border border-bronzo/30 bg-surface-raised p-3">
           <div className="text-sm font-medium text-gray-200">
             Token for &ldquo;{minted.name}&rdquo;
           </div>
@@ -182,9 +182,7 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
             Copy it now. Only its hash is stored, so this is the only time it can be shown.
           </p>
           <div className="flex items-center rounded-md bg-black/30 border border-white/[0.06] px-3 py-2">
-            <code className="text-xs text-emerald-400 font-mono flex-1 truncate">
-              {minted.plaintext}
-            </code>
+            <code className="text-xs text-ink font-mono flex-1 truncate">{minted.plaintext}</code>
             <CopyButton text={minted.plaintext} />
           </div>
           <button
@@ -197,8 +195,11 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
       )}
 
       {asking && (
-        <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3">
-          <div className="text-sm text-gray-200 font-medium">A phone is asking to pair</div>
+        <div className="mt-3 rounded-lg border border-bronzo/40 bg-surface-raised p-3">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-bronzo flex-shrink-0" />
+            <div className="text-sm text-gray-200 font-medium">A phone is asking to pair</div>
+          </div>
           <dl className="mt-2 space-y-1 text-xs">
             <div className="flex justify-between gap-3">
               <dt className="text-gray-500">Device</dt>
@@ -347,7 +348,7 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
         </div>
       )}
 
-      {error && <p className="text-xs text-amber-400/80 mt-2">{error}</p>}
+      {error && <p className="text-xs text-danger mt-2">{error}</p>}
 
       {tokens !== null && active.length === 0 && !adding && !minted && (
         <p className="text-xs text-gray-600 mt-2">
@@ -374,7 +375,7 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
                 <div className="flex gap-1.5 shrink-0">
                   <button
                     onClick={() => void revoke(token.id)}
-                    className="px-2 py-1 text-xs font-medium rounded-md text-red-300 border border-red-500/20 hover:bg-red-500/10 transition-colors"
+                    className="px-2 py-1 text-xs font-medium rounded-md text-danger border border-danger/25 hover:bg-danger/10 transition-colors"
                   >
                     Revoke
                   </button>
