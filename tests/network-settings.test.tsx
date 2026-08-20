@@ -414,7 +414,7 @@ describe('the device list', () => {
     await renderPanel()
 
     await user.click(screen.getByText('Add device'))
-    await user.click(screen.getByText('Pair manually instead'))
+    await user.click(await screen.findByText('Pair manually instead'))
     await user.type(screen.getByLabelText('What is this device?'), 'My phone')
     await user.click(screen.getByText('Create token'))
 
@@ -432,7 +432,7 @@ describe('the device list', () => {
     // No question first: showing a code is the answer almost every time.
     await waitFor(() => expect(screen.getByText('ABCD-EFGH')).toBeInTheDocument())
     expect(startPairing).toHaveBeenCalled()
-    expect(screen.getByAltText('Pairing code')).toBeInTheDocument()
+    expect(await screen.findByAltText('Pairing code')).toBeInTheDocument()
   })
 
   it('offers a code for each address, so a phone can be met on its own network', async () => {
