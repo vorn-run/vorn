@@ -45,10 +45,6 @@ export default defineConfig({
       '@shared': path.resolve(__dirname, 'src/shared'),
       '@main': path.resolve(__dirname, 'src/main'),
       '@renderer': path.resolve(__dirname, 'src/renderer'),
-      // node-pty is installed twice (root and packages/server), so a bare
-      // vi.mock('node-pty') in a test only reached the root copy and server
-      // modules kept spawning real terminals. Pin every importer to one copy.
-      'node-pty': path.resolve(__dirname, 'node_modules/node-pty'),
       // Connector packages depend on the published SDK. Tests must exercise
       // the SDK source, not whatever `dist` a previous build left behind.
       '@vornrun/connector-sdk': path.resolve(__dirname, 'packages/connector-sdk/src/index.ts')
