@@ -600,6 +600,14 @@ const api = {
   denyPairing: (requestId: string): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke(IPC.PAIRING_DENY, { requestId }),
   cancelPairing: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.PAIRING_CANCEL),
+  onPairingCollected: (callback: (event: { requestId: string }) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, event: { requestId: string }): void =>
+      callback(event)
+    ipcRenderer.on(IPC.PAIRING_COLLECTED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.PAIRING_COLLECTED, listener)
+    }
+  },
   onPairingRequested: (callback: (request: PairingRequest) => void) => {
     const listener = (_: Electron.IpcRendererEvent, request: PairingRequest): void =>
       callback(request)

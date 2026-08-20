@@ -158,7 +158,13 @@ export async function startServer(
 
   app.post('/api/pair/poll', { preValidation: requireJson }, async (req) => {
     const { requestId } = (req.body ?? {}) as { requestId?: unknown }
-    return pollRequest(requestId, os.hostname().replace(/\.local$/, ''))
+    const result = pollRequest(requestId, os.hostname().replace(/\.local$/, ''))
+    // The token comes into existence here rather than at approval, so this is
+    // the only moment a device list can be told it has something new to show.
+    if (result.status === 'approved' && typeof requestId === 'string') {
+      clientRegistry.broadcast(IPC.PAIRING_COLLECTED, { requestId })
+    }
+    return result
   })
 
   // Serve task images via HTTP (used by web app instead of file:// protocol)

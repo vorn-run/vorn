@@ -76,6 +76,12 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
 
   useEffect(() => window.api.onPairingRequested((request) => setAsking(request)), [])
 
+  // Approving does not create the token; the phone collecting it does, a moment
+  // later. Reloading on approval therefore looked at a list that had nothing
+  // new in it yet, and the device only turned up if the panel was left and
+  // reopened.
+  useEffect(() => window.api.onPairingCollected(() => void load()), [load])
+
   useEffect(() => {
     return () => {
       // Closing the panel puts any code away: it is only safe while watched.

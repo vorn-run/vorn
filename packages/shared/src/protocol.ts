@@ -830,6 +830,12 @@ export interface ServerNotifications {
   'session-exit': TerminalSession
   /** A phone offered a valid pairing code and is waiting to be approved. */
   'pairing:requested': PairingRequest
+  /**
+   * A phone collected the token it was approved for, which is the moment the
+   * credential starts existing. Approving does not mint one: a request nobody
+   * collects should leave nothing behind.
+   */
+  'pairing:collected': { requestId: string }
   'database:corruption-recovered': { message: string }
 }
 

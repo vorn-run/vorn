@@ -237,6 +237,7 @@ function wireServerNotifications(bridge: ServerBridge): void {
       case IPC.SCRIPT_EXIT:
       case IPC.WORKTREE_CONFIRM_CLEANUP:
       case IPC.PAIRING_REQUESTED:
+      case IPC.PAIRING_COLLECTED:
       case IPC.SESSION_CREATED:
       case IPC.SESSION_UPDATED:
       case IPC.SESSION_REORDERED:

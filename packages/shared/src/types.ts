@@ -1515,6 +1515,7 @@ export const IPC = {
   PAIRING_CANCEL: 'pairing:cancel',
   PAIRING_PENDING: 'pairing:pending',
   PAIRING_REQUESTED: 'pairing:requested',
+  PAIRING_COLLECTED: 'pairing:collected',
   TOKEN_LIST: 'token:list',
   TOKEN_CREATE: 'token:create',
   TOKEN_REVOKE: 'token:revoke',

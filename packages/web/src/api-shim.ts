@@ -603,6 +603,8 @@ export function createApiShim(wsUrl: string) {
     approvePairing: (requestId: string) => rpc.invoke('pairing:approve', { requestId }),
     denyPairing: (requestId: string) => rpc.invoke('pairing:deny', { requestId }),
     cancelPairing: () => rpc.invoke('pairing:cancel'),
+    onPairingCollected: (callback: (event: { requestId: string }) => void) =>
+      rpc.on('pairing:collected', callback as (p: unknown) => void),
     onPairingRequested: (
       callback: (request: import('../../shared/src/types').PairingRequest) => void
     ) => rpc.on('pairing:requested', callback as (p: unknown) => void),
