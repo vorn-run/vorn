@@ -156,6 +156,23 @@ export interface DeviceToken {
   revokedAt: string | null
 }
 
+/**
+ * A phone that offered a valid pairing code and is waiting to be approved.
+ *
+ * Carries what the person needs in order to recognise it. Approving is the
+ * step that stops a code someone photographed off a screen from becoming a
+ * token, so the prompt has to say which device is asking and from where.
+ */
+export interface PairingRequest {
+  requestId: string
+  /** What the device calls itself. */
+  deviceName: string
+  /** The address it reached the server from. */
+  address: string
+  askedAt: number
+  status: 'pending' | 'approved' | 'denied' | 'collected'
+}
+
 export interface WorkspaceConfig {
   id: string // 'personal' for default, UUID for user-created
   name: string
@@ -1492,6 +1509,13 @@ export const IPC = {
   AGENT_DETECT_INSTALLED: 'agent:detectInstalled',
   TAILSCALE_STATUS: 'tailscale:status',
   SERVER_REACHABLE_URLS: 'server:reachableUrls',
+  PAIRING_START: 'pairing:start',
+  PAIRING_APPROVE: 'pairing:approve',
+  PAIRING_DENY: 'pairing:deny',
+  PAIRING_CANCEL: 'pairing:cancel',
+  PAIRING_PENDING: 'pairing:pending',
+  PAIRING_REQUESTED: 'pairing:requested',
+  PAIRING_COLLECTED: 'pairing:collected',
   TOKEN_LIST: 'token:list',
   TOKEN_CREATE: 'token:create',
   TOKEN_REVOKE: 'token:revoke',

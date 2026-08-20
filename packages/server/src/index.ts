@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import Fastify from 'fastify'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 
 // CJS (prod bundle): __dirname is a global. ESM (dev/tsx): fall back to the
 // directory of the entry script. Avoids import.meta.url which tsup emits as
@@ -9,7 +11,8 @@ const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(pro
 import websocket from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { handleConnection, registerMethod } from './ws-handler'
-import { parseTopics } from './broadcast'
+import { parseTopics, clientRegistry } from './broadcast'
+import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
 import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
@@ -19,6 +22,7 @@ import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
+import { redeemCode, pollRequest, pendingRequests } from './pairing'
 import { getTailscaleStatus } from './tailscale'
 import { initRebind, checkAndRebind } from './server-rebind'
 import { isAllowedUpgrade, logRefusedUpgrade, setTrustedOriginHosts } from './ws-origin'
@@ -72,8 +76,6 @@ export async function startServer(
   scheduler.syncSchedules(config.workflows ?? [])
 
   // Re-sync managers and broadcast to clients when config changes
-  const { clientRegistry } = await import('./broadcast')
-  const { IPC } = await import('@vornrun/shared/types')
   configManager.onConfigChanged((cfg) => {
     setEnvPassthrough(cfg.defaults.envPassthrough)
     ptyManager.setAgentCommands(cfg.agentCommands)
@@ -118,6 +120,52 @@ export async function startServer(
   )
 
   app.get('/health', async () => ({ status: 'ok' }))
+
+  /**
+   * Pairing, the phone's half.
+   *
+   * HTTP rather than the socket, and polled rather than held open. A phone
+   * that has not paired has no credential, and the socket admits exactly one
+   * method before authenticating — widening that is the last thing worth doing
+   * to reach a five minute flow. Worse, an unauthenticated socket is capped at
+   * 64 with a ten second window, so holding one open for the length of a
+   * pairing window turns that cap into a way to lock everyone else out.
+   *
+   * Neither route returns a token without a person having approved on the
+   * machine being paired to. What they can be used for is burning a code the
+   * owner is currently looking at, which the attempt cap bounds.
+   */
+  const requireJson = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    // A form post from a hostile page cannot set this content type without a
+    // preflight, and no CORS headers are ever sent, so nothing cross-origin
+    // reads the reply either.
+    if (!req.headers['content-type']?.includes('application/json')) {
+      await reply.code(415).send({ error: 'Expected application/json' })
+    }
+  }
+
+  app.post('/api/pair/redeem', { preValidation: requireJson }, async (req, reply) => {
+    const { code, deviceName } = (req.body ?? {}) as { code?: unknown; deviceName?: unknown }
+    const result = redeemCode(code, deviceName, req.ip)
+    if (!result.ok) return reply.code(400).send({ error: result.reason })
+
+    const pending = pendingRequests().find((r) => r.requestId === result.requestId)
+    // The desktop is told rather than asked to poll: the approval prompt has to
+    // appear the moment the phone asks, not on the next refresh.
+    if (pending) clientRegistry.broadcast(IPC.PAIRING_REQUESTED, pending)
+    return { requestId: result.requestId }
+  })
+
+  app.post('/api/pair/poll', { preValidation: requireJson }, async (req) => {
+    const { requestId } = (req.body ?? {}) as { requestId?: unknown }
+    const result = pollRequest(requestId, os.hostname().replace(/\.local$/, ''))
+    // The token comes into existence here rather than at approval, so this is
+    // the only moment a device list can be told it has something new to show.
+    if (result.status === 'approved' && typeof requestId === 'string') {
+      clientRegistry.broadcast(IPC.PAIRING_COLLECTED, { requestId })
+    }
+    return result
+  })
 
   // Serve task images via HTTP (used by web app instead of file:// protocol)
   app.get('/api/task-images/:taskId/:filename', async (req, reply) => {

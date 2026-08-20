@@ -8,3 +8,11 @@ coverage/
 .yarn/install-state.gz
 .mcp.json
 hooks.json
+
+# Internal and machine-local, none of it belongs in a public history.
+# Release videos are large renders kept beside the site rather than in it.
+website/release-videos/
+# Written for an agent working in this checkout, not part of the product.
+CLAUDE.md
+# Supabase CLI state: which project this machine is linked to.
+supabase/

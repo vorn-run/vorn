@@ -24,7 +24,6 @@ export default defineConfig({
         // Process entry point: starts the stdio server, nothing to assert.
         'packages/server/src/index.ts',
         'packages/server/src/register-methods.ts',
-        'packages/server/src/pty-manager.ts',
         'packages/server/src/logger.ts',
         'packages/server/src/hook-server.ts',
         'packages/server/src/hook-installer.ts',

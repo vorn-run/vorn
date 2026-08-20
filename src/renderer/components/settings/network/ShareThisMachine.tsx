@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { TailscaleStatus, ReachableUrls } from '../../../../shared/types'
 import { SettingRow } from '../SettingRow'
 import { ToggleSwitch } from '../ToggleSwitch'
-import { CopyButton, QRCode128 } from './shared'
+import { CopyButton } from './shared'
 import { DeviceTokenList } from './DeviceTokenList'
 
 /**
@@ -37,7 +37,7 @@ function AddressBlock({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="text-[10px] text-gray-600 uppercase tracking-wider font-medium mb-1.5">
-            Open on your phone
+            Open in a browser
           </div>
           <div className="flex items-center">
             <code className="text-sm text-emerald-400 font-mono truncate">{primary}</code>
@@ -77,7 +77,6 @@ function AddressBlock({
             )}
           </p>
         </div>
-        <QRCode128 url={primary} />
       </div>
 
       {showAll && rest.length > 0 && (
@@ -175,7 +174,7 @@ export function ShareThisMachine({
             onTailnet={onTailnet}
             tailscaleInstalled={status?.installed === true}
           />
-          <DeviceTokenList />
+          <DeviceTokenList reachable={reachable} />
         </>
       )}
     </div>

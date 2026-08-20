@@ -334,12 +334,15 @@ class PtyManager extends EventEmitter {
 
     // Password prompt auto-detection
     if (authMethod === 'password' && payload._decryptedPassword) {
+      // Captured in a closure: the credentials are stripped from the payload a
+      // few lines below, long before a prompt ever arrives.
+      const password = payload._decryptedPassword
       let passwordSent = false
       const pwListener = ptyProcess.onData((data: string) => {
         if (!passwordSent && /[Pp]ass(word|phrase)[^:]*:\s*$/.test(data)) {
           passwordSent = true
           setTimeout(() => {
-            if (this.ptys.has(id)) ptyProcess.write(payload._decryptedPassword + '\r')
+            if (this.ptys.has(id)) ptyProcess.write(password + '\r')
           }, 50)
         }
       })

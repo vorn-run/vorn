@@ -28,6 +28,13 @@ vi.mock('../packages/server/src/database', () => ({
     role: 'owner' as const,
     createdAt: new Date().toISOString()
   })),
+  // Pairing mints a real device token when one is collected, and minting is
+  // the only part of that flow which reaches storage.
+  dbInsertDeviceToken: vi.fn(),
+  dbListDeviceTokens: vi.fn(() => []),
+  dbGetDeviceTokenSecret: vi.fn(),
+  dbRevokeDeviceToken: vi.fn(() => true),
+  dbTouchDeviceToken: vi.fn(),
   loadFullConfig: vi.fn(() => ({
     version: 1,
     defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
@@ -233,6 +240,113 @@ describe('server integration', () => {
       })
       expect(ws.readyState).toBe(WebSocket.OPEN)
       ws.close()
+    })
+  })
+
+  /**
+   * Pairing, over the routes a phone with no credential actually uses. The
+   * point of these is what they refuse: a token may only ever leave here after
+   * a person approved it on the machine being paired to.
+   */
+  describe('the pairing routes', () => {
+    const post = async (
+      path: string,
+      body: unknown
+    ): Promise<{ status: number; json: Record<string, unknown> }> => {
+      const res = await fetch(`http://127.0.0.1:${serverPort}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      return { status: res.status, json: await res.json().catch(() => null) }
+    }
+
+    /** Ask the server, over an authenticated socket, for a code to show. */
+    const startPairing = async (): Promise<string> => {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
+      await new Promise<void>((r) => ws.on('open', r))
+      const reply = await sendRpc(ws, 501, 'pairing:start')
+      const { code } = reply.result as { code: string }
+      ws.close()
+      return code
+    }
+
+    const decide = async (method: string, requestId: string): Promise<void> => {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
+      await new Promise<void>((r) => ws.on('open', r))
+      await sendRpc(ws, 502, method, { requestId })
+      ws.close()
+    }
+
+    it('refuses a request that is not JSON, so a form post cannot reach it', async () => {
+      const res = await fetch(`http://127.0.0.1:${serverPort}/api/pair/redeem`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'code=AAAA-AAAA'
+      })
+
+      expect(res.status).toBe(415)
+    })
+
+    it('refuses a code nobody is showing', async () => {
+      const { status } = await post('/api/pair/redeem', {
+        code: 'AAAA-AAAA',
+        deviceName: 'iPhone'
+      })
+
+      expect(status).toBe(400)
+    })
+
+    it('hands over no token while the request is still waiting', async () => {
+      const code = await startPairing()
+      const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
+
+      const polled = await post('/api/pair/poll', { requestId: json.requestId })
+
+      expect(polled.json).toEqual({ status: 'pending' })
+    })
+
+    it('hands over a token once a person approved it', async () => {
+      const code = await startPairing()
+      const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
+      await decide('pairing:approve', json.requestId)
+
+      const polled = await post('/api/pair/poll', { requestId: json.requestId })
+
+      expect(polled.json.status).toBe('approved')
+      expect(polled.json.token).toMatch(/^vorn_/)
+      expect(typeof polled.json.name).toBe('string')
+    })
+
+    it('hands over nothing once a person denied it', async () => {
+      const code = await startPairing()
+      const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
+      await decide('pairing:deny', json.requestId)
+
+      const polled = await post('/api/pair/poll', { requestId: json.requestId })
+
+      expect(polled.json).toEqual({ status: 'denied' })
+    })
+
+    it('lets the token be collected once and not again', async () => {
+      const code = await startPairing()
+      const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
+      await decide('pairing:approve', json.requestId)
+      await post('/api/pair/poll', { requestId: json.requestId })
+
+      const second = await post('/api/pair/poll', { requestId: json.requestId })
+
+      expect(second.json).toEqual({ status: 'expired' })
+    })
+
+    it('will not start pairing for an unauthenticated socket', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`)
+      const closed = new Promise<number>((resolve) => ws.on('close', resolve))
+      await new Promise<void>((r) => ws.on('open', r))
+
+      ws.send(JSON.stringify({ jsonrpc: '2.0', id: 77, method: 'pairing:start' }))
+
+      expect(await closed).toBe(4001)
     })
   })
 
