@@ -105,6 +105,25 @@ function normaliseCode(raw: unknown): string {
   return typeof raw === 'string' ? raw.toUpperCase().replace(/[^0-9A-Z]/g, '') : ''
 }
 
+/**
+ * Drop what can no longer be acted on.
+ *
+ * Two reasons, and the second is the one that bites. A request nobody collects
+ * used to sit in the map for the life of the process, which grows without
+ * bound on a long-running server. And an expired request that is merely
+ * filtered out of a list is still *there*: the approval prompt on the desktop
+ * holds an id, so a prompt left on screen stayed answerable hours after its
+ * code died, and answering it would still hand over a token.
+ */
+function prune(now: number): void {
+  for (const [id, request] of requests) {
+    const waitedTooLong = request.status === 'pending' && now - request.askedAt >= CODE_TTL_MS
+    const decidedTooLongAgo =
+      request.decidedAt !== null && now - request.decidedAt >= APPROVAL_TTL_MS
+    if (waitedTooLong || decidedTooLongAgo) requests.delete(id)
+  }
+}
+
 function expired(now: number): boolean {
   return active !== null && now >= active.expiresAt
 }
@@ -141,6 +160,7 @@ export type RedeemResult =
  */
 export function redeemCode(rawCode: unknown, deviceName: unknown, address: string): RedeemResult {
   const now = Date.now()
+  prune(now)
   if (!active || expired(now)) return { ok: false, reason: active ? 'expired' : 'unknown' }
   if (active.spent) return { ok: false, reason: 'spent' }
   if (active.attempts >= MAX_ATTEMPTS) return { ok: false, reason: 'throttled' }
@@ -177,12 +197,14 @@ export function redeemCode(rawCode: unknown, deviceName: unknown, address: strin
 /** Everything waiting on a person, so the UI can rehydrate rather than rely on having heard the push. */
 export function pendingRequests(): PairingRequest[] {
   const now = Date.now()
+  prune(now)
   return [...requests.values()]
     .filter((r) => r.status === 'pending' && now - r.askedAt < CODE_TTL_MS)
     .map(({ decidedAt: _decidedAt, code: _code, ...request }) => request)
 }
 
 export function approveRequest(requestId: unknown): boolean {
+  prune(Date.now())
   const request = typeof requestId === 'string' ? requests.get(requestId) : undefined
   if (!request || request.status !== 'pending') return false
   request.status = 'approved'
@@ -192,6 +214,7 @@ export function approveRequest(requestId: unknown): boolean {
 }
 
 export function denyRequest(requestId: unknown): boolean {
+  prune(Date.now())
   const request = typeof requestId === 'string' ? requests.get(requestId) : undefined
   if (!request || request.status !== 'pending') return false
   request.status = 'denied'
@@ -216,6 +239,7 @@ export type PollResult =
  */
 export function pollRequest(requestId: unknown, machineName: string): PollResult {
   const now = Date.now()
+  prune(now)
   const request = typeof requestId === 'string' ? requests.get(requestId) : undefined
   if (!request) return { status: 'expired' }
 

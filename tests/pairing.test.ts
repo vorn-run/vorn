@@ -257,3 +257,49 @@ describe('one pairing not disturbing the next', () => {
     expect(redeemCode(code, 'Another phone', FROM).ok).toBe(false)
   })
 })
+
+describe('not keeping what can no longer be used', () => {
+  it('forgets a request nobody ever collected', () => {
+    // Otherwise every abandoned pairing stays in memory for the life of the
+    // process, which on a machine left running is forever.
+    const { code } = startPairing()
+    scan(code)
+    expect(pendingRequests()).toHaveLength(1)
+
+    vi.advanceTimersByTime(CODE_TTL_MS)
+
+    expect(pendingRequests()).toHaveLength(0)
+  })
+
+  it('refuses to approve a request whose code has died', () => {
+    // The prompt on the desktop holds an id, so one left on screen was still
+    // answerable hours later — and answering it still handed over a token.
+    const { code } = startPairing()
+    const requestId = scan(code)
+
+    vi.advanceTimersByTime(CODE_TTL_MS)
+
+    expect(approveRequest(requestId)).toBe(false)
+    expect(pollRequest(requestId, 'mac')).toEqual({ status: 'expired' })
+  })
+
+  it('refuses to deny one too, rather than reviving it', () => {
+    const { code } = startPairing()
+    const requestId = scan(code)
+
+    vi.advanceTimersByTime(CODE_TTL_MS)
+
+    expect(denyRequest(requestId)).toBe(false)
+  })
+
+  it('forgets a collected request once its window has passed', () => {
+    const { code } = startPairing()
+    const requestId = scan(code)
+    approveRequest(requestId)
+    pollRequest(requestId, 'mac')
+
+    vi.advanceTimersByTime(APPROVAL_TTL_MS)
+    // Nothing to find, rather than a spent entry kept forever.
+    expect(pollRequest(requestId, 'mac')).toEqual({ status: 'expired' })
+  })
+})
