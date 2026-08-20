@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { DeviceToken, PairingRequest, ReachableUrls } from '../../../../shared/types'
 import { CopyButton, ScannableQRCode } from './shared'
+import { addressKind } from './address-kind'
 
 /** Ticks once a second so a shown code says how long it has left. */
 function useCountdown(expiresAt: number | null): number {
@@ -44,6 +45,16 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
   const [code, setCode] = useState<string | null>(null)
   const [expiresAt, setExpiresAt] = useState<number | null>(null)
   const [asking, setAsking] = useState<PairingRequest | null>(null)
+  /**
+   * Which address the code points at.
+   *
+   * Not a detail: a phone can only reach the machine over a network it is on,
+   * so a code carrying the tailnet address is unusable from a phone on the
+   * wifi, and the desktop has no way to know which one that is. Tailscale
+   * sorts first because it is the only encrypted option, which made it the
+   * silent default and left LAN pairing with no way in at all.
+   */
+  const [chosenUrl, setChosenUrl] = useState<string | null>(null)
   /** Shown once, then unrecoverable: only its hash is stored. */
   const [minted, setMinted] = useState<{ name: string; plaintext: string } | null>(null)
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null)
@@ -139,6 +150,9 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
   // redeem is not worth offering.
   const canScan = reachable?.remote === true && (reachable?.urls.length ?? 0) > 0
 
+  const urls = reachable?.urls ?? []
+  const pairUrl = chosenUrl && urls.includes(chosenUrl) ? chosenUrl : (urls[0] ?? null)
+
   const active = (tokens ?? []).filter((t) => !t.revokedAt)
 
   return (
@@ -215,16 +229,48 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
         </div>
       )}
 
-      {adding === 'scan' && !asking && showingCode && reachable && (
+      {adding === 'scan' && !asking && showingCode && pairUrl && (
         <div className="mt-3 flex items-start gap-4">
-          <ScannableQRCode
-            url={`vorn://pair?url=${encodeURIComponent(reachable.urls[0])}&code=${code}`}
-          />
+          <ScannableQRCode url={`vorn://pair?url=${encodeURIComponent(pairUrl)}&code=${code}`} />
           <div className="min-w-0 flex-1">
             <p className="text-sm text-gray-200">Scan this in the Vorn app.</p>
             <p className="mt-1 text-xs text-gray-500">
               Then approve the phone here. It will ask by name.
             </p>
+
+            {urls.length > 1 && (
+              <div className="mt-3">
+                <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">
+                  Reachable over
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {urls.map((url) => {
+                    const kind = addressKind(url)
+                    const chosen = url === pairUrl
+                    return (
+                      <button
+                        key={url}
+                        onClick={() => setChosenUrl(url)}
+                        title={url}
+                        className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${
+                          chosen
+                            ? 'border-white/20 bg-white/[0.08] text-gray-200'
+                            : 'border-white/[0.06] text-gray-500 hover:text-white hover:bg-white/[0.06]'
+                        }`}
+                      >
+                        {kind === 'tailnet' ? 'Tailscale' : 'This network'}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-gray-500 font-mono truncate">{pairUrl}</p>
+                <p className="mt-0.5 text-[11px] text-gray-600">
+                  {addressKind(pairUrl) === 'tailnet'
+                    ? 'Encrypted. The phone must be on your tailnet.'
+                    : 'Unencrypted. The phone must be on this wifi.'}
+                </p>
+              </div>
+            )}
             <div className="mt-3 text-[10px] text-gray-600 uppercase tracking-wider">
               Or type this code
             </div>
