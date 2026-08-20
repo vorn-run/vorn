@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { DeviceToken, PairingRequest, ReachableUrls } from '../../../../shared/types'
 import { CopyButton, ScannableQRCode } from './shared'
-import { addressKind } from './address-kind'
+import { addressKind, addressHost } from './address-kind'
 
 /** Ticks once a second so a shown code says how long it has left. */
 function useCountdown(expiresAt: number | null): number {
@@ -241,33 +241,31 @@ export function DeviceTokenList({ reachable }: { reachable: ReachableUrls | null
             {urls.length > 1 && (
               <div className="mt-3">
                 <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">
-                  Reachable over
+                  Address in the code
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {urls.map((url) => {
-                    const kind = addressKind(url)
                     const chosen = url === pairUrl
                     return (
                       <button
                         key={url}
                         onClick={() => setChosenUrl(url)}
                         title={url}
-                        className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${
+                        className={`px-2 py-1 font-mono text-[11px] rounded-md border transition-colors ${
                           chosen
                             ? 'border-white/20 bg-white/[0.08] text-gray-200'
                             : 'border-white/[0.06] text-gray-500 hover:text-white hover:bg-white/[0.06]'
                         }`}
                       >
-                        {kind === 'tailnet' ? 'Tailscale' : 'This network'}
+                        {addressHost(url)}
                       </button>
                     )
                   })}
                 </div>
-                <p className="mt-1.5 text-[11px] text-gray-500 font-mono truncate">{pairUrl}</p>
-                <p className="mt-0.5 text-[11px] text-gray-600">
+                <p className="mt-1.5 text-[11px] text-gray-600">
                   {addressKind(pairUrl) === 'tailnet'
                     ? 'Encrypted. The phone must be on your tailnet.'
-                    : 'Unencrypted. The phone must be on this wifi.'}
+                    : 'Unencrypted. The phone must be able to reach this address.'}
                 </p>
               </div>
             )}

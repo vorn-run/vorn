@@ -16,3 +16,20 @@ export function addressKind(url: string): 'tailnet' | 'lan' {
     return 'lan'
   }
 }
+
+/**
+ * The host on its own, which is the only part that differs between routes.
+ *
+ * Naming the kind instead reads well until a machine has two of one kind, and
+ * then it is two identical buttons and no way to tell which is which. The
+ * address is what actually distinguishes them, and it stays right for routes
+ * nothing here can classify: a public address, a VPN, anything reached some
+ * other way.
+ */
+export function addressHost(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
