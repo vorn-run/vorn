@@ -12,6 +12,7 @@ import { detectIDEs, openInIDE } from './ide-detector'
 import { detectMobileProject } from './mobile-detector'
 import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
 import { clientRegistry } from './broadcast'
+import { readScrollback } from './terminal-scrollback'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
@@ -91,7 +92,9 @@ import {
   dbInsertWorkflow,
   dbDeleteWorkflow,
   dbGetWorkflow,
-  dbListWorkflows
+  dbListWorkflows,
+  dbListTasks,
+  dbGetTask
 } from './database'
 import {
   connectorRegistry,
@@ -294,6 +297,56 @@ export function registerAllMethods(): void {
     sessionManager.scheduleSave()
     broadcastWidgetUpdate()
   })
+  /**
+   * The board without the rest of the configuration around it.
+   *
+   * `config:load` carries every task inline, so a client that wants the board
+   * pulls roughly a hundred kilobytes and a client that moves one card sends all
+   * of it back. The database already stores tasks individually; only the wire
+   * treated them as one object.
+   */
+  registerMethod('task:list', (params) => {
+    const filter = (params ?? {}) as {
+      projectName?: string
+      status?: TaskStatus
+      includeDescription?: boolean
+    }
+    const tasks = dbListTasks(filter.projectName, filter.status)
+    if (filter.includeDescription) return tasks
+    // A board renders titles. Descriptions are most of the bytes and none of
+    // what is drawn, so they are left out until something asks for one task.
+    return tasks.map((task) => ({ ...task, description: '' }))
+  })
+
+  registerMethod('workflow:resolveGate', ({ runId, nodeId, decision }) => {
+    // Broadcast rather than claimed, for the same reason stopping a run is: the
+    // client that answers is not necessarily the one holding the run, and on a
+    // phone it never is.
+    log.info({ runId, nodeId, decision }, '[workflow] broadcasting a gate decision')
+    clientRegistry.broadcast(IPC.WORKFLOW_GATE_RESOLVED, { runId, nodeId, decision })
+    return { accepted: true }
+  })
+
+  registerMethod(
+    'workflow:get',
+    ({ id }) => configManager.loadConfig().workflows?.find((w) => w.id === id) ?? null
+  )
+
+  registerMethod('project:list', () => configManager.loadConfig().projects ?? [])
+
+  registerMethod('task:get', ({ id }) => dbGetTask(id))
+
+  registerMethod('task:setStatus', ({ id, status }) => {
+    if (!dbGetTask(id)) return { ok: false }
+    dbUpdateTask(id, { status })
+    // Everything else reads the board through the cached config, so a direct
+    // row write has to invalidate it. This also broadcasts `config:changed`,
+    // which is how other clients learn the card moved.
+    configManager.notifyChanged()
+    return { ok: true }
+  })
+
+  registerMethod('terminal:readScrollback', ({ id }) => ({ data: readScrollback(id) }))
   registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.getOutput(id, lines))
   registerMethod('shell:create', (cwd) => {
     const session = ptyManager.createShellPty(cwd)
@@ -1209,16 +1262,32 @@ export function registerAllMethods(): void {
   registerMethod('device:logs', (p) => browserBridge.request('device:logs', p))
   registerMethod('device:openPane', (p) => browserBridge.request('device:openPane', p))
 
+  /**
+   * Which instance a manager notification is about, or nothing.
+   *
+   * `terminal:data` and its siblings all carry the terminal's id, and a client
+   * that only wants one terminal's output subscribes to `terminal:data#<id>`.
+   * Payloads without an `id` simply have no instance, and match by name alone.
+   */
+  const terminalScope = (payload: unknown): string | undefined => {
+    const id = (payload as { id?: unknown } | null)?.id
+    return typeof id === 'string' ? id : undefined
+  }
+
   // Wire manager events → broadcast to WS clients
   ptyManager.on('client-message', (channel: string, payload: unknown) => {
-    clientRegistry.broadcast(channel, payload)
+    // A payload's `id` is the instance this notification is about, which lets a
+    // client subscribe to one terminal rather than to all of them. Read
+    // generically rather than per channel: every id-bearing payload here means
+    // the same thing by it.
+    clientRegistry.broadcast(channel, payload, terminalScope(payload))
     if (channel === IPC.TERMINAL_EXIT) {
       const p = payload as { id: string; exitCode: number }
       logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })
     }
   })
   headlessManager.on('client-message', (channel: string, payload: unknown) => {
-    clientRegistry.broadcast(channel, payload)
+    clientRegistry.broadcast(channel, payload, terminalScope(payload))
     if (channel === IPC.HEADLESS_EXIT) {
       const p = payload as { id: string; exitCode: number }
       logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })

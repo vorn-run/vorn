@@ -207,3 +207,71 @@ describe('the topic list on the socket URL', () => {
     expect(parseTopics(query)).toBeUndefined()
   })
 })
+
+/**
+ * Subscribing to `terminal:data` by name means every byte of every terminal on
+ * the machine. On a phone showing one session that is the wrong unit entirely.
+ */
+describe('subscribing to one terminal', () => {
+  const sentMethods = (ws: import('ws').WebSocket): string[] =>
+    (ws.send as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => JSON.parse(c[0] as string).method
+    )
+
+  it('delivers the terminal that was asked for', () => {
+    const reg = new ClientRegistry()
+    const phone = mockWs()
+    reg.add(phone, ['terminal:data#term-1'])
+
+    reg.broadcast('terminal:data', { id: 'term-1', data: 'x' }, 'term-1')
+
+    expect(sentMethods(phone)).toEqual(['terminal:data'])
+  })
+
+  it('withholds every other terminal', () => {
+    const reg = new ClientRegistry()
+    const phone = mockWs()
+    reg.add(phone, ['terminal:data#term-1'])
+
+    reg.broadcast('terminal:data', { id: 'term-2', data: 'x' }, 'term-2')
+
+    expect(sentMethods(phone)).toEqual([])
+  })
+
+  it('still gives every terminal to a client that asked by name', () => {
+    // A desktop renders all of them, and must not be narrowed by the instance
+    // form existing.
+    const reg = new ClientRegistry()
+    const desktop = mockWs()
+    reg.add(desktop, ['terminal:data'])
+
+    reg.broadcast('terminal:data', { id: 'term-1', data: 'x' }, 'term-1')
+    reg.broadcast('terminal:data', { id: 'term-2', data: 'y' }, 'term-2')
+
+    expect(sentMethods(desktop)).toEqual(['terminal:data', 'terminal:data'])
+  })
+
+  it('does not match an instance subscription against a scopeless broadcast', () => {
+    const reg = new ClientRegistry()
+    const phone = mockWs()
+    reg.add(phone, ['terminal:data#term-1'])
+
+    reg.broadcast('terminal:data', { data: 'x' })
+
+    expect(sentMethods(phone)).toEqual([])
+  })
+
+  it('lets one client follow a terminal while another follows nothing', () => {
+    const reg = new ClientRegistry()
+    const watching = mockWs()
+    const listing = mockWs()
+    reg.add(watching, ['session:*', 'terminal:data#term-1'])
+    reg.add(listing, ['session:*'])
+
+    reg.broadcast('terminal:data', { id: 'term-1', data: 'x' }, 'term-1')
+    reg.broadcast('session:updated', { id: 'term-1' }, 'term-1')
+
+    expect(sentMethods(watching)).toEqual(['terminal:data', 'session:updated'])
+    expect(sentMethods(listing)).toEqual(['session:updated'])
+  })
+})

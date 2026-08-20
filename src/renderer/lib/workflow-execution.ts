@@ -1504,6 +1504,36 @@ function latestRunForWorkflow(workflowId: string): WorkflowExecution | undefined
 }
 
 /**
+ * Apply a gate decision that came from somewhere else.
+ *
+ * Someone answered a gate on another client — a phone, or a second window — and
+ * the server broadcast it to everyone. Only the instance actually holding the
+ * run can resume it, so every other instance no-ops, exactly as it does for a
+ * stop request.
+ *
+ * The run is looked up in the store as well as in `activeRuns`, because an
+ * instance that reloaded while a run was parked has the execution rehydrated
+ * but no in-memory handle, and it is still the one that should pick it up.
+ */
+export async function applyGateDecision(
+  runId: string,
+  nodeId: string,
+  decision: 'approve' | 'reject'
+): Promise<void> {
+  const execution =
+    activeRuns.get(runId)?.execution ?? useAppStore.getState().workflowExecutions.get(runId)
+  if (!execution) return
+
+  const node = execution.nodeStates.find((state) => state.nodeId === nodeId)
+  // Already answered, by this instance or by a broadcast that arrived twice.
+  // Re-approving would restart the branch below the gate.
+  if (node?.status !== 'waiting') return
+
+  if (decision === 'approve') await approveWorkflowGate(execution, nodeId)
+  else await rejectWorkflowGate(execution, nodeId)
+}
+
+/**
  * Stop a run: kill the agents it launched, then close it as `cancelled`.
  *
  * Worktrees are deliberately left on disk. A stopped run has usually done
