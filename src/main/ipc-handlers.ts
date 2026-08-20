@@ -289,6 +289,11 @@ export function registerIpcHandlers(): void {
   // Tailscale
   safeHandle(IPC.TAILSCALE_STATUS, () => requireBridge().request(IPC.TAILSCALE_STATUS))
   safeHandle(IPC.SERVER_REACHABLE_URLS, () => requireBridge().request(IPC.SERVER_REACHABLE_URLS))
+  safeHandle(IPC.PAIRING_START, () => requireBridge().request(IPC.PAIRING_START))
+  safeHandle(IPC.PAIRING_PENDING, () => requireBridge().request(IPC.PAIRING_PENDING))
+  safeHandle(IPC.PAIRING_APPROVE, (_, p) => requireBridge().request(IPC.PAIRING_APPROVE, p))
+  safeHandle(IPC.PAIRING_DENY, (_, p) => requireBridge().request(IPC.PAIRING_DENY, p))
+  safeHandle(IPC.PAIRING_CANCEL, () => requireBridge().request(IPC.PAIRING_CANCEL))
   safeHandle(IPC.TOKEN_LIST, () => requireBridge().request(IPC.TOKEN_LIST))
   safeHandle(IPC.TOKEN_CREATE, (_, params) => requireBridge().request(IPC.TOKEN_CREATE, params))
   safeHandle(IPC.TOKEN_REVOKE, (_, id) => requireBridge().request(IPC.TOKEN_REVOKE, id))

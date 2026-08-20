@@ -596,6 +596,17 @@ export function createApiShim(wsUrl: string) {
 
     // Device tokens. A real implementation rather than a stub — unlike SSH keys,
     // these need nothing from Electron, so a phone can manage them too.
+    // Pairing. Real here too: the methods need nothing from Electron, and the
+    // web client is served from the very machine a phone would be pairing to.
+    startPairing: () => rpc.invoke('pairing:start'),
+    pendingPairings: () => rpc.invoke('pairing:pending'),
+    approvePairing: (requestId: string) => rpc.invoke('pairing:approve', { requestId }),
+    denyPairing: (requestId: string) => rpc.invoke('pairing:deny', { requestId }),
+    cancelPairing: () => rpc.invoke('pairing:cancel'),
+    onPairingRequested: (
+      callback: (request: import('../../shared/src/types').PairingRequest) => void
+    ) => rpc.on('pairing:requested', callback as (p: unknown) => void),
+
     listDeviceTokens: () => rpc.invoke('token:list'),
     createDeviceToken: (name: string) => rpc.invoke('token:create', { name }),
     revokeDeviceToken: (id: string) => rpc.invoke('token:revoke', id),

@@ -22,6 +22,7 @@ import {
   TailscaleStatus,
   ReachableUrls,
   DeviceToken,
+  PairingRequest,
   FileEntry,
   SourceConnection,
   TaskSourceLink,
@@ -589,6 +590,24 @@ const api = {
     token: string
   }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('connect:save', params),
   useLocalServer: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('connect:useLocal'),
+
+  // Pairing a phone by showing it a code
+  startPairing: (): Promise<{ code: string; expiresAt: number }> =>
+    ipcRenderer.invoke(IPC.PAIRING_START),
+  pendingPairings: (): Promise<PairingRequest[]> => ipcRenderer.invoke(IPC.PAIRING_PENDING),
+  approvePairing: (requestId: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(IPC.PAIRING_APPROVE, { requestId }),
+  denyPairing: (requestId: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke(IPC.PAIRING_DENY, { requestId }),
+  cancelPairing: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.PAIRING_CANCEL),
+  onPairingRequested: (callback: (request: PairingRequest) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, request: PairingRequest): void =>
+      callback(request)
+    ipcRenderer.on(IPC.PAIRING_REQUESTED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.PAIRING_REQUESTED, listener)
+    }
+  },
 
   // Device tokens
   listDeviceTokens: (): Promise<DeviceToken[]> => ipcRenderer.invoke(IPC.TOKEN_LIST),
