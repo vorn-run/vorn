@@ -41,6 +41,7 @@ import type {
   DevicePoint,
   MobileProject,
   ReachableUrls,
+  PairingRequest,
   DeviceToken,
   ConnectorActionDef,
   ConnectorCatalogSnapshot,
@@ -150,6 +151,14 @@ export interface RequestMethods {
   'token:list': { params: void; result: DeviceToken[] }
   'token:create': { params: { name: string }; result: { token: DeviceToken; plaintext: string } }
   'token:revoke': { params: string; result: { revoked: boolean } }
+  // Pairing a phone by showing it a code. The phone's own two calls are HTTP,
+  // not here: it has no credential yet, and the socket admits exactly one
+  // method before authenticating.
+  'pairing:start': { params: void; result: { code: string; expiresAt: number } }
+  'pairing:approve': { params: { requestId: string }; result: { ok: boolean } }
+  'pairing:deny': { params: { requestId: string }; result: { ok: boolean } }
+  'pairing:cancel': { params: void; result: { ok: boolean } }
+  'pairing:pending': { params: void; result: PairingRequest[] }
 
   // ── Declared late ────────────────────────────────────────────────
   //
@@ -819,6 +828,8 @@ export interface ServerNotifications {
   /** A person answered a gate. Only the instance holding the run acts on it. */
   'workflow:gateResolved': { runId: string; nodeId: string; decision: 'approve' | 'reject' }
   'session-exit': TerminalSession
+  /** A phone offered a valid pairing code and is waiting to be approved. */
+  'pairing:requested': PairingRequest
   'database:corruption-recovered': { message: string }
 }
 

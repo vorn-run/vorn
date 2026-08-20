@@ -121,6 +121,13 @@ import { executeScript, scriptRunnerEvents } from './script-runner'
 import { getTailscaleStatus, clearBinaryCache } from './tailscale'
 import { reachableUrls } from './reachable-urls'
 import { listTokens, mintOwnerToken, revokeToken } from './token-manager'
+import {
+  approveRequest,
+  cancelPairing,
+  denyRequest,
+  pendingRequests,
+  startPairing
+} from './pairing'
 import { disconnectToken } from './ws-handler'
 import { testSshConnection } from './process-utils'
 import { captureAgentSessionId } from './agent-session-capture'
@@ -701,6 +708,19 @@ export function registerAllMethods(): void {
     const minted = mintOwnerToken(label || 'Device')
     return { token: minted.token, plaintext: minted.plaintext }
   })
+  // Pairing a phone. These four are the desktop's half: it asks for a code,
+  // sees who offered it, and decides. The phone's half is two HTTP routes in
+  // `index.ts`, because a phone that has not paired yet has no credential and
+  // the socket admits exactly one method before authenticating.
+  registerMethod('pairing:start', () => startPairing())
+  registerMethod('pairing:pending', () => pendingRequests())
+  registerMethod('pairing:approve', ({ requestId }) => ({ ok: approveRequest(requestId) }))
+  registerMethod('pairing:deny', ({ requestId }) => ({ ok: denyRequest(requestId) }))
+  registerMethod('pairing:cancel', () => {
+    cancelPairing()
+    return { ok: true }
+  })
+
   registerMethod('token:revoke', (id) => {
     const revoked = revokeToken(id)
     // Revoking has to reach a socket already holding the token, or a lost phone
