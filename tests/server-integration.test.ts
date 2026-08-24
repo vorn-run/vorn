@@ -15,6 +15,20 @@ vi.mock('node-pty', () => ({
   spawn: vi.fn()
 }))
 
+/**
+ * Booting a server probes Tailscale, and the probe is a real process.
+ *
+ * `startServer` calls `refreshTrustedOrigins`, which `execFile`s the Tailscale
+ * binary. On a machine with Tailscale.app installed that spawns a helper which
+ * does not reliably die when the ten-second timeout fires, so each run of this
+ * file leaves one behind and a few full-suite runs leave a pile. Nothing here
+ * is about trusted origins.
+ */
+vi.mock('../packages/server/src/tailscale', () => ({
+  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
+  clearBinaryCache: vi.fn()
+}))
+
 // Mock database to avoid SQLite dependency
 vi.mock('../packages/server/src/database', () => ({
   getDb: vi.fn(),

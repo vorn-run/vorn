@@ -25,6 +25,7 @@ import type {
   ConnectorItemContext,
   TaskConfig,
   TaskStatus,
+  AiAgentType,
   WorktreeInventory,
   WorktreeActionResult,
   BranchDeleteResult,
@@ -243,6 +244,52 @@ export interface RequestMethods {
     result: TaskConfig[]
   }
   'task:setStatus': { params: { id: string; status: TaskStatus }; result: { ok: boolean } }
+
+  /**
+   * Writing a task, rather than only reading and moving one.
+   *
+   * These reach the same row-level functions the board has always had. Without
+   * them the only way to write a task over this socket is `config:save` with the
+   * whole configuration attached — which is the round trip `task:list` above
+   * exists to avoid, paid on every keystroke's worth of change.
+   *
+   * `ok: false` means the id named nothing. `created` returns the row so the
+   * caller does not have to guess the id or the order it landed at.
+   */
+  'task:create': {
+    params: {
+      projectName: string
+      title: string
+      description?: string
+      status?: TaskStatus
+      branch?: string
+      useWorktree?: boolean
+      assignedAgent?: AiAgentType
+    }
+    result: { ok: boolean; task?: TaskConfig }
+  }
+  'task:update': {
+    params: {
+      id: string
+      title?: string
+      description?: string
+      status?: TaskStatus
+      branch?: string
+      useWorktree?: boolean
+      assignedAgent?: AiAgentType
+    }
+    result: { ok: boolean; task?: TaskConfig }
+  }
+  'task:delete': { params: { id: string }; result: { ok: boolean } }
+  /** The ids in the order they should now sit, within one project. */
+  'task:reorder': { params: { ids: string[] }; result: { ok: boolean } }
+  /**
+   * One method rather than two. Archiving and restoring are the same field
+   * being set and cleared; the MCP side has two tools only because a tool is a
+   * verb.
+   */
+  'task:archive': { params: { id: string; archived: boolean }; result: { ok: boolean } }
+
   /**
    * The projects a session can be launched into.
    *

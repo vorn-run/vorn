@@ -28,10 +28,12 @@ import {
   PermissionRequestInfo,
   SessionEventType,
   RemoteHost,
-  getProjectRemoteHostId
+  getProjectRemoteHostId,
+  isTerminalTaskStatus
 } from '@vornrun/shared/types'
 import type {
   SourceConnection,
+  TaskConfig,
   TaskStatus,
   ConnectorManifest,
   ExternalItem,
@@ -87,7 +89,9 @@ import {
   dbUpdateTaskSourceLink,
   dbInsertTask,
   dbUpdateTask,
+  dbDeleteTask,
   dbGetMaxTaskOrder,
+  dbGetProject,
   dbSignalChange,
   dbInsertWorkflow,
   dbDeleteWorkflow,
@@ -135,6 +139,27 @@ import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/s
 import log from './logger'
 
 const copilotInstallations = new Map<string, CopilotHookInstallation>()
+
+/**
+ * What a status change does to the two dates that hang off it.
+ *
+ * Finishing a task stamps `completedAt`; reopening one clears it, and clears
+ * `archivedAt` with it — a task that is live again cannot still be filed away.
+ *
+ * Both keys are returned rather than omitted, because `dbUpdateTask` decides
+ * what to write with `'completedAt' in updates`: an absent key leaves the
+ * column alone, and only an explicit `undefined` clears it.
+ */
+function terminalStamps(
+  from: TaskStatus,
+  to: TaskStatus
+): { completedAt?: string; archivedAt?: string } {
+  const was = isTerminalTaskStatus(from)
+  const is = isTerminalTaskStatus(to)
+  if (is && !was) return { completedAt: new Date().toISOString() }
+  if (!is && was) return { completedAt: undefined, archivedAt: undefined }
+  return {}
+}
 
 /** Discover tools on an MCP connection and persist them on the row. */
 async function runMcpDiscovery(
@@ -344,11 +369,101 @@ export function registerAllMethods(): void {
   registerMethod('task:get', ({ id }) => dbGetTask(id))
 
   registerMethod('task:setStatus', ({ id, status }) => {
-    if (!dbGetTask(id)) return { ok: false }
-    dbUpdateTask(id, { status })
+    const task = dbGetTask(id)
+    if (!task) return { ok: false }
+    dbUpdateTask(id, { status, ...terminalStamps(task.status, status) })
     // Everything else reads the board through the cached config, so a direct
     // row write has to invalidate it. This also broadcasts `config:changed`,
     // which is how other clients learn the card moved.
+    configManager.notifyChanged()
+    return { ok: true }
+  })
+
+  /**
+   * Writing a task, not only reading and moving one.
+   *
+   * Until these existed the only way to write a task over this socket was
+   * `config:save` carrying the whole configuration — which is what the MCP
+   * tools still do, and what `task:list` was added to stop the board doing.
+   * Every one of them ends in `notifyChanged`, because a row written without
+   * it is a row no other client hears about.
+   */
+  registerMethod(
+    'task:create',
+    ({ projectName, title, description, status, branch, useWorktree, assignedAgent }) => {
+      // A task in a project that does not exist is a task nothing can ever run.
+      if (!dbGetProject(projectName)) return { ok: false }
+
+      const now = new Date().toISOString()
+      const settled = status ?? 'todo'
+      const task: TaskConfig = {
+        id: crypto.randomUUID(),
+        projectName,
+        title,
+        description: description ?? '',
+        status: settled,
+        order: dbGetMaxTaskOrder(projectName) + 1,
+        createdAt: now,
+        updatedAt: now,
+        ...(branch && { branch }),
+        ...(useWorktree && { useWorktree }),
+        ...(assignedAgent && { assignedAgent }),
+        ...(isTerminalTaskStatus(settled) && { completedAt: now })
+      }
+      dbInsertTask(task)
+      configManager.notifyChanged()
+      // Returned whole: the caller does not have to guess the id it was given
+      // or the order it landed at.
+      return { ok: true, task }
+    }
+  )
+
+  registerMethod('task:update', ({ id, ...fields }) => {
+    const task = dbGetTask(id)
+    if (!task) return { ok: false }
+
+    // Spread rather than assigned one by one: `dbUpdateTask` skips any key that
+    // is `undefined`, so passing the caller's fields through unchanged is both
+    // shorter and exactly the "only what was sent" behaviour wanted here.
+    dbUpdateTask(id, {
+      ...fields,
+      updatedAt: new Date().toISOString(),
+      ...(fields.status ? terminalStamps(task.status, fields.status) : {})
+    })
+    configManager.notifyChanged()
+    return { ok: true, task: dbGetTask(id) ?? undefined }
+  })
+
+  registerMethod('task:delete', ({ id }) => {
+    if (!dbGetTask(id)) return { ok: false }
+    dbDeleteTask(id)
+    configManager.notifyChanged()
+    return { ok: true }
+  })
+
+  /** The ids in the order they should now sit. Anything absent keeps its place. */
+  registerMethod('task:reorder', ({ ids }) => {
+    const now = new Date().toISOString()
+    let moved = 0
+    ids.forEach((id, index) => {
+      if (!dbGetTask(id)) return
+      dbUpdateTask(id, { order: index, updatedAt: now })
+      moved += 1
+    })
+    if (moved === 0) return { ok: false }
+    configManager.notifyChanged()
+    return { ok: true }
+  })
+
+  registerMethod('task:archive', ({ id, archived }) => {
+    const task = dbGetTask(id)
+    if (!task) return { ok: false }
+    // The same rule `archive_task` enforces on the MCP side. Archiving is for
+    // work that is over; a todo hidden from the board is a todo that is lost.
+    if (archived && !isTerminalTaskStatus(task.status)) return { ok: false }
+
+    const now = new Date().toISOString()
+    dbUpdateTask(id, { archivedAt: archived ? now : undefined, updatedAt: now })
     configManager.notifyChanged()
     return { ok: true }
   })

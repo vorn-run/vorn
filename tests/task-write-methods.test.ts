@@ -1,0 +1,398 @@
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest'
+import WebSocket from 'ws'
+import type { RpcResponse } from '@vornrun/shared/protocol'
+import type { TaskConfig } from '@vornrun/shared/types'
+
+/**
+ * Writing a task over the socket.
+ *
+ * Until these methods existed the only way to write one was `config:save` with
+ * the whole configuration attached, which is the round trip `task:list` was
+ * added to avoid. These are the five that reach the row functions directly.
+ *
+ * Driven over a real WebSocket rather than by calling the handlers, because the
+ * phone's path is the socket and the typed registry in `protocol.ts` is half of
+ * what makes a method exist at all.
+ *
+ * The task table is a real store rather than a bag of `vi.fn()`s: these methods
+ * are almost entirely about what they write, so a mock that records calls and
+ * returns nothing would pass while writing the wrong thing.
+ */
+
+const TEST_CREDENTIAL = 'task-write-test-credential'
+
+const store = vi.hoisted(() => ({
+  tasks: new Map<string, Record<string, unknown>>(),
+  projects: new Set<string>(),
+  /** Every `config:changed` the server decided to send. */
+  notified: 0
+}))
+
+vi.mock('node-pty', () => ({ default: { spawn: vi.fn() }, spawn: vi.fn() }))
+
+/**
+ * Booting a server probes Tailscale, and the probe is a real process.
+ *
+ * `startServer` calls `refreshTrustedOrigins`, which shells out to the
+ * Tailscale binary with `execFile`. On a machine where Tailscale.app is
+ * installed that spawns a GUI helper which does not always die when the 10s
+ * timeout fires, so every run of every server-booting test file leaves one
+ * behind. Nothing here is about trusted origins; mock it and spawn nothing.
+ */
+vi.mock('../packages/server/src/tailscale', () => ({
+  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
+  clearBinaryCache: vi.fn()
+}))
+
+vi.mock('../packages/server/src/database', () => ({
+  getDb: vi.fn(),
+  closeDatabase: vi.fn(),
+  initDatabase: vi.fn(),
+  getDataDir: vi.fn(() => '/tmp/vorn-task-write-test'),
+  dbGetOwnerUser: vi.fn(() => ({
+    id: 'owner-1',
+    name: 'test',
+    role: 'owner' as const,
+    createdAt: new Date().toISOString()
+  })),
+  dbInsertDeviceToken: vi.fn(),
+  dbListDeviceTokens: vi.fn(() => []),
+  dbGetDeviceTokenSecret: vi.fn(),
+  dbRevokeDeviceToken: vi.fn(() => true),
+  dbTouchDeviceToken: vi.fn(),
+  loadFullConfig: vi.fn(() => ({
+    version: 1,
+    defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
+    projects: [],
+    workflows: [],
+    remoteHosts: [],
+    tasks: [],
+    workspaces: []
+  })),
+  saveFullConfig: vi.fn(),
+
+  // ── the task table, for real ──────────────────────────────────
+  dbListTasks: vi.fn((projectName?: string) =>
+    [...store.tasks.values()].filter((t) => !projectName || t.projectName === projectName)
+  ),
+  dbGetTask: vi.fn((id: string) => store.tasks.get(id) ?? null),
+  dbInsertTask: vi.fn((task: TaskConfig) => {
+    store.tasks.set(task.id, { ...task })
+  }),
+  dbUpdateTask: vi.fn((id: string, updates: Record<string, unknown>) => {
+    const row = store.tasks.get(id)
+    if (!row) return
+    for (const [key, value] of Object.entries(updates)) {
+      // Mirrors the real `dbUpdateTask`: an absent key leaves the column alone,
+      // and only `completedAt` and `archivedAt` treat an explicit `undefined`
+      // as "clear it". Getting this wrong here would hide the bug it exists to
+      // catch — a reopened task keeping the date it was finished.
+      if (value === undefined && key !== 'completedAt' && key !== 'archivedAt') continue
+      row[key] = value
+    }
+  }),
+  dbDeleteTask: vi.fn((id: string) => {
+    store.tasks.delete(id)
+  }),
+  dbGetMaxTaskOrder: vi.fn((projectName: string) =>
+    [...store.tasks.values()]
+      .filter((t) => t.projectName === projectName)
+      .reduce((max, t) => Math.max(max, (t.order as number) ?? -1), -1)
+  ),
+  dbGetProject: vi.fn((name: string) => (store.projects.has(name) ? { name, path: '/tmp' } : null)),
+
+  dbListProjects: vi.fn(() => []),
+  dbListWorkflows: vi.fn(() => []),
+  dbInsertWorkflow: vi.fn(),
+  dbUpdateWorkflow: vi.fn(),
+  dbDeleteWorkflow: vi.fn(),
+  dbGetWorkflow: vi.fn(),
+  dbSignalChange: vi.fn(),
+  saveWorkflowRun: vi.fn(),
+  listWorkflowRuns: vi.fn(() => []),
+  listWorkflowRunsByTask: vi.fn(() => []),
+  updateWorkflowRunStatus: vi.fn(),
+  dbListSourceConnections: vi.fn(() => []),
+  dbGetSourceConnection: vi.fn(),
+  dbInsertSourceConnection: vi.fn(),
+  dbUpdateSourceConnection: vi.fn(),
+  dbDeleteSourceConnection: vi.fn(),
+  dbGetTaskSourceLink: vi.fn(),
+  dbGetTaskSourceLinkByExternalId: vi.fn(),
+  dbFindTaskByConnectorExternalId: vi.fn(),
+  dbInsertTaskSourceLink: vi.fn(),
+  dbUpdateTaskSourceLink: vi.fn(),
+  dbReleaseConnectorInboxLeases: vi.fn(),
+  dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
+  dbClaimConnectorInbox: vi.fn(() => []),
+  dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null),
+  loadWorkspaces: vi.fn(() => [])
+}))
+
+let serverPort: number
+let serverClose: () => Promise<void>
+let ws: WebSocket
+let nextId = 1
+
+function call<T = unknown>(
+  method: string,
+  params?: unknown
+): Promise<RpcResponse & { result?: T }> {
+  const id = nextId++
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Timeout: ${method}`)), 5000)
+    const handler = (raw: WebSocket.RawData) => {
+      const msg = JSON.parse(raw.toString()) as RpcResponse
+      if (msg.id !== id) return
+      ws.off('message', handler)
+      clearTimeout(timeout)
+      resolve(msg as RpcResponse & { result?: T })
+    }
+    ws.on('message', handler)
+    ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+  })
+}
+
+/** Create a task and return it, failing loudly rather than returning undefined. */
+async function create(fields: Record<string, unknown> = {}): Promise<TaskConfig> {
+  const res = await call<{ ok: boolean; task?: TaskConfig }>('task:create', {
+    projectName: 'vorn',
+    title: 'Fix SSH prompt listener double-dispose bug',
+    ...fields
+  })
+  expect(res.result?.ok).toBe(true)
+  return res.result!.task!
+}
+
+describe('task write methods', () => {
+  beforeAll(async () => {
+    process.env.SECRET_VORN_BOOTSTRAP_TOKEN = TEST_CREDENTIAL
+    const { startServer } = await import('../packages/server/src/index')
+
+    const origWrite = process.stdout.write.bind(process.stdout)
+    process.stdout.write = (() => true) as typeof process.stdout.write
+    try {
+      const started = await startServer({ port: 0 })
+      serverPort = started.port
+      serverClose = async () => {
+        await started.app.close()
+      }
+    } finally {
+      process.stdout.write = origWrite
+    }
+
+    ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, {
+      headers: { Authorization: `Bearer ${TEST_CREDENTIAL}` }
+    })
+    await new Promise<void>((resolve, reject) => {
+      ws.on('open', () => resolve())
+      ws.on('error', reject)
+    })
+    // No `subscribe:set`, so this client is unfiltered and hears everything —
+    // which is what lets the broadcast assertions below be about the server's
+    // decision to send rather than about a subscription.
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString()) as { method?: string }
+      if (msg.method === 'config:changed') store.notified += 1
+    })
+  }, 15000)
+
+  afterAll(async () => {
+    ws?.close()
+    delete process.env.SECRET_VORN_BOOTSTRAP_TOKEN
+    await serverClose()
+  })
+
+  beforeEach(() => {
+    store.tasks.clear()
+    store.projects.clear()
+    store.projects.add('vorn')
+    store.notified = 0
+  })
+
+  describe('create', () => {
+    it('writes the task and hands back the row', async () => {
+      const task = await create({ description: 'Add a disposed flag.' })
+
+      expect(task.id).toBeTruthy()
+      expect(task.status).toBe('todo')
+      expect(task.description).toBe('Add a disposed flag.')
+      expect(store.tasks.get(task.id)).toBeDefined()
+    })
+
+    it('refuses a project that does not exist', async () => {
+      const res = await call<{ ok: boolean }>('task:create', {
+        projectName: 'not-a-project',
+        title: 'Orphan'
+      })
+      expect(res.result?.ok).toBe(false)
+      expect(store.tasks.size).toBe(0)
+    })
+
+    it('puts each new task after the last one in its project', async () => {
+      const first = await create({ title: 'First' })
+      const second = await create({ title: 'Second' })
+      expect(second.order).toBe(first.order + 1)
+    })
+
+    it('stamps completedAt when it is created already finished', async () => {
+      const task = await create({ status: 'done' })
+      expect(task.completedAt).toBeTruthy()
+    })
+
+    it('leaves completedAt off an unfinished task', async () => {
+      const task = await create({ status: 'in_progress' })
+      expect(task.completedAt).toBeUndefined()
+    })
+  })
+
+  describe('update', () => {
+    it('changes only what was sent', async () => {
+      const task = await create({ description: 'Original' })
+      const res = await call<{ ok: boolean; task?: TaskConfig }>('task:update', {
+        id: task.id,
+        title: 'Renamed'
+      })
+
+      expect(res.result?.ok).toBe(true)
+      expect(res.result?.task?.title).toBe('Renamed')
+      expect(res.result?.task?.description).toBe('Original')
+    })
+
+    it('refuses an id that names nothing', async () => {
+      const res = await call<{ ok: boolean }>('task:update', { id: 'nope', title: 'x' })
+      expect(res.result?.ok).toBe(false)
+    })
+
+    it('clears completedAt and archivedAt when a finished task is reopened', async () => {
+      const task = await create({ status: 'done' })
+      await call('task:archive', { id: task.id, archived: true })
+      expect(store.tasks.get(task.id)?.archivedAt).toBeTruthy()
+
+      await call('task:update', { id: task.id, status: 'in_progress' })
+
+      const row = store.tasks.get(task.id)!
+      expect(row.completedAt).toBeUndefined()
+      expect(row.archivedAt).toBeUndefined()
+    })
+  })
+
+  describe('setStatus', () => {
+    it('stamps completedAt on the way into a finished state', async () => {
+      const task = await create()
+      await call('task:setStatus', { id: task.id, status: 'done' })
+      expect(store.tasks.get(task.id)?.completedAt).toBeTruthy()
+    })
+
+    it('clears it again on the way out', async () => {
+      const task = await create({ status: 'done' })
+      await call('task:setStatus', { id: task.id, status: 'todo' })
+      expect(store.tasks.get(task.id)?.completedAt).toBeUndefined()
+    })
+  })
+
+  describe('archive', () => {
+    it('files away a finished task', async () => {
+      const task = await create({ status: 'done' })
+      const res = await call<{ ok: boolean }>('task:archive', { id: task.id, archived: true })
+
+      expect(res.result?.ok).toBe(true)
+      expect(store.tasks.get(task.id)?.archivedAt).toBeTruthy()
+    })
+
+    it('refuses one that is still open', async () => {
+      const task = await create({ status: 'todo' })
+      const res = await call<{ ok: boolean }>('task:archive', { id: task.id, archived: true })
+
+      // The same rule `archive_task` enforces on the MCP side. A todo hidden
+      // from the board is a todo that is lost.
+      expect(res.result?.ok).toBe(false)
+      expect(store.tasks.get(task.id)?.archivedAt).toBeUndefined()
+    })
+
+    it('restores one, whatever its status', async () => {
+      const task = await create({ status: 'cancelled' })
+      await call('task:archive', { id: task.id, archived: true })
+
+      const res = await call<{ ok: boolean }>('task:archive', { id: task.id, archived: false })
+      expect(res.result?.ok).toBe(true)
+      expect(store.tasks.get(task.id)?.archivedAt).toBeUndefined()
+    })
+  })
+
+  describe('reorder', () => {
+    it('rewrites the order of everything named', async () => {
+      const a = await create({ title: 'A' })
+      const b = await create({ title: 'B' })
+      const c = await create({ title: 'C' })
+
+      const res = await call<{ ok: boolean }>('task:reorder', { ids: [c.id, a.id, b.id] })
+
+      expect(res.result?.ok).toBe(true)
+      expect(store.tasks.get(c.id)?.order).toBe(0)
+      expect(store.tasks.get(a.id)?.order).toBe(1)
+      expect(store.tasks.get(b.id)?.order).toBe(2)
+    })
+
+    it('skips ids that name nothing without failing the rest', async () => {
+      const a = await create({ title: 'A' })
+      const res = await call<{ ok: boolean }>('task:reorder', { ids: ['ghost', a.id] })
+
+      expect(res.result?.ok).toBe(true)
+      expect(store.tasks.get(a.id)?.order).toBe(1)
+    })
+
+    it('reports failure when nothing named exists', async () => {
+      const res = await call<{ ok: boolean }>('task:reorder', { ids: ['ghost'] })
+      expect(res.result?.ok).toBe(false)
+    })
+  })
+
+  describe('delete', () => {
+    it('removes the task', async () => {
+      const task = await create()
+      const res = await call<{ ok: boolean }>('task:delete', { id: task.id })
+
+      expect(res.result?.ok).toBe(true)
+      expect(store.tasks.has(task.id)).toBe(false)
+    })
+
+    it('refuses an id that names nothing', async () => {
+      const res = await call<{ ok: boolean }>('task:delete', { id: 'ghost' })
+      expect(res.result?.ok).toBe(false)
+    })
+  })
+
+  /**
+   * The half a handler test cannot see.
+   *
+   * Every one of these writes a row directly, so the cached configuration every
+   * other client reads is stale until `notifyChanged` invalidates it — and that
+   * same call is what broadcasts `config:changed`. A method that skips it looks
+   * correct in a unit test and is invisible on every other screen.
+   */
+  describe('config:changed', () => {
+    it('fires on every mutation', async () => {
+      const task = await create()
+      await call('task:update', { id: task.id, title: 'Renamed' })
+      await call('task:setStatus', { id: task.id, status: 'done' })
+      await call('task:archive', { id: task.id, archived: true })
+      await call('task:reorder', { ids: [task.id] })
+      await call('task:delete', { id: task.id })
+
+      // The broadcast is a notification, so it arrives independently of the
+      // replies awaited above.
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(store.notified).toBe(6)
+    })
+
+    it('stays quiet when nothing changed', async () => {
+      await call('task:update', { id: 'ghost', title: 'x' })
+      await call('task:delete', { id: 'ghost' })
+      await call('task:create', { projectName: 'not-a-project', title: 'Orphan' })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(store.notified).toBe(0)
+    })
+  })
+})
