@@ -264,6 +264,39 @@ describe('task write methods', () => {
       expect(res.result?.ok).toBe(false)
     })
 
+    it('ignores columns it does not advertise', async () => {
+      // The params type is erased at run time, so a client can send anything.
+      // `dbUpdateTask` writes `archivedAt` on mere presence, which would file
+      // away an open task and walk straight past the rule `task:archive`
+      // enforces — so the handler names its fields rather than spreading.
+      const task = await create({ status: 'todo' })
+      await call('task:update', {
+        id: task.id,
+        title: 'Renamed',
+        archivedAt: '2026-01-01T00:00:00.000Z',
+        completedAt: '2026-01-01T00:00:00.000Z',
+        assignedSessionId: 'someone-elses-session',
+        order: 999
+      })
+
+      const row = store.tasks.get(task.id)!
+      expect(row.title).toBe('Renamed')
+      expect(row.archivedAt).toBeUndefined()
+      expect(row.completedAt).toBeUndefined()
+      expect(row.assignedSessionId).toBeUndefined()
+      expect(row.order).toBe(task.order)
+    })
+
+    it('leaves archiving to the method that checks whether it is allowed', async () => {
+      const task = await create({ status: 'todo' })
+      await call('task:update', { id: task.id, archivedAt: '2026-01-01T00:00:00.000Z' })
+      expect(store.tasks.get(task.id)?.archivedAt).toBeUndefined()
+
+      // And that method still refuses, which is the rule being protected.
+      const res = await call<{ ok: boolean }>('task:archive', { id: task.id, archived: true })
+      expect(res.result?.ok).toBe(false)
+    })
+
     it('clears completedAt and archivedAt when a finished task is reopened', async () => {
       const task = await create({ status: 'done' })
       await call('task:archive', { id: task.id, archived: true })

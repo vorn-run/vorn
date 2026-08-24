@@ -418,21 +418,42 @@ export function registerAllMethods(): void {
     }
   )
 
-  registerMethod('task:update', ({ id, ...fields }) => {
-    const task = dbGetTask(id)
-    if (!task) return { ok: false }
+  /**
+   * Named one by one, never spread.
+   *
+   * The params type is erased at run time — `registerMethod` hands the handler
+   * whatever JSON arrived — so a rest spread would put every key a client cared
+   * to send into `dbUpdateTask`, whose column whitelist is wider than what this
+   * method advertises. That is not a style point: `archivedAt` is one of the two
+   * columns `dbUpdateTask` writes on mere presence, so `{ id, archivedAt }`
+   * would file away a task that is still open, walking past the terminal-status
+   * rule `task:archive` enforces a few lines below. Naming the six fields is
+   * what makes that unreachable.
+   *
+   * `dbUpdateTask` already skips any of these that is `undefined`, so an unsent
+   * field needs no guard here. The dates are not a caller's to set: they come
+   * from `terminalStamps` or not at all.
+   */
+  registerMethod(
+    'task:update',
+    ({ id, title, description, status, branch, useWorktree, assignedAgent }) => {
+      const task = dbGetTask(id)
+      if (!task) return { ok: false }
 
-    // Spread rather than assigned one by one: `dbUpdateTask` skips any key that
-    // is `undefined`, so passing the caller's fields through unchanged is both
-    // shorter and exactly the "only what was sent" behaviour wanted here.
-    dbUpdateTask(id, {
-      ...fields,
-      updatedAt: new Date().toISOString(),
-      ...(fields.status ? terminalStamps(task.status, fields.status) : {})
-    })
-    configManager.notifyChanged()
-    return { ok: true, task: dbGetTask(id) ?? undefined }
-  })
+      dbUpdateTask(id, {
+        title,
+        description,
+        status,
+        branch,
+        useWorktree,
+        assignedAgent,
+        updatedAt: new Date().toISOString(),
+        ...(status ? terminalStamps(task.status, status) : {})
+      })
+      configManager.notifyChanged()
+      return { ok: true, task: dbGetTask(id) ?? undefined }
+    }
+  )
 
   registerMethod('task:delete', ({ id }) => {
     if (!dbGetTask(id)) return { ok: false }
