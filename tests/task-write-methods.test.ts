@@ -206,7 +206,7 @@ describe('task write methods', () => {
   afterAll(async () => {
     ws?.close()
     delete process.env.SECRET_VORN_BOOTSTRAP_TOKEN
-    await serverClose()
+    await serverClose?.()
   })
 
   beforeEach(() => {
@@ -391,7 +391,27 @@ describe('task write methods', () => {
       const res = await call<{ ok: boolean }>('task:reorder', { ids: ['ghost', a.id] })
 
       expect(res.result?.ok).toBe(true)
-      expect(store.tasks.get(a.id)?.order).toBe(1)
+      // The ghost does not take a place with it. Numbering the list would have
+      // pushed A to 1 on account of a task that does not exist.
+      expect(store.tasks.get(a.id)?.order).toBe(0)
+    })
+
+    it('leaves the tasks it was not given where they were', async () => {
+      const a = await create({ title: 'A' })
+      const b = await create({ title: 'B' })
+      const c = await create({ title: 'C' })
+      const d = await create({ title: 'D' })
+
+      // Half the board, reversed. The other half must not be landed on.
+      await call('task:reorder', { ids: [c.id, a.id] })
+
+      expect(store.tasks.get(c.id)?.order).toBe(0)
+      expect(store.tasks.get(a.id)?.order).toBe(2)
+      expect(store.tasks.get(b.id)?.order).toBe(1)
+      expect(store.tasks.get(d.id)?.order).toBe(3)
+
+      const orders = [a, b, c, d].map((t) => store.tasks.get(t.id)?.order)
+      expect(new Set(orders).size).toBe(4)
     })
 
     it('reports failure when nothing named exists', async () => {

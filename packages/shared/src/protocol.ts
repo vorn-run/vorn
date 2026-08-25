@@ -253,7 +253,7 @@ export interface RequestMethods {
    * whole configuration attached — which is the round trip `task:list` above
    * exists to avoid, paid on every keystroke's worth of change.
    *
-   * `ok: false` means the id named nothing. `created` returns the row so the
+   * `ok: false` means the id named nothing. `task:create` returns the row so the
    * caller does not have to guess the id or the order it landed at.
    */
   'task:create': {

@@ -469,16 +469,27 @@ export function registerAllMethods(): void {
     return { ok: true }
   })
 
-  /** The ids in the order they should now sit. Anything absent keeps its place. */
+  /**
+   * The ids in the order they should now sit. Anything absent keeps its place.
+   *
+   * The places these tasks already occupy are collected and handed back out in
+   * the order asked for, rather than numbering the list 0..n. Numbering would
+   * make that last sentence false twice over: half a board sent for reordering
+   * would be given orders that collide with the half that was not mentioned,
+   * and an id naming nothing would still eat a place, pushing everything after
+   * it down by one. A permutation cannot do either — the set of orders comes
+   * out the same as it went in.
+   */
   registerMethod('task:reorder', ({ ids }) => {
+    const named = ids.map((id) => dbGetTask(id)).filter((task): task is TaskConfig => !!task)
+    if (named.length === 0) return { ok: false }
+
+    const slots = named.map((task) => task.order).sort((a, b) => a - b)
     const now = new Date().toISOString()
-    let moved = 0
-    ids.forEach((id, index) => {
-      if (!dbGetTask(id)) return
-      dbUpdateTask(id, { order: index, updatedAt: now })
-      moved += 1
+    named.forEach((task, index) => {
+      const slot = slots[index] ?? task.order
+      if (slot !== task.order) dbUpdateTask(task.id, { order: slot, updatedAt: now })
     })
-    if (moved === 0) return { ok: false }
     configManager.notifyChanged()
     return { ok: true }
   })
