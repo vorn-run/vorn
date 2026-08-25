@@ -25,24 +25,39 @@ import path from 'node:path'
  * or the default was busy and it remembered the fallback instead — a fresh data
  * directory has nothing to protect. Both leave the second launch bound to the
  * same port.
+ *
+ * `HOME` is redirected as well as the data directory, and that is not tidiness.
+ * `hook-installer` writes Vorn's hook entry into `~/.claude/settings.json` and the
+ * hook server writes `~/.vorn/port` and `~/.vorn/token`, none of which look at
+ * `--data-dir` — they resolve from `os.homedir()`. A test server left to its own
+ * devices registers itself as the machine's hook endpoint, over whatever Vorn the
+ * person is actually running, and a run killed mid-flight leaves that pointing at
+ * a port with nothing behind it. Every path this process writes has to land inside
+ * the temp directory.
  */
 
 const ENTRY = path.join(__dirname, '..', 'packages', 'server', 'src', 'index.ts')
 
 let child: ChildProcess | null = null
-let dataDir: string | null = null
+let sandbox: string | null = null
 
 afterEach(() => {
   child?.kill('SIGTERM')
   child = null
-  if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true })
-  dataDir = null
+  if (sandbox) fs.rmSync(sandbox, { recursive: true, force: true })
+  sandbox = null
 })
 
 /** Boot the server the way Electron does, and read the port it announces. */
 function launch(dir: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('npx', ['tsx', ENTRY, '--data-dir', dir], { stdio: 'pipe' })
+    const proc = spawn('npx', ['tsx', ENTRY, '--data-dir', path.join(dir, 'data')], {
+      stdio: 'pipe',
+      // Nothing this server writes may escape the sandbox. `os.homedir()` follows
+      // HOME, which is what keeps `~/.claude/settings.json` and `~/.vorn` out of
+      // reach — see the note above.
+      env: { ...process.env, HOME: dir, USERPROFILE: dir }
+    })
     child = proc
     let out = ''
     const timer = setTimeout(
@@ -83,11 +98,11 @@ async function stop(): Promise<void> {
 
 describe('a server relaunched on the same data directory', () => {
   it('comes back on the port it used before', async () => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-port-'))
+    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-port-'))
 
-    const first = await launch(dataDir)
+    const first = await launch(sandbox)
     await stop()
-    const second = await launch(dataDir)
+    const second = await launch(sandbox)
 
     // Not merely "a port" — the same one. A device paired to the first is still
     // paired after the second, which is the whole reason any of this exists.

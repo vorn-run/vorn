@@ -6,6 +6,7 @@ import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { HookEvent } from '@vornrun/shared/types'
 import log from './logger'
+import { HOOK_OWNER_FILE, mayClaimHooks, parseHookOwner } from './hook-ownership'
 
 const PORT_FILE = path.join(os.homedir(), '.vorn', 'port')
 const TOKEN_FILE = path.join(os.homedir(), '.vorn', 'token')
@@ -22,6 +23,14 @@ export class HookServer extends EventEmitter {
   private server: http.Server | null = null
   private pendingPermissions = new Map<string, PendingPermission>()
   private port = 0
+  /**
+   * Whether this process wrote the shared hook files, and so may remove them.
+   *
+   * A second Vorn on the same data directory still runs a hook server — it needs
+   * one if it ever becomes the owner — but it does not advertise itself over the
+   * instance the person is using.
+   */
+  private owner = false
   private authToken: string
 
   constructor() {
@@ -97,8 +106,7 @@ export class HookServer extends EventEmitter {
           const addr = this.server!.address()
           if (typeof addr === 'object' && addr) {
             this.port = addr.port
-            this.writePortFile()
-            this.writeTokenFile()
+            this.claim()
             resolve(this.port)
           } else {
             reject(new Error('Failed to get server address'))
@@ -223,6 +231,63 @@ export class HookServer extends EventEmitter {
     }
   }
 
+  /** Whether this instance is the one registered in `~/.claude/settings.json`. */
+  ownsRegistration(): boolean {
+    return this.owner
+  }
+
+  /**
+   * Take the shared hook files, unless a live instance already holds them.
+   *
+   * Everything a hook needs to reach this server — the port, the token, and the
+   * settings entry that names both — describes exactly one process. Writing them
+   * while another Vorn is running is what silently redirected its hooks here.
+   */
+  private claim(): void {
+    let raw: string | null = null
+    try {
+      raw = fs.readFileSync(HOOK_OWNER_FILE, 'utf-8')
+    } catch {
+      // Absent or unreadable, which reads as unowned.
+    }
+
+    const owner = parseHookOwner(raw)
+    this.owner = mayClaimHooks({
+      owner,
+      selfPid: process.pid,
+      isAlive: (pid) => {
+        try {
+          process.kill(pid, 0) // a probe, not a signal — throws if the pid is gone
+          return true
+        } catch {
+          return false
+        }
+      }
+    })
+
+    if (!this.owner) {
+      log.info(
+        `[hooks] another Vorn (pid ${owner?.pid}) owns the hook registration on port ` +
+          `${owner?.port}, so this server listens on ${this.port} without claiming it`
+      )
+      return
+    }
+
+    this.writeOwnerFile()
+    this.writePortFile()
+    this.writeTokenFile()
+  }
+
+  private writeOwnerFile(): void {
+    const dir = path.dirname(HOOK_OWNER_FILE)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      HOOK_OWNER_FILE,
+      JSON.stringify({ port: this.port, pid: process.pid }),
+      'utf-8'
+    )
+  }
+
   private writePortFile(): void {
     const dir = path.dirname(PORT_FILE)
     if (!fs.existsSync(dir)) {
@@ -249,19 +314,20 @@ export class HookServer extends EventEmitter {
     this.server?.close()
     this.server = null
 
-    try {
-      if (fs.existsSync(PORT_FILE)) {
-        fs.unlinkSync(PORT_FILE)
+    // Only what we wrote. These files name one live server, and deleting another
+    // instance's copies left the running app advertising a port and a token that
+    // nothing was listening on.
+    if (!this.owner) return
+    this.owner = false
+
+    for (const file of [PORT_FILE, TOKEN_FILE, HOOK_OWNER_FILE]) {
+      try {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file)
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
-    }
-    try {
-      if (fs.existsSync(TOKEN_FILE)) {
-        fs.unlinkSync(TOKEN_FILE)
-      }
-    } catch {
-      /* ignore */
     }
   }
 }

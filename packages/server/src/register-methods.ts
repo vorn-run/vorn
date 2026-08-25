@@ -1582,7 +1582,15 @@ export function registerAllMethods(): void {
     .start()
     .then((port) => {
       try {
-        installHooks(port, hookServer.getAuthToken())
+        // Only the instance that claimed the shared hook files writes the
+        // settings entry that points at them. A dev server beside the packaged
+        // app used to redirect its hooks here and, killed before it could tidy
+        // up, leave them pointing at a port with no server behind it.
+        if (hookServer.ownsRegistration()) {
+          installHooks(port, hookServer.getAuthToken())
+        } else {
+          log.info('[hooks] another Vorn owns the registration; leaving it alone')
+        }
       } catch (err) {
         log.error({ err }, '[hooks] failed to install hooks:')
       }
