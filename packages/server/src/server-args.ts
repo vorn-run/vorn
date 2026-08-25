@@ -104,8 +104,15 @@ export function resolveServerPort(input: {
   /** The constant, so a first run is predictable rather than random. */
   fallback: number
 }): number {
-  if (input.explicit !== undefined) return input.explicit
-  if (input.remembered !== undefined) return input.remembered
+  // `!= null`, not `!== undefined`. Defaults are read back through
+  // `JSON.parse(row.value)`, so a stored JSON null arrives as `null` and would
+  // pass a strict undefined check — then reach `listen()` as a port, which is how
+  // you get an ephemeral one from a value that was meant to say "nothing set".
+  // The `??` chain this replaces tolerated null, and dropping that would have
+  // been a quiet narrowing. An explicit `0` survives either way, which is the
+  // distinction that matters.
+  if (input.explicit != null) return input.explicit
+  if (input.remembered != null) return input.remembered
   return input.fallback
 }
 
@@ -140,7 +147,7 @@ export function shouldRememberPort(input: {
   remembered?: number
   fellBack: boolean
 }): boolean {
-  if (input.explicit !== undefined) return false
+  if (input.explicit != null) return false
   if (!input.fellBack) return true
-  return input.remembered === undefined
+  return input.remembered == null
 }

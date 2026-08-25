@@ -59,6 +59,40 @@ describe('resolveServerPort', () => {
   })
 })
 
+describe('a null where a number was expected', () => {
+  /**
+   * Defaults come back through `JSON.parse(row.value)`, so a stored JSON null
+   * arrives as `null` and would satisfy a strict `!== undefined`. The `??` chain
+   * this logic replaced tolerated it; a strict check would have narrowed that
+   * silently and handed `listen()` a null port, which it reads as "any port" —
+   * an ephemeral one produced by a value that meant "nothing set".
+   */
+  const nothing = null as unknown as undefined
+
+  it('reads a null remembered port as nothing remembered', () => {
+    expect(resolveServerPort({ remembered: nothing, fallback: DEFAULT_SERVER_PORT })).toBe(
+      DEFAULT_SERVER_PORT
+    )
+  })
+
+  it('reads a null explicit port as no flag given', () => {
+    expect(
+      resolveServerPort({ explicit: nothing, remembered: 50091, fallback: DEFAULT_SERVER_PORT })
+    ).toBe(50091)
+  })
+
+  it('still lets an explicit zero through, which is not nothing', () => {
+    // `--port 0` asks for an ephemeral port on purpose. Loosening the check must
+    // not sweep it up with the empty values.
+    expect(resolveServerPort({ explicit: 0, remembered: 50091, fallback: 50091 })).toBe(0)
+    expect(shouldRememberPort({ explicit: 0, fellBack: false })).toBe(false)
+  })
+
+  it('settles a first run whose remembered port is null and whose default is taken', () => {
+    expect(shouldRememberPort({ remembered: nothing, fellBack: true })).toBe(true)
+  })
+})
+
 describe('shouldRememberPort', () => {
   it('writes the port it asked for and got', () => {
     expect(shouldRememberPort({ remembered: 50091, fellBack: false })).toBe(true)
