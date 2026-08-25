@@ -4,7 +4,7 @@ import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import log from '../logger'
-import { BOOTSTRAP_ENV_VAR } from '@vornrun/shared/protocol'
+import { BOOTSTRAP_ENV_VAR, SERVER_PORT_ENV_VAR } from '@vornrun/shared/protocol'
 import { ServerBridge } from './server-bridge'
 import { readHostSettings } from './host-store'
 
@@ -101,7 +101,15 @@ export async function launchServer(): Promise<ServerBridge> {
     // Dev mode: use npx tsx to run TypeScript directly
     const repoRoot = path.join(__dirname, '../..')
 
-    const child = spawn('npx', ['tsx', serverEntryPoint], {
+    // A port for this launch only, which no stored setting could give. A dev
+    // server and a packaged Vorn share one data directory and therefore one
+    // remembered port, and the reason to set this is to make them differ.
+    // Passed as `--port` rather than through the environment so it travels the
+    // same path the CLI already takes and is refused the same way if malformed.
+    const devPort = process.env[SERVER_PORT_ENV_VAR]
+    if (devPort) log.info(`[launcher] ${SERVER_PORT_ENV_VAR}=${devPort}, asking for that port`)
+
+    const child = spawn('npx', ['tsx', serverEntryPoint, ...(devPort ? ['--port', devPort] : [])], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,

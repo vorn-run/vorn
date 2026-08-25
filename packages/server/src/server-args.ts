@@ -79,3 +79,68 @@ export function parseServerArgs(argv: string[]): ServerArgs {
     positionals
   }
 }
+
+/**
+ * Which port to ask for, and whether the answer is worth remembering.
+ *
+ * Extracted from `startServer` for the reason `parseServerArgs` above it was:
+ * the decision was inline in a function that boots a database, a scheduler and a
+ * websocket server, so it could not be tested, and it was wrong for as long as
+ * it existed. The direct-run entry point passed `port ?? 0`, which turned "no
+ * flag given" into an explicit zero — and `0 ?? remembered` is `0`, because `??`
+ * only falls through on null and undefined. The remembered port was written on
+ * every launch and read on none.
+ *
+ * That mattered because a browser keys `localStorage` by origin. A port that
+ * moves hands the web client a new origin and its stored token stays behind at
+ * the old one, which a person experiences as Vorn forgetting them. A phone
+ * paired to `ws://host:port/ws` loses it the same way.
+ */
+export function resolveServerPort(input: {
+  /** `--port`, which a person typed and which therefore wins. */
+  explicit?: number
+  /** `defaults.serverPort` — the port this install last settled on. */
+  remembered?: number
+  /** The constant, so a first run is predictable rather than random. */
+  fallback: number
+}): number {
+  if (input.explicit !== undefined) return input.explicit
+  if (input.remembered !== undefined) return input.remembered
+  return input.fallback
+}
+
+/**
+ * Whether the port that was actually bound is worth writing to the configuration.
+ *
+ * Three rules, and the third is the one with a story.
+ *
+ * An explicit `--port` is never remembered. It is an instruction for one launch,
+ * not a new preference: writing it back would let a single test run quietly
+ * repoint every later launch, and the dev override exists precisely so a dev
+ * server can differ from the stored value rather than redefine it.
+ *
+ * A port bound as asked is always remembered. That is the whole mechanism.
+ *
+ * A *fallback* port — one taken because something else held the port we wanted —
+ * is remembered only when nothing was remembered before. The two cases look
+ * identical from inside one process and want opposite things:
+ *
+ * - Another Vorn holds the port, because a dev server and the packaged app share
+ *   a data directory. Writing the fallback would overwrite a working remembered
+ *   port with an accidental one, and move the *other* instance on its next
+ *   launch. Since that config already names a port, this is the case where a
+ *   remembered value exists, so nothing is written.
+ * - Something unrelated squats the default on a first run. Here there is nothing
+ *   to protect, and refusing to write would hand out a fresh random port every
+ *   launch forever — the exact failure this all exists to stop. So it is written,
+ *   and the install settles on it.
+ */
+export function shouldRememberPort(input: {
+  explicit?: number
+  remembered?: number
+  fellBack: boolean
+}): boolean {
+  if (input.explicit !== undefined) return false
+  if (!input.fellBack) return true
+  return input.remembered === undefined
+}

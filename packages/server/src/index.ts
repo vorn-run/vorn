@@ -17,7 +17,8 @@ import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
 import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
 import { getDataDir } from './database'
-import { parseServerArgs } from './server-args'
+import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
+import { DEFAULT_SERVER_PORT } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
@@ -259,26 +260,50 @@ export async function startServer(
   void refreshTrustedOrigins()
 
   // Keep the same port across restarts. A browser keys localStorage by origin, so
-  // an ephemeral port hands a paired device a new origin every launch and its
-  // token goes with it — the user would experience that as Vorn forgetting them.
-  // An explicit --port always wins; otherwise take the remembered one, falling
-  // back if something else has claimed it meanwhile.
-  const preferredPort = options.port ?? config.defaults.serverPort ?? 0
+  // a moving port hands a paired device a new origin every launch and its token
+  // goes with it — the user would experience that as Vorn forgetting them. An
+  // explicit --port always wins; otherwise take the remembered one, or the
+  // default on a first run, falling back only if something else holds it.
+  const wantedPort = resolveServerPort({
+    explicit: options.port,
+    remembered: config.defaults.serverPort,
+    fallback: DEFAULT_SERVER_PORT
+  })
+  let fellBack = false
   try {
-    await app.listen({ host, port: preferredPort })
+    await app.listen({ host, port: wantedPort })
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE' || preferredPort === 0) throw err
-    log.warn(`[server] port ${preferredPort} is in use, taking another`)
+    if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE' || wantedPort === 0) throw err
+    fellBack = true
     await app.listen({ host, port: 0 })
   }
 
   const address = app.server.address()
-  const actualPort = typeof address === 'object' && address ? address.port : preferredPort
+  const actualPort = typeof address === 'object' && address ? address.port : wantedPort
+
+  if (fellBack) {
+    // Said in full rather than as "taking another", because this is the line that
+    // explains why a paired phone or a signed-in browser has just stopped
+    // working: the origin moved. Two Vorn instances on one data directory is the
+    // ordinary cause, a dev server beside the packaged app.
+    log.warn(
+      `[server] port ${wantedPort} is held by something else, so this server took ` +
+        `${actualPort} instead. Anything paired to ${wantedPort} must be pointed at the new port.`
+    )
+  }
 
   // Remember it, so the next launch is the same origin. Written straight to the
   // database rather than through notifyChanged: a config broadcast here would
   // re-enter checkAndRebind during startup.
-  if (!options.port && config.defaults.serverPort !== actualPort) {
+  //
+  // `shouldRememberPort` carries the rule, including why a fallback port is
+  // written on a first run and withheld from an install that already has one.
+  const remember = shouldRememberPort({
+    explicit: options.port,
+    remembered: config.defaults.serverPort,
+    fellBack
+  })
+  if (remember && config.defaults.serverPort !== actualPort) {
     try {
       configManager.saveConfig({
         ...config,
@@ -389,7 +414,7 @@ const isDirectRun =
 if (isDirectRun) {
   const { host, port, dataDir } = parseServerArgs(process.argv.slice(2))
 
-  startServer({ port: port ?? 0, host, dataDir })
+  startServer({ port, host, dataDir })
     .then(({ port: actualPort }) => {
       // This entry point is the one Electron forks, and its launcher blocks on
       // reading this line to learn where to connect. It belongs here rather than
