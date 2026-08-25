@@ -25,6 +25,7 @@ import type {
   ConnectorItemContext,
   TaskConfig,
   TaskStatus,
+  AiAgentType,
   WorktreeInventory,
   WorktreeActionResult,
   BranchDeleteResult,
@@ -243,6 +244,61 @@ export interface RequestMethods {
     result: TaskConfig[]
   }
   'task:setStatus': { params: { id: string; status: TaskStatus }; result: { ok: boolean } }
+
+  /**
+   * Writing a task, rather than only reading and moving one.
+   *
+   * These reach the same row-level functions the board has always had. Without
+   * them the only way to write a task over this socket is `config:save` with the
+   * whole configuration attached — which is the round trip `task:list` above
+   * exists to avoid, paid on every keystroke's worth of change.
+   *
+   * `ok: false` means there was nothing to write to: an id that named no task,
+   * or, for `task:create`, a project that does not exist. `task:create` returns
+   * the row so the caller does not have to guess the id it was given or the
+   * order it landed at.
+   */
+  'task:create': {
+    params: {
+      projectName: string
+      title: string
+      description?: string
+      status?: TaskStatus
+      branch?: string
+      useWorktree?: boolean
+      assignedAgent?: AiAgentType
+    }
+    result: { ok: boolean; task?: TaskConfig }
+  }
+  'task:update': {
+    params: {
+      id: string
+      title?: string
+      description?: string
+      status?: TaskStatus
+      branch?: string
+      useWorktree?: boolean
+      assignedAgent?: AiAgentType
+    }
+    result: { ok: boolean; task?: TaskConfig }
+  }
+  'task:delete': { params: { id: string }; result: { ok: boolean } }
+  /**
+   * The ids in the order they should now sit. Anything absent keeps its place.
+   *
+   * There is no project to name because the named tasks are permuted through
+   * the places they already hold: ids drawn from two projects would each stay
+   * among the orders their own rows already had. One project at a time is the
+   * ordinary use, not a rule the server enforces.
+   */
+  'task:reorder': { params: { ids: string[] }; result: { ok: boolean } }
+  /**
+   * One method rather than two. Archiving and restoring are the same field
+   * being set and cleared; the MCP side has two tools only because a tool is a
+   * verb.
+   */
+  'task:archive': { params: { id: string; archived: boolean }; result: { ok: boolean } }
+
   /**
    * The projects a session can be launched into.
    *
