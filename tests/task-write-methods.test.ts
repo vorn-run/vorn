@@ -21,6 +21,14 @@ import type { TaskConfig } from '@vornrun/shared/types'
 
 const TEST_CREDENTIAL = 'task-write-test-credential'
 
+/**
+ * Whatever the runner already had, so teardown can put it back.
+ *
+ * Deleting the variable outright would take it from a run that had set one
+ * before this file was imported.
+ */
+const PRIOR_BOOTSTRAP_TOKEN = process.env.SECRET_VORN_BOOTSTRAP_TOKEN
+
 const store = vi.hoisted(() => ({
   tasks: new Map<string, Record<string, unknown>>(),
   projects: new Set<string>(),
@@ -205,7 +213,8 @@ describe('task write methods', () => {
 
   afterAll(async () => {
     ws?.close()
-    delete process.env.SECRET_VORN_BOOTSTRAP_TOKEN
+    if (PRIOR_BOOTSTRAP_TOKEN === undefined) delete process.env.SECRET_VORN_BOOTSTRAP_TOKEN
+    else process.env.SECRET_VORN_BOOTSTRAP_TOKEN = PRIOR_BOOTSTRAP_TOKEN
     await serverClose?.()
   })
 

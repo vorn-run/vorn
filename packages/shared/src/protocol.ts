@@ -253,8 +253,10 @@ export interface RequestMethods {
    * whole configuration attached — which is the round trip `task:list` above
    * exists to avoid, paid on every keystroke's worth of change.
    *
-   * `ok: false` means the id named nothing. `task:create` returns the row so the
-   * caller does not have to guess the id or the order it landed at.
+   * `ok: false` means there was nothing to write to: an id that named no task,
+   * or, for `task:create`, a project that does not exist. `task:create` returns
+   * the row so the caller does not have to guess the id it was given or the
+   * order it landed at.
    */
   'task:create': {
     params: {
@@ -281,7 +283,14 @@ export interface RequestMethods {
     result: { ok: boolean; task?: TaskConfig }
   }
   'task:delete': { params: { id: string }; result: { ok: boolean } }
-  /** The ids in the order they should now sit, within one project. */
+  /**
+   * The ids in the order they should now sit. Anything absent keeps its place.
+   *
+   * There is no project to name because the named tasks are permuted through
+   * the places they already hold: ids drawn from two projects would each stay
+   * among the orders their own rows already had. One project at a time is the
+   * ordinary use, not a rule the server enforces.
+   */
   'task:reorder': { params: { ids: string[] }; result: { ok: boolean } }
   /**
    * One method rather than two. Archiving and restoring are the same field
