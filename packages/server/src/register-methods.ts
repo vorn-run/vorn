@@ -371,7 +371,14 @@ export function registerAllMethods(): void {
   registerMethod('task:setStatus', ({ id, status }) => {
     const task = dbGetTask(id)
     if (!task) return { ok: false }
-    dbUpdateTask(id, { status, ...terminalStamps(task.status, status) })
+    // `dbUpdateTask` writes `updated_at` only when it is handed one, so moving a
+    // card between columns used to leave the row claiming it had not been
+    // touched since whenever it was last edited.
+    dbUpdateTask(id, {
+      status,
+      updatedAt: new Date().toISOString(),
+      ...terminalStamps(task.status, status)
+    })
     // Everything else reads the board through the cached config, so a direct
     // row write has to invalidate it. This also broadcasts `config:changed`,
     // which is how other clients learn the card moved.

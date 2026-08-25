@@ -140,7 +140,6 @@ function call<T = unknown>(
 ): Promise<RpcResponse & { result?: T }> {
   const id = nextId++
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Timeout: ${method}`)), 5000)
     const handler = (raw: WebSocket.RawData) => {
       const msg = JSON.parse(raw.toString()) as RpcResponse
       if (msg.id !== id) return
@@ -148,6 +147,13 @@ function call<T = unknown>(
       clearTimeout(timeout)
       resolve(msg as RpcResponse & { result?: T })
     }
+    // Detached on the way out as well as on the way in: a call that times out
+    // and leaves its listener behind makes every later call in a failing run
+    // answer to a socket nobody is reading for.
+    const timeout = setTimeout(() => {
+      ws.off('message', handler)
+      reject(new Error(`Timeout: ${method}`))
+    }, 5000)
     ws.on('message', handler)
     ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
   })
@@ -321,6 +327,19 @@ describe('task write methods', () => {
       const task = await create({ status: 'done' })
       await call('task:setStatus', { id: task.id, status: 'todo' })
       expect(store.tasks.get(task.id)?.completedAt).toBeUndefined()
+    })
+
+    it('marks the row as touched, like every other write does', async () => {
+      const task = await create()
+      // Aged by hand rather than by the clock: creating and moving a task can
+      // land in the same millisecond, and an assertion that depends on them not
+      // doing so is one that goes red on a machine faster than this one.
+      const stale = '2020-01-01T00:00:00.000Z'
+      store.tasks.set(task.id, { ...task, updatedAt: stale })
+
+      await call('task:setStatus', { id: task.id, status: 'in_progress' })
+
+      expect(store.tasks.get(task.id)?.updatedAt).not.toBe(stale)
     })
   })
 
