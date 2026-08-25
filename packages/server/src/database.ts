@@ -1780,6 +1780,10 @@ export function dbInsertTask(task: TaskConfig): void {
 export function dbUpdateTask(id: string, updates: Partial<TaskConfig>): void {
   const sets: string[] = []
   const params: unknown[] = []
+  if (updates.projectName !== undefined) {
+    sets.push('project_name = ?')
+    params.push(updates.projectName)
+  }
   if (updates.title !== undefined) {
     sets.push('title = ?')
     params.push(updates.title)

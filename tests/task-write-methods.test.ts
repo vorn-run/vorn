@@ -29,6 +29,26 @@ const TEST_CREDENTIAL = 'task-write-test-credential'
  */
 const PRIOR_BOOTSTRAP_TOKEN = process.env.SECRET_VORN_BOOTSTRAP_TOKEN
 
+/** The columns `dbUpdateTask` can actually write, in `database.ts` order. */
+const WRITABLE = new Set([
+  'projectName',
+  'title',
+  'description',
+  'status',
+  'order',
+  'branch',
+  'useWorktree',
+  'assignedAgent',
+  'assignedSessionId',
+  'agentSessionId',
+  'updatedAt',
+  'completedAt',
+  'archivedAt',
+  'sourceConnectorId',
+  'sourceExternalUrl',
+  'sourceExternalId'
+])
+
 const store = vi.hoisted(() => ({
   tasks: new Map<string, Record<string, unknown>>(),
   projects: new Set<string>(),
@@ -96,6 +116,11 @@ vi.mock('../packages/server/src/database', () => ({
       // as "clear it". Getting this wrong here would hide the bug it exists to
       // catch — a reopened task keeping the date it was finished.
       if (value === undefined && key !== 'completedAt' && key !== 'archivedAt') continue
+      // And the column whitelist, which this mock used not to have. Without it a
+      // test could hand `dbUpdateTask` a field the real one silently drops and
+      // watch it pass — which is exactly the state `projectName` was in before
+      // it was added to the real function.
+      if (!WRITABLE.has(key)) continue
       row[key] = value
     }
   }),
@@ -258,6 +283,69 @@ describe('task write methods', () => {
     it('leaves completedAt off an unfinished task', async () => {
       const task = await create({ status: 'in_progress' })
       expect(task.completedAt).toBeUndefined()
+    })
+  })
+
+  describe('moving a task to another project', () => {
+    it('writes the project, which the row function could not do at all before', async () => {
+      store.projects.add('dev')
+      const task = await create()
+
+      const res = await call<{ ok: boolean }>('task:update', {
+        id: task.id,
+        projectName: 'dev'
+      })
+
+      expect(res.result?.ok).toBe(true)
+      expect(store.tasks.get(task.id)?.projectName).toBe('dev')
+    })
+
+    it('puts it at the end of the board it arrives on', async () => {
+      // `order` is per project. Carried across it keeps a place that means
+      // nothing where it lands -- and from 0 into a board that already has a 0
+      // it lands on top of something, which no index forbids and `task:reorder`
+      // would preserve rather than repair.
+      store.projects.add('dev')
+      const moving = await create({ title: 'Moving' })
+      const settled = await create({ projectName: 'dev', title: 'Already there' })
+
+      expect(moving.order).toBe(0)
+      expect(settled.order).toBe(0)
+
+      await call('task:update', { id: moving.id, projectName: 'dev' })
+
+      expect(store.tasks.get(moving.id)?.order).toBe(1)
+      expect(store.tasks.get(settled.id)?.order).toBe(0)
+    })
+
+    it('refuses a project that does not exist', async () => {
+      const task = await create()
+
+      const res = await call<{ ok: boolean }>('task:update', {
+        id: task.id,
+        projectName: 'not-a-project'
+      })
+
+      // A task in a project nothing can run is a task that has been lost.
+      expect(res.result?.ok).toBe(false)
+      expect(store.tasks.get(task.id)?.projectName).toBe('vorn')
+    })
+
+    it('leaves the project alone when it is not asked about', async () => {
+      const task = await create()
+      await call('task:update', { id: task.id, title: 'Renamed' })
+
+      expect(store.tasks.get(task.id)?.projectName).toBe('vorn')
+      expect(store.tasks.get(task.id)?.order).toBe(0)
+    })
+
+    it('does not renumber when the project sent is the one it is already in', async () => {
+      const first = await create({ title: 'First' })
+      await create({ title: 'Second' })
+
+      await call('task:update', { id: first.id, projectName: 'vorn' })
+
+      expect(store.tasks.get(first.id)?.order).toBe(0)
     })
   })
 
