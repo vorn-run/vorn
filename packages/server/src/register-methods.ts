@@ -481,7 +481,13 @@ export function registerAllMethods(): void {
    * out the same as it went in.
    */
   registerMethod('task:reorder', ({ ids }) => {
-    const named = ids.map((id) => dbGetTask(id)).filter((task): task is TaskConfig => !!task)
+    // Deduplicated first, keeping the place each id was first named. An id sent
+    // twice would otherwise put its task in the list twice and its order into
+    // the slots twice, and the second copy is a place no task can take up: the
+    // extra slot pushes a later task onto an order another one already holds.
+    const named = [...new Set(ids)]
+      .map((id) => dbGetTask(id))
+      .filter((task): task is TaskConfig => !!task)
     if (named.length === 0) return { ok: false }
 
     const slots = named.map((task) => task.order).sort((a, b) => a - b)

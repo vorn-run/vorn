@@ -414,6 +414,26 @@ describe('task write methods', () => {
       expect(new Set(orders).size).toBe(4)
     })
 
+    it('reads an id sent twice as the once it can mean', async () => {
+      const a = await create({ title: 'A' })
+      const b = await create({ title: 'B' })
+      const c = await create({ title: 'C' })
+      const d = await create({ title: 'D' })
+
+      // A repeat puts its order into the slots twice, and the second copy is a
+      // place no task can occupy -- the spare pushed a later task onto an order
+      // another one already held. Here that used to land A and C both on 1.
+      await call('task:reorder', { ids: [b.id, a.id, c.id, b.id] })
+
+      const orders = [a, b, c, d].map((t) => store.tasks.get(t.id)?.order)
+      expect(new Set(orders).size).toBe(4)
+      // Same answer as the list with the repeat taken out.
+      expect(store.tasks.get(b.id)?.order).toBe(0)
+      expect(store.tasks.get(a.id)?.order).toBe(1)
+      expect(store.tasks.get(c.id)?.order).toBe(2)
+      expect(store.tasks.get(d.id)?.order).toBe(3)
+    })
+
     it('reports failure when nothing named exists', async () => {
       const res = await call<{ ok: boolean }>('task:reorder', { ids: ['ghost'] })
       expect(res.result?.ok).toBe(false)
