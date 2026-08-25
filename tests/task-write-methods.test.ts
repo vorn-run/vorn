@@ -29,25 +29,36 @@ const TEST_CREDENTIAL = 'task-write-test-credential'
  */
 const PRIOR_BOOTSTRAP_TOKEN = process.env.SECRET_VORN_BOOTSTRAP_TOKEN
 
-/** The columns `dbUpdateTask` can actually write, in `database.ts` order. */
-const WRITABLE = new Set([
-  'projectName',
-  'title',
-  'description',
-  'status',
-  'order',
-  'branch',
-  'useWorktree',
-  'assignedAgent',
-  'assignedSessionId',
-  'agentSessionId',
-  'updatedAt',
-  'completedAt',
-  'archivedAt',
-  'sourceConnectorId',
-  'sourceExternalUrl',
-  'sourceExternalId'
-])
+/**
+ * The columns `dbUpdateTask` can actually write, in `database.ts` order.
+ *
+ * Hoisted like `store` below it. The mock reads this from inside a function
+ * body, so a plain `const` happens to be safe -- but a `vi.mock` factory is
+ * lifted above the imports, and anything it touches while it is being built
+ * would find this still in its dead zone. Not worth leaving as the one binding
+ * in this file that depends on where it is read from.
+ */
+const WRITABLE = vi.hoisted(
+  () =>
+    new Set([
+      'projectName',
+      'title',
+      'description',
+      'status',
+      'order',
+      'branch',
+      'useWorktree',
+      'assignedAgent',
+      'assignedSessionId',
+      'agentSessionId',
+      'updatedAt',
+      'completedAt',
+      'archivedAt',
+      'sourceConnectorId',
+      'sourceExternalUrl',
+      'sourceExternalId'
+    ])
+)
 
 const store = vi.hoisted(() => ({
   tasks: new Map<string, Record<string, unknown>>(),
