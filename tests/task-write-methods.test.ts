@@ -438,6 +438,20 @@ describe('task write methods', () => {
       const res = await call<{ ok: boolean }>('task:reorder', { ids: ['ghost'] })
       expect(res.result?.ok).toBe(false)
     })
+
+    it('says nothing when the order asked for is the order already there', async () => {
+      const a = await create({ title: 'A' })
+      const b = await create({ title: 'B' })
+      const before = store.notified
+
+      const res = await call<{ ok: boolean }>('task:reorder', { ids: [a.id, b.id] })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      // It succeeded -- the board is in the state asked for -- and wrote
+      // nothing, so there is nothing for anyone to rebuild.
+      expect(res.result?.ok).toBe(true)
+      expect(store.notified).toBe(before)
+    })
   })
 
   describe('delete', () => {
@@ -466,16 +480,20 @@ describe('task write methods', () => {
   describe('config:changed', () => {
     it('fires on every mutation', async () => {
       const task = await create()
+      // A second task so the reorder below has something to swap with. Given one
+      // id there is no order it could change, and a no-op proves nothing about
+      // whether a real reorder is heard.
+      const other = await create({ title: 'Second' })
       await call('task:update', { id: task.id, title: 'Renamed' })
       await call('task:setStatus', { id: task.id, status: 'done' })
       await call('task:archive', { id: task.id, archived: true })
-      await call('task:reorder', { ids: [task.id] })
+      await call('task:reorder', { ids: [other.id, task.id] })
       await call('task:delete', { id: task.id })
 
       // The broadcast is a notification, so it arrives independently of the
       // replies awaited above.
       await new Promise((resolve) => setTimeout(resolve, 50))
-      expect(store.notified).toBe(6)
+      expect(store.notified).toBe(7)
     })
 
     it('stays quiet when nothing changed', async () => {

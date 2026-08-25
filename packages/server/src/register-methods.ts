@@ -492,11 +492,17 @@ export function registerAllMethods(): void {
 
     const slots = named.map((task) => task.order).sort((a, b) => a - b)
     const now = new Date().toISOString()
+    let moved = 0
     named.forEach((task, index) => {
       const slot = slots[index] ?? task.order
-      if (slot !== task.order) dbUpdateTask(task.id, { order: slot, updatedAt: now })
+      if (slot === task.order) return
+      dbUpdateTask(task.id, { order: slot, updatedAt: now })
+      moved += 1
     })
-    configManager.notifyChanged()
+    // A list already in the order it asks for is a request that succeeded and
+    // wrote nothing. Broadcasting there would make every client rebuild a board
+    // that did not move.
+    if (moved > 0) configManager.notifyChanged()
     return { ok: true }
   })
 
