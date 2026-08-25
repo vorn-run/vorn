@@ -273,6 +273,8 @@ export interface RequestMethods {
   'task:update': {
     params: {
       id: string
+      /** Moving a task between projects. It lands at the end of the new one. */
+      projectName?: string
       title?: string
       description?: string
       status?: TaskStatus

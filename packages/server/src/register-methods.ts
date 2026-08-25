@@ -440,14 +440,29 @@ export function registerAllMethods(): void {
    * `dbUpdateTask` already skips any of these that is `undefined`, so an unsent
    * field needs no guard here. The dates are not a caller's to set: they come
    * from `terminalStamps` or not at all.
+   *
+   * `projectName` carries two rules of its own, both borrowed from `task:create`.
+   * A project that does not exist is refused, because a task in one is a task
+   * nothing can run. And `order` is recomputed, because it is per-project: a
+   * task carried across keeps a place that means nothing where it lands, and
+   * from order 0 in one board into a board that already has an order 0 it lands
+   * on top of something. Nothing in the schema forbids that duplicate and
+   * `task:reorder` preserves it faithfully, since it permutes the orders already
+   * present rather than renumbering them. A moved task goes to the end, exactly
+   * as a new one does.
    */
   registerMethod(
     'task:update',
-    ({ id, title, description, status, branch, useWorktree, assignedAgent }) => {
+    ({ id, projectName, title, description, status, branch, useWorktree, assignedAgent }) => {
       const task = dbGetTask(id)
       if (!task) return { ok: false }
 
+      const moving = projectName !== undefined && projectName !== task.projectName
+      if (moving && !dbGetProject(projectName)) return { ok: false }
+
       dbUpdateTask(id, {
+        projectName,
+        ...(moving && { order: dbGetMaxTaskOrder(projectName) + 1 }),
         title,
         description,
         status,
