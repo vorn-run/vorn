@@ -530,12 +530,20 @@ export async function startServer(
    * rather than a loss, and refusing its sessions would leave the machine with
    * nothing that works.
    */
+  let saidSo = false
   const noticeLostEndpoint = (held: LocalEndpoint | null): boolean => {
-    if (isDraining()) return true
-    if (!held || held.holds()) return false
-    log.warn('[endpoint] this server no longer holds the endpoint; finishing what it has')
-    beginDraining()
-    return true
+    // The endpoint is asked before `isDraining()`, not after. That call flips the
+    // flag itself now -- session creation consults the same check, so it has to --
+    // and asking it first meant this function's own transition never ran and the
+    // warning below was dead. A server quietly refusing every new session with
+    // nothing in the log saying why is a bad half-hour for whoever hits it.
+    const lost = held !== null && !held.holds()
+    if (lost && !saidSo) {
+      saidSo = true
+      log.warn('[endpoint] this server no longer holds the endpoint; finishing what it has')
+      beginDraining()
+    }
+    return isDraining()
   }
 
   // The server outlives the app now, so something has to decide when it is done.

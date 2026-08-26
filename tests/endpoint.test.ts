@@ -122,6 +122,34 @@ describe('the four races', () => {
     expect(inode(canonical)).toBe(theirs)
   })
 
+  it('takes a name that frees itself while it is being checked', async () => {
+    // A server that bound the canonical path directly -- which is what this
+    // codebase did before the scratch name, and what an older Vorn still does --
+    // unlinks it on close. So the name really can go from taken to free while a
+    // claim is in progress, and standing down there would leave the machine with
+    // no endpoint held and nobody holding one.
+    const incumbent = await listener(canonical)
+    const scratch = scratchPathFor(canonical)
+    await listener(scratch)
+    const mine = inode(scratch)
+
+    // The name is taken when the claim starts -- so the first link really does
+    // fail with EEXIST -- and the incumbent departs during the probe, taking the
+    // canonical entry with it the way `close()` does.
+    let departed = false
+    const probe = vi.fn(async (): Promise<Liveness> => {
+      if (!departed) {
+        departed = true
+        await new Promise<void>((r) => incumbent.close(() => r()))
+      }
+      return 'dead'
+    })
+
+    expect(await claimEndpoint(scratch, canonical, probe)).toEqual({ held: true })
+    expect(inode(canonical)).toBe(mine)
+    expect(probe).toHaveBeenCalledTimes(1)
+  })
+
   it('stands down when the entry changes hands mid-check', async () => {
     await listener(canonical)
     const scratch = scratchPathFor(canonical)

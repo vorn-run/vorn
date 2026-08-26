@@ -541,9 +541,11 @@ const ADOPT_AUTH_TIMEOUT_MS = 5_000
  * here; null means "could not tell", never "nothing".
  */
 export async function probeSessions(target: string): Promise<number | null> {
-  const token = readLocalToken()
-  if (!token) return null
-  const probe = new ServerBridge(target, token)
+  // No credential needed, and asking for one would defeat the point. The greeting
+  // arrives before authentication -- that is the whole reason the count rides it
+  // -- so a server this app cannot reach can still say what it is holding, and
+  // that is precisely the server worth saying it about.
+  const probe = new ServerBridge(target, readLocalToken() ?? undefined)
   probe.connect()
   try {
     return await new Promise<number | null>((resolve) => {

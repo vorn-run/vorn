@@ -183,25 +183,41 @@ export async function claimEndpoint(
   const mine = identify(scratch)
   if (!mine) return { held: false, because: 'the scratch name is not a bound socket' }
 
-  // The test-and-set. `link` first and never a bare `rename`, because rename
-  // replaces whatever it finds and would let a starting server destroy a healthy
-  // one without ever asking.
-  try {
-    fs.linkSync(scratch, canonical)
-    // Ours now. Remove the scratch name, which is a name this process created --
-    // not the forbidden unlink-then-link, which is about the canonical entry.
-    // After this, libuv's unlink at close has nothing to find on either path.
+  /** Ours. Remove the scratch name, which is a name this process created -- not
+   *  the forbidden unlink-then-link, which is about the canonical entry. After
+   *  this, libuv's unlink at close has nothing to find on either path. */
+  const took = (): ClaimOutcome => {
     fs.rmSync(scratch, { force: true })
     return { held: true }
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code !== 'EEXIST') return { held: false, because: `link failed: ${code}` }
   }
 
   for (let attempt = 0; attempt < RECHECK_LIMIT; attempt++) {
+    // The test-and-set, and the whole loop exists to come back to it. `link`
+    // first and never a bare `rename`, because rename replaces whatever it finds
+    // and would let a starting server destroy a healthy one without ever asking.
+    try {
+      fs.linkSync(scratch, canonical)
+      return took()
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'EEXIST') return { held: false, because: `link failed: ${code}` }
+    }
+
+    if (!fs.existsSync(canonical)) {
+      // Taken a moment ago and gone now. A server that bound the canonical path
+      // directly -- which is what this codebase did before the scratch name --
+      // unlinks it on close, so the name really can free itself between the
+      // EEXIST and this look. It is free, so go and take it rather than standing
+      // down from an endpoint nobody holds.
+      continue
+    }
+
     const before = identify(canonical)
-    if (!before)
+    if (!before) {
+      // It exists and is not a socket. Not something this process put there, not
+      // something it can identify, and so not something it may replace.
       return { held: false, because: 'the endpoint is not a socket this process can read' }
+    }
 
     const liveness = await probe(canonical)
     if (liveness !== 'dead') return { held: false, because: `the incumbent is ${liveness}` }
