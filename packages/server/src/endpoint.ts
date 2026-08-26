@@ -126,7 +126,12 @@ export function probeEndpoint(socketPath: string, timeoutMs = PROBE_TIMEOUT_MS):
     const socket = net.connect(socketPath)
     socket.setTimeout(timeoutMs, () => done('unknown'))
     socket.once('connect', () => done('alive'))
-    socket.once('error', (err: NodeJS.ErrnoException) => {
+    // `on`, not `once`. Destroying a socket the moment it connects can draw a
+    // second error afterwards -- an ECONNRESET as the peer's reply lands on a
+    // half-closed pipe -- and a handler that unhooked itself leaves that one
+    // unhandled, which takes down the process. A probe whose whole job is to keep
+    // a server safe must not be able to kill the one asking.
+    socket.on('error', (err: NodeJS.ErrnoException) => {
       done(err.code === 'ECONNREFUSED' || err.code === 'ENOENT' ? 'dead' : 'unknown')
     })
   })

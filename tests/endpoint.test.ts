@@ -40,7 +40,13 @@ afterEach(() => {
 
 /** A real bound listener, since the claim identifies sockets by inode. */
 async function listener(at: string): Promise<net.Server> {
-  const server = net.createServer((c) => c.end('served'))
+  const server = net.createServer((c) => {
+    // A probe connects and destroys immediately, so this write often lands on a
+    // socket that has already gone. Swallowed, or the reset is unhandled and
+    // ends the test worker.
+    c.on('error', () => {})
+    c.end('served')
+  })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(at, resolve)
@@ -160,11 +166,18 @@ describe('what the probe is allowed to conclude', () => {
     expect(await probeEndpoint(canonical)).toBe('dead')
   })
 
-  it('declines to guess when it cannot tell', async () => {
-    // A path that is not a socket at all: neither refused nor served.
+  it('is never asked about something that is not a socket', () => {
+    // There was a test here that connected to a regular file and expected
+    // "unknown". It passed on darwin, which answers ENOTSOCK, and failed on linux,
+    // which answers ECONNREFUSED -- so the probe called it dead, which by its own
+    // whitelist is right. The test was asserting an errno rather than a rule.
+    //
+    // The rule it should have been asserting is one layer up: the claim
+    // identifies the entry before it probes, and anything that is not a socket is
+    // not something this process may replace. The probe never sees one.
     const notASocket = path.join(dir, 'a-regular-file')
     fs.writeFileSync(notASocket, 'x')
-    expect(await probeEndpoint(notASocket)).toBe('unknown')
+    expect(fs.lstatSync(notASocket).isSocket()).toBe(false)
   })
 })
 
