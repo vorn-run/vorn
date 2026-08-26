@@ -37,16 +37,22 @@ function isHookEvent(value: unknown): value is HookEvent {
   const event = value as Record<string, unknown>
   if (typeof event.hook_event_name !== 'string' || event.hook_event_name === '') return false
   if (typeof event.session_id !== 'string' || event.session_id === '') return false
-  return typeof event.cwd === 'string' && event.cwd !== ''
+  // A string, but not necessarily a full one. `copilot-hook-installer` posts
+  // `cwd: d.cwd||''` and its sessions are force-linked, so they resolve from the
+  // session map and never needed a directory -- an empty one has always worked
+  // and rejecting it would 400 every Copilot event. Only `undefined` was ever
+  // the problem: `normalizePath('')` resolves, `normalizePath(undefined)` throws.
+  return typeof event.cwd === 'string'
 }
 
 /** Enough of a rejected payload to recognise it, without logging a whole body. */
 function describe(value: unknown): string {
   if (typeof value !== 'object' || value === null) return `not an object (${typeof value})`
   const event = value as Record<string, unknown>
-  const missing = (['hook_event_name', 'session_id', 'cwd'] as const).filter(
+  const missing = (['hook_event_name', 'session_id'] as const).filter(
     (key) => typeof event[key] !== 'string' || event[key] === ''
   )
+  if (typeof event.cwd !== 'string') missing.push('cwd' as never)
   return `${String(event.hook_event_name ?? 'no name')} missing ${missing.join(', ')}`
 }
 
@@ -93,7 +99,15 @@ export class HookServer extends EventEmitter {
     return true
   }
 
-  start(): Promise<number> {
+  /**
+   * @param preferredPort The port to try first, falling back to an OS-assigned
+   * one if it is taken. Defaults to the fixed port that keeps `settings.json`
+   * stable across restarts. Tests pass `0` to take any free port: two servers
+   * both reaching for the fixed one is a collision that depends on whether
+   * anything else on the machine already holds it, which is not a thing a test
+   * should be deciding by accident.
+   */
+  start(preferredPort: number = HookServer.PREFERRED_PORT): Promise<number> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
         if (req.method !== 'POST') {
@@ -162,7 +176,7 @@ export class HookServer extends EventEmitter {
       this.server.once('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
           // Preferred port taken -- fall back to OS-assigned
-          log.info(`[hooks] port ${HookServer.PREFERRED_PORT} in use, falling back to random port`)
+          log.info(`[hooks] port ${preferredPort} in use, falling back to random port`)
           this.server!.removeAllListeners('error')
           this.server!.on('error', reject)
           tryListen(0)
@@ -171,7 +185,7 @@ export class HookServer extends EventEmitter {
         }
       })
 
-      tryListen(HookServer.PREFERRED_PORT)
+      tryListen(preferredPort)
     })
   }
 

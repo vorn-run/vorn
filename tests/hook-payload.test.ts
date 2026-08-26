@@ -63,7 +63,12 @@ afterEach(() => {
 async function startHookServer() {
   const { HookServer } = await import('../packages/server/src/hook-server')
   const instance = new HookServer()
-  const port = await instance.start()
+  // Any free port, never the fixed one. `server-integration.test.ts` starts a
+  // server that claims the fixed port too, and vitest runs files in parallel --
+  // so on a machine where nothing else holds it the two collide and requests
+  // come back as `socket hang up`. Locally that never happened, because the
+  // running Vorn already had it and both fell back. CI had no such accident.
+  const port = await instance.start(0)
   return {
     instance,
     port,
@@ -114,6 +119,7 @@ describe('the payload that crashed the server', () => {
     ['no session', '{"hook_event_name":"Notification","cwd":"/tmp"}'],
     ['no cwd', '{"hook_event_name":"Notification","session_id":"s1"}'],
     ['empty session', '{"hook_event_name":"Stop","session_id":"","cwd":"/tmp"}'],
+    ['a cwd that is not a string', '{"hook_event_name":"Stop","session_id":"s1","cwd":42}'],
     ['no name', '{"session_id":"s1","cwd":"/tmp"}'],
     ['not an object', '"just a string"'],
     ['null', 'null']
@@ -122,6 +128,28 @@ describe('the payload that crashed the server', () => {
     server = started
 
     expect(await post(started.port, started.token, body)).toBe(400)
+  })
+
+  it('accepts an empty cwd, which is what Copilot sends', async () => {
+    // `copilot-hook-installer` bakes `cwd: d.cwd||''` into the scripts it writes
+    // into another tool's configuration, and those sessions are force-linked, so
+    // they resolve from the session map without ever needing a directory. An
+    // empty string has always worked; only `undefined` reached the throw. A
+    // guard strict enough to reject `''` would 400 every Copilot hook event.
+    const started = await startHookServer()
+    server = started
+
+    const seen: unknown[] = []
+    started.instance.on('hook-event', (event) => seen.push(event))
+
+    const status = await post(
+      started.port,
+      started.token,
+      JSON.stringify({ hook_event_name: 'PostToolUse', session_id: 'copilot-1', cwd: '' })
+    )
+
+    expect(status).toBe(200)
+    expect(seen).toHaveLength(1)
   })
 
   it('still accepts a well-formed event', async () => {
