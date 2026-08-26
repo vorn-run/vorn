@@ -30,6 +30,8 @@ const published = {
 }
 
 const spawned: { cmd: string; opts: Record<string, unknown> }[] = []
+/** When set, the spawned child never announces a port — a server that will not start. */
+const quietSpawn = { value: false }
 const spawnedChildren: EventEmitter[] = []
 const bridges: FakeBridge[] = []
 
@@ -128,7 +130,9 @@ vi.mock('node:child_process', () => ({
     stdout.destroy = (): void => {}
     stdout.unref = (): void => {}
     // Only the dev path reads this; the packaged path waits on the port file.
-    setImmediate(() => stdout.emit('data', JSON.stringify({ port: 51000 }) + '\n'))
+    if (!quietSpawn.value) {
+      setImmediate(() => stdout.emit('data', JSON.stringify({ port: 51000 }) + '\n'))
+    }
     child.stdout = stdout
     child.stderr = null
     child.unref = (): void => {}
@@ -136,10 +140,12 @@ vi.mock('node:child_process', () => ({
     child.kill = (): void => {}
     spawnedChildren.push(child)
     // What the server does once it is listening: publish {port, pid}.
-    setImmediate(() => {
-      published.port = 51000
-      published.spawnedPid = 4242
-    })
+    if (!quietSpawn.value) {
+      setImmediate(() => {
+        published.port = 51000
+        published.spawnedPid = 4242
+      })
+    }
     return child
   }
 }))
@@ -171,6 +177,7 @@ beforeEach(() => {
   ;(process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = '/app/Resources'
   spawned.length = 0
   spawnedChildren.length = 0
+  quietSpawn.value = false
   madeDirs.length = 0
   opened.length = 0
   bridges.length = 0
@@ -351,11 +358,12 @@ describe('quitting', () => {
   it('still shuts down a server it spawned when asked to stop', async () => {
     const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
     await launchServer()
+    published.pidAlive = false // it honours the signal, so the wait is immediate
 
     await stopServer()
 
     expect(bridges.at(-1)?.requests).toContain('server:shutdown')
-  })
+  }, 30000)
 })
 
 describe('an adopted server that dies', () => {
@@ -502,7 +510,7 @@ describe('what the reviews caught', () => {
     // If it throws, nothing had happened yet: the user picked "Stop Sessions and
     // Server", the app quit, and every session carried on saying nothing.
     published.port = 50091
-    published.identity = identityFrom()
+    published.identity = identityFrom({ pid: 999 })
     const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
     await launchServer()
     bridges[0].request = async (m: string) => {
@@ -512,6 +520,7 @@ describe('what the reviews caught', () => {
     const signalled: number[] = []
     const spy = vi.spyOn(process, 'kill').mockImplementation((pid) => {
       signalled.push(pid as number)
+      published.pidAlive = false // it goes once actually signalled
       return true
     })
 
@@ -519,7 +528,7 @@ describe('what the reviews caught', () => {
     spy.mockRestore()
 
     expect(signalled).toContain(999)
-  })
+  }, 30000)
 })
 
 describe('a server whose greeting does not match its port file', () => {
@@ -536,84 +545,127 @@ describe('a server whose greeting does not match its port file', () => {
   })
 })
 
-describe('stopping a server that ignores SIGTERM', () => {
-  it('escalates to SIGKILL, judged by liveness rather than by having asked', async () => {
-    // `child.killed` is true the moment a signal is delivered, even to a process
-    // that ignores it. Gating the fallback on it made SIGKILL unreachable, so a
-    // server that swallowed SIGTERM outlived "Stop Sessions and Server" -- which
-    // only started mattering once the server stopped dying with its parent.
+describe('the dev readiness path', () => {
+  it('will not resolve to a port from a file it cannot attribute', async () => {
+    // Dev spawns through npx, so the child is a parent of the process that
+    // listens and there is no pid to match the file against. Falling back to it
+    // would hand the bridge somebody else's port with a credential that server
+    // never issued -- the wrong-server failure this change exists to prevent.
+    process.env.ELECTRON_RENDERER_URL = 'http://localhost:5173'
+    quietSpawn.value = true // the dev child never prints its port line
+    published.port = null // nothing to adopt at launch, so it spawns
+    try {
+      const { launchServer } = await import('../src/main/server/server-launcher')
+      const launching = launchServer()
+      // An incumbent publishes itself while we are still waiting. The old
+      // fallback would have read this and resolved to its port.
+      setTimeout(() => {
+        published.port = 50091
+        published.spawnedPid = 999
+      }, 100)
+
+      await expect(launching).rejects.toThrow(/Timeout waiting for server port/i)
+    } finally {
+      delete process.env.ELECTRON_RENDERER_URL
+      quietSpawn.value = false
+    }
+  }, 30000)
+})
+
+describe('ending a server, and knowing that it ended', () => {
+  /**
+   * Every path here shares one requirement: the caller cannot continue until the
+   * process is actually gone. `before-quit` calls `app.quit()` the moment
+   * `stopServer` resolves, and the connect window relaunches the moment
+   * `stopLocalServer` says yes -- so anything left on a timer is something that
+   * never happens.
+   */
+  function killRecorder(): { signals: string[]; restore: () => void } {
+    const signals: string[] = []
+    const spy = vi.spyOn(process, 'kill').mockImplementation((_pid, sig) => {
+      signals.push(String(sig))
+      // A SIGKILL is the end of the argument; anything else it may ignore.
+      if (String(sig) === 'SIGKILL') published.pidAlive = false
+      return true
+    })
+    return { signals, restore: () => spy.mockRestore() }
+  }
+
+  it('escalates to SIGKILL when the server ignores SIGTERM', async () => {
     published.pidAlive = true
     const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
     await launchServer()
-    // Only now: the launch itself waits on real timers to learn its port.
-    vi.useFakeTimers()
+    ;(spawnedChildren[0] as unknown as Record<string, unknown>).kill = (): void => {}
+    const { signals, restore } = killRecorder()
 
-    const signals: string[] = []
-    const child = spawnedChildren[0] as unknown as Record<string, unknown>
-    child.killed = true // what Node reports right after a delivered SIGTERM
-    child.kill = (sig: string): void => void signals.push(sig)
-
-    const stopping = stopServer()
-    await vi.advanceTimersByTimeAsync(4000)
-    await stopping
+    await stopServer()
+    restore()
 
     expect(signals).toContain('SIGKILL')
-    vi.useRealTimers()
-  })
+  }, 30000)
 
-  it('leaves a server that actually stopped alone', async () => {
+  it('leaves a server that honoured SIGTERM alone', async () => {
     const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
     await launchServer()
-    vi.useFakeTimers()
+    published.pidAlive = false // it went when asked
+    ;(spawnedChildren[0] as unknown as Record<string, unknown>).kill = (): void => {}
+    const { signals, restore } = killRecorder()
 
-    const signals: string[] = []
-    const child = spawnedChildren[0] as unknown as Record<string, unknown>
-    child.kill = (sig: string): void => void signals.push(sig)
-    published.pidAlive = false // it honoured the SIGTERM and exited
-
-    const stopping = stopServer()
-    await vi.advanceTimersByTimeAsync(4000)
-    await stopping
+    await stopServer()
+    restore()
 
     expect(signals).not.toContain('SIGKILL')
-    vi.useRealTimers()
-  })
-})
+  }, 30000)
 
-describe('stopping the local server on request', () => {
-  it('does not report success until the process is actually gone', async () => {
-    // The caller relaunches the app the moment this says yes. A server still
-    // shutting down still owns its ws-port file, so the fresh launch would find
-    // it, refuse it again, and land back in the window the user just acted from
-    // -- a loop that looks like the button doing nothing.
+  it('does not resolve while the process is still there', async () => {
+    published.pidAlive = true
+    const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
+    await launchServer()
+    ;(spawnedChildren[0] as unknown as Record<string, unknown>).kill = (): void => {}
+    const spy = vi.spyOn(process, 'kill').mockImplementation(() => true) // ignores everything
+
+    let settled = false
+    const stopping = stopServer().then(() => {
+      settled = true
+    })
+    await new Promise((r) => setTimeout(r, 250))
+    expect(settled).toBe(false)
+
+    published.pidAlive = false // it finally exits
+    await stopping
+    spy.mockRestore()
+
+    expect(settled).toBe(true)
+  }, 30000)
+
+  it('stopLocalServer reports success only once the pid is gone', async () => {
     published.port = 50091
     published.pidAlive = true
     const { stopLocalServer } = await import('../src/main/server/server-launcher')
-    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const spy = vi.spyOn(process, 'kill').mockImplementation(() => true)
 
     let settled = false
     const stopping = stopLocalServer().then((r) => {
       settled = true
       return r
     })
-
     await new Promise((r) => setTimeout(r, 250))
-    expect(settled).toBe(false) // still alive, so still waiting
+    expect(settled).toBe(false)
 
-    published.pidAlive = false // the server finally exits
+    published.pidAlive = false
     await expect(stopping).resolves.toEqual({ ok: true })
-    vi.restoreAllMocks()
-  })
+    spy.mockRestore()
+  }, 30000)
 
-  it('reports failure when it will not go at all', async () => {
+  it('stopLocalServer reports failure when it will not go at all', async () => {
     published.port = 50091
-    published.pidAlive = true // never exits, through SIGTERM and SIGKILL alike
+    published.pidAlive = true
     const { stopLocalServer } = await import('../src/main/server/server-launcher')
-    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const spy = vi.spyOn(process, 'kill').mockImplementation(() => true)
 
     const result = await stopLocalServer()
+    spy.mockRestore()
 
     expect(result).toMatchObject({ ok: false })
-    vi.restoreAllMocks()
-  }, 20000)
+  }, 30000)
 })

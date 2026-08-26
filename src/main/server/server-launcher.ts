@@ -113,19 +113,8 @@ export async function stopLocalServer(): Promise<{ ok: true } | { ok: false; err
   // fresh launch would find it, refuse it again, and land straight back in the
   // window the user just acted from. A loop that looks like the button doing
   // nothing.
-  if (await waitForExit(pid, STOP_GRACE_MS)) {
+  if (await ensureGone(pid)) {
     log.info(`[launcher] stopped the local server (pid ${pid}) at the user's request`)
-    lastRefusal = null
-    return { ok: true }
-  }
-
-  try {
-    log.warn(`[launcher] local server ${pid} ignored SIGTERM; sending SIGKILL`)
-    process.kill(pid, 'SIGKILL')
-  } catch {
-    /* it may have exited in the meantime, which is the outcome we wanted */
-  }
-  if (await waitForExit(pid, STOP_KILL_GRACE_MS)) {
     lastRefusal = null
     return { ok: true }
   }
@@ -135,6 +124,24 @@ export async function stopLocalServer(): Promise<{ ok: true } | { ok: false; err
 /** How long a server gets to leave politely, and then to leave at all. */
 const STOP_GRACE_MS = 5_000
 const STOP_KILL_GRACE_MS = 2_000
+
+/**
+ * See a process out: wait for it to go, escalate if it will not, wait again.
+ *
+ * Shared by every path that ends a server, because they all have the same two
+ * jobs -- give it a chance to leave cleanly, then stop asking -- and the caller
+ * is always somebody who cannot continue until it is actually gone.
+ */
+async function ensureGone(pid: number): Promise<boolean> {
+  if (await waitForExit(pid, STOP_GRACE_MS)) return true
+  try {
+    log.warn(`[launcher] server ${pid} ignored SIGTERM; sending SIGKILL`)
+    process.kill(pid, 'SIGKILL')
+  } catch {
+    /* it may have exited in the meantime, which is the outcome we wanted */
+  }
+  return waitForExit(pid, STOP_KILL_GRACE_MS)
+}
 
 /** Resolves true once the pid is gone, false if it outlasts the deadline. */
 async function waitForExit(pid: number, deadlineMs: number): Promise<boolean> {
@@ -747,18 +754,17 @@ export async function stopServer(): Promise<void> {
       child.kill()
     } else {
       child.kill('SIGTERM')
-      setTimeout(() => {
-        // Asked whether the process is still there, not whether we asked it to
-        // go. `child.killed` is true the moment a signal is *delivered*, even to
-        // a process that ignores it -- so gating on it made this fallback
-        // unreachable and left a server running after the user chose to stop it.
-        // That was survivable while the server died with its parent anyway; a
-        // detached one just keeps going.
-        if (child.pid && isPidAlive(child.pid)) {
-          log.warn(`[launcher] server ${child.pid} ignored SIGTERM; sending SIGKILL`)
-          child.kill('SIGKILL')
-        }
-      }, 3000)
+      // Awaited, not scheduled. `before-quit` calls `app.quit()` the moment this
+      // resolves, so a timer left running is a timer that never fires: the main
+      // process exits first and a server that ignored SIGTERM is still there --
+      // after the user chose the one action that promises otherwise. Fixing the
+      // condition was only half of it; the escalation has to be in the same
+      // promise the caller is waiting on.
+      //
+      // Asked whether the process is still there, not whether we asked it to go:
+      // `child.killed` is true the moment a signal is delivered, even to a
+      // process that ignores it.
+      if (child.pid) await ensureGone(child.pid)
     }
     serverProcess = null
   } else if (adoptedPid !== null && isPidAlive(adoptedPid)) {
@@ -769,6 +775,7 @@ export async function stopServer(): Promise<void> {
     log.warn('[launcher] the adopted server did not answer; signalling it directly')
     try {
       process.kill(adoptedPid, 'SIGTERM')
+      await ensureGone(adoptedPid)
     } catch (err) {
       log.warn({ err }, '[launcher] could not signal the adopted server')
     }
@@ -883,10 +890,14 @@ function readServerPort(child: ChildProcess): Promise<number> {
     }
 
     const timeout = setTimeout(() => {
-      const published = readPortFile()
-      settle(() =>
-        published ? resolve(published.port) : reject(new Error('Timeout waiting for server port'))
-      )
+      // No port-file fallback here, deliberately. This is the dev path, and dev
+      // spawns through `npx`, so the child is a parent of the process that
+      // actually listens -- there is no pid to match the file against. A file
+      // written by somebody else's server would resolve to somebody else's port,
+      // and the bridge would be built with a credential that server never
+      // issued: the wrong-server failure this whole change exists to prevent.
+      // The packaged path has a pid to check, and checks it.
+      settle(() => reject(new Error('Timeout waiting for server port')))
     }, 10_000)
 
     // A spawn that never starts emits `error`, not `exit`, and an EventEmitter
