@@ -279,6 +279,21 @@ describe('declining a server that is running', () => {
     expect(getLastAdoptionRefusal()).toMatchObject({ reason: 'unusable' })
   })
 
+  it('refuses a server too old to send an identity frame', async () => {
+    // Pre-#494 servers greet and say nothing else. Reading that silence as an
+    // empty machine would put a second writer on their database, where
+    // `saveSessions` replaces the whole table -- so the greeting, not the
+    // identity, is what proves somebody is there.
+    published.port = 50091
+    published.identity = null
+    published.protocolVersion = RUNTIME_PROTOCOL_VERSION
+    const { launchServer } = await import('../src/main/server/server-launcher')
+
+    await expect(launchServer()).rejects.toThrow()
+
+    expect(spawned).toEqual([])
+  })
+
   it('spawns past a name that answers nothing at all', async () => {
     // The ordinary state of a machine between launches. Nothing removes the
     // endpoint on shutdown -- that is what lets the next start find the name to
@@ -288,6 +303,8 @@ describe('declining a server that is running', () => {
     published.port = 50091
     published.token = null
     published.identity = null
+    // Nothing greeted us either: the name is a leftover, not a server.
+    published.protocolVersion = undefined as unknown as number
     const { launchServer } = await import('../src/main/server/server-launcher')
 
     await launchServer()

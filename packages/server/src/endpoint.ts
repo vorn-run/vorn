@@ -115,6 +115,7 @@ export type Liveness = 'alive' | 'dead' | 'unknown'
  */
 export function probeEndpoint(socketPath: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<Liveness> {
   return new Promise((resolve) => {
+    const socket = net.connect(socketPath)
     let settled = false
     const done = (answer: Liveness): void => {
       if (settled) return
@@ -123,7 +124,6 @@ export function probeEndpoint(socketPath: string, timeoutMs = PROBE_TIMEOUT_MS):
       resolve(answer)
     }
 
-    const socket = net.connect(socketPath)
     socket.setTimeout(timeoutMs, () => done('unknown'))
     socket.once('connect', () => done('alive'))
     // `on`, not `once`. Destroying a socket the moment it connects can draw a

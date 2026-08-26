@@ -572,7 +572,19 @@ async function tryAdopt(
   self: { dataDir: string; buildChannel: 'dev' | 'packaged' }
 ): Promise<
   | { bridge: ServerBridge }
-  | { refusal: AdoptionVerdict & { kind: 'refuse' }; sessions: number | null }
+  | {
+      refusal: AdoptionVerdict & { kind: 'refuse' }
+      sessions: number | null
+      /**
+       * Whether anything responded at all.
+       *
+       * The greeting is the discriminator, not the identity: a server too old to
+       * send an identity frame still sends `server:hello`, and reading its
+       * silence-about-identity as absence would put a second writer on its
+       * database.
+       */
+      answered: boolean
+    }
 > {
   // Read, but not insisted on yet. A missing credential is not proof that
   // nothing is there -- the greeting arrives before authentication, so the
@@ -604,6 +616,7 @@ async function tryAdopt(
     candidate.close()
     return {
       sessions: sessionsFrom(identity),
+      answered: true,
       refusal: {
         kind: 'refuse',
         reason: 'unusable',
@@ -617,9 +630,11 @@ async function tryAdopt(
     expectedPid
   })
   if (verdict.kind === 'refuse' || !identity) {
+    const answered = identity !== null || candidate.serverHelloVersion !== undefined
     candidate.close()
     return {
       sessions: sessionsFrom(identity),
+      answered,
       refusal:
         verdict.kind === 'refuse'
           ? verdict
@@ -644,6 +659,9 @@ async function tryAdopt(
     candidate.close()
     return {
       sessions: null,
+      // It greeted us and it judged well enough to reach this line. Whatever is
+      // wrong with the credential, something is holding this database.
+      answered: true,
       refusal: {
         kind: 'refuse',
         reason: 'unusable',
@@ -697,20 +715,6 @@ function discoverable(dataDir: string): Array<{ target: string; pid?: number }> 
   const published = readPortFile(dataDir)
   if (published) found.push({ target: portUrl(published.port), pid: published.pid })
   return found
-}
-
-/**
- * Whether a refusal means "there was no server here" rather than "there is one
- * and this app may not use it".
- *
- * The distinction decides whether the app may go on to start a server, so it is
- * drawn narrowly. A protocol or build or data-dir mismatch means something is
- * running and holding the database: starting a rival would put two writers on one
- * SQLite file where `saveSessions` replaces the whole table, and they would erase
- * each other's sessions. Only silence is permission to carry on.
- */
-function nothingAnswered(refusal: AdoptionVerdict & { kind: 'refuse' }): boolean {
-  return refusal.reason === 'no-identity'
 }
 
 /** The loopback form, for a server discovered by the port it published. */
@@ -814,7 +818,7 @@ async function adoptSomethingRunning(dataDir: string): Promise<ServerBridge | nu
 
     // Nothing was there. Try the next way of finding a server, and if there is
     // none, start one -- exactly as if this name had never existed.
-    if (nothingAnswered(refusal)) {
+    if (!outcome.answered) {
       log.info(`[launcher] ${candidate.target} answered nothing (${refusal.reason}); moving on`)
       if (index < candidates.length - 1) continue
       break
