@@ -52,8 +52,29 @@ export class ServerBridge extends EventEmitter {
   retarget(url: string): void {
     if (url === this.url) return
     this.url = url
-    this.ws?.close()
+
+    // The old socket's listeners come off before it is closed. `close` is
+    // asynchronous, so its handler would otherwise run after the new socket
+    // exists and set `this.ws = null` on it -- leaving the bridge holding no
+    // reference to a connection that is open, rejecting whatever was in flight,
+    // and scheduling a reconnect on top of the one just made.
+    const previous = this.ws
     this.ws = null
+    if (previous) {
+      previous.removeAllListeners()
+      previous.close()
+      // Said here rather than left to each request's own timeout: they were sent
+      // on a socket that is gone, and the answer is never coming.
+      this.rejectAllPending('Server moved')
+    }
+
+    // A reconnect already queued would fire into the new socket and early-return,
+    // but it would also be a second attempt nobody asked for.
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+
     this.connect()
   }
 
