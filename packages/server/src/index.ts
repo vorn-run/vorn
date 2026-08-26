@@ -441,14 +441,17 @@ export async function startServer(
   const { hookStatusMapper } = await import('./hook-status-mapper')
   const { sessionManager } = await import('./session-persistence')
 
-  // Two failures, and they need different answers. A shutdown that *throws* is
-  // retried by the idle watch, which is why that watch keeps ticking. A shutdown
-  // that *hangs* -- `stopAllMcpClients()` awaits child processes that can -- must
-  // not be retried, because `killAll()` and `app.close()` would run a second
-  // time; but leaving it hung is the worst state of all, a live process holding
-  // the port with its credential already cleared and its port file already gone.
-  // So re-entry is refused and a deadline is armed instead. Unref'd: it is a
-  // backstop, not a reason to stay alive.
+  // Two failures, and neither is retried -- by the time either is visible this
+  // has already cleared the credential and removed the port file, so a second
+  // attempt would be running `killAll()` and `app.close()` again over a server
+  // no app can discover anyway. The worst outcome is not a failed shutdown, it
+  // is a live process still holding the port with nothing able to reach it.
+  //
+  // So a throw takes the hard exit at the call site, and a hang -- which is
+  // reachable, `stopAllMcpClients()` awaits child processes -- takes the
+  // deadline armed here. Re-entry is refused because SIGTERM can arrive while
+  // one of those is already in flight. Unref'd: a backstop, not a reason to
+  // stay alive.
   let shuttingDown = false
   const shutdown = async () => {
     if (shuttingDown) return
