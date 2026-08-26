@@ -62,6 +62,14 @@ export class ServerBridge extends EventEmitter {
     this.ws = null
     if (previous) {
       previous.removeAllListeners()
+      // One listener goes straight back on. An EventEmitter with nothing
+      // listening for `error` throws when one is emitted, and a socket being
+      // torn down is exactly when that happens -- closing mid-CONNECTING, or a
+      // reconnect that was already failing. Detaching everything would turn a
+      // socket's last gasp into an uncaught exception, which is the failure this
+      // whole branch is about. It has nothing left to tell us; it just must not
+      // throw on the way out.
+      previous.on('error', () => {})
       previous.close()
       // Said here rather than left to each request's own timeout: they were sent
       // on a socket that is gone, and the answer is never coming.

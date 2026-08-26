@@ -69,6 +69,37 @@ describe('retargeting the bridge', () => {
     await expect(bridge.request('anything', undefined, 200)).rejects.toThrow(/timeout|timed out/i)
   })
 
+  it('lets the old socket fail on its way out without throwing', async () => {
+    // Detaching every listener leaves nothing handling `error`, and an
+    // EventEmitter with no `error` listener throws when one is emitted — which
+    // is precisely what a socket closing mid-CONNECTING does. Retargeting while
+    // the first connection is still being established is the ordinary case here:
+    // the server has just died, so the bridge is usually mid-attempt.
+    const second = await listen()
+
+    // Nothing is listening on this port, so the first socket is CONNECTING and
+    // then failing when it is torn out from under.
+    const bridge = new ServerBridge('ws://127.0.0.1:1/ws')
+    bridges.push(bridge)
+    bridge.connect()
+
+    const escaped: Error[] = []
+    const watch = (err: Error) => escaped.push(err)
+    process.on('uncaughtException', watch)
+
+    try {
+      const arrived = connected(bridge)
+      bridge.retarget(`ws://127.0.0.1:${second.port}/ws`)
+      await arrived
+      await new Promise((resolve) => setTimeout(resolve, 200))
+
+      expect(escaped.map((err) => err.message)).toEqual([])
+      expect(second.connections).toHaveLength(1)
+    } finally {
+      process.off('uncaughtException', watch)
+    }
+  })
+
   it('does nothing when asked for the address it already has', async () => {
     const only = await listen()
     const bridge = new ServerBridge(`ws://127.0.0.1:${only.port}/ws`)
