@@ -223,46 +223,58 @@ describe('finding a server that is already running', () => {
 })
 
 describe('declining a server that is running', () => {
-  it('spawns its own on a protocol mismatch, and never kills the incumbent', async () => {
-    // The running server holds the PTYs, so it holds the user's work. A client
-    // that cannot speak to it says so and steps aside; it does not resolve the
-    // disagreement by ending sessions it cannot even read.
+  /**
+   * Every case here ends the same way: no second server.
+   *
+   * Refusing to adopt is not grounds to start a rival. Both would open the same
+   * SQLite file, and `saveSessions` is a DELETE-then-insert of the whole table on
+   * a debounce, so the two would erase each other's sessions with the last writer
+   * winning. tmux does not kill a server it cannot speak to and does not start one
+   * beside it either -- the client prints the mismatch and exits.
+   */
+  it('refuses on a protocol mismatch, and never kills the incumbent', async () => {
     published.port = 50091
     published.identity = identityFrom()
     published.protocolVersion = RUNTIME_PROTOCOL_VERSION + 1
-    const { launchServer, getLastAdoptionRefusal } =
-      await import('../src/main/server/server-launcher')
+    const { launchServer, getLastAdoptionRefusal, AdoptionRefusedError } = await import(
+      '../src/main/server/server-launcher'
+    )
 
-    await launchServer()
+    await expect(launchServer()).rejects.toBeInstanceOf(AdoptionRefusedError)
 
-    expect(spawned).toHaveLength(1)
+    expect(spawned).toEqual([])
     expect(getLastAdoptionRefusal()).toMatchObject({ reason: 'protocol-mismatch' })
     expect(bridges[0].requests).not.toContain('server:shutdown')
   })
 
-  it('spawns its own when the running server is the other build', async () => {
+  it('refuses when the running server is the other build', async () => {
     published.port = 50091
     published.identity = identityFrom({ buildChannel: 'dev' })
-    const { launchServer, getLastAdoptionRefusal } =
-      await import('../src/main/server/server-launcher')
+    const { launchServer, getLastAdoptionRefusal } = await import(
+      '../src/main/server/server-launcher'
+    )
 
-    await launchServer()
+    await expect(launchServer()).rejects.toThrow()
 
-    expect(spawned).toHaveLength(1)
+    expect(spawned).toEqual([])
     expect(getLastAdoptionRefusal()).toMatchObject({ reason: 'different-build' })
   })
 
-  it('spawns its own when no credential was published', async () => {
+  it('refuses when no credential was published to reach it with', async () => {
     published.port = 50091
     published.token = null
-    const { launchServer } = await import('../src/main/server/server-launcher')
+    const { launchServer, getLastAdoptionRefusal } = await import(
+      '../src/main/server/server-launcher'
+    )
 
-    await launchServer()
+    await expect(launchServer()).rejects.toThrow()
 
-    expect(spawned).toHaveLength(1)
+    expect(spawned).toEqual([])
+    expect(getLastAdoptionRefusal()).toMatchObject({ reason: 'unusable' })
   })
 
   it('spawns when nothing is published at all', async () => {
+    // The one case that is genuinely a free database: no live server anywhere.
     const { launchServer } = await import('../src/main/server/server-launcher')
 
     await launchServer()
@@ -423,9 +435,9 @@ describe('the three ways adoption used to go quietly wrong', () => {
     published.rejectsCredential = true
     const { launchServer } = await import('../src/main/server/server-launcher')
 
-    await launchServer()
+    await expect(launchServer()).rejects.toThrow()
 
-    expect(spawned).toHaveLength(1)
+    expect(spawned).toEqual([])
   })
 
   it('creates the data directory before spawning into it', async () => {
@@ -455,19 +467,18 @@ describe('what the reviews caught', () => {
   })
 
   it('will not accept a port file that names a server it did not spawn', async () => {
-    // After refusing an incumbent, the file still names it with a live pid. A
-    // fallback that read it would hand the bridge the incumbent's port with our
-    // credential -- rejected forever -- while the child we started ran unwatched.
+    // After refusing an incumbent the file still names it with a live pid. The
+    // launcher no longer spawns at all in that case, which is the stronger form
+    // of the same guarantee: there is no second child to mis-resolve.
     published.port = 50091
     published.spawnedPid = 999
     published.identity = identityFrom()
     published.protocolVersion = RUNTIME_PROTOCOL_VERSION + 1
     const { launchServer } = await import('../src/main/server/server-launcher')
 
-    const bridge = await launchServer()
+    await expect(launchServer()).rejects.toThrow()
 
-    // 51000 is the spawned child's port; 50091 is the incumbent's.
-    expect((bridge as unknown as FakeBridge).url).toBe('ws://127.0.0.1:51000/ws')
+    expect(spawned).toEqual([])
   })
 
   it('ends the dev server on detach rather than orphaning it', async () => {
@@ -524,10 +535,10 @@ describe('a server whose greeting does not match its port file', () => {
     // written by a process this app can attribute, and it is the one to believe.
     published.port = 50091
     published.identity = identityFrom({ pid: 31337 })
-
     const { launchServer } = await import('../src/main/server/server-launcher')
-    await launchServer()
 
-    expect(spawned).toHaveLength(1)
+    await expect(launchServer()).rejects.toThrow()
+
+    expect(spawned).toEqual([])
   })
 })

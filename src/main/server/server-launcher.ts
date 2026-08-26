@@ -22,6 +22,20 @@ import {
   type AdoptionVerdict
 } from './server-adoption'
 
+/**
+ * Thrown when a server is running that this app may not use.
+ *
+ * Not an ordinary failure: nothing is broken, and the user's agents are alive
+ * and working inside it. It carries the reason so the window that comes up can
+ * say which of the cases it was.
+ */
+export class AdoptionRefusedError extends Error {
+  constructor(readonly refusal: AdoptionVerdict & { kind: 'refuse' }) {
+    super(`Another Vorn server is running that this app cannot use: ${refusal.detail}`)
+    this.name = 'AdoptionRefusedError'
+  }
+}
+
 let serverProcess: ChildProcess | null = null
 let bridge: ServerBridge | null = null
 
@@ -72,23 +86,28 @@ export function getLastAdoptionRefusal(): AdoptionRefusal | null {
 }
 
 /**
- * End the server this app refused to adopt, because the user asked.
+ * End the local server, because the user asked.
  *
  * The doctrine is that a starting app never ends a running server -- it holds
  * somebody's work and cannot be judged from outside. It says nothing about the
  * person whose work it is, who is the only one in a position to decide.
+ *
+ * Reads the pid from the port file rather than from any greeting: it is the one
+ * value written by a process this app can attribute, and it is the same answer
+ * whether the caller is the connect window (a server it refused to adopt) or the
+ * running app (a local server still going while this is pointed at a host).
  */
-export function stopRefusedServer(): boolean {
-  const pid = lastRefusal?.incumbentPid
-  if (pid == null || !isPidAlive(pid)) return false
+export function stopLocalServer(): { ok: true } | { ok: false; error: string } {
+  const published = readPortFile()
+  if (!published?.pid) return { ok: false, error: 'No local server is running.' }
   try {
-    process.kill(pid, 'SIGTERM')
-    log.info(`[launcher] stopped the refused server (pid ${pid}) at the user's request`)
+    process.kill(published.pid, 'SIGTERM')
+    log.info(`[launcher] stopped the local server (pid ${published.pid}) at the user's request`)
     lastRefusal = null
-    return true
+    return { ok: true }
   } catch (err) {
-    log.warn({ err }, '[launcher] could not stop the refused server')
-    return false
+    log.warn({ err }, '[launcher] could not stop the local server')
+    return { ok: false, error: 'Could not stop it. It may have already exited.' }
   }
 }
 
@@ -461,11 +480,16 @@ async function tryAdopt(
   port: number,
   expectedPid: number | undefined,
   self: { dataDir: string; buildChannel: 'dev' | 'packaged' }
-): Promise<{ bridge: ServerBridge } | { refusal: AdoptionVerdict & { kind: 'refuse' } } | null> {
+): Promise<{ bridge: ServerBridge } | { refusal: AdoptionVerdict & { kind: 'refuse' } }> {
   const token = readLocalToken(self.dataDir)
   if (!token) {
-    log.info('[launcher] a port is published but no credential is; starting our own')
-    return null
+    return {
+      refusal: {
+        kind: 'refuse',
+        reason: 'unusable',
+        detail: 'a server is listening but published no credential to reach it with'
+      }
+    }
   }
 
   const candidate = new ServerBridge(`ws://127.0.0.1:${port}/ws`, token)
@@ -507,8 +531,13 @@ async function tryAdopt(
     .catch(() => false)
   if (!accepted) {
     candidate.close()
-    log.warn('[launcher] the running server did not accept this app; starting our own')
-    return null
+    return {
+      refusal: {
+        kind: 'refuse',
+        reason: 'unusable',
+        detail: 'the running server did not accept this app'
+      }
+    }
   }
 
   // Carried forward, not discarded. If this server later dies and a replacement
@@ -558,17 +587,30 @@ export async function launchServer(): Promise<ServerBridge> {
       dataDir,
       buildChannel: buildChannel()
     })
-    if (outcome && 'bridge' in outcome) {
+    if ('bridge' in outcome) {
       bridge = outcome.bridge
       return bridge
     }
-    if (outcome && 'refusal' in outcome) {
-      lastRefusal = { ...outcome.refusal, incumbentPid: published.pid ?? null }
-      log.warn(
-        `[launcher] declined to adopt the running server (${outcome.refusal.reason}): ` +
-          `${outcome.refusal.detail}. It keeps running and keeps its sessions.`
-      )
-    }
+    const { refusal } = outcome
+    lastRefusal = { ...refusal, incumbentPid: published.pid ?? null }
+    log.warn(
+      `[launcher] declined to adopt the running server (${refusal.reason}): ` +
+        `${refusal.detail}. It keeps running and keeps its sessions.`
+    )
+    // Declining to adopt is not a reason to start a rival.
+    //
+    // Both servers would open the same SQLite file, and `saveSessions` is a
+    // DELETE-then-insert of the whole table on a debounce -- so the two would
+    // erase each other's sessions, last writer winning, and the app would show
+    // whichever set survived. The second would also lose the ws-port file to the
+    // incumbent's liveness guard, making it invisible to MCP.
+    //
+    // This is the half of the doctrine that is easy to drop. tmux does not kill a
+    // server it cannot speak to, and it does not start one beside it either: the
+    // *client* prints the mismatch and exits. There is nothing useful this app can
+    // do against a database another server is holding, so it says so and stops,
+    // and the person decides which server should live.
+    throw new AdoptionRefusedError(refusal)
   }
 
   const port = await spawnServer()

@@ -406,9 +406,9 @@ export function createApiShim(wsUrl: string) {
 
     // ── Menu Events (Electron-only, no-op in web) ──
     // Desktop only. A browser or phone connects to a server; it never launches
-    // one, so there is no adoption to refuse and nothing to stop.
-    onAdoptionRefused: (_callback: (notice: unknown) => void) => () => {},
-    stopRefusedServer: async () => false,
+    // one, so there is no local server for it to be looking away from.
+    onLocalServerStillRunning: (_callback: (notice: unknown) => void) => () => {},
+    stopLocalServer: async () => ({ ok: false, error: 'Not available here.' }),
 
     onMenuNewAgent: (_callback: () => void) => () => {},
 

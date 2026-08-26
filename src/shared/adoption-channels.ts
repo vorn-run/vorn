@@ -1,27 +1,22 @@
 /**
- * Channels for telling the person what a refused adoption means for them.
+ * Telling the person that a server is running here when they are looking away.
  *
- * Named here rather than inline because three layers spell them: main sends,
- * preload subscribes, the renderer listens. They are not in the `IPC` map
- * because that describes the desktop's relay of *server* methods, and neither of
- * these ever reaches the server -- the whole point is that this app could not
- * talk to it.
+ * Only one situation needs this channel: the app is pointed at a remote host
+ * while a local server is still going. Its sessions keep working and switching
+ * back to local reconnects to them — but an agent running on a machine whose app
+ * is showing somebody else's is invisible, and invisible is the thing to avoid.
+ *
+ * The refusal case does *not* come through here. There is no main window then:
+ * the app declined to start a second server, so it never got one to render
+ * against, and the connect window says it instead.
+ *
+ * Not in the `IPC` map because that describes the desktop's relay of *server*
+ * methods, and this never reaches a server — the whole point is that it is about
+ * one this app is not talking to.
  */
-export const ADOPTION_REFUSED_CHANNEL = 'adoption:refused'
-export const ADOPTION_STOP_CHANNEL = 'adoption:stop-refused'
+export const LOCAL_SERVER_RUNNING_CHANNEL = 'local-server:still-running'
 
-/**
- * Deliberately carries no text from the other server.
- *
- * The refusal `detail` reads well and is useful in the log, but it interpolates
- * `dataDir` and `buildChannel` straight out of that server's greeting -- strings
- * this app never verified, from the one party it just decided it could not
- * trust. React would escape them, so this is not an injection; it is simpler
- * than that. A stranger does not get to write the text of Vorn's own warning.
- * The reason is a closed set, and the renderer says the rest in its own words.
- */
-export interface AdoptionRefusedNotice {
-  reason: 'no-identity' | 'protocol-mismatch' | 'different-data-dir' | 'different-build'
-  /** False when the running server's pid was never learned, so nothing can act on it. */
-  canStop: boolean
+export interface LocalServerNotice {
+  /** How many sessions the local server was holding, when that could be read. */
+  sessions: number | null
 }

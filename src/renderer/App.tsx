@@ -241,36 +241,33 @@ export function App() {
       }
     })()
 
-    // Adoption was refused: the agents are alive in a server this app cannot
-    // speak to, and this window is empty. Said out loud, with the one action
-    // that resolves it -- taken by the person whose work it is, never by the app.
-    const removeAdoptionListener = window.api.onAdoptionRefused?.((notice) => {
-      // Said in Vorn's words, from a closed set of reasons. Nothing here comes
-      // from the other server: it is the party this app just declined to trust.
-      const message =
-        notice.reason === 'protocol-mismatch'
-          ? 'Your sessions are still running in a server this version of Vorn cannot talk to. They are safe, and this window cannot reach them.'
-          : 'Vorn found a server it could not use, so it started its own. Any sessions in the other one are not shown here.'
-      toast(message, 'warning', {
-        duration: Number.POSITIVE_INFINITY,
-        actions: notice.canStop
-          ? [
-              {
-                label: 'Stop it and restart Vorn',
-                tone: 'danger',
-                onClick: async () => {
-                  const stopped = await window.api.stopRefusedServer?.()
-                  toast(
-                    stopped
-                      ? 'Stopped. Reopen Vorn to start fresh.'
-                      : 'Could not stop it. It may have already exited.',
-                    stopped ? 'success' : 'error'
-                  )
-                }
+    // Pointed at a host while a server is still running on this machine. Said
+    // out loud, because an agent working on a machine whose app is showing
+    // somebody else's is invisible — and with the one action that resolves it,
+    // taken by the person whose work it is.
+    const removeLocalServerListener = window.api.onLocalServerStillRunning?.((notice) => {
+      const count =
+        notice.sessions === null ? 'Sessions are' : `${notice.sessions} session(s) are`
+      toast(
+        `${count} still running on this machine. They keep working, and switching back to local reconnects to them.`,
+        'warning',
+        {
+          duration: Number.POSITIVE_INFINITY,
+          actions: [
+            {
+              label: 'End them',
+              tone: 'danger',
+              onClick: async () => {
+                const result = await window.api.stopLocalServer?.()
+                toast(
+                  result?.ok ? 'Stopped.' : (result?.error ?? 'Could not stop it.'),
+                  result?.ok ? 'success' : 'error'
+                )
               }
-            ]
-          : []
-      })
+            }
+          ]
+        }
+      )
     })
 
     const removeExitListener = window.api.onTerminalExit(({ id }) => {
@@ -541,7 +538,7 @@ export function App() {
 
     return () => {
       disposeGlobalDataListener()
-      removeAdoptionListener?.()
+      removeLocalServerListener?.()
       removeExitListener()
       removeSessionCreatedListener()
       removeConfigListener()

@@ -10,17 +10,18 @@ import { updateManager } from './update-manager'
 import { IPC, PermissionRequestInfo, type AppConfig } from '../shared/types'
 import { setArtifactNotify } from './artifact-watcher'
 import { SURFACE } from '../shared/surface'
-import { ADOPTION_REFUSED_CHANNEL, ADOPTION_STOP_CHANNEL } from '../shared/adoption-channels'
+import { LOCAL_SERVER_RUNNING_CHANNEL } from '../shared/adoption-channels'
 import {
   launchServer,
   stopServer,
   detachFromServer,
   getServerBridge,
   getLastAdoptionRefusal,
-  stopRefusedServer
+  AdoptionRefusedError
 } from './server/server-launcher'
 import { readHostSettings } from './server/host-store'
 import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
+import { readPortFile } from './server/server-adoption'
 import type { ServerBridge } from './server/server-bridge'
 import log from './logger'
 
@@ -229,6 +230,34 @@ function toggleWidget(): void {
 }
 
 /**
+ * What a refused adoption means, in Vorn's own words.
+ *
+ * Built from the reason alone. The refusal `detail` reads well and belongs in
+ * the log, but it interpolates strings out of the other server's greeting, and
+ * that server is the one party this app just decided it could not trust.
+ */
+function explainRefusal(reason: string): string {
+  if (reason === 'protocol-mismatch') {
+    return (
+      'Another Vorn server is already running, from a different version, and this ' +
+      'app cannot talk to it. Your sessions are still alive inside it. Stop that ' +
+      'server to start fresh here, or reopen the version that started it.'
+    )
+  }
+  if (reason === 'different-build') {
+    return (
+      'Another Vorn server is already running from a different build — a packaged ' +
+      'app beside a dev one, or the reverse. They share one database, so this app ' +
+      'will not start a second server beside it. Stop that one first.'
+    )
+  }
+  return (
+    'Another Vorn server is already running that this app cannot use, and both ' +
+    'would share one database. Stop that server to start fresh here.'
+  )
+}
+
+/**
  * Whether quitting should leave the sessions running.
  *
  * Cached rather than fetched at quit: `before-quit` is not a good place to start
@@ -406,6 +435,14 @@ app.whenReady().then(async () => {
       showConnectWindow(err instanceof Error ? err.message : String(err))
       return
     }
+    // A server this app may not use is not a failure to start — it is a running
+    // server holding the user's agents. Quitting silently would look like Vorn
+    // refusing to open for no reason, so it gets a window that names the reason
+    // and offers to end that server, which is the only thing that resolves it.
+    if (err instanceof AdoptionRefusedError) {
+      showConnectWindow(explainRefusal(err.refusal.reason), 'local-server-refused')
+      return
+    }
     app.quit()
     return
   }
@@ -470,19 +507,18 @@ app.whenReady().then(async () => {
   // Wire server notifications → renderer/widget
   wireServerNotifications(bridge)
 
-  // A refused adoption leaves the user's agents alive in a server this app
-  // cannot speak to, while the window in front of them is empty. Without this it
-  // is explained only by a line in a log nobody is reading.
-  const refusal = getLastAdoptionRefusal()
-  if (refusal) {
-    mainWindow.webContents.once('did-finish-load', () => {
-      mainWindow?.webContents.send(ADOPTION_REFUSED_CHANNEL, {
-        reason: refusal.reason,
-        canStop: refusal.incumbentPid !== null
+  // Pointed at a host while a server is still running here. Its sessions keep
+  // working and switching back to local reconnects to them -- but an agent
+  // running on a machine whose app is showing somebody else's is invisible, and
+  // invisible is the thing this whole phase exists to avoid.
+  if (readHostSettings().mode === 'host') {
+    const local = readPortFile()
+    if (local) {
+      mainWindow.webContents.once('did-finish-load', () => {
+        mainWindow?.webContents.send(LOCAL_SERVER_RUNNING_CHANNEL, { sessions: null })
       })
-    })
+    }
   }
-  ipcMain.handle(ADOPTION_STOP_CHANNEL, () => stopRefusedServer())
 
   // Decrypt connector credentials via safeStorage and push plaintext into
   // the server's in-memory store. Runs once on boot, re-syncs on every

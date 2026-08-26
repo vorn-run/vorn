@@ -97,6 +97,8 @@ export type RefusalReason =
   | 'different-data-dir'
   | 'different-build'
   | 'pid-mismatch'
+  /** Reachable, but this app cannot authenticate to it. */
+  | 'unusable'
 
 /**
  * Whether the greeting on the other end belongs to a server this app may use.
