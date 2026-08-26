@@ -62,9 +62,9 @@ let localTokenPath: string | null = null
  */
 export function initBootstrapSecret(
   dataDir: string,
-  value: string | undefined = process.env[BOOTSTRAP_ENV_VAR],
-  publish = true
+  value: string | undefined = process.env[BOOTSTRAP_ENV_VAR]
 ): void {
+  pendingDataDir = dataDir
   const supplied = value && value.length > 0 ? value : null
   const secret = supplied ?? crypto.randomBytes(32).toString('base64url')
   bootstrapSecret = Buffer.from(secret, 'utf8')
@@ -77,8 +77,32 @@ export function initBootstrapSecret(
   // this, no child can inherit it however it is spawned.
   delete process.env[BOOTSTRAP_ENV_VAR]
 
-  if (!publish) {
-    localTokenPath = null
+  localTokenPath = null
+}
+
+/** The directory to publish into, remembered from `initBootstrapSecret`. */
+let pendingDataDir: string | null = null
+
+/**
+ * Write the credential where same-machine tools will find it.
+ *
+ * Separate from resolving the secret, and deliberately later, because the two
+ * answer different questions. The secret has to exist before any connection can
+ * be accepted; the *file* announces this server as the one this machine uses,
+ * and that is not true until it has claimed the endpoint.
+ *
+ * Publishing at startup meant a server that went on to lose the claim had
+ * already overwritten the winner's credential, and then exited without a
+ * shutdown path to undo it. The winner served with a secret nobody could read
+ * and MCP authenticated against a file belonging to a process that no longer
+ * existed -- the same failure this whole change is about, arrived at through the
+ * race rather than through a dev server.
+ */
+export function publishLocalCredential(owned: boolean): void {
+  const dataDir = pendingDataDir
+  const secret = bootstrapSecret?.toString('utf8')
+  if (!dataDir || !secret) return
+  if (!owned) {
     log.info('[auth] not publishing a local credential: another server owns this directory')
     return
   }

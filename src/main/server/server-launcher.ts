@@ -574,19 +574,15 @@ async function tryAdopt(
   | { bridge: ServerBridge }
   | { refusal: AdoptionVerdict & { kind: 'refuse' }; sessions: number | null }
 > {
+  // Read, but not insisted on yet. A missing credential is not proof that
+  // nothing is there -- the greeting arrives before authentication, so the
+  // question "is anybody serving this name" can be asked without one, and it has
+  // to be asked first. Refusing here instead would mean a leftover name with no
+  // credential beside it looks the same as a running server, and the app must
+  // treat those oppositely: start a server for the first, never for the second.
   const token = readLocalToken(self.dataDir)
-  if (!token) {
-    return {
-      sessions: null,
-      refusal: {
-        kind: 'refuse',
-        reason: 'unusable',
-        detail: 'a server is listening but published no credential to reach it with'
-      }
-    }
-  }
 
-  const candidate = new ServerBridge(target, token)
+  const candidate = new ServerBridge(target, token ?? undefined)
   candidate.connect()
 
   // The greeting is the first frame on the socket and arrives before
@@ -600,6 +596,21 @@ async function tryAdopt(
       resolve(found)
     })
   })
+
+  // Something answered, so this is a server rather than a leftover -- and one
+  // this app cannot reach, which is a refusal rather than permission to start a
+  // rival beside it on the same database.
+  if (identity && !token) {
+    candidate.close()
+    return {
+      sessions: sessionsFrom(identity),
+      refusal: {
+        kind: 'refuse',
+        reason: 'unusable',
+        detail: 'a server is listening but published no credential to reach it with'
+      }
+    }
+  }
 
   const verdict = judgeAdoption(identity, candidate.serverHelloVersion, {
     ...self,
@@ -668,6 +679,40 @@ async function tryAdopt(
   return { bridge: candidate }
 }
 
+/**
+ * Every way a server on this machine might be found, in the order to try them.
+ *
+ * The endpoint first, because it is the name a server *owns* rather than a record
+ * anything can write. Its absence is not evidence: win32 never has one, and a
+ * server that could not host one still publishes a port. So the port file remains
+ * the fallback rather than the deprecated path.
+ *
+ * Recomputed on each call, never cached: it is asked again after a spawn stands
+ * down, and by then the winner has published things that were not there before.
+ */
+function discoverable(dataDir: string): Array<{ target: string; pid?: number }> {
+  const found: Array<{ target: string; pid?: number }> = []
+  const socket = readEndpointPath(dataDir)
+  if (socket) found.push({ target: endpointUrl(socket) })
+  const published = readPortFile(dataDir)
+  if (published) found.push({ target: portUrl(published.port), pid: published.pid })
+  return found
+}
+
+/**
+ * Whether a refusal means "there was no server here" rather than "there is one
+ * and this app may not use it".
+ *
+ * The distinction decides whether the app may go on to start a server, so it is
+ * drawn narrowly. A protocol or build or data-dir mismatch means something is
+ * running and holding the database: starting a rival would put two writers on one
+ * SQLite file where `saveSessions` replaces the whole table, and they would erase
+ * each other's sessions. Only silence is permission to carry on.
+ */
+function nothingAnswered(refusal: AdoptionVerdict & { kind: 'refuse' }): boolean {
+  return refusal.reason === 'no-identity'
+}
+
 /** The loopback form, for a server discovered by the port it published. */
 function portUrl(port: number): string {
   return `ws://127.0.0.1:${port}/ws`
@@ -695,27 +740,88 @@ export async function launchServer(): Promise<ServerBridge> {
   // record anything can write. Its absence is not evidence: win32 never has one,
   // and a server that could not host one still publishes a port. So the port file
   // remains the fallback rather than the deprecated path.
-  const socket = readEndpointPath(dataDir)
-  const published = readPortFile(dataDir)
-  const target = socket ? endpointUrl(socket) : published ? portUrl(published.port) : null
-  if (target) {
+  // Both, in order, and the first is not allowed to be the last word.
+  //
+  // Nothing removes the endpoint on shutdown -- that is the point, since the file
+  // is how the next start finds the name to replace -- so a socket left by a
+  // server that has since exited is the *ordinary* state of a machine between
+  // launches, not an exotic one. Committing to it and giving up when it does not
+  // answer would mean quitting Vorn once made Vorn unable to start again.
+  //
+  // A candidate that answers nothing is not a server; it is a filename. Only a
+  // candidate that answered and was then judged unusable is a refusal worth
+  // stopping for.
+  const adopted = await adoptSomethingRunning(dataDir)
+  if (adopted) {
+    bridge = adopted
+    return bridge
+  }
+
+  lastSpawnStoodDown = false
+  let port: number
+  try {
+    port = await spawnServer()
+  } catch (err) {
+    // A spawn that reported no port is either a server that failed to start or
+    // one that found this machine already had a server and stood down. Only the
+    // second has an answer, and it is not to try again: go and use the winner.
+    if (!lastSpawnStoodDown) throw err
+    log.info('[launcher] the server we started stood down; adopting the one that won')
+    const winner = await adoptSomethingRunning(dataDir)
+    if (winner) {
+      bridge = winner
+      return bridge
+    }
+    throw err
+  }
+  log.info(`[launcher] server started on port ${port}`)
+
+  // Connect bridge
+  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken ?? undefined)
+  bridge.connect()
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timed out connecting to the server')), 10_000)
+    bridge?.once('connected', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+  return bridge
+}
+
+/**
+ * Adopt whatever is already running here, or answer null if nothing is.
+ *
+ * Separated out because it is asked twice: once before starting a server, and
+ * again if the server we started stood down because somebody else had already
+ * won. The second ask is the whole reason a lost race is not a failed launch.
+ */
+async function adoptSomethingRunning(dataDir: string): Promise<ServerBridge | null> {
+  const candidates = discoverable(dataDir)
+
+  for (const [index, candidate] of candidates.entries()) {
     // No pid to insist on when adopting through the socket: nothing wrote one
     // there. `judgeAdoption` already tolerates that -- it is the same shape as a
     // port record MCP healed for itself -- and the identity still has to match
     // data dir, build channel and protocol, and the credential still has to be
     // accepted.
-    const outcome = await tryAdopt(target, socket ? undefined : published?.pid, {
+    const outcome = await tryAdopt(candidate.target, candidate.pid, {
       dataDir,
       buildChannel: buildChannel()
     })
-    if ('bridge' in outcome) {
-      bridge = outcome.bridge
-      return bridge
-    }
+    if ('bridge' in outcome) return outcome.bridge
     const { refusal } = outcome
+
+    // Nothing was there. Try the next way of finding a server, and if there is
+    // none, start one -- exactly as if this name had never existed.
+    if (nothingAnswered(refusal)) {
+      log.info(`[launcher] ${candidate.target} answered nothing (${refusal.reason}); moving on`)
+      if (index < candidates.length - 1) continue
+      break
+    }
     lastRefusal = {
       ...refusal,
-      incumbentPid: published?.pid ?? null,
+      incumbentPid: candidate.pid ?? null,
       // Coerced, not trusted. This number comes from the party this app has just
       // decided it cannot use, so it is clamped and rendered as a count — never
       // as text spliced into a sentence.
@@ -741,23 +847,7 @@ export async function launchServer(): Promise<ServerBridge> {
     throw new AdoptionRefusedError(refusal)
   }
 
-  const port = await spawnServer()
-  log.info(`[launcher] server started on port ${port}`)
-
-  // Connect bridge
-  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken ?? undefined)
-  bridge.connect()
-
-  // Wait for connection
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Bridge connection timeout')), 10_000)
-    bridge!.once('connected', () => {
-      clearTimeout(timeout)
-      resolve()
-    })
-  })
-
-  return bridge
+  return null
 }
 
 export function getServerBridge(): ServerBridge | null {
@@ -937,8 +1027,20 @@ function waitForPublishedPort(child: ChildProcess): Promise<number> {
  * down -- which is precisely the diagnostic a detached server most needs.
  */
 function onChildExit(code: number | null, signal: NodeJS.Signals | null): void {
-  onServerExit(`code=${code}, signal=${signal}`, code === EXIT_ENDPOINT_TAKEN)
+  lastSpawnStoodDown = code === EXIT_ENDPOINT_TAKEN
+  onServerExit(`code=${code}, signal=${signal}`, lastSpawnStoodDown)
 }
+
+/**
+ * Whether the last server this app spawned stood down rather than failed.
+ *
+ * Read once, immediately after a spawn that did not report a port. The two are
+ * indistinguishable from the reject alone -- both are "no port arrived" -- and
+ * they call for opposite answers: a crash is a failure to start, while standing
+ * down means a healthy server is already running and this app should go and use
+ * it.
+ */
+let lastSpawnStoodDown = false
 
 /** Where a detached server's stdout and stderr go, under the data directory. */
 const SERVER_LOG_FILENAME = 'server.log'

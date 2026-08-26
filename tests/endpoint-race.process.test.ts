@@ -183,6 +183,36 @@ describe('two servers reaching for one machine', () => {
     expect(replies.length, `only ${replies.length} of ${sent} calls answered`).toBe(sent)
   }, 60_000)
 
+  it('lets a later start claim an endpoint its owner left behind on a clean exit', async () => {
+    // The ordinary state of a machine between launches, and the one a review
+    // found would have bricked the app: nothing removes the endpoint on shutdown,
+    // so quitting Vorn leaves a socket file with nothing behind it. A launcher
+    // that committed to that name and gave up when it did not answer would mean
+    // quitting Vorn once made Vorn unable to start again.
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-race-'))
+    const first = launch()
+    const socket = await waitForEndpoint()
+    const abandoned = fs.lstatSync(socket).ino
+
+    process.kill(first.pid as number, 'SIGTERM')
+    for (let i = 0; i < 40 && alive(first.pid as number); i++) await sleep(250)
+
+    expect(fs.lstatSync(socket).isSocket(), 'the endpoint was removed on the way out').toBe(true)
+    expect(await served(socket), 'something still serves a stopped server').toBe(false)
+    expect(
+      fs.existsSync(path.join(dir, '.vorn', 'local-token')),
+      'the owner left its credential behind'
+    ).toBe(false)
+
+    const second = launch()
+    const deadline = Date.now() + 20_000
+    while (Date.now() < deadline && fs.lstatSync(socket).ino === abandoned) await sleep(250)
+
+    expect(fs.lstatSync(socket).ino, 'the leftover was never replaced').not.toBe(abandoned)
+    expect(await served(socket), 'the new server is not serving').toBe(true)
+    expect(alive(second.pid as number), 'the new server stood down instead of starting').toBe(true)
+  }, 60_000)
+
   it('lets the next start claim an endpoint whose owner was killed outright', async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-race-'))
     const first = launch()

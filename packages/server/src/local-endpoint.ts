@@ -133,6 +133,14 @@ export async function openLocalEndpoint(
     path: canonical,
     holds: () => stillOurs(canonical, mine),
     close: async () => {
+      // Terminated, not asked. `ws` with `clientTracking` does not close tracked
+      // sockets on `close()` -- it waits for them, and so does the http server
+      // behind it. A half-open client, which is exactly what the idle watch's
+      // duration clock exists to tolerate, would hold this promise for ever:
+      // `shutdown()` would stall to its deadline and leave on exit(1), read by
+      // the launcher as a crash, after `killAll()` had already run.
+      for (const client of wss.clients) client.terminate()
+      server.closeAllConnections()
       await new Promise<void>((resolve) => {
         wss.close(() => resolve())
       })

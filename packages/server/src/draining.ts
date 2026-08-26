@@ -25,6 +25,22 @@
  */
 
 let draining = false
+let stillHoldsEndpoint: (() => boolean) | null = null
+
+/**
+ * Teach this module how to check, rather than waiting to be told.
+ *
+ * Losing the endpoint happens *to* this process: another server that found it
+ * unreachable takes the name and has no way to say so. An earlier version noticed
+ * only inside the idle watch's snapshot, which meant up to a minute of creating
+ * sessions on a name that already pointed elsewhere -- and no noticing at all for
+ * `vorn-server serve`, where that watch is switched off entirely.
+ *
+ * One `lstat` at session creation, which is a rare, user-initiated moment.
+ */
+export function watchEndpoint(holds: () => boolean): void {
+  stillHoldsEndpoint = holds
+}
 
 /** Irreversible on purpose. Nothing gives an endpoint back once it is lost. */
 export function beginDraining(): void {
@@ -32,12 +48,18 @@ export function beginDraining(): void {
 }
 
 export function isDraining(): boolean {
+  if (draining) return true
+  // A server that never held an endpoint is not draining: it is running
+  // TCP-only, which is a downgrade rather than a loss, and refusing its sessions
+  // would leave the machine with nothing that works.
+  if (stillHoldsEndpoint && !stillHoldsEndpoint()) beginDraining()
   return draining
 }
 
 /** Test-only. Production has no path back. */
 export function resetDrainingForTests(): void {
   draining = false
+  stillHoldsEndpoint = null
 }
 
 /** The message a person sees when a session is refused. */

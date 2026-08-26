@@ -24,8 +24,13 @@ import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
-import { beginDraining, isDraining } from './draining'
-import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
+import { beginDraining, isDraining, watchEndpoint } from './draining'
+import {
+  initBootstrapSecret,
+  publishLocalCredential,
+  clearLocalCredential,
+  bearerFrom
+} from './ws-auth'
 import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
 import { DEFAULT_SERVER_PORT, EXIT_ENDPOINT_TAKEN } from '@vornrun/shared/protocol'
@@ -172,9 +177,11 @@ export async function startServer(
   // last writer silently wins.
   const ownsPublished = claimPublishedFiles(dataDir)
 
-  // Resolve this process's local credential and publish it for same-machine
-  // tools, before any connection can be accepted.
-  initBootstrapSecret(dataDir, undefined, ownsPublished)
+  // Resolve this process's local credential, before any connection can be
+  // accepted. Publishing it is a separate step, after the endpoint is claimed:
+  // the secret has to exist to authenticate anyone, but the file announces this
+  // server as the one this machine uses, which is not true until it has won.
+  initBootstrapSecret(dataDir)
 
   app.get(
     '/ws',
@@ -433,8 +440,16 @@ export async function startServer(
     process.exit(EXIT_ENDPOINT_TAKEN)
   }
   const endpoint = claimed.kind === 'held' ? claimed.endpoint : null
+  // Asked at session creation rather than only on the idle tick: that timer runs
+  // at a quarter of the window and is switched off entirely for `vorn-server
+  // serve`, so a check that lived only there would be late or absent exactly
+  // where it matters.
+  if (endpoint) watchEndpoint(() => endpoint.holds())
 
-  // Publish the port for MCP and anything else that reads this directory.
+  // Published together, after the claim, because they are one announcement: the
+  // port says where, the credential says how, and a reader that finds one
+  // without the other cannot reach anything.
+  publishLocalCredential(ownsPublished)
   writePortFile(dataDir, actualPort, ownsPublished)
 
   log.info(`[server] listening on ${host}:${actualPort}`)
