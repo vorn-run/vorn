@@ -7,9 +7,27 @@ import log from '../logger'
 import { BOOTSTRAP_ENV_VAR, SERVER_PORT_ENV_VAR } from '@vornrun/shared/protocol'
 import { ServerBridge } from './server-bridge'
 import { readHostSettings } from './host-store'
+import { attemptsAfterExit, decideRelaunch } from './server-relaunch'
 
 let serverProcess: ChildProcess | UtilityProcess | null = null
 let bridge: ServerBridge | null = null
+
+/**
+ * The credential the server is spawned with, kept for as long as the app runs.
+ *
+ * It was a local in `launchServer`, which was fine while a server was started
+ * exactly once. A relaunch has to spawn the replacement with the same one: the
+ * bridge holds it and re-sends it on every reconnect, so a fresh token would
+ * leave it authenticating against a server that had never heard of it.
+ */
+let bootstrapToken: string | null = null
+
+/** Reset whenever a server has run long enough to look healthy. */
+let relaunchAttempts = 0
+/** When the current server was spawned, to tell a crash loop from bad luck. */
+let lastSpawnAt = 0
+/** Set by `stopServer`, so an exit we asked for is not treated as a failure. */
+let stoppingDeliberately = false
 
 /**
  * Connect to a server running on another machine.
@@ -96,26 +114,24 @@ function readDevPort(): string | undefined {
   return String(port)
 }
 
-export async function launchServer(): Promise<ServerBridge> {
-  const host = readHostSettings()
-  if (host.mode === 'host' && host.url) {
-    // Configured for a host but holding no credential — safeStorage was
-    // unavailable when it was saved, or the keychain has moved since. Falling
-    // through to a local server would quietly open a different database than the
-    // one the user asked for, and everything would look empty rather than wrong.
-    // Failing here puts the connect window up asking for the token.
-    if (!host.token) throw new Error(`No stored token for ${host.url}`)
-    return connectToHost(host.url, host.token)
-  }
-
+/**
+ * Start a server process and wait for it to say where it is listening.
+ *
+ * Extracted from `launchServer` so a relaunch can run it again. Everything the
+ * bridge needs afterwards -- the port -- comes back from here; everything it
+ * already has -- the credential -- is module state now, because a replacement
+ * server must be given the same one.
+ */
+async function spawnServer(): Promise<number> {
+  lastSpawnAt = Date.now()
   const serverEntryPoint = resolveServerEntry()
   log.info(`[launcher] starting server: ${serverEntryPoint}`)
 
-  // A per-launch credential for the server we are about to spawn. Generated here
-  // rather than persisted: nothing to leak at rest, and it dies with the process.
-  // The name is stripped unconditionally by `filterEnv`, so it never reaches a
-  // PTY, headless agent or script node.
-  const bootstrapToken = randomBytes(32).toString('base64url')
+  // A per-run credential for the servers we spawn. Generated here rather than
+  // persisted: nothing to leak at rest, and it dies with the app. The name is
+  // stripped unconditionally by `filterEnv`, so it never reaches a PTY, headless
+  // agent or script node. Reused across a relaunch -- see the declaration.
+  bootstrapToken ??= randomBytes(32).toString('base64url')
 
   // Deliberately does NOT pass --data-dir. Vorn's data directory is ~/.vorn —
   // that is where the database, ws-port file and scheduler locks have always
@@ -165,8 +181,7 @@ export async function launchServer(): Promise<ServerBridge> {
     port = await readServerPort(child)
 
     child.on('exit', (code, signal) => {
-      log.warn(`[launcher] server exited (code=${code}, signal=${signal})`)
-      serverProcess = null
+      onServerExit(`code=${code}, signal=${signal}`)
     })
 
     serverProcess = child
@@ -201,17 +216,85 @@ export async function launchServer(): Promise<ServerBridge> {
     port = await readServerPort(child)
 
     child.on('exit', (code) => {
-      log.warn(`[launcher] server exited (code=${code})`)
-      serverProcess = null
+      onServerExit(`code=${code}`)
     })
 
     serverProcess = child
   }
 
+  return port
+}
+
+/**
+ * A server process has gone. Decide whether another should take its place.
+ *
+ * Recovery is only half missing: `ServerBridge` has always reconnected every two
+ * seconds and never given up, so once something is listening again the app
+ * reattaches itself. What was absent was anything to listen again -- this
+ * handler logged the exit code and stopped, and a server that died took the
+ * session with it until the app was quit and reopened.
+ *
+ * The bridge is kept and repointed rather than replaced, because `main` holds
+ * the instance `launchServer` returned and would go on using the old one.
+ */
+function onServerExit(detail: string): void {
+  const uptimeMs = lastSpawnAt === 0 ? 0 : Date.now() - lastSpawnAt
+  log.warn(`[launcher] server exited (${detail}) after ${Math.round(uptimeMs / 1000)}s`)
+  serverProcess = null
+  relaunchAttempts = attemptsAfterExit(relaunchAttempts, uptimeMs)
+
+  const decision = decideRelaunch({
+    deliberate: stoppingDeliberately,
+    hostMode: readHostSettings().mode === 'host',
+    attempts: relaunchAttempts
+  })
+
+  if (!decision.relaunch) {
+    log.warn(`[launcher] not restarting the server: ${decision.reason}`)
+    return
+  }
+
+  relaunchAttempts += 1
+  log.info(
+    `[launcher] restarting the server in ${decision.delayMs}ms (attempt ${relaunchAttempts})`
+  )
+
+  setTimeout(() => {
+    void spawnServer()
+      .then((port) => {
+        const url = `ws://127.0.0.1:${port}/ws`
+        // Usually a no-op now that the port is remembered across restarts, which
+        // is the case the reconnect loop already handles on its own. It matters
+        // when the old port was taken in the moment between the two.
+        if (bridge && bridge.target() !== url) {
+          log.info(`[launcher] server came back on ${port}; repointing the bridge`)
+          bridge.retarget(url)
+        }
+      })
+      .catch((err) => {
+        log.error({ err }, '[launcher] restart failed')
+        onServerExit('restart failed')
+      })
+  }, decision.delayMs)
+}
+
+export async function launchServer(): Promise<ServerBridge> {
+  const host = readHostSettings()
+  if (host.mode === 'host' && host.url) {
+    // Configured for a host but holding no credential — safeStorage was
+    // unavailable when it was saved, or the keychain has moved since. Falling
+    // through to a local server would quietly open a different database than the
+    // one the user asked for, and everything would look empty rather than wrong.
+    // Failing here puts the connect window up asking for the token.
+    if (!host.token) throw new Error(`No stored token for ${host.url}`)
+    return connectToHost(host.url, host.token)
+  }
+
+  const port = await spawnServer()
   log.info(`[launcher] server started on port ${port}`)
 
   // Connect bridge
-  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken)
+  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken ?? undefined)
   bridge.connect()
 
   // Wait for connection
@@ -231,6 +314,9 @@ export function getServerBridge(): ServerBridge | null {
 }
 
 export async function stopServer(): Promise<void> {
+  // Before anything else: an exit we asked for must not look like a crash.
+  stoppingDeliberately = true
+
   if (bridge) {
     // Only ask a server to stop if this app is the one that started it.
     //

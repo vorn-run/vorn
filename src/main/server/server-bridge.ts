@@ -35,6 +35,28 @@ export class ServerBridge extends EventEmitter {
     this.credential = credential
   }
 
+  /** Where this bridge is pointed, so a caller can tell whether it has moved. */
+  target(): string {
+    return this.url
+  }
+
+  /**
+   * Point at a different port and reconnect there.
+   *
+   * A restarted server usually comes back on the port it had, and the reconnect
+   * loop finds it without help. This is for when it does not — the old port
+   * taken in the moment between the two — where the loop would otherwise retry a
+   * stale address forever, which looks exactly like a server that never came
+   * back.
+   */
+  retarget(url: string): void {
+    if (url === this.url) return
+    this.url = url
+    this.ws?.close()
+    this.ws = null
+    this.connect()
+  }
+
   connect(): void {
     if (this.ws) return
 

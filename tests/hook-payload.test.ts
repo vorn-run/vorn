@@ -1,0 +1,210 @@
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
+import fs from 'node:fs'
+import http from 'node:http'
+import os from 'node:os'
+import path from 'node:path'
+import { normalizePath } from '../packages/server/src/process-utils'
+
+/**
+ * The event that took the server down, and why answering it was the fatal part.
+ *
+ * A `Notification` arrived with `session_id` and `cwd` undefined. `HookEvent`
+ * declares both as required and `hook-server` cast the parsed body straight to
+ * it, so the status mapper read them, handed `cwd` to `normalizePath`, and threw.
+ *
+ * That throw alone should have been survivable — the call sat inside a
+ * try/catch. The catch answered with `res.writeHead(400)`, on a response
+ * `handleEvent` had already ended before emitting. Writing headers to a finished
+ * response throws `ERR_HTTP_HEADERS_SENT`, from inside the handler, with nothing
+ * above it. The error handler is what ended the process, three milliseconds
+ * after the event arrived.
+ *
+ * So there are three separate things to hold: the payload never reaches the code
+ * that throws, a listener that throws anyway cannot escape, and the catch cannot
+ * make things worse than what it is catching.
+ */
+
+vi.mock('node-pty', () => ({ default: { spawn: vi.fn() }, spawn: vi.fn() }))
+
+/**
+ * A home directory of its own, because a real `HookServer` writes to one.
+ *
+ * `start()` claims `~/.vorn/{hook-owner,port,token}`, and those paths come from
+ * `os.homedir()` — no data directory involved. Left alone, this file would
+ * repoint the machine's hook endpoint at a server that exists for one assertion
+ * and then exits. It happens to be refused today, because the ownership check
+ * sees the running Vorn and declines, but that is the machine's state saving the
+ * test rather than the test being safe.
+ *
+ * Set before the first import of `hook-server`, since it reads `homedir()` once
+ * at module scope — which is why the import below is dynamic.
+ */
+let home: string | null = null
+let realHome: string | undefined
+
+beforeAll(() => {
+  realHome = process.env.HOME
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-hooks-'))
+  process.env.HOME = home
+})
+
+afterAll(() => {
+  process.env.HOME = realHome
+  if (home) fs.rmSync(home, { recursive: true, force: true })
+})
+
+let server: { stop: () => void; port: number; token: string } | null = null
+
+afterEach(() => {
+  server?.stop()
+  server = null
+})
+
+async function startHookServer() {
+  const { HookServer } = await import('../packages/server/src/hook-server')
+  const instance = new HookServer()
+  const port = await instance.start()
+  return {
+    instance,
+    port,
+    token: instance.getAuthToken(),
+    stop: () => instance.stop()
+  }
+}
+
+function post(port: number, token: string, body: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/hooks',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+      },
+      (res) => {
+        res.resume()
+        resolve(res.statusCode ?? 0)
+      }
+    )
+    req.on('error', reject)
+    req.end(body)
+  })
+}
+
+describe('the payload that crashed the server', () => {
+  it('is refused, and the server is still there afterwards', async () => {
+    const started = await startHookServer()
+    server = started
+
+    // Exactly what the log recorded: a name, and nothing else.
+    const status = await post(started.port, started.token, '{"hook_event_name":"Notification"}')
+    expect(status).toBe(400)
+
+    // The assertion that matters. Before the fix the process was gone by now.
+    const after = await post(
+      started.port,
+      started.token,
+      JSON.stringify({ hook_event_name: 'Stop', session_id: 's1', cwd: '/tmp' })
+    )
+    expect(after).toBe(200)
+  })
+
+  it.each([
+    ['no session', '{"hook_event_name":"Notification","cwd":"/tmp"}'],
+    ['no cwd', '{"hook_event_name":"Notification","session_id":"s1"}'],
+    ['empty session', '{"hook_event_name":"Stop","session_id":"","cwd":"/tmp"}'],
+    ['no name', '{"session_id":"s1","cwd":"/tmp"}'],
+    ['not an object', '"just a string"'],
+    ['null', 'null']
+  ])('refuses a payload with %s', async (_label, body) => {
+    const started = await startHookServer()
+    server = started
+
+    expect(await post(started.port, started.token, body)).toBe(400)
+  })
+
+  it('still accepts a well-formed event', async () => {
+    const started = await startHookServer()
+    server = started
+
+    const seen: unknown[] = []
+    started.instance.on('hook-event', (event) => seen.push(event))
+
+    const status = await post(
+      started.port,
+      started.token,
+      JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 's1', cwd: '/tmp' })
+    )
+
+    expect(status).toBe(200)
+    expect(seen).toHaveLength(1)
+  })
+
+  it('survives a listener that throws, without reaching the top of the process', async () => {
+    // `emit` is synchronous, so a listener runs on the request handler's stack,
+    // and the response has already been sent by the time it runs. That is what
+    // made the throw fatal: the catch above answered it with `writeHead(400)` on
+    // a finished response, which threw again with nothing left to catch it.
+    //
+    // The status codes alone cannot show this. Both requests are answered before
+    // anything fails, so they return 200 either way — checked by mutation, and
+    // an earlier version of this test passed against the unfixed code for
+    // exactly that reason. What has to be watched is whether anything reaches
+    // `uncaughtException`, because in the real server that is the process ending.
+    const started = await startHookServer()
+    server = started
+    started.instance.on('hook-event', () => {
+      throw new Error('a listener blew up')
+    })
+
+    const escaped: Error[] = []
+    const watch = (err: Error) => escaped.push(err)
+    process.on('uncaughtException', watch)
+
+    try {
+      expect(
+        await post(
+          started.port,
+          started.token,
+          JSON.stringify({ hook_event_name: 'Stop', session_id: 's1', cwd: '/tmp' })
+        )
+      ).toBe(200)
+
+      // A tick for anything thrown after the response was flushed.
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      expect(escaped.map((err) => (err as NodeJS.ErrnoException).code ?? err.message)).toEqual([])
+    } finally {
+      process.off('uncaughtException', watch)
+    }
+
+    // And it is still answering.
+    expect(
+      await post(
+        started.port,
+        started.token,
+        JSON.stringify({ hook_event_name: 'Stop', session_id: 's2', cwd: '/tmp' })
+      )
+    ).toBe(200)
+  })
+})
+
+describe('this test file itself', () => {
+  it('writes nothing outside its own home directory', () => {
+    // The claim above, checked rather than asserted in a comment. If the sandbox
+    // ever stops working, this is what says so — instead of the machine's real
+    // hook registration quietly moving.
+    expect(process.env.HOME).toBe(home)
+    expect(os.homedir()).toBe(home)
+  })
+})
+
+describe('the utility underneath it', () => {
+  it('still refuses a path that is not one', () => {
+    // Pinned deliberately. The guard belongs at the boundary, where an untrusted
+    // body is turned into a typed event — not in a general path helper, which
+    // would then quietly absorb the next caller's mistake instead of this one.
+    expect(() => normalizePath(undefined as unknown as string)).toThrow(TypeError)
+  })
+})

@@ -19,6 +19,37 @@ export interface PendingPermission {
   createdAt: number
 }
 
+/**
+ * Whether a parsed body is an event, rather than merely JSON.
+ *
+ * `JSON.parse(body) as HookEvent` was a cast over a payload posted by another
+ * process, and `HookEvent` declares `session_id` and `cwd` as required -- so
+ * every consumer downstream is entitled to assume they are there, and none of
+ * them look. One `Notification` arrived with both undefined, reached
+ * `normalizePath(cwd)` by way of the status mapper, and threw.
+ *
+ * Checked here rather than at each consumer: the mapper, `cancelSessionPermissions`
+ * and the task-linking block all read these fields, and a boundary that keeps the
+ * promise its type makes is worth more than three guards that each remember to.
+ */
+function isHookEvent(value: unknown): value is HookEvent {
+  if (typeof value !== 'object' || value === null) return false
+  const event = value as Record<string, unknown>
+  if (typeof event.hook_event_name !== 'string' || event.hook_event_name === '') return false
+  if (typeof event.session_id !== 'string' || event.session_id === '') return false
+  return typeof event.cwd === 'string' && event.cwd !== ''
+}
+
+/** Enough of a rejected payload to recognise it, without logging a whole body. */
+function describe(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return `not an object (${typeof value})`
+  const event = value as Record<string, unknown>
+  const missing = (['hook_event_name', 'session_id', 'cwd'] as const).filter(
+    (key) => typeof event[key] !== 'string' || event[key] === ''
+  )
+  return `${String(event.hook_event_name ?? 'no name')} missing ${missing.join(', ')}`
+}
+
 export class HookServer extends EventEmitter {
   private server: http.Server | null = null
   private pendingPermissions = new Map<string, PendingPermission>()
@@ -92,9 +123,23 @@ export class HookServer extends EventEmitter {
         req.on('end', () => {
           if (aborted) return
           try {
-            const event = JSON.parse(body) as HookEvent
-            this.handleEvent(event, res)
-          } catch {
+            const parsed: unknown = JSON.parse(body)
+            if (!isHookEvent(parsed)) {
+              log.warn(`[hooks] ignoring a malformed event: ${describe(parsed)}`)
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'Malformed hook event' }))
+              return
+            }
+            this.handleEvent(parsed, res)
+          } catch (err) {
+            // Only if nothing has been sent. `handleEvent` answers before it
+            // emits, so by the time anything downstream can fail the response is
+            // finished -- and `writeHead` on a finished response throws
+            // ERR_HTTP_HEADERS_SENT *from inside this handler*, with nothing
+            // above it to catch it. That is what ended the process: not the
+            // original error, but this line answering it.
+            log.error({ err }, '[hooks] failed to handle an event')
+            if (res.headersSent) return
             res.writeHead(400)
             res.end()
           }
@@ -155,7 +200,17 @@ export class HookServer extends EventEmitter {
       // Fire-and-forget: respond immediately
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end('{}')
-      this.emit('hook-event', event)
+      // Contained, because a listener is somebody else's code running on this
+      // process's stack. `emit` is synchronous, so a throw in one unwinds
+      // through here and out of the request handler -- and the answer has
+      // already been sent, so there is nothing left to report it with. A
+      // listener that fails is a status that does not update, not a server that
+      // stops.
+      try {
+        this.emit('hook-event', event)
+      } catch (err) {
+        log.error({ err }, `[hooks] a listener threw on ${event.hook_event_name}`)
+      }
     }
   }
 
