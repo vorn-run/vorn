@@ -11,6 +11,7 @@ import {
   EXIT_ENDPOINT_TAKEN,
   type ServerIdentity
 } from '@vornrun/shared/protocol'
+import WebSocket from 'ws'
 import { ServerBridge } from './server-bridge'
 import { readHostSettings } from './host-store'
 import { attemptsAfterExit, decideRelaunch } from './server-relaunch'
@@ -21,6 +22,7 @@ import {
   readPortFile,
   readEndpointPath,
   endpointUrl,
+  isServerIdentity,
   resolveDataDir,
   type AdoptionVerdict
 } from './server-adoption'
@@ -541,22 +543,43 @@ const ADOPT_AUTH_TIMEOUT_MS = 5_000
  * here; null means "could not tell", never "nothing".
  */
 export async function probeSessions(target: string): Promise<number | null> {
-  // No credential needed, and asking for one would defeat the point. The greeting
-  // arrives before authentication -- that is the whole reason the count rides it
-  // -- so a server this app cannot reach can still say what it is holding, and
-  // that is precisely the server worth saying it about.
-  const probe = new ServerBridge(target, readLocalToken() ?? undefined)
-  probe.connect()
+  // A bare socket, not a `ServerBridge`, and that is the point of this function
+  // being its own thing.
+  //
+  // The count rides the greeting, which arrives before authentication, so the
+  // server worth asking is exactly the one this app cannot otherwise reach. But
+  // `ServerBridge.connect()` claims the browser bridge the moment it opens, and a
+  // socket with no accepted credential is refused for sending any method but
+  // `auth:authenticate` -- so the "probe" would announce itself, be thrown out,
+  // and leave a line in the log of a server it only meant to look at. This one
+  // listens and says nothing.
+  const token = readLocalToken()
+  const socket = new WebSocket(
+    target,
+    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
+  )
+  socket.on('error', () => {})
   try {
     return await new Promise<number | null>((resolve) => {
       const timer = setTimeout(() => resolve(null), ADOPT_IDENTITY_TIMEOUT_MS)
-      probe.once('identity', (found: ServerIdentity) => {
+      const settle = (answer: number | null): void => {
         clearTimeout(timer)
-        resolve(sessionsFrom(found))
+        resolve(answer)
+      }
+      socket.on('close', () => settle(null))
+      socket.on('message', (raw: Buffer) => {
+        try {
+          const frame = JSON.parse(raw.toString()) as { method?: string; params?: unknown }
+          if (frame.method !== 'server:identity') return
+          settle(sessionsFrom(isServerIdentity(frame.params) ? frame.params : null))
+        } catch {
+          // Not JSON, or not a frame this cares about. The timer still owns the
+          // outcome.
+        }
       })
     })
   } finally {
-    probe.close()
+    socket.close()
   }
 }
 

@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
+import { spawnsRealServers } from './helpers/one-at-a-time'
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
+
+spawnsRealServers()
 
 /**
  * The real launcher, against real servers.

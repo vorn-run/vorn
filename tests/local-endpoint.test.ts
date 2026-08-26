@@ -5,6 +5,7 @@ import path from 'node:path'
 import WebSocket from 'ws'
 import { openLocalEndpoint, type LocalEndpoint } from '../packages/server/src/local-endpoint'
 import { endpointUrl } from '../src/main/server/server-adoption'
+import { probeSessions } from '../src/main/server/server-launcher'
 
 /**
  * Bringing up the endpoint, in this process.
@@ -18,6 +19,7 @@ import { endpointUrl } from '../src/main/server/server-adoption'
 
 let dir: string
 const open: LocalEndpoint[] = []
+const cleanup: Array<() => void> = []
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-local-'))
@@ -25,6 +27,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  while (cleanup.length) cleanup.pop()?.()
   for (const endpoint of open.splice(0)) await endpoint.close()
   fs.rmSync(dir, { recursive: true, force: true })
 })
@@ -119,6 +122,77 @@ describe('what the endpoint answers', () => {
     ).resolves.toBeUndefined()
     ws.close()
   })
+})
+
+describe('asking what a server holds without joining it', () => {
+  /**
+   * A server that greets and records, so both halves of the claim are visible:
+   * what the probe learns, and what it says to learn it.
+   */
+  async function greeter(sessions: number): Promise<{ url: string; heard: string[] }> {
+    const { WebSocketServer } = await import('ws')
+    const http = await import('node:http')
+    const heard: string[] = []
+    const socketPath = path.join(dir, 'greeter.sock')
+    const server = http.createServer()
+    const wss = new WebSocketServer({ server })
+    wss.on('connection', (ws) => {
+      ws.on('message', (m: Buffer) => heard.push(m.toString()))
+      ws.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'server:identity',
+          params: {
+            dataDir: dir,
+            appVersion: '0.7.0',
+            buildChannel: 'packaged',
+            pid: process.pid,
+            sessions
+          }
+        })
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve))
+    cleanup.push(() => {
+      for (const c of wss.clients) c.terminate()
+      server.close()
+    })
+    return { url: `ws+unix://${socketPath}:/ws`, heard }
+  }
+
+  it('reads the count off the greeting', async () => {
+    const { url } = await greeter(4)
+    await expect(probeSessions(url)).resolves.toBe(4)
+  })
+
+  it('never says anything to the server it is looking at', async () => {
+    // `ServerBridge` claims the browser bridge the moment it opens, and a socket
+    // with no accepted credential is refused for sending any method but
+    // `auth:authenticate` -- so a probe built on one would announce itself, be
+    // thrown out, and leave a line in the log of a server it only meant to look
+    // at. This one cannot, because it sends nothing at all.
+    const { url, heard } = await greeter(1)
+
+    await probeSessions(url)
+    await new Promise((r) => setTimeout(r, 200))
+
+    expect(heard).toEqual([])
+  })
+
+  it('answers null rather than waiting for a server that says nothing', async () => {
+    const { WebSocketServer } = await import('ws')
+    const http = await import('node:http')
+    const socketPath = path.join(dir, 'silent.sock')
+    const server = http.createServer()
+    const wss = new WebSocketServer({ server })
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve))
+    cleanup.push(() => {
+      for (const c of wss.clients) c.terminate()
+      server.close()
+    })
+
+    await expect(probeSessions(`ws+unix://${socketPath}:/ws`)).resolves.toBeNull()
+  }, 15_000)
 })
 
 describe('letting go', () => {

@@ -1,8 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import { spawnsRealServers } from './helpers/one-at-a-time'
 import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+
+spawnsRealServers()
 
 /**
  * The one assertion the unit tests cannot make: two launches agree.

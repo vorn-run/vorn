@@ -167,7 +167,7 @@ export type RefusalReason =
  * `path.resolve`, which throws: the launcher would die where it meant to
  * decline, and a throw that is not an AdoptionRefusedError quits the app.
  */
-function isServerIdentity(value: ServerIdentity | null): value is ServerIdentity {
+export function isServerIdentity(value: unknown): value is ServerIdentity {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<ServerIdentity>
   return (

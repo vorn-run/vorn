@@ -1,10 +1,13 @@
 import { describe, it, expect, afterEach, beforeAll } from 'vitest'
+import { spawnsRealServers } from './helpers/one-at-a-time'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { EXIT_ENDPOINT_TAKEN } from '../packages/shared/src/protocol'
+
+spawnsRealServers()
 
 /**
  * Two real servers, one machine.
