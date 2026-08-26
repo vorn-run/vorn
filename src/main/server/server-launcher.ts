@@ -708,17 +708,22 @@ export async function stopServer(): Promise<void> {
 
   if (serverProcess) {
     const child = serverProcess
-    if (!child.killed) {
-      if (process.platform === 'win32') {
-        child.kill()
-      } else {
-        child.kill('SIGTERM')
-        setTimeout(() => {
-          if (child && !child.killed) {
-            child.kill('SIGKILL')
-          }
-        }, 3000)
-      }
+    if (process.platform === 'win32') {
+      child.kill()
+    } else {
+      child.kill('SIGTERM')
+      setTimeout(() => {
+        // Asked whether the process is still there, not whether we asked it to
+        // go. `child.killed` is true the moment a signal is *delivered*, even to
+        // a process that ignores it -- so gating on it made this fallback
+        // unreachable and left a server running after the user chose to stop it.
+        // That was survivable while the server died with its parent anyway; a
+        // detached one just keeps going.
+        if (child.pid && isPidAlive(child.pid)) {
+          log.warn(`[launcher] server ${child.pid} ignored SIGTERM; sending SIGKILL`)
+          child.kill('SIGKILL')
+        }
+      }, 3000)
     }
     serverProcess = null
   } else if (adoptedPid !== null && isPidAlive(adoptedPid)) {

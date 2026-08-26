@@ -535,3 +535,47 @@ describe('a server whose greeting does not match its port file', () => {
     expect(spawned).toEqual([])
   })
 })
+
+describe('stopping a server that ignores SIGTERM', () => {
+  it('escalates to SIGKILL, judged by liveness rather than by having asked', async () => {
+    // `child.killed` is true the moment a signal is delivered, even to a process
+    // that ignores it. Gating the fallback on it made SIGKILL unreachable, so a
+    // server that swallowed SIGTERM outlived "Stop Sessions and Server" -- which
+    // only started mattering once the server stopped dying with its parent.
+    published.pidAlive = true
+    const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
+    await launchServer()
+    // Only now: the launch itself waits on real timers to learn its port.
+    vi.useFakeTimers()
+
+    const signals: string[] = []
+    const child = spawnedChildren[0] as unknown as Record<string, unknown>
+    child.killed = true // what Node reports right after a delivered SIGTERM
+    child.kill = (sig: string): void => void signals.push(sig)
+
+    const stopping = stopServer()
+    await vi.advanceTimersByTimeAsync(4000)
+    await stopping
+
+    expect(signals).toContain('SIGKILL')
+    vi.useRealTimers()
+  })
+
+  it('leaves a server that actually stopped alone', async () => {
+    const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
+    await launchServer()
+    vi.useFakeTimers()
+
+    const signals: string[] = []
+    const child = spawnedChildren[0] as unknown as Record<string, unknown>
+    child.kill = (sig: string): void => void signals.push(sig)
+    published.pidAlive = false // it honoured the SIGTERM and exited
+
+    const stopping = stopServer()
+    await vi.advanceTimersByTimeAsync(4000)
+    await stopping
+
+    expect(signals).not.toContain('SIGKILL')
+    vi.useRealTimers()
+  })
+})
