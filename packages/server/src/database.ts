@@ -2562,7 +2562,21 @@ export function dbInsertWorkflow(workflow: WorkflowDefinition): void {
     )
 }
 
-export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition>): void {
+/**
+ * Change a workflow's columns, and say how many rows changed.
+ *
+ * Zero has two causes, and a caller must know which it is asking about: no row
+ * matched the id, or `updates` named nothing this function writes. It is an
+ * existence answer only for a caller that passed at least one writable column —
+ * `workflow:setEnabled` always passes `enabled`, so for that one it is.
+ *
+ * The count is worth having because the alternative is worse. Reading the row
+ * first with `dbGetWorkflow` costs a second statement and a `JSON.parse` of
+ * `nodes` and `edges`, so one malformed workflow could throw a caller that only
+ * wanted to flip a boolean — and it leaves a gap between the check and the write
+ * for the row to disappear in.
+ */
+export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition>): number {
   const sets: string[] = []
   const params: unknown[] = []
   if (updates.name !== undefined) {
@@ -2597,11 +2611,12 @@ export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition
     sets.push('workspace_id = ?')
     params.push(updates.workspaceId)
   }
-  if (sets.length === 0) return
+  if (sets.length === 0) return 0
   params.push(id)
-  getDb()
+  const result = getDb()
     .prepare(`UPDATE workflows SET ${sets.join(', ')} WHERE id = ?`)
     .run(...params)
+  return Number(result.changes ?? 0)
 }
 
 export function dbDeleteWorkflow(id: string): void {
