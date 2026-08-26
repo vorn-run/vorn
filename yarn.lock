@@ -4678,6 +4678,7 @@ __metadata:
     tsup: "npm:^8.5.1"
     tsx: "npm:^4.23.1"
     typescript: "npm:^6.0.3"
+    ws: "npm:^8.21.1"
     zod: "npm:^4.4.3"
   bin:
     vorn-server: ./dist/cli.cjs
