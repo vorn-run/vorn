@@ -745,6 +745,20 @@ class PtyManager extends EventEmitter {
     this.sessionOrder = []
   }
 
+  /**
+   * How many terminals still have a process behind them.
+   *
+   * Not `getActiveSessions().length`. That returns session *records*, and a
+   * record outlives its process: when a shell exits on its own, `onExit` drops
+   * the pty and marks the session `'idle'`, but the record stays so the card can
+   * keep showing its exit code until somebody closes it. Only `killPty` removes
+   * it. So a finished-but-still-open tab reads as a live session for ever, which
+   * is precisely the state the idle check must not treat as busy.
+   */
+  livePtyCount(): number {
+    return this.ptys.size
+  }
+
   getActiveSessions(): TerminalSession[] {
     if (this.sessionOrder.length === 0) {
       return Array.from(this.sessions.values())

@@ -88,6 +88,7 @@ export function parseTopics(query: unknown): readonly string[] | undefined {
 
 export class ClientRegistry {
   private clients = new Map<WebSocket, Subscription | null>()
+  private lastActivity = Date.now()
 
   add(ws: WebSocket, topics?: TopicFilter): void {
     this.clients.set(ws, subscriptionFrom(topics))
@@ -97,6 +98,33 @@ export class ClientRegistry {
   remove(ws: WebSocket): void {
     this.clients.delete(ws)
     log.info(`[ws] client disconnected (total: ${this.clients.size})`)
+  }
+
+  /**
+   * How long since a client last did anything.
+   *
+   * A timestamp rather than the count below, because MCP opens a fresh socket
+   * for every RPC call: the count drops to zero between two calls of a working
+   * agent, and anything sampling it at that instant reads a busy server as an
+   * empty one. Recording *when* also fixes the opposite hole — these sockets
+   * have no heartbeat and are only removed on close or error, so one half-open
+   * connection would otherwise hold the count above zero for ever.
+   */
+  msSinceActivity(): number {
+    return Date.now() - this.lastActivity
+  }
+
+  /**
+   * Mark a client as having done something.
+   *
+   * Only real traffic: connecting is not activity, and neither is disconnecting.
+   * Another Vorn deciding whether it may adopt this server opens a socket, reads
+   * the greeting and closes it again — counting that would let the very launches
+   * this feature exists to unblock keep the leftover alive for ever, one probe at
+   * a time.
+   */
+  touch(): void {
+    this.lastActivity = Date.now()
   }
 
   /**

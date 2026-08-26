@@ -87,7 +87,8 @@ export type ConnectWindowCause = 'host-unreachable' | 'local-server-refused'
 
 export function showConnectWindow(
   reason: string,
-  cause: ConnectWindowCause = 'host-unreachable'
+  cause: ConnectWindowCause = 'host-unreachable',
+  holding: number | null = null
 ): void {
   if (connectWindow && !connectWindow.isDestroyed()) {
     connectWindow.focus()
@@ -118,7 +119,7 @@ export function showConnectWindow(
 
   log.info('[connect] showing the connect window')
   void connectWindow.loadURL(
-    `data:text/html;charset=utf-8,${encodeURIComponent(connectMarkup(reason, cause))}`
+    `data:text/html;charset=utf-8,${encodeURIComponent(connectMarkup(reason, cause, holding))}`
   )
 }
 
@@ -130,16 +131,24 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function connectMarkup(reason: string, cause: ConnectWindowCause): string {
+function connectMarkup(reason: string, cause: ConnectWindowCause, holding: number | null): string {
   // Two situations reach this window, and only one of them can be resolved by
   // running a server here: when another one already holds this machine's data
   // directory, "run a server on this machine" is the thing that just failed.
   const refused = cause === 'local-server-refused'
   const heading = refused ? 'Another Vorn server is running' : 'Cannot reach that Vorn'
-  const lede = refused
-    ? 'Your sessions are alive inside it. This app will not start a second server ' +
-      'beside it, because both would share one database.'
-    : 'The server this app is pointed at did not answer.'
+  // Composed from a count, never from anything that server said in words. Two
+  // cases carry no number to state: an older server that does not send one, and
+  // a server holding nothing at all -- which is reachable, since it is given a
+  // grace period before it leaves. Neither can claim sessions that are not there.
+  const refusedLede =
+    holding === null || holding === 0
+      ? "It holds this machine's data directory, and this app will not start a " +
+        'second server beside it, because both would share one database.'
+      : `${holding === 1 ? '1 session is' : `${holding} sessions are`} alive inside it. ` +
+        'This app will not start a second server beside it, because both would share ' +
+        'one database.'
+  const lede = refused ? refusedLede : 'The server this app is pointed at did not answer.'
   const localButton = refused
     ? '<button id="stop-local">Stop it and start fresh</button>'
     : '<button id="local" class="quiet">Run a server on this machine</button>'

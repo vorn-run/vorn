@@ -84,7 +84,27 @@ function getTriggerConfig(wf: WorkflowDefinition): TriggerConfig | null {
 }
 
 class Scheduler extends EventEmitter {
+  /**
+   * Armed schedules that this server can act on with nobody attached.
+   *
+   * Only connector polls. `dispatchConnectorPoll` really does the work here --
+   * it calls the connector and writes inbox rows without any client -- whereas a
+   * recurring or one-off trigger only broadcasts `SCHEDULER_EXECUTE` for a
+   * renderer to execute, so staying awake for one buys nothing: with no client
+   * the occurrence is emitted, the minute lock is written, and the run is lost.
+   * Holding the server open for that would be keeping a promise by dropping it.
+   *
+   * It matters which: connector polls are seeded enabled when a connector is
+   * installed, so counting every armed cron meant anyone with a connector had a
+   * server that never exited.
+   */
+  serverSideScheduleCount(): number {
+    return this.connectorPollWorkflowIds.size
+  }
+
   private cronJobs = new Map<string, ScheduledTask>()
+  /** Of those, the ones that do real work here rather than in a renderer. */
+  private connectorPollWorkflowIds = new Set<string>()
   private timeouts = new Map<string, NodeJS.Timeout>()
   private inboxTimer: NodeJS.Timeout | null = null
 
@@ -180,6 +200,7 @@ class Scheduler extends EventEmitter {
       if (!wf || !wf.enabled || (kind !== 'recurring' && kind !== 'connectorPoll')) {
         this.cronJobs.get(id)?.stop()
         this.cronJobs.delete(id)
+        this.connectorPollWorkflowIds.delete(id)
       }
     }
     for (const [id] of this.timeouts) {
@@ -222,9 +243,22 @@ class Scheduler extends EventEmitter {
             timezone: trigger.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
           })
           this.cronJobs.set(wf.id, task)
+          if (trigger.triggerType === 'connectorPoll') this.connectorPollWorkflowIds.add(wf.id)
         } catch (err) {
           log.error({ err }, `[scheduler] failed to schedule workflow "${wf.name}":`)
         }
+      }
+
+      // Membership is derived from the trigger as it stands now, not from what
+      // it was when the job was created. Both loops above keep an existing cron
+      // job when the new kind is still cron-eligible, and the registration below
+      // is skipped for an id that already has one -- so an edit from `recurring`
+      // to `connectorPoll` would never add the id, and the reverse edit would
+      // leave it behind. Either way the count that decides whether this server
+      // may leave stops describing the schedules it actually holds.
+      if (this.cronJobs.has(wf.id)) {
+        if (trigger.triggerType === 'connectorPoll') this.connectorPollWorkflowIds.add(wf.id)
+        else this.connectorPollWorkflowIds.delete(wf.id)
       }
 
       if (trigger.triggerType === 'once' && !this.timeouts.has(wf.id)) {
@@ -451,6 +485,7 @@ class Scheduler extends EventEmitter {
     for (const [, job] of this.cronJobs) job.stop()
     for (const [, timer] of this.timeouts) clearTimeout(timer)
     this.cronJobs.clear()
+    this.connectorPollWorkflowIds.clear()
     this.timeouts.clear()
     if (this.inboxTimer) clearInterval(this.inboxTimer)
     this.inboxTimer = null

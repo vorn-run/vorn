@@ -120,6 +120,19 @@ export interface ServerIdentity {
    * the packaged app's bundled server, or the reverse.
    */
   buildChannel: 'dev' | 'packaged'
+  /**
+   * How many terminals this server currently has a process behind.
+   *
+   * Optional, so a server that predates it still validates. It rides this frame
+   * rather than an RPC because a launcher decides whether to adopt *before* it
+   * authenticates and closes the socket the moment it refuses — so for five of
+   * the six refusal reasons there is no request it could make. This is the only
+   * thing it hears from a server it has just declined.
+   *
+   * Treat it as a number from an untrusted party: coerce and clamp it, never
+   * splice it into a sentence.
+   */
+  sessions?: number
 }
 
 // ─── Authentication ─────────────────────────────────────────────

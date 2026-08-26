@@ -10,7 +10,7 @@ const CLOSE_UNAUTHENTICATED = 4001
 const CLOSE_CREDENTIAL_REJECTED = 4002
 
 vi.mock('../packages/server/src/broadcast', () => ({
-  clientRegistry: { add: vi.fn(), remove: vi.fn(), setTopics: vi.fn() }
+  clientRegistry: { add: vi.fn(), remove: vi.fn(), setTopics: vi.fn(), touch: vi.fn() }
 }))
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -645,5 +645,41 @@ describe('narrowing what a socket receives', () => {
     sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { topics: ['session:*'] } })
 
     expect(clientRegistry.setTopics).not.toHaveBeenCalled()
+  })
+})
+
+describe('what counts as somebody being out there', () => {
+  it('counts an ordinary call', () => {
+    const ws = createMockWs()
+    connectAuthed(ws)
+    ;(clientRegistry.touch as ReturnType<typeof vi.fn>).mockClear()
+    sendMessage(ws, { jsonrpc: '2.0', id: 1, method: 'config:load' })
+    expect(clientRegistry.touch).toHaveBeenCalled()
+  })
+
+  it('does not count a frame from a socket that has not proved itself', () => {
+    // Anything on this machine can open a socket to loopback. If an
+    // unauthenticated frame counted, arbitrary local traffic could pin a server
+    // nobody is using without ever proving it is a client -- the same hole the
+    // hook endpoint closes by advancing its clock only past authentication.
+    const ws = createMockWs()
+    ;(clientRegistry.touch as ReturnType<typeof vi.fn>).mockClear()
+    handleConnection(ws as never, { socket: { remoteAddress: '127.0.0.1' } } as never)
+    sendMessage(ws, { jsonrpc: '2.0', id: 1, method: 'config:load' })
+    expect(clientRegistry.touch).not.toHaveBeenCalled()
+  })
+
+  it('does not count the frame every connection opens with', () => {
+    // `ServerBridge` sends `bridge:identify` from its own `open` handler, so it
+    // arrives on every socket -- including the one another Vorn opens purely to
+    // ask this server whether it may adopt it, and the one behind
+    // `probeSessions`. Counting it would let a user blocked by a leftover server
+    // reset that server's idle clock on every launch attempt, so the leftover
+    // never leaves and the launches never stop being blocked.
+    const ws = createMockWs()
+    connectAuthed(ws)
+    ;(clientRegistry.touch as ReturnType<typeof vi.fn>).mockClear()
+    sendMessage(ws, { jsonrpc: '2.0', id: 1, method: 'bridge:identify' })
+    expect(clientRegistry.touch).not.toHaveBeenCalled()
   })
 })

@@ -1086,6 +1086,9 @@ export interface AppConfig {
      * With this on, quitting closes a window and nothing else; the next launch
      * reconnects to the sessions that were already running.
      *
+     * The background server shuts itself down once nothing is left running,
+     * so this does not leave a process behind for ever.
+     *
      * Defaults to on. Turning it off restores the old behaviour exactly, and
      * "Stop Sessions and Server" in the File menu does it once without changing
      * the setting.

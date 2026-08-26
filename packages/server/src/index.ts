@@ -10,13 +10,20 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
 const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(process.argv[1])
 import websocket from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
-import { handleConnection, registerMethod, setServerIdentity } from './ws-handler'
+import {
+  handleConnection,
+  registerMethod,
+  setServerIdentity,
+  setLiveSessionCount
+} from './ws-handler'
+import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
+import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
 import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
-import { getDataDir } from './database'
+import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
 import { DEFAULT_SERVER_PORT, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
@@ -25,7 +32,7 @@ import { scheduler } from './scheduler'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
 import { redeemCode, pollRequest, pendingRequests } from './pairing'
 import { getTailscaleStatus } from './tailscale'
-import { initRebind, checkAndRebind } from './server-rebind'
+import { initRebind, checkAndRebind, getCurrentHost } from './server-rebind'
 import { isAllowedUpgrade, logRefusedUpgrade, setTrustedOriginHosts } from './ws-origin'
 import { setEnvPassthrough, setLaunchDataDir } from './process-utils'
 import log from './logger'
@@ -48,6 +55,30 @@ async function refreshTrustedOrigins(): Promise<void> {
 }
 
 /**
+ * How long a shutdown may take before this process leaves regardless.
+ *
+ * Generous, because the work it waits on is real -- persisting sessions, killing
+ * terminals, stopping connector subprocesses -- and cutting it short loses more
+ * than it saves. It exists only for the case where one of those never returns.
+ */
+const SHUTDOWN_DEADLINE_MS = 30_000
+
+/**
+ * How long everything must stay empty before the server stops.
+ *
+ * Not a setting. A number to tune is a knob nobody wants, and the honest range
+ * is narrow: with nothing running there is no work to lose by exiting, so the
+ * window is only there to avoid churning a process for somebody who is coming
+ * straight back. The environment variable exists for tests, which cannot wait
+ * half an hour to watch a process leave.
+ */
+function resolveIdleWindowMs(): number {
+  const raw = process.env.VORN_IDLE_TIMEOUT_MS
+  const parsed = raw ? Number(raw) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_IDLE_WINDOW_MS
+}
+
+/**
  * `dev` or `packaged`, preferring what the launcher told us.
  *
  * The fallback reads the entry point rather than NODE_ENV: NODE_ENV is set to
@@ -62,7 +93,7 @@ function resolveBuildChannel(): 'dev' | 'packaged' {
 }
 
 export async function startServer(
-  options: { host?: string; port?: number; dataDir?: string } = {}
+  options: { host?: string; port?: number; dataDir?: string; idleShutdown?: boolean } = {}
 ) {
   // Initialize database + config. This resolves the data directory for the whole
   // process; everything else reads it back with getDataDir() rather than
@@ -81,6 +112,9 @@ export async function startServer(
   // its own entry point, which is TypeScript in a checkout and bundled CJS in a
   // packaged app. Getting this wrong is not cosmetic: dev and packaged builds
   // deliberately share ~/.vorn, so a wrong answer lets one adopt the other's.
+  // What a launcher deciding whether to adopt this server gets to hear before it
+  // has authenticated — see `ServerIdentity.sessions`.
+  setLiveSessionCount(() => ptyManager.livePtyCount())
   setServerIdentity({
     // The launcher passes the app's version; a CLI server has none to report and
     // says so rather than omitting the field, since every field on this frame is
@@ -407,8 +441,25 @@ export async function startServer(
   const { hookStatusMapper } = await import('./hook-status-mapper')
   const { sessionManager } = await import('./session-persistence')
 
+  // Two failures, and neither is retried -- by the time either is visible this
+  // has already cleared the credential and removed the port file, so a second
+  // attempt would be running `killAll()` and `app.close()` again over a server
+  // no app can discover anyway. The worst outcome is not a failed shutdown, it
+  // is a live process still holding the port with nothing able to reach it.
+  //
+  // So a throw takes the hard exit at the call site, and a hang -- which is
+  // reachable, `stopAllMcpClients()` awaits child processes -- takes the
+  // deadline armed here. Re-entry is refused because SIGTERM can arrive while
+  // one of those is already in flight. Unref'd: a backstop, not a reason to
+  // stay alive.
+  let shuttingDown = false
   const shutdown = async () => {
-    log.info('[server] shutting down...')
+    if (shuttingDown) return
+    shuttingDown = true
+    setTimeout(() => {
+      log.error('[server] shutdown did not finish; exiting anyway')
+      process.exit(1)
+    }, SHUTDOWN_DEADLINE_MS).unref?.()
     // Stop the periodic timer first, then do one final synchronous save
     sessionManager.stopAutoSave()
     sessionManager.persistNow()
@@ -435,8 +486,56 @@ export async function startServer(
     process.exit(0)
   }
 
-  process.on('SIGTERM', shutdown)
-  process.on('SIGINT', shutdown)
+  /**
+   * Every way this process is asked to stop, so there is one of them.
+   *
+   * A rejected `shutdown()` reaches here rather than becoming an unhandled
+   * rejection. By the time one is visible the credential is cleared and the port
+   * file is gone, so there is nothing to salvage and nothing to retry -- what is
+   * left is a live process holding a port no app can discover, which is the state
+   * this whole feature exists to prevent. Exiting hard is the floor. A shutdown
+   * that hangs rather than rejects is caught by the deadline armed inside it.
+   */
+  const stopFor = (reason: string): void => {
+    log.info({ reason }, '[server] shutting down')
+    void shutdown().catch((err) => {
+      log.error({ err, reason }, '[server] shutdown failed; exiting anyway')
+      process.exit(1)
+    })
+  }
+
+  // The server outlives the app now, so something has to decide when it is done.
+  // Nothing here waits for the event loop to drain: the scheduler's inbox
+  // interval is not unref'd, so this process would sit empty for ever.
+  const idleWatch = new IdleWatch(
+    () => ({
+      sessions: ptyManager.livePtyCount(),
+      // Filtered to running: `headless-manager` keeps exited entries for thirty
+      // seconds, and a finished agent is not a reason to stay up.
+      headless: headlessManager.getActiveSessions().filter((h) => h.status === 'running').length,
+      msSinceClientActivity: clientRegistry.msSinceActivity(),
+      msSinceHookActivity: hookServer.msSinceHookActivity(),
+      bridgeAttached: browserBridge.isConnected,
+      pendingPermissions: hookServer.getPendingPermissions().length,
+      pendingPairings: pendingRequests().length,
+      connectorLeases: dbCountActiveConnectorInboxLeases(new Date().toISOString()),
+      enabledSchedules: scheduler.serverSideScheduleCount(),
+      servesOthers: getCurrentHost() === '0.0.0.0'
+    }),
+    { windowMs: resolveIdleWindowMs(), schedulesHoldOpen: true },
+    () => stopFor('nothing left to do')
+  )
+  // Off entirely for a hand-run `vorn-server serve`: that process is the thing
+  // being run, and nothing would bring it back. Being bound wide is handled in
+  // the snapshot instead, because it can change while this runs.
+  if (options.idleShutdown === false) {
+    log.info('[server] idle shutdown off: this server was started to be run')
+  } else {
+    idleWatch.start()
+  }
+
+  process.on('SIGTERM', () => stopFor('SIGTERM'))
+  process.on('SIGINT', () => stopFor('SIGINT'))
   // Why: this process outlives the app that started it, so a hangup on the
   // terminal or the departure of a parent must not take the sessions with it.
   // SIGTERM stays honoured — that is a request to stop, not an accident.
@@ -444,10 +543,10 @@ export async function startServer(
     log.info('[server] ignoring SIGHUP; sessions keep running')
   })
   process.on('message', (msg) => {
-    if (msg === 'shutdown') shutdown()
+    if (msg === 'shutdown') stopFor('the app asked')
   })
 
-  return { app, port: actualPort }
+  return { app, port: actualPort, idleWatch }
 }
 
 // Run directly

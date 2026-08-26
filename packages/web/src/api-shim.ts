@@ -409,6 +409,9 @@ export function createApiShim(wsUrl: string) {
     // one, so there is no local server for it to be looking away from.
     onLocalServerStillRunning: (_callback: (notice: unknown) => void) => () => {},
     stopLocalServer: async () => ({ ok: false, error: 'Not available here.' }),
+    // Present so the surface test passes; the palette hides the command in web,
+    // so nothing should reach this.
+    stopSessionsAndServer: unsupportedInWeb('Stopping the server'),
 
     onMenuNewAgent: (_callback: () => void) => () => {},
 

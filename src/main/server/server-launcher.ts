@@ -77,7 +77,11 @@ let adoptedPid: number | null = null
  * is empty. The pid is what lets them end it on purpose -- the one actor allowed
  * to, since this code never ends an incumbent on its own.
  */
-export type AdoptionRefusal = AdoptionVerdict & { kind: 'refuse' } & { incumbentPid: number | null }
+export type AdoptionRefusal = AdoptionVerdict & { kind: 'refuse' } & {
+  incumbentPid: number | null
+  /** Terminals the refused server said it holds, or null if it did not say. */
+  incumbentSessions: number | null
+}
 
 let lastRefusal: AdoptionRefusal | null = null
 
@@ -501,6 +505,19 @@ function onServerExit(detail: string): void {
 }
 
 /**
+ * A session count from a server we are not going to use.
+ *
+ * Anything that is not a plain, sane integer becomes null, which the window
+ * renders as "sessions" rather than a number. A stranger does not get to choose
+ * what Vorn's own warning says.
+ */
+export function sessionsFrom(identity: ServerIdentity | null): number | null {
+  const n = identity?.sessions
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 10_000) return null
+  return n
+}
+
+/**
  * Long enough for a busy event loop, short enough not to stall a cold launch.
  *
  * A server that sends no identity frame at all -- too old, or not on loopback --
@@ -509,6 +526,33 @@ function onServerExit(detail: string): void {
 const ADOPT_IDENTITY_TIMEOUT_MS = 3_000
 /** How long to wait for the round trip that proves the credential was accepted. */
 const ADOPT_AUTH_TIMEOUT_MS = 5_000
+
+/**
+ * Ask a running server, without joining it, how many terminals it holds.
+ *
+ * The greeting is the first frame on the socket and arrives before
+ * authentication, so this answers even for a server that would reject this app's
+ * credential -- which is the whole reason the count rides that frame. Used where
+ * the app is pointed elsewhere and merely wants to say what is still running
+ * here; null means "could not tell", never "nothing".
+ */
+export async function probeSessions(port: number): Promise<number | null> {
+  const token = readLocalToken()
+  if (!token) return null
+  const probe = new ServerBridge(`ws://127.0.0.1:${port}/ws`, token)
+  probe.connect()
+  try {
+    return await new Promise<number | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), ADOPT_IDENTITY_TIMEOUT_MS)
+      probe.once('identity', (found: ServerIdentity) => {
+        clearTimeout(timer)
+        resolve(sessionsFrom(found))
+      })
+    })
+  } finally {
+    probe.close()
+  }
+}
 
 /**
  * Connect to a server that is already running and decide whether to keep it.
@@ -522,10 +566,14 @@ async function tryAdopt(
   port: number,
   expectedPid: number | undefined,
   self: { dataDir: string; buildChannel: 'dev' | 'packaged' }
-): Promise<{ bridge: ServerBridge } | { refusal: AdoptionVerdict & { kind: 'refuse' } }> {
+): Promise<
+  | { bridge: ServerBridge }
+  | { refusal: AdoptionVerdict & { kind: 'refuse' }; sessions: number | null }
+> {
   const token = readLocalToken(self.dataDir)
   if (!token) {
     return {
+      sessions: null,
       refusal: {
         kind: 'refuse',
         reason: 'unusable',
@@ -556,6 +604,7 @@ async function tryAdopt(
   if (verdict.kind === 'refuse' || !identity) {
     candidate.close()
     return {
+      sessions: sessionsFrom(identity),
       refusal:
         verdict.kind === 'refuse'
           ? verdict
@@ -579,6 +628,7 @@ async function tryAdopt(
   if (!accepted) {
     candidate.close()
     return {
+      sessions: null,
       refusal: {
         kind: 'refuse',
         reason: 'unusable',
@@ -643,7 +693,14 @@ export async function launchServer(): Promise<ServerBridge> {
       return bridge
     }
     const { refusal } = outcome
-    lastRefusal = { ...refusal, incumbentPid: published.pid ?? null }
+    lastRefusal = {
+      ...refusal,
+      incumbentPid: published.pid ?? null,
+      // Coerced, not trusted. This number comes from the party this app has just
+      // decided it cannot use, so it is clamped and rendered as a count — never
+      // as text spliced into a sentence.
+      incumbentSessions: 'sessions' in outcome ? outcome.sessions : null
+    }
     log.warn(
       `[launcher] declined to adopt the running server (${refusal.reason}): ` +
         `${refusal.detail}. It keeps running and keeps its sessions.`

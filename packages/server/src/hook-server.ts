@@ -78,6 +78,14 @@ export class HookServer extends EventEmitter {
     this.authToken = crypto.randomUUID()
   }
 
+  /** When a hook last posted. See the note in the request handler. */
+  private lastRequestAt = Date.now()
+
+  /** How long since any agent, in this app or outside it, used the hook endpoint. */
+  msSinceHookActivity(): number {
+    return Date.now() - this.lastRequestAt
+  }
+
   getPort(): number {
     return this.port
   }
@@ -121,6 +129,17 @@ export class HookServer extends EventEmitter {
 
         // Authenticate all requests with bearer token
         if (!this.authenticate(req, res)) return
+
+        // Recorded only past the checks above, and deliberately so. An agent run
+        // outside Vorn still posts here, because hooks are installed into the
+        // user's agent settings globally: it has no terminal, no headless entry
+        // and no websocket, so this is the only trace it leaves -- and
+        // `shutdown()` uninstalls those hooks, which would break its permission
+        // routing for the rest of the run. But that argument covers real hook
+        // traffic only. Counting a stray unauthenticated request would let
+        // anything on this machine hold the server open without ever proving it
+        // is an agent, which is a worse hole than the one this closes.
+        this.lastRequestAt = Date.now()
 
         let body = ''
         let bodySize = 0

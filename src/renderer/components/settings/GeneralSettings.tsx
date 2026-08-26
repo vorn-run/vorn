@@ -17,6 +17,30 @@ export function GeneralSettings() {
 
   if (!config) return null
 
+  // Two ordinary settings quietly override the sentence above, and a promise
+  // that is conditional should say so where it is made rather than leaving the
+  // user to notice a server that never leaves.
+  // Read the way `scheduler.getTriggerConfig` reads it -- first trigger node,
+  // its own config -- so this cannot describe a different set of workflows from
+  // the one the server actually stays awake for.
+  const polling = (config.workflows ?? []).some((w) => {
+    if (!w.enabled) return false
+    const trigger = w.nodes.find((n) => n.type === 'trigger')
+    return (
+      (trigger?.config as { triggerType?: string } | undefined)?.triggerType === 'connectorPoll'
+    )
+  })
+  const reasons = [
+    config.defaults.networkAccessEnabled
+      ? 'Network Access is on, so it stays up to be reached from your other devices'
+      : null,
+    polling ? 'a connector is polling on a schedule, which it services itself' : null
+  ].filter(Boolean)
+  const serverStaysUp =
+    reasons.length === 0
+      ? undefined
+      : `${reasons.join(', and ')}. This server will not shut down on its own.`
+
   const updateDefaults = (patch: Partial<typeof config.defaults>): void => {
     const updated = {
       ...config,
@@ -88,7 +112,8 @@ export function GeneralSettings() {
         {/* Keep sessions running */}
         <SettingRow
           label="Keep Sessions Running When Vorn Closes"
-          description="Agents keep working while Vorn is shut. Reopening reconnects to them instead of restarting them. A background server stays running until every session ends."
+          description="Agents keep working while Vorn is shut. Reopening reconnects to them instead of restarting them. A background server stays running until every session ends, then shuts down on its own."
+          note={serverStaysUp}
         >
           <ToggleSwitch
             checked={config.defaults.keepSessionsRunning ?? true}

@@ -556,3 +556,53 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     expect(dbRecordConnectorPollPageMock).not.toHaveBeenCalled()
   })
 })
+
+describe('the count that decides whether this server may leave', () => {
+  // `serverSideScheduleCount` is the only schedule kind that vetoes an idle
+  // shutdown, because a connector poll is the only one this server performs
+  // itself. A recurring or one-off trigger is executed by a renderer, so waiting
+  // for one would keep a promise by dropping the run.
+  const recurring = (id: string): WorkflowDefinition => {
+    const wf = makePollWorkflow(id)
+    wf.nodes[0].config = {
+      triggerType: 'recurring',
+      cron: '*/5 * * * *'
+    } as unknown as ConnectorPollTriggerConfig
+    return wf
+  }
+
+  beforeEach(() => {
+    scheduler.stopAll()
+  })
+
+  it('counts an armed connector poll and not a recurring trigger', () => {
+    scheduler.syncSchedules([makePollWorkflow('poll-a'), recurring('cron-a')])
+    expect(scheduler.serverSideScheduleCount()).toBe(1)
+  })
+
+  it('follows a trigger that changes kind in either direction', () => {
+    // Both sync loops keep an existing cron job when the new kind is still
+    // cron-eligible, and registration is skipped for an id that already has one.
+    // So membership taken at creation time never moved again: flipping to
+    // `connectorPoll` left the server free to exit and silently stop polling,
+    // and flipping away from it left the server pinned open for ever.
+    scheduler.syncSchedules([recurring('wf-x')])
+    expect(scheduler.serverSideScheduleCount()).toBe(0)
+
+    scheduler.syncSchedules([makePollWorkflow('wf-x')])
+    expect(scheduler.serverSideScheduleCount()).toBe(1)
+
+    scheduler.syncSchedules([recurring('wf-x')])
+    expect(scheduler.serverSideScheduleCount()).toBe(0)
+  })
+
+  it('drops the count when the workflow is disabled', () => {
+    scheduler.syncSchedules([makePollWorkflow('wf-y')])
+    expect(scheduler.serverSideScheduleCount()).toBe(1)
+
+    const disabled = makePollWorkflow('wf-y')
+    disabled.enabled = false
+    scheduler.syncSchedules([disabled])
+    expect(scheduler.serverSideScheduleCount()).toBe(0)
+  })
+})

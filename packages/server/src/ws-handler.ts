@@ -46,11 +46,9 @@ let helloFrameCache: string | null = null
  * spawns its own rather than guessing.
  */
 let identity: ServerIdentity | null = null
-let identityFrameCache: string | null = null
 
 export function setServerIdentity(next: ServerIdentity): void {
   identity = next
-  identityFrameCache = null
 }
 
 function helloFrame(): string {
@@ -76,8 +74,26 @@ function helloFrame(): string {
  */
 function identityFrame(): string | null {
   if (!identity) return null
-  identityFrameCache ??= JSON.stringify(createNotification('server:identity', identity))
-  return identityFrameCache
+  // Built per connection rather than cached: the session count is the point of
+  // sending it, and a count fixed at boot would be a lie by the second socket.
+  // The frame goes only to loopback peers, so this is not a per-request cost on
+  // anything remote.
+  return JSON.stringify(
+    createNotification('server:identity', { ...identity, sessions: liveSessionCount?.() })
+  )
+}
+
+/**
+ * How many terminals are live, when somebody has told us how to ask.
+ *
+ * A function rather than a number because the count changes; injected rather
+ * than imported because `ws-handler` has no business knowing about PTYs, and a
+ * direct import would put the socket layer downstream of the terminal layer.
+ */
+let liveSessionCount: (() => number) | null = null
+
+export function setLiveSessionCount(fn: () => number): void {
+  liveSessionCount = fn
 }
 
 /**
@@ -293,6 +309,21 @@ export function handleConnection(
     }
 
     const { id, method, params } = msg
+    // A frame from a socket that has proved itself counts as somebody being out
+    // there, and the idle watch stays up for it. Two things do not count.
+    //
+    // An unauthenticated frame, because anything on this machine can open a
+    // socket to loopback: counting those would let arbitrary local traffic pin a
+    // server nobody is using, without ever proving it is a client. Same rule the
+    // hook endpoint follows, and for the same reason.
+    //
+    // And `bridge:identify`, even authenticated, because `ServerBridge` sends it
+    // from its own `open` handler -- so it arrives on every connection including
+    // the one another Vorn opens purely to ask whether it may adopt this server.
+    // Counting that would let a user blocked by a leftover reset its clock on
+    // every launch attempt, so the leftover never leaves and the launches never
+    // stop being blocked.
+    if (session && method !== 'bridge:identify') clientRegistry.touch()
 
     // Everything below this line requires an authenticated socket. The one
     // exception is the credential itself.

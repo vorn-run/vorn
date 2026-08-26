@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { LOCAL_SERVER_RUNNING_CHANNEL, type LocalServerNotice } from '../shared/adoption-channels'
+import {
+  LOCAL_SERVER_RUNNING_CHANNEL,
+  STOP_SESSIONS_AND_SERVER_CHANNEL,
+  type LocalServerNotice
+} from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import {
   CreateTerminalPayload,
@@ -606,6 +610,9 @@ const api = {
    *  local server is still running. */
   stopLocalServer: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('connect:stopLocal'),
+
+  /** The File menu's "Stop Sessions and Server", offered from the palette too. */
+  stopSessionsAndServer: (): Promise<void> => ipcRenderer.invoke(STOP_SESSIONS_AND_SERVER_CHANNEL),
 
   // Pairing a phone by showing it a code
   startPairing: (): Promise<{ code: string; expiresAt: number }> =>
