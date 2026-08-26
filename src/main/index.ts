@@ -226,11 +226,6 @@ function toggleWidget(): void {
 }
 
 /**
- * Wire up server notification forwarding.
- * When the server pushes events via WebSocket, forward them to the
- * renderer and widget windows.
- */
-/**
  * Whether quitting should leave the sessions running.
  *
  * Cached rather than fetched at quit: `before-quit` is not a good place to start
@@ -248,6 +243,11 @@ function rememberKeepSessionsRunning(config: unknown): void {
   keepSessionsRunning = value ?? true
 }
 
+/**
+ * Wire up server notification forwarding.
+ * When the server pushes events via WebSocket, forward them to the
+ * renderer and widget windows.
+ */
 function wireServerNotifications(bridge: ServerBridge): void {
   bridge.on('server-notification', (method: string, params: unknown) => {
     if (method === IPC.CONFIG_CHANGED) rememberKeepSessionsRunning(params)

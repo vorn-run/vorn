@@ -232,6 +232,22 @@ describe('the server it spawns', () => {
     expect(spawned[0].opts.detached).toBe(true)
   })
 
+  it('is NOT detached in dev, so a restart cannot adopt yesterday\'s source', async () => {
+    // Every adoption check would pass for a leftover dev server -- same data
+    // directory, same build channel -- and it would be running the code as it
+    // was before the edit that prompted the restart, with nothing to say so.
+    process.env.ELECTRON_RENDERER_URL = 'http://localhost:5173'
+    try {
+      const { launchServer } = await import('../src/main/server/server-launcher')
+
+      await launchServer()
+
+      expect(spawned[0].opts.detached).toBeUndefined()
+    } finally {
+      delete process.env.ELECTRON_RENDERER_URL
+    }
+  })
+
   it('runs the Electron binary as Node rather than as another app', async () => {
     // process.execPath is the Electron binary. Spawning it without this variable
     // launches a second full Vorn — an infinite spawn loop this code has hit.

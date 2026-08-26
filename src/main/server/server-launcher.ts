@@ -219,9 +219,19 @@ async function spawnServer(): Promise<number> {
 
     const child = spawn('npx', ['tsx', serverEntryPoint, ...(devPort ? ['--port', devPort] : [])], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      // Its own process group and session, so it survives this app -- and so a
-      // Ctrl-C aimed at the terminal running `yarn dev` does not reach it.
-      detached: true,
+      // Deliberately NOT detached, where production is.
+      //
+      // A detached dev server outlives `yarn dev`, and the next `yarn dev` would
+      // adopt it -- same data directory, same build channel, so every check
+      // passes. It would be running the source as it was before the edit that
+      // prompted the restart, and nothing would say so. An hour lost to a fix
+      // that "did not work" is a worse trade than restarting sessions a
+      // developer was going to restart anyway.
+      //
+      // Sessions surviving a quit is a property of the shipped app. Dev keeps
+      // the old lifetime, and the buildChannel check still earns its place: a
+      // packaged server does outlive its app, and this is what stops `yarn dev`
+      // from adopting it.
       env: {
         ...process.env,
         [BOOTSTRAP_ENV_VAR]: bootstrapToken,
@@ -248,8 +258,10 @@ async function spawnServer(): Promise<number> {
       child.kill('SIGKILL')
       throw err
     })
+    // Streams released for the same reason as production -- an open pipe refs
+    // this process's event loop -- but the child is left ref'd, because in dev
+    // it is meant to go when the app goes.
     releaseChildStreams(child)
-    child.unref()
   } else {
     // Deliberately NOT utilityProcess.fork: a utility process is tied to this
     // app's lifetime by design, so it can never outlive the window -- which is
