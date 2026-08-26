@@ -30,6 +30,14 @@ export const RELAUNCH_DELAYS_MS = [0, 1_000, 5_000, 15_000]
 export function decideRelaunch(input: {
   /** `stopServer` ran, or the app is quitting. The exit was the point. */
   deliberate: boolean
+  /**
+   * The server stood down because this machine already had one.
+   *
+   * Not a crash and not a failure: it did nothing wrong, it arrived second. A
+   * replacement would arrive second too, so the answer is to go back and adopt
+   * the incumbent rather than to spawn another loser.
+   */
+  endpointTaken?: boolean
   /** No server of our own — we are pointed at someone else's. */
   hostMode: boolean
   /** How many times we have already relaunched in this run. */
@@ -37,6 +45,9 @@ export function decideRelaunch(input: {
 }): RelaunchDecision {
   if (input.deliberate) {
     return { relaunch: false, delayMs: 0, reason: 'the server was asked to stop' }
+  }
+  if (input.endpointTaken) {
+    return { relaunch: false, delayMs: 0, reason: 'this machine already has a server' }
   }
   // Host mode has no server of its own: `serverProcess` is null because another
   // machine is running it. Starting one here would be answering a question

@@ -50,11 +50,21 @@ let localTokenPath: string | null = null
  * loopback, but it cannot read a file off disk.
  *
  * Per-process and deleted on shutdown, so nothing usable outlives the server.
+ *
+ * `publish` is the data directory's ownership, decided once by
+ * `claimPublishedFiles` before anything is written. False means another live
+ * server already holds this directory, and the secret stays in memory only: the
+ * desktop that started this process handed it over in the environment and does
+ * not need the file, while anything reading the directory — MCP — is looking for
+ * the server that owns it, not for this one. Writing anyway is the bug this
+ * closes: a `yarn dev` server overwrote the packaged app's credential and MCP
+ * then read one server's port beside another server's secret.
  */
 export function initBootstrapSecret(
   dataDir: string,
   value: string | undefined = process.env[BOOTSTRAP_ENV_VAR]
 ): void {
+  pendingDataDir = dataDir
   const supplied = value && value.length > 0 ? value : null
   const secret = supplied ?? crypto.randomBytes(32).toString('base64url')
   bootstrapSecret = Buffer.from(secret, 'utf8')
@@ -66,6 +76,36 @@ export function initBootstrapSecret(
   // and reads `env` back, so anything still in `process.env` is reachable. After
   // this, no child can inherit it however it is spawned.
   delete process.env[BOOTSTRAP_ENV_VAR]
+
+  localTokenPath = null
+}
+
+/** The directory to publish into, remembered from `initBootstrapSecret`. */
+let pendingDataDir: string | null = null
+
+/**
+ * Write the credential where same-machine tools will find it.
+ *
+ * Separate from resolving the secret, and deliberately later, because the two
+ * answer different questions. The secret has to exist before any connection can
+ * be accepted; the *file* announces this server as the one this machine uses,
+ * and that is not true until it has claimed the endpoint.
+ *
+ * Publishing at startup meant a server that went on to lose the claim had
+ * already overwritten the winner's credential, and then exited without a
+ * shutdown path to undo it. The winner served with a secret nobody could read
+ * and MCP authenticated against a file belonging to a process that no longer
+ * existed -- the same failure this whole change is about, arrived at through the
+ * race rather than through a dev server.
+ */
+export function publishLocalCredential(owned: boolean): void {
+  const dataDir = pendingDataDir
+  const secret = bootstrapSecret?.toString('utf8')
+  if (!dataDir || !secret) return
+  if (!owned) {
+    log.info('[auth] not publishing a local credential: another server owns this directory')
+    return
+  }
 
   try {
     localTokenPath = path.join(dataDir, LOCAL_TOKEN_FILENAME)
@@ -79,13 +119,28 @@ export function initBootstrapSecret(
   }
 }
 
-/** Remove the published credential. Called from the server's shutdown path. */
+/**
+ * Remove the published credential, if the one on disk is still ours.
+ *
+ * Two gates. `localTokenPath` is null unless this process published, so a server
+ * that stood aside removes nothing. And the content is compared before the
+ * unlink, because publishing and shutting down are minutes apart: a file that has
+ * since been replaced belongs to whoever replaced it, and deleting it would leave
+ * a live server unreachable — the failure this whole change is about, caused on
+ * the way out instead of on the way in.
+ *
+ * Compared by content rather than by a pid beside it: the secret is the one thing
+ * this process already knows for certain, and `local-token` holds nothing else —
+ * `packages/mcp` reads the whole file as the credential.
+ */
 export function clearLocalCredential(): void {
   if (!localTokenPath) return
   try {
-    fs.rmSync(localTokenPath, { force: true })
+    if (fs.readFileSync(localTokenPath, 'utf-8') === bootstrapSecret?.toString('utf8')) {
+      fs.rmSync(localTokenPath, { force: true })
+    }
   } catch {
-    /* best effort — it is invalid after this process exits anyway */
+    /* absent or unreadable — either way there is nothing of ours to remove */
   }
   localTokenPath = null
 }

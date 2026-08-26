@@ -534,7 +534,7 @@ app.whenReady().then(async () => {
         // Asked rather than assumed, and the window is not held waiting for the
         // answer: a server that does not reply leaves the count null, which the
         // toast already words as "Sessions are".
-        void probeSessions(local.port)
+        void probeSessions(`ws://127.0.0.1:${local.port}/ws`)
           .catch(() => null)
           .then((sessions) => {
             mainWindow?.webContents.send(LOCAL_SERVER_RUNNING_CHANNEL, { sessions })

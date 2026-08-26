@@ -22,10 +22,18 @@ import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
-import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
+import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
+import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
+import { beginDraining, isDraining, watchEndpoint } from './draining'
+import {
+  initBootstrapSecret,
+  publishLocalCredential,
+  clearLocalCredential,
+  bearerFrom
+} from './ws-auth'
 import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
-import { DEFAULT_SERVER_PORT, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
+import { DEFAULT_SERVER_PORT, EXIT_ENDPOINT_TAKEN } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
@@ -158,8 +166,21 @@ export async function startServer(
   const app = Fastify({ logger: false })
   await app.register(websocket)
 
-  // Resolve this process's local credential and publish it for same-machine
-  // tools, before any connection can be accepted.
+  // Who owns this data directory's published names, decided once and used by
+  // every publisher below.
+  //
+  // Taken here rather than beside the port-file write, which is where it used to
+  // live, because the credential is published before the listen and the port
+  // after it — two publishers asking the same question at two different moments
+  // is how they came to disagree. `~/.vorn` is shared by a packaged Vorn and a
+  // `yarn dev` server on purpose, so a fixed name in it needs an owner or the
+  // last writer silently wins.
+  const ownsPublished = claimPublishedFiles(dataDir)
+
+  // Resolve this process's local credential, before any connection can be
+  // accepted. Publishing it is a separate step, after the endpoint is claimed:
+  // the secret has to exist to authenticate anyone, but the file announces this
+  // server as the one this machine uses, which is not true until it has won.
   initBootstrapSecret(dataDir)
 
   app.get(
@@ -186,7 +207,7 @@ export async function startServer(
         // Decides whether the greeting carries this server's identity. Only a
         // desktop on this machine has any use for it, and only loopback can be
         // trusted not to be a stranger on the tailnet.
-        req.socket.remoteAddress
+        { transport: 'tcp', address: req.socket.remoteAddress }
       )
       scheduler.deliverPendingConnectorInbox()
     }
@@ -397,40 +418,39 @@ export async function startServer(
   // and its parent process, not a property of the server. The CLI has no parent
   // and prints something a person can read instead.
 
-  // Write WS port to a well-known file so MCP and other tools can discover it.
-  // Use JSON with PID so multiple instances don't clobber each other's port files.
-  // Lives beside the database rather than always in ~/.vorn, so a server on its
-  // own data dir advertises itself there instead of over the desktop's file.
-  const wsPortFile = path.join(dataDir, WS_PORT_FILENAME)
-  let ownsPortFile = true
-  try {
-    fs.mkdirSync(path.dirname(wsPortFile), { recursive: true })
+  // The canonical local endpoint. A name that can be owned, unlike the port
+  // above -- the desktop probes and adopts through it, and holding it is what
+  // makes this server the one this machine answers with.
+  //
+  // Opened after the listen rather than before: a server that cannot claim the
+  // name still serves whatever is already attached to it, and losing the claim
+  // must never be the reason a startup fails.
+  const claimed = await openLocalEndpoint(dataDir, () => scheduler.deliverPendingConnectorInbox())
 
-    // Check if another live instance owns the port file
-    try {
-      const existing = JSON.parse(fs.readFileSync(wsPortFile, 'utf-8'))
-      if (existing.pid && existing.pid !== process.pid) {
-        try {
-          process.kill(existing.pid, 0) // probe — throws if dead
-          ownsPortFile = false
-          log.info(
-            { existingPid: existing.pid },
-            '[server] another instance owns ws-port file, skipping write'
-          )
-        } catch {
-          // dead PID — safe to overwrite
-        }
-      }
-    } catch {
-      // no file or invalid JSON — safe to write
-    }
-
-    if (ownsPortFile) {
-      fs.writeFileSync(wsPortFile, JSON.stringify({ port: actualPort, pid: process.pid }), 'utf-8')
-    }
-  } catch (err) {
-    log.warn({ err }, '[server] failed to write ws-port file (MCP discovery will not work)')
+  // Arriving second is not a failure, and it is not something to carry on
+  // through. This process would be a second server on one database, and
+  // `saveSessions` is a whole-table replace -- two of them erase each other's
+  // sessions, which is the hazard adoption exists to prevent and the reason a
+  // refused launch does not spawn a rival. So it stands down before publishing
+  // anything, on an exit code that says which of the three things happened, and
+  // the app that started it adopts the incumbent instead of relaunching this.
+  if (claimed.kind === 'lost') {
+    log.warn({ because: claimed.because }, '[server] this machine already has a server')
+    await app.close()
+    process.exit(EXIT_ENDPOINT_TAKEN)
   }
+  const endpoint = claimed.kind === 'held' ? claimed.endpoint : null
+  // Asked at session creation rather than only on the idle tick: that timer runs
+  // at a quarter of the window and is switched off entirely for `vorn-server
+  // serve`, so a check that lived only there would be late or absent exactly
+  // where it matters.
+  if (endpoint) watchEndpoint(() => endpoint.holds())
+
+  // Published together, after the claim, because they are one announcement: the
+  // port says where, the credential says how, and a reader that finds one
+  // without the other cannot reach anything.
+  publishLocalCredential(ownsPublished)
+  writePortFile(dataDir, actualPort, ownsPublished)
 
   log.info(`[server] listening on ${host}:${actualPort}`)
 
@@ -474,14 +494,11 @@ export async function startServer(
     const { stopAllMcpClients } = await import('./connectors')
     await stopAllMcpClients()
     configManager.close()
-    if (ownsPortFile) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(wsPortFile, 'utf-8'))
-        if (raw.pid === process.pid) fs.unlinkSync(wsPortFile)
-      } catch {
-        /* ignore */
-      }
-    }
+    removePortFile(dataDir, ownsPublished)
+    // Never removes the canonical entry: this listener bound a scratch name that
+    // no longer exists, so libuv's unlink at close has nothing to find. A dead
+    // socket file left behind is the next publisher's to replace in one rename.
+    await endpoint?.close()
     await app.close()
     process.exit(0)
   }
@@ -504,6 +521,31 @@ export async function startServer(
     })
   }
 
+  /**
+   * Whether this server is winding down, checking first whether it still holds
+   * the endpoint it claimed.
+   *
+   * One direction only: once lost, a name is not given back. A server that never
+   * held one is not draining -- it is running TCP-only, which is a downgrade
+   * rather than a loss, and refusing its sessions would leave the machine with
+   * nothing that works.
+   */
+  let saidSo = false
+  const noticeLostEndpoint = (held: LocalEndpoint | null): boolean => {
+    // The endpoint is asked before `isDraining()`, not after. That call flips the
+    // flag itself now -- session creation consults the same check, so it has to --
+    // and asking it first meant this function's own transition never ran and the
+    // warning below was dead. A server quietly refusing every new session with
+    // nothing in the log saying why is a bad half-hour for whoever hits it.
+    const lost = held !== null && !held.holds()
+    if (lost && !saidSo) {
+      saidSo = true
+      log.warn('[endpoint] this server no longer holds the endpoint; finishing what it has')
+      beginDraining()
+    }
+    return isDraining()
+  }
+
   // The server outlives the app now, so something has to decide when it is done.
   // Nothing here waits for the event loop to drain: the scheduler's inbox
   // interval is not unref'd, so this process would sit empty for ever.
@@ -520,7 +562,12 @@ export async function startServer(
       pendingPairings: pendingRequests().length,
       connectorLeases: dbCountActiveConnectorInboxLeases(new Date().toISOString()),
       enabledSchedules: scheduler.serverSideScheduleCount(),
-      servesOthers: getCurrentHost() === '0.0.0.0'
+      servesOthers: getCurrentHost() === '0.0.0.0',
+      // Looked at rather than waited for. Losing the endpoint is something that
+      // happens *to* this process -- another server that found it unreachable is
+      // entitled to take the name and has no way to say so. One lstat per tick
+      // is the cheapest place to notice, and this timer already runs.
+      draining: noticeLostEndpoint(endpoint)
     }),
     { windowMs: resolveIdleWindowMs(), schedulesHoldOpen: true },
     () => stopFor('nothing left to do')

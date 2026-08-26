@@ -1,8 +1,11 @@
 import { describe, it, expect, afterEach, beforeAll } from 'vitest'
+import { spawnsRealServers } from './helpers/one-at-a-time'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+
+spawnsRealServers()
 
 /**
  * Does the process actually leave?

@@ -26,6 +26,7 @@ const quiet = (over: Partial<IdleSnapshot> = {}): IdleSnapshot => ({
   msSinceClientActivity: DEFAULT_IDLE_WINDOW_MS + 1,
   msSinceHookActivity: DEFAULT_IDLE_WINDOW_MS + 1,
   servesOthers: false,
+  draining: false,
   bridgeAttached: false,
   pendingPermissions: 0,
   pendingPairings: 0,
@@ -376,5 +377,35 @@ describe('once the decision is made', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('a server that lost the endpoint', () => {
+  it('stops being held open by the network binding', () => {
+    // `servesOthers` never lapses on its own, so without this a draining server
+    // bound to 0.0.0.0 would stay up for the life of the machine — keeping a
+    // promise to be reachable that it can no longer keep, since nothing can find
+    // it by name any more.
+    const wide = quiet({ servesOthers: true })
+    expect(whatHoldsItOpen(wide, policy)).not.toBeNull()
+    expect(whatHoldsItOpen({ ...wide, draining: true }, policy)).toBeNull()
+  })
+
+  it('still finishes the work it already has', () => {
+    // Draining refuses new sessions; it does not abandon running ones. Every
+    // hold below the network one is about work in progress and still applies.
+    const working = quiet({ servesOthers: true, draining: true, sessions: 2 })
+    expect(whatHoldsItOpen(working, policy)).toBe('2 session(s)')
+
+    const agent = quiet({ draining: true, headless: 1 })
+    expect(whatHoldsItOpen(agent, policy)).toBe('1 headless agent(s)')
+
+    const blocked = quiet({ draining: true, pendingPermissions: 1 })
+    expect(whatHoldsItOpen(blocked, policy)).toBe('an agent is waiting on a permission')
+  })
+
+  it('leaves once that work is done, on the window it already had', () => {
+    const done = quiet({ servesOthers: true, draining: true })
+    expect(decide(done, policy)).toEqual({ exit: true })
   })
 })

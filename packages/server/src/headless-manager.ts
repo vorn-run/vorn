@@ -22,6 +22,7 @@ import { getLaunchEnv, shellEscape } from './process-utils'
 import { buildHeadlessSpawnArgs } from './agent-launch'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
+import { isDraining, DRAINING_MESSAGE } from './draining'
 
 const MAX_OUTPUT_LINES = 1000
 const FORCE_KILL_DELAY_MS = 5000
@@ -54,6 +55,11 @@ class HeadlessManager extends EventEmitter {
   }
 
   createHeadless(payload: CreateTerminalPayload): HeadlessSession {
+    // Refused rather than created: a session started on an endpoint this process
+    // no longer holds is reachable through a name that now points elsewhere, so
+    // nobody would ever see it. Existing sessions are untouched -- their clients
+    // hold a descriptor, not a name.
+    if (isDraining()) throw new Error(DRAINING_MESSAGE)
     const id = crypto.randomUUID()
     let effectivePath = payload.projectPath
     let effectiveBranch: string | undefined

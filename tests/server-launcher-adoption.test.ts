@@ -263,9 +263,13 @@ describe('declining a server that is running', () => {
     expect(getLastAdoptionRefusal()).toMatchObject({ reason: 'different-build' })
   })
 
-  it('refuses when no credential was published to reach it with', async () => {
+  it('refuses a server that answers but published no credential', async () => {
+    // Something is there and holding the database; this app simply cannot reach
+    // it. Starting a second server beside it is the one thing that must not
+    // happen, whatever the reason it is unreachable.
     published.port = 50091
     published.token = null
+    published.identity = identityFrom()
     const { launchServer, getLastAdoptionRefusal } =
       await import('../src/main/server/server-launcher')
 
@@ -273,6 +277,39 @@ describe('declining a server that is running', () => {
 
     expect(spawned).toEqual([])
     expect(getLastAdoptionRefusal()).toMatchObject({ reason: 'unusable' })
+  })
+
+  it('refuses a server too old to send an identity frame', async () => {
+    // Pre-#494 servers greet and say nothing else. Reading that silence as an
+    // empty machine would put a second writer on their database, where
+    // `saveSessions` replaces the whole table -- so the greeting, not the
+    // identity, is what proves somebody is there.
+    published.port = 50091
+    published.identity = null
+    published.protocolVersion = RUNTIME_PROTOCOL_VERSION
+    const { launchServer } = await import('../src/main/server/server-launcher')
+
+    await expect(launchServer()).rejects.toThrow()
+
+    expect(spawned).toEqual([])
+  })
+
+  it('spawns past a name that answers nothing at all', async () => {
+    // The ordinary state of a machine between launches. Nothing removes the
+    // endpoint on shutdown -- that is what lets the next start find the name to
+    // replace -- so a leftover with no credential beside it is what a quit Vorn
+    // leaves behind. Treating it as a running server would mean quitting Vorn
+    // once made Vorn unable to start again.
+    published.port = 50091
+    published.token = null
+    published.identity = null
+    // Nothing greeted us either: the name is a leftover, not a server.
+    published.protocolVersion = undefined as unknown as number
+    const { launchServer } = await import('../src/main/server/server-launcher')
+
+    await launchServer()
+
+    expect(spawned).toHaveLength(1)
   })
 
   it('spawns when nothing is published at all', async () => {

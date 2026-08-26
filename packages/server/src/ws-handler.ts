@@ -103,6 +103,25 @@ export function setLiveSessionCount(fn: () => number): void {
  * reports for a v4 loopback connection, so matching only `127.0.0.1` would fail
  * open in the common case -- and failing open here means withholding nothing.
  */
+/**
+ * Where a connection came in.
+ *
+ * A unix peer has no address at all -- there is nothing to put in one, and
+ * `isLoopbackAddress(undefined)` is correctly false. Passing a synthetic
+ * `'127.0.0.1'` would make it true by lying, in the one place whose whole job is
+ * to decide who may be told about this machine. So the transport is named
+ * instead, and a unix peer is judged on what is actually true of it: it reached a
+ * socket inside a directory this user owns, which is stronger evidence of being
+ * on this machine than any address could be.
+ */
+export type Peer = { transport: 'unix' } | { transport: 'tcp'; address?: string }
+
+/** Whether this peer is provably on the same machine, and may hear who we are. */
+export function isSameMachine(peer: Peer | undefined): boolean {
+  if (!peer) return false
+  return peer.transport === 'unix' || isLoopbackAddress(peer.address)
+}
+
 export function isLoopbackAddress(address: string | undefined): boolean {
   if (!address) return false
   const bare = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address
@@ -226,12 +245,12 @@ export function handleConnection(
   ws: WebSocket,
   credential?: string,
   initialTopics?: readonly string[],
-  peerAddress?: string
+  peer?: Peer
 ): void {
   // Announce the contract first, so a client that has to authenticate by message
   // knows that it must before it is refused for not having.
   ws.send(helloFrame())
-  if (isLoopbackAddress(peerAddress)) {
+  if (isSameMachine(peer)) {
     const frame = identityFrame()
     if (frame) ws.send(frame)
   }

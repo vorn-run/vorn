@@ -2,58 +2,42 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import {
+  claimPublishedFiles,
+  writePortFile,
+  removePortFile,
+  isPidAlive
+} from '../packages/server/src/published-files'
 
 /**
- * Tests for the port-file lifecycle logic used by the server (index.ts).
+ * Who may write the names a machine uses to find its server.
  *
- * The server's startup/shutdown port-file management is inline in startServer(),
- * which is expensive to spin up in tests. These tests replicate the exact same
- * read → check-PID → write / read → check-PID → delete logic against a temp
- * directory so we can verify the multi-instance safety guarantees.
+ * These used to test a copy of the server's logic, pasted into this file because
+ * the real thing was inline in `startServer` and expensive to reach. The copy
+ * drifted the moment the original moved, and a green run proved nothing about
+ * the code that ships. It is a module now, and this points at it.
+ *
+ * "This process" is always `process.pid` here, as it is in production — the
+ * functions take no pid argument, because a caller that can name someone else as
+ * the owner is a caller that can claim a directory on their behalf. A live rival
+ * is played by `process.ppid`, which vitest guarantees is alive and is not us.
  */
 
-let tmpDir: string
+let dir: string
 let portFile: string
 
-// --- Helpers that mirror the server's inline logic ---
+const DEAD_PID = 2147483647 // max pid — nothing is running as this
 
-function writePortFile(port: number, pid: number): boolean {
-  fs.mkdirSync(path.dirname(portFile), { recursive: true })
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-port-test-'))
+  portFile = path.join(dir, 'ws-port')
+})
 
-  let shouldWrite = true
-  try {
-    const existing = JSON.parse(fs.readFileSync(portFile, 'utf-8'))
-    if (existing.pid && existing.pid !== pid) {
-      try {
-        process.kill(existing.pid, 0)
-        shouldWrite = false
-      } catch {
-        // dead PID — overwrite
-      }
-    }
-  } catch {
-    // no file or invalid JSON — overwrite
-  }
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true })
+})
 
-  if (shouldWrite) {
-    fs.writeFileSync(portFile, JSON.stringify({ port, pid }), 'utf-8')
-    return true // owns the file
-  }
-  return false
-}
-
-function deletePortFileIfOwned(ownerPid: number): void {
-  try {
-    const raw = JSON.parse(fs.readFileSync(portFile, 'utf-8'))
-    if (raw.pid === ownerPid) {
-      fs.unlinkSync(portFile)
-    }
-  } catch {
-    // file gone or invalid — nothing to do
-  }
-}
-
-function readPortFile(): { port: number; pid: number } | null {
+const read = (): { port?: number; pid?: number } | null => {
   try {
     return JSON.parse(fs.readFileSync(portFile, 'utf-8'))
   } catch {
@@ -61,126 +45,108 @@ function readPortFile(): { port: number; pid: number } | null {
   }
 }
 
-// --- Tests ---
-
-beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-port-test-'))
-  portFile = path.join(tmpDir, 'ws-port')
-})
-
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true })
-})
-
-describe('port file write (startup)', () => {
-  it('writes port file when none exists', () => {
-    const owns = writePortFile(53829, process.pid)
-    expect(owns).toBe(true)
-
-    const data = readPortFile()
-    expect(data).toEqual({ port: 53829, pid: process.pid })
+describe('claiming the directory', () => {
+  it('claims it when nothing is published', () => {
+    expect(claimPublishedFiles(dir)).toBe(true)
+    writePortFile(dir, 53829, true)
+    expect(read()).toEqual({ port: 53829, pid: process.pid })
   })
 
-  it('overwrites stale file from dead PID', () => {
-    // Write a file claiming to be owned by a PID that does not exist
-    const deadPid = 2147483647 // max PID — almost certainly not running
-    fs.writeFileSync(portFile, JSON.stringify({ port: 11111, pid: deadPid }))
+  it('claims it from a process that has died', () => {
+    fs.writeFileSync(portFile, JSON.stringify({ port: 11111, pid: DEAD_PID }))
 
-    const owns = writePortFile(22222, process.pid)
-    expect(owns).toBe(true)
-
-    const data = readPortFile()
-    expect(data).toEqual({ port: 22222, pid: process.pid })
+    expect(claimPublishedFiles(dir)).toBe(true)
+    writePortFile(dir, 22222, true)
+    expect(read()).toEqual({ port: 22222, pid: process.pid })
   })
 
-  it('does NOT overwrite when existing PID is alive', () => {
-    // Use process.ppid (our parent) as a guaranteed-alive PID that differs from
-    // the "new instance" PID we'll pass to writePortFile.
-    const alivePid = process.ppid
-    fs.writeFileSync(portFile, JSON.stringify({ port: 11111, pid: alivePid }))
+  it('refuses it while another process is alive', () => {
+    fs.writeFileSync(portFile, JSON.stringify({ port: 11111, pid: process.ppid }))
 
-    const fakePid = 99999999
-    const owns = writePortFile(22222, fakePid)
-    expect(owns).toBe(false)
-
-    // File should still have the original data
-    const data = readPortFile()
-    expect(data).toEqual({ port: 11111, pid: alivePid })
+    expect(claimPublishedFiles(dir)).toBe(false)
   })
 
-  it('overwrites legacy plain-number format', () => {
+  it('claims it from the legacy plain-number format', () => {
+    // Written by MCP's own discovery before it learned to record a pid. It names
+    // no owner, so it stops nobody.
     fs.writeFileSync(portFile, '53829')
 
-    const owns = writePortFile(54000, process.pid)
-    expect(owns).toBe(true)
-
-    const data = readPortFile()
-    expect(data).toEqual({ port: 54000, pid: process.pid })
+    expect(claimPublishedFiles(dir)).toBe(true)
+    writePortFile(dir, 54000, true)
+    expect(read()).toEqual({ port: 54000, pid: process.pid })
   })
 
-  it('allows same PID to re-write (restart scenario)', () => {
+  it('claims it from a record with no pid', () => {
+    // MCP heals a missing port file by discovering the port and writing it back
+    // without a pid. `judgeAdoption` is written to tolerate that record, so this
+    // must too.
+    fs.writeFileSync(portFile, JSON.stringify({ port: 11111 }))
+
+    expect(claimPublishedFiles(dir)).toBe(true)
+  })
+
+  it('claims it back from itself, so a restart is not blocked by its own file', () => {
     fs.writeFileSync(portFile, JSON.stringify({ port: 11111, pid: process.pid }))
 
-    const owns = writePortFile(22222, process.pid)
-    expect(owns).toBe(true)
-
-    const data = readPortFile()
-    expect(data).toEqual({ port: 22222, pid: process.pid })
+    expect(claimPublishedFiles(dir)).toBe(true)
+    writePortFile(dir, 22222, true)
+    expect(read()).toEqual({ port: 22222, pid: process.pid })
   })
 })
 
-describe('port file delete (shutdown)', () => {
-  it('deletes file when PID matches', () => {
-    fs.writeFileSync(portFile, JSON.stringify({ port: 53829, pid: process.pid }))
-
-    deletePortFileIfOwned(process.pid)
+describe('publishing without the claim', () => {
+  it('writes nothing', () => {
+    writePortFile(dir, 53829, false)
     expect(fs.existsSync(portFile)).toBe(false)
   })
 
-  it('does NOT delete when PID does not match', () => {
-    const otherPid = process.ppid
-    fs.writeFileSync(portFile, JSON.stringify({ port: 53829, pid: otherPid }))
+  it('leaves a live rival file exactly as it found it', () => {
+    const theirs = JSON.stringify({ port: 11111, pid: process.ppid })
+    fs.writeFileSync(portFile, theirs)
 
-    deletePortFileIfOwned(99999)
-    expect(fs.existsSync(portFile)).toBe(true)
+    writePortFile(dir, 53829, false)
+    removePortFile(dir, false)
 
-    const data = readPortFile()
-    expect(data).toEqual({ port: 53829, pid: otherPid })
-  })
-
-  it('no-ops when file is already gone', () => {
-    expect(() => deletePortFileIfOwned(process.pid)).not.toThrow()
+    expect(fs.readFileSync(portFile, 'utf-8')).toBe(theirs)
   })
 })
 
-describe('multi-instance scenario', () => {
-  it('second instance does not clobber first, shutdown of second preserves file', () => {
-    // Instance A starts (use ppid as a guaranteed-alive process)
-    const alivePid = process.ppid
-    fs.writeFileSync(portFile, JSON.stringify({ port: 53829, pid: alivePid }))
-
-    // Instance B starts — should NOT overwrite because owner PID is alive
-    const fakePidB = 99999999
-    const ownsB = writePortFile(54000, fakePidB)
-    expect(ownsB).toBe(false)
-
-    // Instance B shuts down — should NOT delete because it doesn't own the file
-    deletePortFileIfOwned(fakePidB)
-
-    // Instance A's port file is preserved
-    const data = readPortFile()
-    expect(data).toEqual({ port: 53829, pid: alivePid })
+describe('removing it on the way out', () => {
+  it('removes the file it published', () => {
+    writePortFile(dir, 53829, true)
+    removePortFile(dir, true)
+    expect(fs.existsSync(portFile)).toBe(false)
   })
 
-  it('second instance takes over after first crashes (dead PID)', () => {
-    const deadPid = 2147483647
-    fs.writeFileSync(portFile, JSON.stringify({ port: 53829, pid: deadPid }))
+  it('leaves a file that has since become somebody elses', () => {
+    // The claim was taken minutes ago and the flag still says yes. The file is
+    // the thing being removed, so the file gets the last word: another server
+    // named there is one this process must not unpublish.
+    writePortFile(dir, 53829, true)
+    fs.writeFileSync(portFile, JSON.stringify({ port: 54000, pid: process.ppid }))
 
-    // Instance B starts — should overwrite because old PID is dead
-    const owns = writePortFile(54000, process.pid)
-    expect(owns).toBe(true)
+    removePortFile(dir, true)
 
-    const data = readPortFile()
-    expect(data).toEqual({ port: 54000, pid: process.pid })
+    expect(read()).toEqual({ port: 54000, pid: process.ppid })
+  })
+
+  it('does not throw when the file is already gone', () => {
+    expect(() => removePortFile(dir, true)).not.toThrow()
+  })
+})
+
+describe('asking whether a process is there', () => {
+  it('says yes for this one', () => {
+    expect(isPidAlive(process.pid)).toBe(true)
+  })
+
+  it('says no for one that has died', () => {
+    expect(isPidAlive(DEAD_PID)).toBe(false)
+  })
+
+  it.each([0, -1, 1.5, Number.NaN])('says no for %s rather than asking', (pid) => {
+    // Signal 0 to pid 0 targets this process group and always succeeds, so an
+    // unchecked zero would report every dead server as alive.
+    expect(isPidAlive(pid)).toBe(false)
   })
 })

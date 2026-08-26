@@ -197,6 +197,31 @@ export const LOCAL_TOKEN_FILENAME = 'local-token'
  */
 export const WS_PORT_FILENAME = 'ws-port'
 
+/**
+ * Filename, under the resolved data dir, of the canonical local endpoint.
+ *
+ * A unix socket rather than a record naming a port, because this one is *owned*:
+ * `link()` refuses to replace an existing name and `rename()` replaces one
+ * atomically, so a starting server can ask whether the machine already has a
+ * server before it becomes a second one. A port has no such name -- two servers
+ * reaching for one are settled by whichever bound first, invisibly.
+ *
+ * Absent on win32, where Node maps a socket path to a named pipe and there is no
+ * filesystem entry to test-and-set. There the port file above remains the only
+ * answer, and the race it leaves open remains open.
+ */
+export const ENDPOINT_FILENAME = 'vorn.sock'
+
+/**
+ * Exit code for a server that found this machine already had one.
+ *
+ * Distinct from both success and failure, because it is neither. The process did
+ * nothing wrong and nothing is broken -- it simply arrived second, and the right
+ * answer is for the app that started it to adopt the incumbent instead. Read as
+ * a crash it would be relaunched, and the relaunch would arrive second too.
+ */
+export const EXIT_ENDPOINT_TAKEN = 3
+
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
 
 export interface RpcRequest {

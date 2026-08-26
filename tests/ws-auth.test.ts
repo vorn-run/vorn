@@ -12,6 +12,7 @@ import {
   authenticateCredential,
   bearerFrom,
   initBootstrapSecret,
+  publishLocalCredential,
   clearLocalCredential
 } from '../packages/server/src/ws-auth'
 import { LOCAL_TOKEN_FILENAME } from '@vornrun/shared/protocol'
@@ -58,6 +59,7 @@ describe('the local credential', () => {
 
   it('publishes a file only readable by this user', () => {
     initBootstrapSecret(dataDir)
+    publishLocalCredential(true)
     const file = path.join(dataDir, LOCAL_TOKEN_FILENAME)
 
     expect(fs.existsSync(file)).toBe(true)
@@ -69,6 +71,7 @@ describe('the local credential', () => {
 
   it('authenticates the secret it published', () => {
     initBootstrapSecret(dataDir)
+    publishLocalCredential(true)
     const published = fs.readFileSync(path.join(dataDir, LOCAL_TOKEN_FILENAME), 'utf-8')
 
     const result = authenticateCredential(published)
@@ -86,6 +89,7 @@ describe('the local credential', () => {
 
   it('generates one when nothing was supplied, so a standalone server still works', () => {
     initBootstrapSecret(dataDir, undefined)
+    publishLocalCredential(true)
     const published = fs.readFileSync(path.join(dataDir, LOCAL_TOKEN_FILENAME), 'utf-8')
     expect(published.length).toBeGreaterThan(20)
     expect(authenticateCredential(published)).not.toBeNull()
@@ -93,6 +97,7 @@ describe('the local credential', () => {
 
   it('removes the file on shutdown, so nothing usable outlives the process', () => {
     initBootstrapSecret(dataDir)
+    publishLocalCredential(true)
     clearLocalCredential()
     expect(fs.existsSync(path.join(dataDir, LOCAL_TOKEN_FILENAME))).toBe(false)
   })
@@ -105,11 +110,61 @@ describe('the local credential', () => {
     expect(() => initBootstrapSecret(unwritable)).not.toThrow()
   })
 
+  it('publishes nothing when another server owns the directory', () => {
+    // The bug this closes, reproduced: a `yarn dev` server starting beside a
+    // packaged one wrote its own secret over the credential the running app had
+    // published, so MCP read one server's port beside another server's token and
+    // every call timed out until Vorn was restarted.
+    const file = path.join(dataDir, 'local-token')
+    fs.writeFileSync(file, 'the-running-servers-secret', { mode: 0o600 })
+
+    initBootstrapSecret(dataDir, 'this-servers-secret')
+    publishLocalCredential(false)
+
+    expect(fs.readFileSync(file, 'utf-8')).toBe('the-running-servers-secret')
+  })
+
+  it('still authenticates its own secret when it publishes nothing', () => {
+    // Standing aside is about the file, not about the server. The desktop that
+    // started this process handed the secret over in the environment and must
+    // still be able to use it.
+    initBootstrapSecret(dataDir, 'this-servers-secret')
+    publishLocalCredential(false)
+
+    expect(authenticateCredential('this-servers-secret')).toMatchObject({ kind: 'bootstrap' })
+  })
+
+  it('removes nothing on shutdown when it published nothing', () => {
+    const file = path.join(dataDir, 'local-token')
+    fs.writeFileSync(file, 'the-running-servers-secret', { mode: 0o600 })
+
+    initBootstrapSecret(dataDir, 'this-servers-secret')
+    publishLocalCredential(false)
+    clearLocalCredential()
+
+    expect(fs.readFileSync(file, 'utf-8')).toBe('the-running-servers-secret')
+  })
+
+  it('leaves a credential that has since been replaced', () => {
+    // Publishing and shutting down are minutes apart. A file that is no longer
+    // ours belongs to whoever wrote it, and removing it would leave that server
+    // unreachable -- the same failure, caused on the way out instead of in.
+    const file = path.join(dataDir, 'local-token')
+    initBootstrapSecret(dataDir, 'ours')
+    publishLocalCredential(true)
+    fs.writeFileSync(file, 'somebody-elses', { mode: 0o600 })
+
+    clearLocalCredential()
+
+    expect(fs.readFileSync(file, 'utf-8')).toBe('somebody-elses')
+  })
+
   it('replaces an existing file rather than inheriting its permissions', () => {
     const file = path.join(dataDir, LOCAL_TOKEN_FILENAME)
     fs.writeFileSync(file, 'stale', { mode: 0o644 })
 
     initBootstrapSecret(dataDir)
+    publishLocalCredential(true)
 
     // `mode` on writeFileSync only applies when the file is created — the flaw in
     // the hook-server precedent this follows.

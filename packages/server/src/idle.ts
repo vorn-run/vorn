@@ -72,6 +72,16 @@ export interface IdleSnapshot {
    * being -- a phone's only way in at any point after it started.
    */
   servesOthers: boolean
+
+  /**
+   * Whether this server has lost the endpoint and is winding down.
+   *
+   * Checked before every other hold, including the network one. A draining
+   * server bound to `0.0.0.0` would otherwise be pinned open for the life of the
+   * machine by a promise it can no longer keep -- nothing can reach it by name
+   * any more, so staying up to be reached is staying up for nobody.
+   */
+  draining: boolean
 }
 
 export interface IdlePolicy {
@@ -115,16 +125,25 @@ export type IdleVerdict =
  * lets it keep running.
  */
 export function whatHoldsItOpen(s: IdleSnapshot, policy: IdlePolicy): string | null {
-  // Not filtered by session status. `pty-manager` marks a session 'idle' five
-  // seconds after its agent stops typing; that is a live terminal with a shell
-  // in it, and `getActiveSessionsForWorktree` filters them out for a different
-  // question entirely (whether a worktree is safe to delete).
   // First, because it is the one hold that is about what this server is for
   // rather than what it is doing. Nothing restarts a server a phone reaches, and
   // "my phone could not reach my Mac this morning" is worse than a process that
   // outstays its welcome. Said out loud in Settings, since it makes the promise
   // there conditional.
-  if (s.servesOthers) return 'this server is bound to be reached from the network'
+  //
+  // Lapses while draining, and only this one does. A server that has lost the
+  // endpoint cannot be reached by name again, so staying up to be reached keeps
+  // a promise to nobody -- and this hold never expires on its own, which would
+  // turn a wind-down into a permanent state. Every hold below is about work in
+  // progress and still applies: draining refuses new sessions, it does not
+  // abandon the ones already running.
+  if (s.servesOthers && !s.draining) {
+    return 'this server is bound to be reached from the network'
+  }
+  // Not filtered by session status. `pty-manager` marks a session 'idle' five
+  // seconds after its agent stops typing; that is a live terminal with a shell
+  // in it, and `getActiveSessionsForWorktree` filters them out for a different
+  // question entirely (whether a worktree is safe to delete).
   if (s.sessions > 0) return `${s.sessions} session(s)`
   // Over-conservative on purpose: `headless-manager` keeps exited entries for
   // thirty seconds, so this can read non-zero just after one finishes. Waiting
