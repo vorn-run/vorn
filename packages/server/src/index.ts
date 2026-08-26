@@ -460,7 +460,6 @@ export async function startServer(
       log.error('[server] shutdown did not finish; exiting anyway')
       process.exit(1)
     }, SHUTDOWN_DEADLINE_MS).unref?.()
-    log.info('[server] shutting down...')
     // Stop the periodic timer first, then do one final synchronous save
     sessionManager.stopAutoSave()
     sessionManager.persistNow()
@@ -487,6 +486,24 @@ export async function startServer(
     process.exit(0)
   }
 
+  /**
+   * Every way this process is asked to stop, so there is one of them.
+   *
+   * A rejected `shutdown()` reaches here rather than becoming an unhandled
+   * rejection. By the time one is visible the credential is cleared and the port
+   * file is gone, so there is nothing to salvage and nothing to retry -- what is
+   * left is a live process holding a port no app can discover, which is the state
+   * this whole feature exists to prevent. Exiting hard is the floor. A shutdown
+   * that hangs rather than rejects is caught by the deadline armed inside it.
+   */
+  const stopFor = (reason: string): void => {
+    log.info({ reason }, '[server] shutting down')
+    void shutdown().catch((err) => {
+      log.error({ err, reason }, '[server] shutdown failed; exiting anyway')
+      process.exit(1)
+    })
+  }
+
   // The server outlives the app now, so something has to decide when it is done.
   // Nothing here waits for the event loop to drain: the scheduler's inbox
   // interval is not unref'd, so this process would sit empty for ever.
@@ -506,18 +523,7 @@ export async function startServer(
       servesOthers: getCurrentHost() === '0.0.0.0'
     }),
     { windowMs: resolveIdleWindowMs(), schedulesHoldOpen: true },
-    () => {
-      log.info('[server] nothing left to do; shutting down')
-      // A shutdown that throws has already cleared the credential and removed
-      // the port file, so giving up here would leave a process bound to a port
-      // no app can use or discover -- the exact state this feature exists to
-      // prevent. Exiting hard is the floor. A shutdown that hangs instead is
-      // caught by the deadline armed inside it.
-      void shutdown().catch((err) => {
-        log.error({ err }, '[server] idle shutdown failed; exiting anyway')
-        process.exit(1)
-      })
-    }
+    () => stopFor('nothing left to do')
   )
   // Off entirely for a hand-run `vorn-server serve`: that process is the thing
   // being run, and nothing would bring it back. Being bound wide is handled in
@@ -528,8 +534,8 @@ export async function startServer(
     idleWatch.start()
   }
 
-  process.on('SIGTERM', shutdown)
-  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', () => stopFor('SIGTERM'))
+  process.on('SIGINT', () => stopFor('SIGINT'))
   // Why: this process outlives the app that started it, so a hangup on the
   // terminal or the departure of a parent must not take the sessions with it.
   // SIGTERM stays honoured — that is a request to stop, not an accident.
@@ -537,7 +543,7 @@ export async function startServer(
     log.info('[server] ignoring SIGHUP; sessions keep running')
   })
   process.on('message', (msg) => {
-    if (msg === 'shutdown') shutdown()
+    if (msg === 'shutdown') stopFor('the app asked')
   })
 
   return { app, port: actualPort, idleWatch }
