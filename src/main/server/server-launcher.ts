@@ -28,6 +28,8 @@ let relaunchAttempts = 0
 let lastSpawnAt = 0
 /** Set by `stopServer`, so an exit we asked for is not treated as a failure. */
 let stoppingDeliberately = false
+/** A relaunch waiting to happen, so shutting down can call it off. */
+let relaunchTimer: NodeJS.Timeout | null = null
 
 /**
  * Connect to a server running on another machine.
@@ -178,13 +180,19 @@ async function spawnServer(): Promise<number> {
       })
     }
 
-    port = await readServerPort(child)
-
+    // Tracked before anything is awaited. `readServerPort` can reject on a ten
+    // second timeout with the child still running, and a child assigned only
+    // after that is one nothing holds a reference to -- unkillable by
+    // `stopServer`, invisible to the relaunch logic, and still on the port.
+    serverProcess = child
     child.on('exit', (code, signal) => {
       onServerExit(`code=${code}, signal=${signal}`)
     })
 
-    serverProcess = child
+    port = await readServerPort(child).catch((err) => {
+      child.kill('SIGKILL')
+      throw err
+    })
   } else {
     // Production: use Electron's utilityProcess.fork() to run the bundled
     // server as a proper Node.js child process (NOT another Electron instance)
@@ -213,13 +221,15 @@ async function spawnServer(): Promise<number> {
       })
     }
 
-    port = await readServerPort(child)
-
+    serverProcess = child
     child.on('exit', (code) => {
       onServerExit(`code=${code}`)
     })
 
-    serverProcess = child
+    port = await readServerPort(child).catch((err) => {
+      child.kill()
+      throw err
+    })
   }
 
   return port
@@ -259,7 +269,15 @@ function onServerExit(detail: string): void {
     `[launcher] restarting the server in ${decision.delayMs}ms (attempt ${relaunchAttempts})`
   )
 
-  setTimeout(() => {
+  relaunchTimer = setTimeout(() => {
+    relaunchTimer = null
+    // Asked again, because fifteen seconds is long enough for the answer to have
+    // changed. The app may have begun quitting since, and spawning a server on
+    // the way out is the one thing this must never do.
+    if (stoppingDeliberately) {
+      log.info('[launcher] not restarting after all: the app is shutting down')
+      return
+    }
     void spawnServer()
       .then((port) => {
         const url = `ws://127.0.0.1:${port}/ws`
@@ -272,8 +290,11 @@ function onServerExit(detail: string): void {
         }
       })
       .catch((err) => {
+        // Not re-entered here. The child now carries its own `exit` handler from
+        // the moment it is spawned, so a failed start already routes back
+        // through `onServerExit` -- calling it again would spend two attempts on
+        // one failure.
         log.error({ err }, '[launcher] restart failed')
-        onServerExit('restart failed')
       })
   }, decision.delayMs)
 }
@@ -314,8 +335,13 @@ export function getServerBridge(): ServerBridge | null {
 }
 
 export async function stopServer(): Promise<void> {
-  // Before anything else: an exit we asked for must not look like a crash.
+  // Before anything else: an exit we asked for must not look like a crash, and
+  // a relaunch already counting down must not outlive the decision to quit.
   stoppingDeliberately = true
+  if (relaunchTimer) {
+    clearTimeout(relaunchTimer)
+    relaunchTimer = null
+  }
 
   if (bridge) {
     // Only ask a server to stop if this app is the one that started it.

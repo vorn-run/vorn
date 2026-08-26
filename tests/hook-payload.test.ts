@@ -42,14 +42,22 @@ vi.mock('node-pty', () => ({ default: { spawn: vi.fn() }, spawn: vi.fn() }))
 let home: string | null = null
 let realHome: string | undefined
 
+let realProfile: string | undefined
+
 beforeAll(() => {
   realHome = process.env.HOME
+  realProfile = process.env.USERPROFILE
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-hooks-'))
+  // Both, because `os.homedir()` reads HOME on POSIX and USERPROFILE on Windows.
+  // Setting only HOME leaves a developer on Windows running this suite against
+  // their real home directory — the isolation would look present and not be.
   process.env.HOME = home
+  process.env.USERPROFILE = home
 })
 
 afterAll(() => {
   process.env.HOME = realHome
+  process.env.USERPROFILE = realProfile
   if (home) fs.rmSync(home, { recursive: true, force: true })
 })
 
@@ -224,6 +232,7 @@ describe('this test file itself', () => {
     // ever stops working, this is what says so — instead of the machine's real
     // hook registration quietly moving.
     expect(process.env.HOME).toBe(home)
+    expect(process.env.USERPROFILE).toBe(home)
     expect(os.homedir()).toBe(home)
   })
 })
