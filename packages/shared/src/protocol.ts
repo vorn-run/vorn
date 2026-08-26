@@ -110,6 +110,30 @@ export const RPC_NOT_AUTHENTICATED = -32001
  */
 export const BOOTSTRAP_ENV_VAR = 'SECRET_VORN_BOOTSTRAP_TOKEN'
 
+/**
+ * The port a Vorn server takes when it has no reason to take another.
+ *
+ * Vorn had no default at all until now: the port was whatever the OS handed the
+ * first launch, remembered and reused. That only ever reached step two -- see
+ * `resolveServerPort` -- so in practice every launch drew a new one, and the
+ * origin a browser keys its token by changed underneath it every time.
+ *
+ * An install that already remembers a port keeps it; this decides a first run.
+ * The number itself is not special. It is the one existing installs happen to
+ * hold, which is worth more than a prettier constant that would move them.
+ */
+export const DEFAULT_SERVER_PORT = 50091
+
+/**
+ * The environment variable that overrides the port for one launch.
+ *
+ * Named here because the desktop launcher reads it and the server is what it
+ * ends up configuring. It exists for the case a stored setting cannot serve: a
+ * dev server and a packaged Vorn share one data directory, so they share one
+ * remembered port, and the whole point is for them to differ.
+ */
+export const SERVER_PORT_ENV_VAR = 'VORN_SERVER_PORT'
+
 /** Filename, under the resolved data dir, of the credential same-machine tools read. */
 export const LOCAL_TOKEN_FILENAME = 'local-token'
 

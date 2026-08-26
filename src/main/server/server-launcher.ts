@@ -4,7 +4,7 @@ import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { app, utilityProcess, type UtilityProcess } from 'electron'
 import log from '../logger'
-import { BOOTSTRAP_ENV_VAR } from '@vornrun/shared/protocol'
+import { BOOTSTRAP_ENV_VAR, SERVER_PORT_ENV_VAR } from '@vornrun/shared/protocol'
 import { ServerBridge } from './server-bridge'
 import { readHostSettings } from './host-store'
 
@@ -66,6 +66,36 @@ const HOST_CONNECT_TIMEOUT_MS = 15_000
  * which caused an infinite app spawn loop because process.execPath is the
  * Electron binary — spawning it launches another full Electron app instance.
  */
+/**
+ * `VORN_SERVER_PORT`, if it is a port.
+ *
+ * Checked here rather than forwarded blind. `parseServerArgs` does reject a
+ * non-numeric `--port`, but it runs outside the server's `.catch`, so a typo
+ * would take the process down with a stack trace while this launcher sat waiting
+ * for a port line that was never coming — a hang, thirty seconds from the
+ * mistake, describing none of it.
+ *
+ * Loud and ignored rather than fatal. `yarn dev` should still start; what it must
+ * not do is come up quietly on a different port than the one asked for, which is
+ * the confusion this whole mechanism exists to end.
+ */
+function readDevPort(): string | undefined {
+  const raw = process.env[SERVER_PORT_ENV_VAR]
+  if (!raw) return undefined
+
+  const port = Number(raw)
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    log.warn(
+      `[launcher] ${SERVER_PORT_ENV_VAR}="${raw}" is not a port, so it was ignored. ` +
+        'The server will take its usual one.'
+    )
+    return undefined
+  }
+
+  log.info(`[launcher] ${SERVER_PORT_ENV_VAR}=${port}, asking for that port`)
+  return String(port)
+}
+
 export async function launchServer(): Promise<ServerBridge> {
   const host = readHostSettings()
   if (host.mode === 'host' && host.url) {
@@ -101,7 +131,14 @@ export async function launchServer(): Promise<ServerBridge> {
     // Dev mode: use npx tsx to run TypeScript directly
     const repoRoot = path.join(__dirname, '../..')
 
-    const child = spawn('npx', ['tsx', serverEntryPoint], {
+    // A port for this launch only, which no stored setting could give. A dev
+    // server and a packaged Vorn share one data directory and therefore one
+    // remembered port, and the reason to set this is to make them differ.
+    // Passed as `--port` rather than through the environment so it travels the
+    // same path the CLI already takes and is refused the same way if malformed.
+    const devPort = readDevPort()
+
+    const child = spawn('npx', ['tsx', serverEntryPoint, ...(devPort ? ['--port', devPort] : [])], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
