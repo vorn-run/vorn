@@ -85,6 +85,17 @@ export function GeneralSettings() {
           />
         </SettingRow>
 
+        {/* Keep sessions running */}
+        <SettingRow
+          label="Keep Sessions Running When Vorn Closes"
+          description="Agents keep working while Vorn is shut. Reopening reconnects to them instead of restarting them. A background server stays running until every session ends."
+        >
+          <ToggleSwitch
+            checked={config.defaults.keepSessionsRunning ?? true}
+            onChange={(keepSessionsRunning) => updateDefaults({ keepSessionsRunning })}
+          />
+        </SettingRow>
+
         {/* Block rendering */}
         <SettingRow
           label="Command Blocks"

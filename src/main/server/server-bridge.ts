@@ -1,6 +1,6 @@
 import WebSocket from 'ws'
 import { EventEmitter } from 'node:events'
-import type { RpcResponse, RpcNotification } from '@vornrun/shared/protocol'
+import type { RpcResponse, RpcNotification, ServerHello } from '@vornrun/shared/protocol'
 import { createRequest, createNotification } from '@vornrun/shared/protocol'
 import log from '../logger'
 
@@ -28,6 +28,16 @@ export class ServerBridge extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null
   private shouldReconnect = true
   private inbound = new Map<string, (params: unknown) => unknown>()
+  /**
+   * The greeting, once it has arrived. The server sends it as the first frame on
+   * every socket and before authentication, so a caller deciding whether to adopt
+   * this server can read it without first proving who it is.
+   */
+  private hello: ServerHello | null = null
+
+  get serverHello(): ServerHello | null {
+    return this.hello
+  }
 
   constructor(url: string, credential?: string) {
     super()
@@ -77,9 +87,9 @@ export class ServerBridge extends EventEmitter {
           this.handleResponse(msg as RpcResponse)
         } else if ('method' in msg) {
           if (msg.method === 'server:hello') {
-            // Recorded in the log only. Pass B adds the field that gates on a
-            // capability, at the point where something actually reads it.
-            log.info({ hello: (msg as RpcNotification).params }, '[bridge] server protocol')
+            this.hello = (msg as RpcNotification).params as ServerHello
+            this.emit('hello', this.hello)
+            log.info({ hello: this.hello }, '[bridge] server protocol')
           }
           this.emit('server-notification', msg.method, (msg as RpcNotification).params)
         }

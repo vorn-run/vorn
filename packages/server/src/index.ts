@@ -10,7 +10,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
 const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(process.argv[1])
 import websocket from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
-import { handleConnection, registerMethod } from './ws-handler'
+import { handleConnection, registerMethod, setServerIdentity } from './ws-handler'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort } from './register-methods'
@@ -18,7 +18,7 @@ import { configManager } from './config-manager'
 import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
 import { getDataDir } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
-import { DEFAULT_SERVER_PORT } from '@vornrun/shared/protocol'
+import { DEFAULT_SERVER_PORT, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
@@ -47,6 +47,20 @@ async function refreshTrustedOrigins(): Promise<void> {
   }
 }
 
+/**
+ * `dev` or `packaged`, preferring what the launcher told us.
+ *
+ * The fallback reads the entry point rather than NODE_ENV: NODE_ENV is set to
+ * 'production' by the packaged launcher AND left at whatever the shell had for a
+ * CLI run, so it answers a different question than the one being asked. The entry
+ * extension is the fact itself — `.ts` only runs under tsx from a checkout.
+ */
+function resolveBuildChannel(): 'dev' | 'packaged' {
+  const declared = process.env.VORN_BUILD_CHANNEL
+  if (declared === 'dev' || declared === 'packaged') return declared
+  return process.argv[1]?.endsWith('.ts') ? 'dev' : 'packaged'
+}
+
 export async function startServer(
   options: { host?: string; port?: number; dataDir?: string } = {}
 ) {
@@ -60,6 +74,19 @@ export async function startServer(
   // Anything launched from a session inherits VORN_DATA_DIR and can then find the
   // port and credential files even when --data-dir moved them.
   setLaunchDataDir(dataDir)
+
+  // Who this server is, so a desktop can decide whether to adopt it instead of
+  // starting a second one on the same data directory. The channel is passed by
+  // the launcher when there is one; a server started from the CLI infers it from
+  // its own entry point, which is TypeScript in a checkout and bundled CJS in a
+  // packaged app. Getting this wrong is not cosmetic: dev and packaged builds
+  // deliberately share ~/.vorn, so a wrong answer lets one adopt the other's.
+  setServerIdentity({
+    ...(process.env.VORN_APP_VERSION ? { appVersion: process.env.VORN_APP_VERSION } : {}),
+    dataDir,
+    pid: process.pid,
+    buildChannel: resolveBuildChannel()
+  })
 
   // Register built-in connectors
   const { connectorRegistry } = await import('./connectors')
@@ -329,7 +356,7 @@ export async function startServer(
   // Use JSON with PID so multiple instances don't clobber each other's port files.
   // Lives beside the database rather than always in ~/.vorn, so a server on its
   // own data dir advertises itself there instead of over the desktop's file.
-  const wsPortFile = path.join(dataDir, 'ws-port')
+  const wsPortFile = path.join(dataDir, WS_PORT_FILENAME)
   let ownsPortFile = true
   try {
     fs.mkdirSync(path.dirname(wsPortFile), { recursive: true })
@@ -399,6 +426,12 @@ export async function startServer(
 
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)
+  // Why: this process outlives the app that started it, so a hangup on the
+  // terminal or the departure of a parent must not take the sessions with it.
+  // SIGTERM stays honoured — that is a request to stop, not an accident.
+  process.on('SIGHUP', () => {
+    log.info('[server] ignoring SIGHUP; sessions keep running')
+  })
   process.on('message', (msg) => {
     if (msg === 'shutdown') shutdown()
   })

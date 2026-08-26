@@ -14,7 +14,8 @@ import {
   CLOSE_CREDENTIAL_REJECTED,
   RPC_NOT_AUTHENTICATED,
   type ClientNotification,
-  type ClientNotifications
+  type ClientNotifications,
+  type ServerHello
 } from '@vornrun/shared/protocol'
 import { authenticateCredential, AUTH_TIMEOUT_MS, type Authenticated } from './ws-auth'
 import { clientRegistry } from './broadcast'
@@ -36,13 +37,29 @@ export function registerCapability(name: string, version: number): void {
 
 let helloFrameCache: string | null = null
 
+/**
+ * Who this server is, for a desktop deciding whether to adopt it.
+ *
+ * Set once at startup by the entry point, which is the only place that knows the
+ * resolved data directory. Left unset in tests and in any embedding that does not
+ * call it, and a hello without identity simply is not adoptable — the launcher
+ * spawns its own rather than guessing.
+ */
+let identity: Pick<ServerHello, 'appVersion' | 'dataDir' | 'pid' | 'buildChannel'> = {}
+
+export function setServerIdentity(next: typeof identity): void {
+  identity = next
+  helloFrameCache = null
+}
+
 function helloFrame(): string {
   // Built on first use, not at module load: another module may still be
   // registering a capability at import time. It never varies after that.
   helloFrameCache ??= JSON.stringify(
     createNotification('server:hello', {
       protocolVersion: RUNTIME_PROTOCOL_VERSION,
-      capabilities: Object.fromEntries(capabilities)
+      capabilities: Object.fromEntries(capabilities),
+      ...identity
     })
   )
   return helloFrameCache

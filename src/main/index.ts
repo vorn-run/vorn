@@ -7,10 +7,15 @@ import { installCompanionQuitHook } from './device-companion'
 import { installConnectorCredentialsSync } from './connector-credentials-sync'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
-import { IPC, PermissionRequestInfo } from '../shared/types'
+import { IPC, PermissionRequestInfo, type AppConfig } from '../shared/types'
 import { setArtifactNotify } from './artifact-watcher'
 import { SURFACE } from '../shared/surface'
-import { launchServer, stopServer, getServerBridge } from './server/server-launcher'
+import {
+  launchServer,
+  stopServer,
+  detachFromServer,
+  getServerBridge
+} from './server/server-launcher'
 import { readHostSettings } from './server/host-store'
 import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
 import type { ServerBridge } from './server/server-bridge'
@@ -225,8 +230,27 @@ function toggleWidget(): void {
  * When the server pushes events via WebSocket, forward them to the
  * renderer and widget windows.
  */
+/**
+ * Whether quitting should leave the sessions running.
+ *
+ * Cached rather than fetched at quit: `before-quit` is not a good place to start
+ * a round trip, and the answer decides whether a user's agents survive. Primed
+ * from the first config load and kept current by the `config:changed` broadcast
+ * that already passes through here.
+ *
+ * Defaults to true, matching the stored default — an unreadable config must not
+ * silently start ending sessions.
+ */
+let keepSessionsRunning = true
+
+function rememberKeepSessionsRunning(config: unknown): void {
+  const value = (config as AppConfig | null)?.defaults?.keepSessionsRunning
+  keepSessionsRunning = value ?? true
+}
+
 function wireServerNotifications(bridge: ServerBridge): void {
   bridge.on('server-notification', (method: string, params: unknown) => {
+    if (method === IPC.CONFIG_CHANGED) rememberKeepSessionsRunning(params)
     switch (method) {
       // Terminal data/exit → forward to renderer
       case IPC.TERMINAL_DATA:
@@ -421,7 +445,13 @@ app.whenReady().then(async () => {
   ipcMain.on(IPC.WINDOW_CLOSE, () => mainWindow?.close())
   ipcMain.handle(IPC.WINDOW_IS_MAXIMIZED, () => mainWindow?.isMaximized() ?? false)
 
-  createMenu(toggleWidget)
+  createMenu(toggleWidget, async () => {
+    // Ends the sessions and the server on purpose, then closes the app, which is
+    // the only combination that leaves nothing running. Distinct from quitting,
+    // which now leaves everything running.
+    await stopServer()
+    app.quit()
+  })
   createWindow()
 
   if (!mainWindow) {
@@ -442,16 +472,14 @@ app.whenReady().then(async () => {
   let updateChannel: 'stable' | 'beta' = 'stable'
   let updateAutoDownload = true
   try {
-    const config = await bridge.request<{
-      defaults: {
-        widgetEnabled?: boolean
-        updateChannel?: 'stable' | 'beta'
-        updateAutoDownload?: boolean
-      }
-    }>(IPC.CONFIG_LOAD)
+    const config = await bridge.request<AppConfig>(IPC.CONFIG_LOAD)
     widgetEnabled = config.defaults.widgetEnabled !== false
     updateChannel = config.defaults.updateChannel ?? 'stable'
     updateAutoDownload = config.defaults.updateAutoDownload !== false
+    // Primed here, not only from `config:changed`: that fires on save, so a user
+    // who turned this off in an earlier session and never touched it again would
+    // otherwise have their sessions kept running against their wish.
+    rememberKeepSessionsRunning(config)
   } catch {
     // Config not available yet, use defaults
   }
@@ -593,7 +621,19 @@ app.on('before-quit', async () => {
   // Killing the companions leaves the simulators Vorn booted running: nothing
   // releases a claim on the way out, and `bootedByVorn` is only honoured by
   // release. Detached, so this outlives the process rather than delaying it.
+  //
+  // Deliberately unchanged now that the server outlives the app: device
+  // ownership lives in this process (`device-registry.ts`) and every `device:*`
+  // RPC relays back here, so the server holds no device state and could not keep
+  // a claim even if it wanted to. Server-owned devices are their own piece of
+  // work, not a side effect of this one.
   deviceRegistry.shutdownOwnedDevices()
+  if (keepSessionsRunning) {
+    // A window closing, not a process dying. The agents keep working and the
+    // next launch adopts the same server.
+    detachFromServer()
+    return
+  }
   await stopServer()
 })
 

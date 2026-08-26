@@ -83,6 +83,29 @@ export interface ServerHello {
    * `auth:authenticate` message.
    */
   capabilities: Record<string, number>
+  /**
+   * Who this server is, for a desktop deciding whether to adopt it rather than
+   * start its own. All four are optional: a server that predates them is simply
+   * not adoptable, which is the safe answer rather than a broken one.
+   *
+   * Adoption turns on `protocolVersion` above, never on `appVersion`. The two
+   * move independently on purpose — `protocolVersion` changes when the messages
+   * change, `appVersion` changes every release — and gating on the release would
+   * end every running session on every update for no reason. The same split is
+   * why a mismatch here is never resolved by killing the incumbent: the server
+   * holding the PTYs is the one with the user's work in it, so a client that
+   * cannot speak to it declines and says so.
+   */
+  appVersion?: string
+  /** Resolved data directory. Two servers on one directory is the case to catch. */
+  dataDir?: string
+  pid?: number
+  /**
+   * A dev build and a packaged build deliberately share `~/.vorn` while keeping
+   * separate Electron user data, so without this a `yarn dev` launch would adopt
+   * the packaged app's bundled server, or the reverse.
+   */
+  buildChannel?: 'dev' | 'packaged'
 }
 
 // ─── Authentication ─────────────────────────────────────────────
@@ -136,6 +159,16 @@ export const SERVER_PORT_ENV_VAR = 'VORN_SERVER_PORT'
 
 /** Filename, under the resolved data dir, of the credential same-machine tools read. */
 export const LOCAL_TOKEN_FILENAME = 'local-token'
+
+/**
+ * Filename, under the resolved data dir, of the running server's `{port, pid}`.
+ *
+ * Named here because three packages now depend on the exact string: the server
+ * writes it, `packages/mcp` reads it to find a server it did not start, and the
+ * desktop launcher reads it to decide whether to adopt one instead of spawning a
+ * second. It was a bare literal in the first two until the third arrived.
+ */
+export const WS_PORT_FILENAME = 'ws-port'
 
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
 
