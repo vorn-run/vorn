@@ -277,3 +277,59 @@ describe('the utility underneath it', () => {
     expect(() => normalizePath(undefined as unknown as string)).toThrow(TypeError)
   })
 })
+
+describe('what the idle clock counts as an agent being alive', () => {
+  // `msSinceHookActivity` is the only trace an agent started outside Vorn leaves
+  // on this server, and the idle watch stays up for it. That makes advancing it
+  // a way to keep the server alive, so it must take the same proof every other
+  // hook request takes.
+  it('advances on an authenticated hook post', async () => {
+    const started = await startHookServer()
+    server = started
+    await new Promise((r) => setTimeout(r, 30))
+    const before = started.instance.msSinceHookActivity()
+    expect(before).toBeGreaterThan(0)
+
+    await post(
+      started.port,
+      started.token,
+      '{"hook_event_name":"Stop","session_id":"s","cwd":"/tmp"}'
+    )
+    expect(started.instance.msSinceHookActivity()).toBeLessThan(before)
+  })
+
+  it('does not advance for a request with no credential', async () => {
+    const started = await startHookServer()
+    server = started
+    await new Promise((r) => setTimeout(r, 30))
+    const before = started.instance.msSinceHookActivity()
+
+    const status = await post(started.port, 'not-the-token', '{"hook_event_name":"Stop"}')
+    expect(status).toBe(401)
+    // Anything on this machine can reach loopback. If a refused request counted,
+    // a port scan would be enough to keep a server nobody is using alive for
+    // ever -- a worse hole than the one this clock closes.
+    expect(started.instance.msSinceHookActivity()).toBeGreaterThanOrEqual(before)
+  })
+
+  it('does not advance for a request that is not a POST', async () => {
+    const started = await startHookServer()
+    server = started
+    await new Promise((r) => setTimeout(r, 30))
+    const before = started.instance.msSinceHookActivity()
+
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(
+        { hostname: '127.0.0.1', port: started.port, path: '/hooks', method: 'GET' },
+        (res) => {
+          res.resume()
+          expect(res.statusCode).toBe(404)
+          resolve()
+        }
+      )
+      req.on('error', reject)
+      req.end()
+    })
+    expect(started.instance.msSinceHookActivity()).toBeGreaterThanOrEqual(before)
+  })
+})

@@ -34,14 +34,27 @@ beforeAll(() => {
 
 let child: ChildProcess | null = null
 let dir: string | null = null
+let output: string[] = []
+
+/** What the server said, for a failure message. Trimmed: it is chatty. */
+function saidSoFar(): string {
+  return output.join('').split('\n').slice(-25).join('\n')
+}
 
 function launch(idleMs: number): ChildProcess {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-idle-'))
   fs.mkdirSync(path.join(dir, '.vorn'), { recursive: true })
+  output = []
   const proc = spawn(
     process.execPath,
     [ENTRY, '--data-dir', path.join(dir, '.vorn'), '--port', '0'],
     {
+      // Piped and drained below, never piped and left. An unread pipe fills at
+      // 64KB and then blocks the writer, and this server logs a line per request
+      // through pino -- so the second case here, which sends frames for nine
+      // seconds, would stall the very process it is asking to stay alive. Kept
+      // rather than ignored because the output is the only diagnosis available
+      // when one of these fails.
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
       env: {
@@ -53,6 +66,8 @@ function launch(idleMs: number): ChildProcess {
     }
   )
   child = proc
+  proc.stdout?.on('data', (b: Buffer) => output.push(b.toString()))
+  proc.stderr?.on('data', (b: Buffer) => output.push(b.toString()))
   return proc
 }
 
@@ -87,7 +102,7 @@ describe('a server with nothing to do', () => {
     const proc = launch(2_000)
     const pid = proc.pid as number
     await new Promise((r) => setTimeout(r, 12_000))
-    expect(alive(pid)).toBe(false)
+    expect(alive(pid), `still running. server said:\n${saidSoFar()}`).toBe(false)
   }, 40_000)
 
   it('stays up while a websocket client keeps sending frames', async () => {
@@ -121,6 +136,6 @@ describe('a server with nothing to do', () => {
     const stillUp = alive(pid)
     ws.close()
 
-    expect(stillUp).toBe(true)
+    expect(stillUp, `left while a client was talking. server said:\n${saidSoFar()}`).toBe(true)
   }, 45_000)
 })

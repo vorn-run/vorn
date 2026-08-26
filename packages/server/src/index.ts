@@ -55,13 +55,14 @@ async function refreshTrustedOrigins(): Promise<void> {
 }
 
 /**
- * `dev` or `packaged`, preferring what the launcher told us.
+ * How long a shutdown may take before this process leaves regardless.
  *
- * The fallback reads the entry point rather than NODE_ENV: NODE_ENV is set to
- * 'production' by the packaged launcher AND left at whatever the shell had for a
- * CLI run, so it answers a different question than the one being asked. The entry
- * extension is the fact itself — `.ts` only runs under tsx from a checkout.
+ * Generous, because the work it waits on is real -- persisting sessions, killing
+ * terminals, stopping connector subprocesses -- and cutting it short loses more
+ * than it saves. It exists only for the case where one of those never returns.
  */
+const SHUTDOWN_DEADLINE_MS = 30_000
+
 /**
  * How long everything must stay empty before the server stops.
  *
@@ -71,21 +72,20 @@ async function refreshTrustedOrigins(): Promise<void> {
  * straight back. The environment variable exists for tests, which cannot wait
  * half an hour to watch a process leave.
  */
-/**
- * How long a shutdown may take before this process leaves regardless.
- *
- * Generous, because the work it waits on is real -- persisting sessions, killing
- * terminals, stopping connector subprocesses -- and cutting it short loses more
- * than it saves. It exists only for the case where one of those never returns.
- */
-const SHUTDOWN_DEADLINE_MS = 30_000
-
 function resolveIdleWindowMs(): number {
   const raw = process.env.VORN_IDLE_TIMEOUT_MS
   const parsed = raw ? Number(raw) : NaN
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_IDLE_WINDOW_MS
 }
 
+/**
+ * `dev` or `packaged`, preferring what the launcher told us.
+ *
+ * The fallback reads the entry point rather than NODE_ENV: NODE_ENV is set to
+ * 'production' by the packaged launcher AND left at whatever the shell had for a
+ * CLI run, so it answers a different question than the one being asked. The entry
+ * extension is the fact itself — `.ts` only runs under tsx from a checkout.
+ */
 function resolveBuildChannel(): 'dev' | 'packaged' {
   const declared = process.env.VORN_BUILD_CHANNEL
   if (declared === 'dev' || declared === 'packaged') return declared
