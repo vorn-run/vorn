@@ -68,7 +68,7 @@ import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { MissedScheduleDialog } from './components/MissedScheduleDialog'
 import { SourcePromptDialog } from './components/SourcePromptDialog'
 import { OnboardingModal } from './components/OnboardingModal'
-import { ToastContainer } from './components/Toast'
+import { ToastContainer, toast } from './components/Toast'
 import { AddTaskDialog } from './components/AddTaskDialog'
 import { GridContextMenu } from './components/GridContextMenu'
 import { WindowControls } from './components/WindowControls'
@@ -240,6 +240,34 @@ export function App() {
         console.error('[App] startup initialization failed:', err)
       }
     })()
+
+    // Pointed at a host while a server is still running on this machine. Said
+    // out loud, because an agent working on a machine whose app is showing
+    // somebody else's is invisible — and with the one action that resolves it,
+    // taken by the person whose work it is.
+    const removeLocalServerListener = window.api.onLocalServerStillRunning?.((notice) => {
+      const count = notice.sessions === null ? 'Sessions are' : `${notice.sessions} session(s) are`
+      toast(
+        `${count} still running on this machine. They keep working, and switching back to local reconnects to them.`,
+        'warning',
+        {
+          duration: Number.POSITIVE_INFINITY,
+          actions: [
+            {
+              label: 'End them',
+              tone: 'danger',
+              onClick: async () => {
+                const result = await window.api.stopLocalServer?.()
+                toast(
+                  result?.ok ? 'Stopped.' : (result?.error ?? 'Could not stop it.'),
+                  result?.ok ? 'success' : 'error'
+                )
+              }
+            }
+          ]
+        }
+      )
+    })
 
     const removeExitListener = window.api.onTerminalExit(({ id }) => {
       const state = useAppStore.getState()
@@ -509,6 +537,7 @@ export function App() {
 
     return () => {
       disposeGlobalDataListener()
+      removeLocalServerListener?.()
       removeExitListener()
       removeSessionCreatedListener()
       removeConfigListener()

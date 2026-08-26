@@ -7,12 +7,21 @@ import { installCompanionQuitHook } from './device-companion'
 import { installConnectorCredentialsSync } from './connector-credentials-sync'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
-import { IPC, PermissionRequestInfo } from '../shared/types'
+import { IPC, PermissionRequestInfo, type AppConfig } from '../shared/types'
 import { setArtifactNotify } from './artifact-watcher'
 import { SURFACE } from '../shared/surface'
-import { launchServer, stopServer, getServerBridge } from './server/server-launcher'
+import { LOCAL_SERVER_RUNNING_CHANNEL } from '../shared/adoption-channels'
+import {
+  launchServer,
+  stopServer,
+  detachFromServer,
+  getServerBridge,
+  getLastAdoptionRefusal,
+  AdoptionRefusedError
+} from './server/server-launcher'
 import { readHostSettings } from './server/host-store'
 import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
+import { readPortFile } from './server/server-adoption'
 import type { ServerBridge } from './server/server-bridge'
 import log from './logger'
 
@@ -221,12 +230,62 @@ function toggleWidget(): void {
 }
 
 /**
+ * What a refused adoption means, in Vorn's own words.
+ *
+ * Built from the reason alone. The refusal `detail` reads well and belongs in
+ * the log, but it interpolates strings out of the other server's greeting, and
+ * that server is the one party this app just decided it could not trust.
+ */
+function explainRefusal(reason: string): string {
+  if (reason === 'protocol-mismatch') {
+    return (
+      'Another Vorn server is already running, from a different version, and this ' +
+      'app cannot talk to it. Your sessions are still alive inside it. Stop that ' +
+      'server to start fresh here, or reopen the version that started it.'
+    )
+  }
+  if (reason === 'different-build') {
+    return (
+      'Another Vorn server is already running from a different build — a packaged ' +
+      'app beside a dev one, or the reverse. They share one database, so this app ' +
+      'will not start a second server beside it. Stop that one first.'
+    )
+  }
+  return (
+    'Another Vorn server is already running that this app cannot use, and both ' +
+    'would share one database. Stop that server to start fresh here.'
+  )
+}
+
+/**
+ * Whether quitting should leave the sessions running.
+ *
+ * Cached rather than fetched at quit: `before-quit` is not a good place to start
+ * a round trip, and the answer decides whether a user's agents survive. Primed
+ * from the first config load and kept current by the `config:changed` broadcast
+ * that already passes through here.
+ *
+ * Defaults to true, matching the stored default — an unreadable config must not
+ * silently start ending sessions.
+ */
+let keepSessionsRunning = true
+
+function rememberKeepSessionsRunning(config: unknown): void {
+  const value = (config as AppConfig | null)?.defaults?.keepSessionsRunning
+  keepSessionsRunning = value ?? true
+}
+
+/**
  * Wire up server notification forwarding.
  * When the server pushes events via WebSocket, forward them to the
  * renderer and widget windows.
  */
 function wireServerNotifications(bridge: ServerBridge): void {
   bridge.on('server-notification', (method: string, params: unknown) => {
+    // Before the switch rather than inside it: `CONFIG_CHANGED` is one label in a
+    // fall-through group that forwards seventeen events identically, so giving it
+    // a body of its own would mean splitting it out and repeating the forward.
+    if (method === IPC.CONFIG_CHANGED) rememberKeepSessionsRunning(params)
     switch (method) {
       // Terminal data/exit → forward to renderer
       case IPC.TERMINAL_DATA:
@@ -376,6 +435,14 @@ app.whenReady().then(async () => {
       showConnectWindow(err instanceof Error ? err.message : String(err))
       return
     }
+    // A server this app may not use is not a failure to start — it is a running
+    // server holding the user's agents. Quitting silently would look like Vorn
+    // refusing to open for no reason, so it gets a window that names the reason
+    // and offers to end that server, which is the only thing that resolves it.
+    if (err instanceof AdoptionRefusedError) {
+      showConnectWindow(explainRefusal(err.refusal.reason), 'local-server-refused')
+      return
+    }
     app.quit()
     return
   }
@@ -421,7 +488,14 @@ app.whenReady().then(async () => {
   ipcMain.on(IPC.WINDOW_CLOSE, () => mainWindow?.close())
   ipcMain.handle(IPC.WINDOW_IS_MAXIMIZED, () => mainWindow?.isMaximized() ?? false)
 
-  createMenu(toggleWidget)
+  createMenu(toggleWidget, () => {
+    // Ends the sessions and the server on purpose. Expressed as "quit, but do
+    // not keep them" rather than as its own shutdown, so there is exactly one
+    // path that stops a server and exactly one place that holds the quit open
+    // until it has finished.
+    keepSessionsRunning = false
+    app.quit()
+  })
   createWindow()
 
   if (!mainWindow) {
@@ -433,6 +507,19 @@ app.whenReady().then(async () => {
   // Wire server notifications → renderer/widget
   wireServerNotifications(bridge)
 
+  // Pointed at a host while a server is still running here. Its sessions keep
+  // working and switching back to local reconnects to them -- but an agent
+  // running on a machine whose app is showing somebody else's is invisible, and
+  // invisible is the thing this whole phase exists to avoid.
+  if (readHostSettings().mode === 'host') {
+    const local = readPortFile()
+    if (local) {
+      mainWindow.webContents.once('did-finish-load', () => {
+        mainWindow?.webContents.send(LOCAL_SERVER_RUNNING_CHANNEL, { sessions: null })
+      })
+    }
+  }
+
   // Decrypt connector credentials via safeStorage and push plaintext into
   // the server's in-memory store. Runs once on boot, re-syncs on every
   // config change so newly added connections are picked up without restart.
@@ -442,16 +529,14 @@ app.whenReady().then(async () => {
   let updateChannel: 'stable' | 'beta' = 'stable'
   let updateAutoDownload = true
   try {
-    const config = await bridge.request<{
-      defaults: {
-        widgetEnabled?: boolean
-        updateChannel?: 'stable' | 'beta'
-        updateAutoDownload?: boolean
-      }
-    }>(IPC.CONFIG_LOAD)
+    const config = await bridge.request<AppConfig>(IPC.CONFIG_LOAD)
     widgetEnabled = config.defaults.widgetEnabled !== false
     updateChannel = config.defaults.updateChannel ?? 'stable'
     updateAutoDownload = config.defaults.updateAutoDownload !== false
+    // Primed here, not only from `config:changed`: that fires on save, so a user
+    // who turned this off in an earlier session and never touched it again would
+    // otherwise have their sessions kept running against their wish.
+    rememberKeepSessionsRunning(config)
   } catch {
     // Config not available yet, use defaults
   }
@@ -586,15 +671,44 @@ updateManager.onQuitForUpdate(() => {
   isQuitting = true
 })
 
-app.on('before-quit', async () => {
+/** Set once the deliberate shutdown has finished, so the re-entered quit proceeds. */
+let serverStopped = false
+
+app.on('before-quit', async (event) => {
   isQuitting = true
   globalShortcut.unregisterAll()
   updateManager.stop()
   // Killing the companions leaves the simulators Vorn booted running: nothing
   // releases a claim on the way out, and `bootedByVorn` is only honoured by
   // release. Detached, so this outlives the process rather than delaying it.
+  //
+  // Deliberately unchanged now that the server outlives the app: device
+  // ownership lives in this process (`device-registry.ts`) and every `device:*`
+  // RPC relays back here, so the server holds no device state and could not keep
+  // a claim even if it wanted to. Server-owned devices are their own piece of
+  // work, not a side effect of this one.
   deviceRegistry.shutdownOwnedDevices()
-  await stopServer()
+  if (keepSessionsRunning) {
+    // A window closing, not a process dying. The agents keep working and the
+    // next launch adopts the same server. Synchronous, so nothing here races the
+    // quit that is already underway.
+    detachFromServer()
+    return
+  }
+
+  // Ending the sessions has to actually finish. Electron does not await this
+  // handler, and `stopServer` waits on a five second RPC before it signals --
+  // so without holding the quit open, the app could exit first and leave the
+  // detached server running, which is the opposite of what was asked for. This
+  // did not matter while the server died with its parent.
+  if (serverStopped) return
+  event.preventDefault()
+  try {
+    await stopServer()
+  } finally {
+    serverStopped = true
+    app.quit()
+  }
 })
 
 app.on('window-all-closed', () => {

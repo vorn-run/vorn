@@ -51,6 +51,8 @@ describe('defaults survive a save/load round trip', () => {
     ['minimalShellPrompt', true],
     ['minimalShellPrompt', false],
     ['reopenSessions', true],
+    ['keepSessionsRunning', true],
+    ['keepSessionsRunning', false],
     ['widgetEnabled', false]
   ])('%s = %s', (key, value) => {
     saveConfig(configWith({ [key]: value } as Partial<AppConfig['defaults']>))
@@ -63,15 +65,24 @@ describe('defaults survive a save/load round trip', () => {
     const loaded = loadConfig()
     expect(loaded.defaults.domBlockRendering).toBe(true)
     expect(loaded.defaults.minimalShellPrompt).toBe(true)
+    expect(loaded.defaults.keepSessionsRunning).toBe(true)
   })
 
   it('keeps a false the user chose, rather than treating it as unset', () => {
     // The bug this guards: `?? true` on a stored `false` would silently turn
-    // the setting back on every time it loaded.
-    saveConfig(configWith({ domBlockRendering: false, minimalShellPrompt: false }))
+    // the setting back on every time it loaded. For keepSessionsRunning that
+    // would mean quitting kept the agents alive after the user asked it not to.
+    saveConfig(
+      configWith({
+        domBlockRendering: false,
+        minimalShellPrompt: false,
+        keepSessionsRunning: false
+      })
+    )
     const loaded = loadConfig()
     expect(loaded.defaults.domBlockRendering).toBe(false)
     expect(loaded.defaults.minimalShellPrompt).toBe(false)
+    expect(loaded.defaults.keepSessionsRunning).toBe(false)
   })
 })
 

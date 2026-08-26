@@ -14,7 +14,8 @@ import {
   CLOSE_CREDENTIAL_REJECTED,
   RPC_NOT_AUTHENTICATED,
   type ClientNotification,
-  type ClientNotifications
+  type ClientNotifications,
+  type ServerIdentity
 } from '@vornrun/shared/protocol'
 import { authenticateCredential, AUTH_TIMEOUT_MS, type Authenticated } from './ws-auth'
 import { clientRegistry } from './broadcast'
@@ -36,6 +37,22 @@ export function registerCapability(name: string, version: number): void {
 
 let helloFrameCache: string | null = null
 
+/**
+ * Who this server is, for a desktop deciding whether to adopt it.
+ *
+ * Set once at startup by the entry point, which is the only place that knows the
+ * resolved data directory. Left unset in tests and in any embedding that does not
+ * call it, and a hello without identity simply is not adoptable — the launcher
+ * spawns its own rather than guessing.
+ */
+let identity: ServerIdentity | null = null
+let identityFrameCache: string | null = null
+
+export function setServerIdentity(next: ServerIdentity): void {
+  identity = next
+  identityFrameCache = null
+}
+
 function helloFrame(): string {
   // Built on first use, not at module load: another module may still be
   // registering a capability at import time. It never varies after that.
@@ -46,6 +63,34 @@ function helloFrame(): string {
     })
   )
   return helloFrameCache
+}
+
+/**
+ * Who this server is — sent only to a peer on this machine.
+ *
+ * `dataDir` names the user's home directory, so it carries the account name,
+ * and with remote access enabled the server binds `0.0.0.0` where the Origin
+ * allowlist does not apply to a peer that simply sends no Origin at all. The
+ * one caller with any use for these fields is a desktop on this machine
+ * deciding whether to adopt this server rather than start a second one.
+ */
+function identityFrame(): string | null {
+  if (!identity) return null
+  identityFrameCache ??= JSON.stringify(createNotification('server:identity', identity))
+  return identityFrameCache
+}
+
+/**
+ * Whether a peer address is this machine talking to itself.
+ *
+ * IPv4-mapped IPv6 (`::ffff:127.0.0.1`) is what a dual-stack listener actually
+ * reports for a v4 loopback connection, so matching only `127.0.0.1` would fail
+ * open in the common case -- and failing open here means withholding nothing.
+ */
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false
+  const bare = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address
+  return bare === '::1' || bare === '127.0.0.1' || bare.startsWith('127.')
 }
 
 // Handler registry: method name → async handler function
@@ -164,11 +209,16 @@ export function resetTokenTracking(): void {
 export function handleConnection(
   ws: WebSocket,
   credential?: string,
-  initialTopics?: readonly string[]
+  initialTopics?: readonly string[],
+  peerAddress?: string
 ): void {
   // Announce the contract first, so a client that has to authenticate by message
   // knows that it must before it is refused for not having.
   ws.send(helloFrame())
+  if (isLoopbackAddress(peerAddress)) {
+    const frame = identityFrame()
+    if (frame) ws.send(frame)
+  }
 
   let authTimer: NodeJS.Timeout | null = null
 

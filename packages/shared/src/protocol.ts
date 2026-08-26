@@ -85,6 +85,43 @@ export interface ServerHello {
   capabilities: Record<string, number>
 }
 
+/**
+ * Who this server is, for a desktop deciding whether to adopt it rather than
+ * start its own.
+ *
+ * A separate frame from `server:hello` because the audience is different, and
+ * that difference is the whole design. Capabilities go to every client;
+ * identity goes only to a peer on loopback, because `dataDir` names the user's
+ * home directory and the server may be bound to `0.0.0.0`. Folding it into the
+ * greeting meant one message with two audiences — a frame that had to be built
+ * per-peer and cached twice, and fields that had to be optional for readers who
+ * would never receive them.
+ *
+ * Every field is required, so a reader that has this frame is done checking. A
+ * server too old to send one simply does not, and "no identity" is already the
+ * answer that declines adoption.
+ *
+ * Adoption turns on `ServerHello.protocolVersion`, never on `appVersion`. The
+ * two move independently on purpose — the protocol changes when the messages
+ * change, the release changes every time anything ships — and gating on the
+ * release would end every running session on every update for no reason. The
+ * same reasoning is why a mismatch is never settled by killing the incumbent:
+ * the server holding the PTYs holds the user's work, so a client that cannot
+ * speak to it declines and says so.
+ */
+export interface ServerIdentity {
+  appVersion: string
+  /** Resolved data directory. Two servers on one directory is the case to catch. */
+  dataDir: string
+  pid: number
+  /**
+   * A dev build and a packaged build deliberately share `~/.vorn` while keeping
+   * separate Electron user data, so without this a `yarn dev` launch would adopt
+   * the packaged app's bundled server, or the reverse.
+   */
+  buildChannel: 'dev' | 'packaged'
+}
+
 // ─── Authentication ─────────────────────────────────────────────
 
 /**
@@ -136,6 +173,16 @@ export const SERVER_PORT_ENV_VAR = 'VORN_SERVER_PORT'
 
 /** Filename, under the resolved data dir, of the credential same-machine tools read. */
 export const LOCAL_TOKEN_FILENAME = 'local-token'
+
+/**
+ * Filename, under the resolved data dir, of the running server's `{port, pid}`.
+ *
+ * Named here because three packages now depend on the exact string: the server
+ * writes it, `packages/mcp` reads it to find a server it did not start, and the
+ * desktop launcher reads it to decide whether to adopt one instead of spawning a
+ * second. It was a bare literal in the first two until the third arrived.
+ */
+export const WS_PORT_FILENAME = 'ws-port'
 
 // ─── JSON-RPC 2.0 Envelope Types ────────────────────────────────
 
@@ -903,6 +950,8 @@ export interface RequestMethods {
 export interface ServerNotifications {
   /** First frame on every connection, before anything is dispatched. */
   'server:hello': ServerHello
+  /** Follows the greeting, on loopback only. Absent from an older server. */
+  'server:identity': ServerIdentity
   /** Sent once a socket is admitted, so a client knows it may start sending. */
   'auth:ok': { userId: string }
   'terminal:data': { id: string; data: string }

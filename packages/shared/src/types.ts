@@ -1077,6 +1077,21 @@ export interface AppConfig {
      */
     domBlockRendering?: boolean
     /**
+     * Whether the server keeps running after the last window closes.
+     *
+     * The agents are the point. A PTY belongs to the server process, so while
+     * the server was a child of the app, quitting killed every session and
+     * reopening could only relaunch them from their transcripts — losing the
+     * process, the turn in flight, and any prompt waiting for an answer.
+     * With this on, quitting closes a window and nothing else; the next launch
+     * reconnects to the sessions that were already running.
+     *
+     * Defaults to on. Turning it off restores the old behaviour exactly, and
+     * "Stop Sessions and Server" in the File menu does it once without changing
+     * the setting.
+     */
+    keepSessionsRunning?: boolean
+    /**
      * Set to `true` after the seeded "Default Task Workflow" has been inserted
      * once. Ensures deleting the workflow sticks — we don't resurrect it on
      * the next launch.

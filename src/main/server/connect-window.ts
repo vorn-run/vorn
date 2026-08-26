@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, app } from 'electron'
 import path from 'node:path'
 import log from '../logger'
 import { readHostSettings, writeHostSettings, clearHostSettings } from './host-store'
+import { stopLocalServer } from './server-launcher'
 
 /**
  * The window shown when this desktop is pointed at a server it cannot reach.
@@ -51,6 +52,8 @@ export function registerConnectHandlers(): void {
     return { ok: true }
   })
 
+  ipcMain.handle('connect:stopLocal', () => stopLocalServer())
+
   ipcMain.handle('connect:useLocal', () => {
     clearHostSettings()
     restart()
@@ -80,7 +83,12 @@ export function normaliseHostUrl(input: string): string {
   return `${secure ? 'wss:' : 'ws:'}//${parsed.host}/ws`
 }
 
-export function showConnectWindow(reason: string): void {
+export type ConnectWindowCause = 'host-unreachable' | 'local-server-refused'
+
+export function showConnectWindow(
+  reason: string,
+  cause: ConnectWindowCause = 'host-unreachable'
+): void {
   if (connectWindow && !connectWindow.isDestroyed()) {
     connectWindow.focus()
     return
@@ -110,7 +118,7 @@ export function showConnectWindow(reason: string): void {
 
   log.info('[connect] showing the connect window')
   void connectWindow.loadURL(
-    `data:text/html;charset=utf-8,${encodeURIComponent(connectMarkup(reason))}`
+    `data:text/html;charset=utf-8,${encodeURIComponent(connectMarkup(reason, cause))}`
   )
 }
 
@@ -122,7 +130,19 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function connectMarkup(reason: string): string {
+function connectMarkup(reason: string, cause: ConnectWindowCause): string {
+  // Two situations reach this window, and only one of them can be resolved by
+  // running a server here: when another one already holds this machine's data
+  // directory, "run a server on this machine" is the thing that just failed.
+  const refused = cause === 'local-server-refused'
+  const heading = refused ? 'Another Vorn server is running' : 'Cannot reach that Vorn'
+  const lede = refused
+    ? 'Your sessions are alive inside it. This app will not start a second server ' +
+      'beside it, because both would share one database.'
+    : 'The server this app is pointed at did not answer.'
+  const localButton = refused
+    ? '<button id="stop-local">Stop it and start fresh</button>'
+    : '<button id="local" class="quiet">Run a server on this machine</button>'
   return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
@@ -158,8 +178,8 @@ function connectMarkup(reason: string): string {
   .err { color: #c9922a; font-size: 11px; min-height: 15px; margin-bottom: 6px }
 </style></head>
 <body>
-  <h1>Cannot reach that Vorn</h1>
-  <p>The server this app is pointed at did not answer.</p>
+  <h1>${escapeHtml(heading)}</h1>
+  <p>${escapeHtml(lede)}</p>
   <div class="reason">${escapeHtml(reason)}</div>
 
   <label for="url">Server address</label>
@@ -170,7 +190,7 @@ function connectMarkup(reason: string): string {
 
   <div class="err" id="err"></div>
   <button id="connect">Connect</button>
-  <button id="local" class="quiet">Run a server on this machine</button>
+  ${localButton}
 
   <div class="note">
     A host runs your sessions and holds your data. Workflows and schedules still
@@ -191,7 +211,15 @@ function connectMarkup(reason: string): string {
   }
 
   $('connect').addEventListener('click', connect)
-  $('local').addEventListener('click', () => window.api.useLocalServer())
+  $('local')?.addEventListener('click', () => window.api.useLocalServer())
+  $('stop-local')?.addEventListener('click', async () => {
+    $('err').textContent = ''
+    const result = await window.api.stopLocalServer()
+    // Restarting is the server-picking decision run again from the top, which is
+    // what this window is for; with the incumbent gone it lands on a fresh spawn.
+    if (result.ok) window.api.useLocalServer()
+    else $('err').textContent = result.error
+  })
   document.addEventListener('keydown', (e) => { if (e.key === 'Enter') connect() })
 </script>
 </body></html>`

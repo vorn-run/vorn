@@ -379,6 +379,8 @@ describe('server integration', () => {
      * sure. Each frame restarts the clock, so this settles as fast as the server
      * allows and still waits when the server is slow.
      */
+    const HANDSHAKE_FRAMES = new Set(['server:hello', 'server:identity'])
+
     async function notificationsFor(query: string): Promise<string[]> {
       const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws${query}`, authOptions())
       const methods: string[] = []
@@ -390,7 +392,10 @@ describe('server integration', () => {
         }
         ws.on('message', (raw) => {
           const frame = JSON.parse(raw.toString())
-          if (frame.method && frame.method !== 'server:hello') methods.push(frame.method)
+          // The handshake frames are sent directly on the socket, outside the
+          // broadcast set this test is measuring, so neither is a notification
+          // any topic filter was ever asked about.
+          if (frame.method && !HANDSHAKE_FRAMES.has(frame.method)) methods.push(frame.method)
           restart()
         })
         restart()

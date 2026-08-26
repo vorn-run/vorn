@@ -1205,6 +1205,10 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     // user has toggled it, so absence means "not yet decided", not "off".
     domBlockRendering: (map.domBlockRendering as boolean) ?? true,
     minimalShellPrompt: (map.minimalShellPrompt as boolean) ?? true,
+    // Sessions outlive the window. Default on, same reasoning as above: the key
+    // only appears once the user has turned it off, so absence is "not yet
+    // decided". Read by the main process at quit, not by the renderer.
+    keepSessionsRunning: (map.keepSessionsRunning as boolean) ?? true,
     ...(map.widgetEnabled !== undefined && { widgetEnabled: map.widgetEnabled as boolean }),
     ...(map.taskViewMode !== undefined && {
       taskViewMode: map.taskViewMode as AppConfig['defaults']['taskViewMode']

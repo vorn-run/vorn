@@ -3,7 +3,7 @@ import { app, Menu, BrowserWindow } from 'electron'
 
 const isMac = process.platform === 'darwin'
 
-export function createMenu(onToggleWidget?: () => void): void {
+export function createMenu(onToggleWidget?: () => void, onStopServer?: () => void): void {
   app.setAboutPanelOptions({
     applicationName: 'Vorn',
     applicationVersion: app.getVersion(),
@@ -38,6 +38,15 @@ export function createMenu(onToggleWidget?: () => void): void {
           click: (): void => {
             const win = BrowserWindow.getFocusedWindow()
             win?.webContents.send('menu:new-agent')
+          }
+        },
+        { type: 'separator' },
+        {
+          // The deliberate end, kept reachable now that quitting no longer ends
+          // anything. Quitting is a window closing; this is the switch.
+          label: 'Stop Sessions and Server',
+          click: (): void => {
+            onStopServer?.()
           }
         },
         { type: 'separator' },

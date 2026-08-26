@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { LOCAL_SERVER_RUNNING_CHANNEL, type LocalServerNotice } from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import {
   CreateTerminalPayload,
@@ -106,6 +107,15 @@ const api = {
     ipcRenderer.on(IPC.CONFIG_CHANGED, listener)
     return () => {
       ipcRenderer.removeListener(IPC.CONFIG_CHANGED, listener)
+    }
+  },
+
+  onLocalServerStillRunning: (callback: (notice: LocalServerNotice) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, notice: LocalServerNotice): void =>
+      callback(notice)
+    ipcRenderer.on(LOCAL_SERVER_RUNNING_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(LOCAL_SERVER_RUNNING_CHANNEL, listener)
     }
   },
 
@@ -590,6 +600,12 @@ const api = {
     token: string
   }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('connect:save', params),
   useLocalServer: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('connect:useLocal'),
+
+  /** Ends the local server on purpose. Offered by the connect window when it
+   *  refused to adopt one, and by the app when it is pointed at a host while a
+   *  local server is still running. */
+  stopLocalServer: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('connect:stopLocal'),
 
   // Pairing a phone by showing it a code
   startPairing: (): Promise<{ code: string; expiresAt: number }> =>
