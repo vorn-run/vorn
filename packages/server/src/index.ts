@@ -32,7 +32,7 @@ import { scheduler } from './scheduler'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
 import { redeemCode, pollRequest, pendingRequests } from './pairing'
 import { getTailscaleStatus } from './tailscale'
-import { initRebind, checkAndRebind } from './server-rebind'
+import { initRebind, checkAndRebind, getCurrentHost } from './server-rebind'
 import { isAllowedUpgrade, logRefusedUpgrade, setTrustedOriginHosts } from './ws-origin'
 import { setEnvPassthrough, setLaunchDataDir } from './process-utils'
 import log from './logger'
@@ -71,6 +71,15 @@ async function refreshTrustedOrigins(): Promise<void> {
  * straight back. The environment variable exists for tests, which cannot wait
  * half an hour to watch a process leave.
  */
+/**
+ * How long a shutdown may take before this process leaves regardless.
+ *
+ * Generous, because the work it waits on is real -- persisting sessions, killing
+ * terminals, stopping connector subprocesses -- and cutting it short loses more
+ * than it saves. It exists only for the case where one of those never returns.
+ */
+const SHUTDOWN_DEADLINE_MS = 30_000
+
 function resolveIdleWindowMs(): number {
   const raw = process.env.VORN_IDLE_TIMEOUT_MS
   const parsed = raw ? Number(raw) : NaN
@@ -432,7 +441,22 @@ export async function startServer(
   const { hookStatusMapper } = await import('./hook-status-mapper')
   const { sessionManager } = await import('./session-persistence')
 
+  // Two failures, and they need different answers. A shutdown that *throws* is
+  // retried by the idle watch, which is why that watch keeps ticking. A shutdown
+  // that *hangs* -- `stopAllMcpClients()` awaits child processes that can -- must
+  // not be retried, because `killAll()` and `app.close()` would run a second
+  // time; but leaving it hung is the worst state of all, a live process holding
+  // the port with its credential already cleared and its port file already gone.
+  // So re-entry is refused and a deadline is armed instead. Unref'd: it is a
+  // backstop, not a reason to stay alive.
+  let shuttingDown = false
   const shutdown = async () => {
+    if (shuttingDown) return
+    shuttingDown = true
+    setTimeout(() => {
+      log.error('[server] shutdown did not finish; exiting anyway')
+      process.exit(1)
+    }, SHUTDOWN_DEADLINE_MS).unref?.()
     log.info('[server] shutting down...')
     // Stop the periodic timer first, then do one final synchronous save
     sessionManager.stopAutoSave()
@@ -470,33 +494,36 @@ export async function startServer(
       // seconds, and a finished agent is not a reason to stay up.
       headless: headlessManager.getActiveSessions().filter((h) => h.status === 'running').length,
       msSinceClientActivity: clientRegistry.msSinceActivity(),
+      msSinceHookActivity: hookServer.msSinceHookActivity(),
       bridgeAttached: browserBridge.isConnected,
       pendingPermissions: hookServer.getPendingPermissions().length,
       pendingPairings: pendingRequests().length,
       connectorLeases: dbCountActiveConnectorInboxLeases(new Date().toISOString()),
-      enabledSchedules: scheduler.serverSideScheduleCount()
+      enabledSchedules: scheduler.serverSideScheduleCount(),
+      servesOthers: getCurrentHost() === '0.0.0.0'
     }),
     { windowMs: resolveIdleWindowMs(), schedulesHoldOpen: true },
     () => {
       log.info('[server] nothing left to do; shutting down')
-      // Caught, and the watch is left running. A shutdown that throws part-way
-      // has already cleared the credential and removed the port file, so giving
-      // up here would leave a process still bound to the port that no app can
-      // use or discover -- the exact state this feature exists to prevent.
-      // Exiting hard is the floor.
+      // A shutdown that throws has already cleared the credential and removed
+      // the port file, so giving up here would leave a process bound to a port
+      // no app can use or discover -- the exact state this feature exists to
+      // prevent. Exiting hard is the floor. A shutdown that hangs instead is
+      // caught by the deadline armed inside it.
       void shutdown().catch((err) => {
         log.error({ err }, '[server] idle shutdown failed; exiting anyway')
         process.exit(1)
       })
     }
   )
-  // Off wherever the server is the thing being run rather than something an app
-  // started: a hand-run `vorn-server serve`, or a machine serving a phone over
-  // the network. Nothing would restart it, and "my phone could not reach my Mac
-  // this morning" is a worse failure than a process that outstays its welcome.
-  const servesOthers = host === '0.0.0.0'
-  if (options.idleShutdown ?? !servesOthers) idleWatch.start()
-  else log.info('[server] idle shutdown off: this server is here to be reached')
+  // Off entirely for a hand-run `vorn-server serve`: that process is the thing
+  // being run, and nothing would bring it back. Being bound wide is handled in
+  // the snapshot instead, because it can change while this runs.
+  if (options.idleShutdown === false) {
+    log.info('[server] idle shutdown off: this server was started to be run')
+  } else {
+    idleWatch.start()
+  }
 
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)

@@ -528,6 +528,33 @@ const ADOPT_IDENTITY_TIMEOUT_MS = 3_000
 const ADOPT_AUTH_TIMEOUT_MS = 5_000
 
 /**
+ * Ask a running server, without joining it, how many terminals it holds.
+ *
+ * The greeting is the first frame on the socket and arrives before
+ * authentication, so this answers even for a server that would reject this app's
+ * credential -- which is the whole reason the count rides that frame. Used where
+ * the app is pointed elsewhere and merely wants to say what is still running
+ * here; null means "could not tell", never "nothing".
+ */
+export async function probeSessions(port: number): Promise<number | null> {
+  const token = readLocalToken()
+  if (!token) return null
+  const probe = new ServerBridge(`ws://127.0.0.1:${port}/ws`, token)
+  probe.connect()
+  try {
+    return await new Promise<number | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), ADOPT_IDENTITY_TIMEOUT_MS)
+      probe.once('identity', (found: ServerIdentity) => {
+        clearTimeout(timer)
+        resolve(sessionsFrom(found))
+      })
+    })
+  } finally {
+    probe.close()
+  }
+}
+
+/**
  * Connect to a server that is already running and decide whether to keep it.
  *
  * Never kills the incumbent. The process holding the PTYs is the one with the

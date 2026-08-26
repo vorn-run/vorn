@@ -78,6 +78,14 @@ export class HookServer extends EventEmitter {
     this.authToken = crypto.randomUUID()
   }
 
+  /** When a hook last posted. See the note in the request handler. */
+  private lastRequestAt = Date.now()
+
+  /** How long since any agent, in this app or outside it, used the hook endpoint. */
+  msSinceHookActivity(): number {
+    return Date.now() - this.lastRequestAt
+  }
+
   getPort(): number {
     return this.port
   }
@@ -113,6 +121,12 @@ export class HookServer extends EventEmitter {
   start(preferredPort: number = HookServer.PREFERRED_PORT): Promise<number> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
+        // An agent run outside Vorn still posts here, because hooks are installed
+        // into `~/.claude/settings.json` globally. It has no terminal, no headless
+        // entry and no websocket, so this is the only trace it leaves -- and
+        // `shutdown()` uninstalls those hooks, which would break permission
+        // routing for the rest of that run.
+        this.lastRequestAt = Date.now()
         if (req.method !== 'POST') {
           res.writeHead(404)
           res.end()

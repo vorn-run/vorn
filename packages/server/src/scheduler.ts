@@ -85,18 +85,6 @@ function getTriggerConfig(wf: WorkflowDefinition): TriggerConfig | null {
 
 class Scheduler extends EventEmitter {
   /**
-   * How many schedules are armed right now.
-   *
-   * For the idle check, which treats one as a reason to stay alive. Weaker than
-   * it sounds: a run is executed by a renderer, so an armed schedule with no
-   * client attached cannot fire. Staying up means being there when a desktop
-   * returns, not doing the work.
-   */
-  armedScheduleCount(): number {
-    return this.cronJobs.size + this.timeouts.size
-  }
-
-  /**
    * Armed schedules that this server can act on with nobody attached.
    *
    * Only connector polls. `dispatchConnectorPoll` really does the work here --
@@ -259,6 +247,18 @@ class Scheduler extends EventEmitter {
         } catch (err) {
           log.error({ err }, `[scheduler] failed to schedule workflow "${wf.name}":`)
         }
+      }
+
+      // Membership is derived from the trigger as it stands now, not from what
+      // it was when the job was created. Both loops above keep an existing cron
+      // job when the new kind is still cron-eligible, and the registration below
+      // is skipped for an id that already has one -- so an edit from `recurring`
+      // to `connectorPoll` would never add the id, and the reverse edit would
+      // leave it behind. Either way the count that decides whether this server
+      // may leave stops describing the schedules it actually holds.
+      if (this.cronJobs.has(wf.id)) {
+        if (trigger.triggerType === 'connectorPoll') this.connectorPollWorkflowIds.add(wf.id)
+        else this.connectorPollWorkflowIds.delete(wf.id)
       }
 
       if (trigger.triggerType === 'once' && !this.timeouts.has(wf.id)) {

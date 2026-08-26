@@ -300,10 +300,6 @@ export function handleConnection(
   }
 
   ws.on('message', async (raw: Buffer) => {
-    // Every inbound frame counts as a client doing something, including the ones
-    // that go on to be refused. What the idle check needs to know is whether
-    // anybody is out there, not whether they were allowed.
-    clientRegistry.touch()
     let msg: RpcRequest
     try {
       msg = JSON.parse(raw.toString())
@@ -313,6 +309,13 @@ export function handleConnection(
     }
 
     const { id, method, params } = msg
+    // A frame counts as somebody being out there -- including one that goes on to
+    // be refused, since what the idle check needs is whether anybody is there,
+    // not whether they were allowed. The exception is the frame every connection
+    // opens with: `ServerBridge` sends it from its `open` handler, so a Vorn
+    // merely asking this server whether it may adopt it would otherwise reset
+    // this server's idle clock on the way past, one blocked launch at a time.
+    if (method !== 'bridge:identify') clientRegistry.touch()
 
     // Everything below this line requires an authenticated socket. The one
     // exception is the credential itself.

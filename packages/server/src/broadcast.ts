@@ -101,7 +101,7 @@ export class ClientRegistry {
   }
 
   /**
-   * How long since a client last did anything, or null while one is attached.
+   * How long since a client last did anything.
    *
    * A timestamp rather than the count below, because MCP opens a fresh socket
    * for every RPC call: the count drops to zero between two calls of a working

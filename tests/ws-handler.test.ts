@@ -647,3 +647,27 @@ describe('narrowing what a socket receives', () => {
     expect(clientRegistry.setTopics).not.toHaveBeenCalled()
   })
 })
+
+describe('what counts as somebody being out there', () => {
+  it('counts an ordinary call', () => {
+    const ws = createMockWs()
+    connectAuthed(ws)
+    ;(clientRegistry.touch as ReturnType<typeof vi.fn>).mockClear()
+    sendMessage(ws, { jsonrpc: '2.0', id: 1, method: 'config:load' })
+    expect(clientRegistry.touch).toHaveBeenCalled()
+  })
+
+  it('does not count the frame every connection opens with', () => {
+    // `ServerBridge` sends `bridge:identify` from its own `open` handler, so it
+    // arrives on every socket -- including the one another Vorn opens purely to
+    // ask this server whether it may adopt it, and the one behind
+    // `probeSessions`. Counting it would let a user blocked by a leftover server
+    // reset that server's idle clock on every launch attempt, so the leftover
+    // never leaves and the launches never stop being blocked.
+    const ws = createMockWs()
+    connectAuthed(ws)
+    ;(clientRegistry.touch as ReturnType<typeof vi.fn>).mockClear()
+    sendMessage(ws, { jsonrpc: '2.0', id: 1, method: 'bridge:identify' })
+    expect(clientRegistry.touch).not.toHaveBeenCalled()
+  })
+})

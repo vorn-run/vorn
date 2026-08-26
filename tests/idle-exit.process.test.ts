@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { describe, it, expect, afterEach, beforeAll } from 'vitest'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -18,8 +18,19 @@ import path from 'node:path'
  * agent hooks on the way past.
  */
 
-const ENTRY = path.join(__dirname, '..', 'packages', 'server', 'dist', 'index.cjs')
-const built = fs.existsSync(ENTRY)
+const SERVER = path.join(__dirname, '..', 'packages', 'server')
+const ENTRY = path.join(SERVER, 'dist', 'index.cjs')
+
+// Built here rather than skipped when missing. `dist/` is gitignored and
+// `yarn test` is a bare `vitest run`, so a skip-if-absent gate meant this file
+// never ran in CI -- green on the one claim the feature is named for, proving
+// nothing. The build is a few seconds and only happens when the bundle is not
+// already there.
+beforeAll(() => {
+  if (fs.existsSync(ENTRY)) return
+  const built = spawnSync('yarn', ['build'], { cwd: SERVER, stdio: 'inherit', shell: false })
+  if (built.status !== 0) throw new Error('could not build the server bundle for this test')
+}, 180_000)
 
 let child: ChildProcess | null = null
 let dir: string | null = null
@@ -71,7 +82,7 @@ afterEach(() => {
   dir = null
 })
 
-describe.skipIf(!built)('a server with nothing to do', () => {
+describe('a server with nothing to do', () => {
   it('exits on its own', async () => {
     const proc = launch(2_000)
     const pid = proc.pid as number

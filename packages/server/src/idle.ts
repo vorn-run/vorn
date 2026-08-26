@@ -35,6 +35,16 @@ export interface IdleSnapshot {
    * agent.
    */
   msSinceClientActivity: number
+
+  /**
+   * How long since anything used the hook endpoint.
+   *
+   * Separate from the client clock because it catches what nothing else does: an
+   * agent the user started outside Vorn. Hooks are installed globally, so such a
+   * run has no terminal, no headless entry and no socket here -- and `shutdown()`
+   * uninstalls the hooks, which would break its permission routing mid-run.
+   */
+  msSinceHookActivity: number
   /** A Vorn desktop is driving this server through the browser/device bridge. */
   bridgeAttached: boolean
   /** Agents blocked on a permission prompt. Somebody is mid-decision. */
@@ -52,6 +62,16 @@ export interface IdleSnapshot {
    * does its work here.
    */
   enabledSchedules: number
+
+  /**
+   * Whether this server is bound wide, to be reached by something that is not
+   * this machine.
+   *
+   * Read every tick rather than captured at boot: Network Access is an ordinary
+   * toggle and the socket is rebound live, so a server can become -- or stop
+   * being -- a phone's only way in at any point after it started.
+   */
+  servesOthers: boolean
 }
 
 export interface IdlePolicy {
@@ -71,7 +91,21 @@ export interface IdlePolicy {
 
 export const DEFAULT_IDLE_WINDOW_MS = 30 * 60 * 1000
 
-export type IdleVerdict = { exit: true } | { exit: false; because: string }
+/** Named so the verdict can tell this hold apart from the ones that mean work. */
+const ATTACHED_DESKTOP = 'a desktop is attached'
+
+export type IdleVerdict =
+  | { exit: true }
+  /**
+   * `restartsCountdown` is not the same question as "is something holding it".
+   *
+   * Work restarts it: an agent that ran for three hours after the app closed
+   * must get the full window afterwards, not none of it. Presence does not --
+   * the attached-desktop flag is already gated on the client clock, and letting
+   * it also reset the countdown would mean a slept laptop needs two windows to
+   * release instead of the one that branch promises.
+   */
+  | { exit: false; because: string; restartsCountdown: boolean }
 
 /**
  * Is there anything at all to stay up for?
@@ -85,12 +119,28 @@ export function whatHoldsItOpen(s: IdleSnapshot, policy: IdlePolicy): string | n
   // seconds after its agent stops typing; that is a live terminal with a shell
   // in it, and `getActiveSessionsForWorktree` filters them out for a different
   // question entirely (whether a worktree is safe to delete).
+  // First, because it is the one hold that is about what this server is for
+  // rather than what it is doing. Nothing restarts a server a phone reaches, and
+  // "my phone could not reach my Mac this morning" is worse than a process that
+  // outstays its welcome. Said out loud in Settings, since it makes the promise
+  // there conditional.
+  if (s.servesOthers) return 'this server is bound to be reached from the network'
   if (s.sessions > 0) return `${s.sessions} session(s)`
   // Over-conservative on purpose: `headless-manager` keeps exited entries for
   // thirty seconds, so this can read non-zero just after one finishes. Waiting
   // an extra half-minute is the cheap direction to be wrong in.
   if (s.headless > 0) return `${s.headless} headless agent(s)`
-  if (s.bridgeAttached) return 'a desktop is attached'
+  // Presence, but never presence alone. Any authenticated socket may claim the
+  // bridge and there is no heartbeat behind it, so a laptop that slept with Vorn
+  // open leaves `isConnected` true for ever. An attached desktop that has said
+  // nothing for the whole window is not attached, whatever the flag says -- and a
+  // real one talks constantly, so this costs a live app nothing.
+  //
+  // Measured against the client clock rather than the caller's combined one:
+  // that clock is the only one this veto cannot itself hold still. Anything
+  // derived from "when the last hold let go" is reset by this very branch, so a
+  // stuck bridge would keep the countdown at zero and never reach its own escape.
+  if (s.bridgeAttached && s.msSinceClientActivity < policy.windowMs) return ATTACHED_DESKTOP
   if (s.pendingPermissions > 0) return 'an agent is waiting on a permission'
   if (s.pendingPairings > 0) return 'a pairing is in progress'
   if (s.connectorLeases > 0) return 'connector work is outstanding'
@@ -103,41 +153,41 @@ export function whatHoldsItOpen(s: IdleSnapshot, policy: IdlePolicy): string | n
 /**
  * Whether to stop now.
  *
- * The client test is a *timestamp*, not a count, because MCP opens a fresh
- * socket for every RPC call: the connected count oscillates between zero and one
- * while an agent is working, and sampling it at the wrong instant reads a busy
- * server as an empty one. The same timestamp covers the opposite failure — there
- * is no heartbeat on these sockets, so a half-open one would otherwise pin the
- * count at one for ever and the server would never exit.
+ * `quietForMs` is how long nothing has wanted this server, and the caller owns
+ * it because it is the later of two clocks. One is when the last thing let go:
+ * an agent that worked for three hours after the app closed must not leave the
+ * server exiting on the very next tick with none of the grace the setting
+ * implies. Another is when a hook last fired, which is the only trace an agent
+ * started outside Vorn leaves here. The last is when a client spoke, and it is a
+ * *duration* rather
+ * than a count because MCP opens a fresh socket per RPC call -- the connected
+ * count oscillates between zero and one while an agent works, and sampling it at
+ * the wrong instant reads a busy server as an empty one. That same duration is
+ * the only escape from the opposite failure: these sockets have no heartbeat, so
+ * a half-open one would pin any count at one for ever.
+ *
+ * This is the whole decision. `IdleWatch` supplies the clocks and acts on the
+ * answer; it does not get a second opinion.
  */
-export function shouldExitWhenIdle(s: IdleSnapshot, policy: IdlePolicy): IdleVerdict {
+export function shouldExitWhenIdle(
+  s: IdleSnapshot,
+  policy: IdlePolicy,
+  quietForMs: number
+): IdleVerdict {
   const holding = whatHoldsItOpen(s, policy)
-  if (holding) return { exit: false, because: holding }
-  if (s.msSinceClientActivity < policy.windowMs) {
+  if (holding) {
+    return { exit: false, because: holding, restartsCountdown: holding !== ATTACHED_DESKTOP }
+  }
+  if (quietForMs < policy.windowMs) {
     return {
       exit: false,
-      because: `quiet for only ${Math.round(s.msSinceClientActivity / 1000)}s`
+      because: `quiet for only ${Math.round(quietForMs / 1000)}s`,
+      restartsCountdown: false
     }
   }
   return { exit: true }
 }
 
-/**
- * The countdown that acts on the decision above.
- *
- * Deliberately dumb: it polls the snapshot, and the only judgement it makes is
- * the one `shouldExitWhenIdle` hands back. Two rules it does enforce, because
- * both are about *when* rather than *whether*:
- *
- * The exit is explicit, never a matter of letting the event loop drain. The
- * scheduler's inbox interval is not unref'd, so this process would sit there
- * for ever regardless of how empty it is.
- *
- * And the snapshot is taken twice — once to decide, once immediately before
- * acting. `shutdown()` calls `killAll()` on terminals and headless agents, so a
- * countdown that expires in the same instant a session starts would destroy it.
- * The second look costs nothing and closes that window.
- */
 export class IdleWatch {
   private timer: NodeJS.Timeout | null = null
 
@@ -177,26 +227,25 @@ export class IdleWatch {
 
   tick(): IdleVerdict {
     const snapshot = this.snapshot()
-    const holding = whatHoldsItOpen(snapshot, this.policy)
-    if (holding) {
-      // Busy again: the clock restarts from whenever this ends, not from
-      // whenever a client last spoke. Otherwise an agent working for three hours
-      // after the window closed would leave the server exiting on the very next
-      // tick, with none of the grace the setting implies.
-      this.quietSince = null
-      return { exit: false, because: holding }
-    }
-    this.quietSince ??= Date.now()
+    // The most recent of the clocks wins. A client that spoke means somebody is
+    // out there even with nothing running; a session that ended means the work
+    // only just stopped; a hook that fired means an agent is mid-run somewhere
+    // this server can otherwise not see.
+    const sinceLetGo = this.quietSince === null ? 0 : Date.now() - this.quietSince
+    const quietFor = Math.min(
+      sinceLetGo,
+      snapshot.msSinceClientActivity,
+      snapshot.msSinceHookActivity
+    )
 
-    // Two clocks, and the later one wins. A client that spoke recently means
-    // somebody is out there even with nothing running; a session that ended
-    // recently means the work only just stopped.
-    const quietFor = Math.min(Date.now() - this.quietSince, snapshot.msSinceClientActivity)
-    if (quietFor < this.policy.windowMs) {
-      return { exit: false, because: `quiet for only ${Math.round(quietFor / 1000)}s` }
+    const verdict = shouldExitWhenIdle(snapshot, this.policy, quietFor)
+    if (!verdict.exit) {
+      // Busy restarts the clock; merely quiet-but-not-long-enough leaves it run.
+      if (verdict.restartsCountdown) this.quietSince = null
+      else this.quietSince ??= Date.now()
+      return verdict
     }
-
     this.onIdle()
-    return { exit: true }
+    return verdict
   }
 }

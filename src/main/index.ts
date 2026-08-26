@@ -20,7 +20,8 @@ import {
   detachFromServer,
   getServerBridge,
   getLastAdoptionRefusal,
-  AdoptionRefusedError
+  AdoptionRefusedError,
+  probeSessions
 } from './server/server-launcher'
 import { readHostSettings } from './server/host-store'
 import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
@@ -530,7 +531,14 @@ app.whenReady().then(async () => {
     const local = readPortFile()
     if (local) {
       mainWindow.webContents.once('did-finish-load', () => {
-        mainWindow?.webContents.send(LOCAL_SERVER_RUNNING_CHANNEL, { sessions: null })
+        // Asked rather than assumed, and the window is not held waiting for the
+        // answer: a server that does not reply leaves the count null, which the
+        // toast already words as "Sessions are".
+        void probeSessions(local.port)
+          .catch(() => null)
+          .then((sessions) => {
+            mainWindow?.webContents.send(LOCAL_SERVER_RUNNING_CHANNEL, { sessions })
+          })
       })
     }
   }
