@@ -6,7 +6,7 @@ import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { HookEvent } from '@vornrun/shared/types'
 import log from './logger'
-import { HOOK_OWNER_FILE, mayClaimHooks, parseHookOwner } from './hook-ownership'
+import { HOOK_OWNER_FILE, mayClaimHooks, pidIsAlive, readHookOwnerFile } from './hook-ownership'
 
 const PORT_FILE = path.join(os.homedir(), '.vorn', 'port')
 const TOKEN_FILE = path.join(os.homedir(), '.vorn', 'token')
@@ -244,26 +244,8 @@ export class HookServer extends EventEmitter {
    * while another Vorn is running is what silently redirected its hooks here.
    */
   private claim(): void {
-    let raw: string | null = null
-    try {
-      raw = fs.readFileSync(HOOK_OWNER_FILE, 'utf-8')
-    } catch {
-      // Absent or unreadable, which reads as unowned.
-    }
-
-    const owner = parseHookOwner(raw)
-    this.owner = mayClaimHooks({
-      owner,
-      selfPid: process.pid,
-      isAlive: (pid) => {
-        try {
-          process.kill(pid, 0) // a probe, not a signal — throws if the pid is gone
-          return true
-        } catch {
-          return false
-        }
-      }
-    })
+    const owner = readHookOwnerFile()
+    this.owner = mayClaimHooks({ owner, selfPid: process.pid, isAlive: pidIsAlive })
 
     if (!this.owner) {
       log.info(
@@ -314,11 +296,21 @@ export class HookServer extends EventEmitter {
     this.server?.close()
     this.server = null
 
-    // Only what we wrote. These files name one live server, and deleting another
+    // Only what we wrote, confirmed against the record rather than against a flag
+    // we set at startup. These files name one live server, and deleting another
     // instance's copies left the running app advertising a port and a token that
-    // nothing was listening on.
+    // nothing was listening on -- so if the record has moved on, it is not ours
+    // to clear.
+    const owner = readHookOwnerFile()
     if (!this.owner) return
     this.owner = false
+    if (owner && owner.pid !== process.pid) {
+      log.info(
+        `[hooks] the registration is now held by pid ${owner.pid}, so this server ` +
+          'left the shared files alone'
+      )
+      return
+    }
 
     for (const file of [PORT_FILE, TOKEN_FILE, HOOK_OWNER_FILE]) {
       try {

@@ -67,17 +67,15 @@ describe('a null where a number was expected', () => {
    * silently and handed `listen()` a null port, which it reads as "any port" —
    * an ephemeral one produced by a value that meant "nothing set".
    */
-  const nothing = null as unknown as undefined
-
   it('reads a null remembered port as nothing remembered', () => {
-    expect(resolveServerPort({ remembered: nothing, fallback: DEFAULT_SERVER_PORT })).toBe(
+    expect(resolveServerPort({ remembered: null, fallback: DEFAULT_SERVER_PORT })).toBe(
       DEFAULT_SERVER_PORT
     )
   })
 
   it('reads a null explicit port as no flag given', () => {
     expect(
-      resolveServerPort({ explicit: nothing, remembered: 50091, fallback: DEFAULT_SERVER_PORT })
+      resolveServerPort({ explicit: null, remembered: 50091, fallback: DEFAULT_SERVER_PORT })
     ).toBe(50091)
   })
 
@@ -89,7 +87,7 @@ describe('a null where a number was expected', () => {
   })
 
   it('settles a first run whose remembered port is null and whose default is taken', () => {
-    expect(shouldRememberPort({ remembered: nothing, fellBack: true })).toBe(true)
+    expect(shouldRememberPort({ remembered: null, fellBack: true })).toBe(true)
   })
 })
 

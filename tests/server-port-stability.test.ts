@@ -71,8 +71,9 @@ function launch(dir: string): Promise<number> {
     })
     child = proc
     let out = ''
+    let err = ''
     const timer = setTimeout(
-      () => reject(new Error(`no port announced; stdout was: ${out}`)),
+      () => reject(new Error(`no port announced after 60s; stdout was: ${out}`)),
       60_000
     )
 
@@ -85,9 +86,19 @@ function launch(dir: string): Promise<number> {
       clearTimeout(timer)
       resolve(Number(found[1]))
     })
-    proc.on('error', (err) => {
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      err += chunk.toString()
+    })
+    // Without this, a server that dies on a bad argument or a syntax error sits
+    // out the full minute and then reports only that no port arrived. Failing
+    // when it exits says what actually went wrong, while it is still legible.
+    proc.on('exit', (code) => {
       clearTimeout(timer)
-      reject(err)
+      reject(new Error(`server exited with code ${code} before announcing a port: ${err || out}`))
+    })
+    proc.on('error', (cause) => {
+      clearTimeout(timer)
+      reject(cause)
     })
   })
 }
@@ -134,14 +145,18 @@ async function stop(): Promise<void> {
   const pid = proc.pid
   await new Promise<void>((resolve) => {
     let settled = false
+    // Cleared on the way out: a timer still pending keeps the runner alive after
+    // the test has finished, and would fire SIGKILL at a process that exited
+    // cleanly ten seconds earlier.
+    const timer = setTimeout(() => done(), 10_000)
     const done = () => {
       if (settled) return
       settled = true
+      clearTimeout(timer)
       resolve()
     }
     proc.once('exit', done)
     killGroup(proc, 'SIGTERM')
-    setTimeout(done, 10_000)
   })
 
   if (pid === undefined) return
@@ -154,16 +169,23 @@ async function stop(): Promise<void> {
 }
 
 describe('a server relaunched on the same data directory', () => {
-  it('comes back on the port it used before', async () => {
-    sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-port-'))
+  // Signalling a process group by negative pid is POSIX-only, as is the
+  // SIGTERM/SIGKILL pair it is sent with. `default-shell` and `shell-integration`
+  // skip the same way rather than pretending to cover a platform they do not.
+  it.skipIf(process.platform === 'win32')(
+    'comes back on the port it used before',
+    async () => {
+      sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-port-'))
 
-    const first = await launch(sandbox)
-    await stop()
-    const second = await launch(sandbox)
+      const first = await launch(sandbox)
+      await stop()
+      const second = await launch(sandbox)
 
-    // Not merely "a port" — the same one. A device paired to the first is still
-    // paired after the second, which is the whole reason any of this exists.
-    expect(second).toBe(first)
-    expect(first).toBeGreaterThan(0)
-  }, 180_000)
+      // Not merely "a port" — the same one. A device paired to the first is still
+      // paired after the second, which is the whole reason any of this exists.
+      expect(second).toBe(first)
+      expect(first).toBeGreaterThan(0)
+    },
+    180_000
+  )
 })

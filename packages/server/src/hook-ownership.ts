@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 
@@ -43,6 +44,33 @@ export function parseHookOwner(raw: string | null | undefined): HookOwner | null
     return { port: parsed.port, pid: parsed.pid }
   } catch {
     return null
+  }
+}
+
+/** The record on disk, or null for absent, unreadable or malformed. */
+export function readHookOwnerFile(): HookOwner | null {
+  try {
+    return parseHookOwner(fs.readFileSync(HOOK_OWNER_FILE, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether a pid belongs to a process that still exists.
+ *
+ * `EPERM` means it does and we are not allowed to signal it — a Vorn running as
+ * another user. Reading that as "dead", which any bare try/catch around
+ * `process.kill` does, is the one error here that loses data: it would claim the
+ * registration out from under a live instance, which is the whole failure this
+ * file exists to prevent.
+ */
+export function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0) // a probe, not a signal
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
   }
 }
 

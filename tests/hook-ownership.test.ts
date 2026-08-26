@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   mayClaimHooks,
   mayReleaseHooks,
-  parseHookOwner
+  parseHookOwner,
+  pidIsAlive
 } from '../packages/server/src/hook-ownership'
 
 /**
@@ -39,6 +40,26 @@ describe('reading the ownership record', () => {
 
   it('reads a well-formed record', () => {
     expect(parseHookOwner('{"port":56432,"pid":7116}')).toEqual({ port: 56432, pid: 7116 })
+  })
+})
+
+describe('deciding whether a pid is still there', () => {
+  it('sees this very process', () => {
+    expect(pidIsAlive(process.pid)).toBe(true)
+  })
+
+  it('sees through a pid that is gone', () => {
+    // Pid 0 has a special meaning to `kill` and is never a process to probe;
+    // 2^22 is above every platform's default pid_max, so nothing owns it.
+    expect(pidIsAlive(4_194_304)).toBe(false)
+  })
+
+  it('counts a process it may not signal as alive', () => {
+    // `process.kill` throws EPERM when the process exists and belongs to someone
+    // else — a Vorn running as another user. A bare try/catch reads that as dead
+    // and claims the registration out from under it, which is the one error here
+    // that loses somebody's work. Pid 1 is `launchd`/`init`, owned by root.
+    expect(pidIsAlive(1)).toBe(true)
   })
 })
 

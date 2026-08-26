@@ -98,9 +98,16 @@ export function parseServerArgs(argv: string[]): ServerArgs {
  */
 export function resolveServerPort(input: {
   /** `--port`, which a person typed and which therefore wins. */
-  explicit?: number
-  /** `defaults.serverPort` — the port this install last settled on. */
-  remembered?: number
+  explicit?: number | null
+  /**
+   * `defaults.serverPort` — the port this install last settled on.
+   *
+   * Null is in the type because it is in the data: defaults are read back through
+   * `JSON.parse(row.value)`, so a stored JSON null arrives as one. Declaring only
+   * `number | undefined` would have made every caller that knows better reach for
+   * a cast, which is a worse way to say the same thing.
+   */
+  remembered?: number | null
   /** The constant, so a first run is predictable rather than random. */
   fallback: number
 }): number {
@@ -143,8 +150,8 @@ export function resolveServerPort(input: {
  *   and the install settles on it.
  */
 export function shouldRememberPort(input: {
-  explicit?: number
-  remembered?: number
+  explicit?: number | null
+  remembered?: number | null
   fellBack: boolean
 }): boolean {
   if (input.explicit != null) return false

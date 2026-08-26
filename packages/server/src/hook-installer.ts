@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 
-import { HOOK_OWNER_FILE, mayReleaseHooks, parseHookOwner } from './hook-ownership'
+import { mayReleaseHooks, readHookOwnerFile } from './hook-ownership'
 
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json')
 const VORN_HEADER = 'X-Vorn'
@@ -88,16 +88,11 @@ export function uninstallHooks(): void {
     // Only a registration we wrote. The old check compared ports, and only when
     // a port had been recorded — so an instance that never installed anything
     // fell straight through and removed the running app's entries on its way out.
-    let raw: string | null = null
-    try {
-      raw = fs.readFileSync(HOOK_OWNER_FILE, 'utf-8')
-    } catch {
-      // Gone, which is what our own shutdown leaves behind.
-    }
-
     if (
       !mayReleaseHooks({
-        owner: parseHookOwner(raw),
+        // Absent is what our own shutdown leaves behind, which `mayReleaseHooks`
+        // reads together with whether we installed anything at all.
+        owner: readHookOwnerFile(),
         selfPid: process.pid,
         installed: installedPort !== null
       })
