@@ -445,11 +445,12 @@ app.whenReady().then(async () => {
   ipcMain.on(IPC.WINDOW_CLOSE, () => mainWindow?.close())
   ipcMain.handle(IPC.WINDOW_IS_MAXIMIZED, () => mainWindow?.isMaximized() ?? false)
 
-  createMenu(toggleWidget, async () => {
-    // Ends the sessions and the server on purpose, then closes the app, which is
-    // the only combination that leaves nothing running. Distinct from quitting,
-    // which now leaves everything running.
-    await stopServer()
+  createMenu(toggleWidget, () => {
+    // Ends the sessions and the server on purpose. Expressed as "quit, but do
+    // not keep them" rather than as its own shutdown, so there is exactly one
+    // path that stops a server and exactly one place that holds the quit open
+    // until it has finished.
+    keepSessionsRunning = false
     app.quit()
   })
   createWindow()
@@ -614,7 +615,10 @@ updateManager.onQuitForUpdate(() => {
   isQuitting = true
 })
 
-app.on('before-quit', async () => {
+/** Set once the deliberate shutdown has finished, so the re-entered quit proceeds. */
+let serverStopped = false
+
+app.on('before-quit', async (event) => {
   isQuitting = true
   globalShortcut.unregisterAll()
   updateManager.stop()
@@ -630,11 +634,25 @@ app.on('before-quit', async () => {
   deviceRegistry.shutdownOwnedDevices()
   if (keepSessionsRunning) {
     // A window closing, not a process dying. The agents keep working and the
-    // next launch adopts the same server.
+    // next launch adopts the same server. Synchronous, so nothing here races the
+    // quit that is already underway.
     detachFromServer()
     return
   }
-  await stopServer()
+
+  // Ending the sessions has to actually finish. Electron does not await this
+  // handler, and `stopServer` waits on a five second RPC before it signals --
+  // so without holding the quit open, the app could exit first and leave the
+  // detached server running, which is the opposite of what was asked for. This
+  // did not matter while the server died with its parent.
+  if (serverStopped) return
+  event.preventDefault()
+  try {
+    await stopServer()
+  } finally {
+    serverStopped = true
+    app.quit()
+  }
 })
 
 app.on('window-all-closed', () => {

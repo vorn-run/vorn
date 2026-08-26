@@ -68,6 +68,16 @@ describe('judging a running server', () => {
     expect(verdict).toMatchObject({ kind: 'refuse', reason: 'different-build' })
   })
 
+  it('refuses a server that does not report its pid', () => {
+    // Without one there is no way to tell a dead server from a reconnecting
+    // bridge, and no handle left for stopping one this app did not spawn.
+    const { pid: _p, ...noPid } = hello()
+    expect(judgeAdoption(noPid as ServerHello, self)).toMatchObject({
+      kind: 'refuse',
+      reason: 'no-identity'
+    })
+  })
+
   it('refuses a server that does not say who it is', () => {
     // A build old enough to predate these fields cannot be told apart from one on
     // another data directory. Declining costs a spawn; guessing costs a database.

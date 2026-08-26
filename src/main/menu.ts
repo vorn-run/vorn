@@ -5,7 +5,7 @@ const isMac = process.platform === 'darwin'
 
 export function createMenu(
   onToggleWidget?: () => void,
-  onStopServer?: () => Promise<void> | void
+  onStopServer?: () => void
 ): void {
   app.setAboutPanelOptions({
     applicationName: 'Vorn',
@@ -49,7 +49,7 @@ export function createMenu(
           // anything. Quitting is a window closing; this is the switch.
           label: 'Stop Sessions and Server',
           click: (): void => {
-            void onStopServer?.()
+            onStopServer?.()
           }
         },
         { type: 'separator' },

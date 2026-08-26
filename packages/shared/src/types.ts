@@ -1086,8 +1086,9 @@ export interface AppConfig {
      * With this on, quitting closes a window and nothing else; the next launch
      * reconnects to the sessions that were already running.
      *
-     * Defaults to on. Turning it off restores the old behaviour exactly, which
-     * is also what the "End them instead" action on the quit notice does once.
+     * Defaults to on. Turning it off restores the old behaviour exactly, and
+     * "Stop Sessions and Server" in the File menu does it once without changing
+     * the setting.
      */
     keepSessionsRunning?: boolean
     /**

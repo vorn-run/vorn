@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
-import path from 'node:path'
+import { closeSync, mkdirSync, openSync } from 'node:fs'
+import path, { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { app } from 'electron'
 import log from '../logger'
@@ -85,23 +85,6 @@ function buildChannel(): 'dev' | 'packaged' {
  */
 function identityEnv(): Record<string, string> {
   return { VORN_BUILD_CHANNEL: buildChannel(), VORN_APP_VERSION: app.getVersion() }
-}
-
-/**
- * Let go of a detached child's pipes once it has reported for duty.
- *
- * Both are `Socket`s, and an open one references this process's event loop --
- * `child.unref()` does not cover them, so leaving either attached keeps Electron
- * alive at quit waiting on a server that is never going to close them.
- *
- * They exist at all for the reason abduco keeps a pipe across its own fork: a
- * daemon that fails during startup has nowhere to say so, and a silent failure
- * to start is far worse to debug than a noisy one. So they stay open exactly as
- * long as the answer takes.
- */
-function releaseChildStreams(child: ChildProcess): void {
-  child.stdout?.destroy()
-  child.stderr?.destroy()
 }
 
 /**
@@ -201,6 +184,7 @@ function readDevPort(): string | undefined {
  */
 async function spawnServer(): Promise<number> {
   lastSpawnAt = Date.now()
+  const dataDir = ensureDataDir()
   const serverEntryPoint = resolveServerEntry()
   log.info(`[launcher] starting server: ${serverEntryPoint}`)
 
@@ -272,10 +256,6 @@ async function spawnServer(): Promise<number> {
       child.kill('SIGKILL')
       throw err
     })
-    // Streams released for the same reason as production -- an open pipe refs
-    // this process's event loop -- but the child is left ref'd, because in dev
-    // it is meant to go when the app goes.
-    releaseChildStreams(child)
   } else {
     // Deliberately NOT utilityProcess.fork: a utility process is tied to this
     // app's lifetime by design, so it can never outlive the window -- which is
@@ -294,8 +274,21 @@ async function spawnServer(): Promise<number> {
     // here and passed through the environment for the server to use.
     const asarUnpacked = path.join(app.getAppPath() + '.unpacked', 'node_modules')
 
+    // Straight to a file, not to pipes.
+    //
+    // A pipe held by this process dies with this process, and the server is
+    // meant to outlive it: the next write to stderr after that raises EPIPE, and
+    // the server installs no uncaughtException handler, so it exits. Its logger
+    // writes to `process.stderr` on every request, so the window is one log line
+    // wide. Measured both ways -- destroying the parent's end and merely
+    // unref'ing it both killed the child on its next write.
+    //
+    // A file descriptor does not care that the parent is gone, and the startup
+    // diagnostics a pipe existed to carry end up somewhere durable rather than
+    // in a log that stops the moment the app does.
+    const logFd = openSync(join(dataDir, SERVER_LOG_FILENAME), 'a')
     const child = spawn(process.execPath, [serverEntryPoint], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', logFd, logFd],
       detached: true,
       // A daemon must not hold open a directory that can be deleted underneath
       // it, so not the app bundle and not a worktree. The data dir is where the
@@ -303,7 +296,7 @@ async function spawnServer(): Promise<number> {
       // to serve -- but on a first run it does not exist yet: the *server*
       // creates it, and it has not started. `spawn` with a missing cwd fails
       // ENOENT, so it is created here first.
-      cwd: ensureDataDir(),
+      cwd: dataDir,
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -315,16 +308,25 @@ async function spawnServer(): Promise<number> {
       }
     })
 
+    // Closed here as soon as the child holds its own copy; leaving it open would
+    // keep a descriptor in this process for a file only the server writes to.
+    closeSync(logFd)
+
     serverProcess = child
     child.on('exit', (code) => {
       onServerExit(`code=${code}`)
     })
+    child.on('error', (err) => {
+      log.error({ err }, '[launcher] could not start the server')
+    })
 
-    port = await readServerPort(child).catch((err) => {
+    // Nothing to read from: the port arrives through the file the server writes
+    // for MCP, and the same watcher that waits for it proves the server got as
+    // far as listening.
+    port = await waitForPublishedPort(child).catch((err) => {
       child.kill('SIGKILL')
       throw err
     })
-    releaseChildStreams(child)
     child.unref()
   }
 
@@ -400,8 +402,8 @@ function onServerExit(detail: string): void {
 
 /** Long enough for a busy event loop, short enough not to stall a cold launch. */
 const ADOPT_HELLO_TIMEOUT_MS = 3_000
-/** How long a socket must stay open to count as accepted. Loopback, so short. */
-const ADOPT_SETTLE_MS = 250
+/** How long to wait for the round trip that proves the credential was accepted. */
+const ADOPT_AUTH_TIMEOUT_MS = 5_000
 
 /**
  * Connect to a server that is already running and decide whether to keep it.
@@ -448,21 +450,14 @@ async function tryAdopt(
   // greeting resolves and proves nothing -- an earlier version of this checked
   // exactly that and could never have been false.
   //
-  // What a rejection does do is close the socket promptly, so the honest test is
-  // whether it stays open. On loopback, against a server that has already sent a
-  // frame, a short settle is enough.
-  const rejected = await new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => {
-      candidate.off('disconnected', onDrop)
-      resolve(false)
-    }, ADOPT_SETTLE_MS)
-    function onDrop(): void {
-      clearTimeout(timer)
-      resolve(true)
-    }
-    candidate.once('disconnected', onDrop)
-  })
-  if (rejected || !candidate.isConnected) {
+  // A timer would only guess. An authenticated round trip is the question
+  // itself: `config:load` is refused outright without a credential, so a reply
+  // to it *is* the proof, and it is a read this app makes moments later anyway.
+  const accepted = await candidate
+    .request('config:load', undefined, ADOPT_AUTH_TIMEOUT_MS)
+    .then(() => true)
+    .catch(() => false)
+  if (!accepted) {
     candidate.close()
     log.warn('[launcher] the running server did not accept this app; starting our own')
     return null
@@ -570,8 +565,18 @@ export function detachFromServer(): void {
 
   bridge?.close()
   bridge = null
-  // Dropped without killing. The child is unref'd and in its own process group,
-  // so nothing here holds it and nothing here will end it.
+
+  // In dev the child is not detached, and on POSIX nothing kills a plain child
+  // when its parent exits -- it is simply reparented. Walking away would leave
+  // the `npx tsx` server running for the next `yarn dev` to adopt, which is the
+  // stale-source trap the dev spawn is written to avoid. Dev keeps the old
+  // lifetime in full: the server goes when the app goes.
+  if (serverProcess && process.env.ELECTRON_RENDERER_URL) {
+    serverProcess.kill('SIGTERM')
+  }
+
+  // Otherwise dropped without killing: a packaged child is unref'd and in its
+  // own process group, so nothing here holds it and nothing here will end it.
   serverProcess = null
   adoptedPid = null
 }
@@ -622,6 +627,17 @@ export async function stopServer(): Promise<void> {
       }
     }
     serverProcess = null
+  } else if (adoptedPid !== null && isPidAlive(adoptedPid)) {
+    // An adopted server has no child handle, so the RPC above was the only way
+    // to ask -- and if it threw or timed out, nothing has happened yet. Without
+    // this the user picks "Stop Sessions and Server", the app quits, and every
+    // session carries on with nothing to say so. The pid is the handle left.
+    log.warn('[launcher] the adopted server did not answer; signalling it directly')
+    try {
+      process.kill(adoptedPid, 'SIGTERM')
+    } catch (err) {
+      log.warn({ err }, '[launcher] could not signal the adopted server')
+    }
   }
   adoptedPid = null
 }
@@ -635,6 +651,53 @@ function resolveServerEntry(): string {
   }
   return path.join(process.resourcesPath, 'server', 'index.cjs')
 }
+
+/**
+ * Wait for a server we just spawned to publish its port.
+ *
+ * Only ever satisfied by a file naming *this* child. The same file is what
+ * `launchServer` reads before deciding whether to adopt, so a launch that
+ * declined an incumbent -- wrong protocol, wrong build -- would otherwise find
+ * the incumbent's record still sitting there and resolve to its port, handing
+ * the bridge a credential that server never had while the child we actually
+ * started ran unwatched somewhere else.
+ */
+function waitForPublishedPort(child: ChildProcess): Promise<number> {
+  const deadline = Date.now() + SPAWN_READY_TIMEOUT_MS
+  return new Promise((resolve, reject) => {
+    let exited: number | null = null
+    child.once('exit', (code) => {
+      exited = code ?? -1
+    })
+
+    const poll = (): void => {
+      const published = readPortFile()
+      if (published && published.pid === child.pid) {
+        resolve(published.port)
+        return
+      }
+      if (exited !== null) {
+        reject(new Error(`Server exited before reporting port (code=${exited})`))
+        return
+      }
+      if (Date.now() >= deadline) {
+        reject(
+          new Error(
+            `Timeout waiting for the server to start. Its output is in ${SERVER_LOG_FILENAME}.`
+          )
+        )
+        return
+      }
+      setTimeout(poll, SPAWN_POLL_MS).unref?.()
+    }
+    poll()
+  })
+}
+
+/** Where a detached server's stdout and stderr go, under the data directory. */
+const SERVER_LOG_FILENAME = 'server.log'
+const SPAWN_READY_TIMEOUT_MS = 20_000
+const SPAWN_POLL_MS = 100
 
 /**
  * Wait for the server to say which port it took.

@@ -25,9 +25,18 @@ import {
  * declines and says so — it never resolves the disagreement by killing.
  */
 
-/** The data directory both the server and MCP resolve to, unless --data-dir moved it. */
+/**
+ * The data directory the server this app spawns will use.
+ *
+ * Deliberately NOT `VORN_DATA_DIR`, even though `packages/mcp` reads that. The
+ * launcher never passes `--data-dir`, so its server always resolves `~/.vorn` --
+ * and the server injects `VORN_DATA_DIR` into everything it launches, so a Vorn
+ * started from a terminal *inside* a Vorn session inherits a value describing
+ * somebody else's data directory. Honouring it here would send the launcher
+ * looking for a port file that its own server is never going to write.
+ */
 export function resolveDataDir(): string {
-  return process.env.VORN_DATA_DIR || path.join(os.homedir(), '.vorn')
+  return path.join(os.homedir(), '.vorn')
 }
 
 export type PortFile = { port: number; pid?: number }
@@ -107,7 +116,15 @@ export function judgeAdoption(
   // A server old enough to predate these fields cannot be told apart from one on
   // another data directory, so it is not adoptable. Declining costs a spawn;
   // guessing costs two servers on one database.
-  if (hello.dataDir === undefined || hello.buildChannel === undefined) {
+  // The pid is required, not decorative: it is the only way to tell a server
+  // that died from a bridge that is merely reconnecting, and the only handle
+  // left for stopping one this app did not spawn. Adopting without it yields a
+  // server that can be neither recovered nor ended.
+  if (
+    hello.dataDir === undefined ||
+    hello.buildChannel === undefined ||
+    typeof hello.pid !== 'number'
+  ) {
     return {
       kind: 'refuse',
       reason: 'no-identity',

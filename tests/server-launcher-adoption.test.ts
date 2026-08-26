@@ -23,10 +23,13 @@ const published = {
   /** Whether the adopted server's process is still alive, when asked. */
   pidAlive: true,
   /** Whether the running server closes the socket after greeting us. */
-  rejectsCredential: false
+  rejectsCredential: false,
+  /** Set once the fake spawned server has "published" its port file. */
+  spawnedPid: null as number | null
 }
 
 const spawned: { cmd: string; opts: Record<string, unknown> }[] = []
+const spawnedChildren: EventEmitter[] = []
 const bridges: FakeBridge[] = []
 
 class FakeBridge extends EventEmitter {
@@ -48,18 +51,16 @@ class FakeBridge extends EventEmitter {
       this.isConnected = true
       this.emit('connected')
       if (published.hello) this.emit('hello', published.hello)
-      if (published.rejectsCredential) {
-        // What a 4001/4002 close looks like from here: open, greeted, dropped.
-        setTimeout(() => {
-          this.isConnected = false
-          this.emit('disconnected')
-        }, 5)
-      }
     })
   }
   async request(method: string): Promise<unknown> {
     this.requests.push(method)
-    return undefined
+    // `config:load` is what the launcher uses to prove the credential was
+    // accepted; a server that refuses this app answers it with a rejection.
+    if (method === 'config:load' && published.rejectsCredential) {
+      throw new Error('not authenticated')
+    }
+    return {}
   }
   close(): void {
     this.closed = true
@@ -90,31 +91,51 @@ vi.mock('../src/main/server/server-adoption', async (importOriginal) => {
   return {
     ...actual,
     resolveDataDir: () => '/Users/x/.vorn',
-    readPortFile: () => (published.port === null ? null : { port: published.port, pid: 999 }),
+    readPortFile: () =>
+      published.port === null
+        ? null
+        : { port: published.port, pid: published.spawnedPid ?? 999 },
     readLocalToken: () => published.token,
     isPidAlive: () => published.pidAlive
   }
 })
 
 const madeDirs: string[] = []
+const opened: string[] = []
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
-  return { ...actual, mkdirSync: (dir: string) => void madeDirs.push(dir) }
+  return {
+    ...actual,
+    mkdirSync: (dir: string) => void madeDirs.push(dir),
+    openSync: (file: string) => {
+      opened.push(String(file))
+      return 99
+    },
+    closeSync: () => {}
+  }
 })
 
 vi.mock('node:child_process', () => ({
   spawn: (cmd: string, _args: string[], opts: Record<string, unknown>) => {
     spawned.push({ cmd, opts })
     const child = new EventEmitter() as EventEmitter & Record<string, unknown>
+    child.pid = 4242
     const stdout = new EventEmitter() as EventEmitter & Record<string, unknown>
     stdout.destroy = (): void => {}
-    // readline reads this; emitting the port line is what the launcher waits on.
+    stdout.unref = (): void => {}
+    // Only the dev path reads this; the packaged path waits on the port file.
     setImmediate(() => stdout.emit('data', JSON.stringify({ port: 51000 }) + '\n'))
     child.stdout = stdout
     child.stderr = null
     child.unref = (): void => {}
     child.killed = false
     child.kill = (): void => {}
+    spawnedChildren.push(child)
+    // What the server does once it is listening: publish {port, pid}.
+    setImmediate(() => {
+      published.port = 51000
+      published.spawnedPid = 4242
+    })
     return child
   }
 }))
@@ -147,13 +168,16 @@ beforeEach(() => {
   // Only Electron sets this, and the packaged entry point is resolved from it.
   ;(process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = '/app/Resources'
   spawned.length = 0
+  spawnedChildren.length = 0
   madeDirs.length = 0
+  opened.length = 0
   bridges.length = 0
   published.port = null
   published.token = 'local-secret'
   published.hello = null
   published.pidAlive = true
   published.rejectsCredential = false
+  published.spawnedPid = null
   hostSettings.value = { mode: 'local', url: '', token: undefined }
 })
 
@@ -384,10 +408,10 @@ describe('the three ways adoption used to go quietly wrong', () => {
     expect(env.SECRET_VORN_BOOTSTRAP_TOKEN).toBe('local-secret')
   })
 
-  it('declines a server that greets us and then drops the socket', async () => {
-    // A rejected credential does not fail the connect: the socket opens, the
-    // greeting arrives, and only then is it closed. Reading `isConnected` at the
-    // greeting therefore always said yes, and this branch could never run.
+  it('declines a server that greets us but refuses our credential', async () => {
+    // A rejected credential does not fail the connect: the socket opens and the
+    // greeting arrives regardless, so `isConnected` always said yes and the old
+    // check could never run. An authenticated round trip is the actual question.
     published.port = 50091
     published.hello = helloFrom()
     published.rejectsCredential = true
@@ -406,5 +430,83 @@ describe('the three ways adoption used to go quietly wrong', () => {
     await launchServer()
 
     expect(madeDirs).toContain('/Users/x/.vorn')
+  })
+})
+
+describe('what the reviews caught', () => {
+  it('sends the packaged server\'s output to a file, never to a pipe', async () => {
+    // A pipe held by this process dies with this process, and the server is
+    // meant to outlive it. Measured: the next write to stderr after the parent
+    // goes raises EPIPE, the server has no uncaughtException handler, and it
+    // exits -- on its first log line, which is milliseconds away.
+    const { launchServer } = await import('../src/main/server/server-launcher')
+
+    await launchServer()
+
+    expect(opened.some((f) => f.endsWith('server.log'))).toBe(true)
+    expect((spawned[0].opts.stdio as unknown[])[1]).toBe(99)
+    expect((spawned[0].opts.stdio as unknown[])[2]).toBe(99)
+  })
+
+  it('will not accept a port file that names a server it did not spawn', async () => {
+    // After refusing an incumbent, the file still names it with a live pid. A
+    // fallback that read it would hand the bridge the incumbent's port with our
+    // credential -- rejected forever -- while the child we started ran unwatched.
+    published.port = 50091
+    published.spawnedPid = 999
+    published.hello = helloFrom({ protocolVersion: RUNTIME_PROTOCOL_VERSION + 1 })
+    const { launchServer } = await import('../src/main/server/server-launcher')
+
+    const bridge = await launchServer()
+
+    // 51000 is the spawned child's port; 50091 is the incumbent's.
+    expect((bridge as unknown as FakeBridge).url).toBe('ws://127.0.0.1:51000/ws')
+  })
+
+  it('ends the dev server on detach rather than orphaning it', async () => {
+    // A dev child is not detached, and POSIX does not kill a plain child when
+    // its parent exits. Walking away would leave it for the next `yarn dev` to
+    // adopt -- running the source from before the edit that prompted the restart.
+    process.env.ELECTRON_RENDERER_URL = 'http://localhost:5173'
+    try {
+      const { launchServer, detachFromServer } = await import(
+        '../src/main/server/server-launcher'
+      )
+      await launchServer()
+      const killed: string[] = []
+      ;(spawnedChildren[0] as Record<string, unknown>).kill = (sig: string): void => {
+        killed.push(sig)
+      }
+
+      detachFromServer()
+
+      expect(killed).toEqual(['SIGTERM'])
+    } finally {
+      delete process.env.ELECTRON_RENDERER_URL
+    }
+  })
+
+  it('signals an adopted server that ignores the shutdown request', async () => {
+    // An adopted server has no child handle, so the RPC is the only way to ask.
+    // If it throws, nothing had happened yet: the user picked "Stop Sessions and
+    // Server", the app quit, and every session carried on saying nothing.
+    published.port = 50091
+    published.hello = helloFrom({ pid: 4242 })
+    const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
+    await launchServer()
+    bridges[0].request = async (m: string) => {
+      if (m === 'server:shutdown') throw new Error('no answer')
+      return {}
+    }
+    const signalled: number[] = []
+    const spy = vi.spyOn(process, 'kill').mockImplementation((pid) => {
+      signalled.push(pid as number)
+      return true
+    })
+
+    await stopServer()
+    spy.mockRestore()
+
+    expect(signalled).toContain(4242)
   })
 })
