@@ -29,7 +29,7 @@ const TEST_CREDENTIAL = 'workflow-methods-test-credential'
 const PRIOR_BOOTSTRAP_TOKEN = process.env.SECRET_VORN_BOOTSTRAP_TOKEN
 
 /** The columns `dbUpdateWorkflow` can actually write, in `database.ts` order. */
-const WRITABLE = vi.hoisted(
+const WORKFLOW_COLUMNS = vi.hoisted(
   () =>
     new Set([
       'name',
@@ -90,40 +90,19 @@ vi.mock('../packages/server/src/database', () => ({
   })),
   saveFullConfig: vi.fn(),
 
-  // ── the task table, for real ──────────────────────────────────
-  dbListTasks: vi.fn((projectName?: string) =>
-    [...store.tasks.values()].filter((t) => !projectName || t.projectName === projectName)
-  ),
-  dbGetTask: vi.fn((id: string) => store.tasks.get(id) ?? null),
-  dbInsertTask: vi.fn((task: TaskConfig) => {
-    store.tasks.set(task.id, { ...task })
-  }),
-  dbUpdateTask: vi.fn((id: string, updates: Record<string, unknown>) => {
-    const row = store.tasks.get(id)
-    if (!row) return
-    for (const [key, value] of Object.entries(updates)) {
-      // Mirrors the real `dbUpdateTask`: an absent key leaves the column alone,
-      // and only `completedAt` and `archivedAt` treat an explicit `undefined`
-      // as "clear it". Getting this wrong here would hide the bug it exists to
-      // catch — a reopened task keeping the date it was finished.
-      if (value === undefined && key !== 'completedAt' && key !== 'archivedAt') continue
-      // And the column whitelist, which this mock used not to have. Without it a
-      // test could hand `dbUpdateTask` a field the real one silently drops and
-      // watch it pass — which is exactly the state `projectName` was in before
-      // it was added to the real function.
-      if (!WRITABLE.has(key)) continue
-      row[key] = value
-    }
-  }),
-  dbDeleteTask: vi.fn((id: string) => {
-    store.tasks.delete(id)
-  }),
-  dbGetMaxTaskOrder: vi.fn((projectName: string) =>
-    [...store.tasks.values()]
-      .filter((t) => t.projectName === projectName)
-      .reduce((max, t) => Math.max(max, (t.order as number) ?? -1), -1)
-  ),
-  dbGetProject: vi.fn((name: string) => (store.projects.has(name) ? { name, path: '/tmp' } : null)),
+  // ── the task table: names only ─────────────────────────────────
+  // These exist so the mocked module has the exports `registerAllMethods`
+  // imports. Nothing in this file calls them, and a copied implementation would
+  // be worse than none: it reached for a `store.tasks` this file does not have
+  // and filtered through the workflow column list, which is not the task one.
+  // `tests/task-write-methods.test.ts` is where task writes are tested.
+  dbListTasks: vi.fn(() => []),
+  dbGetTask: vi.fn(() => null),
+  dbInsertTask: vi.fn(),
+  dbUpdateTask: vi.fn(),
+  dbDeleteTask: vi.fn(),
+  dbGetMaxTaskOrder: vi.fn(() => -1),
+  dbGetProject: vi.fn(() => null),
 
   dbListProjects: vi.fn(() => []),
   // ── the workflow table, for real ──────────────────────────────
@@ -137,7 +116,7 @@ vi.mock('../packages/server/src/database', () => ({
     // any key lets a handler pass here while writing nothing in production --
     // which is the state `project_name` was in before PR #488.
     for (const [key, value] of Object.entries(updates)) {
-      if (!WRITABLE.has(key)) continue
+      if (!WORKFLOW_COLUMNS.has(key)) continue
       row[key] = value
     }
   }),
@@ -275,7 +254,10 @@ describe('workflow read and enable methods', () => {
 
       const res = await call<{ id: string; name: string }[]>('workflow:list')
 
-      expect(res.result?.map((w) => w.name)).toEqual(['clean branches', 'Simple hello'])
+      // Order is not asserted: the read is `SELECT * FROM workflows` with no
+      // ORDER BY, so there is no order to promise and a test that depended on
+      // one would be pinning an accident of insertion.
+      expect(res.result?.map((w) => w.name).sort()).toEqual(['Simple hello', 'clean branches'])
     })
 
     it('is empty rather than absent when there are none', async () => {
