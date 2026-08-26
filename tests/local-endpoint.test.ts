@@ -61,15 +61,16 @@ describe('bringing up the endpoint', () => {
     if (second.kind === 'lost') expect(second.because).toContain('alive')
   })
 
-  it('carries on without one where the directory will not have it', async () => {
-    // Anyone who can write the directory can rename over the endpoint, so a
-    // world-writable one gets no socket -- and no failure either. A server nobody
-    // can reach would be worse than a race nobody has lost yet.
-    fs.chmodSync(dir, 0o777)
-    const outcome = await openLocalEndpoint(dir, () => {})
+  it('carries on without one where a socket cannot go', async () => {
+    // A path too long for `sun_path`. No failure either way: the socket is
+    // additive, and a server nobody can reach would be worse than a race nobody
+    // has lost yet.
+    const deep = path.join(dir, 'z'.repeat(90))
+    fs.mkdirSync(deep, { recursive: true, mode: 0o700 })
+    const outcome = await openLocalEndpoint(deep, () => {})
 
     expect(outcome.kind).toBe('unavailable')
-    expect(fs.existsSync(path.join(dir, 'vorn.sock'))).toBe(false)
+    expect(fs.existsSync(path.join(deep, 'vorn.sock'))).toBe(false)
   })
 })
 

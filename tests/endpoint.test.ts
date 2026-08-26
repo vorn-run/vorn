@@ -214,12 +214,36 @@ describe('whether this machine can host one at all', () => {
     expect(canHostEndpoint(dir)).toEqual({ ok: true })
   })
 
-  it('declines a directory anyone can write', () => {
-    // The directory is the whole access control on darwin, where a socket's own
-    // mode is not consulted on connect. Anyone who can write here can rename
-    // over the endpoint.
-    fs.chmodSync(dir, 0o777)
-    expect(canHostEndpoint(dir)).toMatchObject({ ok: false })
+  it.each([
+    ['world-writable', 0o777],
+    ['group-writable', 0o770],
+    // Not writable, and still not private. On darwin a socket's own mode is not
+    // consulted on connect, so a directory another user can traverse is a socket
+    // another user can connect to -- and the greeting, sent before
+    // authentication, hands them this server's identity and the account name in
+    // `dataDir`. Loopback bounded that for TCP peers; for a unix peer the
+    // directory is the only bound there is.
+    ['world-readable', 0o755],
+    ['group-readable', 0o750],
+    ['group-executable only', 0o710]
+  ])('tightens a %s directory rather than refusing it', (_label, mode) => {
+    // This directory is Vorn's own, it holds the credential and the database, and
+    // `database.ts` already means it to be 0700 -- but `mode` on mkdir applies
+    // only at creation, so real installs are out there sitting wider. Refusing
+    // them would leave those machines silently without an endpoint; narrowing
+    // fixes the thing that was actually wrong.
+    fs.chmodSync(dir, mode)
+
+    expect(canHostEndpoint(dir)).toEqual({ ok: true })
+    expect(fs.statSync(dir).mode & 0o777).toBe(0o700)
+  })
+
+  it('refuses when it cannot make the directory private', () => {
+    const stranger = path.join(dir, 'not-ours')
+    fs.mkdirSync(stranger, { mode: 0o755 })
+    // Nothing to tighten because there is nothing there: the honest answer is no.
+    fs.rmSync(stranger, { recursive: true })
+    expect(canHostEndpoint(stranger)).toMatchObject({ ok: false })
   })
 
   it('declines a path too long for sun_path', () => {

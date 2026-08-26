@@ -56,10 +56,15 @@ const RECHECK_LIMIT = 3
 
 /**
  * `sun_path` is 104 bytes on darwin and 108 on linux, including the terminator.
- * Held well under the smaller of the two — the cost of being wrong is a bind
- * that fails at startup for a reason nothing explains.
+ *
+ * Close to the smaller of the two rather than well under it, because what gets
+ * measured is now the scratch name that is actually bound rather than the shorter
+ * canonical one. The old margin was covering the thirteen bytes this check used
+ * to ignore, and once that was fixed the margin was pure cost -- it turned a
+ * macOS temp directory, which is where every process-level test runs, into a
+ * machine that silently hosts no endpoint.
  */
-const MAX_SOCKET_PATH = 96
+const MAX_SOCKET_PATH = 100
 
 export function endpointPath(dataDir: string): string {
   return path.join(dataDir, ENDPOINT_FILENAME)
@@ -92,16 +97,39 @@ export function canHostEndpoint(dataDir: string): { ok: boolean; why?: string } 
     return { ok: false, why: `path is ${Buffer.byteLength(bound)} bytes` }
   }
 
-  // The directory is the access control that matters. On darwin a socket's own
-  // mode bits are not consulted on connect, and `database.ts` sets 0700 only
-  // when it creates the directory — an install predating that, or a umask
-  // accident, leaves it writable by others, and anyone who can write the
-  // directory can rename over the endpoint.
+  // The directory is the access control, and it has to be private -- not merely
+  // unwritable by others.
+  //
+  // Writable was the obvious half: anyone who can write here can rename over the
+  // endpoint. Readable and traversable matters too, and it took a review to see
+  // it. On darwin a socket's own mode bits are not consulted on connect, so the
+  // 0600 this code sets on the socket protects nothing; a directory another user
+  // can traverse is a socket another user can connect to. And the greeting is
+  // sent before authentication -- deliberately, since that is what lets a desktop
+  // learn who is serving -- so a stranger who connects is handed this server's
+  // identity, `dataDir` included, which names the account.
+  //
+  // Loopback bounded that disclosure for TCP peers. A unix peer is judged local
+  // by the directory alone, so the directory is where the bound has to be.
+  // `database.ts` creates it 0700, so an ordinary install passes and only one
+  // that predates that, or a umask accident, is turned away -- to TCP-only,
+  // never to a failed start.
   try {
+    if (fs.statSync(dataDir).mode & 0o077) {
+      // Narrowed rather than refused, where this process is allowed to. The
+      // directory holds this server's credential, its database and its tokens,
+      // `database.ts` already means it to be 0700, and `mode` on mkdir applies
+      // only at creation -- so an install made before that, or under a loose
+      // umask, has been sitting wider than intended all along. Tightening it is
+      // the fix for that, not a workaround for this check. Never widened: this
+      // only ever removes bits.
+      fs.chmodSync(dataDir, 0o700)
+      log.info({ dataDir }, '[endpoint] tightened the data directory to 0700')
+    }
     const mode = fs.statSync(dataDir).mode & 0o777
-    if (mode & 0o022) return { ok: false, why: `directory is mode ${mode.toString(8)}` }
+    if (mode & 0o077) return { ok: false, why: `directory is mode ${mode.toString(8)}` }
   } catch (err) {
-    return { ok: false, why: `cannot stat the data directory: ${(err as Error).message}` }
+    return { ok: false, why: `cannot secure the data directory: ${(err as Error).message}` }
   }
 
   return { ok: true }
