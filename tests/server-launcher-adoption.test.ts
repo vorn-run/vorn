@@ -21,7 +21,9 @@ const published = {
   token: 'local-secret' as string | null,
   hello: null as ServerHello | null,
   /** Whether the adopted server's process is still alive, when asked. */
-  pidAlive: true
+  pidAlive: true,
+  /** Whether the running server closes the socket after greeting us. */
+  rejectsCredential: false
 }
 
 const spawned: { cmd: string; opts: Record<string, unknown> }[] = []
@@ -40,12 +42,19 @@ class FakeBridge extends EventEmitter {
   }
   connect(): void {
     setImmediate(() => {
-      // The real server sends its greeting as the first frame on the socket and
-      // before authentication, which is what lets a launcher judge it without
-      // first proving who it is.
-      if (published.hello) this.emit('hello', published.hello)
+      // Mirrors the real ordering: the socket opens and `connected` fires first,
+      // then frames arrive. So `isConnected` is already true when the greeting
+      // lands, and cannot be used as proof the credential was accepted.
       this.isConnected = true
       this.emit('connected')
+      if (published.hello) this.emit('hello', published.hello)
+      if (published.rejectsCredential) {
+        // What a 4001/4002 close looks like from here: open, greeted, dropped.
+        setTimeout(() => {
+          this.isConnected = false
+          this.emit('disconnected')
+        }, 5)
+      }
     })
   }
   async request(method: string): Promise<unknown> {
@@ -54,6 +63,7 @@ class FakeBridge extends EventEmitter {
   }
   close(): void {
     this.closed = true
+    this.isConnected = false
   }
 }
 
@@ -84,6 +94,12 @@ vi.mock('../src/main/server/server-adoption', async (importOriginal) => {
     readLocalToken: () => published.token,
     isPidAlive: () => published.pidAlive
   }
+})
+
+const madeDirs: string[] = []
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return { ...actual, mkdirSync: (dir: string) => void madeDirs.push(dir) }
 })
 
 vi.mock('node:child_process', () => ({
@@ -131,11 +147,13 @@ beforeEach(() => {
   // Only Electron sets this, and the packaged entry point is resolved from it.
   ;(process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = '/app/Resources'
   spawned.length = 0
+  madeDirs.length = 0
   bridges.length = 0
   published.port = null
   published.token = 'local-secret'
   published.hello = null
   published.pidAlive = true
+  published.rejectsCredential = false
   hostSettings.value = { mode: 'local', url: '', token: undefined }
 })
 
@@ -344,5 +362,49 @@ describe('an adopted server that dies', () => {
     bridges[0].emit('disconnected')
     await new Promise((r) => setTimeout(r, 20))
     expect(spawned).toEqual([])
+  })
+})
+
+describe('the three ways adoption used to go quietly wrong', () => {
+  it('keeps the adopted credential, so a replacement server accepts the same bridge', async () => {
+    // `retarget` moves the URL and nothing else -- the credential is fixed when
+    // the bridge is built. Minting a fresh secret for the replacement left the
+    // surviving bridge presenting a token no server had heard of, reconnecting
+    // forever against a server that was perfectly healthy.
+    published.port = 50091
+    published.hello = helloFrom()
+    const { launchServer } = await import('../src/main/server/server-launcher')
+    await launchServer()
+
+    published.pidAlive = false
+    bridges[0].emit('disconnected')
+    await vi.waitFor(() => expect(spawned).toHaveLength(1))
+
+    const env = spawned[0].opts.env as Record<string, string>
+    expect(env.SECRET_VORN_BOOTSTRAP_TOKEN).toBe('local-secret')
+  })
+
+  it('declines a server that greets us and then drops the socket', async () => {
+    // A rejected credential does not fail the connect: the socket opens, the
+    // greeting arrives, and only then is it closed. Reading `isConnected` at the
+    // greeting therefore always said yes, and this branch could never run.
+    published.port = 50091
+    published.hello = helloFrom()
+    published.rejectsCredential = true
+    const { launchServer } = await import('../src/main/server/server-launcher')
+
+    await launchServer()
+
+    expect(spawned).toHaveLength(1)
+  })
+
+  it('creates the data directory before spawning into it', async () => {
+    // The server creates it on init -- but it is also the cwd the server is
+    // spawned into, and a missing cwd is an ENOENT before any of that runs.
+    const { launchServer } = await import('../src/main/server/server-launcher')
+
+    await launchServer()
+
+    expect(madeDirs).toContain('/Users/x/.vorn')
   })
 })

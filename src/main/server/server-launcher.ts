@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { app } from 'electron'
@@ -55,6 +56,19 @@ let lastRefusal: (AdoptionVerdict & { kind: 'refuse' }) | null = null
 
 export function getLastAdoptionRefusal(): (AdoptionVerdict & { kind: 'refuse' }) | null {
   return lastRefusal
+}
+
+/**
+ * The data directory, created if this is the first run.
+ *
+ * Normally the server makes it (`database.ts` on init), but it is also the cwd
+ * the server is spawned into, and that has to exist before the spawn rather than
+ * after it.
+ */
+function ensureDataDir(): string {
+  const dir = resolveDataDir()
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  return dir
 }
 
 /** `dev` or `packaged`, decided the same way the server entry point is resolved. */
@@ -284,9 +298,12 @@ async function spawnServer(): Promise<number> {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
       // A daemon must not hold open a directory that can be deleted underneath
-      // it. The data dir is the one place guaranteed to exist for as long as the
-      // server has anything to serve.
-      cwd: resolveDataDir(),
+      // it, so not the app bundle and not a worktree. The data dir is where the
+      // server's own files live, so it lasts as long as the server has anything
+      // to serve -- but on a first run it does not exist yet: the *server*
+      // creates it, and it has not started. `spawn` with a missing cwd fails
+      // ENOENT, so it is created here first.
+      cwd: ensureDataDir(),
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -383,7 +400,8 @@ function onServerExit(detail: string): void {
 
 /** Long enough for a busy event loop, short enough not to stall a cold launch. */
 const ADOPT_HELLO_TIMEOUT_MS = 3_000
-const ADOPT_CONNECT_TIMEOUT_MS = 5_000
+/** How long a socket must stay open to count as accepted. Loopback, so short. */
+const ADOPT_SETTLE_MS = 250
 
 /**
  * Connect to a server that is already running and decide whether to keep it.
@@ -424,22 +442,39 @@ async function tryAdopt(
     return { refusal: verdict }
   }
 
-  // Judged, but not yet usable: a rejected credential closes the socket at 4001
-  // rather than failing the connect, so the greeting alone proves nothing about
-  // whether this app may actually talk to it.
-  const usable = await new Promise<boolean>((resolve) => {
-    if (candidate.isConnected) return resolve(true)
-    const timer = setTimeout(() => resolve(false), ADOPT_CONNECT_TIMEOUT_MS)
-    candidate.once('connected', () => {
+  // Judged, but not yet known to be usable. A rejected credential does not fail
+  // the connect: the socket opens, the greeting arrives, and only then does the
+  // server close it at 4001/4002. So `isConnected` is true by the time the
+  // greeting resolves and proves nothing -- an earlier version of this checked
+  // exactly that and could never have been false.
+  //
+  // What a rejection does do is close the socket promptly, so the honest test is
+  // whether it stays open. On loopback, against a server that has already sent a
+  // frame, a short settle is enough.
+  const rejected = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      candidate.off('disconnected', onDrop)
+      resolve(false)
+    }, ADOPT_SETTLE_MS)
+    function onDrop(): void {
       clearTimeout(timer)
       resolve(true)
-    })
+    }
+    candidate.once('disconnected', onDrop)
   })
-  if (!usable) {
+  if (rejected || !candidate.isConnected) {
     candidate.close()
     log.warn('[launcher] the running server did not accept this app; starting our own')
     return null
   }
+
+  // Carried forward, not discarded. If this server later dies and a replacement
+  // is spawned, `spawnServer` reuses this value rather than minting a fresh one
+  // -- and the bridge is retargeted, never rebuilt, so its credential is fixed
+  // at construction. Leaving it null meant the replacement got a new secret the
+  // surviving bridge had never heard of, and the bridge would then reconnect
+  // forever against a healthy server, rejected every time.
+  bootstrapToken = token
 
   adoptedPid = hello?.pid ?? null
   // An adopted server has no child handle, so nothing would ever call
@@ -624,6 +659,13 @@ function readServerPort(child: ChildProcess): Promise<number> {
       const errLines = createInterface({ input: child.stderr })
       errLines.on('line', (line) => log.info(`[server] ${line}`))
     }
+
+    // A spawn that never starts emits `error`, not `exit`, and an EventEmitter
+    // with nothing listening for `error` throws -- taking the main process down
+    // instead of reporting a server that failed to launch.
+    child.on('error', (err) => {
+      settle(() => reject(err))
+    })
 
     const rl = createInterface({ input: child.stdout })
     const settle = (fn: () => void): void => {
