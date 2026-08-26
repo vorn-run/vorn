@@ -1,4 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import {
+  ADOPTION_REFUSED_CHANNEL,
+  ADOPTION_STOP_CHANNEL,
+  type AdoptionRefusedNotice
+} from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import {
   CreateTerminalPayload,
@@ -108,6 +113,17 @@ const api = {
       ipcRenderer.removeListener(IPC.CONFIG_CHANGED, listener)
     }
   },
+
+  onAdoptionRefused: (callback: (notice: AdoptionRefusedNotice) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, notice: AdoptionRefusedNotice): void =>
+      callback(notice)
+    ipcRenderer.on(ADOPTION_REFUSED_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(ADOPTION_REFUSED_CHANNEL, listener)
+    }
+  },
+
+  stopRefusedServer: (): Promise<boolean> => ipcRenderer.invoke(ADOPTION_STOP_CHANNEL),
 
   onMenuNewAgent: (callback: () => void) => {
     const listener = (): void => callback()

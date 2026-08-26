@@ -68,7 +68,7 @@ import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { MissedScheduleDialog } from './components/MissedScheduleDialog'
 import { SourcePromptDialog } from './components/SourcePromptDialog'
 import { OnboardingModal } from './components/OnboardingModal'
-import { ToastContainer } from './components/Toast'
+import { ToastContainer, toast } from './components/Toast'
 import { AddTaskDialog } from './components/AddTaskDialog'
 import { GridContextMenu } from './components/GridContextMenu'
 import { WindowControls } from './components/WindowControls'
@@ -240,6 +240,38 @@ export function App() {
         console.error('[App] startup initialization failed:', err)
       }
     })()
+
+    // Adoption was refused: the agents are alive in a server this app cannot
+    // speak to, and this window is empty. Said out loud, with the one action
+    // that resolves it -- taken by the person whose work it is, never by the app.
+    const removeAdoptionListener = window.api.onAdoptionRefused?.((notice) => {
+      // Said in Vorn's words, from a closed set of reasons. Nothing here comes
+      // from the other server: it is the party this app just declined to trust.
+      const message =
+        notice.reason === 'protocol-mismatch'
+          ? 'Your sessions are still running in a server this version of Vorn cannot talk to. They are safe, and this window cannot reach them.'
+          : 'Vorn found a server it could not use, so it started its own. Any sessions in the other one are not shown here.'
+      toast(message, 'warning', {
+        duration: Number.POSITIVE_INFINITY,
+        actions: notice.canStop
+          ? [
+              {
+                label: 'Stop it and restart Vorn',
+                tone: 'danger',
+                onClick: async () => {
+                  const stopped = await window.api.stopRefusedServer?.()
+                  toast(
+                    stopped
+                      ? 'Stopped. Reopen Vorn to start fresh.'
+                      : 'Could not stop it. It may have already exited.',
+                    stopped ? 'success' : 'error'
+                  )
+                }
+              }
+            ]
+          : []
+      })
+    })
 
     const removeExitListener = window.api.onTerminalExit(({ id }) => {
       const state = useAppStore.getState()
@@ -509,6 +541,7 @@ export function App() {
 
     return () => {
       disposeGlobalDataListener()
+      removeAdoptionListener?.()
       removeExitListener()
       removeSessionCreatedListener()
       removeConfigListener()

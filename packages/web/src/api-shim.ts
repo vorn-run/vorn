@@ -405,6 +405,11 @@ export function createApiShim(wsUrl: string) {
       rpc.on('config:changed', (p: unknown) => callback(withViewerSettings(p as AppConfig))),
 
     // ── Menu Events (Electron-only, no-op in web) ──
+    // Desktop only. A browser or phone connects to a server; it never launches
+    // one, so there is no adoption to refuse and nothing to stop.
+    onAdoptionRefused: (_callback: (notice: unknown) => void) => () => {},
+    stopRefusedServer: async () => false,
+
     onMenuNewAgent: (_callback: () => void) => () => {},
 
     // ── Sessions ──

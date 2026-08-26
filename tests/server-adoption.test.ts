@@ -158,3 +158,22 @@ describe('probing whether a process is alive', () => {
     spy.mockRestore()
   })
 })
+
+describe('who the greeting tells this server is', () => {
+  it('withholds identity from a peer that is not on loopback', async () => {
+    // The greeting is sent before any credential check, deliberately. `dataDir`
+    // names the user's home directory, so it carries the account name, and with
+    // remote access on the server binds 0.0.0.0 -- where the Origin allowlist
+    // does not apply to a peer that simply sends no Origin. Only a desktop on
+    // this machine has any use for these fields.
+    const { isLoopbackAddress } = await import('../packages/server/src/ws-handler')
+
+    expect(isLoopbackAddress('127.0.0.1')).toBe(true)
+    expect(isLoopbackAddress('::1')).toBe(true)
+    // What a dual-stack listener actually reports for a v4 loopback connection.
+    expect(isLoopbackAddress('::ffff:127.0.0.1')).toBe(true)
+    expect(isLoopbackAddress('192.168.1.42')).toBe(false)
+    expect(isLoopbackAddress('100.64.0.7')).toBe(false)
+    expect(isLoopbackAddress(undefined)).toBe(false)
+  })
+})

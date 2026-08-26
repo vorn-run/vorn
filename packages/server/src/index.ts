@@ -142,7 +142,15 @@ export async function startServer(
       }
     },
     (socket, req) => {
-      handleConnection(socket, bearerFrom(req.headers.authorization), parseTopics(req.query))
+      handleConnection(
+        socket,
+        bearerFrom(req.headers.authorization),
+        parseTopics(req.query),
+        // Decides whether the greeting carries this server's identity. Only a
+        // desktop on this machine has any use for it, and only loopback can be
+        // trusted not to be a stranger on the tailnet.
+        req.socket.remoteAddress
+      )
       scheduler.deliverPendingConnectorInbox()
     }
   )

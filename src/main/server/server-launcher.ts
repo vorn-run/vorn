@@ -51,11 +51,41 @@ let relaunchTimer: NodeJS.Timeout | null = null
  */
 let adoptedPid: number | null = null
 
-/** What the last adoption attempt refused, for the UI to explain. Null when none did. */
-let lastRefusal: (AdoptionVerdict & { kind: 'refuse' }) | null = null
+/**
+ * What the last adoption attempt refused, and the pid still holding the sessions.
+ *
+ * Kept because a refusal is the user's problem, not just a log line: their agents
+ * are alive in a server this app cannot speak to, and the app they are looking at
+ * is empty. The pid is what lets them end it on purpose -- the one actor allowed
+ * to, since this code never ends an incumbent on its own.
+ */
+export type AdoptionRefusal = AdoptionVerdict & { kind: 'refuse' } & { incumbentPid: number | null }
 
-export function getLastAdoptionRefusal(): (AdoptionVerdict & { kind: 'refuse' }) | null {
+let lastRefusal: AdoptionRefusal | null = null
+
+export function getLastAdoptionRefusal(): AdoptionRefusal | null {
   return lastRefusal
+}
+
+/**
+ * End the server this app refused to adopt, because the user asked.
+ *
+ * The doctrine is that a starting app never ends a running server -- it holds
+ * somebody's work and cannot be judged from outside. It says nothing about the
+ * person whose work it is, who is the only one in a position to decide.
+ */
+export function stopRefusedServer(): boolean {
+  const pid = lastRefusal?.incumbentPid
+  if (pid == null || !isPidAlive(pid)) return false
+  try {
+    process.kill(pid, 'SIGTERM')
+    log.info(`[launcher] stopped the refused server (pid ${pid}) at the user's request`)
+    lastRefusal = null
+    return true
+  } catch (err) {
+    log.warn({ err }, '[launcher] could not stop the refused server')
+    return false
+  }
 }
 
 /**
@@ -415,6 +445,7 @@ const ADOPT_AUTH_TIMEOUT_MS = 5_000
  */
 async function tryAdopt(
   port: number,
+  expectedPid: number | undefined,
   self: { dataDir: string; buildChannel: 'dev' | 'packaged' }
 ): Promise<{ bridge: ServerBridge } | { refusal: AdoptionVerdict & { kind: 'refuse' } } | null> {
   const token = readLocalToken(self.dataDir)
@@ -471,7 +502,17 @@ async function tryAdopt(
   // forever against a healthy server, rejected every time.
   bootstrapToken = token
 
-  adoptedPid = hello?.pid ?? null
+  // The port file's pid, not the greeting's. Both name the same server when
+  // everything is honest, but only one of them was written by a process this
+  // app can attribute -- and this value is later handed to `process.kill`.
+  if (hello?.pid !== expectedPid) {
+    candidate.close()
+    log.warn(
+      `[launcher] the server on port ${port} reports pid ${hello?.pid}, but the port file says ${expectedPid}; starting our own`
+    )
+    return null
+  }
+  adoptedPid = expectedPid ?? null
   // An adopted server has no child handle, so nothing would ever call
   // `onServerExit` for it. Watching the socket is the only signal available, and
   // the pid distinguishes the two reasons it drops: a server that died, and one
@@ -508,13 +549,16 @@ export async function launchServer(): Promise<ServerBridge> {
   lastRefusal = null
   const published = readPortFile(dataDir)
   if (published) {
-    const outcome = await tryAdopt(published.port, { dataDir, buildChannel: buildChannel() })
+    const outcome = await tryAdopt(published.port, published.pid, {
+      dataDir,
+      buildChannel: buildChannel()
+    })
     if (outcome && 'bridge' in outcome) {
       bridge = outcome.bridge
       return bridge
     }
     if (outcome && 'refusal' in outcome) {
-      lastRefusal = outcome.refusal
+      lastRefusal = { ...outcome.refusal, incumbentPid: published.pid ?? null }
       log.warn(
         `[launcher] declined to adopt the running server (${outcome.refusal.reason}): ` +
           `${outcome.refusal.detail}. It keeps running and keeps its sessions.`

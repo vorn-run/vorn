@@ -50,19 +50,52 @@ let identity: Pick<ServerHello, 'appVersion' | 'dataDir' | 'pid' | 'buildChannel
 export function setServerIdentity(next: typeof identity): void {
   identity = next
   helloFrameCache = null
+  loopbackHelloFrameCache = null
 }
 
-function helloFrame(): string {
+let loopbackHelloFrameCache: string | null = null
+
+/**
+ * The greeting, which every socket receives before it has authenticated.
+ *
+ * That timing is deliberate — a client that must authenticate by message needs
+ * to know so before it is refused for not having — and it is also why the
+ * identity fields are withheld from anything that is not on loopback. They exist
+ * for one caller: a desktop on this machine deciding whether to adopt this
+ * server rather than start a second one. `dataDir` names the user's home
+ * directory, so it carries the account name, and with remote access enabled the
+ * server binds `0.0.0.0`, where the Origin allowlist does not apply to a peer
+ * that simply sends no Origin at all. A LAN peer would have read both before
+ * being disconnected.
+ */
+function helloFrame(fromLoopback: boolean): string {
   // Built on first use, not at module load: another module may still be
   // registering a capability at import time. It never varies after that.
-  helloFrameCache ??= JSON.stringify(
-    createNotification('server:hello', {
-      protocolVersion: RUNTIME_PROTOCOL_VERSION,
-      capabilities: Object.fromEntries(capabilities),
-      ...identity
-    })
+  const base = {
+    protocolVersion: RUNTIME_PROTOCOL_VERSION,
+    capabilities: Object.fromEntries(capabilities)
+  }
+  if (!fromLoopback) {
+    helloFrameCache ??= JSON.stringify(createNotification('server:hello', base))
+    return helloFrameCache
+  }
+  loopbackHelloFrameCache ??= JSON.stringify(
+    createNotification('server:hello', { ...base, ...identity })
   )
-  return helloFrameCache
+  return loopbackHelloFrameCache
+}
+
+/**
+ * Whether a peer address is this machine talking to itself.
+ *
+ * IPv4-mapped IPv6 (`::ffff:127.0.0.1`) is what a dual-stack listener actually
+ * reports for a v4 loopback connection, so matching only `127.0.0.1` would fail
+ * open in the common case -- and failing open here means withholding nothing.
+ */
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false
+  const bare = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address
+  return bare === '::1' || bare === '127.0.0.1' || bare.startsWith('127.')
 }
 
 // Handler registry: method name → async handler function
@@ -181,11 +214,12 @@ export function resetTokenTracking(): void {
 export function handleConnection(
   ws: WebSocket,
   credential?: string,
-  initialTopics?: readonly string[]
+  initialTopics?: readonly string[],
+  peerAddress?: string
 ): void {
   // Announce the contract first, so a client that has to authenticate by message
   // knows that it must before it is refused for not having.
-  ws.send(helloFrame())
+  ws.send(helloFrame(isLoopbackAddress(peerAddress)))
 
   let authTimer: NodeJS.Timeout | null = null
 

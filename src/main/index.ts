@@ -10,11 +10,14 @@ import { updateManager } from './update-manager'
 import { IPC, PermissionRequestInfo, type AppConfig } from '../shared/types'
 import { setArtifactNotify } from './artifact-watcher'
 import { SURFACE } from '../shared/surface'
+import { ADOPTION_REFUSED_CHANNEL, ADOPTION_STOP_CHANNEL } from '../shared/adoption-channels'
 import {
   launchServer,
   stopServer,
   detachFromServer,
-  getServerBridge
+  getServerBridge,
+  getLastAdoptionRefusal,
+  stopRefusedServer
 } from './server/server-launcher'
 import { readHostSettings } from './server/host-store'
 import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
@@ -463,6 +466,20 @@ app.whenReady().then(async () => {
 
   // Wire server notifications → renderer/widget
   wireServerNotifications(bridge)
+
+  // A refused adoption leaves the user's agents alive in a server this app
+  // cannot speak to, while the window in front of them is empty. Without this it
+  // is explained only by a line in a log nobody is reading.
+  const refusal = getLastAdoptionRefusal()
+  if (refusal) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow?.webContents.send(ADOPTION_REFUSED_CHANNEL, {
+        reason: refusal.reason,
+        canStop: refusal.incumbentPid !== null
+      })
+    })
+  }
+  ipcMain.handle(ADOPTION_STOP_CHANNEL, () => stopRefusedServer())
 
   // Decrypt connector credentials via safeStorage and push plaintext into
   // the server's in-memory store. Runs once on boot, re-syncs on every

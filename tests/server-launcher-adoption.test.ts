@@ -491,7 +491,7 @@ describe('what the reviews caught', () => {
     // If it throws, nothing had happened yet: the user picked "Stop Sessions and
     // Server", the app quit, and every session carried on saying nothing.
     published.port = 50091
-    published.hello = helloFrom({ pid: 4242 })
+    published.hello = helloFrom({ pid: 999 })
     const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
     await launchServer()
     bridges[0].request = async (m: string) => {
@@ -507,6 +507,20 @@ describe('what the reviews caught', () => {
     await stopServer()
     spy.mockRestore()
 
-    expect(signalled).toContain(4242)
+    expect(signalled).toContain(999)
+  })
+})
+
+describe('a server whose greeting does not match its port file', () => {
+  it('is refused, because that pid is later handed to process.kill', async () => {
+    // Both name the same server when everything is honest. Only one of them was
+    // written by a process this app can attribute, and it is the one to believe.
+    published.port = 50091
+    published.hello = helloFrom({ pid: 31337 })
+
+    const { launchServer } = await import('../src/main/server/server-launcher')
+    await launchServer()
+
+    expect(spawned).toHaveLength(1)
   })
 })
