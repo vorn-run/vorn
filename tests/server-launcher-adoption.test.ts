@@ -19,7 +19,9 @@ const hostSettings = {
 const published = {
   port: null as number | null,
   token: 'local-secret' as string | null,
-  hello: null as ServerHello | null
+  hello: null as ServerHello | null,
+  /** Whether the adopted server's process is still alive, when asked. */
+  pidAlive: true
 }
 
 const spawned: { cmd: string; opts: Record<string, unknown> }[] = []
@@ -79,7 +81,8 @@ vi.mock('../src/main/server/server-adoption', async (importOriginal) => {
     ...actual,
     resolveDataDir: () => '/Users/x/.vorn',
     readPortFile: () => (published.port === null ? null : { port: published.port, pid: 999 }),
-    readLocalToken: () => published.token
+    readLocalToken: () => published.token,
+    isPidAlive: () => published.pidAlive
   }
 })
 
@@ -132,6 +135,7 @@ beforeEach(() => {
   published.port = null
   published.token = 'local-secret'
   published.hello = null
+  published.pidAlive = true
   hostSettings.value = { mode: 'local', url: '', token: undefined }
 })
 
@@ -280,5 +284,49 @@ describe('quitting', () => {
     await stopServer()
 
     expect(bridges.at(-1)?.requests).toContain('server:shutdown')
+  })
+})
+
+describe('an adopted server that dies', () => {
+  it('is replaced, even though there is no child process to notice it', async () => {
+    // Crash recovery hangs off `child.on('exit')`, and an adopted server has no
+    // child to emit one. Without this the case adoption exists for would be the
+    // one case that never recovers: the bridge retrying forever against a port
+    // with nothing behind it, which is the symptom #492 was written to end.
+    published.port = 50091
+    published.hello = helloFrom()
+    const { launchServer } = await import('../src/main/server/server-launcher')
+    await launchServer()
+
+    published.pidAlive = false
+    bridges[0].emit('disconnected')
+    await vi.waitFor(() => expect(spawned).toHaveLength(1))
+  })
+
+  it('is left alone while its process is still running', async () => {
+    // A socket dropping is not proof the server died — it is usually the bridge
+    // reconnecting. Spawning a replacement on that signal alone would put a
+    // second server on the database every time the connection blipped.
+    published.port = 50091
+    published.hello = helloFrom()
+    const { launchServer } = await import('../src/main/server/server-launcher')
+    await launchServer()
+
+    bridges[0].emit('disconnected')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawned).toEqual([])
+  })
+
+  it('is not replaced once the app has decided to quit', async () => {
+    published.port = 50091
+    published.hello = helloFrom()
+    const { launchServer, detachFromServer } = await import('../src/main/server/server-launcher')
+    await launchServer()
+
+    detachFromServer()
+    published.pidAlive = false
+    bridges[0].emit('disconnected')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(spawned).toEqual([])
   })
 })

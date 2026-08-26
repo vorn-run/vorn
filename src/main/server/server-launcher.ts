@@ -7,7 +7,9 @@ import log from '../logger'
 import { BOOTSTRAP_ENV_VAR, SERVER_PORT_ENV_VAR, type ServerHello } from '@vornrun/shared/protocol'
 import { ServerBridge } from './server-bridge'
 import { readHostSettings } from './host-store'
+import { attemptsAfterExit, decideRelaunch } from './server-relaunch'
 import {
+  isPidAlive,
   judgeAdoption,
   readLocalToken,
   readPortFile,
@@ -17,6 +19,76 @@ import {
 
 let serverProcess: ChildProcess | null = null
 let bridge: ServerBridge | null = null
+
+/**
+ * The credential the server is spawned with, kept for as long as the app runs.
+ *
+ * It was a local in `launchServer`, which was fine while a server was started
+ * exactly once. A relaunch has to spawn the replacement with the same one: the
+ * bridge holds it and re-sends it on every reconnect, so a fresh token would
+ * leave it authenticating against a server that had never heard of it.
+ */
+let bootstrapToken: string | null = null
+
+/** Reset whenever a server has run long enough to look healthy. */
+let relaunchAttempts = 0
+/** When the current server was spawned, to tell a crash loop from bad luck. */
+let lastSpawnAt = 0
+/** Set by `stopServer`, so an exit we asked for is not treated as a failure. */
+let stoppingDeliberately = false
+/** A relaunch waiting to happen, so shutting down can call it off. */
+let relaunchTimer: NodeJS.Timeout | null = null
+
+/**
+ * The pid of a server we adopted rather than spawned.
+ *
+ * Recovery hangs off `child.on('exit')`, and an adopted server has no child to
+ * emit one -- so without this, the one case the whole adoption path exists for
+ * would be the one case that never recovers. The bridge would reconnect forever
+ * against a port with nothing behind it, which is precisely the symptom #492
+ * was written to end.
+ */
+let adoptedPid: number | null = null
+
+/** What the last adoption attempt refused, for the UI to explain. Null when none did. */
+let lastRefusal: (AdoptionVerdict & { kind: 'refuse' }) | null = null
+
+export function getLastAdoptionRefusal(): (AdoptionVerdict & { kind: 'refuse' }) | null {
+  return lastRefusal
+}
+
+/** `dev` or `packaged`, decided the same way the server entry point is resolved. */
+function buildChannel(): 'dev' | 'packaged' {
+  return process.env.ELECTRON_RENDERER_URL ? 'dev' : 'packaged'
+}
+
+/**
+ * What the server needs to describe itself in `server:hello`.
+ *
+ * Passed rather than inferred server-side because only this process knows for
+ * certain which build spawned it; the server's own fallback reads its entry
+ * extension, which is right for a CLI run and merely probable here.
+ */
+function identityEnv(): Record<string, string> {
+  return { VORN_BUILD_CHANNEL: buildChannel(), VORN_APP_VERSION: app.getVersion() }
+}
+
+/**
+ * Let go of a detached child's pipes once it has reported for duty.
+ *
+ * Both are `Socket`s, and an open one references this process's event loop --
+ * `child.unref()` does not cover them, so leaving either attached keeps Electron
+ * alive at quit waiting on a server that is never going to close them.
+ *
+ * They exist at all for the reason abduco keeps a pipe across its own fork: a
+ * daemon that fails during startup has nowhere to say so, and a silent failure
+ * to start is far worse to debug than a noisy one. So they stay open exactly as
+ * long as the answer takes.
+ */
+function releaseChildStreams(child: ChildProcess): void {
+  child.stdout?.destroy()
+  child.stderr?.destroy()
+}
 
 /**
  * Connect to a server running on another machine.
@@ -72,8 +144,8 @@ const HOST_CONNECT_TIMEOUT_MS = 15_000
  *
  * NOTE: `process.execPath` is the Electron binary, and spawning it *without*
  * ELECTRON_RUN_AS_NODE launches another full Electron app — an infinite spawn
- * loop this code has hit before. The env var is what makes it a Node process, so
- * it is not optional.
+ * loop this code has hit before. The variable is what makes it a Node process,
+ * so it is not optional.
  */
 /**
  * `VORN_SERVER_PORT`, if it is a port.
@@ -106,149 +178,23 @@ function readDevPort(): string | undefined {
 }
 
 /**
- * What the server needs to describe itself in `server:hello`.
+ * Start a server process and wait for it to say where it is listening.
  *
- * The channel is passed rather than inferred server-side because only this
- * process knows for certain which build spawned it — the server's own fallback
- * reads its entry extension, which is right for a CLI run and merely probable
- * here.
+ * Extracted from `launchServer` so a relaunch can run it again. Everything the
+ * bridge needs afterwards -- the port -- comes back from here; everything it
+ * already has -- the credential -- is module state now, because a replacement
+ * server must be given the same one.
  */
-function identityEnv(buildChannel: 'dev' | 'packaged'): Record<string, string> {
-  return {
-    VORN_BUILD_CHANNEL: buildChannel,
-    VORN_APP_VERSION: app.getVersion()
-  }
-}
-
-/**
- * Let go of a detached child's pipes once it has reported for duty.
- *
- * Both are `Socket`s, and an open one references this process's event loop —
- * `child.unref()` does not cover them, so leaving either attached would keep
- * Electron alive at quit waiting on a server that is never going to close them.
- *
- * The pipes exist at all for the reason abduco keeps one across its own fork
- * (`~/dev/references/abduco/abduco.c:413-480`): a daemon that fails during
- * startup has nowhere to say so, and a silent failure to start is far worse to
- * debug than a noisy one. So they stay open exactly as long as the answer takes.
- */
-function releaseChildStreams(child: ChildProcess): void {
-  child.stdout?.destroy()
-  child.stderr?.destroy()
-}
-
-/**
- * Connect to a server that is already running and decide whether to keep it.
- *
- * Returns the bridge on adoption, or null with the reason recorded. Never kills
- * the incumbent: the process holding the PTYs is the one with the user's work in
- * it, so a client that cannot speak to it declines rather than resolving the
- * disagreement by force. The caller then spawns its own, which is a wasted
- * process at worst — where killing would be lost work.
- */
-async function tryAdopt(
-  port: number,
-  self: { dataDir: string; buildChannel: 'dev' | 'packaged' }
-): Promise<{ bridge: ServerBridge } | { refusal: AdoptionVerdict & { kind: 'refuse' } } | null> {
-  const token = readLocalToken(self.dataDir)
-  if (!token) {
-    log.info('[launcher] a port is published but no credential is; starting our own')
-    return null
-  }
-
-  const candidate = new ServerBridge(`ws://127.0.0.1:${port}/ws`, token)
-  candidate.connect()
-
-  // The greeting is the first frame on the socket and arrives before
-  // authentication, so this resolves even against a server that would reject the
-  // credential. A timeout here means "cannot tell", which must not be read as
-  // "dead" — we decline and spawn rather than assuming the port is free.
-  const hello = await new Promise<ServerHello | null>((resolve) => {
-    const timer = setTimeout(() => resolve(null), ADOPT_HELLO_TIMEOUT_MS)
-    candidate.once('hello', (h: ServerHello) => {
-      clearTimeout(timer)
-      resolve(h)
-    })
-  })
-
-  const verdict = judgeAdoption(hello, self)
-  if (verdict.kind === 'refuse') {
-    candidate.close()
-    return { refusal: verdict }
-  }
-
-  // Adopted, but not yet usable: `connect` fires before the socket opens, and a
-  // rejected credential closes it at 4001 rather than failing the connect.
-  const usable = await new Promise<boolean>((resolve) => {
-    if (candidate.isConnected) return resolve(true)
-    const timer = setTimeout(() => resolve(false), ADOPT_CONNECT_TIMEOUT_MS)
-    candidate.once('connected', () => {
-      clearTimeout(timer)
-      resolve(true)
-    })
-  })
-  if (!usable) {
-    candidate.close()
-    log.warn('[launcher] the running server did not accept this app; starting our own')
-    return null
-  }
-
-  log.info(`[launcher] adopted the server already running on port ${port}`)
-  return { bridge: candidate }
-}
-
-/** Long enough for a busy event loop, short enough not to stall a cold launch. */
-const ADOPT_HELLO_TIMEOUT_MS = 3_000
-const ADOPT_CONNECT_TIMEOUT_MS = 5_000
-
-/** What the last adoption attempt refused, for the UI to explain. Null when none did. */
-let lastRefusal: (AdoptionVerdict & { kind: 'refuse' }) | null = null
-
-export function getLastAdoptionRefusal(): (AdoptionVerdict & { kind: 'refuse' }) | null {
-  return lastRefusal
-}
-
-export async function launchServer(): Promise<ServerBridge> {
-  const host = readHostSettings()
-  if (host.mode === 'host' && host.url) {
-    // Configured for a host but holding no credential — safeStorage was
-    // unavailable when it was saved, or the keychain has moved since. Falling
-    // through to a local server would quietly open a different database than the
-    // one the user asked for, and everything would look empty rather than wrong.
-    // Failing here puts the connect window up asking for the token.
-    if (!host.token) throw new Error(`No stored token for ${host.url}`)
-    return connectToHost(host.url, host.token)
-  }
-
-  // Before spawning anything: is one already running? This is the ordinary path
-  // now that the server outlives the app, not an edge case.
-  const dataDir = resolveDataDir()
-  const buildChannel: 'dev' | 'packaged' = process.env.ELECTRON_RENDERER_URL ? 'dev' : 'packaged'
-  lastRefusal = null
-  const published = readPortFile(dataDir)
-  if (published) {
-    const outcome = await tryAdopt(published.port, { dataDir, buildChannel })
-    if (outcome && 'bridge' in outcome) {
-      bridge = outcome.bridge
-      return bridge
-    }
-    if (outcome && 'refusal' in outcome) {
-      lastRefusal = outcome.refusal
-      log.warn(
-        `[launcher] declined to adopt the running server (${outcome.refusal.reason}): ` +
-          `${outcome.refusal.detail}. It keeps running and keeps its sessions.`
-      )
-    }
-  }
-
+async function spawnServer(): Promise<number> {
+  lastSpawnAt = Date.now()
   const serverEntryPoint = resolveServerEntry()
   log.info(`[launcher] starting server: ${serverEntryPoint}`)
 
-  // A per-launch credential for the server we are about to spawn. Generated here
-  // rather than persisted: nothing to leak at rest, and it dies with the process.
-  // The name is stripped unconditionally by `filterEnv`, so it never reaches a
-  // PTY, headless agent or script node.
-  const bootstrapToken = randomBytes(32).toString('base64url')
+  // A per-run credential for the servers we spawn. Generated here rather than
+  // persisted: nothing to leak at rest, and it dies with the app. The name is
+  // stripped unconditionally by `filterEnv`, so it never reaches a PTY, headless
+  // agent or script node. Reused across a relaunch -- see the declaration.
+  bootstrapToken ??= randomBytes(32).toString('base64url')
 
   // Deliberately does NOT pass --data-dir. Vorn's data directory is ~/.vorn —
   // that is where the database, ws-port file and scheduler locks have always
@@ -273,14 +219,14 @@ export async function launchServer(): Promise<ServerBridge> {
 
     const child = spawn('npx', ['tsx', serverEntryPoint, ...(devPort ? ['--port', devPort] : [])], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      // Its own process group and session, so it survives this app and so a
+      // Its own process group and session, so it survives this app -- and so a
       // Ctrl-C aimed at the terminal running `yarn dev` does not reach it.
       detached: true,
       env: {
         ...process.env,
         [BOOTSTRAP_ENV_VAR]: bootstrapToken,
         NODE_ENV: process.env.NODE_ENV ?? 'development',
-        ...identityEnv(buildChannel)
+        ...identityEnv()
         // Connectors live in their own repository now, so a local build is
         // preferred by setting VORN_CONNECTORS_ROOT to that checkout. It
         // passes through with the rest of the environment above; deriving it
@@ -289,35 +235,46 @@ export async function launchServer(): Promise<ServerBridge> {
       cwd: repoRoot
     })
 
-    port = await readServerPort(child)
-    releaseChildStreams(child)
-    child.unref()
-
+    // Tracked before anything is awaited. `readServerPort` can reject on a ten
+    // second timeout with the child still running, and a child assigned only
+    // after that is one nothing holds a reference to -- unkillable by
+    // `stopServer`, invisible to the relaunch logic, and still on the port.
+    serverProcess = child
     child.on('exit', (code, signal) => {
-      log.warn(`[launcher] server exited (code=${code}, signal=${signal})`)
-      serverProcess = null
+      onServerExit(`code=${code}, signal=${signal}`)
     })
 
-    serverProcess = child
+    port = await readServerPort(child).catch((err) => {
+      child.kill('SIGKILL')
+      throw err
+    })
+    releaseChildStreams(child)
+    child.unref()
   } else {
+    // Deliberately NOT utilityProcess.fork: a utility process is tied to this
+    // app's lifetime by design, so it can never outlive the window -- which is
+    // the whole point here. Spawning the Electron binary with
+    // ELECTRON_RUN_AS_NODE gives a plain Node process from the same signed
+    // bundle, which the hardened runtime already permits because
+    // `resources/entitlements.mac.plist` grants
+    // com.apple.security.cs.allow-dyld-environment-variables.
+    //
+    // The variable is not optional: process.execPath is the Electron binary, and
+    // spawning it without this launches a second full Vorn -- an infinite spawn
+    // loop this code has hit before.
+    //
     // The main process has Electron's ASAR patching so it can resolve native
     // modules. A plain Node child does NOT, so the absolute paths are resolved
     // here and passed through the environment for the server to use.
     const asarUnpacked = path.join(app.getAppPath() + '.unpacked', 'node_modules')
 
-    // Deliberately NOT utilityProcess.fork: a utility process is tied to this
-    // app's lifetime by design, so it can never outlive the window. Spawning the
-    // Electron binary with ELECTRON_RUN_AS_NODE gives a plain Node process from
-    // the same signed bundle — the hardened runtime already allows it, because
-    // `resources/entitlements.mac.plist` grants
-    // com.apple.security.cs.allow-dyld-environment-variables.
     const child = spawn(process.execPath, [serverEntryPoint], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
-      // A daemon must not hold a directory open that can be deleted underneath
+      // A daemon must not hold open a directory that can be deleted underneath
       // it. The data dir is the one place guaranteed to exist for as long as the
       // server has anything to serve.
-      cwd: dataDir,
+      cwd: resolveDataDir(),
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -325,26 +282,209 @@ export async function launchServer(): Promise<ServerBridge> {
         NODE_ENV: 'production',
         VORN_NATIVE_MODULES_PATH: asarUnpacked,
         NODE_PATH: [path.join(app.getAppPath(), 'node_modules'), asarUnpacked].join(path.delimiter),
-        ...identityEnv(buildChannel)
+        ...identityEnv()
       }
     })
 
-    port = await readServerPort(child)
-    releaseChildStreams(child)
-    child.unref()
-
+    serverProcess = child
     child.on('exit', (code) => {
-      log.warn(`[launcher] server exited (code=${code})`)
-      serverProcess = null
+      onServerExit(`code=${code}`)
     })
 
-    serverProcess = child
+    port = await readServerPort(child).catch((err) => {
+      child.kill('SIGKILL')
+      throw err
+    })
+    releaseChildStreams(child)
+    child.unref()
   }
 
+  // A server we started is one we supervise through its child handle, so any
+  // earlier adoption no longer describes what is running.
+  adoptedPid = null
+  return port
+}
+
+/**
+ * A server process has gone. Decide whether another should take its place.
+ *
+ * Recovery is only half missing: `ServerBridge` has always reconnected every two
+ * seconds and never given up, so once something is listening again the app
+ * reattaches itself. What was absent was anything to listen again -- this
+ * handler logged the exit code and stopped, and a server that died took the
+ * session with it until the app was quit and reopened.
+ *
+ * The bridge is kept and repointed rather than replaced, because `main` holds
+ * the instance `launchServer` returned and would go on using the old one.
+ */
+function onServerExit(detail: string): void {
+  const uptimeMs = lastSpawnAt === 0 ? 0 : Date.now() - lastSpawnAt
+  log.warn(`[launcher] server exited (${detail}) after ${Math.round(uptimeMs / 1000)}s`)
+  serverProcess = null
+  relaunchAttempts = attemptsAfterExit(relaunchAttempts, uptimeMs)
+
+  const decision = decideRelaunch({
+    deliberate: stoppingDeliberately,
+    hostMode: readHostSettings().mode === 'host',
+    attempts: relaunchAttempts
+  })
+
+  if (!decision.relaunch) {
+    log.warn(`[launcher] not restarting the server: ${decision.reason}`)
+    return
+  }
+
+  relaunchAttempts += 1
+  log.info(
+    `[launcher] restarting the server in ${decision.delayMs}ms (attempt ${relaunchAttempts})`
+  )
+
+  relaunchTimer = setTimeout(() => {
+    relaunchTimer = null
+    // Asked again, because fifteen seconds is long enough for the answer to have
+    // changed. The app may have begun quitting since, and spawning a server on
+    // the way out is the one thing this must never do.
+    if (stoppingDeliberately) {
+      log.info('[launcher] not restarting after all: the app is shutting down')
+      return
+    }
+    void spawnServer()
+      .then((port) => {
+        const url = `ws://127.0.0.1:${port}/ws`
+        // Usually a no-op now that the port is remembered across restarts, which
+        // is the case the reconnect loop already handles on its own. It matters
+        // when the old port was taken in the moment between the two.
+        if (bridge && bridge.target() !== url) {
+          log.info(`[launcher] server came back on ${port}; repointing the bridge`)
+          bridge.retarget(url)
+        }
+      })
+      .catch((err) => {
+        // Not re-entered here. The child now carries its own `exit` handler from
+        // the moment it is spawned, so a failed start already routes back
+        // through `onServerExit` -- calling it again would spend two attempts on
+        // one failure.
+        log.error({ err }, '[launcher] restart failed')
+      })
+  }, decision.delayMs)
+}
+
+/** Long enough for a busy event loop, short enough not to stall a cold launch. */
+const ADOPT_HELLO_TIMEOUT_MS = 3_000
+const ADOPT_CONNECT_TIMEOUT_MS = 5_000
+
+/**
+ * Connect to a server that is already running and decide whether to keep it.
+ *
+ * Never kills the incumbent. The process holding the PTYs is the one with the
+ * user's work in it, so a client that cannot speak to it declines and says so
+ * rather than settling the disagreement by force -- the rule tmux and zellij
+ * both landed on. Refusing costs a spare process; killing costs the session.
+ */
+async function tryAdopt(
+  port: number,
+  self: { dataDir: string; buildChannel: 'dev' | 'packaged' }
+): Promise<{ bridge: ServerBridge } | { refusal: AdoptionVerdict & { kind: 'refuse' } } | null> {
+  const token = readLocalToken(self.dataDir)
+  if (!token) {
+    log.info('[launcher] a port is published but no credential is; starting our own')
+    return null
+  }
+
+  const candidate = new ServerBridge(`ws://127.0.0.1:${port}/ws`, token)
+  candidate.connect()
+
+  // The greeting is the first frame on the socket and arrives before
+  // authentication, so this resolves even against a server that would reject the
+  // credential. A timeout means "cannot tell", which must not be read as "dead":
+  // that reading is how a second server gets started on a live port.
+  const hello = await new Promise<ServerHello | null>((resolve) => {
+    const timer = setTimeout(() => resolve(null), ADOPT_HELLO_TIMEOUT_MS)
+    candidate.once('hello', (h: ServerHello) => {
+      clearTimeout(timer)
+      resolve(h)
+    })
+  })
+
+  const verdict = judgeAdoption(hello, self)
+  if (verdict.kind === 'refuse') {
+    candidate.close()
+    return { refusal: verdict }
+  }
+
+  // Judged, but not yet usable: a rejected credential closes the socket at 4001
+  // rather than failing the connect, so the greeting alone proves nothing about
+  // whether this app may actually talk to it.
+  const usable = await new Promise<boolean>((resolve) => {
+    if (candidate.isConnected) return resolve(true)
+    const timer = setTimeout(() => resolve(false), ADOPT_CONNECT_TIMEOUT_MS)
+    candidate.once('connected', () => {
+      clearTimeout(timer)
+      resolve(true)
+    })
+  })
+  if (!usable) {
+    candidate.close()
+    log.warn('[launcher] the running server did not accept this app; starting our own')
+    return null
+  }
+
+  adoptedPid = hello?.pid ?? null
+  // An adopted server has no child handle, so nothing would ever call
+  // `onServerExit` for it. Watching the socket is the only signal available, and
+  // the pid distinguishes the two reasons it drops: a server that died, and one
+  // that is merely busy while the bridge retries.
+  candidate.on('disconnected', () => {
+    if (adoptedPid === null || stoppingDeliberately) return
+    if (isPidAlive(adoptedPid)) return
+    const pid = adoptedPid
+    adoptedPid = null
+    onServerExit(`adopted server pid=${pid} is gone`)
+  })
+
+  log.info(`[launcher] adopted the server already running on port ${port}`)
+  return { bridge: candidate }
+}
+
+export async function launchServer(): Promise<ServerBridge> {
+  const host = readHostSettings()
+  if (host.mode === 'host' && host.url) {
+    // Configured for a host but holding no credential — safeStorage was
+    // unavailable when it was saved, or the keychain has moved since. Falling
+    // through to a local server would quietly open a different database than the
+    // one the user asked for, and everything would look empty rather than wrong.
+    // Failing here puts the connect window up asking for the token.
+    if (!host.token) throw new Error(`No stored token for ${host.url}`)
+    return connectToHost(host.url, host.token)
+  }
+
+  // Before spawning anything: is one already running? The ordinary path now that
+  // the server outlives the app, not an edge case. Skipping it would leave the
+  // old server holding the PTYs while this one took another port -- two servers
+  // on one database, the app talking to the empty one.
+  const dataDir = resolveDataDir()
+  lastRefusal = null
+  const published = readPortFile(dataDir)
+  if (published) {
+    const outcome = await tryAdopt(published.port, { dataDir, buildChannel: buildChannel() })
+    if (outcome && 'bridge' in outcome) {
+      bridge = outcome.bridge
+      return bridge
+    }
+    if (outcome && 'refusal' in outcome) {
+      lastRefusal = outcome.refusal
+      log.warn(
+        `[launcher] declined to adopt the running server (${outcome.refusal.reason}): ` +
+          `${outcome.refusal.detail}. It keeps running and keeps its sessions.`
+      )
+    }
+  }
+
+  const port = await spawnServer()
   log.info(`[launcher] server started on port ${port}`)
 
   // Connect bridge
-  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken)
+  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken ?? undefined)
   bridge.connect()
 
   // Wait for connection
@@ -367,19 +507,37 @@ export function getServerBridge(): ServerBridge | null {
  * Let go of the server without stopping it.
  *
  * The ordinary quit path once sessions outlive the window: close the socket and
- * leave the process alone. Deliberately not `stopServer` with a flag — the two
+ * leave the process alone. Deliberately not `stopServer` with a flag -- the two
  * read identically at the call site and mean opposite things to the person whose
  * agent is mid-turn, so they are separate names.
  */
 export function detachFromServer(): void {
+  // Same first move as `stopServer`, for the same reason: the socket is about to
+  // drop, and neither the exit handler nor a countdown already running may take
+  // that as a crash worth answering with a new server on the way out.
+  stoppingDeliberately = true
+  if (relaunchTimer) {
+    clearTimeout(relaunchTimer)
+    relaunchTimer = null
+  }
+
   bridge?.close()
   bridge = null
-  // Dropped without killing. The child is already unref'd and in its own process
-  // group, so nothing here is holding it and nothing here will end it.
+  // Dropped without killing. The child is unref'd and in its own process group,
+  // so nothing here holds it and nothing here will end it.
   serverProcess = null
+  adoptedPid = null
 }
 
 export async function stopServer(): Promise<void> {
+  // Before anything else: an exit we asked for must not look like a crash, and
+  // a relaunch already counting down must not outlive the decision to quit.
+  stoppingDeliberately = true
+  if (relaunchTimer) {
+    clearTimeout(relaunchTimer)
+    relaunchTimer = null
+  }
+
   if (bridge) {
     // Only ask a server to stop if this app is the one that started it.
     //
@@ -387,7 +545,11 @@ export async function stopServer(): Promise<void> {
     // `server:shutdown` to a host would take the server down for everyone
     // connected to it — every other desktop, every phone — because one person
     // closed their laptop.
-    if (serverProcess) {
+    //
+    // An adopted server counts as ours: it is on this machine, on this data
+    // directory, and this app is the one being asked to stop everything. It has
+    // no child handle, so the RPC is the only way to end it.
+    if (serverProcess || adoptedPid !== null) {
       try {
         await bridge.request('server:shutdown', undefined, 5000)
       } catch {
@@ -414,6 +576,7 @@ export async function stopServer(): Promise<void> {
     }
     serverProcess = null
   }
+  adoptedPid = null
 }
 
 function resolveServerEntry(): string {
@@ -429,15 +592,14 @@ function resolveServerEntry(): string {
 /**
  * Wait for the server to say which port it took.
  *
- * The pipe is the primary channel and the only one that can also report a
- * startup crash, which is why it exists on an otherwise detached child. Its
- * stderr is drained into our log for the same window — a server that dies during
- * startup says why here or nowhere.
+ * The pipe is the primary channel and the only one that can also carry a startup
+ * crash, which is why a detached child keeps one. Its stderr is drained into our
+ * log for the same window -- a server that dies during startup says why here or
+ * nowhere -- and both are released the moment the answer arrives.
  *
- * The port file is the fallback, for the case the pipe is closed or the line is
- * missed. It is not merely belt-and-braces: the server writes `{port, pid}` there
- * for MCP already, so a launch that lost the pipe can still find a healthy server
- * rather than concluding it failed.
+ * The port file is the fallback rather than belt-and-braces: the server writes
+ * `{port, pid}` there for MCP already, so a launch that lost the pipe can still
+ * find a healthy server instead of concluding it failed and spawning a second.
  */
 function readServerPort(child: ChildProcess): Promise<number> {
   return new Promise((resolve, reject) => {

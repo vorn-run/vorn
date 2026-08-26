@@ -45,6 +45,57 @@ export class ServerBridge extends EventEmitter {
     this.credential = credential
   }
 
+  /** Where this bridge is pointed, so a caller can tell whether it has moved. */
+  target(): string {
+    return this.url
+  }
+
+  /**
+   * Point at a different port and reconnect there.
+   *
+   * A restarted server usually comes back on the port it had, and the reconnect
+   * loop finds it without help. This is for when it does not — the old port
+   * taken in the moment between the two — where the loop would otherwise retry a
+   * stale address forever, which looks exactly like a server that never came
+   * back.
+   */
+  retarget(url: string): void {
+    if (url === this.url) return
+    this.url = url
+
+    // The old socket's listeners come off before it is closed. `close` is
+    // asynchronous, so its handler would otherwise run after the new socket
+    // exists and set `this.ws = null` on it -- leaving the bridge holding no
+    // reference to a connection that is open, rejecting whatever was in flight,
+    // and scheduling a reconnect on top of the one just made.
+    const previous = this.ws
+    this.ws = null
+    if (previous) {
+      previous.removeAllListeners()
+      // One listener goes straight back on. An EventEmitter with nothing
+      // listening for `error` throws when one is emitted, and a socket being
+      // torn down is exactly when that happens -- closing mid-CONNECTING, or a
+      // reconnect that was already failing. Detaching everything would turn a
+      // socket's last gasp into an uncaught exception, which is the failure this
+      // whole branch is about. It has nothing left to tell us; it just must not
+      // throw on the way out.
+      previous.on('error', () => {})
+      previous.close()
+      // Said here rather than left to each request's own timeout: they were sent
+      // on a socket that is gone, and the answer is never coming.
+      this.rejectAllPending('Server moved')
+    }
+
+    // A reconnect already queued would fire into the new socket and early-return,
+    // but it would also be a second attempt nobody asked for.
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+
+    this.connect()
+  }
+
   connect(): void {
     if (this.ws) return
 
