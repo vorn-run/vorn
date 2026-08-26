@@ -37,12 +37,17 @@ import path from 'node:path'
  */
 
 const ENTRY = path.join(__dirname, '..', 'packages', 'server', 'src', 'index.ts')
+// The tsx binary itself, not `npx tsx`. `npx` is a parent of the process that
+// actually listens on some platforms and execs into it on others, and that
+// difference is the whole reason this test passed locally and failed in CI.
+// Spawning the binary removes the layer rather than reasoning about it.
+const TSX = path.join(__dirname, '..', 'node_modules', '.bin', 'tsx')
 
 let child: ChildProcess | null = null
 let sandbox: string | null = null
 
 afterEach(() => {
-  child?.kill('SIGTERM')
+  if (child) killGroup(child, 'SIGKILL')
   child = null
   if (sandbox) fs.rmSync(sandbox, { recursive: true, force: true })
   sandbox = null
@@ -51,12 +56,18 @@ afterEach(() => {
 /** Boot the server the way Electron does, and read the port it announces. */
 function launch(dir: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('npx', ['tsx', ENTRY, '--data-dir', path.join(dir, 'data')], {
+    const proc = spawn(TSX, [ENTRY, '--data-dir', path.join(dir, 'data')], {
       stdio: 'pipe',
       // Nothing this server writes may escape the sandbox. `os.homedir()` follows
       // HOME, which is what keeps `~/.claude/settings.json` and `~/.vorn` out of
       // reach — see the note above.
-      env: { ...process.env, HOME: dir, USERPROFILE: dir }
+      env: { ...process.env, HOME: dir, USERPROFILE: dir },
+      // Its own process group, so it can be killed as one. `npx tsx` is a parent
+      // of the process that actually listens, and signalling only the parent
+      // leaves the child holding the port — which is precisely how the second
+      // launch below ends up on a fallback port and this test fails for a reason
+      // that has nothing to do with what it is checking.
+      detached: true
     })
     child = proc
     let out = ''
@@ -81,19 +92,65 @@ function launch(dir: string): Promise<number> {
   })
 }
 
-/** Down, and confirmed down, so the next launch is not racing a held socket. */
+/** Signal the whole group; the listener is a child of the process we spawned. */
+function killGroup(proc: ChildProcess, signal: NodeJS.Signals): void {
+  if (proc.pid === undefined) return
+  try {
+    process.kill(-proc.pid, signal)
+  } catch {
+    // Already gone, or never became a group leader.
+  }
+}
+
+/** Whether any process in the group is still alive. */
+function groupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0) // a probe, not a signal
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Down, and confirmed down.
+ *
+ * Waiting on the spawned process is not enough on its own: a server still holding
+ * its port makes the relaunch bind a fallback, failing the assertion for a reason
+ * that has nothing to do with what is being checked. That is what happened in CI,
+ * and it passed locally only because this machine already had something on the
+ * default port, so both launches overlapped on it through `SO_REUSEADDR` and
+ * neither ever reached `EADDRINUSE`. Hence the process group, and the wait.
+ *
+ * The wait is on the process group rather than on the port being free. A port can
+ * be held by something that is not ours — locally, the default is exactly that —
+ * so "nothing answers there" is not a precondition this test can ever demand.
+ */
 async function stop(): Promise<void> {
   const proc = child
   child = null
   if (!proc) return
+
+  const pid = proc.pid
   await new Promise<void>((resolve) => {
-    proc.once('exit', () => resolve())
-    proc.kill('SIGTERM')
-    setTimeout(() => {
-      proc.kill('SIGKILL')
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
       resolve()
-    }, 10_000)
+    }
+    proc.once('exit', done)
+    killGroup(proc, 'SIGTERM')
+    setTimeout(done, 10_000)
   })
+
+  if (pid === undefined) return
+  for (let i = 0; i < 100; i++) {
+    if (!groupAlive(pid)) return
+    if (i === 50) killGroup(proc, 'SIGKILL')
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error('the server process group was still alive 10s after being killed')
 }
 
 describe('a server relaunched on the same data directory', () => {
