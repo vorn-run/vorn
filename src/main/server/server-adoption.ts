@@ -4,6 +4,7 @@ import os from 'node:os'
 import {
   LOCAL_TOKEN_FILENAME,
   WS_PORT_FILENAME,
+  ENDPOINT_FILENAME,
   RUNTIME_PROTOCOL_VERSION,
   type ServerIdentity
 } from '@vornrun/shared/protocol'
@@ -97,6 +98,32 @@ export function isPidAlive(pid: number): boolean {
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'EPERM'
   }
+}
+
+/**
+ * Where this machine's server answers, by name rather than by port.
+ *
+ * A port is discovered from a file that anything can write; this is the file
+ * itself, and holding it is what makes a server the one this machine answers
+ * with. Absent on win32, where Node maps a socket path to a named pipe and there
+ * is no filesystem entry to own -- there the port file is still the only answer.
+ */
+export function readEndpointPath(dataDir = resolveDataDir()): string | null {
+  if (process.platform === 'win32') return null
+  const socket = path.join(dataDir, ENDPOINT_FILENAME)
+  try {
+    return fs.lstatSync(socket).isSocket() ? socket : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The URL form `ws` wants for a unix socket: the path, then the request path
+ * after a colon. Odd-looking, and the only shape the library accepts.
+ */
+export function endpointUrl(socketPath: string): string {
+  return `ws+unix://${socketPath}:/ws`
 }
 
 /** The credential a server publishes for same-machine callers, or null. */

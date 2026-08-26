@@ -39,6 +39,7 @@ import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
+import { isDraining, DRAINING_MESSAGE } from './draining'
 
 const MAX_OUTPUT_LINES = 1000
 const IDLE_TIMEOUT_MS = 5000
@@ -147,6 +148,11 @@ class PtyManager extends EventEmitter {
   }
 
   createPty(payload: CreateTerminalPayload): TerminalSession {
+    // Refused rather than created: a session started on an endpoint this process
+    // no longer holds is reachable through a name that now points elsewhere, so
+    // nobody would ever see it. Existing sessions are untouched -- their clients
+    // hold a descriptor, not a name.
+    if (isDraining()) throw new Error(DRAINING_MESSAGE)
     const id = crypto.randomUUID()
     const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
 

@@ -8,6 +8,7 @@ import log from '../logger'
 import {
   BOOTSTRAP_ENV_VAR,
   SERVER_PORT_ENV_VAR,
+  EXIT_ENDPOINT_TAKEN,
   type ServerIdentity
 } from '@vornrun/shared/protocol'
 import { ServerBridge } from './server-bridge'
@@ -18,6 +19,8 @@ import {
   judgeAdoption,
   readLocalToken,
   readPortFile,
+  readEndpointPath,
+  endpointUrl,
   resolveDataDir,
   type AdoptionVerdict
 } from './server-adoption'
@@ -447,7 +450,7 @@ async function spawnServer(): Promise<number> {
  * The bridge is kept and repointed rather than replaced, because `main` holds
  * the instance `launchServer` returned and would go on using the old one.
  */
-function onServerExit(detail: string): void {
+function onServerExit(detail: string, endpointTaken = false): void {
   const uptimeMs = lastSpawnAt === 0 ? 0 : Date.now() - lastSpawnAt
   log.warn(`[launcher] server exited (${detail}) after ${Math.round(uptimeMs / 1000)}s`)
   // Both, not just the child handle. "How are we holding this server" is one
@@ -460,6 +463,7 @@ function onServerExit(detail: string): void {
 
   const decision = decideRelaunch({
     deliberate: stoppingDeliberately,
+    endpointTaken,
     hostMode: readHostSettings().mode === 'host',
     attempts: relaunchAttempts
   })
@@ -536,10 +540,10 @@ const ADOPT_AUTH_TIMEOUT_MS = 5_000
  * the app is pointed elsewhere and merely wants to say what is still running
  * here; null means "could not tell", never "nothing".
  */
-export async function probeSessions(port: number): Promise<number | null> {
+export async function probeSessions(target: string): Promise<number | null> {
   const token = readLocalToken()
   if (!token) return null
-  const probe = new ServerBridge(`ws://127.0.0.1:${port}/ws`, token)
+  const probe = new ServerBridge(target, token)
   probe.connect()
   try {
     return await new Promise<number | null>((resolve) => {
@@ -563,7 +567,7 @@ export async function probeSessions(port: number): Promise<number | null> {
  * both landed on. Refusing costs a spare process; killing costs the session.
  */
 async function tryAdopt(
-  port: number,
+  target: string,
   expectedPid: number | undefined,
   self: { dataDir: string; buildChannel: 'dev' | 'packaged' }
 ): Promise<
@@ -582,7 +586,7 @@ async function tryAdopt(
     }
   }
 
-  const candidate = new ServerBridge(`ws://127.0.0.1:${port}/ws`, token)
+  const candidate = new ServerBridge(target, token)
   candidate.connect()
 
   // The greeting is the first frame on the socket and arrives before
@@ -660,8 +664,13 @@ async function tryAdopt(
     onServerExit(`adopted server pid=${adoptedPid} is gone`)
   })
 
-  log.info(`[launcher] adopted the server already running on port ${port}`)
+  log.info(`[launcher] adopted the server already running at ${target}`)
   return { bridge: candidate }
+}
+
+/** The loopback form, for a server discovered by the port it published. */
+function portUrl(port: number): string {
+  return `ws://127.0.0.1:${port}/ws`
 }
 
 export async function launchServer(): Promise<ServerBridge> {
@@ -682,9 +691,20 @@ export async function launchServer(): Promise<ServerBridge> {
   // on one database, the app talking to the empty one.
   const dataDir = resolveDataDir()
   lastRefusal = null
+  // The endpoint first, because it is the name a server *owns* rather than a
+  // record anything can write. Its absence is not evidence: win32 never has one,
+  // and a server that could not host one still publishes a port. So the port file
+  // remains the fallback rather than the deprecated path.
+  const socket = readEndpointPath(dataDir)
   const published = readPortFile(dataDir)
-  if (published) {
-    const outcome = await tryAdopt(published.port, published.pid, {
+  const target = socket ? endpointUrl(socket) : published ? portUrl(published.port) : null
+  if (target) {
+    // No pid to insist on when adopting through the socket: nothing wrote one
+    // there. `judgeAdoption` already tolerates that -- it is the same shape as a
+    // port record MCP healed for itself -- and the identity still has to match
+    // data dir, build channel and protocol, and the credential still has to be
+    // accepted.
+    const outcome = await tryAdopt(target, socket ? undefined : published?.pid, {
       dataDir,
       buildChannel: buildChannel()
     })
@@ -695,7 +715,7 @@ export async function launchServer(): Promise<ServerBridge> {
     const { refusal } = outcome
     lastRefusal = {
       ...refusal,
-      incumbentPid: published.pid ?? null,
+      incumbentPid: published?.pid ?? null,
       // Coerced, not trusted. This number comes from the party this app has just
       // decided it cannot use, so it is clamped and rendered as a count — never
       // as text spliced into a sentence.
@@ -917,7 +937,7 @@ function waitForPublishedPort(child: ChildProcess): Promise<number> {
  * down -- which is precisely the diagnostic a detached server most needs.
  */
 function onChildExit(code: number | null, signal: NodeJS.Signals | null): void {
-  onServerExit(`code=${code}, signal=${signal}`)
+  onServerExit(`code=${code}, signal=${signal}`, code === EXIT_ENDPOINT_TAKEN)
 }
 
 /** Where a detached server's stdout and stderr go, under the data directory. */

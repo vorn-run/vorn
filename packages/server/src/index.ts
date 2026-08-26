@@ -23,10 +23,12 @@ import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
+import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
+import { beginDraining, isDraining } from './draining'
 import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
 import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
-import { DEFAULT_SERVER_PORT } from '@vornrun/shared/protocol'
+import { DEFAULT_SERVER_PORT, EXIT_ENDPOINT_TAKEN } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
@@ -198,7 +200,7 @@ export async function startServer(
         // Decides whether the greeting carries this server's identity. Only a
         // desktop on this machine has any use for it, and only loopback can be
         // trusted not to be a stranger on the tailnet.
-        req.socket.remoteAddress
+        { transport: 'tcp', address: req.socket.remoteAddress }
       )
       scheduler.deliverPendingConnectorInbox()
     }
@@ -409,6 +411,29 @@ export async function startServer(
   // and its parent process, not a property of the server. The CLI has no parent
   // and prints something a person can read instead.
 
+  // The canonical local endpoint. A name that can be owned, unlike the port
+  // above -- the desktop probes and adopts through it, and holding it is what
+  // makes this server the one this machine answers with.
+  //
+  // Opened after the listen rather than before: a server that cannot claim the
+  // name still serves whatever is already attached to it, and losing the claim
+  // must never be the reason a startup fails.
+  const claimed = await openLocalEndpoint(dataDir, () => scheduler.deliverPendingConnectorInbox())
+
+  // Arriving second is not a failure, and it is not something to carry on
+  // through. This process would be a second server on one database, and
+  // `saveSessions` is a whole-table replace -- two of them erase each other's
+  // sessions, which is the hazard adoption exists to prevent and the reason a
+  // refused launch does not spawn a rival. So it stands down before publishing
+  // anything, on an exit code that says which of the three things happened, and
+  // the app that started it adopts the incumbent instead of relaunching this.
+  if (claimed.kind === 'lost') {
+    log.warn({ because: claimed.because }, '[server] this machine already has a server')
+    await app.close()
+    process.exit(EXIT_ENDPOINT_TAKEN)
+  }
+  const endpoint = claimed.kind === 'held' ? claimed.endpoint : null
+
   // Publish the port for MCP and anything else that reads this directory.
   writePortFile(dataDir, actualPort, ownsPublished)
 
@@ -455,6 +480,10 @@ export async function startServer(
     await stopAllMcpClients()
     configManager.close()
     removePortFile(dataDir, ownsPublished)
+    // Never removes the canonical entry: this listener bound a scratch name that
+    // no longer exists, so libuv's unlink at close has nothing to find. A dead
+    // socket file left behind is the next publisher's to replace in one rename.
+    await endpoint?.close()
     await app.close()
     process.exit(0)
   }
@@ -477,6 +506,23 @@ export async function startServer(
     })
   }
 
+  /**
+   * Whether this server is winding down, checking first whether it still holds
+   * the endpoint it claimed.
+   *
+   * One direction only: once lost, a name is not given back. A server that never
+   * held one is not draining -- it is running TCP-only, which is a downgrade
+   * rather than a loss, and refusing its sessions would leave the machine with
+   * nothing that works.
+   */
+  const noticeLostEndpoint = (held: LocalEndpoint | null): boolean => {
+    if (isDraining()) return true
+    if (!held || held.holds()) return false
+    log.warn('[endpoint] this server no longer holds the endpoint; finishing what it has')
+    beginDraining()
+    return true
+  }
+
   // The server outlives the app now, so something has to decide when it is done.
   // Nothing here waits for the event loop to drain: the scheduler's inbox
   // interval is not unref'd, so this process would sit empty for ever.
@@ -493,7 +539,12 @@ export async function startServer(
       pendingPairings: pendingRequests().length,
       connectorLeases: dbCountActiveConnectorInboxLeases(new Date().toISOString()),
       enabledSchedules: scheduler.serverSideScheduleCount(),
-      servesOthers: getCurrentHost() === '0.0.0.0'
+      servesOthers: getCurrentHost() === '0.0.0.0',
+      // Looked at rather than waited for. Losing the endpoint is something that
+      // happens *to* this process -- another server that found it unreachable is
+      // entitled to take the name and has no way to say so. One lstat per tick
+      // is the cheapest place to notice, and this timer already runs.
+      draining: noticeLostEndpoint(endpoint)
     }),
     { windowMs: resolveIdleWindowMs(), schedulesHoldOpen: true },
     () => stopFor('nothing left to do')
