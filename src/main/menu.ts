@@ -3,10 +3,7 @@ import { app, Menu, BrowserWindow } from 'electron'
 
 const isMac = process.platform === 'darwin'
 
-export function createMenu(
-  onToggleWidget?: () => void,
-  onStopServer?: () => void
-): void {
+export function createMenu(onToggleWidget?: () => void, onStopServer?: () => void): void {
   app.setAboutPanelOptions({
     applicationName: 'Vorn',
     applicationVersion: app.getVersion(),

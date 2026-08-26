@@ -98,9 +98,7 @@ vi.mock('../src/main/server/server-adoption', async (importOriginal) => {
     ...actual,
     resolveDataDir: () => '/Users/x/.vorn',
     readPortFile: () =>
-      published.port === null
-        ? null
-        : { port: published.port, pid: published.spawnedPid ?? 999 },
+      published.port === null ? null : { port: published.port, pid: published.spawnedPid ?? 999 },
     readLocalToken: () => published.token,
     isPidAlive: () => published.pidAlive
   }
@@ -236,9 +234,8 @@ describe('declining a server that is running', () => {
     published.port = 50091
     published.identity = identityFrom()
     published.protocolVersion = RUNTIME_PROTOCOL_VERSION + 1
-    const { launchServer, getLastAdoptionRefusal, AdoptionRefusedError } = await import(
-      '../src/main/server/server-launcher'
-    )
+    const { launchServer, getLastAdoptionRefusal, AdoptionRefusedError } =
+      await import('../src/main/server/server-launcher')
 
     await expect(launchServer()).rejects.toBeInstanceOf(AdoptionRefusedError)
 
@@ -250,9 +247,8 @@ describe('declining a server that is running', () => {
   it('refuses when the running server is the other build', async () => {
     published.port = 50091
     published.identity = identityFrom({ buildChannel: 'dev' })
-    const { launchServer, getLastAdoptionRefusal } = await import(
-      '../src/main/server/server-launcher'
-    )
+    const { launchServer, getLastAdoptionRefusal } =
+      await import('../src/main/server/server-launcher')
 
     await expect(launchServer()).rejects.toThrow()
 
@@ -263,9 +259,8 @@ describe('declining a server that is running', () => {
   it('refuses when no credential was published to reach it with', async () => {
     published.port = 50091
     published.token = null
-    const { launchServer, getLastAdoptionRefusal } = await import(
-      '../src/main/server/server-launcher'
-    )
+    const { launchServer, getLastAdoptionRefusal } =
+      await import('../src/main/server/server-launcher')
 
     await expect(launchServer()).rejects.toThrow()
 
@@ -292,7 +287,7 @@ describe('the server it spawns', () => {
     expect(spawned[0].opts.detached).toBe(true)
   })
 
-  it('is NOT detached in dev, so a restart cannot adopt yesterday\'s source', async () => {
+  it("is NOT detached in dev, so a restart cannot adopt yesterday's source", async () => {
     // Every adoption check would pass for a leftover dev server -- same data
     // directory, same build channel -- and it would be running the code as it
     // was before the edit that prompted the restart, with nothing to say so.
@@ -452,7 +447,7 @@ describe('the three ways adoption used to go quietly wrong', () => {
 })
 
 describe('what the reviews caught', () => {
-  it('sends the packaged server\'s output to a file, never to a pipe', async () => {
+  it("sends the packaged server's output to a file, never to a pipe", async () => {
     // A pipe held by this process dies with this process, and the server is
     // meant to outlive it. Measured: the next write to stderr after the parent
     // goes raises EPIPE, the server has no uncaughtException handler, and it
@@ -487,9 +482,7 @@ describe('what the reviews caught', () => {
     // adopt -- running the source from before the edit that prompted the restart.
     process.env.ELECTRON_RENDERER_URL = 'http://localhost:5173'
     try {
-      const { launchServer, detachFromServer } = await import(
-        '../src/main/server/server-launcher'
-      )
+      const { launchServer, detachFromServer } = await import('../src/main/server/server-launcher')
       await launchServer()
       const killed: string[] = []
       ;(spawnedChildren[0] as Record<string, unknown>).kill = (sig: string): void => {

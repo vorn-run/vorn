@@ -1,8 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import {
-  LOCAL_SERVER_RUNNING_CHANNEL,
-  type LocalServerNotice
-} from '../shared/adoption-channels'
+import { LOCAL_SERVER_RUNNING_CHANNEL, type LocalServerNotice } from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import {
   CreateTerminalPayload,

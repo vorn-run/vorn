@@ -246,8 +246,7 @@ export function App() {
     // somebody else's is invisible — and with the one action that resolves it,
     // taken by the person whose work it is.
     const removeLocalServerListener = window.api.onLocalServerStillRunning?.((notice) => {
-      const count =
-        notice.sessions === null ? 'Sessions are' : `${notice.sessions} session(s) are`
+      const count = notice.sessions === null ? 'Sessions are' : `${notice.sessions} session(s) are`
       toast(
         `${count} still running on this machine. They keep working, and switching back to local reconnects to them.`,
         'warning',
