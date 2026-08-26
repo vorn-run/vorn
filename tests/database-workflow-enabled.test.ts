@@ -129,6 +129,20 @@ describe('switching a workflow on and off in the table', () => {
     expect(dbListWorkflows()).toHaveLength(1)
   })
 
+  it('counts the row it matched, not whether the value moved', () => {
+    // The handler reads this count to answer an unknown id, so it depends on a
+    // driver behaviour that is not obvious and is not universal: SQLite's
+    // `changes` counts rows the UPDATE *matched*, so writing `true` over `true`
+    // still reports one. MySQL's default `affected_rows` reports zero for the
+    // same statement, which is where the opposite intuition comes from -- and
+    // if this behaved that way, switching on a workflow that was already on
+    // would come back `{ ok: false }` and the method would not be idempotent.
+    seed([{ id: 'wf-a', name: 'Alpha', enabled: true }])
+
+    expect(dbUpdateWorkflow('wf-a', { enabled: true })).toBe(1)
+    expect(dbGetWorkflow('wf-a')?.enabled).toBe(true)
+  })
+
   it('changes nothing, and says so, when handed no columns', () => {
     seed([{ id: 'wf-a', name: 'Alpha', enabled: false }])
 
