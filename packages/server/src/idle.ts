@@ -209,7 +209,7 @@ export class IdleWatch {
 
   /** Idempotent, following the shape `scheduler.startInboxWorker` already uses. */
   start(): void {
-    if (this.timer) return
+    if (this.timer || this.decided) return
     this.timer = setInterval(() => this.tick(), this.checkEveryMs)
     // Nothing should stay alive merely because this is watching.
     this.timer.unref?.()
@@ -225,7 +225,11 @@ export class IdleWatch {
   /** When the last thing holding this server open let go. Null while busy. */
   private quietSince: number | null = null
 
+  /** Set once this has called for the exit. The verdict does not un-make itself. */
+  private decided = false
+
   tick(): IdleVerdict {
+    if (this.decided) return { exit: true }
     const snapshot = this.snapshot()
     // The most recent of the clocks wins. A client that spoke means somebody is
     // out there even with nothing running; a session that ended means the work
@@ -245,6 +249,14 @@ export class IdleWatch {
       else this.quietSince ??= Date.now()
       return verdict
     }
+    // Stopped before it acts, not after, and latched so a caller holding this
+    // watch cannot ask again. `shutdown()` is allowed to take up to its
+    // deadline, and this interval would otherwise go on firing throughout --
+    // announcing "nothing left to do" once per tick against a shutdown already
+    // in flight, and re-entering a path whose only answer is to refuse. The
+    // decision has been made; there is nothing left to watch for.
+    this.decided = true
+    this.stop()
     this.onIdle()
     return verdict
   }

@@ -309,13 +309,21 @@ export function handleConnection(
     }
 
     const { id, method, params } = msg
-    // A frame counts as somebody being out there -- including one that goes on to
-    // be refused, since what the idle check needs is whether anybody is there,
-    // not whether they were allowed. The exception is the frame every connection
-    // opens with: `ServerBridge` sends it from its `open` handler, so a Vorn
-    // merely asking this server whether it may adopt it would otherwise reset
-    // this server's idle clock on the way past, one blocked launch at a time.
-    if (method !== 'bridge:identify') clientRegistry.touch()
+    // A frame from a socket that has proved itself counts as somebody being out
+    // there, and the idle watch stays up for it. Two things do not count.
+    //
+    // An unauthenticated frame, because anything on this machine can open a
+    // socket to loopback: counting those would let arbitrary local traffic pin a
+    // server nobody is using, without ever proving it is a client. Same rule the
+    // hook endpoint follows, and for the same reason.
+    //
+    // And `bridge:identify`, even authenticated, because `ServerBridge` sends it
+    // from its own `open` handler -- so it arrives on every connection including
+    // the one another Vorn opens purely to ask whether it may adopt this server.
+    // Counting that would let a user blocked by a leftover reset its clock on
+    // every launch attempt, so the leftover never leaves and the launches never
+    // stop being blocked.
+    if (session && method !== 'bridge:identify') clientRegistry.touch()
 
     // Everything below this line requires an authenticated socket. The one
     // exception is the credential itself.

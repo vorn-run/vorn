@@ -343,3 +343,38 @@ describe('a desktop flag that outlived its desktop', () => {
     }
   })
 })
+
+describe('once the decision is made', () => {
+  const brief: IdlePolicy = { windowMs: 1_000, schedulesHoldOpen: true }
+
+  it('fires exactly once, however long the shutdown takes', () => {
+    // `shutdown()` may take up to its deadline, and this interval would
+    // otherwise keep firing throughout -- announcing "nothing left to do" once
+    // per tick against a shutdown already in flight, and re-entering a path that
+    // only refuses the re-entry.
+    vi.useFakeTimers()
+    try {
+      let exits = 0
+      const watch = new IdleWatch(quiet, brief, () => exits++, 100)
+      watch.tick() // starts the countdown
+      vi.advanceTimersByTime(brief.windowMs)
+      for (let i = 0; i < 10; i++) watch.tick()
+      expect(exits).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops its own interval, so nothing is left ticking', () => {
+    vi.useFakeTimers()
+    try {
+      let exits = 0
+      const watch = new IdleWatch(quiet, brief, () => exits++, 100)
+      watch.start()
+      vi.advanceTimersByTime(brief.windowMs * 20)
+      expect(exits).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

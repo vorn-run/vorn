@@ -657,6 +657,18 @@ describe('what counts as somebody being out there', () => {
     expect(clientRegistry.touch).toHaveBeenCalled()
   })
 
+  it('does not count a frame from a socket that has not proved itself', () => {
+    // Anything on this machine can open a socket to loopback. If an
+    // unauthenticated frame counted, arbitrary local traffic could pin a server
+    // nobody is using without ever proving it is a client -- the same hole the
+    // hook endpoint closes by advancing its clock only past authentication.
+    const ws = createMockWs()
+    ;(clientRegistry.touch as ReturnType<typeof vi.fn>).mockClear()
+    handleConnection(ws as never, { socket: { remoteAddress: '127.0.0.1' } } as never)
+    sendMessage(ws, { jsonrpc: '2.0', id: 1, method: 'config:load' })
+    expect(clientRegistry.touch).not.toHaveBeenCalled()
+  })
+
   it('does not count the frame every connection opens with', () => {
     // `ServerBridge` sends `bridge:identify` from its own `open` handler, so it
     // arrives on every socket -- including the one another Vorn opens purely to
