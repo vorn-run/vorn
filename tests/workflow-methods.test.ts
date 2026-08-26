@@ -110,7 +110,10 @@ vi.mock('../packages/server/src/database', () => ({
   dbGetWorkflow: vi.fn((id: string) => store.workflows.get(id) ?? null),
   dbUpdateWorkflow: vi.fn((id: string, updates: Record<string, unknown>) => {
     const row = store.workflows.get(id)
-    if (!row) return
+    // The count, as the real one returns: zero rows matched is how an unknown id
+    // is answered, and a mock that returned nothing would make every call look
+    // like a miss.
+    if (!row) return 0
     // The real `dbUpdateWorkflow` builds its SET list from a fixed set of
     // columns and ignores anything else. Mirrored, because a mock that accepts
     // any key lets a handler pass here while writing nothing in production --
@@ -119,6 +122,7 @@ vi.mock('../packages/server/src/database', () => ({
       if (!WORKFLOW_COLUMNS.has(key)) continue
       row[key] = value
     }
+    return 1
   }),
   dbInsertWorkflow: vi.fn(),
   dbDeleteWorkflow: vi.fn(),
@@ -234,6 +238,11 @@ describe('workflow read and enable methods', () => {
     else process.env.HOME = realHome
     if (realProfile === undefined) delete process.env.USERPROFILE
     else process.env.USERPROFILE = realProfile
+    // `app.close()` does not stop the hook server -- that only happens in the
+    // signal shutdown path -- so it would keep a listener open on a socket, and
+    // its files inside a temp home about to be deleted underneath it.
+    const { hookServer } = await import('../packages/server/src/hook-server')
+    hookServer.stop()
     await serverClose?.()
     if (home) fs.rmSync(home, { recursive: true, force: true })
   })

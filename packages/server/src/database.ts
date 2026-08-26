@@ -2562,7 +2562,16 @@ export function dbInsertWorkflow(workflow: WorkflowDefinition): void {
     )
 }
 
-export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition>): void {
+/**
+ * Change a workflow's columns, and say whether a row was there to change.
+ *
+ * The count is the answer to "does this id exist", and it comes free with the
+ * UPDATE. Asking `dbGetWorkflow` first would cost a second statement and a
+ * `JSON.parse` of `nodes` and `edges` — so a single malformed row could throw a
+ * caller that only wanted to flip a boolean, and there would be a gap between
+ * the check and the write for the row to disappear in.
+ */
+export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition>): number {
   const sets: string[] = []
   const params: unknown[] = []
   if (updates.name !== undefined) {
@@ -2597,11 +2606,12 @@ export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition
     sets.push('workspace_id = ?')
     params.push(updates.workspaceId)
   }
-  if (sets.length === 0) return
+  if (sets.length === 0) return 0
   params.push(id)
-  getDb()
+  const result = getDb()
     .prepare(`UPDATE workflows SET ${sets.join(', ')} WHERE id = ?`)
     .run(...params)
+  return Number(result.changes ?? 0)
 }
 
 export function dbDeleteWorkflow(id: string): void {

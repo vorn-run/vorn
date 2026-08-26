@@ -117,13 +117,23 @@ describe('switching a workflow on and off in the table', () => {
     expect(dbGetWorkflow('wf-b')?.enabled).toBe(false)
   })
 
-  it('writes nothing for an id that names no workflow', () => {
-    // The method checks first and refuses, but the helper is reachable on its
-    // own — and an UPDATE matching no row must stay a no-op rather than an error.
+  it('reports how many rows it changed, which is how an unknown id is answered', () => {
+    // `workflow:setEnabled` reads this count instead of fetching the workflow
+    // first. That matters beyond tidiness: `dbGetWorkflow` parses `nodes` and
+    // `edges`, so checking that way would let one malformed row throw a call
+    // that only wanted to flip a boolean.
     seed([{ id: 'wf-a', name: 'Alpha', enabled: false }])
 
-    expect(() => dbUpdateWorkflow('wf-nope', { enabled: true })).not.toThrow()
+    expect(dbUpdateWorkflow('wf-a', { enabled: true })).toBe(1)
+    expect(dbUpdateWorkflow('wf-nope', { enabled: true })).toBe(0)
     expect(dbListWorkflows()).toHaveLength(1)
+  })
+
+  it('changes nothing, and says so, when handed no columns', () => {
+    seed([{ id: 'wf-a', name: 'Alpha', enabled: false }])
+
+    expect(dbUpdateWorkflow('wf-a', {})).toBe(0)
+    expect(dbGetWorkflow('wf-a')?.name).toBe('Alpha')
   })
 })
 

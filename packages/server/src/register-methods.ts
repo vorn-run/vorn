@@ -372,10 +372,11 @@ export function registerAllMethods(): void {
   registerMethod('workflow:list', () => dbListWorkflows())
 
   registerMethod('workflow:setEnabled', ({ id, enabled }) => {
-    // Checked first, so an id that names nothing is answered rather than written
-    // past -- `dbUpdateWorkflow` builds an UPDATE that simply matches no row.
-    if (!dbGetWorkflow(id)) return { ok: false }
-    dbUpdateWorkflow(id, { enabled })
+    // The row count is how an unknown id is answered. Reading the workflow first
+    // would parse its nodes and edges to learn a boolean, so one malformed row
+    // could throw a call that never needed the definition -- and it would leave
+    // a gap between the check and the write.
+    if (dbUpdateWorkflow(id, { enabled }) === 0) return { ok: false }
     // The desktop is drawing this workflow's dot right now and holds the
     // configuration in a cache. Without this it goes on showing the old state
     // until something else invalidates it.
