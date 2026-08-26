@@ -22,10 +22,11 @@ import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
+import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
 import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
-import { DEFAULT_SERVER_PORT, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
+import { DEFAULT_SERVER_PORT } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
@@ -158,9 +159,20 @@ export async function startServer(
   const app = Fastify({ logger: false })
   await app.register(websocket)
 
+  // Who owns this data directory's published names, decided once and used by
+  // every publisher below.
+  //
+  // Taken here rather than beside the port-file write, which is where it used to
+  // live, because the credential is published before the listen and the port
+  // after it — two publishers asking the same question at two different moments
+  // is how they came to disagree. `~/.vorn` is shared by a packaged Vorn and a
+  // `yarn dev` server on purpose, so a fixed name in it needs an owner or the
+  // last writer silently wins.
+  const ownsPublished = claimPublishedFiles(dataDir)
+
   // Resolve this process's local credential and publish it for same-machine
   // tools, before any connection can be accepted.
-  initBootstrapSecret(dataDir)
+  initBootstrapSecret(dataDir, undefined, ownsPublished)
 
   app.get(
     '/ws',
@@ -397,40 +409,8 @@ export async function startServer(
   // and its parent process, not a property of the server. The CLI has no parent
   // and prints something a person can read instead.
 
-  // Write WS port to a well-known file so MCP and other tools can discover it.
-  // Use JSON with PID so multiple instances don't clobber each other's port files.
-  // Lives beside the database rather than always in ~/.vorn, so a server on its
-  // own data dir advertises itself there instead of over the desktop's file.
-  const wsPortFile = path.join(dataDir, WS_PORT_FILENAME)
-  let ownsPortFile = true
-  try {
-    fs.mkdirSync(path.dirname(wsPortFile), { recursive: true })
-
-    // Check if another live instance owns the port file
-    try {
-      const existing = JSON.parse(fs.readFileSync(wsPortFile, 'utf-8'))
-      if (existing.pid && existing.pid !== process.pid) {
-        try {
-          process.kill(existing.pid, 0) // probe — throws if dead
-          ownsPortFile = false
-          log.info(
-            { existingPid: existing.pid },
-            '[server] another instance owns ws-port file, skipping write'
-          )
-        } catch {
-          // dead PID — safe to overwrite
-        }
-      }
-    } catch {
-      // no file or invalid JSON — safe to write
-    }
-
-    if (ownsPortFile) {
-      fs.writeFileSync(wsPortFile, JSON.stringify({ port: actualPort, pid: process.pid }), 'utf-8')
-    }
-  } catch (err) {
-    log.warn({ err }, '[server] failed to write ws-port file (MCP discovery will not work)')
-  }
+  // Publish the port for MCP and anything else that reads this directory.
+  writePortFile(dataDir, actualPort, ownsPublished)
 
   log.info(`[server] listening on ${host}:${actualPort}`)
 
@@ -474,14 +454,7 @@ export async function startServer(
     const { stopAllMcpClients } = await import('./connectors')
     await stopAllMcpClients()
     configManager.close()
-    if (ownsPortFile) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(wsPortFile, 'utf-8'))
-        if (raw.pid === process.pid) fs.unlinkSync(wsPortFile)
-      } catch {
-        /* ignore */
-      }
-    }
+    removePortFile(dataDir, ownsPublished)
     await app.close()
     process.exit(0)
   }
