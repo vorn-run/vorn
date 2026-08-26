@@ -19,16 +19,37 @@ import path from 'node:path'
  * for the same reason: it fails rather than overwriting, so the loser knows it
  * lost.
  *
- * Stale locks are taken rather than swept. A worker killed mid-test leaves one
- * behind, and a test run that refused to proceed because of a crash an hour ago
+ * A lock is stale when the worker that wrote it is gone, which is asked rather
+ * than assumed from elapsed time: these suites legitimately run for minutes, and
+ * a clock-based rule would hand the lock to a second worker exactly on the slow
+ * machines where it matters. A worker killed mid-test still leaves one behind,
+ * and that one is taken -- a run that refused to start over a crash an hour ago
  * would be worse than the contention this avoids.
  */
 
 const LOCK = path.join(os.tmpdir(), 'vorn-test-spawn.lock')
-const STALE_AFTER_MS = 120_000
 const POLL_MS = 100
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/** Who holds it, or null if nothing does. */
+function holder(): number | null {
+  try {
+    const pid = Number(fs.readFileSync(LOCK, 'utf-8').trim())
+    return Number.isInteger(pid) && pid > 0 ? pid : null
+  } catch {
+    return null
+  }
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
 
 async function acquire(): Promise<void> {
   for (;;) {
@@ -36,13 +57,15 @@ async function acquire(): Promise<void> {
       fs.writeFileSync(LOCK, String(process.pid), { flag: 'wx' })
       return
     } catch {
-      try {
-        if (Date.now() - fs.statSync(LOCK).mtimeMs > STALE_AFTER_MS)
-          fs.rmSync(LOCK, { force: true })
-      } catch {
-        // Somebody released it between the failed create and this look, which is
-        // the outcome being waited for anyway.
-      }
+      // Liveness, never elapsed time. An earlier version called a lock stale
+      // after two minutes, and `launcher-endpoint.process.test.ts` runs six tests
+      // that each spawn a server -- comfortably longer than that. So the helper
+      // written to stop suites running concurrently would have been the thing
+      // letting a second one in, and only on the slowest machines, which is where
+      // it was needed most. A worker that is still there still holds it, however
+      // long it takes.
+      const owner = holder()
+      if (owner !== null && !alive(owner)) fs.rmSync(LOCK, { force: true })
       await sleep(POLL_MS)
     }
   }
@@ -60,6 +83,9 @@ export function spawnsRealServers(): void {
     await acquire()
   }, 180_000)
   afterAll(() => {
-    fs.rmSync(LOCK, { force: true })
+    // Only ours. The same rule the code under test lives by: no actor removes a
+    // name it did not create. A worker that overran and lost the lock must not
+    // take the next one's on its way out.
+    if (holder() === process.pid) fs.rmSync(LOCK, { force: true })
   })
 }

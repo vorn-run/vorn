@@ -8,6 +8,28 @@ import { endpointUrl } from '../src/main/server/server-adoption'
 import { probeSessions } from '../src/main/server/server-launcher'
 
 /**
+ * What the endpoint handed to `parseTopics`.
+ *
+ * The obvious place to watch -- `clientRegistry.add` -- is only reached once a
+ * socket has authenticated, and these tests deliberately do not. So the
+ * observation sits at the boundary the fix is about: whether the query string
+ * reaches the parser at all, or whether `undefined` is passed in its place and
+ * every filter silently dropped.
+ */
+const topicsSeen: unknown[] = []
+
+vi.mock('../packages/server/src/broadcast', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../packages/server/src/broadcast')>()
+  return {
+    ...actual,
+    parseTopics: (query: unknown) => {
+      topicsSeen.push(query)
+      return actual.parseTopics(query)
+    }
+  }
+})
+
+/**
  * Bringing up the endpoint, in this process.
  *
  * `endpoint-race.process.test.ts` proves the behaviour with real spawned servers,
@@ -110,17 +132,24 @@ describe('what the endpoint answers', () => {
     }
   )
 
-  it('accepts the route with a query on it', async () => {
+  it('accepts the route with a query, and reads it', async () => {
+    // Accepting a query and then ignoring it would be worse than refusing one: a
+    // client that narrowed its subscription would be sent everything anyway, and
+    // nothing would say so. Fastify parses this for the TCP route; here it is
+    // done by hand, so it is worth proving the query reaches the parser rather
+    // than the `undefined` that used to be passed in its place.
+    topicsSeen.length = 0
     const endpoint = await hold()
 
-    const ws = new WebSocket(`ws+unix://${endpoint.path}:/ws?topics=all`)
-    await expect(
-      new Promise((resolve, reject) => {
-        ws.once('open', resolve)
-        ws.once('error', reject)
-      })
-    ).resolves.toBeUndefined()
+    const ws = new WebSocket(`ws+unix://${endpoint.path}:/ws?topics=sessions,tasks`)
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve)
+      ws.once('error', reject)
+    })
+    await new Promise((r) => setTimeout(r, 150))
     ws.close()
+
+    expect(topicsSeen).toContainEqual({ topics: 'sessions,tasks' })
   })
 })
 

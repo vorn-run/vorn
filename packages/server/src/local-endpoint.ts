@@ -87,15 +87,22 @@ export async function openLocalEndpoint(
     // Exactly `/ws`, with or without a query. `startsWith` accepted `/ws-anything`
     // too, which is a wider door than this listener means to open -- it exists to
     // carry one route.
-    const route = new URL(req.url ?? '/', 'ws://endpoint').pathname
-    if (route !== '/ws') {
+    const url = new URL(req.url ?? '/', 'ws://endpoint')
+    if (url.pathname !== '/ws') {
       socket.destroy()
       return
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
-      handleConnection(ws, bearerFrom(req.headers.authorization), parseTopics(undefined), {
-        transport: 'unix'
-      })
+      handleConnection(
+        ws,
+        bearerFrom(req.headers.authorization),
+        // Read, not discarded. Accepting a query and then ignoring it is worse
+        // than refusing one: a client that narrowed its subscription would be
+        // sent everything anyway, and nothing would say so. Fastify parses this
+        // for the TCP route; here it has to be done by hand.
+        parseTopics(Object.fromEntries(url.searchParams)),
+        { transport: 'unix' }
+      )
       onUpgraded()
     })
   })
