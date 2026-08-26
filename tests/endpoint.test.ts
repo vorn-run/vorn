@@ -227,6 +227,24 @@ describe('whether this machine can host one at all', () => {
     expect(canHostEndpoint(deep)).toMatchObject({ ok: false })
   })
 
+  it('measures the name it will actually bind, not the shorter one', () => {
+    // The scratch name is what gets bound and it is thirteen bytes longer than
+    // the canonical one. A directory that fits only the shorter path would pass
+    // the check and then fail the bind -- the exact failure this turns into a
+    // clean downgrade.
+    // Sized so the canonical path fits inside the limit and the scratch name --
+    // thirteen bytes longer -- does not. Created, because a directory that is not
+    // there is refused for a different reason and would make this pass without
+    // testing anything.
+    const room = 96 - Buffer.byteLength(endpointPath(dir)) - 1
+    const snug = path.join(dir, 'y'.repeat(Math.max(1, room - 6)))
+    fs.mkdirSync(snug, { recursive: true, mode: 0o700 })
+
+    expect(Buffer.byteLength(endpointPath(snug))).toBeLessThanOrEqual(96)
+    expect(Buffer.byteLength(scratchPathFor(endpointPath(snug)))).toBeGreaterThan(96)
+    expect(canHostEndpoint(snug)).toMatchObject({ ok: false })
+  })
+
   it('declines a directory that is not there', () => {
     expect(canHostEndpoint(path.join(dir, 'absent'))).toMatchObject({ ok: false })
   })

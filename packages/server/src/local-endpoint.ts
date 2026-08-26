@@ -84,7 +84,11 @@ export async function openLocalEndpoint(
   const wss = new WebSocketServer({ noServer: true })
 
   server.on('upgrade', (req, socket, head) => {
-    if (!req.url?.startsWith('/ws')) {
+    // Exactly `/ws`, with or without a query. `startsWith` accepted `/ws-anything`
+    // too, which is a wider door than this listener means to open -- it exists to
+    // carry one route.
+    const route = new URL(req.url ?? '/', 'ws://endpoint').pathname
+    if (route !== '/ws') {
       socket.destroy()
       return
     }

@@ -89,16 +89,34 @@ describe('what the endpoint answers', () => {
     ws.close()
   })
 
-  it('refuses anything that is not the socket path', async () => {
+  it.each(['/somewhere-else', '/ws-and-more', '/wsx', '/'])(
+    'refuses the route %s',
+    async (route) => {
+      // `/ws-and-more` is the one worth naming: a `startsWith` check accepted it,
+      // which is a wider door than a listener carrying one route means to open.
+      const endpoint = await hold()
+
+      const ws = new WebSocket(`ws+unix://${endpoint.path}:${route}`)
+      await expect(
+        new Promise((resolve, reject) => {
+          ws.once('open', resolve)
+          ws.once('error', reject)
+        })
+      ).rejects.toThrow()
+    }
+  )
+
+  it('accepts the route with a query on it', async () => {
     const endpoint = await hold()
 
-    const ws = new WebSocket(`ws+unix://${endpoint.path}:/somewhere-else`)
+    const ws = new WebSocket(`ws+unix://${endpoint.path}:/ws?topics=all`)
     await expect(
       new Promise((resolve, reject) => {
         ws.once('open', resolve)
         ws.once('error', reject)
       })
-    ).rejects.toThrow()
+    ).resolves.toBeUndefined()
+    ws.close()
   })
 })
 

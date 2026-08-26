@@ -65,6 +65,11 @@ export function endpointPath(dataDir: string): string {
   return path.join(dataDir, ENDPOINT_FILENAME)
 }
 
+/** A private name to bind, with enough randomness that nothing collides with it. */
+export function scratchPathFor(canonical: string): string {
+  return `${canonical}.${crypto.randomBytes(6).toString('hex')}`
+}
+
 /**
  * Whether this machine can host the endpoint at all.
  *
@@ -77,9 +82,14 @@ export function canHostEndpoint(dataDir: string): { ok: boolean; why?: string } 
   // filesystem entry to test-and-set. Windows keeps the port file.
   if (process.platform === 'win32') return { ok: false, why: 'not a POSIX filesystem' }
 
-  const socket = endpointPath(dataDir)
-  if (Buffer.byteLength(socket) > MAX_SOCKET_PATH) {
-    return { ok: false, why: `path is ${Buffer.byteLength(socket)} bytes` }
+  // Measured on a scratch name, not the canonical one, because the scratch name
+  // is what gets bound -- and it is thirteen bytes longer. Checking the shorter
+  // path would pass a directory whose socket then fails to bind at runtime, which
+  // is the exact failure this guard exists to turn into a clean downgrade.
+  // Generated rather than assumed, so the two cannot drift apart.
+  const bound = scratchPathFor(endpointPath(dataDir))
+  if (Buffer.byteLength(bound) > MAX_SOCKET_PATH) {
+    return { ok: false, why: `path is ${Buffer.byteLength(bound)} bytes` }
   }
 
   // The directory is the access control that matters. On darwin a socket's own
@@ -135,11 +145,6 @@ export function probeEndpoint(socketPath: string, timeoutMs = PROBE_TIMEOUT_MS):
       done(err.code === 'ECONNREFUSED' || err.code === 'ENOENT' ? 'dead' : 'unknown')
     })
   })
-}
-
-/** A private name to bind, with enough randomness that nothing collides with it. */
-export function scratchPathFor(canonical: string): string {
-  return `${canonical}.${crypto.randomBytes(6).toString('hex')}`
 }
 
 interface Entry {
