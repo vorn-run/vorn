@@ -51,14 +51,29 @@ export type PortFile = { port: number; pid?: number }
 export function readPortFile(dataDir = resolveDataDir()): PortFile | null {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(dataDir, WS_PORT_FILENAME), 'utf-8'))
-    const port = typeof raw?.port === 'number' ? raw.port : null
+    // Range-checked, not just typeof'd. The server writes this with a plain
+    // writeFileSync rather than tmp-then-rename, so a crash can leave something
+    // odd behind -- and a nonsense value here is not inert. `port: 0` sends the
+    // launcher at a port nothing can serve, and `pid: 0` is worse: see
+    // `isPidAlive`. Anything unreadable is treated as no record at all, which is
+    // the answer that leads to a fresh spawn rather than a stuck launch.
+    const port = isPort(raw?.port) ? raw.port : null
     if (port === null) return null
-    const pid = typeof raw?.pid === 'number' ? raw.pid : undefined
+    if (raw?.pid !== undefined && !isPid(raw.pid)) return null
+    const pid: number | undefined = raw?.pid
     if (pid !== undefined && !isPidAlive(pid)) return null
     return pid === undefined ? { port } : { port, pid }
   } catch {
     return null
   }
+}
+
+function isPort(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 65535
+}
+
+function isPid(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) > 0
 }
 
 /**
@@ -69,6 +84,13 @@ export function readPortFile(dataDir = resolveDataDir()): PortFile | null {
  * that answer is how a healthy server gets replaced.
  */
 export function isPidAlive(pid: number): boolean {
+  // Zero and negatives are not processes, they are *groups*: `process.kill(0, 0)`
+  // signals this process's own group and always succeeds, and a negative targets
+  // the group of that id. Passing either through would report a server that does
+  // not exist as permanently alive -- and since a live incumbent is refused
+  // rather than replaced, one bad byte in a file would stop the app from
+  // starting at all.
+  if (!isPid(pid)) return false
   try {
     process.kill(pid, 0)
     return true
@@ -109,6 +131,27 @@ export type RefusalReason =
  * session on every update for no reason at all, which is exactly the trap zellij
  * avoids by keeping `CLIENT_SERVER_CONTRACT_VERSION` separate from `VERSION`.
  */
+/**
+ * Whether a greeting is shaped like an identity at all.
+ *
+ * The frame is `JSON.parse`d off a socket and cast, so the type is a claim
+ * rather than a fact -- and the sender is a process this app has not yet decided
+ * to trust. Reading `dataDir` off a malformed one put `undefined` into
+ * `path.resolve`, which throws: the launcher would die where it meant to
+ * decline, and a throw that is not an AdoptionRefusedError quits the app.
+ */
+function isServerIdentity(value: ServerIdentity | null): value is ServerIdentity {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Partial<ServerIdentity>
+  return (
+    typeof v.dataDir === 'string' &&
+    v.dataDir.length > 0 &&
+    typeof v.appVersion === 'string' &&
+    (v.buildChannel === 'dev' || v.buildChannel === 'packaged') &&
+    isPid(v.pid)
+  )
+}
+
 export function judgeAdoption(
   identity: ServerIdentity | null,
   protocolVersion: number | undefined,
@@ -118,7 +161,7 @@ export function judgeAdoption(
   // another data directory, so it is not adoptable. Declining costs a spawn;
   // guessing costs two servers on one database. Nothing further needs checking
   // for undefined: every field on this frame is required.
-  if (!identity) {
+  if (!isServerIdentity(identity)) {
     return {
       kind: 'refuse',
       reason: 'no-identity',

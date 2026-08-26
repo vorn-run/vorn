@@ -175,3 +175,68 @@ describe('who the greeting tells this server is', () => {
     expect(isLoopbackAddress(undefined)).toBe(false)
   })
 })
+
+describe('treating the port file and the greeting as untrusted', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-untrusted-'))
+  })
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  const writePortFile = (value: unknown): void =>
+    fs.writeFileSync(path.join(dir, 'ws-port'), JSON.stringify(value))
+
+  it('rejects pid 0, which signals this process own group and always succeeds', () => {
+    // The nastiest of the three: process.kill(0, 0) succeeds, so a pid of 0 reads
+    // as permanently alive. Since a live incumbent is refused rather than
+    // replaced, one bad byte in this file would stop the app starting at all.
+    expect(isPidAlive(0)).toBe(false)
+    writePortFile({ port: 50091, pid: 0 })
+    expect(readPortFile(dir)).toBeNull()
+  })
+
+  it('rejects a negative pid, which targets a process group', () => {
+    expect(isPidAlive(-1)).toBe(false)
+    writePortFile({ port: 50091, pid: -1 })
+    expect(readPortFile(dir)).toBeNull()
+  })
+
+  it('rejects a non-integer pid', () => {
+    expect(isPidAlive(1.5)).toBe(false)
+    expect(isPidAlive(NaN)).toBe(false)
+  })
+
+  it.each([0, -1, 65536, 1.5, NaN])('rejects an out-of-range port: %s', (port) => {
+    writePortFile({ port, pid: process.pid })
+    expect(readPortFile(dir)).toBeNull()
+  })
+
+  it('refuses a greeting missing its data directory rather than throwing', () => {
+    // path.resolve(undefined) throws, and a throw that is not an
+    // AdoptionRefusedError quits the app -- so the launcher would die exactly
+    // where it meant to decline.
+    const malformed = { appVersion: '1', buildChannel: 'packaged', pid: 4242 }
+    expect(() => judge(malformed as unknown as ServerIdentity)).not.toThrow()
+    expect(judge(malformed as unknown as ServerIdentity)).toMatchObject({
+      kind: 'refuse',
+      reason: 'no-identity'
+    })
+  })
+
+  it.each([
+    [
+      'a bogus build channel',
+      { dataDir: '/Users/x/.vorn', appVersion: '1', buildChannel: 'x', pid: 1 }
+    ],
+    ['an empty data directory', { dataDir: '', appVersion: '1', buildChannel: 'packaged', pid: 1 }],
+    [
+      'a pid of zero',
+      { dataDir: '/Users/x/.vorn', appVersion: '1', buildChannel: 'packaged', pid: 0 }
+    ],
+    ['a non-object', 'not an identity']
+  ])('refuses %s', (_label, frame) => {
+    expect(judge(frame as unknown as ServerIdentity)).toMatchObject({ reason: 'no-identity' })
+  })
+})
