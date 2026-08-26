@@ -83,29 +83,43 @@ export interface ServerHello {
    * `auth:authenticate` message.
    */
   capabilities: Record<string, number>
-  /**
-   * Who this server is, for a desktop deciding whether to adopt it rather than
-   * start its own. All four are optional: a server that predates them is simply
-   * not adoptable, which is the safe answer rather than a broken one.
-   *
-   * Adoption turns on `protocolVersion` above, never on `appVersion`. The two
-   * move independently on purpose — `protocolVersion` changes when the messages
-   * change, `appVersion` changes every release — and gating on the release would
-   * end every running session on every update for no reason. The same split is
-   * why a mismatch here is never resolved by killing the incumbent: the server
-   * holding the PTYs is the one with the user's work in it, so a client that
-   * cannot speak to it declines and says so.
-   */
-  appVersion?: string
+}
+
+/**
+ * Who this server is, for a desktop deciding whether to adopt it rather than
+ * start its own.
+ *
+ * A separate frame from `server:hello` because the audience is different, and
+ * that difference is the whole design. Capabilities go to every client;
+ * identity goes only to a peer on loopback, because `dataDir` names the user's
+ * home directory and the server may be bound to `0.0.0.0`. Folding it into the
+ * greeting meant one message with two audiences — a frame that had to be built
+ * per-peer and cached twice, and fields that had to be optional for readers who
+ * would never receive them.
+ *
+ * Every field is required, so a reader that has this frame is done checking. A
+ * server too old to send one simply does not, and "no identity" is already the
+ * answer that declines adoption.
+ *
+ * Adoption turns on `ServerHello.protocolVersion`, never on `appVersion`. The
+ * two move independently on purpose — the protocol changes when the messages
+ * change, the release changes every time anything ships — and gating on the
+ * release would end every running session on every update for no reason. The
+ * same reasoning is why a mismatch is never settled by killing the incumbent:
+ * the server holding the PTYs holds the user's work, so a client that cannot
+ * speak to it declines and says so.
+ */
+export interface ServerIdentity {
+  appVersion: string
   /** Resolved data directory. Two servers on one directory is the case to catch. */
-  dataDir?: string
-  pid?: number
+  dataDir: string
+  pid: number
   /**
    * A dev build and a packaged build deliberately share `~/.vorn` while keeping
    * separate Electron user data, so without this a `yarn dev` launch would adopt
    * the packaged app's bundled server, or the reverse.
    */
-  buildChannel?: 'dev' | 'packaged'
+  buildChannel: 'dev' | 'packaged'
 }
 
 // ─── Authentication ─────────────────────────────────────────────
@@ -903,6 +917,8 @@ export interface RequestMethods {
 export interface ServerNotifications {
   /** First frame on every connection, before anything is dispatched. */
   'server:hello': ServerHello
+  /** Follows the greeting, on loopback only. Absent from an older server. */
+  'server:identity': ServerIdentity
   /** Sent once a socket is admitted, so a client knows it may start sending. */
   'auth:ok': { userId: string }
   'terminal:data': { id: string; data: string }

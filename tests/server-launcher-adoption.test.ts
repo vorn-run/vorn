@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { RUNTIME_PROTOCOL_VERSION, type ServerHello } from '@vornrun/shared/protocol'
+import { RUNTIME_PROTOCOL_VERSION, type ServerIdentity } from '@vornrun/shared/protocol'
 
 /**
  * Whether a launch starts a server or joins the one already running.
@@ -19,7 +19,8 @@ const hostSettings = {
 const published = {
   port: null as number | null,
   token: 'local-secret' as string | null,
-  hello: null as ServerHello | null,
+  identity: null as ServerIdentity | null,
+  protocolVersion: RUNTIME_PROTOCOL_VERSION as number,
   /** Whether the adopted server's process is still alive, when asked. */
   pidAlive: true,
   /** Whether the running server closes the socket after greeting us. */
@@ -36,6 +37,10 @@ class FakeBridge extends EventEmitter {
   requests: string[] = []
   closed = false
   isConnected = false
+  helloVersion: number | undefined
+  get serverHelloVersion(): number | undefined {
+    return this.helloVersion
+  }
   constructor(
     public url: string,
     public credential?: string
@@ -50,7 +55,8 @@ class FakeBridge extends EventEmitter {
       // lands, and cannot be used as proof the credential was accepted.
       this.isConnected = true
       this.emit('connected')
-      if (published.hello) this.emit('hello', published.hello)
+      this.helloVersion = published.protocolVersion
+      if (published.identity) this.emit('identity', published.identity)
     })
   }
   async request(method: string): Promise<unknown> {
@@ -151,10 +157,8 @@ vi.mock('node:readline', () => ({
   }
 }))
 
-function helloFrom(over: Partial<ServerHello> = {}): ServerHello {
+function identityFrom(over: Partial<ServerIdentity> = {}): ServerIdentity {
   return {
-    protocolVersion: RUNTIME_PROTOCOL_VERSION,
-    capabilities: { auth: 1 },
     dataDir: '/Users/x/.vorn',
     buildChannel: 'packaged',
     pid: 999,
@@ -174,7 +178,8 @@ beforeEach(() => {
   bridges.length = 0
   published.port = null
   published.token = 'local-secret'
-  published.hello = null
+  published.identity = null
+  published.protocolVersion = RUNTIME_PROTOCOL_VERSION
   published.pidAlive = true
   published.rejectsCredential = false
   published.spawnedPid = null
@@ -184,7 +189,7 @@ beforeEach(() => {
 describe('finding a server that is already running', () => {
   it('adopts it instead of spawning a second', async () => {
     published.port = 50091
-    published.hello = helloFrom()
+    published.identity = identityFrom()
     const { launchServer } = await import('../src/main/server/server-launcher')
 
     const bridge = await launchServer()
@@ -198,7 +203,7 @@ describe('finding a server that is already running', () => {
     // the next launch must read the credential the server published rather than
     // inventing one the server has never seen.
     published.port = 50091
-    published.hello = helloFrom()
+    published.identity = identityFrom()
     const { launchServer } = await import('../src/main/server/server-launcher')
 
     const bridge = await launchServer()
@@ -208,7 +213,7 @@ describe('finding a server that is already running', () => {
 
   it('adopts one running an older app version', async () => {
     published.port = 50091
-    published.hello = helloFrom({ appVersion: '0.6.0' })
+    published.identity = identityFrom({ appVersion: '0.6.0' })
     const { launchServer } = await import('../src/main/server/server-launcher')
 
     await launchServer()
@@ -223,7 +228,8 @@ describe('declining a server that is running', () => {
     // that cannot speak to it says so and steps aside; it does not resolve the
     // disagreement by ending sessions it cannot even read.
     published.port = 50091
-    published.hello = helloFrom({ protocolVersion: RUNTIME_PROTOCOL_VERSION + 1 })
+    published.identity = identityFrom()
+    published.protocolVersion = RUNTIME_PROTOCOL_VERSION + 1
     const { launchServer, getLastAdoptionRefusal } =
       await import('../src/main/server/server-launcher')
 
@@ -236,7 +242,7 @@ describe('declining a server that is running', () => {
 
   it('spawns its own when the running server is the other build', async () => {
     published.port = 50091
-    published.hello = helloFrom({ buildChannel: 'dev' })
+    published.identity = identityFrom({ buildChannel: 'dev' })
     const { launchServer, getLastAdoptionRefusal } =
       await import('../src/main/server/server-launcher')
 
@@ -323,7 +329,7 @@ describe('the server it spawns', () => {
 describe('quitting', () => {
   it('lets go of an adopted server without stopping it', async () => {
     published.port = 50091
-    published.hello = helloFrom()
+    published.identity = identityFrom()
     const { launchServer, detachFromServer, getServerBridge } =
       await import('../src/main/server/server-launcher')
     await launchServer()
@@ -352,7 +358,7 @@ describe('an adopted server that dies', () => {
     // one case that never recovers: the bridge retrying forever against a port
     // with nothing behind it, which is the symptom #492 was written to end.
     published.port = 50091
-    published.hello = helloFrom()
+    published.identity = identityFrom()
     const { launchServer } = await import('../src/main/server/server-launcher')
     await launchServer()
 
@@ -366,7 +372,7 @@ describe('an adopted server that dies', () => {
     // reconnecting. Spawning a replacement on that signal alone would put a
     // second server on the database every time the connection blipped.
     published.port = 50091
-    published.hello = helloFrom()
+    published.identity = identityFrom()
     const { launchServer } = await import('../src/main/server/server-launcher')
     await launchServer()
 
@@ -377,7 +383,7 @@ describe('an adopted server that dies', () => {
 
   it('is not replaced once the app has decided to quit', async () => {
     published.port = 50091
-    published.hello = helloFrom()
+    published.identity = identityFrom()
     const { launchServer, detachFromServer } = await import('../src/main/server/server-launcher')
     await launchServer()
 
@@ -396,7 +402,7 @@ describe('the three ways adoption used to go quietly wrong', () => {
     // surviving bridge presenting a token no server had heard of, reconnecting
     // forever against a server that was perfectly healthy.
     published.port = 50091
-    published.hello = helloFrom()
+    published.identity = identityFrom()
     const { launchServer } = await import('../src/main/server/server-launcher')
     await launchServer()
 
@@ -413,7 +419,7 @@ describe('the three ways adoption used to go quietly wrong', () => {
     // greeting arrives regardless, so `isConnected` always said yes and the old
     // check could never run. An authenticated round trip is the actual question.
     published.port = 50091
-    published.hello = helloFrom()
+    published.identity = identityFrom()
     published.rejectsCredential = true
     const { launchServer } = await import('../src/main/server/server-launcher')
 
@@ -454,7 +460,8 @@ describe('what the reviews caught', () => {
     // credential -- rejected forever -- while the child we started ran unwatched.
     published.port = 50091
     published.spawnedPid = 999
-    published.hello = helloFrom({ protocolVersion: RUNTIME_PROTOCOL_VERSION + 1 })
+    published.identity = identityFrom()
+    published.protocolVersion = RUNTIME_PROTOCOL_VERSION + 1
     const { launchServer } = await import('../src/main/server/server-launcher')
 
     const bridge = await launchServer()
@@ -491,7 +498,7 @@ describe('what the reviews caught', () => {
     // If it throws, nothing had happened yet: the user picked "Stop Sessions and
     // Server", the app quit, and every session carried on saying nothing.
     published.port = 50091
-    published.hello = helloFrom({ pid: 999 })
+    published.identity = identityFrom()
     const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
     await launchServer()
     bridges[0].request = async (m: string) => {
@@ -516,7 +523,7 @@ describe('a server whose greeting does not match its port file', () => {
     // Both name the same server when everything is honest. Only one of them was
     // written by a process this app can attribute, and it is the one to believe.
     published.port = 50091
-    published.hello = helloFrom({ pid: 31337 })
+    published.identity = identityFrom({ pid: 31337 })
 
     const { launchServer } = await import('../src/main/server/server-launcher')
     await launchServer()

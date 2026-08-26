@@ -1,6 +1,6 @@
 import WebSocket from 'ws'
 import { EventEmitter } from 'node:events'
-import type { RpcResponse, RpcNotification, ServerHello } from '@vornrun/shared/protocol'
+import type { RpcResponse, RpcNotification, ServerIdentity } from '@vornrun/shared/protocol'
 import { createRequest, createNotification } from '@vornrun/shared/protocol'
 import log from '../logger'
 
@@ -29,14 +29,22 @@ export class ServerBridge extends EventEmitter {
   private shouldReconnect = true
   private inbound = new Map<string, (params: unknown) => unknown>()
   /**
-   * The greeting, once it has arrived. The server sends it as the first frame on
-   * every socket and before authentication, so a caller deciding whether to adopt
-   * this server can read it without first proving who it is.
+   * Who the server said it is, once it has said so.
+   *
+   * Follows the greeting, before authentication, and only on loopback — so a
+   * caller deciding whether to adopt this server can read it without first
+   * proving who it is, and a stranger on the network never sees it at all.
    */
-  private hello: ServerHello | null = null
+  private identity: ServerIdentity | null = null
+  /** From the greeting, which every socket receives. Undefined until it lands. */
+  private helloVersion: number | undefined
 
-  get serverHello(): ServerHello | null {
-    return this.hello
+  get serverIdentity(): ServerIdentity | null {
+    return this.identity
+  }
+
+  get serverHelloVersion(): number | undefined {
+    return this.helloVersion
   }
 
   constructor(url: string, credential?: string) {
@@ -138,9 +146,13 @@ export class ServerBridge extends EventEmitter {
           this.handleResponse(msg as RpcResponse)
         } else if ('method' in msg) {
           if (msg.method === 'server:hello') {
-            this.hello = (msg as RpcNotification).params as ServerHello
-            this.emit('hello', this.hello)
-            log.info({ hello: this.hello }, '[bridge] server protocol')
+            const hello = (msg as RpcNotification).params as { protocolVersion?: number }
+            this.helloVersion = hello?.protocolVersion
+            log.info({ hello }, '[bridge] server protocol')
+          }
+          if (msg.method === 'server:identity') {
+            this.identity = (msg as RpcNotification).params as ServerIdentity
+            this.emit('identity', this.identity)
           }
           this.emit('server-notification', msg.method, (msg as RpcNotification).params)
         }

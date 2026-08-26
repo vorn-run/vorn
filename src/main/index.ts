@@ -253,6 +253,9 @@ function rememberKeepSessionsRunning(config: unknown): void {
  */
 function wireServerNotifications(bridge: ServerBridge): void {
   bridge.on('server-notification', (method: string, params: unknown) => {
+    // Before the switch rather than inside it: `CONFIG_CHANGED` is one label in a
+    // fall-through group that forwards seventeen events identically, so giving it
+    // a body of its own would mean splitting it out and repeating the forward.
     if (method === IPC.CONFIG_CHANGED) rememberKeepSessionsRunning(params)
     switch (method) {
       // Terminal data/exit → forward to renderer

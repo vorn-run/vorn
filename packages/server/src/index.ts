@@ -82,7 +82,10 @@ export async function startServer(
   // packaged app. Getting this wrong is not cosmetic: dev and packaged builds
   // deliberately share ~/.vorn, so a wrong answer lets one adopt the other's.
   setServerIdentity({
-    ...(process.env.VORN_APP_VERSION ? { appVersion: process.env.VORN_APP_VERSION } : {}),
+    // The launcher passes the app's version; a CLI server has none to report and
+    // says so rather than omitting the field, since every field on this frame is
+    // required and a reader that has it should be done checking.
+    appVersion: process.env.VORN_APP_VERSION ?? 'unknown',
     dataDir,
     pid: process.pid,
     buildChannel: resolveBuildChannel()

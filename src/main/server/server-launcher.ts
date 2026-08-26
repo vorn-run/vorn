@@ -5,7 +5,11 @@ import path, { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { app } from 'electron'
 import log from '../logger'
-import { BOOTSTRAP_ENV_VAR, SERVER_PORT_ENV_VAR, type ServerHello } from '@vornrun/shared/protocol'
+import {
+  BOOTSTRAP_ENV_VAR,
+  SERVER_PORT_ENV_VAR,
+  type ServerIdentity
+} from '@vornrun/shared/protocol'
 import { ServerBridge } from './server-bridge'
 import { readHostSettings } from './host-store'
 import { attemptsAfterExit, decideRelaunch } from './server-relaunch'
@@ -214,7 +218,6 @@ function readDevPort(): string | undefined {
  */
 async function spawnServer(): Promise<number> {
   lastSpawnAt = Date.now()
-  const dataDir = ensureDataDir()
   const serverEntryPoint = resolveServerEntry()
   log.info(`[launcher] starting server: ${serverEntryPoint}`)
 
@@ -230,7 +233,7 @@ async function spawnServer(): Promise<number> {
   // Electron's userData, which the server then ignored for everything except
   // task images, so it was inert. Passing it once the server honours it would
   // point the database at an empty directory and read as total data loss.
-  const isDev = !!process.env.ELECTRON_RENDERER_URL
+  const isDev = buildChannel() === 'dev'
 
   let port: number
 
@@ -278,9 +281,7 @@ async function spawnServer(): Promise<number> {
     // after that is one nothing holds a reference to -- unkillable by
     // `stopServer`, invisible to the relaunch logic, and still on the port.
     serverProcess = child
-    child.on('exit', (code, signal) => {
-      onServerExit(`code=${code}, signal=${signal}`)
-    })
+    child.on('exit', onChildExit)
 
     port = await readServerPort(child).catch((err) => {
       child.kill('SIGKILL')
@@ -302,6 +303,11 @@ async function spawnServer(): Promise<number> {
     // The main process has Electron's ASAR patching so it can resolve native
     // modules. A plain Node child does NOT, so the absolute paths are resolved
     // here and passed through the environment for the server to use.
+    // Created here rather than at the top of this function: only this branch
+    // reads it, and the dev branch would otherwise pay a blocking recursive
+    // mkdirSync on every spawn -- including every crash relaunch during a
+    // `yarn dev` session -- for a value it never touches.
+    const dataDir = ensureDataDir()
     const asarUnpacked = path.join(app.getAppPath() + '.unpacked', 'node_modules')
 
     // Straight to a file, not to pipes.
@@ -343,9 +349,7 @@ async function spawnServer(): Promise<number> {
     closeSync(logFd)
 
     serverProcess = child
-    child.on('exit', (code) => {
-      onServerExit(`code=${code}`)
-    })
+    child.on('exit', onChildExit)
     child.on('error', (err) => {
       log.error({ err }, '[launcher] could not start the server')
     })
@@ -381,7 +385,12 @@ async function spawnServer(): Promise<number> {
 function onServerExit(detail: string): void {
   const uptimeMs = lastSpawnAt === 0 ? 0 : Date.now() - lastSpawnAt
   log.warn(`[launcher] server exited (${detail}) after ${Math.round(uptimeMs / 1000)}s`)
+  // Both, not just the child handle. "How are we holding this server" is one
+  // fact stored in two variables -- a child we spawned, or a pid we adopted --
+  // and until this cleared only one of them, the caller on the adopted path had
+  // to clear the other itself. One invariant with two owners is how they drift.
   serverProcess = null
+  adoptedPid = null
   relaunchAttempts = attemptsAfterExit(relaunchAttempts, uptimeMs)
 
   const decision = decideRelaunch({
@@ -430,8 +439,13 @@ function onServerExit(detail: string): void {
   }, decision.delayMs)
 }
 
-/** Long enough for a busy event loop, short enough not to stall a cold launch. */
-const ADOPT_HELLO_TIMEOUT_MS = 3_000
+/**
+ * Long enough for a busy event loop, short enough not to stall a cold launch.
+ *
+ * A server that sends no identity frame at all -- too old, or not on loopback --
+ * costs exactly this before the launch gives up and spawns its own.
+ */
+const ADOPT_IDENTITY_TIMEOUT_MS = 3_000
 /** How long to wait for the round trip that proves the credential was accepted. */
 const ADOPT_AUTH_TIMEOUT_MS = 5_000
 
@@ -461,15 +475,18 @@ async function tryAdopt(
   // authentication, so this resolves even against a server that would reject the
   // credential. A timeout means "cannot tell", which must not be read as "dead":
   // that reading is how a second server gets started on a live port.
-  const hello = await new Promise<ServerHello | null>((resolve) => {
-    const timer = setTimeout(() => resolve(null), ADOPT_HELLO_TIMEOUT_MS)
-    candidate.once('hello', (h: ServerHello) => {
+  const identity = await new Promise<ServerIdentity | null>((resolve) => {
+    const timer = setTimeout(() => resolve(null), ADOPT_IDENTITY_TIMEOUT_MS)
+    candidate.once('identity', (found: ServerIdentity) => {
       clearTimeout(timer)
-      resolve(h)
+      resolve(found)
     })
   })
 
-  const verdict = judgeAdoption(hello, self)
+  const verdict = judgeAdoption(identity, candidate.serverHelloVersion, {
+    ...self,
+    expectedPid
+  })
   if (verdict.kind === 'refuse') {
     candidate.close()
     return { refusal: verdict }
@@ -502,16 +519,6 @@ async function tryAdopt(
   // forever against a healthy server, rejected every time.
   bootstrapToken = token
 
-  // The port file's pid, not the greeting's. Both name the same server when
-  // everything is honest, but only one of them was written by a process this
-  // app can attribute -- and this value is later handed to `process.kill`.
-  if (hello?.pid !== expectedPid) {
-    candidate.close()
-    log.warn(
-      `[launcher] the server on port ${port} reports pid ${hello?.pid}, but the port file says ${expectedPid}; starting our own`
-    )
-    return null
-  }
   adoptedPid = expectedPid ?? null
   // An adopted server has no child handle, so nothing would ever call
   // `onServerExit` for it. Watching the socket is the only signal available, and
@@ -520,9 +527,7 @@ async function tryAdopt(
   candidate.on('disconnected', () => {
     if (adoptedPid === null || stoppingDeliberately) return
     if (isPidAlive(adoptedPid)) return
-    const pid = adoptedPid
-    adoptedPid = null
-    onServerExit(`adopted server pid=${pid} is gone`)
+    onServerExit(`adopted server pid=${adoptedPid} is gone`)
   })
 
   log.info(`[launcher] adopted the server already running on port ${port}`)
@@ -597,15 +602,24 @@ export function getServerBridge(): ServerBridge | null {
  * read identically at the call site and mean opposite things to the person whose
  * agent is mid-turn, so they are separate names.
  */
-export function detachFromServer(): void {
-  // Same first move as `stopServer`, for the same reason: the socket is about to
-  // drop, and neither the exit handler nor a countdown already running may take
-  // that as a crash worth answering with a new server on the way out.
+/**
+ * Stop treating the server's departure as a failure.
+ *
+ * The first move of every deliberate ending, whether the server is being killed
+ * or merely let go of: the socket is about to drop, and neither the exit handler
+ * nor a countdown already running may read that as a crash worth answering with
+ * a new server on the way out.
+ */
+function beginDeliberateStop(): void {
   stoppingDeliberately = true
   if (relaunchTimer) {
     clearTimeout(relaunchTimer)
     relaunchTimer = null
   }
+}
+
+export function detachFromServer(): void {
+  beginDeliberateStop()
 
   bridge?.close()
   bridge = null
@@ -615,7 +629,7 @@ export function detachFromServer(): void {
   // the `npx tsx` server running for the next `yarn dev` to adopt, which is the
   // stale-source trap the dev spawn is written to avoid. Dev keeps the old
   // lifetime in full: the server goes when the app goes.
-  if (serverProcess && process.env.ELECTRON_RENDERER_URL) {
+  if (serverProcess && buildChannel() === 'dev') {
     serverProcess.kill('SIGTERM')
   }
 
@@ -626,13 +640,7 @@ export function detachFromServer(): void {
 }
 
 export async function stopServer(): Promise<void> {
-  // Before anything else: an exit we asked for must not look like a crash, and
-  // a relaunch already counting down must not outlive the decision to quit.
-  stoppingDeliberately = true
-  if (relaunchTimer) {
-    clearTimeout(relaunchTimer)
-    relaunchTimer = null
-  }
+  beginDeliberateStop()
 
   if (bridge) {
     // Only ask a server to stop if this app is the one that started it.
@@ -689,7 +697,7 @@ export async function stopServer(): Promise<void> {
 function resolveServerEntry(): string {
   // In dev: packages/server/src/index.ts (run via tsx)
   // In production: resources/server/index.cjs (bundled)
-  if (process.env.ELECTRON_RENDERER_URL) {
+  if (buildChannel() === 'dev') {
     // Dev mode — use tsx to run TypeScript directly
     return path.join(__dirname, '../../packages/server/src/index.ts')
   }
@@ -698,6 +706,14 @@ function resolveServerEntry(): string {
 
 /**
  * Wait for a server we just spawned to publish its port.
+ *
+ * Only for the packaged branch, which spawns the server directly. Dev goes
+ * through `npx tsx`, so its child is npx -- a parent of the process that
+ * actually listens -- and the pid in the port file is the server's, never the
+ * child's. Merging the two readiness paths onto this one therefore cannot work:
+ * in dev the match below would never be satisfied and the launch would hang for
+ * the full timeout. `tests/server-port-stability.test.ts` runs the tsx binary
+ * directly for the same reason.
  *
  * Only ever satisfied by a file naming *this* child. The same file is what
  * `launchServer` reads before deciding whether to adopt, so a launch that
@@ -736,6 +752,16 @@ function waitForPublishedPort(child: ChildProcess): Promise<number> {
     }
     poll()
   })
+}
+
+/**
+ * One handler for both branches, so a packaged crash is logged as fully as a dev
+ * one. The signal is the interesting half when a server is killed rather than
+ * exiting, and the production branch used to drop it for no reason anyone wrote
+ * down -- which is precisely the diagnostic a detached server most needs.
+ */
+function onChildExit(code: number | null, signal: NodeJS.Signals | null): void {
+  onServerExit(`code=${code}, signal=${signal}`)
 }
 
 /** Where a detached server's stdout and stderr go, under the data directory. */

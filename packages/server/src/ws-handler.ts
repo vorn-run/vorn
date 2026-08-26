@@ -15,7 +15,7 @@ import {
   RPC_NOT_AUTHENTICATED,
   type ClientNotification,
   type ClientNotifications,
-  type ServerHello
+  type ServerIdentity
 } from '@vornrun/shared/protocol'
 import { authenticateCredential, AUTH_TIMEOUT_MS, type Authenticated } from './ws-auth'
 import { clientRegistry } from './broadcast'
@@ -45,44 +45,39 @@ let helloFrameCache: string | null = null
  * call it, and a hello without identity simply is not adoptable — the launcher
  * spawns its own rather than guessing.
  */
-let identity: Pick<ServerHello, 'appVersion' | 'dataDir' | 'pid' | 'buildChannel'> = {}
+let identity: ServerIdentity | null = null
+let identityFrameCache: string | null = null
 
-export function setServerIdentity(next: typeof identity): void {
+export function setServerIdentity(next: ServerIdentity): void {
   identity = next
-  helloFrameCache = null
-  loopbackHelloFrameCache = null
+  identityFrameCache = null
 }
 
-let loopbackHelloFrameCache: string | null = null
-
-/**
- * The greeting, which every socket receives before it has authenticated.
- *
- * That timing is deliberate — a client that must authenticate by message needs
- * to know so before it is refused for not having — and it is also why the
- * identity fields are withheld from anything that is not on loopback. They exist
- * for one caller: a desktop on this machine deciding whether to adopt this
- * server rather than start a second one. `dataDir` names the user's home
- * directory, so it carries the account name, and with remote access enabled the
- * server binds `0.0.0.0`, where the Origin allowlist does not apply to a peer
- * that simply sends no Origin at all. A LAN peer would have read both before
- * being disconnected.
- */
-function helloFrame(fromLoopback: boolean): string {
+function helloFrame(): string {
   // Built on first use, not at module load: another module may still be
   // registering a capability at import time. It never varies after that.
-  const base = {
-    protocolVersion: RUNTIME_PROTOCOL_VERSION,
-    capabilities: Object.fromEntries(capabilities)
-  }
-  if (!fromLoopback) {
-    helloFrameCache ??= JSON.stringify(createNotification('server:hello', base))
-    return helloFrameCache
-  }
-  loopbackHelloFrameCache ??= JSON.stringify(
-    createNotification('server:hello', { ...base, ...identity })
+  helloFrameCache ??= JSON.stringify(
+    createNotification('server:hello', {
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
+      capabilities: Object.fromEntries(capabilities)
+    })
   )
-  return loopbackHelloFrameCache
+  return helloFrameCache
+}
+
+/**
+ * Who this server is — sent only to a peer on this machine.
+ *
+ * `dataDir` names the user's home directory, so it carries the account name,
+ * and with remote access enabled the server binds `0.0.0.0` where the Origin
+ * allowlist does not apply to a peer that simply sends no Origin at all. The
+ * one caller with any use for these fields is a desktop on this machine
+ * deciding whether to adopt this server rather than start a second one.
+ */
+function identityFrame(): string | null {
+  if (!identity) return null
+  identityFrameCache ??= JSON.stringify(createNotification('server:identity', identity))
+  return identityFrameCache
 }
 
 /**
@@ -219,7 +214,11 @@ export function handleConnection(
 ): void {
   // Announce the contract first, so a client that has to authenticate by message
   // knows that it must before it is refused for not having.
-  ws.send(helloFrame(isLoopbackAddress(peerAddress)))
+  ws.send(helloFrame())
+  if (isLoopbackAddress(peerAddress)) {
+    const frame = identityFrame()
+    if (frame) ws.send(frame)
+  }
 
   let authTimer: NodeJS.Timeout | null = null
 

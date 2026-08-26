@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { RUNTIME_PROTOCOL_VERSION, type ServerHello } from '@vornrun/shared/protocol'
+import { RUNTIME_PROTOCOL_VERSION, type ServerIdentity } from '@vornrun/shared/protocol'
 import {
   isPidAlive,
   judgeAdoption,
@@ -20,12 +20,14 @@ import {
  * would end the sessions it was holding, which is the user's work.
  */
 
-const self = { dataDir: '/Users/x/.vorn', buildChannel: 'packaged' as const }
+const self = {
+  dataDir: '/Users/x/.vorn',
+  buildChannel: 'packaged' as const,
+  expectedPid: 4242
+}
 
-function hello(over: Partial<ServerHello> = {}): ServerHello {
+function identityOf(over: Partial<ServerIdentity> = {}): ServerIdentity {
   return {
-    protocolVersion: RUNTIME_PROTOCOL_VERSION,
-    capabilities: { auth: 1 },
     dataDir: '/Users/x/.vorn',
     buildChannel: 'packaged',
     pid: 4242,
@@ -34,64 +36,60 @@ function hello(over: Partial<ServerHello> = {}): ServerHello {
   }
 }
 
+const judge = (
+  identity: ServerIdentity | null,
+  version: number | undefined = RUNTIME_PROTOCOL_VERSION
+): ReturnType<typeof judgeAdoption> => judgeAdoption(identity, version, self)
+
 describe('judging a running server', () => {
   it('adopts one that matches', () => {
-    expect(judgeAdoption(hello(), self)).toEqual({ kind: 'adopt' })
+    expect(judge(identityOf())).toEqual({ kind: 'adopt' })
   })
 
   it('adopts across app versions', () => {
     // The point of gating on the protocol rather than the release. An update
     // that changed no messages must not end sessions that are still running,
     // and Vorn updates far more often than its protocol changes.
-    expect(judgeAdoption(hello({ appVersion: '0.6.1' }), self)).toEqual({ kind: 'adopt' })
+    expect(judge(identityOf({ appVersion: '0.6.1' }))).toEqual({ kind: 'adopt' })
   })
 
   it('refuses a different protocol version', () => {
-    const verdict = judgeAdoption(hello({ protocolVersion: RUNTIME_PROTOCOL_VERSION + 1 }), self)
+    const verdict = judge(identityOf(), RUNTIME_PROTOCOL_VERSION + 1)
     expect(verdict).toMatchObject({ kind: 'refuse', reason: 'protocol-mismatch' })
   })
 
   it('refuses another data directory', () => {
-    const verdict = judgeAdoption(hello({ dataDir: '/tmp/other' }), self)
+    const verdict = judge(identityOf({ dataDir: '/tmp/other' }))
     expect(verdict).toMatchObject({ kind: 'refuse', reason: 'different-data-dir' })
   })
 
   it('compares data directories after resolving them', () => {
-    expect(judgeAdoption(hello({ dataDir: '/Users/x/.vorn/' }), self)).toEqual({ kind: 'adopt' })
+    expect(judge(identityOf({ dataDir: '/Users/x/.vorn/' }))).toEqual({ kind: 'adopt' })
   })
 
   it('refuses the other build channel', () => {
     // Dev and packaged deliberately share ~/.vorn while keeping separate Electron
     // user data, so without this a `yarn dev` launch adopts the packaged app's
     // bundled server, or the reverse.
-    const verdict = judgeAdoption(hello({ buildChannel: 'dev' }), self)
+    const verdict = judge(identityOf({ buildChannel: 'dev' }))
     expect(verdict).toMatchObject({ kind: 'refuse', reason: 'different-build' })
   })
 
-  it('refuses a server that does not report its pid', () => {
-    // Without one there is no way to tell a dead server from a reconnecting
-    // bridge, and no handle left for stopping one this app did not spawn.
-    const { pid: _p, ...noPid } = hello()
-    expect(judgeAdoption(noPid as ServerHello, self)).toMatchObject({
+  it('refuses a server whose pid disagrees with the port file', () => {
+    // Both name the same server when everything is honest. Only the port file
+    // was written by a process this app can attribute, and this pid is later
+    // handed to process.kill.
+    expect(judge(identityOf({ pid: 31337 }))).toMatchObject({
       kind: 'refuse',
-      reason: 'no-identity'
+      reason: 'pid-mismatch'
     })
   })
 
-  it('refuses a server that does not say who it is', () => {
-    // A build old enough to predate these fields cannot be told apart from one on
-    // another data directory. Declining costs a spawn; guessing costs a database.
-    const { dataDir: _d, buildChannel: _b, ...anonymous } = hello()
-    expect(judgeAdoption(anonymous as ServerHello, self)).toMatchObject({
-      kind: 'refuse',
-      reason: 'no-identity'
-    })
-  })
-
-  it('refuses when no greeting arrived at all', () => {
+  it('refuses when no identity arrived at all', () => {
+    // Covers both a server too old to send the frame and one that never answered.
     // A timeout means "cannot tell", which must never be read as "nothing is
     // there" — that reading is how a second server gets started on a live port.
-    expect(judgeAdoption(null, self)).toMatchObject({ kind: 'refuse', reason: 'no-identity' })
+    expect(judge(null)).toMatchObject({ kind: 'refuse', reason: 'no-identity' })
   })
 })
 
