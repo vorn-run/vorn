@@ -97,18 +97,53 @@ export function getLastAdoptionRefusal(): AdoptionRefusal | null {
  * whether the caller is the connect window (a server it refused to adopt) or the
  * running app (a local server still going while this is pointed at a host).
  */
-export function stopLocalServer(): { ok: true } | { ok: false; error: string } {
+export async function stopLocalServer(): Promise<{ ok: true } | { ok: false; error: string }> {
   const published = readPortFile()
   if (!published?.pid) return { ok: false, error: 'No local server is running.' }
+  const pid = published.pid
   try {
-    process.kill(published.pid, 'SIGTERM')
-    log.info(`[launcher] stopped the local server (pid ${published.pid}) at the user's request`)
-    lastRefusal = null
-    return { ok: true }
+    process.kill(pid, 'SIGTERM')
   } catch (err) {
-    log.warn({ err }, '[launcher] could not stop the local server')
+    log.warn({ err }, '[launcher] could not signal the local server')
     return { ok: false, error: 'Could not stop it. It may have already exited.' }
   }
+
+  // Waited for, not assumed. The caller relaunches the app the moment this says
+  // yes, and a server still shutting down still owns its ws-port file -- so the
+  // fresh launch would find it, refuse it again, and land straight back in the
+  // window the user just acted from. A loop that looks like the button doing
+  // nothing.
+  if (await waitForExit(pid, STOP_GRACE_MS)) {
+    log.info(`[launcher] stopped the local server (pid ${pid}) at the user's request`)
+    lastRefusal = null
+    return { ok: true }
+  }
+
+  try {
+    log.warn(`[launcher] local server ${pid} ignored SIGTERM; sending SIGKILL`)
+    process.kill(pid, 'SIGKILL')
+  } catch {
+    /* it may have exited in the meantime, which is the outcome we wanted */
+  }
+  if (await waitForExit(pid, STOP_KILL_GRACE_MS)) {
+    lastRefusal = null
+    return { ok: true }
+  }
+  return { ok: false, error: 'It is still running and did not respond to being stopped.' }
+}
+
+/** How long a server gets to leave politely, and then to leave at all. */
+const STOP_GRACE_MS = 5_000
+const STOP_KILL_GRACE_MS = 2_000
+
+/** Resolves true once the pid is gone, false if it outlasts the deadline. */
+async function waitForExit(pid: number, deadlineMs: number): Promise<boolean> {
+  const until = Date.now() + deadlineMs
+  while (Date.now() < until) {
+    if (!isPidAlive(pid)) return true
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  return !isPidAlive(pid)
 }
 
 /**
@@ -840,13 +875,6 @@ function readServerPort(child: ChildProcess): Promise<number> {
       errLines.on('line', (line) => log.info(`[server] ${line}`))
     }
 
-    // A spawn that never starts emits `error`, not `exit`, and an EventEmitter
-    // with nothing listening for `error` throws -- taking the main process down
-    // instead of reporting a server that failed to launch.
-    child.on('error', (err) => {
-      settle(() => reject(err))
-    })
-
     const rl = createInterface({ input: child.stdout })
     const settle = (fn: () => void): void => {
       clearTimeout(timeout)
@@ -860,6 +888,18 @@ function readServerPort(child: ChildProcess): Promise<number> {
         published ? resolve(published.port) : reject(new Error('Timeout waiting for server port'))
       )
     }, 10_000)
+
+    // A spawn that never starts emits `error`, not `exit`, and an EventEmitter
+    // with nothing listening for `error` throws -- taking the main process down
+    // instead of reporting a server that failed to launch.
+    //
+    // Registered below `settle` rather than above it. Node emits this one
+    // asynchronously, so the earlier order was safe -- but it was safe only
+    // because of when the event fires, which is a thing to know rather than a
+    // thing to read.
+    child.on('error', (err) => {
+      settle(() => reject(err))
+    })
 
     rl.on('line', (line) => {
       try {

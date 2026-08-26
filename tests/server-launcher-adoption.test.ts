@@ -579,3 +579,41 @@ describe('stopping a server that ignores SIGTERM', () => {
     vi.useRealTimers()
   })
 })
+
+describe('stopping the local server on request', () => {
+  it('does not report success until the process is actually gone', async () => {
+    // The caller relaunches the app the moment this says yes. A server still
+    // shutting down still owns its ws-port file, so the fresh launch would find
+    // it, refuse it again, and land back in the window the user just acted from
+    // -- a loop that looks like the button doing nothing.
+    published.port = 50091
+    published.pidAlive = true
+    const { stopLocalServer } = await import('../src/main/server/server-launcher')
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+
+    let settled = false
+    const stopping = stopLocalServer().then((r) => {
+      settled = true
+      return r
+    })
+
+    await new Promise((r) => setTimeout(r, 250))
+    expect(settled).toBe(false) // still alive, so still waiting
+
+    published.pidAlive = false // the server finally exits
+    await expect(stopping).resolves.toEqual({ ok: true })
+    vi.restoreAllMocks()
+  })
+
+  it('reports failure when it will not go at all', async () => {
+    published.port = 50091
+    published.pidAlive = true // never exits, through SIGTERM and SIGKILL alike
+    const { stopLocalServer } = await import('../src/main/server/server-launcher')
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+
+    const result = await stopLocalServer()
+
+    expect(result).toMatchObject({ ok: false })
+    vi.restoreAllMocks()
+  }, 20000)
+})
