@@ -10,7 +10,10 @@ import { updateManager } from './update-manager'
 import { IPC, PermissionRequestInfo, type AppConfig } from '../shared/types'
 import { setArtifactNotify } from './artifact-watcher'
 import { SURFACE } from '../shared/surface'
-import { LOCAL_SERVER_RUNNING_CHANNEL } from '../shared/adoption-channels'
+import {
+  LOCAL_SERVER_RUNNING_CHANNEL,
+  STOP_SESSIONS_AND_SERVER_CHANNEL
+} from '../shared/adoption-channels'
 import {
   launchServer,
   stopServer,
@@ -440,7 +443,14 @@ app.whenReady().then(async () => {
     // refusing to open for no reason, so it gets a window that names the reason
     // and offers to end that server, which is the only thing that resolves it.
     if (err instanceof AdoptionRefusedError) {
-      showConnectWindow(explainRefusal(err.refusal.reason), 'local-server-refused')
+      // The count rides the recorded refusal rather than the thrown error: the
+      // error carries the verdict, the record carries what we learned about the
+      // incumbent while deciding.
+      showConnectWindow(
+        explainRefusal(err.refusal.reason),
+        'local-server-refused',
+        getLastAdoptionRefusal()?.incumbentSessions ?? null
+      )
       return
     }
     app.quit()
@@ -488,14 +498,19 @@ app.whenReady().then(async () => {
   ipcMain.on(IPC.WINDOW_CLOSE, () => mainWindow?.close())
   ipcMain.handle(IPC.WINDOW_IS_MAXIMIZED, () => mainWindow?.isMaximized() ?? false)
 
-  createMenu(toggleWidget, () => {
-    // Ends the sessions and the server on purpose. Expressed as "quit, but do
-    // not keep them" rather than as its own shutdown, so there is exactly one
-    // path that stops a server and exactly one place that holds the quit open
-    // until it has finished.
+  // Ends the sessions and the server on purpose. Expressed as "quit, but do not
+  // keep them" rather than as its own shutdown, so there is exactly one path
+  // that stops a server and exactly one place that holds the quit open until it
+  // has finished.
+  //
+  // Named once and shared, because the File menu and the command palette offer
+  // the same words and must not mean two different things.
+  const stopSessionsAndServer = (): void => {
     keepSessionsRunning = false
     app.quit()
-  })
+  }
+  createMenu(toggleWidget, stopSessionsAndServer)
+  ipcMain.handle(STOP_SESSIONS_AND_SERVER_CHANNEL, () => stopSessionsAndServer())
   createWindow()
 
   if (!mainWindow) {

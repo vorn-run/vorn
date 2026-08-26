@@ -10,13 +10,20 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
 const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(process.argv[1])
 import websocket from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
-import { handleConnection, registerMethod, setServerIdentity } from './ws-handler'
+import {
+  handleConnection,
+  registerMethod,
+  setServerIdentity,
+  setLiveSessionCount
+} from './ws-handler'
+import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
+import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort } from './register-methods'
 import { configManager } from './config-manager'
 import { initBootstrapSecret, clearLocalCredential, bearerFrom } from './ws-auth'
-import { getDataDir } from './database'
+import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
 import { DEFAULT_SERVER_PORT, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
@@ -55,6 +62,21 @@ async function refreshTrustedOrigins(): Promise<void> {
  * CLI run, so it answers a different question than the one being asked. The entry
  * extension is the fact itself — `.ts` only runs under tsx from a checkout.
  */
+/**
+ * How long everything must stay empty before the server stops.
+ *
+ * Not a setting. A number to tune is a knob nobody wants, and the honest range
+ * is narrow: with nothing running there is no work to lose by exiting, so the
+ * window is only there to avoid churning a process for somebody who is coming
+ * straight back. The environment variable exists for tests, which cannot wait
+ * half an hour to watch a process leave.
+ */
+function resolveIdleWindowMs(): number {
+  const raw = process.env.VORN_IDLE_TIMEOUT_MS
+  const parsed = raw ? Number(raw) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_IDLE_WINDOW_MS
+}
+
 function resolveBuildChannel(): 'dev' | 'packaged' {
   const declared = process.env.VORN_BUILD_CHANNEL
   if (declared === 'dev' || declared === 'packaged') return declared
@@ -62,7 +84,7 @@ function resolveBuildChannel(): 'dev' | 'packaged' {
 }
 
 export async function startServer(
-  options: { host?: string; port?: number; dataDir?: string } = {}
+  options: { host?: string; port?: number; dataDir?: string; idleShutdown?: boolean } = {}
 ) {
   // Initialize database + config. This resolves the data directory for the whole
   // process; everything else reads it back with getDataDir() rather than
@@ -81,6 +103,9 @@ export async function startServer(
   // its own entry point, which is TypeScript in a checkout and bundled CJS in a
   // packaged app. Getting this wrong is not cosmetic: dev and packaged builds
   // deliberately share ~/.vorn, so a wrong answer lets one adopt the other's.
+  // What a launcher deciding whether to adopt this server gets to hear before it
+  // has authenticated — see `ServerIdentity.sessions`.
+  setLiveSessionCount(() => ptyManager.livePtyCount())
   setServerIdentity({
     // The launcher passes the app's version; a CLI server has none to report and
     // says so rather than omitting the field, since every field on this frame is
@@ -435,6 +460,44 @@ export async function startServer(
     process.exit(0)
   }
 
+  // The server outlives the app now, so something has to decide when it is done.
+  // Nothing here waits for the event loop to drain: the scheduler's inbox
+  // interval is not unref'd, so this process would sit empty for ever.
+  const idleWatch = new IdleWatch(
+    () => ({
+      sessions: ptyManager.livePtyCount(),
+      // Filtered to running: `headless-manager` keeps exited entries for thirty
+      // seconds, and a finished agent is not a reason to stay up.
+      headless: headlessManager.getActiveSessions().filter((h) => h.status === 'running').length,
+      msSinceClientActivity: clientRegistry.msSinceActivity(),
+      bridgeAttached: browserBridge.isConnected,
+      pendingPermissions: hookServer.getPendingPermissions().length,
+      pendingPairings: pendingRequests().length,
+      connectorLeases: dbCountActiveConnectorInboxLeases(new Date().toISOString()),
+      enabledSchedules: scheduler.serverSideScheduleCount()
+    }),
+    { windowMs: resolveIdleWindowMs(), schedulesHoldOpen: true },
+    () => {
+      log.info('[server] nothing left to do; shutting down')
+      // Caught, and the watch is left running. A shutdown that throws part-way
+      // has already cleared the credential and removed the port file, so giving
+      // up here would leave a process still bound to the port that no app can
+      // use or discover -- the exact state this feature exists to prevent.
+      // Exiting hard is the floor.
+      void shutdown().catch((err) => {
+        log.error({ err }, '[server] idle shutdown failed; exiting anyway')
+        process.exit(1)
+      })
+    }
+  )
+  // Off wherever the server is the thing being run rather than something an app
+  // started: a hand-run `vorn-server serve`, or a machine serving a phone over
+  // the network. Nothing would restart it, and "my phone could not reach my Mac
+  // this morning" is a worse failure than a process that outstays its welcome.
+  const servesOthers = host === '0.0.0.0'
+  if (options.idleShutdown ?? !servesOthers) idleWatch.start()
+  else log.info('[server] idle shutdown off: this server is here to be reached')
+
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)
   // Why: this process outlives the app that started it, so a hangup on the
@@ -447,7 +510,7 @@ export async function startServer(
     if (msg === 'shutdown') shutdown()
   })
 
-  return { app, port: actualPort }
+  return { app, port: actualPort, idleWatch }
 }
 
 // Run directly

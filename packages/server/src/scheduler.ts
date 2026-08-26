@@ -84,7 +84,39 @@ function getTriggerConfig(wf: WorkflowDefinition): TriggerConfig | null {
 }
 
 class Scheduler extends EventEmitter {
+  /**
+   * How many schedules are armed right now.
+   *
+   * For the idle check, which treats one as a reason to stay alive. Weaker than
+   * it sounds: a run is executed by a renderer, so an armed schedule with no
+   * client attached cannot fire. Staying up means being there when a desktop
+   * returns, not doing the work.
+   */
+  armedScheduleCount(): number {
+    return this.cronJobs.size + this.timeouts.size
+  }
+
+  /**
+   * Armed schedules that this server can act on with nobody attached.
+   *
+   * Only connector polls. `dispatchConnectorPoll` really does the work here --
+   * it calls the connector and writes inbox rows without any client -- whereas a
+   * recurring or one-off trigger only broadcasts `SCHEDULER_EXECUTE` for a
+   * renderer to execute, so staying awake for one buys nothing: with no client
+   * the occurrence is emitted, the minute lock is written, and the run is lost.
+   * Holding the server open for that would be keeping a promise by dropping it.
+   *
+   * It matters which: connector polls are seeded enabled when a connector is
+   * installed, so counting every armed cron meant anyone with a connector had a
+   * server that never exited.
+   */
+  serverSideScheduleCount(): number {
+    return this.connectorPollWorkflowIds.size
+  }
+
   private cronJobs = new Map<string, ScheduledTask>()
+  /** Of those, the ones that do real work here rather than in a renderer. */
+  private connectorPollWorkflowIds = new Set<string>()
   private timeouts = new Map<string, NodeJS.Timeout>()
   private inboxTimer: NodeJS.Timeout | null = null
 
@@ -180,6 +212,7 @@ class Scheduler extends EventEmitter {
       if (!wf || !wf.enabled || (kind !== 'recurring' && kind !== 'connectorPoll')) {
         this.cronJobs.get(id)?.stop()
         this.cronJobs.delete(id)
+        this.connectorPollWorkflowIds.delete(id)
       }
     }
     for (const [id] of this.timeouts) {
@@ -222,6 +255,7 @@ class Scheduler extends EventEmitter {
             timezone: trigger.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
           })
           this.cronJobs.set(wf.id, task)
+          if (trigger.triggerType === 'connectorPoll') this.connectorPollWorkflowIds.add(wf.id)
         } catch (err) {
           log.error({ err }, `[scheduler] failed to schedule workflow "${wf.name}":`)
         }
@@ -451,6 +485,7 @@ class Scheduler extends EventEmitter {
     for (const [, job] of this.cronJobs) job.stop()
     for (const [, timer] of this.timeouts) clearTimeout(timer)
     this.cronJobs.clear()
+    this.connectorPollWorkflowIds.clear()
     this.timeouts.clear()
     if (this.inboxTimer) clearInterval(this.inboxTimer)
     this.inboxTimer = null

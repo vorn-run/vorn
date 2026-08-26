@@ -88,7 +88,7 @@ export function GeneralSettings() {
         {/* Keep sessions running */}
         <SettingRow
           label="Keep Sessions Running When Vorn Closes"
-          description="Agents keep working while Vorn is shut. Reopening reconnects to them instead of restarting them. A background server stays running until every session ends."
+          description="Agents keep working while Vorn is shut. Reopening reconnects to them instead of restarting them. A background server stays running until every session ends, then shuts down on its own."
         >
           <ToggleSwitch
             checked={config.defaults.keepSessionsRunning ?? true}

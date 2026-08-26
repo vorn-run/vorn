@@ -7,6 +7,7 @@ import { FileTypeIcon } from './file-icons'
 import { getProjectHostIds, getProjectRemoteHostId, type RecentSession } from '../../shared/types'
 import { SortMode, StatusFilter } from '../stores/types'
 import { AGENT_DEFINITIONS, AGENT_LIST } from '../lib/agent-definitions'
+import { isElectron } from '../lib/platform'
 import { AgentIcon } from './AgentIcon'
 import { getDisplayName } from '../lib/terminal-display'
 import {
@@ -36,6 +37,7 @@ import {
   Plug,
   HardDrive,
   LayoutDashboard,
+  Power,
   Globe
 } from 'lucide-react'
 
@@ -209,6 +211,24 @@ function useCommands(
       keywords: ['new task', 'add task', 'todo'],
       onExecute: () => setTaskDialogOpen(true)
     })
+    // Desktop only, and hidden rather than inert in the browser: a phone cannot
+    // end a server it did not start, and a command that appears and does nothing
+    // is worse than one that is not there.
+    if (isElectron) {
+      commands.push({
+        id: 'action:stop-sessions-and-server',
+        // The File menu's wording, exactly. Two places, one ending.
+        label: 'Stop Sessions and Server',
+        sublabel: terminals.size > 0 ? `${terminals.size} running` : undefined,
+        category: 'actions',
+        icon: <Power size={14} strokeWidth={1.5} />,
+        keywords: ['stop', 'quit', 'shutdown', 'server', 'end', 'kill'],
+        onExecute: () => {
+          void window.api.stopSessionsAndServer?.()
+        }
+      })
+    }
+
     commands.push({
       id: 'action:toggle-layout',
       label: 'Toggle Layout (Grid/Tabs)',

@@ -87,7 +87,8 @@ export type ConnectWindowCause = 'host-unreachable' | 'local-server-refused'
 
 export function showConnectWindow(
   reason: string,
-  cause: ConnectWindowCause = 'host-unreachable'
+  cause: ConnectWindowCause = 'host-unreachable',
+  holding: number | null = null
 ): void {
   if (connectWindow && !connectWindow.isDestroyed()) {
     connectWindow.focus()
@@ -118,7 +119,7 @@ export function showConnectWindow(
 
   log.info('[connect] showing the connect window')
   void connectWindow.loadURL(
-    `data:text/html;charset=utf-8,${encodeURIComponent(connectMarkup(reason, cause))}`
+    `data:text/html;charset=utf-8,${encodeURIComponent(connectMarkup(reason, cause, holding))}`
   )
 }
 
@@ -130,15 +131,20 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function connectMarkup(reason: string, cause: ConnectWindowCause): string {
+function connectMarkup(reason: string, cause: ConnectWindowCause, holding: number | null): string {
   // Two situations reach this window, and only one of them can be resolved by
   // running a server here: when another one already holds this machine's data
   // directory, "run a server on this machine" is the thing that just failed.
   const refused = cause === 'local-server-refused'
   const heading = refused ? 'Another Vorn server is running' : 'Cannot reach that Vorn'
+  // Composed from a count, never from anything that server said in words. It
+  // may not have said anything at all, in which case "Sessions" is the honest
+  // form -- there certainly are some, or it would have shut itself down.
+  const held =
+    holding === null ? 'Sessions are' : holding === 1 ? '1 session is' : `${holding} sessions are`
   const lede = refused
-    ? 'Your sessions are alive inside it. This app will not start a second server ' +
-      'beside it, because both would share one database.'
+    ? `${held} alive inside it. This app will not start a second server beside it, ` +
+      'because both would share one database.'
     : 'The server this app is pointed at did not answer.'
   const localButton = refused
     ? '<button id="stop-local">Stop it and start fresh</button>'

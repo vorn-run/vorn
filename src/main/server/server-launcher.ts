@@ -77,7 +77,11 @@ let adoptedPid: number | null = null
  * is empty. The pid is what lets them end it on purpose -- the one actor allowed
  * to, since this code never ends an incumbent on its own.
  */
-export type AdoptionRefusal = AdoptionVerdict & { kind: 'refuse' } & { incumbentPid: number | null }
+export type AdoptionRefusal = AdoptionVerdict & { kind: 'refuse' } & {
+  incumbentPid: number | null
+  /** Terminals the refused server said it holds, or null if it did not say. */
+  incumbentSessions: number | null
+}
 
 let lastRefusal: AdoptionRefusal | null = null
 
@@ -501,6 +505,19 @@ function onServerExit(detail: string): void {
 }
 
 /**
+ * A session count from a server we are not going to use.
+ *
+ * Anything that is not a plain, sane integer becomes null, which the window
+ * renders as "sessions" rather than a number. A stranger does not get to choose
+ * what Vorn's own warning says.
+ */
+export function sessionsFrom(identity: ServerIdentity | null): number | null {
+  const n = identity?.sessions
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 10_000) return null
+  return n
+}
+
+/**
  * Long enough for a busy event loop, short enough not to stall a cold launch.
  *
  * A server that sends no identity frame at all -- too old, or not on loopback --
@@ -522,10 +539,14 @@ async function tryAdopt(
   port: number,
   expectedPid: number | undefined,
   self: { dataDir: string; buildChannel: 'dev' | 'packaged' }
-): Promise<{ bridge: ServerBridge } | { refusal: AdoptionVerdict & { kind: 'refuse' } }> {
+): Promise<
+  | { bridge: ServerBridge }
+  | { refusal: AdoptionVerdict & { kind: 'refuse' }; sessions: number | null }
+> {
   const token = readLocalToken(self.dataDir)
   if (!token) {
     return {
+      sessions: null,
       refusal: {
         kind: 'refuse',
         reason: 'unusable',
@@ -556,6 +577,7 @@ async function tryAdopt(
   if (verdict.kind === 'refuse' || !identity) {
     candidate.close()
     return {
+      sessions: sessionsFrom(identity),
       refusal:
         verdict.kind === 'refuse'
           ? verdict
@@ -579,6 +601,7 @@ async function tryAdopt(
   if (!accepted) {
     candidate.close()
     return {
+      sessions: null,
       refusal: {
         kind: 'refuse',
         reason: 'unusable',
@@ -643,7 +666,14 @@ export async function launchServer(): Promise<ServerBridge> {
       return bridge
     }
     const { refusal } = outcome
-    lastRefusal = { ...refusal, incumbentPid: published.pid ?? null }
+    lastRefusal = {
+      ...refusal,
+      incumbentPid: published.pid ?? null,
+      // Coerced, not trusted. This number comes from the party this app has just
+      // decided it cannot use, so it is clamped and rendered as a count — never
+      // as text spliced into a sentence.
+      incumbentSessions: 'sessions' in outcome ? outcome.sessions : null
+    }
     log.warn(
       `[launcher] declined to adopt the running server (${refusal.reason}): ` +
         `${refusal.detail}. It keeps running and keeps its sessions.`

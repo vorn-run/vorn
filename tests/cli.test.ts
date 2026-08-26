@@ -186,7 +186,9 @@ describe('serve', () => {
     expect(startServer).toHaveBeenCalledWith({
       host: undefined,
       port: undefined,
-      dataDir
+      dataDir,
+      // A server somebody ran on purpose does not get to decide it is done.
+      idleShutdown: false
     })
     expect(io.out()).toContain('Vorn server listening on port 4400')
     expect(io.out()).toContain('No device tokens existed')
@@ -212,7 +214,8 @@ describe('serve', () => {
     expect(startServer).toHaveBeenCalledWith({
       host: '0.0.0.0',
       port: 9999,
-      dataDir
+      dataDir,
+      idleShutdown: false
     })
     expect(io.out()).toContain('listening on port 9999')
   })

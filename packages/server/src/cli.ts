@@ -111,7 +111,12 @@ async function runServe(args: ServerArgs, deps: CliDeps): Promise<number> {
   const { port } = await startServer({
     host: args.host,
     port: args.port,
-    dataDir: args.dataDir
+    dataDir: args.dataDir,
+    // A server somebody ran on purpose does not get to decide it is done. There
+    // is no app watching to restart it, and the next line hands out a token for
+    // other machines to connect with -- so exiting would strand exactly the
+    // clients this command exists to serve.
+    idleShutdown: false
   })
   deps.write(`Vorn server listening on port ${port}\n`)
 

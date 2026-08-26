@@ -10,7 +10,7 @@ const CLOSE_UNAUTHENTICATED = 4001
 const CLOSE_CREDENTIAL_REJECTED = 4002
 
 vi.mock('../packages/server/src/broadcast', () => ({
-  clientRegistry: { add: vi.fn(), remove: vi.fn(), setTopics: vi.fn() }
+  clientRegistry: { add: vi.fn(), remove: vi.fn(), setTopics: vi.fn(), touch: vi.fn() }
 }))
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }

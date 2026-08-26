@@ -20,3 +20,13 @@ export interface LocalServerNotice {
   /** How many sessions the local server was holding, when that could be read. */
   sessions: number | null
 }
+
+/**
+ * Ending the sessions and the server deliberately.
+ *
+ * The File menu and the command palette both offer this, under the same words,
+ * and both reach the one closure in `index.ts` — a label that ends the app from
+ * one place and not from another is the kind of difference people only find
+ * once.
+ */
+export const STOP_SESSIONS_AND_SERVER_CHANNEL = 'app:stop-sessions-and-server'

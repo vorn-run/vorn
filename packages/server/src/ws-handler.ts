@@ -46,11 +46,9 @@ let helloFrameCache: string | null = null
  * spawns its own rather than guessing.
  */
 let identity: ServerIdentity | null = null
-let identityFrameCache: string | null = null
 
 export function setServerIdentity(next: ServerIdentity): void {
   identity = next
-  identityFrameCache = null
 }
 
 function helloFrame(): string {
@@ -76,8 +74,26 @@ function helloFrame(): string {
  */
 function identityFrame(): string | null {
   if (!identity) return null
-  identityFrameCache ??= JSON.stringify(createNotification('server:identity', identity))
-  return identityFrameCache
+  // Built per connection rather than cached: the session count is the point of
+  // sending it, and a count fixed at boot would be a lie by the second socket.
+  // The frame goes only to loopback peers, so this is not a per-request cost on
+  // anything remote.
+  return JSON.stringify(
+    createNotification('server:identity', { ...identity, sessions: liveSessionCount?.() })
+  )
+}
+
+/**
+ * How many terminals are live, when somebody has told us how to ask.
+ *
+ * A function rather than a number because the count changes; injected rather
+ * than imported because `ws-handler` has no business knowing about PTYs, and a
+ * direct import would put the socket layer downstream of the terminal layer.
+ */
+let liveSessionCount: (() => number) | null = null
+
+export function setLiveSessionCount(fn: () => number): void {
+  liveSessionCount = fn
 }
 
 /**
@@ -284,6 +300,10 @@ export function handleConnection(
   }
 
   ws.on('message', async (raw: Buffer) => {
+    // Every inbound frame counts as a client doing something, including the ones
+    // that go on to be refused. What the idle check needs to know is whether
+    // anybody is out there, not whether they were allowed.
+    clientRegistry.touch()
     let msg: RpcRequest
     try {
       msg = JSON.parse(raw.toString())
