@@ -97,6 +97,7 @@ import {
   dbDeleteWorkflow,
   dbGetWorkflow,
   dbListWorkflows,
+  dbUpdateWorkflow,
   dbListTasks,
   dbGetTask
 } from './database'
@@ -363,6 +364,24 @@ export function registerAllMethods(): void {
     'workflow:get',
     ({ id }) => configManager.loadConfig().workflows?.find((w) => w.id === id) ?? null
   )
+
+  // Straight from the table, the way `task:list` reads `dbListTasks` rather than
+  // going through the configuration. `workflow:get` above still goes the other
+  // way and finds by id in a loaded config; that is heavier and inconsistent,
+  // and untangling it is not this change.
+  registerMethod('workflow:list', () => dbListWorkflows())
+
+  registerMethod('workflow:setEnabled', ({ id, enabled }) => {
+    // Checked first, so an id that names nothing is answered rather than written
+    // past -- `dbUpdateWorkflow` builds an UPDATE that simply matches no row.
+    if (!dbGetWorkflow(id)) return { ok: false }
+    dbUpdateWorkflow(id, { enabled })
+    // The desktop is drawing this workflow's dot right now and holds the
+    // configuration in a cache. Without this it goes on showing the old state
+    // until something else invalidates it.
+    configManager.notifyChanged()
+    return { ok: true }
+  })
 
   registerMethod('project:list', () => configManager.loadConfig().projects ?? [])
 

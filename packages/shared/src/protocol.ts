@@ -348,6 +348,39 @@ export interface RequestMethods {
   'workflow:get': { params: { id: string }; result: WorkflowDefinition | null }
 
   /**
+   * Every workflow, whole.
+   *
+   * `workflow:get` needs an id, and until this there was no method that produced
+   * one — so a client that had not already been told about a workflow could not
+   * reach it at all. The phone's Workflows tab is a list of *runs* for exactly
+   * that reason, and a workflow that has never run appears nowhere in it.
+   *
+   * The definition is not trimmed, unlike `task:list`, which blanks descriptions.
+   * That looked like the same problem and is not: measured against a real board,
+   * task descriptions are 147 KB while every workflow on the same machine —
+   * nodes, edges, agent prompts and all — is 5.4 KB. There is nothing here worth
+   * the cost of a second shape that has to be kept in step with this one.
+   *
+   * No workspace filter. `workflowRun:listAll` takes one, but nothing that would
+   * call this has a workspace to pass yet; it is a line to add when a caller
+   * exists rather than an argument nobody sends.
+   */
+  'workflow:list': { params: void; result: WorkflowDefinition[] }
+
+  /**
+   * Switch a workflow's schedule on or off.
+   *
+   * `enabled` governs whether a trigger fires, not whether a run may be started
+   * by hand, and it is meaningless on a manual workflow — there is nothing to
+   * disable. The desktop writes it through the whole-config save path; this is
+   * the same change as one call.
+   */
+  'workflow:setEnabled': {
+    params: { id: string; enabled: boolean }
+    result: { ok: boolean }
+  }
+
+  /**
    * Answer a run that is parked on an approval gate.
    *
    * The decision is recorded by whichever instance is holding the run, not here:
