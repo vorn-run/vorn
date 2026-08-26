@@ -249,13 +249,23 @@ describe('this test file itself', () => {
     expect(await post(started.port, started.token, '{"hook_event_name":"","cwd":"/tmp"}')).toBe(400)
   })
 
-  it('writes nothing outside its own home directory', () => {
-    // The claim above, checked rather than asserted in a comment. If the sandbox
-    // ever stops working, this is what says so — instead of the machine's real
-    // hook registration quietly moving.
-    expect(process.env.HOME).toBe(home)
-    expect(process.env.USERPROFILE).toBe(home)
+  it('writes its claim inside its own home directory', async () => {
+    // Behavioural on purpose. Asserting the environment variables only proves
+    // they are set now; `hook-server` resolves `~/.vorn` into module-level
+    // constants at import time, so what matters is where the constants landed —
+    // and if some future import graph or an `isolate: false` in the vitest config
+    // loaded that module before `beforeAll` ran, they would point at the real
+    // home while every env check still passed.
+    //
+    // So: start a server, let it claim, and look for the evidence here rather
+    // than there. This failing is the sandbox failing, which is the only warning
+    // anyone gets before a test repoints a real machine's hook registration.
+    const started = await startHookServer()
+    server = started
+
     expect(os.homedir()).toBe(home)
+    expect(fs.existsSync(path.join(home as string, '.vorn', 'hook-owner'))).toBe(true)
+    expect(fs.existsSync(path.join(home as string, '.vorn', 'port'))).toBe(true)
   })
 })
 
