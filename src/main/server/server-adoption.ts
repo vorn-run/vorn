@@ -189,10 +189,22 @@ export function judgeAdoption(
       detail: `it is a ${identity.buildChannel} build, this app is ${self.buildChannel}`
     }
   }
-  // Both values name the same server when everything is honest. Only one of them
-  // was written by a process this app can attribute -- the port file -- and this
-  // pid is later handed to `process.kill`, so that is the one to believe.
-  if (identity.pid !== self.expectedPid) {
+  // Both values name the same server when everything is honest, and only one of
+  // them was written by a process this app can attribute -- so where the port
+  // file has a pid, that is the one to believe, and a disagreement is refused.
+  //
+  // Where it has none, this does NOT refuse. A record without a pid is written
+  // by `packages/mcp` itself: `discoverAndHeal` finds a live server by port and
+  // rewrites the file as `{ port }` alone. Treating that as a mismatch compared
+  // a number against `undefined`, refused, and -- since a refusal now stops the
+  // launch rather than starting a rival -- locked the app out of opening at all,
+  // because one of its own components had healed a file.
+  //
+  // Adopting on the remaining evidence is sound: the identity still has to match
+  // this data directory, this build channel and this protocol, and the socket
+  // still has to accept a credential readable only by this user. Anything that
+  // clears all four already holds the user's privileges.
+  if (self.expectedPid !== undefined && identity.pid !== self.expectedPid) {
     return {
       kind: 'refuse',
       reason: 'pid-mismatch',

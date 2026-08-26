@@ -240,3 +240,28 @@ describe('treating the port file and the greeting as untrusted', () => {
     expect(judge(frame as unknown as ServerIdentity)).toMatchObject({ reason: 'no-identity' })
   })
 })
+
+describe('a port file with no pid in it', () => {
+  it('is adopted, not refused — our own MCP writes one', () => {
+    // `discoverAndHeal` in packages/mcp finds a live server by port and rewrites
+    // the file as `{ port }` alone. Comparing a number against that `undefined`
+    // refused as a mismatch, and since a refusal now stops the launch rather
+    // than starting a rival, the app locked itself out of opening because one of
+    // its own components had healed a file.
+    const verdict = judgeAdoption(identityOf(), RUNTIME_PROTOCOL_VERSION, {
+      dataDir: '/Users/x/.vorn',
+      buildChannel: 'packaged',
+      expectedPid: undefined
+    })
+    expect(verdict).toEqual({ kind: 'adopt' })
+  })
+
+  it('still refuses a genuine disagreement when the file does name one', () => {
+    const verdict = judgeAdoption(identityOf({ pid: 31337 }), RUNTIME_PROTOCOL_VERSION, {
+      dataDir: '/Users/x/.vorn',
+      buildChannel: 'packaged',
+      expectedPid: 4242
+    })
+    expect(verdict).toMatchObject({ kind: 'refuse', reason: 'pid-mismatch' })
+  })
+})

@@ -553,9 +553,14 @@ async function tryAdopt(
     ...self,
     expectedPid
   })
-  if (verdict.kind === 'refuse') {
+  if (verdict.kind === 'refuse' || !identity) {
     candidate.close()
-    return { refusal: verdict }
+    return {
+      refusal:
+        verdict.kind === 'refuse'
+          ? verdict
+          : { kind: 'refuse', reason: 'no-identity', detail: 'the running server said nothing' }
+    }
   }
 
   // Judged, but not yet known to be usable. A rejected credential does not fail
@@ -590,7 +595,11 @@ async function tryAdopt(
   // forever against a healthy server, rejected every time.
   bootstrapToken = token
 
-  adoptedPid = expectedPid ?? null
+  // The file's pid where there is one, the greeting's where there is not. They
+  // agree by the time this runs -- `judgeAdoption` refused otherwise -- and
+  // falling back keeps a pid-less record (which `packages/mcp` writes when it
+  // heals one) from leaving nothing to signal later.
+  adoptedPid = expectedPid ?? identity.pid
   // An adopted server has no child handle, so nothing would ever call
   // `onServerExit` for it. Watching the socket is the only signal available, and
   // the pid distinguishes the two reasons it drops: a server that died, and one
@@ -754,18 +763,19 @@ export async function stopServer(): Promise<void> {
       child.kill()
     } else {
       child.kill('SIGTERM')
-      // Awaited, not scheduled. `before-quit` calls `app.quit()` the moment this
-      // resolves, so a timer left running is a timer that never fires: the main
-      // process exits first and a server that ignored SIGTERM is still there --
-      // after the user chose the one action that promises otherwise. Fixing the
-      // condition was only half of it; the escalation has to be in the same
-      // promise the caller is waiting on.
-      //
-      // Asked whether the process is still there, not whether we asked it to go:
-      // `child.killed` is true the moment a signal is delivered, even to a
-      // process that ignores it.
-      if (child.pid) await ensureGone(child.pid)
     }
+    // Awaited on every platform, not just POSIX. `before-quit` calls
+    // `app.quit()` the moment this resolves, so anything left outside the
+    // promise never happens: the main process exits first and a server that
+    // ignored the signal is still there, after the user chose the one action
+    // that promises otherwise. Windows had the same hole for the same reason
+    // -- `child.kill()` returns before the process is gone -- and it matters
+    // there too now that the server outlives the app.
+    //
+    // Asked whether the process is still there, not whether we asked it to go:
+    // `child.killed` is true the moment a signal is delivered, even to a
+    // process that ignores it.
+    if (child.pid) await ensureGone(child.pid)
     serverProcess = null
   } else if (adoptedPid !== null && isPidAlive(adoptedPid)) {
     // An adopted server has no child handle, so the RPC above was the only way

@@ -669,3 +669,34 @@ describe('ending a server, and knowing that it ended', () => {
     expect(result).toMatchObject({ ok: false })
   }, 30000)
 })
+
+describe('stopping on Windows', () => {
+  it('waits for the process there too, where kill() also returns early', async () => {
+    // `child.kill()` returns before the process is gone, same as SIGTERM does.
+    // That was harmless while the server died with the app; a detached one on
+    // Windows just keeps running after "Stop Sessions and Server".
+    const platform = process.platform
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+    published.pidAlive = true
+    try {
+      const { launchServer, stopServer } = await import('../src/main/server/server-launcher')
+      await launchServer()
+      ;(spawnedChildren[0] as unknown as Record<string, unknown>).kill = (): void => {}
+      const spy = vi.spyOn(process, 'kill').mockImplementation(() => true)
+
+      let settled = false
+      const stopping = stopServer().then(() => {
+        settled = true
+      })
+      await new Promise((r) => setTimeout(r, 250))
+      expect(settled).toBe(false) // still there, so still waiting
+
+      published.pidAlive = false
+      await stopping
+      spy.mockRestore()
+      expect(settled).toBe(true)
+    } finally {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true })
+    }
+  }, 30000)
+})
