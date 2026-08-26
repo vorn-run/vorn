@@ -55,9 +55,22 @@ beforeAll(() => {
   process.env.USERPROFILE = home
 })
 
+/**
+ * Put a variable back, including putting it back to not existing.
+ *
+ * `process.env.X = undefined` does not unset X — it sets it to the *string*
+ * "undefined", and every later reader gets a home directory by that name. On a
+ * machine where one of these was never set to begin with, restoring it by
+ * assignment is how a test leaves the process dirtier than it found it.
+ */
+function restore(name: 'HOME' | 'USERPROFILE', value: string | undefined): void {
+  if (value === undefined) delete process.env[name]
+  else process.env[name] = value
+}
+
 afterAll(() => {
-  process.env.HOME = realHome
-  process.env.USERPROFILE = realProfile
+  restore('HOME', realHome)
+  restore('USERPROFILE', realProfile)
   if (home) fs.rmSync(home, { recursive: true, force: true })
 })
 
@@ -227,6 +240,15 @@ describe('the payload that crashed the server', () => {
 })
 
 describe('this test file itself', () => {
+  it('names a malformed event even when the name itself is empty', async () => {
+    // `??` treats '' as present, so the log line began with a space and said
+    // nothing about what had arrived — the one job of that message.
+    const started = await startHookServer()
+    server = started
+
+    expect(await post(started.port, started.token, '{"hook_event_name":"","cwd":"/tmp"}')).toBe(400)
+  })
+
   it('writes nothing outside its own home directory', () => {
     // The claim above, checked rather than asserted in a comment. If the sandbox
     // ever stops working, this is what says so — instead of the machine's real

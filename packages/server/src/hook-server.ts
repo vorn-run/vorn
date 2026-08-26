@@ -53,7 +53,10 @@ function describe(value: unknown): string {
     (key) => typeof event[key] !== 'string' || event[key] === ''
   )
   if (typeof event.cwd !== 'string') missing.push('cwd' as never)
-  return `${String(event.hook_event_name ?? 'no name')} missing ${missing.join(', ')}`
+  // Not `??`: an empty name is not a missing one to `??`, so the line would
+  // begin with a space and say nothing about what arrived.
+  const name = typeof event.hook_event_name === 'string' && event.hook_event_name !== ''
+  return `${name ? String(event.hook_event_name) : 'no name'} missing ${missing.join(', ')}`
 }
 
 export class HookServer extends EventEmitter {
