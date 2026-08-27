@@ -21,6 +21,14 @@ vi.mock('../src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
+// The header asks whether it is standing in for the window's titlebar, and that
+// answer starts with whether this is a phone.
+Object.defineProperty(window, 'matchMedia', {
+  value: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
+  writable: true,
+  configurable: true
+})
+
 Object.defineProperty(window, 'api', {
   value: {
     killTerminal: vi.fn(),
