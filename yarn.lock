@@ -4670,6 +4670,8 @@ __metadata:
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
     "@types/ws": "npm:^8.18.1"
     "@vornrun/shared": "workspace:*"
+    "@xterm/addon-serialize": "npm:0.13.0"
+    "@xterm/headless": "npm:5.5.0"
     fastify: "npm:^5.11.0"
     libsql: "npm:^0.5.29"
     node-cron: "npm:^4.2.1"
@@ -4731,6 +4733,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@xterm/addon-serialize@npm:0.13.0":
+  version: 0.13.0
+  resolution: "@xterm/addon-serialize@npm:0.13.0"
+  peerDependencies:
+    "@xterm/xterm": ^5.0.0
+  checksum: 10c0/090f502867250cdceca9abdbe37aebe0c01eb5d708a09c51d3e0e9bb5d4d3b0d4d67af1c4c8bde9b78f108a5e4150420180de69e6228aac76596fdbf6c4c59dc
+  languageName: node
+  linkType: hard
+
 "@xterm/addon-web-links@npm:0.12.0":
   version: 0.12.0
   resolution: "@xterm/addon-web-links@npm:0.12.0"
@@ -4742,6 +4753,13 @@ __metadata:
   version: 0.19.0
   resolution: "@xterm/addon-webgl@npm:0.19.0"
   checksum: 10c0/238f9af3745bc027c78a6ec6ed155721f82f2f0934bc65adffc0ae997c23ad053b18f04fceb121a38945d2fc31bf0e4baa01714c4c2916781bb27873d9d5cd8b
+  languageName: node
+  linkType: hard
+
+"@xterm/headless@npm:5.5.0":
+  version: 5.5.0
+  resolution: "@xterm/headless@npm:5.5.0"
+  checksum: 10c0/2cb22acc1b00acbbc8698b36c939493589f0e23256bcbf27afae7b3ee6c005dfde6e96843955d89b4de171c29ea97bff6d32f85e6fa3cb3f743e15e656c86f8f
   languageName: node
   linkType: hard
 

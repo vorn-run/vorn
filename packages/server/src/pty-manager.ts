@@ -38,6 +38,7 @@ import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
+import { feedScreen, resizeScreen, clearScreen } from './terminal-screen'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 
@@ -530,7 +531,19 @@ class PtyManager extends EventEmitter {
     this.dataBuffers.delete(id)
     this.flushTimers.delete(id)
     if (data) {
+      // Clients first, always. What follows models the screen for nobody who is
+      // waiting; this line is a person watching their terminal, and it must not
+      // be behind anything that can fail or stall.
       this.emit('client-message', IPC.TERMINAL_DATA, { id, data })
+
+      // Fed from here rather than from `onData` for two reasons. `term.write`
+      // queues a macrotask per call and node-pty emits a few bytes at a time
+      // while somebody types, so this is one queued write per session per flush
+      // instead of one per keystroke. And it puts the model in step with the
+      // clients rather than ahead of them -- fed from `onData`, a screen read
+      // mid-flush would describe something nobody has seen yet.
+      const session = this.sessions.get(id)
+      feedScreen(id, data, session?.cols, session?.rows)
     }
   }
 
@@ -643,6 +656,11 @@ class PtyManager extends EventEmitter {
       this.deleteTempKey(id)
       this.clearSessionTracking(id)
       clearScrollback(id)
+      // Beside the scrollback it belongs to: the PTY is gone and nothing will
+      // draw into it again. The session record survives so the card can show an
+      // exit code, but its history does not -- that is pre-existing, and this
+      // matches it rather than quietly deciding otherwise.
+      clearScreen(id)
       this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
 
       this.ptys.delete(id)
@@ -706,6 +724,8 @@ class PtyManager extends EventEmitter {
       session.rows = rows
     }
     this.ptys.get(id)?.resize(cols, rows)
+    // The same numbers, so the model wraps where the program does.
+    resizeScreen(id, cols, rows)
   }
 
   killPty(id: string): void {
@@ -726,6 +746,11 @@ class PtyManager extends EventEmitter {
     this.sessions.delete(id)
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
+    // Not beside a `clearScrollback`, because there is not one here -- but this
+    // path deletes the session outright, so nothing would ever feed or free the
+    // model again. A `Terminal` holds buffers; leaving it is a leak per closed
+    // session for the life of the server.
+    clearScreen(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
 
