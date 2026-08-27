@@ -187,6 +187,27 @@ describe('reading one that is not there, or not right', () => {
   })
 })
 
+describe('an id that does not name a directory', () => {
+  // The only two that survive `encodeURIComponent` unchanged. Anything else with
+  // a slash in it -- `'../..'` becomes `'..%2F..'` -- is already one safe
+  // segment, which is what the encoding is for and what the case below checks.
+  it.each([
+    ['two dots, which name the data directory', '..'],
+    ['one dot, which names the history directory', '.']
+  ])('is refused rather than resolved: %s', (_label, id) => {
+    // `encodeURIComponent('..')` is `'..'`, so encoding is not the guarantee it
+    // reads as -- and the writer's `reset` begins by removing the directory it
+    // is given. Every id is a random UUID today; this is what makes that a
+    // property of the function rather than of its callers.
+    expect(() => historyDir('/data', id)).toThrow()
+  })
+
+  it('still accepts anything that is merely awkward', () => {
+    const at = historyDir('/data', 'a/b?c:d')
+    expect(path.dirname(at)).toBe(path.join('/data', 'history'))
+  })
+})
+
 describe('where history lives', () => {
   it('sits under a subdirectory, not beside the database', () => {
     // `config-manager` watches the data directory itself. A log written there

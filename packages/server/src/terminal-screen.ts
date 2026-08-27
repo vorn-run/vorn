@@ -93,6 +93,19 @@ const SCROLLBACK = 0
 const MAX_QUEUED_UNITS = 4 * 1024 * 1024
 
 /**
+ * How much of a title or a cwd is kept.
+ *
+ * Both are stored for the life of the terminal and both travel in the
+ * checkpoint, and xterm will hand over an OSC payload of up to ten million
+ * characters. One `\x1b]0;` followed by five megabytes -- which an agent
+ * printing the contents of a file it was asked to read can produce without
+ * anybody intending it -- would put every checkpoint for that session over its
+ * size cap, permanently, for as long as the terminal lives. Nothing that is
+ * genuinely a title or a path comes near this.
+ */
+const MAX_LABEL_UNITS = 512
+
+/**
  * Mirrors the client's terminal, and the mirroring is the point.
  *
  * `allowProposedApi` matches `terminal-registry.ts` because the serialize addon
@@ -120,7 +133,7 @@ function create(cols: number, rows: number): Held {
   // The title is stored and nothing more. A property write cannot throw, and an
   // earlier version wrapped it anyway, which made a no-op look load-bearing.
   term.onTitleChange((title) => {
-    held.title = title
+    held.title = title.slice(0, MAX_LABEL_UNITS)
   })
   // The cwd handler is the one that can. It runs from xterm's own timer rather
   // than from `feedScreen`, so a throw here reaches the top of the process past
@@ -134,7 +147,7 @@ function create(cols: number, rows: number): Held {
       const raw = payload.replace(/^file:\/\/[^/]*/, '')
       // `decodeURIComponent` throws on a stray `%` -- and a directory named
       // `100%` is a directory somebody has. Left encoded rather than lost.
-      if (raw) held.cwd = tryDecode(raw)
+      if (raw) held.cwd = tryDecode(raw).slice(0, MAX_LABEL_UNITS)
     } catch {
       /* an unreadable cwd is not worth anything at all */
     }
@@ -261,33 +274,56 @@ export async function resizeScreen(id: string, cols: number, rows: number): Prom
   const held = screens.get(id)
   if (!held) return
   try {
-    // Drained first, and that ordering is the whole point. Writes are queued, so
+    // At the drain, and that ordering is the whole point. Writes are queued, so
     // resizing straight away reflows bytes that arrived *before* the resize at
     // the size that came *after* it -- and the client, which parsed those bytes
     // before it refitted, wraps them somewhere else. A model that wraps
     // differently from the terminal it models is the failure this exists to
     // avoid, and it would show up as a screen that is subtly wrong rather than
     // one that is obviously broken.
-    await drain(held)
-    held.term.resize(cols, rows)
-    held.cols = cols
-    held.rows = rows
+    //
+    // At the marker rather than after it, for the reason `atDrain` gives: bytes
+    // parsed while the loop unwinds would be laid out at the old width by a
+    // program that had already been told the new one.
+    await atDrain(held, () => {
+      held.term.resize(cols, rows)
+      held.cols = cols
+      held.rows = rows
+    })
   } catch (err) {
     drop(id, err)
   }
 }
 
 /**
- * Wait for everything already written to have been parsed.
+ * Read the buffer at the point everything written so far has been parsed, and
+ * nothing written later has.
  *
- * An empty write, queued behind everything in flight, resolving only once the
- * parser reaches it. That is the whole mechanism: writes are applied in order,
- * so waiting on the last one waits on all of them. Both callers need it and for
- * the same reason -- `term.write` returns before anything is parsed, so acting
- * on the buffer straight after a write acts on whatever happened to be done.
+ * The callback of an empty write is the only such point, and it has to be *used*
+ * rather than merely awaited. xterm invokes it from inside its own parse loop
+ * and then carries on consuming the rest of the queue for up to twelve
+ * milliseconds before returning -- so a `then` or an `await` on it runs as a
+ * microtask, which cannot execute until that loop unwinds, by which time later
+ * writes have been parsed too.
+ *
+ * That is not theoretical. A checkpoint asks for the screen, the flush timer
+ * fires before the parser reaches the marker, and the snapshot comes back
+ * holding output whose frames were also written to the log after it -- so a
+ * restore applies those bytes twice. It reproduces on the first attempt.
+ *
+ * `read` therefore runs at the marker, synchronously, and its answer is what
+ * resolves.
  */
-function drain(held: Held): Promise<void> {
-  return new Promise<void>((resolve) => held.term.write('', resolve))
+function atDrain<T>(held: Held, read: () => T): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    held.term.write('', () => {
+      try {
+        resolve(read())
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)))
+      }
+    })
+  })
 }
 
 /** Give up on a session's model. The session itself carries on without one. */
@@ -329,14 +365,13 @@ export async function serializeScreen(id: string): Promise<ScreenSnapshot | null
   const held = screens.get(id)
   if (!held) return null
   try {
-    await drain(held)
-    return {
+    return await atDrain(held, () => ({
       screen: held.serializer.serialize(),
       cols: held.cols,
       rows: held.rows,
       title: held.title,
       cwd: held.cwd
-    }
+    }))
   } catch (err) {
     log.warn({ err, id }, '[screen] could not serialize')
     return null

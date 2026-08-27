@@ -74,6 +74,65 @@ function row(term: Terminal, y: number): string {
   return cells.join('|')
 }
 
+describe('what a program can make the model hold', () => {
+  it('keeps a title bounded, whatever length the program sends', async () => {
+    // Both the title and the cwd live for as long as the terminal does and both
+    // travel in the checkpoint, and xterm will hand over an OSC payload of ten
+    // million characters. One long enough puts every checkpoint for that session
+    // over its size cap -- permanently, since the field never goes back. An
+    // agent printing a file it was asked to read can produce this without
+    // anybody intending it.
+    createScreen('shouty', 80, 24)
+    feedScreen('shouty', `${ESC}]0;${'t'.repeat(5_000_000)}\x07`)
+
+    const snapshot = await serializeScreen('shouty')
+
+    expect(snapshot?.title.length ?? 0).toBeLessThanOrEqual(512)
+    expect(snapshot?.title.startsWith('tt')).toBe(true)
+  })
+
+  it('keeps a cwd bounded the same way', async () => {
+    createScreen('shouty', 80, 24)
+    feedScreen('shouty', `${ESC}]7;file:///${'p'.repeat(5_000_000)}\x07`)
+
+    expect((await serializeScreen('shouty'))?.cwd.length ?? 0).toBeLessThanOrEqual(512)
+  })
+})
+
+describe('the moment a snapshot describes', () => {
+  it('holds what was written before it was asked for, and nothing written after', async () => {
+    // The whole correctness argument for the checkpoint rests on this. xterm
+    // invokes a write's callback from inside its own parse loop and then keeps
+    // consuming the queue for up to twelve milliseconds before returning, so
+    // anything that reads the buffer in a `then` reads it a loop later --
+    // holding output that arrived after the snapshot was asked for.
+    //
+    // Downstream that is not a stale screen, it is a duplicated one: those same
+    // bytes are recorded as log frames written after the checkpoint, so a
+    // restore applies them on top of a screen that already has them.
+    createScreen('later', 80, 24)
+    feedScreen('later', 'before the snapshot\r\n')
+
+    const pending = serializeScreen('later')
+    feedScreen('later', 'after the snapshot\r\n')
+    const snapshot = await pending
+
+    expect(snapshot?.screen).toContain('before the snapshot')
+    expect(snapshot?.screen ?? '', 'the snapshot ran a parse loop late').not.toContain(
+      'after the snapshot'
+    )
+  })
+
+  it('still waits for everything that was written before it', async () => {
+    // The other half, and the reason this cannot simply serialize synchronously:
+    // `term.write` returns before anything is parsed at all.
+    createScreen('earlier', 80, 24)
+    feedScreen('earlier', 'queued but not yet parsed\r\n')
+
+    expect((await serializeScreen('earlier'))?.screen).toContain('queued but not yet parsed')
+  })
+})
+
 describe('what the screen looks like when it comes back', () => {
   it('reproduces text and colour cell for cell', async () => {
     feed('t', `${ESC}[31mred${ESC}[0m plain ${ESC}[1;34mbold blue${ESC}[0m`)

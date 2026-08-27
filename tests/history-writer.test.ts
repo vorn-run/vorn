@@ -382,6 +382,31 @@ describe('a log that outgrows its cap', () => {
     expect(readCheckpoint(historyDir(dir, ID))?.generation).toBe(2)
   })
 
+  it('keeps a log that is over the cap because the checkpoint that just landed took a while', async () => {
+    // The fold used to re-read `logBytes` to work out whether the checkpoint had
+    // landed. A checkpoint that succeeds while more than a megabyte arrives
+    // during its fsyncs leaves a log legitimately over the cap -- and every byte
+    // of it was thrown away, on the healthy path, not the faulted one the
+    // fallback exists for.
+    begin()
+    emit(ID, past())
+    // Arrives while the checkpoint is being written, so it is carried past it.
+    const during = 'y'.repeat(MAX_LOG_BYTES + 1024)
+    const real = fsp.rename
+    vi.spyOn(fsp, 'rename').mockImplementationOnce((async (...args: [never, never]) => {
+      emit(ID, during)
+      return real(...args)
+    }) as never)
+
+    await settle(4)
+
+    expect(readCheckpoint(historyDir(dir, ID))?.generation).toBe(2)
+    // Same generation in both, so the log is still replayable onto it -- which is
+    // the whole point of not having dropped it.
+    expect(logOf().generation).toBe(2)
+    expect(outputs(logOf().frames)).toContain('y')
+  })
+
   it('is thrown away when no checkpoint can be written, and cannot be replayed after', async () => {
     // A session whose screen model has faulted has nothing to checkpoint from,
     // so the log is the only thing growing and nothing would ever bound it.

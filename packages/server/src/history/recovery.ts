@@ -4,7 +4,7 @@ import log from '../logger'
 import { createScreen, feedScreen, resizeScreen } from '../terminal-screen'
 import { seedScrollback } from '../terminal-scrollback'
 import { readHeader, readFrames, type Frame, type StopReason } from './log'
-import { readCheckpointAsync, LOG_FILE } from './checkpoint'
+import { readCheckpointAsync, LOG_FILE, CHECKPOINT_FILE } from './checkpoint'
 
 /**
  * Putting back what a crash interrupted.
@@ -55,18 +55,35 @@ export interface Recovered {
 
 export interface RecoverableSession {
   id: string
-  /** What the session record remembers, which for an older row is nothing. */
-  cols?: number
-  rows?: number
 }
 
 /**
- * The geometry to rebuild at when neither the checkpoint nor the session record
- * says. The same numbers a PTY is spawned at, so a screen restored without one
- * wraps where the program was writing.
+ * The geometry to rebuild at when there is no checkpoint to take one from.
+ *
+ * Not a guess. A log with no checkpoint beside it begins where `startHistory`
+ * opened it, which is the spawn -- and a PTY is spawned at exactly these
+ * numbers. Any resize the terminal saw afterwards is a frame further down that
+ * same log, so the replay arrives at the right size by the same route the
+ * original did.
+ *
+ * The session record is not consulted: the `sessions` table carries no geometry,
+ * so a term reading `session.cols` would look like a source of truth and always
+ * be undefined.
  */
 const FALLBACK_COLS = 80
 const FALLBACK_ROWS = 24
+
+/**
+ * How many terminals are rebuilt.
+ *
+ * Each one is a headless emulator with its buffers, held for the life of the
+ * process -- nothing disposes a recovered model, because nothing has attached to
+ * it yet. Fifty was measured at about eight megabytes, which is the same ceiling
+ * fifty live sessions carry, so this bounds the recovered set at no more than
+ * the running one. What is skipped keeps its files: it is not restored, it is
+ * not read yet, and a later start can have it.
+ */
+const MAX_RESTORED = 50
 
 export interface RecoveryReport {
   recovered: Recovered[]
@@ -87,10 +104,17 @@ const AT_ONCE = 8
  * with no session behind it is not history somebody might want, it is history
  * nobody can ask for -- ordinary residue from a crash that ran none of the
  * teardown that normally removes it.
+ *
+ * That reasoning holds only while the list is known to be complete, which is why
+ * `sessions` may be null. `getPreviousSessions` answers `[]` both when there are
+ * none and when it could not read them, and those two are the difference between
+ * removing nothing and removing every terminal's history on the strength of one
+ * transient database error. Null means "could not read": restore nothing, sweep
+ * nothing, leave it all for a start that can.
  */
 export async function recoverHistory(
   dataDir: string,
-  sessions: RecoverableSession[]
+  sessions: RecoverableSession[] | null
 ): Promise<RecoveryReport> {
   const root = path.join(dataDir, 'history')
   let entries: string[]
@@ -98,6 +122,11 @@ export async function recoverHistory(
     entries = await fs.readdir(root)
   } catch {
     // No history directory is the ordinary first run, not a failure.
+    return { recovered: [], swept: 0 }
+  }
+
+  if (sessions === null) {
+    log.warn('[history] the session list could not be read; leaving every terminal alone')
     return { recovered: [], swept: 0 }
   }
 
@@ -122,6 +151,16 @@ export async function recoverHistory(
     } catch (err) {
       log.warn({ err, entry }, '[history] could not remove history for a session that is gone')
     }
+  }
+
+  if (restorable.length > MAX_RESTORED) {
+    // Said rather than done quietly. A cap that nobody is told about reads as
+    // "everything was restored" on the one start where it was not.
+    log.warn(
+      { found: restorable.length, restoring: MAX_RESTORED },
+      '[history] more terminals on disk than are rebuilt at once; the rest keep their files'
+    )
+    restorable.length = MAX_RESTORED
   }
 
   for (let from = 0; from < restorable.length; from += AT_ONCE) {
@@ -161,6 +200,27 @@ export async function recoverHistory(
 }
 
 /**
+ * Remove scratch files a crash left behind.
+ *
+ * `writeCheckpoint` names its scratch file randomly and removes it only when the
+ * write fails; a process that dies mid-write removes nothing, and up to two
+ * megabytes of it sits there under a name nothing will ever reuse. Cleared here
+ * because this is the one moment it is certainly safe -- no writer for this
+ * session exists yet.
+ */
+async function sweepScratch(dir: string): Promise<void> {
+  try {
+    for (const entry of await fs.readdir(dir)) {
+      if (entry.startsWith(`.${CHECKPOINT_FILE}.`)) {
+        await fs.rm(path.join(dir, entry), { force: true })
+      }
+    }
+  } catch {
+    /* nothing there, or nothing removable; neither stops a restore */
+  }
+}
+
+/**
  * A directory name back into a session id.
  *
  * Null rather than a throw for something that is not one: `decodeURIComponent`
@@ -175,6 +235,7 @@ function decode(entry: string): string | null {
 }
 
 async function restore(dir: string, session: RecoverableSession): Promise<Recovered | null> {
+  await sweepScratch(dir)
   const checkpoint = await readCheckpointAsync(dir)
   const { frames, stopped } = await readLog(dir, checkpoint?.generation)
   if (!checkpoint && !frames.length) return null
@@ -184,8 +245,8 @@ async function restore(dir: string, session: RecoverableSession): Promise<Recove
   // columns, and rebuilding it at any other width moves every line after the
   // first wrap. A resize frame further down the log moves it afterwards, which
   // is what the client did at the time too.
-  const cols = checkpoint?.cols ?? session.cols ?? FALLBACK_COLS
-  const rows = checkpoint?.rows ?? session.rows ?? FALLBACK_ROWS
+  const cols = checkpoint?.cols ?? FALLBACK_COLS
+  const rows = checkpoint?.rows ?? FALLBACK_ROWS
 
   createScreen(session.id, cols, rows)
   let scrollback = checkpoint?.scrollback ?? ''

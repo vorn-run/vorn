@@ -463,7 +463,7 @@ export async function startServer(
   // ask for history that has not been read yet. The cost is that discovery waits
   // on it -- measured at 77ms for fifty terminals.
   const { sessionManager } = await import('./session-persistence')
-  await recoverHistory(dataDir, sessionManager.getPreviousSessions())
+  await recoverHistory(dataDir, sessionManager.readPreviousSessions())
 
   // Published together, after the claim, because they are one announcement: the
   // port says where, the credential says how, and a reader that finds one

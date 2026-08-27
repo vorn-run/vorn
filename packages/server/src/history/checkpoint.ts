@@ -49,7 +49,15 @@ export interface Checkpoint {
   cwd: string
   /** Ties the log beside it to this checkpoint. */
   generation: number
-  /** The last batch this includes. Replay starts after it. */
+  /**
+   * The last batch on disk that this supersedes.
+   *
+   * Recovery does not read it, and that is not an oversight: a checkpoint
+   * replaces the log rather than being written past it, so there is never a
+   * prefix to skip. It is here because the generation says *which* log belongs
+   * to this checkpoint and this says *how much* of one it stood in for, which is
+   * the difference between a file somebody can diagnose and one they cannot.
+   */
   seq: number
 }
 
@@ -75,10 +83,20 @@ export const MAX_CHECKPOINT_BYTES = 2 * 1024 * 1024
  * database would wake that watcher on every chunk of terminal output.
  *
  * The id is encoded because it ends up as a path segment, and a session id is
- * not guaranteed to be one.
+ * not guaranteed to be one. Encoding is not on its own a guarantee, which is
+ * worth saying because it reads like one: `encodeURIComponent('..')` is `'..'`,
+ * so an id of two dots would name the data directory itself -- and `reset()`
+ * begins by removing the directory it is given. Every id today is a
+ * `crypto.randomUUID()`, so nothing reaches that; the check below is what makes
+ * that a fact about this function rather than about its callers.
  */
 export function historyDir(dataDir: string, sessionId: string): string {
-  return path.join(dataDir, 'history', encodeURIComponent(sessionId))
+  const root = path.join(dataDir, 'history')
+  const at = path.join(root, encodeURIComponent(sessionId))
+  if (path.dirname(at) !== root) {
+    throw new Error(`a session id that does not name a directory under history: ${sessionId}`)
+  }
+  return at
 }
 
 /**

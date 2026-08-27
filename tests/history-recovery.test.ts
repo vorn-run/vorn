@@ -94,7 +94,7 @@ async function put(
   }
 }
 
-const only = [{ id: ID, cols: 80, rows: 24 }]
+const only = [{ id: ID }]
 
 const ESC = '\x1b'
 /** Built rather than a literal, which the control-character rule refuses. */
@@ -119,12 +119,12 @@ describe('a checkpoint and the log that follows it', () => {
     expect(await screenText()).toContain('from the checkpoint and then the log')
   })
 
-  it('rebuilds at the geometry the checkpoint was taken at, not the one the record remembers', async () => {
+  it('rebuilds at the geometry the checkpoint was taken at', async () => {
     // The screen is being rebuilt from bytes that wrapped at those columns. Any
     // other width moves every line after the first wrap.
     await put(sample({ cols: 100, rows: 30 }), 4)
 
-    await recoverHistory(dir, [{ id: ID, cols: 40, rows: 10 }])
+    await recoverHistory(dir, only)
 
     expect(await serializeScreen(ID)).toMatchObject({ cols: 100, rows: 30 })
   })
@@ -162,6 +162,17 @@ describe('a log that does not belong to the checkpoint beside it', () => {
 })
 
 describe('a log with no checkpoint', () => {
+  it('is rebuilt at the size a PTY is spawned at, which is where the log begins', async () => {
+    // Not a guess and not a default. A log with no checkpoint opens at the
+    // spawn, and a PTY is spawned at 80 by 24; any resize the terminal saw is a
+    // frame further down that same log.
+    await put(null, 1, frameBatch(1), frameOutput('from the very beginning'))
+
+    await recoverHistory(dir, only)
+
+    expect(await serializeScreen(ID)).toMatchObject({ cols: 80, rows: 24 })
+  })
+
   it('is replayed from nothing, because it starts from nothing', async () => {
     // A session that crashed before its first checkpoint has a complete log --
     // exactly the short-lived session an interval was never going to cover.
@@ -228,7 +239,7 @@ describe('what is left of sessions that are gone', () => {
   })
 
   it('leaves a session with no history alone', async () => {
-    const report = await recoverHistory(dir, [{ id: 'never-recorded', cols: 80, rows: 24 }])
+    const report = await recoverHistory(dir, [{ id: 'never-recorded' }])
     expect(report).toEqual({ recovered: [], swept: 0 })
   })
 
@@ -261,6 +272,59 @@ describe('residue that is not history', () => {
     leave()
     const report = await recoverHistory(dir, only)
     expect(report.recovered).toEqual([])
+  })
+})
+
+describe('more terminals than are rebuilt at once', () => {
+  it('stops at the cap, keeps the rest, and says it did', async () => {
+    // Each rebuilt terminal is a headless emulator held for the life of the
+    // process, because nothing has attached to one yet and so nothing disposes
+    // it. A cap nobody is told about reads as "everything was restored" on the
+    // one start where it was not.
+    const many = []
+    for (let i = 0; i < 55; i++) {
+      const id = `session-${i}`
+      many.push({ id })
+      fs.mkdirSync(historyDir(dir, id), { recursive: true })
+      await writeCheckpoint(historyDir(dir, id), sample())
+    }
+
+    const report = await recoverHistory(dir, many)
+
+    expect(report.recovered).toHaveLength(50)
+    expect(report.swept).toBe(0)
+    // Nothing was removed to make room; a later start can have them.
+    expect(fs.readdirSync(path.join(dir, 'history'))).toHaveLength(55)
+  })
+})
+
+describe('a session list that could not be read', () => {
+  it('sweeps nothing, because absence and failure look the same otherwise', async () => {
+    // `getPreviousSessions` answers an empty list both when there are none and
+    // when the database would not answer. Acting on the first is a sweep; acting
+    // on the second is every terminal's history removed for one transient error.
+    await put(sample(), 4)
+
+    const report = await recoverHistory(dir, null)
+
+    expect(report).toEqual({ recovered: [], swept: 0 })
+    expect(fs.existsSync(historyDir(dir, ID))).toBe(true)
+  })
+})
+
+describe('a scratch file a crash left half-written', () => {
+  it('is cleared rather than kept for ever under a name nothing reuses', async () => {
+    // `writeCheckpoint` removes its scratch file only when the write fails. A
+    // process that dies mid-write removes nothing, and up to two megabytes sits
+    // there for the life of the session directory.
+    await put(sample(), 4)
+    const leftover = path.join(historyDir(dir, ID), `.${CHECKPOINT_FILE}.deadbeefcafe`)
+    fs.writeFileSync(leftover, 'half a checkpoint')
+
+    await recoverHistory(dir, only)
+
+    expect(fs.existsSync(leftover)).toBe(false)
+    expect(readScrollback(ID)).toContain('from the checkpoint')
   })
 })
 

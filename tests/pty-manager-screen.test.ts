@@ -236,6 +236,19 @@ describe('the model follows the session it belongs to', () => {
     expect(live?.rows).toBe(43)
   })
 
+  it('ignores a resize larger than a frame can record', () => {
+    // A resize frame stores its dimensions in sixteen bits, so seventy thousand
+    // columns would be written to disk as four thousand -- a durable
+    // disagreement between what the program rendered against and what a replay
+    // lays it out at, re-applied on every start. Refused at the source, where
+    // the PTY and the model and the frame all still agree.
+    const { session, fake } = createAgent()
+    ptyManager.resizePty(session.id, 70_000, 40)
+
+    expect(fake.resize).not.toHaveBeenCalled()
+    expect(ptyManager.getActiveSessions().find((s) => s.id === session.id)?.cols).toBe(80)
+  })
+
   it('ignores a resize that would throw inside node-pty', () => {
     // Arrives as a fire-and-forget notification, so a throw here has no caller.
     const { session, fake } = createAgent()

@@ -451,8 +451,13 @@ async function flushPending(held: Recorded): Promise<void> {
  * restore from.
  */
 async function fold(held: Recorded): Promise<void> {
-  await checkpoint(held)
-  if (held.logBytes <= MAX_LOG_BYTES) return
+  // Asked, not inferred. An earlier version re-read `logBytes` to work out
+  // whether the checkpoint had landed, which is wrong in one reachable case: a
+  // checkpoint that succeeded while a megabyte of output arrived during its
+  // fsyncs leaves a log legitimately over the cap, and the log would then be
+  // thrown away along with every byte in it -- on a healthy path, not the
+  // faulted one this fallback is for.
+  if (await checkpoint(held)) return
 
   log.warn(
     { id: held.id, bytes: held.logBytes },
@@ -475,7 +480,7 @@ async function fold(held: Recorded): Promise<void> {
  * this line ran -- but only if nothing is recorded between taking `seq` and
  * placing that marker. Nothing can be: there is no await between them.
  */
-async function checkpoint(held: Recorded): Promise<void> {
+async function checkpoint(held: Recorded): Promise<boolean> {
   const cutSeq = held.seq
   const scrollback = readScrollback(held.id)
   const drained = serializeScreen(held.id)
@@ -503,7 +508,7 @@ async function checkpoint(held: Recorded): Promise<void> {
     // about what happened, so they go back at the front and the log carries on.
     restore(held, superseded, supersededBytes)
     await flushPending(held)
-    return
+    return false
   }
 
   // From here the frames in `superseded` are inside the checkpoint and must not
@@ -515,6 +520,7 @@ async function checkpoint(held: Recorded): Promise<void> {
     // The checkpoint is already durable, so the screen survives; what is lost is
     // the little that came after it. Reported and marked there.
   })
+  return true
 }
 
 /**

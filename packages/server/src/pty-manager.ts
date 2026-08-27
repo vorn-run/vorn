@@ -52,6 +52,9 @@ const MAX_OUTPUT_LINES = 1000
  * these too, and a literal in one place and a constant in another is how the two
  * come to disagree about what the program is rendering against.
  */
+/** The largest geometry a resize may ask for. See `resizePty`. */
+const MAX_GEOMETRY = 10_000
+
 const INITIAL_COLS = 80
 const INITIAL_ROWS = 24
 const IDLE_TIMEOUT_MS = 5000
@@ -744,6 +747,13 @@ class PtyManager extends EventEmitter {
    */
   resizePty(id: string, cols: number, rows: number): void {
     if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) return
+    // Bounded as well as positive, because this now outlives the process. A
+    // resize frame stores its dimensions in sixteen bits, so a client asking for
+    // seventy thousand columns would be recorded as four thousand -- a durable
+    // disagreement between what the program was rendering against and what a
+    // replay lays it out at, and one that is re-applied on every subsequent
+    // start. Nothing a terminal is actually displayed at comes near this.
+    if (cols > MAX_GEOMETRY || rows > MAX_GEOMETRY) return
 
     const session = this.sessions.get(id)
     if (session) {
