@@ -124,6 +124,20 @@ export function readScrollback(id: string): string {
   return held.chunks[0] ?? ''
 }
 
+/**
+ * Replace a terminal's buffer with bytes from somewhere else.
+ *
+ * For recovery, which reconstructs it from a checkpoint and a log rather than
+ * from a PTY. It goes through the same bound as an append, because a checkpoint
+ * written by an older build -- or one whose cap was larger -- must not be able
+ * to seed a buffer past what this module promises to hold.
+ */
+export function seedScrollback(id: string, data: string): void {
+  const held: Buffered = { chunks: [data], units: data.length }
+  buffers.set(id, held)
+  compact(held)
+}
+
 export function clearScrollback(id: string): void {
   buffers.delete(id)
 }

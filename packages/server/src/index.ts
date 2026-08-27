@@ -36,6 +36,7 @@ import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server
 import { DEFAULT_SERVER_PORT, EXIT_ENDPOINT_TAKEN } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { configureHistory, flushHistory } from './history/writer'
+import { recoverHistory } from './history/recovery'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
@@ -450,6 +451,17 @@ export async function startServer(
   // serve`, so a check that lived only there would be late or absent exactly
   // where it matters.
   if (endpoint) watchEndpoint(() => endpoint.holds())
+
+  // Only now, and for two reasons. It is after `registerAllMethods()`, so
+  // nothing here races the first debounced `saveSessions`. And it is after the
+  // endpoint claim, so a server that arrives second exits above rather than
+  // replaying every terminal on the machine and then standing down.
+  //
+  // That leaves a window between the listen and this line where a client could
+  // ask for history that is not loaded yet. Named rather than hidden: nothing
+  // asks for it at all until a pane is built to.
+  const { sessionManager: persisted } = await import('./session-persistence')
+  await recoverHistory(dataDir, persisted.getPreviousSessions())
 
   // Published together, after the claim, because they are one announcement: the
   // port says where, the credential says how, and a reader that finds one
