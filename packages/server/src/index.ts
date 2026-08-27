@@ -35,6 +35,7 @@ import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
 import { DEFAULT_SERVER_PORT, EXIT_ENDPOINT_TAKEN } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
+import { configureHistory, flushHistory } from './history/writer'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
@@ -113,6 +114,10 @@ export async function startServer(
   // Anything launched from a session inherits VORN_DATA_DIR and can then find the
   // port and credential files even when --data-dir moved them.
   setLaunchDataDir(dataDir)
+  // Before anything listens, so there is no window where a session is created
+  // and then never recorded. Nothing is written until a terminal exists, and a
+  // server that loses the endpoint claim exits without ever having one.
+  configureHistory(dataDir)
 
   // Who this server is, so a desktop can decide whether to adopt it instead of
   // starting a second one on the same data directory. The channel is passed by
@@ -483,6 +488,14 @@ export async function startServer(
     // Stop the periodic timer first, then do one final synchronous save
     sessionManager.stopAutoSave()
     sessionManager.persistNow()
+    // The last few milliseconds of output, then every terminal's screen, before
+    // anything kills a PTY. After `killAll()` the buffers this reads have been
+    // emptied; before `persistNow()` the sessions these belong to are not yet
+    // saved. Awaited because serializing a screen is asynchronous by necessity,
+    // and bounded from the inside -- it is on the same path as the unref'd
+    // `SHUTDOWN_DEADLINE_MS` and must not be able to spend all of it.
+    ptyManager.flushPendingOutput()
+    await flushHistory()
     hookServer.stop()
     clearLocalCredential()
     uninstallHooks()

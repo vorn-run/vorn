@@ -39,6 +39,7 @@ import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
 import { createScreen, feedScreen, resizeScreen, clearScreen } from './terminal-screen'
+import { startHistory, recordOutput, recordResize, stopHistory } from './history/writer'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 
@@ -543,6 +544,10 @@ class PtyManager extends EventEmitter {
       // clients rather than ahead of them -- fed from `onData`, a screen read
       // mid-flush would describe something nobody has seen yet.
       feedScreen(id, data)
+      // Beside the model rather than beside `appendScrollback`, and for the same
+      // reason: this is the coalesced write, so a burst of keystrokes is one
+      // frame on disk instead of thirty.
+      recordOutput(id, data)
     }
   }
 
@@ -642,6 +647,9 @@ class PtyManager extends EventEmitter {
    */
   private setupPtyEvents(id: string, ptyProcess: pty.IPty, cols: number, rows: number): void {
     createScreen(id, cols, rows)
+    // Replaces whatever was left under this id. A recovered session that is
+    // being respawned has history describing a process that is gone.
+    startHistory(id)
 
     ptyProcess.onData((data: string) => {
       this.bufferData(id, data)
@@ -668,6 +676,10 @@ class PtyManager extends EventEmitter {
       // exit code, but its history does not -- that is pre-existing, and this
       // matches it rather than quietly deciding otherwise.
       clearScreen(id)
+      // And the same for what was written for it. A terminal whose process has
+      // exited has nothing worth restoring -- refused during shutdown, where the
+      // PTYs are killed after the checkpoints have been written.
+      stopHistory(id)
       this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
 
       this.ptys.delete(id)
@@ -735,6 +747,7 @@ class PtyManager extends EventEmitter {
     // this is reached from a fire-and-forget notification, and the model drains
     // its own queue before applying the size.
     void resizeScreen(id, cols, rows)
+    recordResize(id, cols, rows)
   }
 
   killPty(id: string): void {
@@ -760,6 +773,7 @@ class PtyManager extends EventEmitter {
     // model again. A `Terminal` holds buffers; leaving it is a leak per closed
     // session for the life of the server.
     clearScreen(id)
+    stopHistory(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
 
@@ -793,6 +807,23 @@ class PtyManager extends EventEmitter {
       // Surface an exit event even if the PTY was already gone so the
       // renderer can complete any close-intent cleanup.
       this.emit('client-message', IPC.TERMINAL_EXIT, { id, exitCode: 0 })
+    }
+  }
+
+  /**
+   * Push out whatever is sitting in the flush buffers, without waiting for their
+   * timers.
+   *
+   * For shutdown. The buffers hold up to `BUFFER_FLUSH_MS` of output, and that
+   * output is the most recent thing the terminal showed -- the part somebody is
+   * most likely to want back. `killAll` below drops it deliberately, which was
+   * right while nothing outlived the process.
+   */
+  flushPendingOutput(): void {
+    for (const id of [...this.flushTimers.keys()]) {
+      const timer = this.flushTimers.get(id)
+      if (timer) clearTimeout(timer)
+      this.flushBuffer(id)
     }
   }
 
