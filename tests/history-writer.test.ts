@@ -12,8 +12,10 @@ import {
   flushHistory,
   settleHistory,
   historyState,
-  resetHistory
+  resetHistory,
+  MAX_LOG_BYTES
 } from '../packages/server/src/history/writer'
+import { recoverHistory } from '../packages/server/src/history/recovery'
 import {
   historyDir,
   readCheckpoint,
@@ -21,8 +23,17 @@ import {
   LOG_FILE
 } from '../packages/server/src/history/checkpoint'
 import { readHeader, readFrames, type Frame } from '../packages/server/src/history/log'
-import { createScreen, feedScreen, resetScreens } from '../packages/server/src/terminal-screen'
-import { appendScrollback, resetScrollback } from '../packages/server/src/terminal-scrollback'
+import {
+  createScreen,
+  feedScreen,
+  clearScreen,
+  resetScreens
+} from '../packages/server/src/terminal-screen'
+import {
+  appendScrollback,
+  readScrollback,
+  resetScrollback
+} from '../packages/server/src/terminal-scrollback'
 
 /**
  * Turning a running terminal into files a restart can read.
@@ -305,6 +316,53 @@ describe('shutting down', () => {
     await flushHistory()
 
     expect(outputs(logOf().frames)).toBe('')
+  })
+})
+
+describe('a log that outgrows its cap', () => {
+  const past = (): string => 'x'.repeat(MAX_LOG_BYTES + 1024)
+
+  it('is folded into a checkpoint rather than left to grow', async () => {
+    begin()
+    emit(ID, past())
+    await settle(3)
+
+    expect(historyState(ID)?.logBytes).toBeLessThanOrEqual(MAX_LOG_BYTES)
+    expect(readCheckpoint(historyDir(dir, ID))?.screen).toBeTruthy()
+  })
+
+  it('is bounded by size, not by waiting out the interval', async () => {
+    // A terminal producing output continuously never falls quiet, so the quiet
+    // window and the interval both pass it by. Nothing here waits for either.
+    begin()
+    emit(ID, past())
+    await settle(3)
+
+    expect(readCheckpoint(historyDir(dir, ID))?.generation).toBe(2)
+  })
+
+  it('is thrown away when no checkpoint can be written, and cannot be replayed after', async () => {
+    // A session whose screen model has faulted has nothing to checkpoint from,
+    // so the log is the only thing growing and nothing would ever bound it.
+    // Dropping it loses history on purpose; the last good checkpoint remains.
+    begin()
+    emit(ID, 'this much was checkpointed')
+    await quiesce()
+    expect(readCheckpoint(historyDir(dir, ID))?.generation).toBe(2)
+
+    clearScreen(ID)
+    recordOutput(ID, past())
+    await settle(3)
+
+    expect(historyState(ID)?.logBytes).toBeLessThanOrEqual(MAX_LOG_BYTES)
+    // The generation moved with the log and not with the checkpoint, which is
+    // what stops a truncated log being replayed onto a screen it does not follow.
+    expect(logOf().generation).toBe(3)
+    expect(readCheckpoint(historyDir(dir, ID))?.generation).toBe(2)
+
+    const report = await recoverHistory(dir, [{ id: ID, cols: 80, rows: 24 }])
+    expect(report.recovered[0]?.replayed).toBe(0)
+    expect(readScrollback(ID)).toBe('this much was checkpointed')
   })
 })
 

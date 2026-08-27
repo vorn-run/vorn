@@ -80,6 +80,21 @@ const DEFAULT_TIMING: HistoryTiming = {
 let timing: HistoryTiming = DEFAULT_TIMING
 
 /**
+ * How large a log may grow before it is folded into a checkpoint.
+ *
+ * Half of `MAX_CHECKPOINT_BYTES`, so the log can never be the larger half of the
+ * pair and a session's history on disk is bounded by the two together. The same
+ * shape as the memory bound in `terminal-scrollback`: a cap with the compaction
+ * that enforces it, rather than a cap nobody applies.
+ *
+ * This, not `checkpointMs`, is what actually bounds a busy terminal. A terminal
+ * producing a megabyte a second never falls quiet and would otherwise put thirty
+ * megabytes on disk between checkpoints, all of it to be replayed through a VT
+ * parser on the next start.
+ */
+export const MAX_LOG_BYTES = 1024 * 1024
+
+/**
  * How much unwritten output a session may hold before it is given up on.
  *
  * Reached only when the disk has stopped taking writes, since a tick drains this
@@ -358,6 +373,41 @@ async function flushPending(held: Recorded): Promise<void> {
 }
 
 /**
+ * Fold a log that has outgrown its cap into a checkpoint.
+ *
+ * A checkpoint already replaces the log rather than appending past it, so
+ * compaction is not a separate mechanism -- it is the ordinary checkpoint,
+ * asked for by size instead of by time.
+ *
+ * When one cannot be written the log is thrown away instead, and the generation
+ * is moved so that what is left cannot be replayed onto the checkpoint still
+ * sitting beside it. That loses history, which is the point: a session whose
+ * screen model has faulted would otherwise append for the life of the server
+ * with nothing able to bound it, and the last good checkpoint is still there to
+ * restore from.
+ */
+async function fold(held: Recorded): Promise<void> {
+  await checkpoint(held)
+  if (held.logBytes <= MAX_LOG_BYTES) return
+
+  log.warn(
+    { id: held.id, bytes: held.logBytes },
+    '[history] could not checkpoint a log past its cap; dropping it'
+  )
+  held.generation += 1
+  const header = writeHeader(held.generation)
+  try {
+    await fs.writeFile(logPath(held), header, { mode: 0o600 })
+    held.logBytes = header.length
+    held.seq = 0
+    held.broken = false
+  } catch (err) {
+    log.warn({ err, id: held.id }, '[history] could not drop the log either')
+    held.broken = true
+  }
+}
+
+/**
  * Write the screen, then replace the log with whatever arrived while it was
  * being written.
  *
@@ -475,7 +525,10 @@ function tick(): void {
     if (held.queued > 0) continue
 
     if (held.pending.length) {
-      void enqueue(held, () => flushPending(held))
+      void enqueue(held, async () => {
+        await flushPending(held)
+        if (held.logBytes > MAX_LOG_BYTES) await fold(held)
+      })
       continue
     }
 
