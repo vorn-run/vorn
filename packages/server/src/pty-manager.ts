@@ -38,7 +38,7 @@ import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
-import { feedScreen, resizeScreen, clearScreen } from './terminal-screen'
+import { createScreen, feedScreen, resizeScreen, clearScreen } from './terminal-screen'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 
@@ -260,7 +260,7 @@ class PtyManager extends EventEmitter {
     const launchLine = this.buildAgentLaunchLine(payload)
     setTimeout(() => ptyProcess.write(launchLine + '\r'), 300)
 
-    this.setupPtyEvents(id, ptyProcess)
+    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
     this.ptys.set(id, ptyProcess)
 
     const branch = effectiveBranch || getGitBranch(effectivePath)
@@ -423,7 +423,7 @@ class PtyManager extends EventEmitter {
     })
 
     // Forward all data to the renderer from the start
-    this.setupPtyEvents(id, ptyProcess)
+    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
     this.ptys.set(id, ptyProcess)
 
     // Clean up the prompt listener after connection or timeout
@@ -487,7 +487,7 @@ class PtyManager extends EventEmitter {
         VORN_SESSION_ID: id
       }
     })
-    this.setupPtyEvents(id, ptyProcess)
+    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
     this.ptys.set(id, ptyProcess)
 
     const shellCount =
@@ -542,8 +542,7 @@ class PtyManager extends EventEmitter {
       // instead of one per keystroke. And it puts the model in step with the
       // clients rather than ahead of them -- fed from `onData`, a screen read
       // mid-flush would describe something nobody has seen yet.
-      const session = this.sessions.get(id)
-      feedScreen(id, data, session?.cols, session?.rows)
+      feedScreen(id, data)
     }
   }
 
@@ -635,7 +634,15 @@ class PtyManager extends EventEmitter {
     )
   }
 
-  private setupPtyEvents(id: string, ptyProcess: pty.IPty): void {
+  /**
+   * @param cols - what the PTY was spawned at, passed rather than looked up.
+   *   Every caller runs this *before* registering the session, so a lookup here
+   *   finds nothing and silently falls back -- which is invisible while all
+   *   three spawn at the same size and wrong the moment one does not.
+   */
+  private setupPtyEvents(id: string, ptyProcess: pty.IPty, cols: number, rows: number): void {
+    createScreen(id, cols, rows)
+
     ptyProcess.onData((data: string) => {
       this.bufferData(id, data)
       this.appendOutput(id, data)
@@ -724,8 +731,10 @@ class PtyManager extends EventEmitter {
       session.rows = rows
     }
     this.ptys.get(id)?.resize(cols, rows)
-    // The same numbers, so the model wraps where the program does.
-    resizeScreen(id, cols, rows)
+    // The same numbers, so the model wraps where the program does. Not awaited:
+    // this is reached from a fire-and-forget notification, and the model drains
+    // its own queue before applying the size.
+    void resizeScreen(id, cols, rows)
   }
 
   killPty(id: string): void {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { spawnSync } from 'node:child_process'
-import path from 'node:path'
+import { runMeasurement } from './helpers/run-measurement'
+import { spawnsRealServers } from './helpers/one-at-a-time'
 
 /**
  * What the server spends on each chunk of terminal output.
@@ -15,12 +15,20 @@ import path from 'node:path'
  * In a child process for the same reason as the memory measurement: this
  * worker's own scheduling noise is larger than the differences that matter.
  *
- * The ceilings are generous and the comparison is relative. Wall-clock on a
- * loaded CI box is not a number to assert tightly, and a flaky performance test
- * gets deleted rather than investigated. What these catch is a change of shape —
- * a per-chunk cost that goes back to being quadratic, or a model that becomes an
- * order of magnitude more expensive to feed.
+ * Every assertion is a comparison between numbers from the same run, never a
+ * ceiling on one of them. Wall-clock on a loaded CI box is not a thing to assert
+ * against a constant, and a flaky performance test gets deleted rather than
+ * investigated — which leaves nothing at all. What these catch is a change of
+ * *shape*: the buffer going quadratic again, or the model becoming the thing
+ * that dominates this path.
+ *
+ * The absolute figures belong in a commit message, where they are a record
+ * rather than a trap.
  */
+
+// Takes the same lock the server suites take. This one measures wall-clock and
+// heap, so anything spawning beside it is measuring something else.
+spawnsRealServers()
 
 interface Measurement {
   chunks: number
@@ -35,19 +43,8 @@ interface Measurement {
   screenOnlyMs: number
 }
 
-function measure(): Measurement {
-  const script = path.join(__dirname, 'helpers', 'measure-write-path.ts')
-  const run = spawnSync('npx', ['tsx', script], {
-    cwd: path.join(__dirname, '..'),
-    encoding: 'utf-8',
-    timeout: 300_000
-  })
-  if (run.status !== 0) throw new Error(`measurement failed (${run.status}):\n${run.stderr}`)
-  return JSON.parse(run.stdout.trim().split('\n').pop() ?? '') as Measurement
-}
-
 describe('the path every byte of output takes', () => {
-  const r = measure()
+  const r = runMeasurement<Measurement>('measure-write-path.ts', { timeoutMs: 300_000 })
 
   it('is faster than it was before a screen model was added to it', () => {
     // The headline, and the reason the buffer fix belongs in the same branch as
@@ -62,18 +59,17 @@ describe('the path every byte of output takes', () => {
     ).toBeLessThan(r.oldBufferMs)
   })
 
-  it('holds the buffer to a flat cost per chunk', () => {
-    // The old shape was quadratic in disguise: every append re-formed the whole
-    // buffer, so the cost per chunk grew with the buffer until it hit the cap and
-    // stayed there, expensively. Roughly 0.2µs/chunk now.
-    expect(r.newBufferMs, `${r.newBufferMs}ms for ${r.chunks} chunks`).toBeLessThan(200)
-  })
-
-  it('keeps the screen model affordable to feed', () => {
-    // About 1.9µs per chunk when this was written — a real VT parse, and the
-    // reason the model is fed from the 8ms coalescer rather than from every raw
-    // PTY write. An order of magnitude worse than this would be worth knowing
-    // about; a doubling would not.
-    expect(r.screenOnlyMs, `${r.screenOnlyMs}ms for ${r.chunks} chunks`).toBeLessThan(400)
+  it('spends most of what is left on the model rather than the buffer', () => {
+    // A ratio, not a ceiling. Absolute wall-clock in a permanent suite is a
+    // flaky test on a loaded CI box, and a flaky performance test gets deleted
+    // rather than investigated -- leaving nothing. Both numbers come from the
+    // same process and the same run, so their relationship is stable even when
+    // the machine is not.
+    //
+    // What this catches is the buffer going quadratic again: it would stop being
+    // the small half. Measured at roughly 4ms against 38ms when written.
+    expect(r.newBufferMs, `buffer ${r.newBufferMs}ms, model ${r.screenOnlyMs}ms`).toBeLessThan(
+      r.screenOnlyMs
+    )
   })
 }, 300_000)

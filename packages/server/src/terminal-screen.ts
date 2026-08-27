@@ -84,6 +84,15 @@ type SerializeAddon = InstanceType<typeof SerializeAddon>
 const SCROLLBACK = 0
 
 /**
+ * How far the parser may fall behind before chunks are skipped.
+ *
+ * A screenful at a generous size is a few tens of kilobytes, so this is room for
+ * many of them -- enough that nothing normal is ever dropped -- while being far
+ * below the fifty megabytes xterm would otherwise hold before refusing.
+ */
+const MAX_QUEUED_UNITS = 4 * 1024 * 1024
+
+/**
  * Mirrors the client's terminal, and the mirroring is the point.
  *
  * `allowProposedApi` matches `terminal-registry.ts` because the serialize addon
@@ -102,21 +111,85 @@ function create(cols: number, rows: number): Held {
   const term = new Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true })
   const serializer = new SerializeAddon()
   term.loadAddon(serializer)
-  return { term, serializer, pending: Promise.resolve() }
+  const held: Held = { term, serializer, cols, rows, queued: 0, behind: false, title: '', cwd: '' }
+
+  // Two things the program says about itself that the serialized screen does
+  // not carry, so they are caught as they go past. Neither is a reply -- these
+  // are notifications from the program, and observing one sends nothing back.
+  //
+  // Both run from xterm's own timer, not from `feedScreen`, so a throw in either
+  // reaches the top of the process rather than any `try` in this file -- and the
+  // server installs no `uncaughtException` handler. That is the whole server and
+  // every session, killed by a program printing an odd string. So both are
+  // wrapped, and neither may assume anything about what it was handed.
+  term.onTitleChange((title) => {
+    try {
+      held.title = title
+    } catch {
+      /* nothing a title can do is worth a process */
+    }
+  })
+  term.parser.registerOscHandler(7, (payload) => {
+    try {
+      // `file://host/path`, per the convention every shell integration uses.
+      const raw = payload.replace(/^file:\/\/[^/]*/, '')
+      // `decodeURIComponent` throws on a stray `%` -- and a directory named
+      // `100%` is a directory somebody has. Left encoded rather than lost.
+      if (raw) held.cwd = tryDecode(raw)
+    } catch {
+      /* an unreadable cwd is not worth anything at all */
+    }
+    // False: this is an observation, not a takeover. xterm goes on handling it.
+    return false
+  })
+
+  return held
+}
+
+/** Percent-decoded where that is possible, left alone where it is not. */
+function tryDecode(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
 }
 
 interface Held {
   term: Terminal
   serializer: SerializeAddon
-  /** The last write, so a read can wait for it. See `serializeScreen`. */
-  pending: Promise<void>
+  cols: number
+  rows: number
+  /** Written but not yet parsed, in UTF-16 units. */
+  queued: number
+  /** Whether the last chunk was skipped, so the log says it once. */
+  behind: boolean
+  /** Last OSC 0/2. The addon does not carry it. */
+  title: string
+  /** Last OSC 7, as a path. The addon does not carry this either. */
+  cwd: string
+}
+
+/**
+ * A screen, and the things the serialized string does not say.
+ *
+ * `serialize()` emits cells, SGR, the final cursor position and a set of modes.
+ * Everything else a restorer needs has to be gathered beside it -- which is why
+ * this is a record rather than a string.
+ */
+export interface ScreenSnapshot {
+  /** Escape sequences that reproduce the screen. */
+  screen: string
+  /** The geometry it must be replayed at, or the wrap points do not match. */
+  cols: number
+  rows: number
+  /** Last window title the program set, if it set one. */
+  title: string
+  /** Working directory the shell last reported, if it reports one. */
+  cwd: string
 }
 
 const screens = new Map<string, Held>()
-
-/** What a PTY starts at, when a session has not said otherwise. */
-const FALLBACK_COLS = 80
-const FALLBACK_ROWS = 24
 
 /**
  * Feed output to the screen model.
@@ -126,18 +199,55 @@ const FALLBACK_ROWS = 24
  * stopped updating — so a terminal that faults is dropped and the session
  * carries on without one.
  */
-export function feedScreen(id: string, data: string, cols?: number, rows?: number): void {
-  try {
-    let held = screens.get(id)
-    if (!held) {
-      held = create(cols ?? FALLBACK_COLS, rows ?? FALLBACK_ROWS)
-      screens.set(id, held)
+export function feedScreen(id: string, data: string): void {
+  const held = screens.get(id)
+  if (!held) return
+
+  // Dropped rather than queued when the model is behind.
+  //
+  // xterm parses on a timer and holds everything not yet parsed. A PTY can
+  // outrun that -- `cat` of a large file arrives far faster than a VT parse --
+  // and xterm's own answer at fifty megabytes of backlog is to throw. That would
+  // cost the session its model permanently, having first held fifty megabytes to
+  // get there.
+  //
+  // So the backlog is bounded here instead, and the response to a full one is to
+  // skip the chunk. A model missing a screenful of a flood is repaired by the
+  // next repaint; a model that no longer exists is not repaired at all. The
+  // client is unaffected either way -- it got these bytes before this line ran.
+  if (held.queued > MAX_QUEUED_UNITS) {
+    if (!held.behind) {
+      held.behind = true
+      log.warn({ id }, '[screen] output is outrunning the screen model; skipping ahead')
     }
-    const term = held.term
-    held.pending = new Promise<void>((resolve) => term.write(data, resolve))
+    return
+  }
+
+  try {
+    held.queued += data.length
+    held.behind = false
+    held.term.write(data, () => {
+      held.queued = Math.max(0, held.queued - data.length)
+    })
   } catch (err) {
-    log.warn({ err, id }, '[screen] dropping the screen model for this session')
-    clearScreen(id)
+    drop(id, err)
+  }
+}
+
+/**
+ * Start modelling a terminal, at the geometry it was spawned with.
+ *
+ * Explicit rather than created on the first byte, so the geometry comes from the
+ * one place that knows it instead of being threaded through every flush. It also
+ * means `feedScreen` is a map lookup and a write, on a path that runs for every
+ * chunk of every session.
+ */
+export function createScreen(id: string, cols: number, rows: number): void {
+  clearScreen(id)
+  try {
+    screens.set(id, create(cols, rows))
+  } catch (err) {
+    drop(id, err)
   }
 }
 
@@ -148,19 +258,54 @@ export function feedScreen(id: string, data: string, cols?: number, rows?: numbe
  * rendering against those: a model one column wider wraps in a different place,
  * and every line after the first divergence is wrong.
  */
-export function resizeScreen(id: string, cols: number, rows: number): void {
+export async function resizeScreen(id: string, cols: number, rows: number): Promise<void> {
   const held = screens.get(id)
   if (!held) return
   try {
+    // Drained first, and that ordering is the whole point. Writes are queued, so
+    // resizing straight away reflows bytes that arrived *before* the resize at
+    // the size that came *after* it -- and the client, which parsed those bytes
+    // before it refitted, wraps them somewhere else. A model that wraps
+    // differently from the terminal it models is the failure this exists to
+    // avoid, and it would show up as a screen that is subtly wrong rather than
+    // one that is obviously broken.
+    await new Promise<void>((resolve) => held.term.write('', resolve))
     held.term.resize(cols, rows)
+    held.cols = cols
+    held.rows = rows
   } catch (err) {
-    log.warn({ err, id }, '[screen] dropping the screen model for this session')
-    clearScreen(id)
+    drop(id, err)
   }
 }
 
+/** Give up on a session's model. The session itself carries on without one. */
+function drop(id: string, err: unknown): void {
+  log.warn({ err, id }, '[screen] dropping the screen model for this session')
+  clearScreen(id)
+}
+
 /**
- * The screen as escape sequences that reproduce it.
+ * The screen, and what has to travel beside it.
+ *
+ * ## What this does not carry, and why
+ *
+ * The task asks for scrollback, dimensions, modes, the saved-cursor register,
+ * OSC 8 link ranges, the last title and the cwd. Dimensions, title and cwd are
+ * gathered here; modes and the alternate-screen flag come from the addon. Three
+ * do not, and it is better to say so than to let a caller assume:
+ *
+ * - **Scrollback** is deliberate: this model runs with none, for the reasons
+ *   beside `SCROLLBACK`. The bytes are already kept twice over elsewhere.
+ * - **The saved-cursor register** (DECSC) is not emitted by
+ *   `@xterm/addon-serialize` at 0.13. A program that saved a position and had
+ *   not yet restored it loses that, which shows up as a restore-cursor landing
+ *   at the origin.
+ * - **OSC 8 link ranges** are stored as cell attributes and the addon does not
+ *   round-trip them, so a restored screen has the link text without the link.
+ *
+ * Reaching those means either an addon that emits them or walking the buffer
+ * here. Neither belongs in the task that introduces the model, and both are
+ * cheaper once something actually reads a snapshot -- which nothing does yet.
  *
  * Async, and that is not a convenience. `term.write` is queued, not applied —
  * xterm defers the parse to a macrotask — so serializing straight after a write
@@ -168,15 +313,24 @@ export function resizeScreen(id: string, cols: number, rows: number): void {
  * occasionally most of it. That failure is invisible in a test that happens to
  * yield and reappears under load.
  */
-export async function serializeScreen(id: string): Promise<string> {
+export async function serializeScreen(id: string): Promise<ScreenSnapshot | null> {
   const held = screens.get(id)
-  if (!held) return ''
-  await held.pending
+  if (!held) return null
   try {
-    return held.serializer.serialize()
+    // An empty write, queued behind everything already in flight, resolving only
+    // once the parser has reached it. That is the whole drain: writes are applied
+    // in order, so waiting for the last one waits for all of them.
+    await new Promise<void>((resolve) => held.term.write('', resolve))
+    return {
+      screen: held.serializer.serialize(),
+      cols: held.cols,
+      rows: held.rows,
+      title: held.title,
+      cwd: held.cwd
+    }
   } catch (err) {
     log.warn({ err, id }, '[screen] could not serialize')
-    return ''
+    return null
   }
 }
 

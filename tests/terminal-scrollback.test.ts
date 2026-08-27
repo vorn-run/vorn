@@ -3,6 +3,7 @@ import {
   appendScrollback,
   clearScrollback,
   readScrollback,
+  scrollbackUnitsHeld,
   resetScrollback
 } from '../packages/server/src/terminal-scrollback'
 
@@ -138,5 +139,22 @@ describe('holding chunks instead of one string', () => {
 
     expect(kept).toContain(`${ESC}[31mred`)
     expect(kept.length).toBeLessThanOrEqual(256 * 1024)
+  })
+})
+
+describe('the very first thing a terminal says', () => {
+  it('is bounded like everything after it', () => {
+    // An earlier version seeded the buffer with the first chunk and returned, so
+    // a single oversized write arriving before anything else sat unbounded until
+    // the next append -- which for a terminal that then goes quiet is never.
+    //
+    // Asserted on what is held, not on what a read returns: `readScrollback`
+    // compacts on the way out, so the answer was already within the cap either
+    // way. The first version of this test passed against the bug for exactly
+    // that reason.
+    appendScrollback('t', 'x'.repeat(2 * 1024 * 1024))
+
+    expect(scrollbackUnitsHeld('t')).toBeLessThanOrEqual(256 * 1024 + (256 * 1024) / 4)
+    expect(readScrollback('t').length).toBeLessThanOrEqual(256 * 1024)
   })
 })

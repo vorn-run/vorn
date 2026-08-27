@@ -5,6 +5,15 @@ import type { CreateTerminalPayload, TerminalSession } from '@vornrun/shared/typ
 /**
  * The screen model, where there is a real PTY to watch.
  *
+ * The mock harness below is duplicated from `pty-manager-recovery.test.ts`, and
+ * it is duplicated on purpose rather than by neglect. `vi.mock` is hoisted into
+ * the file that calls it; moved to a shared module it registers after that
+ * file's imports have already resolved, so the real `node-pty` is loaded and the
+ * suite spawns actual shells. Extracting it needs the factory form
+ * (`vi.mock(spec, () => import(helper))`) in both files, which trades a hundred
+ * lines of obvious boilerplate for a subtlety that fails silently. If a third
+ * file ever needs this, that trade is worth making.
+ *
  * `terminal-screen.test.ts` proves what a screen becomes; it cannot prove that
  * feeding one never writes back. That needs something on the other end of the
  * PTY recording what arrives, which is what `FakePty` is -- every `write` lands
@@ -237,11 +246,11 @@ describe('the model follows the session it belongs to', () => {
     fake.emitData('output')
     await afterFlush()
     const held = screenCount()
-    expect(await serializeScreen(session.id)).toContain('output')
+    expect((await serializeScreen(session.id))?.screen).toContain('output')
 
     ptyManager.killPty(session.id)
 
     expect(screenCount()).toBe(held - 1)
-    expect(await serializeScreen(session.id)).toBe('')
+    expect(await serializeScreen(session.id)).toBeNull()
   })
 })

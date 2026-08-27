@@ -4,6 +4,7 @@ import {
   resetScrollback
 } from '../../packages/server/src/terminal-scrollback'
 import {
+  createScreen,
   feedScreen,
   serializeScreen,
   resetScreens
@@ -69,7 +70,8 @@ async function main(): Promise<void> {
   const scratch = { buf: '' }
   for (const c of warm) appendTheOldWay(scratch, c)
   for (const c of warm) appendScrollback('warm', c)
-  for (const c of warm) feedScreen('warm', c, COLS, ROWS)
+  createScreen('warm', COLS, ROWS)
+  for (const c of warm) feedScreen('warm', c)
   await serializeScreen('warm')
   resetScrollback()
   resetScreens()
@@ -79,19 +81,26 @@ async function main(): Promise<void> {
     for (const c of data) appendTheOldWay(before, c)
   })
 
+  // The read is inside the clock, not after it. The old shape paid its trim on
+  // every append, so timing the new shape's writes alone against that would be
+  // the old total against the new half -- flattering, and not the same
+  // question. This is every cost either shape pays to end up with the same
+  // bytes available.
   resetScrollback()
   const newBuffer = ms(() => {
     for (const c of data) appendScrollback('s', c)
+    readScrollback('s')
   })
-  readScrollback('s')
 
   resetScrollback()
   resetScreens()
+  createScreen('s', COLS, ROWS)
   const newBufferAndScreen = ms(() => {
     for (const c of data) {
       appendScrollback('s', c)
-      feedScreen('s', c, COLS, ROWS)
+      feedScreen('s', c)
     }
+    readScrollback('s')
   })
   // The parse is queued, so the write is not finished when the loop is. Waiting
   // for it is the difference between measuring the work and measuring the

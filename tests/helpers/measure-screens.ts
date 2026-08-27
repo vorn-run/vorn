@@ -1,4 +1,5 @@
 import {
+  createScreen,
   feedScreen,
   serializeScreen,
   clearScreen,
@@ -61,7 +62,10 @@ async function cycle(round: number): Promise<{ held: number; after: number; mode
   await settle()
   const before = process.memoryUsage().heapUsed
 
-  for (let i = 0; i < SESSIONS; i++) feedScreen(`r${round}s${i}`, realisticPaint(i), COLS, ROWS)
+  for (let i = 0; i < SESSIONS; i++) {
+    createScreen(`r${round}s${i}`, COLS, ROWS)
+    feedScreen(`r${round}s${i}`, realisticPaint(i))
+  }
   // Serialized too, so the addon has done its work and nothing is lazily
   // unbuilt at the moment of measuring.
   for (let i = 0; i < SESSIONS; i++) await serializeScreen(`r${round}s${i}`)

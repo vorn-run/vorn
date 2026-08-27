@@ -78,10 +78,10 @@ interface Buffered {
 const buffers = new Map<string, Buffered>()
 
 export function appendScrollback(id: string, data: string): void {
-  const held = buffers.get(id)
+  let held = buffers.get(id)
   if (!held) {
-    buffers.set(id, { chunks: [data], units: data.length })
-    return
+    held = { chunks: [], units: 0 }
+    buffers.set(id, held)
   }
 
   held.chunks.push(data)
@@ -91,6 +91,11 @@ export function appendScrollback(id: string, data: string): void {
   // otherwise a terminal sitting exactly at the cap would re-join on every
   // chunk, which is the behaviour this replaced. The slack is bounded, so the
   // real ceiling is `MAX_UNITS + COMPACT_SLACK` rather than `MAX_UNITS`.
+  //
+  // The first chunk goes through this too. An earlier version seeded the buffer
+  // and returned, so a single oversized write -- a `cat` of something large,
+  // arriving before anything else -- sat unbounded until the next append or
+  // read, which for a terminal that then goes quiet is indefinitely.
   if (held.units > MAX_UNITS + COMPACT_SLACK) compact(held)
 }
 
@@ -121,6 +126,17 @@ export function readScrollback(id: string): string {
 
 export function clearScrollback(id: string): void {
   buffers.delete(id)
+}
+
+/**
+ * How much this terminal is holding, before any join.
+ *
+ * Exposed because the bound is otherwise unobservable: `readScrollback` compacts
+ * on the way out, so a read is always within the cap no matter how much is being
+ * held behind it. What a test needs to see is the memory, not the answer.
+ */
+export function scrollbackUnitsHeld(id: string): number {
+  return buffers.get(id)?.units ?? 0
 }
 
 /** Test-only, mirroring the map this module used to expose implicitly. */

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { spawnSync } from 'node:child_process'
-import path from 'node:path'
+import { runMeasurement } from './helpers/run-measurement'
+import { spawnsRealServers } from './helpers/one-at-a-time'
 
 /**
  * What fifty screen models cost, and whether they are given back.
@@ -22,6 +22,10 @@ import path from 'node:path'
  * nothing at all.
  */
 
+// Takes the same lock the server suites take. This one measures wall-clock and
+// heap, so anything spawning beside it is measuring something else.
+spawnsRealServers()
+
 interface Measurement {
   sessions: number
   cols: number
@@ -33,23 +37,11 @@ interface Measurement {
   residualSecond: number
 }
 
-function measure(): Measurement {
-  const script = path.join(__dirname, 'helpers', 'measure-screens.ts')
-  const run = spawnSync('npx', ['tsx', script], {
-    cwd: path.join(__dirname, '..'),
-    encoding: 'utf-8',
-    env: { ...process.env, NODE_OPTIONS: '--expose-gc' },
-    timeout: 180_000
-  })
-  if (run.status !== 0) {
-    throw new Error(`measurement failed (${run.status}):\n${run.stderr}`)
-  }
-  const line = run.stdout.trim().split('\n').pop() ?? ''
-  return JSON.parse(line) as Measurement
-}
-
 describe('fifty sessions', () => {
-  const result = measure()
+  const result = runMeasurement<Measurement>('measure-screens.ts', {
+    env: { NODE_OPTIONS: '--expose-gc' },
+    timeoutMs: 180_000
+  })
   const mb = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
   it('models every one of them', () => {
