@@ -746,6 +746,10 @@ class PtyManager extends EventEmitter {
    * says which of them won.
    */
   resizePty(id: string, cols: number, rows: number): void {
+    // An id this manager does not know is not merely a no-op below: the screen
+    // model is keyed by session id and a restored one exists without a PTY, so a
+    // cold pane fitting itself would reflow a screen nothing is drawing to.
+    if (!this.sessions.has(id)) return
     if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) return
     // Bounded as well as positive, because this now outlives the process. A
     // resize frame stores its dimensions in sixteen bits, so a client asking for

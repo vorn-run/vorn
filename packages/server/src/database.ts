@@ -3080,7 +3080,10 @@ export function getPreviousSessions(): TerminalSession[] {
       statusSource: r.status_source as TerminalSession['statusSource']
     }),
     ...(r.worktree_name != null && { worktreeName: r.worktree_name }),
-    ...(r.agent_session_id != null && { agentSessionId: r.agent_session_id })
+    ...(r.agent_session_id != null && { agentSessionId: r.agent_session_id }),
+    // Selected since this table was written and dropped on the floor until now.
+    // It is the only record of when a run ended.
+    ...(r.saved_at != null && { savedAt: r.saved_at })
   }))
 }
 

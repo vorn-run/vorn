@@ -12,6 +12,7 @@ import { detectIDEs, openInIDE } from './ide-detector'
 import { detectMobileProject } from './mobile-detector'
 import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
 import { clientRegistry } from './broadcast'
+import { restoredRecords } from './restored-sessions'
 import { readScrollback } from './terminal-scrollback'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
@@ -1530,7 +1531,14 @@ export function registerAllMethods(): void {
   // session-exit, SessionStart hook), this reduces reliance on the shutdown
   // path (which has a race with bridge.close and doesn't cover
   // force-quit / crash).
-  sessionManager.startAutoSave(() => ptyManager.getActiveSessions())
+  //
+  // Live sessions *and* the ones a previous run left unclaimed. A save is a
+  // whole-table replace, so persisting only the live set is what erased every
+  // record from the last run the moment a single pane was opened -- and with the
+  // record gone, the next start judged that session's history unreachable and
+  // deleted it. Holding them here is what makes a terminal survive more than one
+  // restart.
+  sessionManager.startAutoSave(() => [...ptyManager.getActiveSessions(), ...restoredRecords()])
 
   // ─── Hook server integration ──────────────────────────────────
 

@@ -232,6 +232,68 @@ describe('a server that was killed rather than asked to stop', () => {
     expect(data, 'the restored scrollback lost the output').toContain(MARKER)
   }, 120_000)
 
+  it('keeps a terminal through a second restart, even after a new one is opened', async () => {
+    // The failure this catches is quiet and takes two restarts to show.
+    //
+    // A save is a whole-table replace fed by the live session map, and after a
+    // restart that map is empty. So opening a single new pane replaced the
+    // table with that one row, every record from the previous run went, and on
+    // the *next* start recovery judged their history unreachable -- correctly,
+    // by its own rule -- and deleted it. Terminal history survived exactly one
+    // restart, which is one fewer than the point of writing it down.
+    //
+    // One restart is not enough to see it: the first restore works. It is the
+    // second that comes back empty.
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-crash-'))
+
+    const first = launch()
+    let pid = first.pid as number
+    let ws = await connect()
+    let wasOn: number = JSON.parse(fs.readFileSync(path.join(dataDir(), 'ws-port'), 'utf-8')).port
+
+    const original = await call<{ id: string }>(ws, 'shell:create', dir)
+    notify(ws, 'terminal:write', { id: original.id, data: COMMAND })
+    const history = path.join(dataDir(), 'history', encodeURIComponent(original.id))
+    expect(await until(() => fs.existsSync(path.join(history, 'checkpoint.json')), 20_000)).toBe(
+      true
+    )
+    ws.close()
+    process.kill(pid, 'SIGKILL')
+    await until(() => !alive(pid), 10_000)
+
+    // Second run: open something new, which is what used to erase the record.
+    const second = launch()
+    pid = second.pid as number
+    ws = await connect(wasOn)
+    wasOn = JSON.parse(fs.readFileSync(path.join(dataDir(), 'ws-port'), 'utf-8')).port
+    expect(
+      (await call<Array<{ id: string }>>(ws, 'sessions:getPrevious')).map((s) => s.id)
+    ).toContain(original.id)
+
+    await call<{ id: string }>(ws, 'shell:create', dir)
+    // Past the 500ms save debounce, so the replace has certainly happened.
+    await sleep(2_000)
+    ws.close()
+    process.kill(pid, 'SIGKILL')
+    await until(() => !alive(pid), 10_000)
+
+    // Third run: the original must still be nameable, and still have its history.
+    launch()
+    ws = await connect(wasOn)
+    const previous = await call<Array<{ id: string }>>(ws, 'sessions:getPrevious')
+    const { data } = await call<{ data: string }>(ws, 'terminal:readScrollback', {
+      id: original.id
+    })
+    ws.close()
+
+    expect(
+      previous.map((s) => s.id),
+      'the record was erased by the second run'
+    ).toContain(original.id)
+    expect(fs.existsSync(history), 'its history was swept as unreachable').toBe(true)
+    expect(data, 'the terminal came back empty').toContain(MARKER)
+  }, 180_000)
+
   it('leaves nothing behind for a terminal the next server cannot name', async () => {
     // The sweep, against real residue rather than a fabricated directory. A
     // crash leaves a directory per live terminal, and history keyed by an id no

@@ -112,6 +112,15 @@ export interface TerminalSession {
   shellCwd?: string
   /** Shell session only: PTY exit code once the shell has exited. */
   shellExitCode?: number
+  /**
+   * When the record was last written down.
+   *
+   * Set by the database on save and read back by `getPreviousSessions`; a
+   * session that has never been persisted does not have one. It is the only
+   * thing on disk that says roughly when a run ended, which is what a pane
+   * restored from a previous process has to tell somebody.
+   */
+  savedAt?: number
 }
 
 export type AuthMethod = 'key-file' | 'key-stored' | 'password' | 'agent'

@@ -37,6 +37,8 @@ import { DEFAULT_SERVER_PORT, EXIT_ENDPOINT_TAKEN } from '@vornrun/shared/protoc
 import { ptyManager } from './pty-manager'
 import { configureHistory, flushHistory } from './history/writer'
 import { recoverHistory } from './history/recovery'
+import { seedRestored, markRecovered } from './restored-sessions'
+import { sessionManager } from './session-persistence'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
@@ -334,6 +336,13 @@ export async function startServer(
     log.info(`[server] serving web app from ${webDistDir}`)
   }
 
+  // Before `registerAllMethods()`, and that ordering is the point rather than
+  // tidiness. Registering wires `startAutoSave`, and `startInboxWorker()` on the
+  // next line can launch a workflow session -- so a save can fire from here, and
+  // a save is a whole-table replace. Seeding after it would mean the records
+  // this is holding had already been erased by the thing it exists to survive.
+  const carriedOver = seedRestored(sessionManager.readPreviousSessions())
+
   // Register all RPC methods
   registerAllMethods()
   scheduler.startInboxWorker()
@@ -462,8 +471,7 @@ export async function startServer(
   // this server until both of those exist, so there is no moment where one can
   // ask for history that has not been read yet. The cost is that discovery waits
   // on it -- measured at 77ms for fifty terminals.
-  const { sessionManager } = await import('./session-persistence')
-  await recoverHistory(dataDir, sessionManager.readPreviousSessions())
+  markRecovered((await recoverHistory(dataDir, carriedOver)).recovered)
 
   // Published together, after the claim, because they are one announcement: the
   // port says where, the credential says how, and a reader that finds one
