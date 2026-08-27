@@ -386,7 +386,7 @@ export function createApiShim(wsUrl: string) {
     createShellTerminal: (cwd?: string) => rpc.invoke('shell:create', cwd),
 
     // ── Terminal Events ──
-    onTerminalData: (callback: (event: { id: string; data: string }) => void) =>
+    onTerminalData: (callback: (event: { id: string; data: string; seq: number }) => void) =>
       rpc.on('terminal:data', callback as (p: unknown) => void),
     onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) =>
       rpc.on('terminal:exit', callback as (p: unknown) => void),
@@ -417,6 +417,7 @@ export function createApiShim(wsUrl: string) {
 
     // ── Sessions ──
     listActiveSessions: () => rpc.invoke('terminal:listActive'),
+    attachTerminal: (id: string) => rpc.invoke('terminal:attach', { id }),
     getPreviousSessions: () => rpc.invoke('sessions:getPrevious'),
     clearPreviousSessions: () => rpc.invoke('sessions:clear'),
     getRecentSessions: (projectPath?: string) => rpc.invoke('sessions:getRecent', projectPath),

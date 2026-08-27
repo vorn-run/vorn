@@ -17,6 +17,8 @@ interface TerminalEntry {
   _loadRenderer?: (() => void) | null
   _gpuAddon?: { dispose(): void } | null
   _disposeCommandBlocks?: (() => void) | null
+  /** Whether this terminal has already been seeded from the server. */
+  _hydrated?: boolean
 }
 
 /** data attribute on the persistent wrapper, read by TerminalHost for event delegation. */
@@ -26,8 +28,25 @@ const registry = new Map<string, TerminalEntry>()
 const readyCallbacks = new Map<string, Set<() => void>>()
 
 // --- Write batching: single global listener + requestAnimationFrame ---
-const pendingWrites = new Map<string, string[]>()
+interface Chunk {
+  data: string
+  /** Which flush of that session this came from. See `PtyManager.flushSeq`. */
+  seq: number
+}
+
+const pendingWrites = new Map<string, Chunk[]>()
 let rafId: number | null = null
+
+/**
+ * Sessions being seeded right now.
+ *
+ * A pane that did not create its terminal has to be given what the terminal
+ * already shows before it applies anything live, and the two must not cross. So
+ * live chunks are held from before the seed is asked for until after it has been
+ * written -- then the ones the seed already contains are dropped by their number
+ * and the rest are applied in order.
+ */
+const hydrating = new Map<string, Chunk[]>()
 
 function scheduleFlush(): void {
   if (rafId !== null) return
@@ -37,10 +56,18 @@ function scheduleFlush(): void {
 function flushWrites(): void {
   rafId = null
   for (const [id, chunks] of pendingWrites) {
-    const data = chunks.length === 1 ? chunks[0] : chunks.join('')
+    const holding = hydrating.get(id)
+    if (holding) {
+      holding.push(...chunks)
+      continue
+    }
+    const data = chunks.length === 1 ? chunks[0].data : chunks.map((c) => c.data).join('')
     const entry = registry.get(id)
     if (entry) entry.term.write(data)
-    statusHandlers.get(id)?.(data)
+    // Only when it was actually written. A handler that fires for a terminal
+    // nothing drew into is reporting something nobody saw -- and the one handler
+    // that exists rings a bell.
+    if (entry) statusHandlers.get(id)?.(data)
   }
   pendingWrites.clear()
 }
@@ -49,12 +76,12 @@ let removeGlobalDataListener: (() => void) | null = null
 
 export function initGlobalDataListener(): void {
   if (removeGlobalDataListener) return
-  removeGlobalDataListener = window.api.onTerminalData(({ id, data }) => {
+  removeGlobalDataListener = window.api.onTerminalData(({ id, data, seq }) => {
     const existing = pendingWrites.get(id)
     if (existing) {
-      existing.push(data)
+      existing.push({ data, seq })
     } else {
-      pendingWrites.set(id, [data])
+      pendingWrites.set(id, [{ data, seq }])
     }
     scheduleFlush()
   })
@@ -68,6 +95,60 @@ export function disposeGlobalDataListener(): void {
     rafId = null
   }
   pendingWrites.clear()
+  hydrating.clear()
+}
+
+/**
+ * Show a terminal this pane did not create.
+ *
+ * Ordering is the whole of it, and getting it wrong is invisible until somebody
+ * reads their scrollback:
+ *
+ *   1. Start holding live chunks. Before asking, not after -- anything that
+ *      arrives while the request is in flight belongs after the seed, and there
+ *      is no way to recover it once it has been written ahead of one.
+ *   2. Ask. The answer carries the scrollback and the flush it reflects, read on
+ *      the server in a single tick so the two cannot disagree.
+ *   3. Write the seed, then the held chunks numbered above it. Anything at or
+ *      below that number is already in the seed; applying it again would print
+ *      those bytes twice.
+ *
+ * The seed goes straight to the terminal rather than through the batch above, so
+ * it never reaches a status handler. Replaying a screen must not ring a bell an
+ * agent rang an hour ago.
+ *
+ * Idempotent per entry: a second window, a reconnect and a re-render all land
+ * here, and a terminal that has already been seeded must not be seeded again.
+ */
+export async function hydrateTerminal(terminalId: string): Promise<void> {
+  const entry = registry.get(terminalId)
+  if (!entry || entry._hydrated) return
+  entry._hydrated = true
+
+  hydrating.set(terminalId, [])
+  try {
+    const { data, seq } = await window.api.attachTerminal(terminalId)
+    if (data) entry.term.write(data)
+    for (const chunk of hydrating.get(terminalId) ?? []) {
+      if (chunk.seq <= seq) continue
+      entry.term.write(chunk.data)
+      // These are live, unlike the seed above them. A bell that rang while the
+      // seed was in flight rang just now, and holding it back for the length of
+      // a round trip would drop the notification entirely.
+      statusHandlers.get(terminalId)?.(chunk.data)
+    }
+  } catch (err) {
+    console.error('[terminal] could not attach', terminalId, err)
+    // Held chunks are still the truth about what happened; let them through
+    // rather than losing them to a failed seed.
+    for (const chunk of hydrating.get(terminalId) ?? []) {
+      entry.term.write(chunk.data)
+      statusHandlers.get(terminalId)?.(chunk.data)
+    }
+    entry._hydrated = false
+  } finally {
+    hydrating.delete(terminalId)
+  }
 }
 
 // --- Status detection handler registry ---

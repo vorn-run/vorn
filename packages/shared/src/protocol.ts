@@ -503,6 +503,23 @@ export interface RequestMethods {
    * agent may be never.
    */
   'terminal:readScrollback': { params: { id: string }; result: { data: string } }
+  /**
+   * Everything a pane needs to start showing a terminal it did not create.
+   *
+   * `data` is the scrollback; `seq` is the flush it reflects, so the caller can
+   * discard the live chunks it already has; `live` says whether a process is
+   * still behind it, which decides whether the pane is a terminal or a
+   * photograph of one. All three are read in the same tick, and that is what
+   * makes the pair trustworthy -- see `PtyManager.flushSeq`.
+   *
+   * It serves a session restored from disk as well as a running one. There is
+   * no process behind a restored session, so nothing can arrive while the answer
+   * is in flight and `seq` is zero.
+   */
+  'terminal:attach': {
+    params: { id: string }
+    result: { data: string; seq: number; live: boolean }
+  }
   'shell:create': { params: string | undefined; result: TerminalSession }
   'config:load': { params: void; result: AppConfig }
   'config:save': { params: AppConfig; result: void }
@@ -992,7 +1009,15 @@ export interface ServerNotifications {
   'server:identity': ServerIdentity
   /** Sent once a socket is admitted, so a client knows it may start sending. */
   'auth:ok': { userId: string }
-  'terminal:data': { id: string; data: string }
+  /**
+   * `seq` numbers the flush this chunk came from, counting up per session.
+   *
+   * It exists so a pane can attach without losing or repeating anything.
+   * `terminal:attach` answers with the scrollback *and* the flush it reflects;
+   * a client subscribes first, buffers, and then applies only the chunks
+   * numbered above what it was handed.
+   */
+  'terminal:data': { id: string; data: string; seq: number }
   'terminal:exit': { id: string; exitCode: number }
   'session:created': TerminalSession
   'session:updated': TerminalSession

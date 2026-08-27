@@ -30,6 +30,22 @@ import path from 'node:path'
 const LOCK = path.join(os.tmpdir(), 'vorn-test-spawn.lock')
 const POLL_MS = 100
 
+/**
+ * How long a file will queue before giving up.
+ *
+ * Everything holding this lock runs one after another by construction, so the
+ * last one in line waits for the sum of all the others. That total is what this
+ * has to clear, and it grew each time a suite was added -- at 180 seconds the
+ * eighth file started failing in its `beforeAll`, which reads as a broken suite
+ * rather than a busy one and points at whichever file was unluckiest.
+ *
+ * Generous on purpose. Waiting is not the failure being guarded against; the
+ * lock already refuses to hand itself to a second worker while the first is
+ * alive, so a number here only decides how patient a queue is. It exists to stop
+ * a run hanging for ever, not to police how long these take.
+ */
+const ACQUIRE_TIMEOUT_MS = 600_000
+
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** Who holds it, or null if nothing does. */
@@ -81,7 +97,7 @@ async function acquire(): Promise<void> {
 export function spawnsRealServers(): void {
   beforeAll(async () => {
     await acquire()
-  }, 180_000)
+  }, ACQUIRE_TIMEOUT_MS)
   afterAll(() => {
     // Only ours. The same rule the code under test lives by: no actor removes a
     // name it did not create. A worker that overran and lost the lock must not

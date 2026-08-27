@@ -556,6 +556,14 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('terminal:readScrollback', ({ id }) => ({ data: readScrollback(id) }))
+  // Read in one tick on purpose: the scrollback and the flush counter move
+  // together inside `flushBuffer`, so taking both in the same turn is what
+  // guarantees the caller can trust one against the other.
+  registerMethod('terminal:attach', ({ id }) => ({
+    data: readScrollback(id),
+    seq: ptyManager.lastFlushSeq(id),
+    live: ptyManager.hasLivePty(id)
+  }))
   registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.getOutput(id, lines))
   registerMethod('shell:create', (cwd) => {
     const session = ptyManager.createShellPty(cwd)

@@ -530,15 +530,40 @@ class PtyManager extends EventEmitter {
     }
   }
 
+  /**
+   * How many flushes each session has had.
+   *
+   * The number a client uses to tell what it already has. A pane attaching
+   * asks for the scrollback and is told which flush it reflects; every
+   * `terminal:data` carries the same counter, so anything at or below that
+   * number is already in what it was handed and anything above it is not.
+   *
+   * This works only because `flushBuffer` below is one synchronous block. The
+   * counter moves and the buffer it describes is appended in the same tick, with
+   * nothing awaited between them, so a reader that takes both in one turn cannot
+   * catch them disagreeing. **Introduce an `await` in there and this silently
+   * stops being true**, and the symptom is a terminal that duplicates or loses a
+   * few hundred milliseconds of output on attach.
+   */
+  private flushSeq = new Map<string, number>()
+
+  /** What the last flush of this session was numbered. */
+  lastFlushSeq(id: string): number {
+    return this.flushSeq.get(id) ?? 0
+  }
+
   private flushBuffer(id: string): void {
     const data = this.dataBuffers.get(id)
     this.dataBuffers.delete(id)
     this.flushTimers.delete(id)
     if (data) {
+      const seq = this.lastFlushSeq(id) + 1
+      this.flushSeq.set(id, seq)
+
       // Clients first, always. What follows models the screen for nobody who is
       // waiting; this line is a person watching their terminal, and it must not
       // be behind anything that can fail or stall.
-      this.emit('client-message', IPC.TERMINAL_DATA, { id, data })
+      this.emit('client-message', IPC.TERMINAL_DATA, { id, data, seq })
 
       // Fed from here rather than from `onData` for two reasons. `term.write`
       // queues a macrotask per call and node-pty emits a few bytes at a time
@@ -681,6 +706,7 @@ class PtyManager extends EventEmitter {
       this.clearBuffer(id)
       this.deleteTempKey(id)
       this.clearSessionTracking(id)
+      this.flushSeq.delete(id)
       clearScrollback(id)
       // Beside the scrollback it belongs to: the PTY is gone and nothing will
       // draw into it again. The session record survives so the card can show an
@@ -785,6 +811,7 @@ class PtyManager extends EventEmitter {
     this.sessions.delete(id)
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
+    this.flushSeq.delete(id)
     // Not beside a `clearScrollback`, because there is not one here -- but this
     // path deletes the session outright, so nothing would ever feed or free the
     // model again. A `Terminal` holds buffers; leaving it is a leak per closed
@@ -851,6 +878,7 @@ class PtyManager extends EventEmitter {
     }
     this.dataBuffers.clear()
     this.flushTimers.clear()
+    this.flushSeq.clear()
 
     // Clean up any remaining temp key files
     for (const sessionId of this.tempKeyPaths.keys()) {
@@ -882,6 +910,17 @@ class PtyManager extends EventEmitter {
    */
   livePtyCount(): number {
     return this.ptys.size
+  }
+
+  /**
+   * Whether a process is still behind this session.
+   *
+   * `getActiveSessions()` cannot answer it. That returns session *records*, and
+   * a record outlives its process -- only `killPty` removes one -- so a terminal
+   * that exited on its own is still in that list. This is the map that decides.
+   */
+  hasLivePty(id: string): boolean {
+    return this.ptys.has(id)
   }
 
   getActiveSessions(): TerminalSession[] {

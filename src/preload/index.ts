@@ -60,12 +60,18 @@ const api = {
 
   killTerminal: (id: string) => ipcRenderer.invoke(IPC.TERMINAL_KILL, id),
 
+  /** Everything a pane needs to show a terminal it did not create. */
+  attachTerminal: (id: string): Promise<{ data: string; seq: number; live: boolean }> =>
+    ipcRenderer.invoke(IPC.TERMINAL_ATTACH, id),
+
   createShellTerminal: (cwd?: string): Promise<TerminalSession> =>
     ipcRenderer.invoke(IPC.SHELL_CREATE, cwd),
 
-  onTerminalData: (callback: (event: { id: string; data: string }) => void) => {
-    const listener = (_: Electron.IpcRendererEvent, event: { id: string; data: string }): void =>
-      callback(event)
+  onTerminalData: (callback: (event: { id: string; data: string; seq: number }) => void) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      event: { id: string; data: string; seq: number }
+    ): void => callback(event)
     ipcRenderer.on(IPC.TERMINAL_DATA, listener)
     return () => {
       ipcRenderer.removeListener(IPC.TERMINAL_DATA, listener)
