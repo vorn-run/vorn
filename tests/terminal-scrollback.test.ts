@@ -94,3 +94,49 @@ describe('staying bounded', () => {
     expect(readScrollback('a').length).toBeLessThanOrEqual(256 * 1024)
   })
 })
+
+describe('holding chunks instead of one string', () => {
+  it('bounds memory even when nobody ever reads', () => {
+    // Appends compact themselves past a slack margin, so a terminal producing
+    // output for hours without a single reader does not grow without limit.
+    // Reads are what enforce the exact cap; this enforces the rough one.
+    for (let i = 0; i < 400; i++) appendScrollback('t', 'x'.repeat(4096))
+
+    expect(readScrollback('t').length).toBeLessThanOrEqual(256 * 1024)
+  })
+
+  it('returns the same bytes however many times it is read', () => {
+    appendScrollback('t', 'one')
+    appendScrollback('t', 'two')
+
+    const first = readScrollback('t')
+    const second = readScrollback('t')
+
+    expect(first).toBe('onetwo')
+    expect(second).toBe(first)
+  })
+
+  it('keeps appending correctly after a read has compacted it', () => {
+    appendScrollback('t', 'before')
+    readScrollback('t')
+    appendScrollback('t', 'after')
+
+    expect(readScrollback('t')).toBe('beforeafter')
+  })
+
+  it('cuts at a boundary that spans two appends, not at the chunk edge', () => {
+    // The reason the trim runs on the joined text rather than per chunk. A PTY
+    // write can land anywhere -- including in the middle of an escape sequence --
+    // so trimming each chunk as it arrived would cut wherever the kernel happened
+    // to split the stream, which is exactly the mid-sequence cut the boundary
+    // rule exists to prevent.
+    appendScrollback('t', 'x'.repeat(256 * 1024))
+    appendScrollback('t', `\n${ESC}[3`)
+    appendScrollback('t', '1mred')
+
+    const kept = readScrollback('t')
+
+    expect(kept).toContain(`${ESC}[31mred`)
+    expect(kept.length).toBeLessThanOrEqual(256 * 1024)
+  })
+})

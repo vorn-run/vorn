@@ -30,8 +30,6 @@
  */
 const MAX_UNITS = 256 * 1024
 
-const buffers = new Map<string, string>()
-
 /**
  * Trim from the front, at a line boundary where there is one nearby.
  *
@@ -51,19 +49,81 @@ function trim(data: string): string {
   return boundary === -1 ? data.slice(cut) : data.slice(boundary + 1)
 }
 
+/**
+ * Chunks as they arrived, joined only when somebody reads.
+ *
+ * This used to be one string per terminal, re-formed on every append:
+ * `set(id, trim(get(id) + data))`. Once a buffer reached its cap that was two
+ * ~256 KB allocations per PTY chunk -- one to concatenate, one to slice -- and
+ * a busy agent produces chunks by the hundred per second. It was the most
+ * expensive thing on the hottest path in the server, for a value almost nothing
+ * reads.
+ *
+ * Appending is now a push, and the cost moves to `readScrollback`, which is
+ * where it belongs: reads are rare and deliberate, writes are constant and
+ * incidental. The running total is kept so the bound can be enforced without
+ * measuring the whole list.
+ *
+ * The trim itself is unchanged, including where it cuts. It runs against the
+ * joined result rather than per chunk, because a boundary can only be found in
+ * the text either side of it -- trimming chunk by chunk would cut at whatever
+ * edge a PTY write happened to land on, which is precisely the mid-sequence cut
+ * the boundary rule exists to avoid.
+ */
+interface Buffered {
+  chunks: string[]
+  units: number
+}
+
+const buffers = new Map<string, Buffered>()
+
 export function appendScrollback(id: string, data: string): void {
-  buffers.set(id, trim((buffers.get(id) ?? '') + data))
+  const held = buffers.get(id)
+  if (!held) {
+    buffers.set(id, { chunks: [data], units: data.length })
+    return
+  }
+
+  held.chunks.push(data)
+  held.units += data.length
+
+  // Compacted only when there is enough overshoot to be worth the join --
+  // otherwise a terminal sitting exactly at the cap would re-join on every
+  // chunk, which is the behaviour this replaced. The slack is bounded, so the
+  // real ceiling is `MAX_UNITS + COMPACT_SLACK` rather than `MAX_UNITS`.
+  if (held.units > MAX_UNITS + COMPACT_SLACK) compact(held)
+}
+
+/**
+ * How far a buffer may run past its cap before it is re-formed.
+ *
+ * A quarter of the cap: large enough that compaction is rare against a stream of
+ * small writes, small enough that the overshoot is a rounding error against the
+ * memory this bounds.
+ */
+const COMPACT_SLACK = MAX_UNITS / 4
+
+function compact(held: Buffered): void {
+  const trimmed = trim(held.chunks.join(''))
+  held.chunks = [trimmed]
+  held.units = trimmed.length
 }
 
 export function readScrollback(id: string): string {
-  return buffers.get(id) ?? ''
+  const held = buffers.get(id)
+  if (!held) return ''
+  // Compacted on the way out rather than joined and thrown away: a caller that
+  // reads twice should not pay twice, and the result is the same bytes either
+  // way.
+  compact(held)
+  return held.chunks[0] ?? ''
 }
 
 export function clearScrollback(id: string): void {
   buffers.delete(id)
 }
 
-/** Only for tests, which would otherwise leak state between cases. */
+/** Test-only, mirroring the map this module used to expose implicitly. */
 export function resetScrollback(): void {
   buffers.clear()
 }
