@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
@@ -79,6 +79,15 @@ vi.mock('../src/renderer/stores', () => {
 const { WorkflowEditor } = await import('../src/renderer/components/workflow-editor/WorkflowEditor')
 
 describe('WorkflowEditor', () => {
+  // The editing id decides whether half this toolbar renders at all, and the
+  // store mock is a plain object rather than a store — nothing resets it
+  // between tests. It was on each test that set it to put it back, which holds
+  // right up until one of them forgets and the next test inherits an editor it
+  // never asked for.
+  afterEach(() => {
+    mockState.editingWorkflowId = null
+  })
+
   it('renders the canvas and properties panel when open with no node selected', () => {
     const { getByTestId } = render(<WorkflowEditor />)
     expect(getByTestId('canvas')).toBeInTheDocument()
