@@ -87,6 +87,27 @@ export interface TerminalSession {
   hookSessionId?: string
   agentSessionId?: string
   statusSource?: 'hooks' | 'pattern'
+  /**
+   * The geometry the PTY is currently running at.
+   *
+   * Held because a program renders against it: wrap points, cursor position and
+   * every full-screen repaint are decided by these numbers, so anything that
+   * models the screen has to agree with them exactly. Nothing recorded them
+   * before -- all three spawn sites passed 80x24 to node-pty and `resizePty`
+   * forwarded new values without keeping them.
+   *
+   * Last writer wins between attached clients, because node-pty already works
+   * that way: a phone fitting to 60x20 and a desktop at 200x50 will fight, and
+   * whichever resized last is what the program is drawing against. That is a
+   * pre-existing behaviour, and this records it rather than changing it.
+   *
+   * Optional because not every `TerminalSession` has a PTY behind it -- a
+   * workflow builds a synthetic one to describe its source, and inventing a
+   * geometry for something that is not being drawn would be a fact nobody
+   * checked. Absent means "whatever a PTY starts at".
+   */
+  cols?: number
+  rows?: number
   /** Shell session only: working directory the PTY was started in. */
   shellCwd?: string
   /** Shell session only: PTY exit code once the shell has exited. */

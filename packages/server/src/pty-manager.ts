@@ -42,6 +42,16 @@ import { analyzeOutput, createStatusContext, StatusContext } from './status-pars
 import { isDraining, DRAINING_MESSAGE } from './draining'
 
 const MAX_OUTPUT_LINES = 1000
+
+/**
+ * What a PTY starts at, before any client has fitted itself to a pane.
+ *
+ * Named rather than repeated at each spawn site: the session record now carries
+ * these too, and a literal in one place and a constant in another is how the two
+ * come to disagree about what the program is rendering against.
+ */
+const INITIAL_COLS = 80
+const INITIAL_ROWS = 24
 const IDLE_TIMEOUT_MS = 5000
 const IDLE_TIMEOUT_HOOKS_MS = 30_000
 
@@ -217,8 +227,8 @@ class PtyManager extends EventEmitter {
 
     const ptyProcess = pty.spawn(shell, getShellArgs(), {
       name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       cwd: effectivePath,
       // No shell integration: an agent paints its own full-screen interface
       // and is never drawn as command blocks. Installing the shim anyway made
@@ -260,6 +270,8 @@ class PtyManager extends EventEmitter {
       projectPath: payload.projectPath,
       status: 'running',
       createdAt: Date.now(),
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       pid: ptyProcess.pid,
       ...(payload.displayName
         ? { displayName: payload.displayName }
@@ -288,8 +300,8 @@ class PtyManager extends EventEmitter {
   ): TerminalSession {
     const ptyProcess = pty.spawn(shell, getShellArgs(), {
       name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       cwd: os.homedir(),
       env: getSafeEnv()
     })
@@ -435,6 +447,8 @@ class PtyManager extends EventEmitter {
       projectPath: payload.projectPath,
       status: 'running',
       createdAt: Date.now(),
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       pid: ptyProcess.pid,
       remoteHostId: host.id,
       remoteHostLabel: host.label,
@@ -462,8 +476,8 @@ class PtyManager extends EventEmitter {
     // initialisation, so integration for them replaces the launch arguments.
     const ptyProcess = pty.spawn(shell, integration.args ?? getShellArgs(), {
       name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       cwd: workingDir,
       env: {
         ...getSafeEnv(),
@@ -485,6 +499,8 @@ class PtyManager extends EventEmitter {
       projectPath: workingDir,
       status: 'running',
       createdAt: Date.now(),
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       pid: ptyProcess.pid,
       displayName: `Shell ${shellCount}`,
       shellCwd: workingDir
@@ -667,7 +683,28 @@ class PtyManager extends EventEmitter {
     }
   }
 
+  /**
+   * Change the geometry a program is rendering against.
+   *
+   * Guarded before anything is touched. This arrives as an RPC *notification*
+   * -- fire-and-forget, no caller to catch a throw -- and `resize(0, 0)` throws
+   * inside node-pty, so a client that fitted itself to a collapsed pane would
+   * take down the handler rather than be ignored.
+   *
+   * The session record is updated alongside the PTY, with the same numbers, so
+   * anything modelling the screen can agree with what the program is actually
+   * drawing against. Two clients still fight over it -- node-pty has always been
+   * last-writer-wins here and this does not change that -- but now the record
+   * says which of them won.
+   */
   resizePty(id: string, cols: number, rows: number): void {
+    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) return
+
+    const session = this.sessions.get(id)
+    if (session) {
+      session.cols = cols
+      session.rows = rows
+    }
     this.ptys.get(id)?.resize(cols, rows)
   }
 
