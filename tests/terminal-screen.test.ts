@@ -74,6 +74,41 @@ function row(term: Terminal, y: number): string {
   return cells.join('|')
 }
 
+describe('a terminal that goes away while it is being read', () => {
+  it.each([
+    ['a snapshot', (id: string) => serializeScreen(id)],
+    ['a resize', (id: string) => resizeScreen(id, 132, 43)]
+  ])(
+    'lets %s finish rather than leaving it pending for ever',
+    async (_label, start) => {
+      // Both read the buffer from inside xterm's write callback, which is the only
+      // point that means what they need it to mean. That leaves a question with a
+      // consequence: if `dispose()` dropped a pending callback, the promise would
+      // never settle -- and since every disk operation for a session runs behind
+      // the last, one unsettled promise would wedge that session's queue for the
+      // life of the server, so its history would never be written and never be
+      // removed.
+      //
+      // It does not: disposing does not cancel the parse xterm has already
+      // scheduled, so the callback still runs. That is a fact about this pinned
+      // version rather than a documented guarantee, which is exactly why it is
+      // asserted here -- a version bump is where it would change.
+      createScreen('going', 200, 50)
+      for (let i = 0; i < 4_000; i++) feedScreen('going', `line ${i} of output\r\n`)
+
+      const pending = start('going')
+      clearScreen('going')
+
+      const outcome = await Promise.race([
+        pending.then(() => 'settled'),
+        new Promise((resolve) => setTimeout(() => resolve('still pending'), 3_000))
+      ])
+      expect(outcome).toBe('settled')
+    },
+    10_000
+  )
+})
+
 describe('what a program can make the model hold', () => {
   it('keeps a title bounded, whatever length the program sends', async () => {
     // Both the title and the cwd live for as long as the terminal does and both
