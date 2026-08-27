@@ -3,7 +3,6 @@ import {
   getProjectRemoteHostId,
   type TerminalSession,
   type RecentSession,
-  type CreateTerminalPayload,
   type ProjectConfig,
   type AiAgentType
 } from '../../shared/types'
@@ -82,6 +81,8 @@ function isDefined<T>(value: T | undefined): value is T {
  * @param claimed - session IDs already assigned to other terminals in this
  *   restore batch; prevents multiple terminals from resuming the same session.
  */
+export { buildRestorePayload } from '@vornrun/shared/session-restore'
+
 export async function resolveResumeSessionId(
   s: TerminalSession,
   claimed: Set<string> = new Set()
@@ -150,29 +151,6 @@ export function resolveProjectName(
     return projectPath === normalized || isManagedWorktreePath(session.projectPath, p.path)
   })
   return project?.name || displayBasename || 'untitled'
-}
-
-export function buildRestorePayload(
-  s: TerminalSession,
-  resumeSessionId?: string
-): CreateTerminalPayload {
-  if (s.agentType === 'shell') {
-    throw new Error(
-      'buildRestorePayload: shell sessions restore via createShellTerminal, not createTerminal'
-    )
-  }
-  return {
-    agentType: s.agentType,
-    projectName: s.projectName,
-    projectPath: s.projectPath,
-    displayName: s.displayName,
-    branch: s.isWorktree ? s.branch : undefined,
-    existingWorktreePath: s.isWorktree ? s.worktreePath : undefined,
-    worktreeName: s.worktreeName,
-    useWorktree: (s.isWorktree && !s.worktreePath) || undefined,
-    remoteHostId: s.remoteHostId,
-    resumeSessionId
-  }
 }
 
 /**

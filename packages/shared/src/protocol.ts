@@ -1,5 +1,6 @@
 import type {
   CreateTerminalPayload,
+  RestoredSession,
   TerminalSession,
   HeadlessSession,
   AppConfig,
@@ -524,6 +525,28 @@ export interface RequestMethods {
   'config:load': { params: void; result: AppConfig }
   'config:save': { params: AppConfig; result: void }
   'sessions:getPrevious': { params: void; result: TerminalSession[] }
+  /**
+   * Sessions from the last run that no pane has taken yet.
+   *
+   * The server holds them, so two clients can be looking at the same one. Each
+   * says roughly when it ended and whether there is a screen to show, which is
+   * what a pane needs to say what it is looking at rather than pretending it is
+   * live.
+   */
+  'sessions:restored': { params: void; result: RestoredSession[] }
+  /**
+   * Claim one and start it, exactly once.
+   *
+   * `gone` is the honest answer to the second caller: another pane, another
+   * window or another device took it first, and starting a second agent against
+   * one transcript is the failure this prevents.
+   */
+  'sessions:resume': {
+    params: { id: string; resumeSessionId?: string }
+    result:
+      | { ok: true; session: TerminalSession }
+      | { ok: false; reason: 'gone' | 'failed'; message?: string }
+  }
   'sessions:clear': { params: void; result: void }
   'sessions:getRecent': { params: string | undefined; result: RecentSession[] }
   'git:isGitRepo': { params: string; result: boolean }

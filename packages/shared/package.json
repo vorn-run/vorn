@@ -15,6 +15,7 @@
     "./json-schema-utils": "./src/json-schema-utils.ts",
     "./structured-output": "./src/structured-output.ts",
     "./config-scope": "./src/config-scope.ts",
+    "./session-restore": "./src/session-restore.ts",
     "./viewer-settings-store": "./src/viewer-settings-store.ts"
   }
 }

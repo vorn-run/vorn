@@ -123,6 +123,23 @@ export interface TerminalSession {
   savedAt?: number
 }
 
+/**
+ * A session from a previous run that no pane has taken yet.
+ *
+ * Held by the server rather than the client so two of them can be looking at the
+ * same one: the first to claim it gets it, and the second is told it is gone
+ * rather than starting a second agent against one transcript.
+ */
+export interface RestoredSession {
+  session: TerminalSession
+  /** Roughly when it ended: the last save the previous process managed. */
+  endedAt: number
+  /** Whether a screen was rebuilt for it, so a pane has something to show. */
+  replayable: boolean
+  /** The recorded history stops short of what actually happened. */
+  partial: boolean
+}
+
 export type AuthMethod = 'key-file' | 'key-stored' | 'password' | 'agent'
 
 export interface SSHKey {
@@ -1417,6 +1434,8 @@ export const IPC = {
   CONFIG_SAVE: 'config:save',
   CONFIG_CHANGED: 'config:changed',
   SESSIONS_GET_PREVIOUS: 'sessions:getPrevious',
+  SESSIONS_RESTORED: 'sessions:restored',
+  SESSIONS_RESUME: 'sessions:resume',
   SESSIONS_CLEAR: 'sessions:clear',
   SESSIONS_GET_RECENT: 'sessions:getRecent',
   DIALOG_OPEN_DIRECTORY: 'dialog:openDirectory',

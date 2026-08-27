@@ -8,6 +8,7 @@ import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewe
 import {
   CreateTerminalPayload,
   TerminalSession,
+  RestoredSession,
   ResizePayload,
   AppConfig,
   RecentSession,
@@ -149,6 +150,17 @@ const api = {
 
   getPreviousSessions: (): Promise<TerminalSession[]> =>
     ipcRenderer.invoke(IPC.SESSIONS_GET_PREVIOUS),
+
+  /** Sessions from the last run that no pane has taken yet. */
+  getRestoredSessions: (): Promise<RestoredSession[]> => ipcRenderer.invoke(IPC.SESSIONS_RESTORED),
+
+  /** Claim one and start it. `gone` means another pane took it first. */
+  resumeSession: (params: {
+    id: string
+    resumeSessionId?: string
+  }): Promise<
+    { ok: true; session: TerminalSession } | { ok: false; reason: string; message?: string }
+  > => ipcRenderer.invoke(IPC.SESSIONS_RESUME, params),
 
   clearPreviousSessions: () => ipcRenderer.invoke(IPC.SESSIONS_CLEAR),
 

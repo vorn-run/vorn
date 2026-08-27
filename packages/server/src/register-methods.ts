@@ -12,7 +12,15 @@ import { detectIDEs, openInIDE } from './ide-detector'
 import { detectMobileProject } from './mobile-detector'
 import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
 import { clientRegistry } from './broadcast'
-import { restoredRecords } from './restored-sessions'
+import {
+  restoredRecords,
+  listRestored,
+  consumeRestored,
+  consumeAllRestored
+} from './restored-sessions'
+import { clearScreen } from './terminal-screen'
+import { discardHistory } from './history/writer'
+import { buildRestorePayload } from '@vornrun/shared/session-restore'
 import { readScrollback } from './terminal-scrollback'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
@@ -318,7 +326,19 @@ export function registerAllMethods(): void {
   registerMethod('terminal:create', (payload) => {
     return ptyManager.createPty(payload)
   })
-  registerMethod('terminal:kill', (id) => ptyManager.killPty(id))
+  registerMethod('terminal:kill', (id) => {
+    // A pane showing a session from the last run has no PTY to kill. Closing it
+    // is a decision about the record and the files, and it is the same decision
+    // resume makes -- so it goes through the same door, and a second client
+    // closing the same pane finds nothing rather than an error.
+    const restored = consumeRestored(id)
+    if (restored) {
+      clearScreen(id)
+      void discardHistory(id)
+      return
+    }
+    ptyManager.killPty(id)
+  })
   registerMethod('terminal:listActive', () => ptyManager.getActiveSessions())
   registerMethod('terminal:rename', ({ id, displayName }) => {
     ptyManager.renameSession(id, displayName)
@@ -588,7 +608,66 @@ export function registerAllMethods(): void {
 
   // Sessions
   registerMethod('sessions:getPrevious', () => sessionManager.getPreviousSessions())
-  registerMethod('sessions:clear', () => sessionManager.clear())
+  registerMethod('sessions:clear', () => {
+    // The offer is being declined for all of them at once. Same rule as closing
+    // one: the record goes and so does what was written for it.
+    for (const one of consumeAllRestored()) {
+      clearScreen(one.session.id)
+      void discardHistory(one.session.id)
+    }
+    sessionManager.clear()
+  })
+
+  registerMethod('sessions:restored', () => listRestored())
+
+  registerMethod('sessions:resume', ({ id, resumeSessionId }) => {
+    // Claimed before anything is started, and that ordering is the point. Two
+    // clients can be looking at the same cold pane; the second must be told it
+    // is gone rather than launching a second agent against one transcript.
+    const restored = consumeRestored(id)
+    if (!restored) return { ok: false as const, reason: 'gone' as const }
+
+    const previous = restored.session
+    try {
+      // The screen and the files described a session that is now being replaced
+      // by a live one. Cleared before the spawn, so the new session opens its own
+      // history rather than appending to a record of the old one.
+      clearScreen(id)
+      void discardHistory(id)
+
+      if (previous.agentType === 'shell') {
+        const cwd = previous.shellCwd ?? previous.worktreePath ?? previous.projectPath
+        const session = ptyManager.createShellPty(cwd)
+        // Carried across on the server rather than grafted on by whichever
+        // client asked. `createShellPty` names a session after its directory, so
+        // without this a restored shell loses the project it belonged to -- which
+        // it does today, for exactly this reason.
+        Object.assign(session, {
+          projectName: previous.projectName,
+          projectPath: previous.projectPath,
+          ...(previous.worktreePath !== undefined && { worktreePath: previous.worktreePath }),
+          ...(previous.worktreeName !== undefined && { worktreeName: previous.worktreeName }),
+          ...(previous.branch !== undefined && { branch: previous.branch }),
+          ...(previous.isWorktree !== undefined && { isWorktree: previous.isWorktree }),
+          ...(previous.displayName !== undefined && { displayName: previous.displayName })
+        })
+        clientRegistry.broadcast(IPC.SESSION_CREATED, session)
+        sessionManager.scheduleSave()
+        return { ok: true as const, session }
+      }
+
+      const session = ptyManager.createPty(buildRestorePayload(previous, resumeSessionId))
+      sessionManager.scheduleSave()
+      return { ok: true as const, session }
+    } catch (err) {
+      log.warn({ err, id }, '[restored] could not resume this session')
+      return {
+        ok: false as const,
+        reason: 'failed' as const,
+        message: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
   registerMethod('sessions:getRecent', (projectPath) => getRecentSessions(projectPath))
 
   // Resolve remote host by ID

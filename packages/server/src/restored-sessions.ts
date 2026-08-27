@@ -1,4 +1,4 @@
-import type { TerminalSession } from '@vornrun/shared/types'
+import type { RestoredSession, TerminalSession } from '@vornrun/shared/types'
 import log from './logger'
 
 /**
@@ -38,18 +38,7 @@ import log from './logger'
  * awake.
  */
 
-export interface RestoredSession {
-  session: TerminalSession
-  /**
-   * Roughly when it ended: the last save the previous process managed. It is the
-   * only thing on disk that says so, and the pane wants to tell somebody.
-   */
-  endedAt: number
-  /** Whether the server rebuilt a screen for it, so there is something to show. */
-  replayable: boolean
-  /** The log stopped short of its end, so the screen does too. */
-  partial: boolean
-}
+export type { RestoredSession }
 
 /**
  * How long an unclaimed record is kept.

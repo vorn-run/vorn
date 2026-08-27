@@ -261,6 +261,28 @@ export function stopHistory(id: string): void {
 }
 
 /**
+ * Remove what is on disk for a session this writer is not recording.
+ *
+ * `stopHistory` is for a terminal that was being written to and has gone. This
+ * is for one that was restored from a previous run and then claimed or
+ * dismissed: nothing here is tracking it, so there is no record to clear and no
+ * queue to run behind -- only files that no longer describe anything reachable.
+ *
+ * Refused once sealed, for the same reason as `stopHistory`: a shutdown writes
+ * every terminal's screen and then kills the PTYs, and the teardown that follows
+ * must not remove what it has just written.
+ */
+export async function discardHistory(id: string): Promise<void> {
+  if (!dataDir || sealed) return
+  const dir = historyDir(dataDir, id)
+  try {
+    await fs.rm(dir, { recursive: true, force: true })
+  } catch (err) {
+    log.warn({ err, id }, '[history] could not remove history for a session that was claimed')
+  }
+}
+
+/**
  * Write every session's screen out, for a server that is going down.
  *
  * Seals first, so the PTY teardown that follows cannot remove what this writes.
