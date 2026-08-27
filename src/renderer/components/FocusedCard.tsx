@@ -2,7 +2,9 @@ import { Minimize2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useShallow } from 'zustand/react/shallow'
-import { isMac } from '../lib/platform'
+import { isMac, TRAFFIC_LIGHT_PAD_PX } from '../lib/platform'
+import { AppNavCluster } from './AppNavCluster'
+import { useFocusedTitlebar } from '../hooks/useFocusedTitlebar'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { CardSubjectIcon } from './CardSubjectIcon'
 import { usePromotedCardSubject } from '../hooks/usePromotedCards'
@@ -35,6 +37,9 @@ export function FocusedCard({ cardId }: { cardId: string }) {
     }))
   )
   const isMobile = useIsMobile()
+  // A card on the stage empties the window of its titlebar exactly as a session
+  // does, so its header owes the window the same things.
+  const { needsTrafficLightPad, showsAppNav } = useFocusedTitlebar()
 
   // Closed while focused. The stage empties on the next pass; bailing here
   // keeps it from drawing a header for a card that is gone.
@@ -63,12 +68,19 @@ export function FocusedCard({ cardId }: { cardId: string }) {
       <div
         className={`shrink-0 flex items-center gap-2 px-3 py-2 border-b border-white/[0.06]
                    ${isMac && !isMobile ? 'titlebar-drag' : 'titlebar-no-drag'}`}
+        style={needsTrafficLightPad ? { paddingLeft: `${TRAFFIC_LIGHT_PAD_PX}px` } : undefined}
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).closest('button, input, [role="button"]')) return
           contract()
         }}
         data-testid={`focused-card-${cardId}`}
       >
+        {showsAppNav && (
+          <>
+            <AppNavCluster />
+            <div className="w-px h-4 bg-white/[0.06]" />
+          </>
+        )}
         <span className="titlebar-no-drag flex items-center">
           <CardSubjectIcon card={subject} size={16} />
         </span>

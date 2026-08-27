@@ -36,10 +36,9 @@ import {
 import { toggleTerminalsPanel } from '../lib/session-utils'
 import { shouldOfferPane } from '../lib/pane-affordance'
 import { GridContextMenu } from './GridContextMenu'
+import { AppNavCluster } from './AppNavCluster'
 import { GridToolbar } from './GridToolbar'
 import { WindowControls } from './WindowControls'
-import { SidebarToggleButton } from './SidebarToggleButton'
-import { MainViewPills } from './MainViewPills'
 import { RecentSessionsButton } from './RecentSessionsButton'
 import { SessionDock } from './SessionDock'
 import { HeadlessBadge } from './HeadlessBadge'
@@ -326,10 +325,8 @@ export function TabView() {
         onPointerCancel={handlePointerCancel}
       >
         {!isSidebarOpen && (
-          <div className="shrink-0 flex items-center gap-1 pl-2 titlebar-no-drag">
-            <SidebarToggleButton />
-            <div className="w-px h-4 bg-white/[0.06] mx-0.5" />
-            <MainViewPills />
+          <div className="pl-2 flex items-center">
+            <AppNavCluster />
           </div>
         )}
 

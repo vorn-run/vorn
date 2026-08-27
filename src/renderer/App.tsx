@@ -32,8 +32,8 @@ import { SessionRestoredBanner } from './components/SessionRestoredBanner'
 import { GridToolbar } from './components/GridToolbar'
 import { ToolbarBreadcrumb } from './components/ToolbarBreadcrumb'
 import { SettingsPage } from './components/SettingsPage'
-import { SidebarToggleButton } from './components/SidebarToggleButton'
-import { MainViewPills } from './components/MainViewPills'
+import { AppNavCluster } from './components/AppNavCluster'
+import { useFocusedTitlebar } from './hooks/useFocusedTitlebar'
 import { SessionDock } from './components/SessionDock'
 import { HeadlessBadge } from './components/HeadlessBadge'
 import { RecentSessionsButton } from './components/RecentSessionsButton'
@@ -120,8 +120,9 @@ export function App() {
   const isTabToolbarMerged =
     layoutMode === 'tabs' && mainViewMode === 'sessions' && !isMobile && !focusedId && !previewId
 
-  // Only hide toolbar on macOS focused view — Windows/Linux need it for window controls
-  const isFocusedFullScreen = isMac && !isMobile && (!!focusedId || !!previewId)
+  // Hidden only on macOS, where a focused session's own header takes the bar
+  // over. Windows and Linux keep theirs — it holds their window controls.
+  const { ownsTitlebar: isFocusedFullScreen } = useFocusedTitlebar()
 
   // On mobile, auto-close sidebar on initial load
   useEffect(() => {
@@ -606,13 +607,7 @@ export function App() {
                   <Menu size={20} strokeWidth={2} />
                 </button>
               )}
-              {!isMobile && !isSidebarOpen && (
-                <>
-                  <SidebarToggleButton />
-                  <div className="w-px h-4 bg-white/[0.06] mx-0.5" />
-                  <MainViewPills />
-                </>
-              )}
+              {!isMobile && !isSidebarOpen && <AppNavCluster />}
               {!isMobile && mainViewMode === 'sessions' && (
                 <>
                   <SessionDock includeMinimized={layoutMode === 'grid'} />

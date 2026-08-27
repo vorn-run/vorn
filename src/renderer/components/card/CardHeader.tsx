@@ -4,9 +4,11 @@ import { AgentStatusIcon } from '../AgentStatusIcon'
 import { InlineRename } from '../InlineRename'
 import { CardActionCluster, type CardVariant } from './CardActionCluster'
 import { FocusedNavHint } from './FocusedNavHint'
+import { AppNavCluster } from '../AppNavCluster'
+import { useFocusedTitlebar } from '../../hooks/useFocusedTitlebar'
 import { getDisplayName } from '../../lib/terminal-display'
 import { Pencil } from 'lucide-react'
-import { MOD } from '../../lib/platform'
+import { MOD, TRAFFIC_LIGHT_PAD_PX } from '../../lib/platform'
 import { toast } from '../Toast'
 
 interface Props {
@@ -40,6 +42,10 @@ export function CardHeader({
       renameTerminal: s.renameTerminal
     }))
   )
+  // Only the focused variant is ever the window's titlebar; the grid's mini
+  // headers sit inside a window that still has one of its own.
+  const { needsTrafficLightPad, showsAppNav } = useFocusedTitlebar()
+  const isTitlebar = variant === 'focused'
 
   if (!terminal) return null
 
@@ -60,8 +66,21 @@ export function CardHeader({
       className={`flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.04] shrink-0
                   transition-opacity duration-200 ease-out
                   ${dimmed ? 'opacity-60 group-hover/card:opacity-100' : 'opacity-100'}`}
-      style={{ background: 'var(--color-surface-raised)' }}
+      data-testid={isTitlebar ? 'focused-session-header' : undefined}
+      style={{
+        background: 'var(--color-surface-raised)',
+        // Standing in for the titlebar means clearing the traffic lights, which
+        // otherwise sit straight on top of the session's name.
+        ...(isTitlebar && needsTrafficLightPad ? { paddingLeft: `${TRAFFIC_LIGHT_PAD_PX}px` } : {})
+      }}
     >
+      {isTitlebar && showsAppNav && (
+        <>
+          <AppNavCluster />
+          <div className="w-px h-4 bg-white/[0.06]" />
+        </>
+      )}
+
       <div
         className={`flex-1 min-w-0 flex items-center gap-2 ${dragHandleClass}`}
         onDoubleClick={onDoubleClick}
