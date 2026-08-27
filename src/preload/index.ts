@@ -64,6 +64,16 @@ const api = {
   attachTerminal: (id: string): Promise<{ data: string; seq: number; live: boolean }> =>
     ipcRenderer.invoke(IPC.TERMINAL_ATTACH, id),
 
+  /**
+   * What the server has, which is not the same as what the database remembers.
+   *
+   * The web client has asked this since it was written; the desktop never could,
+   * which is why its start-up read the saved list and relaunched from it. It is
+   * the same question and it deserves the same answer.
+   */
+  listActiveSessions: (): Promise<TerminalSession[]> =>
+    ipcRenderer.invoke(IPC.TERMINAL_LIST_ACTIVE),
+
   createShellTerminal: (cwd?: string): Promise<TerminalSession> =>
     ipcRenderer.invoke(IPC.SHELL_CREATE, cwd),
 
@@ -137,7 +147,8 @@ const api = {
     }
   },
 
-  getPreviousSessions: () => ipcRenderer.invoke(IPC.SESSIONS_GET_PREVIOUS),
+  getPreviousSessions: (): Promise<TerminalSession[]> =>
+    ipcRenderer.invoke(IPC.SESSIONS_GET_PREVIOUS),
 
   clearPreviousSessions: () => ipcRenderer.invoke(IPC.SESSIONS_CLEAR),
 

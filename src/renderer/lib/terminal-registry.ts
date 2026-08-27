@@ -48,6 +48,9 @@ let rafId: number | null = null
  */
 const hydrating = new Map<string, Chunk[]>()
 
+/** Seeds in flight, so concurrent callers join one rather than starting several. */
+const hydrations = new Map<string, Promise<void>>()
+
 function scheduleFlush(): void {
   if (rafId !== null) return
   rafId = requestAnimationFrame(flushWrites)
@@ -96,6 +99,7 @@ export function disposeGlobalDataListener(): void {
   }
   pendingWrites.clear()
   hydrating.clear()
+  hydrations.clear()
 }
 
 /**
@@ -117,38 +121,50 @@ export function disposeGlobalDataListener(): void {
  * it never reaches a status handler. Replaying a screen must not ring a bell an
  * agent rang an hour ago.
  *
- * Idempotent per entry: a second window, a reconnect and a re-render all land
- * here, and a terminal that has already been seeded must not be seeded again.
+ * Idempotent, and shared: a second window, a reconnect and a re-render all land
+ * here, and one already in flight is joined rather than started again. A
+ * terminal seeded twice has its scrollback twice.
  */
-export async function hydrateTerminal(terminalId: string): Promise<void> {
+export function hydrateTerminal(terminalId: string): Promise<void> {
+  const already = hydrations.get(terminalId)
+  if (already) return already
+
   const entry = registry.get(terminalId)
-  if (!entry || entry._hydrated) return
+  if (!entry || entry._hydrated) return Promise.resolve()
+  // Absent on an older client surface, and in tests that mock a smaller one. A
+  // terminal with nothing to be seeded from simply carries on live.
+  if (typeof window.api?.attachTerminal !== 'function') return Promise.resolve()
   entry._hydrated = true
 
   hydrating.set(terminalId, [])
-  try {
-    const { data, seq } = await window.api.attachTerminal(terminalId)
-    if (data) entry.term.write(data)
-    for (const chunk of hydrating.get(terminalId) ?? []) {
-      if (chunk.seq <= seq) continue
-      entry.term.write(chunk.data)
-      // These are live, unlike the seed above them. A bell that rang while the
-      // seed was in flight rang just now, and holding it back for the length of
-      // a round trip would drop the notification entirely.
-      statusHandlers.get(terminalId)?.(chunk.data)
+  const run = (async () => {
+    try {
+      const { data, seq } = await window.api.attachTerminal(terminalId)
+      if (data) entry.term.write(data)
+      for (const chunk of hydrating.get(terminalId) ?? []) {
+        if (chunk.seq <= seq) continue
+        entry.term.write(chunk.data)
+        // These are live, unlike the seed above them. A bell that rang while the
+        // seed was in flight rang just now, and holding it back for the length
+        // of a round trip would drop the notification entirely.
+        statusHandlers.get(terminalId)?.(chunk.data)
+      }
+    } catch (err) {
+      console.error('[terminal] could not attach', terminalId, err)
+      // Held chunks are still the truth about what happened; let them through
+      // rather than losing them to a failed seed, and allow another try.
+      for (const chunk of hydrating.get(terminalId) ?? []) {
+        entry.term.write(chunk.data)
+        statusHandlers.get(terminalId)?.(chunk.data)
+      }
+      entry._hydrated = false
+    } finally {
+      hydrating.delete(terminalId)
+      hydrations.delete(terminalId)
     }
-  } catch (err) {
-    console.error('[terminal] could not attach', terminalId, err)
-    // Held chunks are still the truth about what happened; let them through
-    // rather than losing them to a failed seed.
-    for (const chunk of hydrating.get(terminalId) ?? []) {
-      entry.term.write(chunk.data)
-      statusHandlers.get(terminalId)?.(chunk.data)
-    }
-    entry._hydrated = false
-  } finally {
-    hydrating.delete(terminalId)
-  }
+  })()
+  hydrations.set(terminalId, run)
+  return run
 }
 
 // --- Status detection handler registry ---
@@ -343,6 +359,16 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
   entry._disposeCommandBlocks = disposeCommandBlocks
 
   registry.set(terminalId, entry)
+
+  // Every terminal is seeded, not only the ones adopted from a previous run.
+  //
+  // Started here rather than left to whoever created the pane, and started the
+  // moment the entry exists, because the hold that makes seeding safe has to be
+  // in place before the first live chunk is written. A terminal this client
+  // created a moment ago is seeded from an empty scrollback and nothing happens;
+  // one that was already running gets everything it missed. Two paths through
+  // one door beats a flag saying which door this was.
+  void hydrateTerminal(terminalId)
 
   const cbs = readyCallbacks.get(terminalId)
   if (cbs) {

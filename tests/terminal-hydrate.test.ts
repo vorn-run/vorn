@@ -126,11 +126,22 @@ function writes(): string[] {
   return created[created.length - 1]!.write.mock.calls.map((c) => c[0] as string)
 }
 
+/**
+ * Open the pane, which is what starts the seed.
+ *
+ * Production hydrates when the terminal is built rather than when somebody asks,
+ * so the mock has to be armed before this and not after. Awaiting the returned
+ * promise joins the seed already in flight; it does not start a second.
+ */
+function open(): Promise<void> {
+  registerSlot(ID, slot())
+  return hydrateTerminal(ID)
+}
+
 beforeEach(() => {
   created.length = 0
   attachTerminal.mockReset()
   initGlobalDataListener()
-  registerSlot(ID, slot())
 })
 
 afterEach(() => {
@@ -145,7 +156,7 @@ describe('what the seed already contains', () => {
     let answer: (v: unknown) => void = () => {}
     attachTerminal.mockReturnValue(new Promise((r) => (answer = r)))
 
-    const hydrating = hydrateTerminal(ID)
+    const hydrating = open()
     emit({ id: ID, data: 'already in the seed', seq: 5 })
     await frame()
     answer({ data: 'THE SEED', seq: 5, live: true })
@@ -158,7 +169,7 @@ describe('what the seed already contains', () => {
     let answer: (v: unknown) => void = () => {}
     attachTerminal.mockReturnValue(new Promise((r) => (answer = r)))
 
-    const hydrating = hydrateTerminal(ID)
+    const hydrating = open()
     emit({ id: ID, data: 'in the seed', seq: 5 })
     emit({ id: ID, data: 'after the seed', seq: 6 })
     await frame()
@@ -172,7 +183,7 @@ describe('what the seed already contains', () => {
     let answer: (v: unknown) => void = () => {}
     attachTerminal.mockReturnValue(new Promise((r) => (answer = r)))
 
-    const hydrating = hydrateTerminal(ID)
+    const hydrating = open()
     for (const [data, seq] of [
       ['first', 6],
       ['second', 7],
@@ -193,7 +204,7 @@ describe('nothing is written ahead of the seed', () => {
     let answer: (v: unknown) => void = () => {}
     attachTerminal.mockReturnValue(new Promise((r) => (answer = r)))
 
-    const hydrating = hydrateTerminal(ID)
+    const hydrating = open()
     emit({ id: ID, data: 'arrived first', seq: 9 })
     await frame()
 
@@ -216,7 +227,7 @@ describe('the bell', () => {
     registerStatusHandler(ID, handler)
     attachTerminal.mockResolvedValue({ data: 'ding \x07 ding', seq: 3, live: false })
 
-    await hydrateTerminal(ID)
+    await open()
 
     expect(handler).not.toHaveBeenCalled()
   })
@@ -230,7 +241,7 @@ describe('the bell', () => {
     let answer: (v: unknown) => void = () => {}
     attachTerminal.mockReturnValue(new Promise((r) => (answer = r)))
 
-    const hydrating = hydrateTerminal(ID)
+    const hydrating = open()
     emit({ id: ID, data: 'attention \x07', seq: 9 })
     await frame()
     answer({ data: 'THE SEED', seq: 5, live: true })
@@ -243,7 +254,7 @@ describe('the bell', () => {
     const handler = vi.fn()
     registerStatusHandler(ID, handler)
     attachTerminal.mockResolvedValue({ data: 'seed', seq: 3, live: true })
-    await hydrateTerminal(ID)
+    await open()
 
     emit({ id: ID, data: 'live \x07', seq: 4 })
     await frame()
@@ -258,7 +269,7 @@ describe('asking twice', () => {
     // would double the scrollback.
     attachTerminal.mockResolvedValue({ data: 'THE SEED', seq: 1, live: true })
 
-    await hydrateTerminal(ID)
+    await open()
     await hydrateTerminal(ID)
 
     expect(attachTerminal).toHaveBeenCalledTimes(1)
@@ -271,7 +282,7 @@ describe('a seed that never arrives', () => {
     attachTerminal.mockRejectedValue(new Error('the server went away'))
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const hydrating = hydrateTerminal(ID)
+    const hydrating = open()
     emit({ id: ID, data: 'happened anyway', seq: 2 })
     await frame()
     await hydrating

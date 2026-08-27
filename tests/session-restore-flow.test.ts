@@ -16,7 +16,11 @@ vi.stubGlobal('window', {
   }
 })
 
-import { resolveResumeSessionId, buildRestorePayload } from '../src/renderer/lib/session-utils'
+import {
+  resolveResumeSessionId,
+  buildRestorePayload,
+  reconcileSessions
+} from '../src/renderer/lib/session-utils'
 
 const env = { PATH: '/usr/bin' }
 const cmds = DEFAULT_AGENT_COMMANDS
@@ -138,5 +142,51 @@ describe('session restore flow: Codex fallback to history', () => {
     const payload = makePayload({ agentType: 'codex', resumeSessionId: 'codex-sess-1' })
     const line = buildAgentLaunchLine(payload, cmds, env)
     expect(line).toBe('codex resume codex-sess-1')
+  })
+})
+
+describe('what to bind and what to relaunch', () => {
+  /**
+   * The rule the whole phase turns on. Start-up used to read the saved list and
+   * launch a replacement for every record in it -- including sessions that had
+   * never stopped, whose agent was still running and possibly mid-turn. The
+   * saved list says what existed when it was last written down; the server says
+   * what exists now.
+   */
+  it('binds a saved session that is still running rather than relaunching it', () => {
+    const running = makeSession({ id: 'still-going' })
+
+    const { adopt, orphaned } = reconcileSessions([running], [makeSession({ id: 'still-going' })])
+
+    expect(adopt.map((s) => s.id)).toEqual(['still-going'])
+    // Nothing to relaunch. A second agent against the same work is the failure.
+    expect(orphaned).toEqual([])
+  })
+
+  it('leaves a saved session with no process behind for the other path', () => {
+    const { adopt, orphaned } = reconcileSessions(
+      [makeSession({ id: 'running' })],
+      [makeSession({ id: 'running' }), makeSession({ id: 'gone' })]
+    )
+
+    expect(adopt.map((s) => s.id)).toEqual(['running'])
+    expect(orphaned.map((s) => s.id)).toEqual(['gone'])
+  })
+
+  it('gives a pane to a session nothing saved, because the server is the authority', () => {
+    // A session started from a phone, or by a workflow, between the last save
+    // and this start. It exists, whatever the database remembers.
+    const { adopt, orphaned } = reconcileSessions([makeSession({ id: 'unsaved' })], [])
+
+    expect(adopt.map((s) => s.id)).toEqual(['unsaved'])
+    expect(orphaned).toEqual([])
+  })
+
+  it('has nothing to do when the server has nothing', () => {
+    const saved = [makeSession({ id: 'one' }), makeSession({ id: 'two' })]
+    const { adopt, orphaned } = reconcileSessions([], saved)
+
+    expect(adopt).toEqual([])
+    expect(orphaned.map((s) => s.id)).toEqual(['one', 'two'])
   })
 })

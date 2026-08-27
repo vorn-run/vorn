@@ -366,3 +366,26 @@ export function resolveActiveProject() {
   const ws = state.activeWorkspace
   return projects.find((p) => (p.workspaceId ?? 'personal') === ws)
 }
+
+/**
+ * What the server has against what the database remembers.
+ *
+ * Two different questions, and start-up used to ask only the second. A saved
+ * record says a session existed when it was last written down; a running PTY
+ * says one exists now. Where both agree the pane binds to the process that never
+ * stopped -- relaunching it as well would put a second agent on the same work,
+ * and the first would carry on unattached.
+ *
+ * The server is the authority on the first list, so a session it reports that
+ * nothing saved still gets a pane: it exists, whatever the database thinks.
+ */
+export function reconcileSessions(
+  active: TerminalSession[],
+  saved: TerminalSession[]
+): { adopt: TerminalSession[]; orphaned: TerminalSession[] } {
+  const running = new Set(active.map((s) => s.id))
+  return {
+    adopt: active,
+    orphaned: saved.filter((s) => !running.has(s.id))
+  }
+}

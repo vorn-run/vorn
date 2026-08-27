@@ -26,7 +26,7 @@ import {
   stopWorkflowRun,
   applyGateDecision
 } from './lib/workflow-execution'
-import type { WorkflowExecution } from '../shared/types'
+import type { TerminalSession, WorkflowExecution } from '../shared/types'
 import { CommandPalette } from './components/CommandPalette'
 import { SessionRestoredBanner } from './components/SessionRestoredBanner'
 import { GridToolbar } from './components/GridToolbar'
@@ -74,7 +74,7 @@ import { GridContextMenu } from './components/GridContextMenu'
 import { WindowControls } from './components/WindowControls'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from './lib/platform'
 import { useIsMobile } from './hooks/useIsMobile'
-import { resolveResumeSessionId, buildRestorePayload } from './lib/session-utils'
+import { resolveResumeSessionId, buildRestorePayload, reconcileSessions } from './lib/session-utils'
 
 export function App() {
   const {
@@ -182,30 +182,34 @@ export function App() {
         if (Number(config.defaults.hasSeenOnboarding ?? 0) < ONBOARDING_VERSION) {
           useAppStore.getState().setOnboardingOpen(true)
         }
-        // Web: hydrate already-running sessions that started before we connected
-        if (isWeb && 'listActiveSessions' in window.api) {
-          try {
-            const active = (await (
-              window.api as { listActiveSessions: () => Promise<unknown[]> }
-            ).listActiveSessions()) as import('../shared/types').TerminalSession[]
-            const state = useAppStore.getState()
-            for (const session of active) {
-              if (!state.terminals.has(session.id)) {
-                state.addTerminal(session)
-              }
-            }
-          } catch (err) {
-            console.error('[App] failed to hydrate active sessions:', err)
-          }
+        // What the server actually has, asked before what the database
+        // remembers, because they are different questions and only one of them
+        // is about the present.
+        //
+        // The web client has done this since it was written and the desktop
+        // never could, so a desktop restart read the saved list and launched a
+        // replacement for every session -- including the ones that had never
+        // stopped. A pane bound here is the same terminal, with the same
+        // process, mid-turn if it was mid-turn; the seeding happens in
+        // `terminal-registry` when the pane's terminal is built.
+        let active: TerminalSession[] = []
+        try {
+          active = await window.api.listActiveSessions()
+        } catch (err) {
+          console.error('[App] failed to adopt running sessions:', err)
         }
-
-        if (prev && prev.length > 0) {
+        const { adopt, orphaned } = reconcileSessions(active, prev ?? [])
+        const store = useAppStore.getState()
+        for (const session of adopt) {
+          if (!store.terminals.has(session.id)) store.addTerminal(session)
+        }
+        if (orphaned.length > 0) {
           if (config.defaults.reopenSessions) {
             // Auto-restore sessions — prefer hook-correlated session ID (exact),
             // fall back to scanning agent history when hooks weren't active.
             // Shells restore as fresh PTYs in their saved cwd (no resume concept).
             const claimed = new Set<string>()
-            for (const s of prev) {
+            for (const s of orphaned) {
               if (s.agentType === 'shell') {
                 const cwd = s.shellCwd ?? s.worktreePath ?? s.projectPath
                 const session = await window.api.createShellTerminal(cwd)
@@ -233,7 +237,7 @@ export function App() {
             }
             window.api.clearPreviousSessions()
           } else {
-            useAppStore.getState().setSessionBanner(true, prev)
+            useAppStore.getState().setSessionBanner(true, orphaned)
           }
         }
       } catch (err) {
