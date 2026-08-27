@@ -101,11 +101,26 @@ function focusCard(overrides: Record<string, unknown> = {}): string {
   return cardId
 }
 
-const appNavIsPresent = (): boolean =>
-  screen.queryByRole('button', { name: 'Toggle sidebar' }) !== null &&
-  screen.queryByRole('button', { name: 'Sessions' }) !== null &&
-  screen.queryByRole('button', { name: 'Tasks' }) !== null &&
-  screen.queryByRole('button', { name: 'Workflows' }) !== null
+/**
+ * Every control the hidden titlebar was carrying, asserted one by one.
+ *
+ * An `&&` of the four collapsed to a single boolean, and `expect(that).toBe(
+ * false)` is satisfied by any one of them going missing -- so a header that
+ * drew three of the four would have passed as "draws none".
+ */
+const NAV_CONTROLS = ['Toggle sidebar', 'Sessions', 'Tasks', 'Workflows']
+
+const expectAppNav = (): void => {
+  for (const name of NAV_CONTROLS) {
+    expect(screen.queryByRole('button', { name })).toBeInTheDocument()
+  }
+}
+
+const expectNoAppNav = (): void => {
+  for (const name of NAV_CONTROLS) {
+    expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
+  }
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -128,7 +143,7 @@ describe('the focused session header, standing in for the titlebar', () => {
     render(<CardHeader terminalId="t1" variant="focused" />)
 
     expect(screen.getByTestId('focused-session-header')).toHaveStyle({ paddingLeft: '80px' })
-    expect(appNavIsPresent()).toBe(true)
+    expectAppNav()
   })
 
   it('draws neither while the sidebar is open, which is already holding both', () => {
@@ -136,7 +151,7 @@ describe('the focused session header, standing in for the titlebar', () => {
     render(<CardHeader terminalId="t1" variant="focused" />)
 
     expect(screen.getByTestId('focused-session-header')).not.toHaveStyle({ paddingLeft: '80px' })
-    expect(appNavIsPresent()).toBe(false)
+    expectNoAppNav()
   })
 
   it('draws neither off macOS, where the app keeps its own titlebar', () => {
@@ -145,7 +160,7 @@ describe('the focused session header, standing in for the titlebar', () => {
     render(<CardHeader terminalId="t1" variant="focused" />)
 
     expect(screen.getByTestId('focused-session-header')).not.toHaveStyle({ paddingLeft: '80px' })
-    expect(appNavIsPresent()).toBe(false)
+    expectNoAppNav()
   })
 
   it('keeps the nav but drops the inset on the web, which has no traffic lights', () => {
@@ -154,7 +169,7 @@ describe('the focused session header, standing in for the titlebar', () => {
     render(<CardHeader terminalId="t1" variant="focused" />)
 
     expect(screen.getByTestId('focused-session-header')).not.toHaveStyle({ paddingLeft: '80px' })
-    expect(appNavIsPresent()).toBe(true)
+    expectAppNav()
   })
 
   it('leaves the grid’s own card headers alone', () => {
@@ -162,7 +177,7 @@ describe('the focused session header, standing in for the titlebar', () => {
     render(<CardHeader terminalId="t1" variant="mini" />)
 
     expect(screen.queryByTestId('focused-session-header')).not.toBeInTheDocument()
-    expect(appNavIsPresent()).toBe(false)
+    expectNoAppNav()
   })
 })
 
@@ -177,7 +192,7 @@ describe('a promoted card, standing in for the titlebar', () => {
     render(<FocusedStage />)
 
     expect(screen.getByTestId(`focused-card-${cardId}`)).toHaveStyle({ paddingLeft: '80px' })
-    expect(appNavIsPresent()).toBe(true)
+    expectAppNav()
   })
 
   it('draws neither while the sidebar is open', () => {
@@ -185,6 +200,6 @@ describe('a promoted card, standing in for the titlebar', () => {
     render(<FocusedStage />)
 
     expect(screen.getByTestId(`focused-card-${cardId}`)).not.toHaveStyle({ paddingLeft: '80px' })
-    expect(appNavIsPresent()).toBe(false)
+    expectNoAppNav()
   })
 })
