@@ -1,19 +1,30 @@
-import headless from '@xterm/headless'
-import serializeAddon from '@xterm/addon-serialize'
+import * as headless from '@xterm/headless'
+import * as serializeAddon from '@xterm/addon-serialize'
 import log from './logger'
 
 /**
- * Default-imported and destructured, not `import { Terminal } from ...`.
+ * Reached through an interop dance rather than by name, and it earns its keep.
  *
  * Both packages are plain CommonJS -- no `exports` map, no `module` field -- and
- * they build their exports in a way Node's named-export detection cannot see.
- * Under the bundler the named form works; under `tsx`, which is how the server
- * runs in development and in several tests, it fails at import time with
- * "does not provide an export named 'Terminal'". That is a server which will not
- * start, so the shape that works in both is the one to use.
+ * build their exports in a way Node's named-export detection cannot see. That
+ * makes `import { Terminal } from '@xterm/headless'` fail at import time under
+ * `tsx`, which is how the server runs in development: a server that will not
+ * start, caught by `server-port-stability` spawning the real thing.
+ *
+ * Nor is a plain default import enough. Compiled to CommonJS the namespace *is*
+ * the exports object and there is no `default` at all; loaded as ESM the exports
+ * arrive under `default`, because the same detection failure that breaks the
+ * named form also leaves the namespace with nothing else on it. This file is
+ * loaded both ways -- the bundle, `tsx` and vitest do not agree -- so it takes
+ * whichever of the two actually holds the classes.
  */
-const { Terminal } = headless
-const { SerializeAddon } = serializeAddon
+function interop<T>(mod: unknown): T {
+  const ns = mod as { default?: T }
+  return ns?.default ?? (mod as T)
+}
+
+const { Terminal } = interop<typeof import('@xterm/headless')>(headless)
+const { SerializeAddon } = interop<typeof import('@xterm/addon-serialize')>(serializeAddon)
 type Terminal = InstanceType<typeof Terminal>
 type SerializeAddon = InstanceType<typeof SerializeAddon>
 
