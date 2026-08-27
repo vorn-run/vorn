@@ -457,11 +457,13 @@ export async function startServer(
   // endpoint claim, so a server that arrives second exits above rather than
   // replaying every terminal on the machine and then standing down.
   //
-  // That leaves a window between the listen and this line where a client could
-  // ask for history that is not loaded yet. Named rather than hidden: nothing
-  // asks for it at all until a pane is built to.
-  const { sessionManager: persisted } = await import('./session-persistence')
-  await recoverHistory(dataDir, persisted.getPreviousSessions())
+  // It runs before the port file and the credential below, which closes the
+  // window the plan for this expected to have to live with: a client cannot find
+  // this server until both of those exist, so there is no moment where one can
+  // ask for history that has not been read yet. The cost is that discovery waits
+  // on it -- measured at 77ms for fifty terminals.
+  const { sessionManager } = await import('./session-persistence')
+  await recoverHistory(dataDir, sessionManager.getPreviousSessions())
 
   // Published together, after the claim, because they are one announcement: the
   // port says where, the credential says how, and a reader that finds one
@@ -476,7 +478,6 @@ export async function startServer(
   const { uninstallHooks } = await import('./hook-installer')
   const { uninstallAllCopilotHooks } = await import('./copilot-hook-installer')
   const { hookStatusMapper } = await import('./hook-status-mapper')
-  const { sessionManager } = await import('./session-persistence')
 
   // Two failures, and neither is retried -- by the time either is visible this
   // has already cleared the credential and removed the port file, so a second

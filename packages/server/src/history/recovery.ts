@@ -1,10 +1,10 @@
-import fs from 'fs'
+import fs from 'fs/promises'
 import path from 'path'
 import log from '../logger'
 import { createScreen, feedScreen, resizeScreen } from '../terminal-screen'
 import { seedScrollback } from '../terminal-scrollback'
 import { readHeader, readFrames, type Frame, type StopReason } from './log'
-import { readCheckpoint, historyDir, LOG_FILE } from './checkpoint'
+import { readCheckpointAsync, LOG_FILE } from './checkpoint'
 
 /**
  * Putting back what a crash interrupted.
@@ -27,6 +27,13 @@ import { readCheckpoint, historyDir, LOG_FILE } from './checkpoint'
  * writes a fresh header and appends from the beginning, so a session that
  * crashed before its first checkpoint has a complete log -- which is exactly the
  * short-lived session a checkpoint interval was never going to cover.
+ *
+ * Sessions are restored a few at a time rather than one after another. Each
+ * touches only its own directory, its own screen model and its own scrollback
+ * key, so there is nothing to serialize them for -- and reading them one at a
+ * time meant up to a hundred and fifty megabytes of file reads that the thread
+ * pool could have overlapped. Bounded rather than unbounded: fifty terminals
+ * built at once is fifty emulators and every checkpoint resident together.
  *
  * ## What this does not do
  *
@@ -67,6 +74,10 @@ export interface RecoveryReport {
   swept: number
 }
 
+/** How many sessions are rebuilt at once. Enough to overlap the reads, few
+ * enough that peak memory stays near one terminal's worth times this. */
+const AT_ONCE = 8
+
 /**
  * Restore every session the database still knows about, and sweep the rest.
  *
@@ -84,7 +95,7 @@ export async function recoverHistory(
   const root = path.join(dataDir, 'history')
   let entries: string[]
   try {
-    entries = fs.readdirSync(root)
+    entries = await fs.readdir(root)
   } catch {
     // No history directory is the ordinary first run, not a failure.
     return { recovered: [], swept: 0 }
@@ -92,32 +103,53 @@ export async function recoverHistory(
 
   const known = new Map(sessions.map((s) => [s.id, s]))
   const report: RecoveryReport = { recovered: [], swept: 0 }
+  const restorable: Array<{ at: string; session: RecoverableSession }> = []
 
   for (const entry of entries) {
+    // Named once. Rebuilding the path from the decoded id would re-encode what
+    // was just decoded, and `encodeURIComponent(decodeURIComponent(x)) === x`
+    // does not hold for every string a directory listing can produce.
+    const at = path.join(root, entry)
     const id = decode(entry)
     const session = id === null ? undefined : known.get(id)
-    if (!session) {
-      try {
-        fs.rmSync(path.join(root, entry), { recursive: true, force: true })
-        report.swept += 1
-      } catch (err) {
-        log.warn({ err, entry }, '[history] could not remove history for a session that is gone')
-      }
+    if (session) {
+      restorable.push({ at, session })
       continue
     }
-
     try {
-      const one = await restore(historyDir(dataDir, session.id), session)
-      if (one) report.recovered.push(one)
+      await fs.rm(at, { recursive: true, force: true })
+      report.swept += 1
     } catch (err) {
-      log.warn({ err, id: session.id }, '[history] could not restore this terminal')
+      log.warn({ err, entry }, '[history] could not remove history for a session that is gone')
     }
+  }
+
+  for (let from = 0; from < restorable.length; from += AT_ONCE) {
+    const batch = restorable.slice(from, from + AT_ONCE)
+    const done = await Promise.all(
+      batch.map(async ({ at, session }) => {
+        try {
+          return await restore(at, session)
+        } catch (err) {
+          log.warn({ err, id: session.id }, '[history] could not restore this terminal')
+          return null
+        }
+      })
+    )
+    for (const one of done) if (one) report.recovered.push(one)
   }
 
   if (report.recovered.length || report.swept) {
     const damaged = report.recovered.filter((r) => r.stopped !== 'end')
     log.info(
-      { restored: report.recovered.length, swept: report.swept, damaged: damaged.length },
+      {
+        restored: report.recovered.length,
+        swept: report.swept,
+        damaged: damaged.length,
+        // A session restored without one crashed before its first checkpoint,
+        // so its whole history came from the log. Worth being able to see.
+        fromLogAlone: report.recovered.filter((r) => !r.fromCheckpoint).length
+      },
       '[history] restored terminals from the last run'
     )
     for (const one of damaged) {
@@ -143,8 +175,8 @@ function decode(entry: string): string | null {
 }
 
 async function restore(dir: string, session: RecoverableSession): Promise<Recovered | null> {
-  const checkpoint = readCheckpoint(dir)
-  const { frames, stopped } = readLog(dir, checkpoint?.generation)
+  const checkpoint = await readCheckpointAsync(dir)
+  const { frames, stopped } = await readLog(dir, checkpoint?.generation)
   if (!checkpoint && !frames.length) return null
 
   // The geometry the checkpoint was taken at, not the one the session record
@@ -160,9 +192,8 @@ async function restore(dir: string, session: RecoverableSession): Promise<Recove
   if (checkpoint?.screen) feedScreen(session.id, checkpoint.screen)
 
   for (const frame of frames) {
-    await apply(session.id, frame, cols, rows)
+    await apply(session.id, frame)
     if (frame.kind === 'output') scrollback += frame.data
-    if (frame.kind === 'clear') scrollback = ''
   }
 
   seedScrollback(session.id, scrollback)
@@ -174,13 +205,13 @@ async function restore(dir: string, session: RecoverableSession): Promise<Recove
   }
 }
 
-function readLog(
+async function readLog(
   dir: string,
   generation: number | undefined
-): { frames: Frame[]; stopped: StopReason } {
+): Promise<{ frames: Frame[]; stopped: StopReason }> {
   let buf: Buffer
   try {
-    buf = fs.readFileSync(path.join(dir, LOG_FILE))
+    buf = await fs.readFile(path.join(dir, LOG_FILE))
   } catch {
     return { frames: [], stopped: 'end' }
   }
@@ -202,16 +233,13 @@ function readLog(
   return { frames: read.frames, stopped: read.reason }
 }
 
-async function apply(id: string, frame: Frame, cols: number, rows: number): Promise<void> {
+async function apply(id: string, frame: Frame): Promise<void> {
   switch (frame.kind) {
     case 'output':
       feedScreen(id, frame.data)
       return
     case 'resize':
       await resizeScreen(id, frame.cols, frame.rows)
-      return
-    case 'clear':
-      createScreen(id, cols, rows)
       return
     case 'batch':
       // A boundary, not a thing that happened. It marks where one flush ended so

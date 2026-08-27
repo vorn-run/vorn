@@ -91,8 +91,7 @@ async function settle(rounds = 2): Promise<void> {
 }
 
 async function quiesce(): Promise<void> {
-  await sleep(TIMING.quiesceMs + TIMING.tickMs * 3)
-  await settleHistory()
+  await sleep(TIMING.quiesceMs)
   await settle()
 }
 
@@ -279,6 +278,48 @@ describe('a session that ends', () => {
     expect(readCheckpoint(historyDir(dir, ID))?.screen).toContain('hello')
   })
 
+  it('orders its work behind the terminal it replaced, not beside it', async () => {
+    // Two records over one directory. The replaced one is asked to remove its
+    // files and the replacement to write fresh ones, and through separate queues
+    // there is no order between those -- the removal can land after the new log
+    // has been written and take it away. The symptom was a respawned session
+    // whose history stopped until the next checkpoint rebuilt the directory, and
+    // a test that failed about one run in five.
+    //
+    // The property, rather than the symptom: everything on this directory is in
+    // one queue, so the replacement cannot start while the replaced session
+    // still has an operation in flight.
+    begin()
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const real = fsp.appendFile
+    vi.spyOn(fsp, 'appendFile').mockImplementationOnce((async (...args: [never, never]) => {
+      await held
+      return real(...args)
+    }) as never)
+
+    emit(ID, 'from the first process')
+    await sleep(TIMING.tickMs * 3)
+
+    begin()
+    emit(ID, 'from the second process')
+
+    let finished = false
+    const settling = settleHistory().then(() => {
+      finished = true
+    })
+    await sleep(TIMING.tickMs * 6)
+    expect(finished, 'the replacement ran while the replaced session was mid-write').toBe(false)
+
+    release?.()
+    await settling
+    await settle(3)
+
+    expect(outputs(logOf().frames)).toBe('from the second process')
+  })
+
   it('starts clean when the same id is recorded again', async () => {
     begin()
     emit(ID, 'from the first process')
@@ -410,7 +451,39 @@ describe('a disk that stops answering', () => {
 })
 
 describe('one session against another', () => {
-  it('does not make a healthy terminal wait behind a wedged one', async () => {
+  it('does not make a healthy terminal wait behind a wedged checkpoint', async () => {
+    // The rule the per-session queue exists for, on the operation it was written
+    // about: a checkpoint holds one directory's write-and-rename pair, and that
+    // exclusivity buys nothing across directories. A queue for the whole server
+    // would make every terminal wait on the slowest disk under any of them.
+    begin('wedged')
+    begin('healthy')
+
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const real = fsp.open
+    vi.spyOn(fsp, 'open').mockImplementation((async (...args: Parameters<typeof fsp.open>) => {
+      if (String(args[0]).includes('wedged')) await held
+      return real(...args)
+    }) as never)
+
+    emit('wedged', 'this one is stuck')
+    emit('healthy', 'this one is not')
+
+    // Polled rather than settled: settling would wait on the session that is
+    // deliberately stuck, which is the thing being shown not to matter.
+    await until(() =>
+      Boolean(readCheckpoint(historyDir(dir, 'healthy'))?.screen.includes('this one is not'))
+    )
+    expect(readCheckpoint(historyDir(dir, 'wedged'))).toBeNull()
+
+    release?.()
+    await settle()
+  })
+
+  it('does not make a healthy terminal wait behind a wedged append', async () => {
     begin('wedged')
     begin('healthy')
 

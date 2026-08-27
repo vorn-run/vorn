@@ -32,7 +32,11 @@ interface Measurement {
   withoutHistoryMs: number
   /** The same path with a frame recorded per chunk. */
   withHistoryMs: number
-  appendOnlyMs: number
+  /** Building a frame per chunk, timed on its own. */
+  frameOnlyMs: number
+  /** Building one per flush instead, which is what the server does. */
+  frameCoalescedMs: number
+  perFlush: number
   /** Pushing those frames to disk, which happens behind the path, not on it. */
   appendToDiskMs: number
   /** Checkpointing every session at once, by session count. */
@@ -46,21 +50,36 @@ describe('what a terminal that survives a crash costs', () => {
   const r = runMeasurement<Measurement>('measure-history.ts', { timeoutMs: 300_000 })
 
   it('adds little to the path every byte of output already takes', () => {
-    // The question that decides whether this belongs on the flush at all. A
-    // frame is a length, a checksum over the payload, and a push -- against a
-    // full VT parse of the same bytes, which was already there. Measured at
-    // roughly 38.6ms without and 39.7ms with, for twenty thousand chunks: about
-    // three per cent, and that is the pessimistic reading, because production
-    // records once per flush rather than once per chunk.
+    // The question that decides whether this belongs on the flush at all: a
+    // length, a checksum over the payload and a push, against a full VT parse of
+    // the same bytes that was already there.
+    //
+    // Measured directly rather than as a difference. Subtracting one whole-path
+    // timing from another put the answer inside this machine's noise -- two ~35ms
+    // samples whose gap came out anywhere from three per cent to negative -- so
+    // the number that used to be asserted here said nothing. This times the frame
+    // construction itself: 1.5ms against a 33ms path, for the same bytes.
     expect(
-      r.appendOnlyMs,
-      `${r.appendOnlyMs}ms added to ${r.withoutHistoryMs}ms for ${r.chunks} chunks`
+      r.frameCoalescedMs,
+      `${r.frameCoalescedMs}ms of framing on a ${r.withoutHistoryMs}ms path, ${r.chunks} chunks`
     ).toBeLessThan(r.withoutHistoryMs / 4)
+  })
+
+  it('is affordable because of the flush, not in spite of it', () => {
+    // The reason `recordOutput` is called from `flushBuffer` rather than from
+    // `onData`. A frame per chunk costs 13.5ms for these bytes; one per flush,
+    // over the same bytes, costs 1.5ms -- one encode and one checksum pass
+    // instead of a hundred of each. If that ratio collapses, something has moved
+    // the call back onto the per-chunk path.
+    expect(
+      r.frameCoalescedMs,
+      `${r.frameOnlyMs}ms per chunk, ${r.frameCoalescedMs}ms at ${r.perFlush} chunks a flush`
+    ).toBeLessThan(r.frameOnlyMs / 3)
   })
 
   it('does the disk work behind that path rather than on it', () => {
     // Frames accumulate and a timer writes them. What a terminal waits for is
-    // the append above; this is what happens afterwards, and it must stay the
+    // the framing above; this is what happens afterwards, and it must stay the
     // smaller of the two or the coalescing is not earning anything.
     expect(
       r.appendToDiskMs,
@@ -72,16 +91,17 @@ describe('what a terminal that survives a crash costs', () => {
     // What this catches is a shape change: a queue that became global, or a scan
     // that became quadratic, either of which turns a machine with fifty
     // terminals into one that cannot shut down. Five times the sessions were
-    // measured at 5.2 times the cost -- 121ms for ten, 627ms for fifty.
+    // measured at 4.7 times the cost -- 102ms for ten, 480ms for fifty.
     const ten = r.checkpointMs['10'] ?? 0
     const fifty = r.checkpointMs[String(r.sessions)] ?? 0
     expect(fifty, `${ten}ms for ten sessions, ${fifty}ms for ${r.sessions}`).toBeLessThan(ten * 10)
   })
 
   it('reads every terminal back for less than it cost to write them', () => {
-    // Recovery sits between the listen and the first client, so its cost is a
-    // window where history is not loaded yet. Measured at 77ms for fifty
-    // sessions, against 627ms to write them.
+    // Recovery runs before the port file and the credential are published, so
+    // its cost is not a window where history is missing -- it is a delay before
+    // anything can find the server at all. Measured at 62ms for fifty sessions,
+    // against 480ms to write them.
     expect(
       r.recoverMs,
       `${r.recoverMs}ms to restore ${r.sessions}, ${r.checkpointMs[String(r.sessions)]}ms to write them`

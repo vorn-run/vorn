@@ -543,10 +543,16 @@ class PtyManager extends EventEmitter {
       // instead of one per keystroke. And it puts the model in step with the
       // clients rather than ahead of them -- fed from `onData`, a screen read
       // mid-flush would describe something nobody has seen yet.
+      // All three from here, on the same bytes, in one place.
+      //
+      // `appendScrollback` used to sit on `onData` instead, and that was not
+      // merely inconsistent -- it put the byte buffer ahead of the screen model
+      // by up to one flush. A checkpoint takes both at the same instant, so it
+      // could hold bytes in its scrollback that its screen had not seen; those
+      // bytes then arrived again as log frames after it, and a restore counted
+      // them twice. Fed from one point they cannot disagree.
+      appendScrollback(id, data)
       feedScreen(id, data)
-      // Beside the model rather than beside `appendScrollback`, and for the same
-      // reason: this is the coalesced write, so a burst of keystrokes is one
-      // frame on disk instead of thirty.
       recordOutput(id, data)
     }
   }
@@ -556,6 +562,13 @@ class PtyManager extends EventEmitter {
     if (timer) clearTimeout(timer)
     this.flushTimers.delete(id)
     this.dataBuffers.delete(id)
+  }
+
+  /** Push what is buffered now, without waiting out the timer that would. */
+  private drainBuffer(id: string): void {
+    const timer = this.flushTimers.get(id)
+    if (timer) clearTimeout(timer)
+    this.flushBuffer(id)
   }
 
   private clearSessionTracking(id: string): void {
@@ -653,20 +666,15 @@ class PtyManager extends EventEmitter {
 
     ptyProcess.onData((data: string) => {
       this.bufferData(id, data)
+      // The one consumer that wants raw chunks rather than coalesced ones: it
+      // reassembles partial lines and scans for bracketed paste, so it has to
+      // see the stream as it arrived. Everything else is fed from the flush.
       this.appendOutput(id, data)
-      // Kept unstripped, and deliberately alongside `appendOutput` rather than
-      // instead of it: one answers what the agent said, the other what a
-      // terminal should draw, and neither can be derived from the other.
-      appendScrollback(id, data)
     })
 
     ptyProcess.onExit(({ exitCode }) => {
-      // Flush any remaining buffered data before signaling exit
-      const pendingTimer = this.flushTimers.get(id)
-      if (pendingTimer) {
-        clearTimeout(pendingTimer)
-        this.flushBuffer(id)
-      }
+      // Whatever is buffered is the last thing this terminal ever printed.
+      this.drainBuffer(id)
       this.clearBuffer(id)
       this.deleteTempKey(id)
       this.clearSessionTracking(id)
@@ -753,12 +761,7 @@ class PtyManager extends EventEmitter {
   killPty(id: string): void {
     const p = this.ptys.get(id)
 
-    // Flush any remaining buffered data before killing
-    const pendingTimer = this.flushTimers.get(id)
-    if (pendingTimer) {
-      clearTimeout(pendingTimer)
-      this.flushBuffer(id)
-    }
+    this.drainBuffer(id)
     this.clearBuffer(id)
 
     // Delete session and PTY from maps BEFORE killing so the onExit handler
@@ -820,15 +823,15 @@ class PtyManager extends EventEmitter {
    * right while nothing outlived the process.
    */
   flushPendingOutput(): void {
-    for (const id of [...this.flushTimers.keys()]) {
-      const timer = this.flushTimers.get(id)
-      if (timer) clearTimeout(timer)
-      this.flushBuffer(id)
-    }
+    // Copied because `flushBuffer` deletes from the map it is walking.
+    for (const id of [...this.flushTimers.keys()]) this.drainBuffer(id)
   }
 
   killAll(): void {
-    // Clear all data buffers and flush timers (window is closing, no point flushing)
+    // Dropped rather than flushed. `shutdown()` calls `flushPendingOutput()`
+    // ahead of this precisely because these bytes do matter now that history
+    // outlives the process -- by the time this runs they have been written, and
+    // what is left is whatever arrived in between, with nowhere to go.
     for (const timer of this.flushTimers.values()) {
       clearTimeout(timer)
     }

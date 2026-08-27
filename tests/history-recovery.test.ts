@@ -78,10 +78,14 @@ const sample = (over: Partial<Checkpoint> = {}): Checkpoint => ({
   ...over
 })
 
-function put(checkpoint: Checkpoint | null, logGeneration?: number, ...frames: Buffer[]): void {
+async function put(
+  checkpoint: Checkpoint | null,
+  logGeneration?: number,
+  ...frames: Buffer[]
+): Promise<void> {
   const at = historyDir(dir, ID)
   fs.mkdirSync(at, { recursive: true })
-  if (checkpoint) writeCheckpoint(at, checkpoint)
+  if (checkpoint) await writeCheckpoint(at, checkpoint)
   if (logGeneration !== undefined) {
     fs.writeFileSync(
       path.join(at, LOG_FILE),
@@ -104,7 +108,7 @@ async function screenText(id = ID): Promise<string> {
 
 describe('a checkpoint and the log that follows it', () => {
   it('replays the log on top of the checkpoint', async () => {
-    put(sample(), 4, frameBatch(1), frameOutput(' and then the log'))
+    await put(sample(), 4, frameBatch(1), frameOutput(' and then the log'))
 
     const report = await recoverHistory(dir, only)
 
@@ -118,7 +122,7 @@ describe('a checkpoint and the log that follows it', () => {
   it('rebuilds at the geometry the checkpoint was taken at, not the one the record remembers', async () => {
     // The screen is being rebuilt from bytes that wrapped at those columns. Any
     // other width moves every line after the first wrap.
-    put(sample({ cols: 100, rows: 30 }), 4)
+    await put(sample({ cols: 100, rows: 30 }), 4)
 
     await recoverHistory(dir, [{ id: ID, cols: 40, rows: 10 }])
 
@@ -126,7 +130,7 @@ describe('a checkpoint and the log that follows it', () => {
   })
 
   it('follows a resize that happened after it', async () => {
-    put(sample(), 4, frameBatch(1), frameResize(132, 43))
+    await put(sample(), 4, frameBatch(1), frameResize(132, 43))
 
     await recoverHistory(dir, only)
 
@@ -139,7 +143,7 @@ describe('a log that does not belong to the checkpoint beside it', () => {
     // The crash window the writer cannot close: the checkpoint landed and the
     // log had not been replaced yet, so the log holds bytes the checkpoint
     // already contains.
-    put(sample({ generation: 5 }), 4, frameBatch(1), frameOutput('from the checkpoint'))
+    await put(sample({ generation: 5 }), 4, frameBatch(1), frameOutput('from the checkpoint'))
 
     const report = await recoverHistory(dir, only)
 
@@ -148,7 +152,7 @@ describe('a log that does not belong to the checkpoint beside it', () => {
   })
 
   it('still restores the checkpoint itself', async () => {
-    put(sample({ generation: 5 }), 4, frameBatch(1), frameOutput('stale'))
+    await put(sample({ generation: 5 }), 4, frameBatch(1), frameOutput('stale'))
 
     await recoverHistory(dir, only)
 
@@ -161,7 +165,7 @@ describe('a log with no checkpoint', () => {
   it('is replayed from nothing, because it starts from nothing', async () => {
     // A session that crashed before its first checkpoint has a complete log --
     // exactly the short-lived session an interval was never going to cover.
-    put(null, 1, frameBatch(1), frameOutput('everything this terminal ever printed'))
+    await put(null, 1, frameBatch(1), frameOutput('everything this terminal ever printed'))
 
     const report = await recoverHistory(dir, only)
 
@@ -175,7 +179,7 @@ describe('a file the crash was in the middle of', () => {
     const whole = Buffer.concat([frameBatch(1), frameOutput('kept'), frameOutput('torn away')])
     const at = historyDir(dir, ID)
     fs.mkdirSync(at, { recursive: true })
-    writeCheckpoint(at, sample())
+    await writeCheckpoint(at, sample())
     fs.writeFileSync(
       path.join(at, LOG_FILE),
       Buffer.concat([writeHeader(4), whole.subarray(0, whole.length - 4)])
@@ -190,7 +194,7 @@ describe('a file the crash was in the middle of', () => {
   it('does not step over a frame that failed its checksum', async () => {
     const at = historyDir(dir, ID)
     fs.mkdirSync(at, { recursive: true })
-    writeCheckpoint(at, sample())
+    await writeCheckpoint(at, sample())
     const body = Buffer.concat([
       writeHeader(4),
       frameOutput('good'),
@@ -212,9 +216,9 @@ describe('what is left of sessions that are gone', () => {
     // History is keyed by session id and `getPreviousSessions` is the only way a
     // pane ever names one. A directory with no session behind it is not history
     // somebody might want, it is history nobody can ask for.
-    put(sample(), 4)
+    await put(sample(), 4)
     fs.mkdirSync(historyDir(dir, 'a-session-that-ended'), { recursive: true })
-    writeCheckpoint(historyDir(dir, 'a-session-that-ended'), sample())
+    await writeCheckpoint(historyDir(dir, 'a-session-that-ended'), sample())
 
     const report = await recoverHistory(dir, only)
 

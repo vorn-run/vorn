@@ -105,6 +105,8 @@ const MAX_PENDING_BYTES = 4 * 1024 * 1024
 interface Recorded {
   id: string
   dir: string
+  /** Joined once. It cannot change, and it was being rebuilt four times a second. */
+  logPath: string
   generation: number
   /** The last batch written to the log. A batch is one flush, not one write. */
   seq: number
@@ -157,14 +159,29 @@ export function configureHistory(dir: string, over: Partial<HistoryTiming> = {})
   sealed = false
 }
 
-/** Begin recording a terminal, replacing any history left under its id. */
+/**
+ * Begin recording a terminal, replacing any history left under its id.
+ *
+ * Not `stopHistory` first, which is what this used to do and which raced itself.
+ * That enqueues a removal on the *old* record's queue and then this builds a new
+ * record with a queue of its own -- two queues over one directory, so the old
+ * removal could land after the new log had been written and take it away. The
+ * symptom was a respawned session whose history quietly stopped until the next
+ * checkpoint rebuilt the directory.
+ *
+ * The new record inherits the old one's tail instead. That keeps every operation
+ * on this directory in one order, including any append still in flight from the
+ * PTY that just went, and `reset` below removes what was there anyway.
+ */
 export function startHistory(id: string): void {
   if (!dataDir || sealed) return
-  stopHistory(id)
+  const previous = recorded.get(id)
+  recorded.delete(id)
 
   const held: Recorded = {
     id,
     dir: historyDir(dataDir, id),
+    logPath: path.join(historyDir(dataDir, id), LOG_FILE),
     generation: 1,
     seq: 0,
     pending: [],
@@ -174,7 +191,7 @@ export function startHistory(id: string): void {
     broken: false,
     lastRecordAt: Date.now(),
     lastCheckpointAt: Date.now(),
-    tail: Promise.resolve(),
+    tail: previous ? previous.tail.catch(() => undefined) : Promise.resolve(),
     queued: 0
   }
   recorded.set(id, held)
@@ -190,18 +207,21 @@ export function startHistory(id: string): void {
  */
 export function recordOutput(id: string, data: string): void {
   if (!data) return
-  push(id, frameOutput(data))
+  // Looked up before the frame is built, not after. Encoding the chunk and
+  // running a checksum over it only to find that nothing is recording this
+  // session is a full pass over every byte, thrown away -- and that is the
+  // ordinary case in every process that never called `configureHistory`.
+  const held = recorded.get(id)
+  if (held) push(held, frameOutput(data))
 }
 
 /** Record a resize, with the numbers node-pty was given. */
 export function recordResize(id: string, cols: number, rows: number): void {
-  push(id, frameResize(cols, rows))
+  const held = recorded.get(id)
+  if (held) push(held, frameResize(cols, rows))
 }
 
-function push(id: string, frame: Buffer): void {
-  const held = recorded.get(id)
-  if (!held) return
-
+function push(held: Recorded, frame: Buffer): void {
   held.lastRecordAt = Date.now()
   held.changed = true
   // Still accumulated while broken, because the next checkpoint replaces the log
@@ -212,13 +232,12 @@ function push(id: string, frame: Buffer): void {
   if (held.pendingBytes > MAX_PENDING_BYTES) {
     if (!held.broken) {
       log.warn(
-        { id },
+        { id: held.id },
         '[history] the disk is not keeping up; dropping this log until the next checkpoint'
       )
     }
     held.broken = true
-    held.pending = []
-    held.pendingBytes = 0
+    take(held)
   }
 
   ensureTicking()
@@ -284,17 +303,13 @@ export function resetHistory(): void {
 }
 
 /** What a session is holding, so the bounds above are observable. */
-export function historyState(id: string): {
-  generation: number
-  seq: number
-  pendingBytes: number
-  logBytes: number
-  broken: boolean
-} | null {
+export function historyState(
+  id: string
+): { pendingBytes: number; logBytes: number; broken: boolean } | null {
   const held = recorded.get(id)
   if (!held) return null
-  const { generation, seq, pendingBytes, logBytes, broken } = held
-  return { generation, seq, pendingBytes, logBytes, broken }
+  const { pendingBytes, logBytes, broken } = held
+  return { pendingBytes, logBytes, broken }
 }
 
 /** Run every pending operation to completion. For tests, and for nothing else. */
@@ -308,10 +323,6 @@ export async function settleHistory(): Promise<void> {
     await Promise.all(tails)
     if (![...recorded.values()].some((held) => held.queued > 0)) return
   }
-}
-
-function logPath(held: Recorded): string {
-  return path.join(held.dir, LOG_FILE)
 }
 
 /**
@@ -334,13 +345,60 @@ function enqueue(held: Recorded, op: () => Promise<unknown>): Promise<void> {
   return held.tail
 }
 
+/**
+ * Take everything not yet written, and leave the record empty.
+ *
+ * One function because `pending` and `pendingBytes` have to move together, and
+ * the five places that used to do it by hand each restated that invariant
+ * without enforcing it -- a sixth that forgot the byte count would have broken
+ * the `MAX_PENDING_BYTES` bound silently.
+ */
+function take(held: Recorded): Buffer[] {
+  const frames = held.pending
+  held.pending = []
+  held.pendingBytes = 0
+  return frames
+}
+
+/**
+ * Replace the log, opening a generation.
+ *
+ * Opening one is four things that are only correct together: write a header
+ * carrying it, adopt it, restart `seq`, and trust the file again. Three call
+ * sites used to do those by hand, in three slightly different orders.
+ *
+ * The body is assembled here rather than passed in because the layout -- a
+ * header, then whole batches, and a fresh generation opening on batch one -- is
+ * the format's rule, and a caller building it from format primitives is a caller
+ * that has to remember the rule.
+ */
+async function openGeneration(
+  held: Recorded,
+  generation: number,
+  carried: Buffer[]
+): Promise<void> {
+  const body = carried.length
+    ? Buffer.concat([writeHeader(generation), frameBatch(1), ...carried])
+    : writeHeader(generation)
+  try {
+    await fs.writeFile(held.logPath, body, { mode: 0o600 })
+    held.generation = generation
+    held.logBytes = body.length
+    held.seq = carried.length ? 1 : 0
+    held.broken = false
+  } catch (err) {
+    // Left untrusted rather than appended to over an unknown prefix: a partial
+    // rewrite is a file whose remaining bytes have no established length.
+    log.warn({ err, id: held.id }, '[history] could not replace the log')
+    held.broken = true
+    throw err
+  }
+}
+
 async function reset(held: Recorded): Promise<void> {
-  const header = writeHeader(held.generation)
   await fs.rm(held.dir, { recursive: true, force: true })
   await fs.mkdir(held.dir, { recursive: true, mode: 0o700 })
-  await fs.writeFile(logPath(held), header, { mode: 0o600 })
-  held.logBytes = header.length
-  held.broken = false
+  await openGeneration(held, held.generation, [])
 }
 
 /**
@@ -353,12 +411,18 @@ async function flushPending(held: Recorded): Promise<void> {
   if (!held.pending.length || held.broken) return
 
   held.seq += 1
-  const body = Buffer.concat([frameBatch(held.seq), ...held.pending])
-  held.pending = []
-  held.pendingBytes = 0
+  const prefix = frameBatch(held.seq)
+  const frames = take(held)
+  // The total is passed rather than summed, and the marker is unshifted rather
+  // than spread. `pending` is bounded by bytes and not by count, so with small
+  // frames it holds a great many -- and a spread of that array is an argument
+  // list of that length.
+  const total = frames.reduce((n, f) => n + f.length, prefix.length)
+  frames.unshift(prefix)
+  const body = Buffer.concat(frames, total)
 
   try {
-    await fs.appendFile(logPath(held), body)
+    await fs.appendFile(held.logPath, body)
     held.logBytes += body.length
   } catch (err) {
     // Not put back. A retry that succeeded after a later batch had been written
@@ -394,17 +458,10 @@ async function fold(held: Recorded): Promise<void> {
     { id: held.id, bytes: held.logBytes },
     '[history] could not checkpoint a log past its cap; dropping it'
   )
-  held.generation += 1
-  const header = writeHeader(held.generation)
-  try {
-    await fs.writeFile(logPath(held), header, { mode: 0o600 })
-    held.logBytes = header.length
-    held.seq = 0
-    held.broken = false
-  } catch (err) {
-    log.warn({ err, id: held.id }, '[history] could not drop the log either')
-    held.broken = true
-  }
+  take(held)
+  await openGeneration(held, held.generation + 1, []).catch(() => {
+    /* already reported, and already marked untrusted */
+  })
 }
 
 /**
@@ -422,73 +479,55 @@ async function checkpoint(held: Recorded): Promise<void> {
   const cutSeq = held.seq
   const scrollback = readScrollback(held.id)
   const drained = serializeScreen(held.id)
-  const superseded = held.pending
-  held.pending = []
-  held.pendingBytes = 0
+  const supersededBytes = held.pendingBytes
+  const superseded = take(held)
 
   const snapshot = await drained
-  if (!snapshot) {
-    // No model to checkpoint from -- it faulted, or the session is gone. The
-    // frames are still the truth about what happened, so they go back at the
-    // front and the log carries on.
-    restore(held, superseded)
-    await flushPending(held)
-    return
-  }
-
   const generation = held.generation + 1
-  const landed = writeCheckpoint(held.dir, {
-    screen: snapshot.screen,
-    scrollback,
-    cols: snapshot.cols,
-    rows: snapshot.rows,
-    title: snapshot.title,
-    cwd: snapshot.cwd,
-    generation,
-    seq: cutSeq
-  })
+  const landed =
+    snapshot !== null &&
+    (await writeCheckpoint(held.dir, {
+      screen: snapshot.screen,
+      scrollback,
+      cols: snapshot.cols,
+      rows: snapshot.rows,
+      title: snapshot.title,
+      cwd: snapshot.cwd,
+      generation,
+      seq: cutSeq
+    }))
 
   if (!landed) {
-    restore(held, superseded)
+    // Either there was no model to checkpoint from -- it faulted, or the session
+    // is gone -- or the write did not land. Those frames are still the truth
+    // about what happened, so they go back at the front and the log carries on.
+    restore(held, superseded, supersededBytes)
     await flushPending(held)
     return
   }
 
   // From here the frames in `superseded` are inside the checkpoint and must not
   // be replayed over it. Only what arrived during the serialize is carried.
-  held.generation = generation
   held.lastCheckpointAt = Date.now()
-  const carried = held.pending
-  held.pending = []
-  held.pendingBytes = 0
+  const carried = take(held)
   held.changed = carried.length > 0
-
-  // The carried frames get a batch marker of their own: seq restarts with the
-  // generation, so the log always opens on a batch rather than on frames that
-  // belong to one written before the checkpoint.
-  const body = Buffer.concat(
-    carried.length
-      ? [writeHeader(generation), frameBatch(1), ...carried]
-      : [writeHeader(generation)]
-  )
-  try {
-    await fs.writeFile(logPath(held), body, { mode: 0o600 })
-    held.logBytes = body.length
-    held.seq = carried.length ? 1 : 0
-    held.broken = false
-  } catch (err) {
+  await openGeneration(held, generation, carried).catch(() => {
     // The checkpoint is already durable, so the screen survives; what is lost is
-    // the little that came after it. The log is left untrusted until the next
-    // checkpoint replaces it, rather than appended to over an unknown prefix.
-    log.warn({ err, id: held.id }, '[history] checkpointed, but could not replace the log')
-    held.broken = true
-  }
+    // the little that came after it. Reported and marked there.
+  })
 }
 
-function restore(held: Recorded, superseded: Buffer[]): void {
+/**
+ * Put frames back at the front, with the byte count they came with.
+ *
+ * Carried rather than recomputed: it was `held.pendingBytes` at the moment they
+ * were taken, so walking the whole array to work it out again is a pass over
+ * everything unwritten for a number already known.
+ */
+function restore(held: Recorded, superseded: Buffer[], bytes: number): void {
   if (!superseded.length) return
-  held.pending = superseded.concat(held.pending)
-  held.pendingBytes = held.pending.reduce((total, frame) => total + frame.length, 0)
+  for (let i = superseded.length - 1; i >= 0; i--) held.pending.unshift(superseded[i]!)
+  held.pendingBytes += bytes
 }
 
 /**

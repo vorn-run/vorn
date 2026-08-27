@@ -9,6 +9,7 @@ import {
   serializeScreen,
   resetScreens
 } from '../../packages/server/src/terminal-screen'
+import { chunks, ms, CHUNKS, COLS, ROWS } from './measure-output'
 
 /**
  * How long the server spends on each chunk of terminal output.
@@ -24,24 +25,7 @@ import {
  * Prints one line of JSON; the test reads it and decides.
  */
 
-const CHUNKS = 20_000
-const COLS = 200
-const ROWS = 50
 const MAX_UNITS = 256 * 1024
-
-/** Output shaped like a working agent's: colour, cursor movement, varied text. */
-function chunks(): string[] {
-  const out: string[] = []
-  for (let i = 0; i < CHUNKS; i++) {
-    const fg = 30 + (i % 8)
-    out.push(
-      `\x1b[${(i % ROWS) + 1};1H\x1b[${fg}m` +
-        `⏺ packages/server/src/file-${i % 40}.ts:${i} ` +
-        `${'▁▂▃▄▅▆▇█'[i % 8]} done\x1b[0m\r\n`
-    )
-  }
-  return out
-}
 
 /** The buffer exactly as it was: concatenate the whole thing, then re-slice it. */
 function appendTheOldWay(state: { buf: string }, data: string): void {
@@ -53,12 +37,6 @@ function appendTheOldWay(state: { buf: string }, data: string): void {
   const cut = joined.length - MAX_UNITS
   const boundary = joined.indexOf('\n', cut)
   state.buf = boundary === -1 ? joined.slice(cut) : joined.slice(boundary + 1)
-}
-
-function ms(run: () => void): number {
-  const started = process.hrtime.bigint()
-  run()
-  return Number(process.hrtime.bigint() - started) / 1e6
 }
 
 async function main(): Promise<void> {

@@ -18,6 +18,8 @@ import {
 } from '../../packages/server/src/history/writer'
 import { recoverHistory } from '../../packages/server/src/history/recovery'
 import { historyDir } from '../../packages/server/src/history/checkpoint'
+import { frameOutput } from '../../packages/server/src/history/log'
+import { chunks, ms, msAsync, CHUNKS, COLS, ROWS } from './measure-output'
 
 /**
  * What writing history costs, in the three places it is paid.
@@ -31,39 +33,27 @@ import { historyDir } from '../../packages/server/src/history/checkpoint'
  * Prints one line of JSON; the test reads it and decides.
  */
 
-const CHUNKS = 20_000
-const COLS = 200
-const ROWS = 50
 const SESSIONS = 50
 
-/** Output shaped like a working agent's: colour, cursor movement, varied text. */
-function chunks(): string[] {
-  const out: string[] = []
-  for (let i = 0; i < CHUNKS; i++) {
-    const fg = 30 + (i % 8)
-    out.push(
-      `\x1b[${(i % ROWS) + 1};1H\x1b[${fg}m` +
-        `⏺ packages/server/src/file-${i % 40}.ts:${i} ` +
-        `${'▁▂▃▄▅▆▇█'[i % 8]} done\x1b[0m\r\n`
-    )
-  }
-  return out
-}
-
-function ms(run: () => void): number {
-  const started = process.hrtime.bigint()
-  run()
-  return Number(process.hrtime.bigint() - started) / 1e6
-}
-
-async function msAsync(run: () => Promise<void>): Promise<number> {
-  const started = process.hrtime.bigint()
-  await run()
-  return Number(process.hrtime.bigint() - started) / 1e6
-}
+/**
+ * How many chunks one flush gathers.
+ *
+ * `PtyManager.BUFFER_FLUSH_MS` is 8, and node-pty delivers small chunks quickly
+ * under load, so a busy terminal's flush covers a great many of them. A hundred
+ * is a conservative reading of the twenty thousand chunks below arriving at a
+ * rate a terminal can actually produce.
+ */
+const PER_FLUSH = 100
 
 function scratch(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-measure-history-'))
+}
+
+/** Everything this module can be holding, in a fixed order. */
+function clean(): void {
+  resetHistory()
+  resetScreens()
+  resetScrollback()
 }
 
 /** Fill `count` sessions with a screenful each, and their logs with the rest. */
@@ -100,9 +90,7 @@ async function main(): Promise<void> {
     }
     await flushHistory()
     await recoverHistory(warm, [{ id: 'warm', cols: COLS, rows: ROWS }])
-    resetHistory()
-    resetScreens()
-    resetScrollback()
+    clean()
     fs.rmSync(warm, { recursive: true, force: true })
   }
 
@@ -112,10 +100,35 @@ async function main(): Promise<void> {
   // once per flush, and a flush coalesces every byte that arrived in eight
   // milliseconds. So the real figure is smaller than this by however many chunks
   // a flush covers.
+  //
+  // Measured directly rather than as a difference. An earlier version of this
+  // subtracted two whole-path timings and called the remainder the cost of an
+  // append; both samples are around forty milliseconds and the machine's noise
+  // is larger than the gap, so that number came out anywhere from three per cent
+  // to negative. What it is is the frame construction, and it can be timed on
+  // its own.
+  //
+  // Twice, because the two answer different questions. Per chunk is what the
+  // path would pay if history were recorded where the output arrives. Coalesced
+  // is what the server actually pays: `recordOutput` is called from the flush,
+  // which gathers eight milliseconds of output into one write, so the real unit
+  // is a batch of chunks rather than a chunk -- one encode and one checksum pass
+  // over the same bytes instead of a hundred of each.
+  const frameOnly = ms(() => {
+    for (const c of data) frameOutput(c)
+  })
+
+  const flushes: string[] = []
+  for (let at = 0; at < data.length; at += PER_FLUSH) {
+    flushes.push(data.slice(at, at + PER_FLUSH).join(''))
+  }
+  const frameCoalesced = ms(() => {
+    for (const f of flushes) frameOutput(f)
+  })
+
   let dir = scratch()
+  clean()
   configureHistory(dir)
-  resetScreens()
-  resetScrollback()
   createScreen('s', COLS, ROWS)
   let withoutHistory = ms(() => {
     for (const c of data) {
@@ -149,9 +162,7 @@ async function main(): Promise<void> {
   // Separately, because it is not on the hot path: the frames are handed to a
   // timer and written out behind it. What the terminal waits for is above.
   const appendToDiskMs = await msAsync(settleHistory)
-  resetHistory()
-  resetScreens()
-  resetScrollback()
+  clean()
   fs.rmSync(dir, { recursive: true, force: true })
 
   // ---- What a checkpoint costs, against session count. -----------------------
@@ -165,9 +176,7 @@ async function main(): Promise<void> {
 
   for (const count of [1, 10, SESSIONS]) {
     dir = scratch()
-    resetHistory()
-    resetScreens()
-    resetScrollback()
+    clean()
     configureHistory(dir)
     const ids = fill(count, screenful)
     // Everything at once, which is what `shutdown()` does and the worst this
@@ -175,16 +184,12 @@ async function main(): Promise<void> {
     checkpointMs[String(count)] = +(await msAsync(() => flushHistory())).toFixed(1)
 
     if (count === SESSIONS) {
-      bytesPerSession = Math.round(
-        ids.reduce(
-          (total, id) =>
-            total +
-            fs
-              .readdirSync(historyDir(dir, id))
-              .reduce((n, f) => n + fs.statSync(path.join(historyDir(dir, id), f)).size, 0),
-          0
-        ) / ids.length
-      )
+      let bytes = 0
+      for (const id of ids) {
+        const at = historyDir(dir, id)
+        for (const file of fs.readdirSync(at)) bytes += fs.statSync(path.join(at, file)).size
+      }
+      bytesPerSession = Math.round(bytes / ids.length)
       resetScreens()
       resetScrollback()
       recoverMs = +(
@@ -196,9 +201,7 @@ async function main(): Promise<void> {
         })
       ).toFixed(1)
     }
-    resetHistory()
-    resetScreens()
-    resetScrollback()
+    clean()
     fs.rmSync(dir, { recursive: true, force: true })
   }
 
@@ -208,7 +211,9 @@ async function main(): Promise<void> {
       sessions: SESSIONS,
       withoutHistoryMs: +withoutHistory.toFixed(1),
       withHistoryMs: +withHistory.toFixed(1),
-      appendOnlyMs: +(withHistory - withoutHistory).toFixed(1),
+      frameOnlyMs: +frameOnly.toFixed(1),
+      frameCoalescedMs: +frameCoalesced.toFixed(1),
+      perFlush: PER_FLUSH,
       appendToDiskMs: +appendToDiskMs.toFixed(1),
       checkpointMs,
       recoverMs,

@@ -54,10 +54,15 @@ function trim(data: string): string {
  *
  * This used to be one string per terminal, re-formed on every append:
  * `set(id, trim(get(id) + data))`. Once a buffer reached its cap that was two
- * ~256 KB allocations per PTY chunk -- one to concatenate, one to slice -- and
- * a busy agent produces chunks by the hundred per second. It was the most
- * expensive thing on the hottest path in the server, for a value almost nothing
- * reads.
+ * ~256 KB allocations per write -- one to concatenate, one to slice -- and it
+ * was fed straight from `onData`, which a busy agent drives by the hundred per
+ * second. It was the most expensive thing on the hottest path in the server, for
+ * a value almost nothing reads.
+ *
+ * It is fed from the coalesced flush now rather than from `onData`, which cuts
+ * the number of writes again and, more importantly, keeps it in step with the
+ * screen model. The cost that remains is per byte rather than per write, so the
+ * chunk list still earns its place.
  *
  * Appending is now a push, and the cost moves to `readScrollback`, which is
  * where it belongs: reads are rare and deliberate, writes are constant and
@@ -119,8 +124,9 @@ export function readScrollback(id: string): string {
   if (!held) return ''
   // Compacted on the way out rather than joined and thrown away: a caller that
   // reads twice should not pay twice, and the result is the same bytes either
-  // way.
-  compact(held)
+  // way. Already-compact is the common case for the second read and for the
+  // checkpoint that follows one, so it costs nothing at all.
+  if (held.chunks.length > 1 || held.units > MAX_UNITS) compact(held)
   return held.chunks[0] ?? ''
 }
 

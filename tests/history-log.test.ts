@@ -7,7 +7,6 @@ import {
   frameBatch,
   frameOutput,
   frameResize,
-  frameClear,
   FORMAT_VERSION,
   type Frame
 } from '../packages/server/src/history/log'
@@ -27,6 +26,13 @@ import {
 
 const log = (...frames: Buffer[]): Buffer => Buffer.concat([writeHeader(1), ...frames])
 
+/** Our magic, a version we do not speak. The shape a future writer leaves. */
+function versioned(version: number): Buffer {
+  const buf = Buffer.from(writeHeader(1))
+  buf.writeUInt8(version, 4)
+  return buf
+}
+
 describe('the header', () => {
   it('round-trips', () => {
     expect(readHeader(writeHeader(7))).toEqual({ formatVersion: FORMAT_VERSION, generation: 7 })
@@ -35,7 +41,8 @@ describe('the header', () => {
   it.each([
     ['an empty file', Buffer.alloc(0)],
     ['a file shorter than the header', Buffer.from('VRN')],
-    ['a file that is not ours', Buffer.from('SQLite format 3\0')]
+    ['a file that is not ours', Buffer.from('SQLite format 3\0')],
+    ['a file from a version this one does not know', versioned(FORMAT_VERSION + 1)]
   ])('refuses %s rather than guessing', (_label, buf) => {
     // All three are ordinary things to find after a crash, and the answer to all
     // three is the same: there is no history here, start again.
@@ -45,12 +52,7 @@ describe('the header', () => {
 
 describe('frames', () => {
   it('round-trips every kind, in order', () => {
-    const buf = log(
-      frameBatch(1180),
-      frameOutput('\x1b[31mred\x1b[0m'),
-      frameResize(200, 50),
-      frameClear()
-    )
+    const buf = log(frameBatch(1180), frameOutput('\x1b[31mred\x1b[0m'), frameResize(200, 50))
 
     const { frames, reason } = readFrames(buf)
 
@@ -58,8 +60,7 @@ describe('frames', () => {
     expect(frames).toEqual<Frame[]>([
       { kind: 'batch', seq: 1180 },
       { kind: 'output', data: '\x1b[31mred\x1b[0m' },
-      { kind: 'resize', cols: 200, rows: 50 },
-      { kind: 'clear' }
+      { kind: 'resize', cols: 200, rows: 50 }
     ])
   })
 

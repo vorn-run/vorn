@@ -117,18 +117,17 @@ function create(cols: number, rows: number): Held {
   // not carry, so they are caught as they go past. Neither is a reply -- these
   // are notifications from the program, and observing one sends nothing back.
   //
-  // Both run from xterm's own timer, not from `feedScreen`, so a throw in either
-  // reaches the top of the process rather than any `try` in this file -- and the
-  // server installs no `uncaughtException` handler. That is the whole server and
-  // every session, killed by a program printing an odd string. So both are
-  // wrapped, and neither may assume anything about what it was handed.
+  // The title is stored and nothing more. A property write cannot throw, and an
+  // earlier version wrapped it anyway, which made a no-op look load-bearing.
   term.onTitleChange((title) => {
-    try {
-      held.title = title
-    } catch {
-      /* nothing a title can do is worth a process */
-    }
+    held.title = title
   })
+  // The cwd handler is the one that can. It runs from xterm's own timer rather
+  // than from `feedScreen`, so a throw here reaches the top of the process past
+  // every `try` in this file -- and the server installs no `uncaughtException`
+  // handler. `decodeURIComponent` throws on a lone percent, which is a path a
+  // shell can genuinely be sitting in, so that would be the whole server and
+  // every session killed by a directory name.
   term.parser.registerOscHandler(7, (payload) => {
     try {
       // `file://host/path`, per the convention every shell integration uses.
@@ -269,13 +268,26 @@ export async function resizeScreen(id: string, cols: number, rows: number): Prom
     // differently from the terminal it models is the failure this exists to
     // avoid, and it would show up as a screen that is subtly wrong rather than
     // one that is obviously broken.
-    await new Promise<void>((resolve) => held.term.write('', resolve))
+    await drain(held)
     held.term.resize(cols, rows)
     held.cols = cols
     held.rows = rows
   } catch (err) {
     drop(id, err)
   }
+}
+
+/**
+ * Wait for everything already written to have been parsed.
+ *
+ * An empty write, queued behind everything in flight, resolving only once the
+ * parser reaches it. That is the whole mechanism: writes are applied in order,
+ * so waiting on the last one waits on all of them. Both callers need it and for
+ * the same reason -- `term.write` returns before anything is parsed, so acting
+ * on the buffer straight after a write acts on whatever happened to be done.
+ */
+function drain(held: Held): Promise<void> {
+  return new Promise<void>((resolve) => held.term.write('', resolve))
 }
 
 /** Give up on a session's model. The session itself carries on without one. */
@@ -317,10 +329,7 @@ export async function serializeScreen(id: string): Promise<ScreenSnapshot | null
   const held = screens.get(id)
   if (!held) return null
   try {
-    // An empty write, queued behind everything already in flight, resolving only
-    // once the parser has reached it. That is the whole drain: writes are applied
-    // in order, so waiting for the last one waits for all of them.
-    await new Promise<void>((resolve) => held.term.write('', resolve))
+    await drain(held)
     return {
       screen: held.serializer.serialize(),
       cols: held.cols,

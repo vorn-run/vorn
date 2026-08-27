@@ -132,8 +132,18 @@ vi.mock('../packages/server/src/process-utils', async () => {
   }
 })
 
+import fs from 'node:fs'
+import os from 'node:os'
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { isGitRepo } from '../packages/server/src/git-utils'
+import {
+  configureHistory,
+  settleHistory,
+  resetHistory
+} from '../packages/server/src/history/writer'
+import { historyDir, LOG_FILE } from '../packages/server/src/history/checkpoint'
+import { readFrames, type Frame } from '../packages/server/src/history/log'
+import { readScrollback, resetScrollback } from '../packages/server/src/terminal-scrollback'
 
 vi.mocked(isGitRepo).mockReturnValue(false)
 
@@ -252,5 +262,101 @@ describe('the model follows the session it belongs to', () => {
 
     expect(screenCount()).toBe(held - 1)
     expect(await serializeScreen(session.id)).toBeNull()
+  })
+})
+
+describe('the terminal is recorded where it is fed', () => {
+  /**
+   * The wiring, which every other history test has to take on trust.
+   *
+   * `history-writer.test.ts` drives the writer directly and proves what it does
+   * with what it is given. Nothing there can show that `pty-manager` gives it
+   * anything at all -- four call sites that are one line each, and a one-line
+   * call site is exactly the kind that gets dropped in a merge and noticed
+   * months later as terminals that come back blank.
+   */
+  let dir: string
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-pty-history-'))
+    configureHistory(dir, { tickMs: 5, quiesceMs: 5_000, checkpointMs: 60_000 })
+  })
+
+  afterEach(() => {
+    resetHistory()
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  async function settled(): Promise<void> {
+    for (let round = 0; round < 4; round++) {
+      await new Promise((r) => setTimeout(r, 20))
+      await settleHistory()
+    }
+  }
+
+  function framesFor(id: string): Frame[] {
+    return readFrames(fs.readFileSync(path.join(historyDir(dir, id), LOG_FILE))).frames
+  }
+
+  it('does not let the byte buffer run ahead of the screen model', async () => {
+    // Both are fed from the flush, and that is what makes a checkpoint coherent.
+    // The buffer used to be fed from `onData` instead, so for up to one flush it
+    // held bytes the model had not seen -- and a checkpoint takes both at the
+    // same instant. Those bytes went into its scrollback, arrived again as log
+    // frames written after it, and a restore counted them twice.
+    resetScrollback()
+    const { session, fake } = createAgent()
+    fake.emitData('printed but not yet flushed')
+
+    expect(readScrollback(session.id), 'the buffer saw it before the model did').toBe('')
+
+    await afterFlush()
+    expect(readScrollback(session.id)).toContain('printed but not yet flushed')
+  })
+
+  it('opens a log when a terminal is spawned', async () => {
+    const { session } = createAgent()
+    await settled()
+
+    expect(fs.existsSync(path.join(historyDir(dir, session.id), LOG_FILE))).toBe(true)
+  })
+
+  it('records what the terminal printed, and the size it printed at', async () => {
+    const { session, fake } = createAgent()
+    fake.emitData('tests passed, 402 of them\r\n')
+    await afterFlush()
+    ptyManager.resizePty(session.id, 132, 43)
+    await settled()
+
+    expect(framesFor(session.id)).toEqual(
+      expect.arrayContaining<Frame>([
+        { kind: 'output', data: 'tests passed, 402 of them\r\n' },
+        { kind: 'resize', cols: 132, rows: 43 }
+      ])
+    )
+  })
+
+  it('records once per flush rather than once per chunk', async () => {
+    // The reason the call sits in `flushBuffer` and not in `onData`. Thirty
+    // keystrokes are one frame, not thirty -- and it is what keeps the byte
+    // buffer and the screen model seeing the same bytes at the same moment.
+    const { session, fake } = createAgent()
+    for (let i = 0; i < 30; i++) fake.emitData('x')
+    await afterFlush()
+    await settled()
+
+    const output = framesFor(session.id).filter((f) => f.kind === 'output')
+    expect(output).toEqual([{ kind: 'output', data: 'x'.repeat(30) }])
+  })
+
+  it('takes the history with the terminal when it is killed', async () => {
+    const { session } = createAgent()
+    await settled()
+    expect(fs.existsSync(historyDir(dir, session.id))).toBe(true)
+
+    ptyManager.killPty(session.id)
+    await settled()
+
+    expect(fs.existsSync(historyDir(dir, session.id))).toBe(false)
   })
 })
