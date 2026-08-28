@@ -191,13 +191,24 @@ class PtyManager extends EventEmitter {
     return buildLaunchLine(payload, this.agentCommands, getSafeEnv())
   }
 
-  createPty(payload: CreateTerminalPayload): TerminalSession {
+  /**
+   * @param reuseId Keep an existing session's id instead of minting one.
+   *
+   * Only resume passes this, and it is what makes a resumed session the same
+   * session rather than a replacement for it. Every client keys a pane by this
+   * id -- the xterm holding the replayed screen, the subscription carrying its
+   * output -- so a new id means a new pane, and the screen the person was
+   * looking at is thrown away at the moment they asked for it back. Reusing it
+   * also means the new run's history supersedes the old run's under the same
+   * name, which `startHistory` does on its own queue.
+   */
+  createPty(payload: CreateTerminalPayload, reuseId?: string): TerminalSession {
     // Refused rather than created: a session started on an endpoint this process
     // no longer holds is reachable through a name that now points elsewhere, so
     // nobody would ever see it. Existing sessions are untouched -- their clients
     // hold a descriptor, not a name.
     if (isDraining()) throw new Error(DRAINING_MESSAGE)
-    const id = crypto.randomUUID()
+    const id = reuseId ?? crypto.randomUUID()
     const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
 
     // Check if this is a remote session
@@ -498,8 +509,9 @@ class PtyManager extends EventEmitter {
     return session
   }
 
-  createShellPty(cwd?: string): TerminalSession {
-    const id = crypto.randomUUID()
+  /** @param reuseId As `createPty`: a resumed shell keeps the pane it was in. */
+  createShellPty(cwd?: string, reuseId?: string): TerminalSession {
+    const id = reuseId ?? crypto.randomUUID()
     const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
     const workingDir = cwd || os.homedir()
     const integration = getShellIntegration({

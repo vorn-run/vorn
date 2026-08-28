@@ -62,9 +62,13 @@ export async function resumeEndedSession(
   if (!result.ok) {
     if (result.reason === 'gone') {
       // Another pane, window or device took it first. Nothing to resume and
-      // nothing to keep showing.
+      // nothing to keep showing -- but only when a person asked for this. An
+      // automatic resume that loses the claim has almost always lost it to this
+      // same app, and deleting the pane then removes the one the winner just
+      // brought back, silently, because automatic resumes say nothing.
+      if (options.automatic) return
       useAppStore.getState().removeTerminal(terminalId)
-      if (!options.automatic) toast('That session was resumed somewhere else')
+      toast('That session was resumed somewhere else')
       return
     }
     if (!options.automatic) toast.error(result.message ?? 'Could not resume that session')

@@ -56,13 +56,21 @@ function held(id: string, over: Partial<RestoredSession> = {}): RestoredSession 
 beforeEach(() => {
   useAppStore.setState({ terminals: new Map(), terminalOrder: [] })
   vi.clearAllMocks()
-  listActiveSessions.mockResolvedValue([])
+  live.length = 0
+  listActiveSessions.mockImplementation(async () => [...live])
   getRestoredSessions.mockResolvedValue([])
-  resumeSession.mockImplementation(async ({ id }: { id: string }) => ({
-    ok: true,
-    session: session({ id: `${id}-again` })
-  }))
+  // As the server does: a resumed session keeps its id -- that is what makes it
+  // the same pane -- and is running by the time the call returns, so a later
+  // reconciliation sees it live rather than ended.
+  resumeSession.mockImplementation(async ({ id }: { id: string }) => {
+    const back = session({ id })
+    live.push(back)
+    return { ok: true, session: back }
+  })
 })
+
+/** What the server currently has running, which resuming adds to. */
+const live: TerminalSession[] = []
 
 /** The ids `sessions:resume` was asked for, in the order it was asked. */
 const resumed = (): string[] => resumeSession.mock.calls.map((c) => c[0].id)
@@ -217,5 +225,49 @@ describe('starting again what was stopped', () => {
     await syncBoard({ showCold: true, resume: true })
 
     expect(resumed()).toEqual([])
+  })
+})
+
+describe('two reconciliations at once', () => {
+  it('resumes each session once, however many passes overlap', async () => {
+    // Start-up runs one and a replaced server runs another moments later; in
+    // development the mount effect runs twice on its own. Both passes see the
+    // same cold records. Before they were serialised, the loser was told the
+    // session was gone and deleted the pane the winner had just brought back --
+    // which is how a board ended up with one pane for two live sessions.
+    getRestoredSessions.mockResolvedValue([held('one'), held('two')])
+    // The second pass asks the server what is running before the first pass has
+    // resumed anything, and is answered after it has. Its answer is therefore
+    // already stale when it is used -- which is the whole race, and why running
+    // the passes one after another is the only thing that settles it.
+    let answer: () => void = () => {}
+    const held_back = new Promise<void>((r) => (answer = r))
+    listActiveSessions
+      .mockImplementationOnce(async () => [...live])
+      .mockImplementationOnce(async () => {
+        const snapshot = [...live]
+        await held_back
+        return snapshot
+      })
+
+    const first = syncBoard({ showCold: true, resume: true })
+    const second = syncBoard({ showCold: true, resume: true })
+    await first
+    answer()
+    await second
+
+    expect(resumed().sort()).toEqual(['one', 'two'])
+  })
+
+  it('keeps the pane when an automatic resume loses the claim', async () => {
+    // The claim is almost always lost to this same app, and an automatic resume
+    // says nothing when it fails -- so removing the pane here made one vanish
+    // with no explanation anywhere.
+    getRestoredSessions.mockResolvedValue([held('contested')])
+    resumeSession.mockResolvedValue({ ok: false, reason: 'gone' })
+
+    await syncBoard({ showCold: true, resume: true })
+
+    expect(useAppStore.getState().terminals.has('contested')).toBe(true)
   })
 })

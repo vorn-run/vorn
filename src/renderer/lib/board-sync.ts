@@ -18,7 +18,26 @@ import { resumeEndedSession } from './session-resume'
  * quiet for a moment, which is the one thing a pane must never look like when it
  * is a photograph.
  */
-export async function syncBoard(options: { showCold: boolean; resume: boolean }): Promise<void> {
+/**
+ * The pass in flight, so a second caller waits for it rather than racing it.
+ *
+ * Two of these overlapping is not a hypothetical: start-up runs one, a server
+ * replaced moments later runs another, and in development the mount effect runs
+ * twice by design. Both passes then read the same cold records, both ask to
+ * resume them, and the loser is told the session is gone -- which used to delete
+ * the pane the winner had just brought back.
+ */
+let inFlight: Promise<void> | null = null
+
+export function syncBoard(options: { showCold: boolean; resume: boolean }): Promise<void> {
+  const run = (inFlight ?? Promise.resolve()).catch(() => undefined).then(() => reconcile(options))
+  inFlight = run.finally(() => {
+    if (inFlight === run) inFlight = null
+  })
+  return run
+}
+
+async function reconcile(options: { showCold: boolean; resume: boolean }): Promise<void> {
   // Sessions this pass found ended, which is not the same as sessions that are
   // ended. A pane the person already chose to leave sitting there must not be
   // started again by the next reconciliation that happens to run.

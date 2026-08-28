@@ -680,7 +680,13 @@ export function registerAllMethods(): void {
           fs.existsSync(remembered) &&
           fs.statSync(remembered).isDirectory()
         const cwd = usable ? remembered : (previous.worktreePath ?? previous.projectPath)
-        const session = ptyManager.createShellPty(cwd)
+        // The same id, which is what makes this the same pane rather than a new
+        // one beside it: the client keys its terminal by this, so a fresh id
+        // would hand back a blank shell and drop the screen being resumed. The
+        // previous run's history is not deleted here either -- `startHistory`
+        // resets it under this name, on the queue that owns it, and only once
+        // something is actually running.
+        const session = ptyManager.createShellPty(cwd, id)
         // Carried across on the server rather than grafted on by whichever
         // client asked. `createShellPty` names a session after its directory, so
         // without this a restored shell loses the project it belonged to -- which
@@ -695,17 +701,12 @@ export function registerAllMethods(): void {
           ...(previous.displayName !== undefined && { displayName: previous.displayName })
         })
         clientRegistry.broadcast(IPC.SESSION_CREATED, session)
-        // Only once something is running. Discarding first and spawning second
-        // meant a spawn that threw -- a project directory renamed, a worktree
-        // pruned, a volume unmounted -- left the record consumed, the history
-        // deleted and nothing to try again from.
-        if (restored) await forgetRestored(id)
         sessionManager.scheduleSave()
         return { ok: true as const, session }
       }
 
-      const session = ptyManager.createPty(buildRestorePayload(previous, resumeSessionId))
-      if (restored) await forgetRestored(id)
+      // Same id, same reasons as the shell branch above.
+      const session = ptyManager.createPty(buildRestorePayload(previous, resumeSessionId), id)
       sessionManager.scheduleSave()
       return { ok: true as const, session }
     } catch (err) {
