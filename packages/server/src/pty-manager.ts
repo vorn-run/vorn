@@ -888,6 +888,25 @@ class PtyManager extends EventEmitter {
     this.ptys.delete(id)
   }
 
+  /**
+   * Put back a record released for a resume whose spawn then failed.
+   *
+   * Releasing is destructive on purpose -- it is what lets the replacement take
+   * the same id -- but a spawn that throws must not be the end of the session.
+   * The restored kind is handed back to `restored-sessions`; this is the other
+   * kind, a session that ended during this run and whose record lives here, and
+   * without this it was released and never put anywhere. The pane's next attempt
+   * found nothing and was told the session was gone.
+   *
+   * Reachable without malice, the same way the other one is: a project directory
+   * renamed, a worktree pruned, a volume unmounted.
+   */
+  restoreReleased(session: TerminalSession): void {
+    this.sessions.set(session.id, session)
+    this.normalizedPaths.set(session.id, normalizePath(session.worktreePath || session.projectPath))
+    if (!this.sessionOrder.includes(session.id)) this.sessionOrder.push(session.id)
+  }
+
   killPty(id: string): void {
     const p = this.ptys.get(id)
 

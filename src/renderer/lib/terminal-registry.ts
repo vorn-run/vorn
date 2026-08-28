@@ -83,9 +83,12 @@ function scheduleFlush(): void {
 function flushWrites(): void {
   rafId = null
   for (const [id, chunks] of pendingWrites) {
-    const seeding = hydrating.get(id)
-    if (seeding) {
-      for (const chunk of chunks) seeding.held.push(chunk)
+    // Not `seeding`: that is a module-level Set in this file now, and a local
+    // of the same name holding something else entirely is a trap for whoever
+    // edits this next.
+    const hydration = hydrating.get(id)
+    if (hydration) {
+      for (const chunk of chunks) hydration.held.push(chunk)
       continue
     }
     const data = chunks.length === 1 ? chunks[0].data : chunks.map((c) => c.data).join('')

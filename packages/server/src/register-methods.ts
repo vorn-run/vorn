@@ -328,6 +328,15 @@ export function setServerPort(port: number): void {
  * At module scope rather than inside `registerAllMethods` because it captures
  * nothing from it, and out here it can be tested without standing up a socket.
  */
+/** Whether a path is a directory right now, answering false for every other case. */
+function isDirectory(at: string): boolean {
+  try {
+    return fs.statSync(at).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 export async function forgetRestored(id: string): Promise<void> {
   clearScreen(id)
   // Recovery seeds a restored session's scrollback so a pane can be shown one
@@ -705,10 +714,11 @@ export function registerAllMethods(): void {
         // turns into where a process starts. A stale or fabricated path falls
         // back to the project rather than being spawned into.
         const remembered = previous.shellCwd
-        const usable =
-          remembered !== undefined &&
-          fs.existsSync(remembered) &&
-          fs.statSync(remembered).isDirectory()
+        // One question, asked once, and never allowed to throw. Asking whether it
+        // exists and then whether it is a directory is two questions with a gap
+        // between them: a directory removed in that gap turns a fallback into a
+        // rejected resume, and the fallback is the whole point of asking.
+        const usable = remembered !== undefined && isDirectory(remembered)
         const cwd = usable ? remembered : (previous.worktreePath ?? previous.projectPath)
         // The same id, which is what makes this the same pane rather than a new
         // one beside it: the client keys its terminal by this, so a fresh id
@@ -745,8 +755,11 @@ export function registerAllMethods(): void {
     } catch (err) {
       log.warn({ err, id }, '[restored] could not resume this session')
       // Put it back. A claim is destructive on purpose, but a claim whose spawn
-      // failed must not be the end of the session.
+      // failed must not be the end of the session. Both kinds, because both were
+      // taken: the carried-over record goes back to `restored-sessions`, and the
+      // one that ended during this run goes back to the pty manager it came from.
       if (restored) restoreHeld(restored)
+      else if (dead) ptyManager.restoreReleased(dead)
       return {
         ok: false as const,
         reason: 'failed' as const,

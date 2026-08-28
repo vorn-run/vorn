@@ -448,3 +448,31 @@ describe('letting go of a session that is about to come back', () => {
     expect(ptyManager.getActiveSessions().some((s) => s.id === session.id)).toBe(false)
   })
 })
+
+describe('a release whose spawn then fails', () => {
+  it('can be put back, because otherwise the session is gone for good', () => {
+    // Releasing is destructive on purpose -- it is what lets the replacement
+    // take the same id -- but a spawn that throws must not end the session. The
+    // carried-over kind is handed back to `restored-sessions`; this is the other
+    // kind, whose record lives in the pty manager, and it was released and never
+    // put anywhere. The pane's next attempt was told the session was gone.
+    const { session } = createAgent()
+    ptyManager.releaseForResume(session.id)
+    expect(ptyManager.getActiveSessions().some((s) => s.id === session.id)).toBe(false)
+
+    ptyManager.restoreReleased(session)
+
+    expect(ptyManager.getActiveSessions().some((s) => s.id === session.id)).toBe(true)
+    // Still no process behind it, which is what makes it resumable rather than live.
+    expect(ptyManager.hasLivePty(session.id)).toBe(false)
+  })
+
+  it('does not put the id in the order twice', () => {
+    const { session } = createAgent()
+    ptyManager.releaseForResume(session.id)
+    ptyManager.restoreReleased(session)
+    ptyManager.restoreReleased(session)
+
+    expect(ptyManager.getActiveSessions().filter((s) => s.id === session.id)).toHaveLength(1)
+  })
+})

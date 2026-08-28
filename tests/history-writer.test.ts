@@ -419,10 +419,18 @@ describe('a log that outgrows its cap', () => {
 
     await settle(4)
 
-    expect(readCheckpoint(historyDir(dir, ID))?.generation).toBe(2)
+    // Not an absolute generation. `settle` sleeps against a live 5ms tick, so a
+    // loaded machine gets more ticks for the same four rounds and a further
+    // checkpoint lands -- which is legitimate and not what this is about. What
+    // must hold is that the log survived and still belongs to the checkpoint
+    // beside it, whichever number they reached together.
+    const checkpointed = readCheckpoint(historyDir(dir, ID))?.generation
+    expect(checkpointed).toBeGreaterThanOrEqual(2)
     // Same generation in both, so the log is still replayable onto it -- which is
     // the whole point of not having dropped it.
-    expect(logOf().generation).toBe(2)
+    expect(logOf().generation).toBe(checkpointed)
+    // The assertion that actually catches the regression: every byte that
+    // arrived during the checkpoint's fsyncs used to be thrown away here.
     expect(outputs(logOf().frames)).toContain('y')
   })
 
