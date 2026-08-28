@@ -23,7 +23,7 @@ import {
 import { clearScreen } from './terminal-screen'
 import { discardHistory } from './history/writer'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
-import { readScrollback } from './terminal-scrollback'
+import { clearScrollback, readScrollback } from './terminal-scrollback'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
@@ -318,6 +318,28 @@ export function setServerPort(port: number): void {
   serverPort = port
 }
 
+/**
+ * Let go of everything held for a session from a previous run.
+ *
+ * Called when one is claimed, closed or dismissed -- the three ways a carried
+ * over record stops being offered. All three end the same way, so they end in
+ * one place.
+ *
+ * At module scope rather than inside `registerAllMethods` because it captures
+ * nothing from it, and out here it can be tested without standing up a socket.
+ */
+export async function forgetRestored(id: string): Promise<void> {
+  clearScreen(id)
+  // Recovery seeds a restored session's scrollback so a pane can be shown one
+  // (`history/recovery.ts`). Nothing else ever frees it: this session has no PTY,
+  // so it never reaches the `clearScrollback` on the kill path, and letting the
+  // record go is the last thing that happens to it. Without this the bytes stay
+  // held for the life of the server -- the same reasoning that put `clearScreen`
+  // here.
+  clearScrollback(id)
+  await discardHistory(id)
+}
+
 export function registerAllMethods(): void {
   // Wire headless worktree counter into pty-manager for cleanup gating
   ptyManager.setHeadlessWorktreeCounter((worktreePath, excludeId) =>
@@ -336,10 +358,6 @@ export function registerAllMethods(): void {
    * its own history rather than appending to a record of the one it replaced,
    * and a declined one is not coming back.
    */
-  const forgetRestored = async (id: string): Promise<void> => {
-    clearScreen(id)
-    await discardHistory(id)
-  }
 
   registerMethod('terminal:kill', (id) => {
     // A pane showing a session from the last run has no PTY to kill. Closing it

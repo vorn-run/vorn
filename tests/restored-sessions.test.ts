@@ -125,8 +125,8 @@ describe('what a pane is told about one', () => {
     seedRestored([session({ id: 'whole' }), session({ id: 'torn' }), session({ id: 'none' })], NOW)
 
     markRecovered([
-      { id: 'whole', stopped: 'end' },
-      { id: 'torn', stopped: 'checksum' }
+      { id: 'whole', stopped: 'end', closedCleanly: true },
+      { id: 'torn', stopped: 'checksum', closedCleanly: false }
     ])
 
     const byId = new Map(listRestored().map((r) => [r.session.id, r]))

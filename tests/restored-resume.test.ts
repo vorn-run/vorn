@@ -22,7 +22,12 @@ import {
 } from '../packages/server/src/history/writer'
 import { historyDir } from '../packages/server/src/history/checkpoint'
 import { createScreen, feedScreen, resetScreens } from '../packages/server/src/terminal-screen'
-import { resetScrollback } from '../packages/server/src/terminal-scrollback'
+import {
+  resetScrollback,
+  seedScrollback,
+  scrollbackUnitsHeld
+} from '../packages/server/src/terminal-scrollback'
+import { forgetRestored } from '../packages/server/src/register-methods'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
 
 /**
@@ -172,5 +177,31 @@ describe('a claim whose spawn then fails', () => {
     // And it can be claimed again, once.
     expect(consumeRestored('one')).not.toBeNull()
     expect(consumeRestored('one')).toBeNull()
+  })
+})
+
+describe('letting go of everything held for one', () => {
+  it('frees the scrollback recovery seeded, which nothing else would', async () => {
+    // Recovery gives a restored session a scrollback so a pane can be shown its
+    // last screen. That session has no PTY, so it never reaches the
+    // `clearScrollback` on the kill path, and being claimed or dismissed is the
+    // last thing that happens to it -- so without this the bytes are held for
+    // the life of the server, once per session anyone declines.
+    await wrote('one')
+    seedScrollback('one', 'what the last run had on screen')
+    expect(scrollbackUnitsHeld('one')).toBeGreaterThan(0)
+
+    await forgetRestored('one')
+
+    expect(scrollbackUnitsHeld('one')).toBe(0)
+  })
+
+  it('takes the history with it', async () => {
+    await wrote('two')
+    expect(fs.existsSync(historyDir(dir, 'two'))).toBe(true)
+
+    await forgetRestored('two')
+
+    expect(fs.existsSync(historyDir(dir, 'two'))).toBe(false)
   })
 })
