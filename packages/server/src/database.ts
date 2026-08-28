@@ -968,6 +968,23 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 15 (config row revisions)')
   }
+
+  if (version < 16) {
+    // Where a shell actually is, rather than where it was started. The column
+    // never existed, so `shellCwd` round-tripped to nothing and a restored shell
+    // always fell back to its project directory -- which for anybody who had
+    // navigated somewhere, which is most shell use, was the wrong place.
+    d.transaction(() => {
+      const cols = d.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
+      if (!cols.some((c) => c.name === 'shell_cwd')) {
+        d.exec('ALTER TABLE sessions ADD COLUMN shell_cwd TEXT')
+      }
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '16')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 16 (shell working directory)')
+  }
 }
 
 /** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
@@ -1025,7 +1042,8 @@ function verifySchema(d: Database.Database): void {
         ddl: 'ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0'
       },
       { column: 'worktree_name', ddl: 'ALTER TABLE sessions ADD COLUMN worktree_name TEXT' },
-      { column: 'agent_session_id', ddl: 'ALTER TABLE sessions ADD COLUMN agent_session_id TEXT' }
+      { column: 'agent_session_id', ddl: 'ALTER TABLE sessions ADD COLUMN agent_session_id TEXT' },
+      { column: 'shell_cwd', ddl: 'ALTER TABLE sessions ADD COLUMN shell_cwd TEXT' }
     ],
     agent_commands: [
       {
@@ -3008,8 +3026,8 @@ export function saveSessions(sessions: TerminalSession[]): void {
   const run = d.transaction(() => {
     d.prepare('DELETE FROM sessions').run()
     const insert = d.prepare(
-      `INSERT INTO sessions (id, agent_type, project_name, project_path, status, created_at, pid, display_name, branch, worktree_path, is_worktree, remote_host_id, remote_host_label, hook_session_id, status_source, saved_at, sort_order, worktree_name, agent_session_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO sessions (id, agent_type, project_name, project_path, status, created_at, pid, display_name, branch, worktree_path, is_worktree, remote_host_id, remote_host_label, hook_session_id, status_source, saved_at, sort_order, worktree_name, agent_session_id, shell_cwd)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (let i = 0; i < sessions.length; i++) {
       const s = sessions[i]
@@ -3032,7 +3050,8 @@ export function saveSessions(sessions: TerminalSession[]): void {
         savedAt,
         i,
         s.worktreeName ?? null,
-        s.agentSessionId ?? null
+        s.agentSessionId ?? null,
+        s.shellCwd ?? null
       )
     }
   })
@@ -3058,6 +3077,7 @@ export function getPreviousSessions(): TerminalSession[] {
     hook_session_id: string | null
     status_source: string | null
     saved_at: number | null
+    shell_cwd: string | null
     worktree_name: string | null
     agent_session_id: string | null
   }>
@@ -3083,7 +3103,8 @@ export function getPreviousSessions(): TerminalSession[] {
     ...(r.agent_session_id != null && { agentSessionId: r.agent_session_id }),
     // Selected since this table was written and dropped on the floor until now.
     // It is the only record of when a run ended.
-    ...(r.saved_at != null && { savedAt: r.saved_at })
+    ...(r.saved_at != null && { savedAt: r.saved_at }),
+    ...(r.shell_cwd != null && { shellCwd: r.shell_cwd })
   }))
 }
 

@@ -154,6 +154,29 @@ function create(cols: number, rows: number): Held {
     // False: this is an observation, not a takeover. xterm goes on handling it.
     return false
   })
+  // And the one Vorn's own shells actually emit.
+  //
+  // The handler above listens on OSC 7, which is the convention other terminals
+  // use -- and Vorn's shell integration has always emitted `5522;cwd;<path>`
+  // instead, namespaced so it cannot collide with a standard sequence. So the
+  // cwd this model captured was empty for every Vorn shell, and the checkpoint
+  // has been carrying an empty field since it was written. Both are registered:
+  // OSC 7 for a shell configured by hand or by another tool, 5522 for ours.
+  //
+  // Same discipline as above, and for the same reason -- this runs from xterm's
+  // timer, where a throw reaches the top of a process with no handler behind it.
+  term.parser.registerOscHandler(5522, (payload) => {
+    try {
+      const [kind, ...rest] = payload.split(';')
+      if (kind === 'cwd' && rest.length) {
+        const path = rest.join(';')
+        if (path) held.cwd = path.slice(0, MAX_LABEL_UNITS)
+      }
+    } catch {
+      /* an unreadable cwd is not worth anything at all */
+    }
+    return false
+  })
 
   return held
 }
@@ -254,10 +277,23 @@ export function feedScreen(id: string, data: string): void {
  * means `feedScreen` is a map lookup and a write, on a path that runs for every
  * chunk of every session.
  */
-export function createScreen(id: string, cols: number, rows: number): void {
+export function createScreen(
+  id: string,
+  cols: number,
+  rows: number,
+  labels?: { title?: string; cwd?: string }
+): void {
   clearScreen(id)
   try {
-    screens.set(id, create(cols, rows))
+    const held = create(cols, rows)
+    // A restored screen is rebuilt from escape sequences, and neither of these
+    // is one -- they arrive as notifications the serializer does not round-trip.
+    // The checkpoint has been storing both since it was written and recovery
+    // never put them back, so a session came back with no title and no
+    // directory however carefully the rest of it was replayed.
+    if (labels?.title) held.title = labels.title.slice(0, MAX_LABEL_UNITS)
+    if (labels?.cwd) held.cwd = labels.cwd.slice(0, MAX_LABEL_UNITS)
+    screens.set(id, held)
   } catch (err) {
     drop(id, err)
   }
@@ -404,4 +440,16 @@ export function screenCount(): number {
 /** Test-only, mirroring `resetScrollback`. */
 export function resetScreens(): void {
   for (const id of [...screens.keys()]) clearScreen(id)
+}
+
+/**
+ * Where this terminal's shell last said it was.
+ *
+ * Empty until a shell with Vorn's integration reports one. Read by
+ * `pty-manager`, which writes it onto the session record so a restored shell can
+ * be offered the directory somebody was actually in rather than the one it was
+ * launched in.
+ */
+export function screenCwd(id: string): string {
+  return screens.get(id)?.cwd ?? ''
 }

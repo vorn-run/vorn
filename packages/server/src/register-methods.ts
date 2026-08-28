@@ -1681,6 +1681,13 @@ export function registerAllMethods(): void {
   })
 
   // Clean up Copilot hooks on session exit
+  // A shell moved. Saved on a debounce, so a script running `cd` in a loop costs
+  // one write rather than hundreds -- and what is being kept is where the shell
+  // ended up, not every step it took to get there.
+  ptyManager.on('session-cwd', () => {
+    sessionManager.scheduleSave()
+  })
+
   ptyManager.on('session-exit', (session) => {
     const inst = copilotInstallations.get(session.id)
     if (inst) {

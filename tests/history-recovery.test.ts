@@ -298,6 +298,22 @@ describe('more terminals than are rebuilt at once', () => {
   })
 })
 
+describe('the two things the serialized screen cannot carry', () => {
+  it('are put back from the checkpoint', async () => {
+    // A title and a working directory arrive as notifications, not as escape
+    // sequences, so replaying the screen does not replay them. The checkpoint
+    // has stored both since it was written; recovery dropped them.
+    await put(sample({ title: 'vorn — building', cwd: '/Users/x/dev/vorn' }), 4)
+
+    await recoverHistory(dir, only)
+
+    expect(await serializeScreen(ID)).toMatchObject({
+      title: 'vorn — building',
+      cwd: '/Users/x/dev/vorn'
+    })
+  })
+})
+
 describe('a session list that could not be read', () => {
   it('sweeps nothing, because absence and failure look the same otherwise', async () => {
     // `getPreviousSessions` answers an empty list both when there are none and

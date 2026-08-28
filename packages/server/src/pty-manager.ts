@@ -38,7 +38,7 @@ import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
-import { createScreen, feedScreen, resizeScreen, clearScreen } from './terminal-screen'
+import { createScreen, feedScreen, resizeScreen, clearScreen, screenCwd } from './terminal-screen'
 import { startHistory, recordOutput, recordResize, stopHistory } from './history/writer'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 import { isDraining, DRAINING_MESSAGE } from './draining'
@@ -582,7 +582,31 @@ class PtyManager extends EventEmitter {
       appendScrollback(id, data)
       feedScreen(id, data)
       recordOutput(id, data)
+      this.followShellCwd(id)
     }
+  }
+
+  /**
+   * Keep a shell's session record pointing at where the shell actually is.
+   *
+   * The screen model already watches for the integration's cwd report; this
+   * carries it onto the record, which is the thing that gets persisted and the
+   * thing a restored shell is offered. Without it `shellCwd` stayed the
+   * directory the PTY was spawned in, so restoring landed somebody back where
+   * they started rather than where they were.
+   *
+   * Read after the flush rather than on every report, because the report
+   * arrives through xterm's parser and this is the point where that parser has
+   * been given the bytes. A save is scheduled only when it actually moved: `cd`
+   * happens far less often than output does, but output is constant.
+   */
+  private followShellCwd(id: string): void {
+    const session = this.sessions.get(id)
+    if (!session || session.agentType !== 'shell') return
+    const cwd = screenCwd(id)
+    if (!cwd || cwd === session.shellCwd) return
+    session.shellCwd = cwd
+    this.emit('session-cwd', id, cwd)
   }
 
   private clearBuffer(id: string): void {

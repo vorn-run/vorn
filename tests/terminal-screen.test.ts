@@ -109,6 +109,64 @@ describe('a terminal that goes away while it is being read', () => {
   )
 })
 
+describe('where the shell says it is', () => {
+  it("follows the sequence Vorn's own integration emits", async () => {
+    // The handler this model started with listens on OSC 7, which is what other
+    // terminals use. Vorn's shell integration has always emitted `5522;cwd;`
+    // instead -- so the cwd was empty for every Vorn shell, and the checkpoint
+    // has been carrying an empty field since it was written.
+    createScreen('shell', 80, 24)
+    feedScreen('shell', `${ESC}]5522;cwd;/Users/x/dev/vorn\x07`)
+
+    expect((await serializeScreen('shell'))?.cwd).toBe('/Users/x/dev/vorn')
+  })
+
+  it('still follows the one other terminals use', async () => {
+    createScreen('shell', 80, 24)
+    feedScreen('shell', `${ESC}]7;file://host/Users/x/dev/other\x07`)
+
+    expect((await serializeScreen('shell'))?.cwd).toBe('/Users/x/dev/other')
+  })
+
+  it('survives a directory with a percent in its name', async () => {
+    // The path is not percent-encoded on this sequence, so it is taken as-is --
+    // and a directory called `100%` is a directory somebody has.
+    createScreen('shell', 80, 24)
+    feedScreen('shell', `${ESC}]5522;cwd;/tmp/100%\x07`)
+
+    expect((await serializeScreen('shell'))?.cwd).toBe('/tmp/100%')
+  })
+
+  it("ignores the integration's other reports", async () => {
+    createScreen('shell', 80, 24)
+    feedScreen('shell', `${ESC}]5522;cmd;bHM=\x07`)
+    feedScreen('shell', `${ESC}]5522;dur;120\x07`)
+
+    expect((await serializeScreen('shell'))?.cwd).toBe('')
+  })
+
+  it('keeps it bounded like the title', async () => {
+    createScreen('shell', 80, 24)
+    feedScreen('shell', `${ESC}]5522;cwd;/${'p'.repeat(5_000_000)}\x07`)
+
+    expect(((await serializeScreen('shell'))?.cwd.length ?? 0) <= 512).toBe(true)
+  })
+})
+
+describe('a screen rebuilt from a checkpoint', () => {
+  it('is given back the title and directory the serializer cannot carry', async () => {
+    // Neither is an escape sequence: they arrive as notifications and the
+    // serializer does not round-trip them. The checkpoint stores both, and
+    // recovery used to drop them on the floor.
+    createScreen('restored', 100, 30, { title: 'vorn — building', cwd: '/Users/x/dev/vorn' })
+
+    expect(await serializeScreen('restored')).toMatchObject({
+      title: 'vorn — building',
+      cwd: '/Users/x/dev/vorn'
+    })
+  })
+})
+
 describe('what a program can make the model hold', () => {
   it('keeps a title bounded, whatever length the program sends', async () => {
     // Both the title and the cwd live for as long as the terminal does and both

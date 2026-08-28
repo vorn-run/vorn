@@ -248,7 +248,10 @@ async function restore(dir: string, session: RecoverableSession): Promise<Recove
   const cols = checkpoint?.cols ?? FALLBACK_COLS
   const rows = checkpoint?.rows ?? FALLBACK_ROWS
 
-  createScreen(session.id, cols, rows)
+  createScreen(session.id, cols, rows, {
+    ...(checkpoint?.title !== undefined && { title: checkpoint.title }),
+    ...(checkpoint?.cwd !== undefined && { cwd: checkpoint.cwd })
+  })
   let scrollback = checkpoint?.scrollback ?? ''
   if (checkpoint?.screen) feedScreen(session.id, checkpoint.screen)
 
