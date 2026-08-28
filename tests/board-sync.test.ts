@@ -19,6 +19,7 @@ Object.defineProperty(window, 'api', {
 
 import { useAppStore } from '../src/renderer/stores'
 import { syncBoard } from '../src/renderer/lib/board-sync'
+import { showEndedSession } from '../src/renderer/lib/session-resume'
 
 /**
  * Making the board agree with what the server actually has.
@@ -307,5 +308,26 @@ describe('two panes resumed in one pass', () => {
     const taken = resumeSession.mock.calls.map((c) => c[0].resumeSessionId)
     expect(taken).toHaveLength(2)
     expect(new Set(taken).size).toBe(2)
+  })
+})
+
+describe('bringing an ended pane in from the banner', () => {
+  it('says a quit was a quit, as the board does', async () => {
+    // The banner offers to show panes without starting anything, and the record
+    // it reads says which ending this was. Reporting every one of them as a
+    // server that stopped unexpectedly turns closing the app into a fault report.
+    getRestoredSessions.mockResolvedValue([held('quit', { closedCleanly: true })])
+
+    await showEndedSession('quit')
+
+    expect(ended('quit')).toMatchObject({ reason: 'app-closed' })
+  })
+
+  it('still says so when the server really did stop', async () => {
+    getRestoredSessions.mockResolvedValue([held('crashed', { closedCleanly: false })])
+
+    await showEndedSession('crashed')
+
+    expect(ended('crashed')).toMatchObject({ reason: 'server-stopped' })
   })
 })
