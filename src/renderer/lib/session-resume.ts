@@ -42,7 +42,7 @@ export async function showEndedSession(id: string): Promise<void> {
  */
 export async function resumeEndedSession(
   terminalId: string,
-  options: { automatic?: boolean } = {}
+  options: { automatic?: boolean; claimed?: Set<string> } = {}
 ): Promise<void> {
   const state = useAppStore.getState()
   const previous = state.terminals.get(terminalId)?.session
@@ -53,7 +53,15 @@ export async function resumeEndedSession(
   // and already lives here; the server is given the answer, not the search.
   let resumeSessionId: string | undefined
   try {
-    resumeSessionId = await resolveResumeSessionId(previous)
+    // `claimed` carries across a whole pass. Where an agent cannot be asked for
+    // an exact id -- codex and opencode support resuming but not pinning, so
+    // there is never an `agentSessionId` to use -- this falls back to scanning
+    // the agent's own history and taking the first match for the project. Two
+    // panes resolved independently would take the same one, and the pass would
+    // start two agents against a single transcript: the thing the record's own
+    // claim exists to prevent, undone one layer down.
+    resumeSessionId = await resolveResumeSessionId(previous, options.claimed)
+    if (resumeSessionId) options.claimed?.add(resumeSessionId)
   } catch {
     // No exact match found. The agent's own picker is better than refusing.
   }

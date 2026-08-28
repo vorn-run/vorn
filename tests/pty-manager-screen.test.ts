@@ -408,3 +408,43 @@ describe('the seam between a session and the one resuming it', () => {
     expect(fake.written.slice(before)).toEqual([])
   })
 })
+
+describe('letting go of a session that is about to come back', () => {
+  it('announces nothing, where killing one announces an exit', () => {
+    // Resume used to route through `killPty`, which emits `session-exit` for a
+    // session that is returning under the same id and -- when it was the last
+    // one in a worktree -- broadcasts WORKTREE_CONFIRM_CLEANUP. That reaches the
+    // person as an offer to delete the worktree the agent is at that moment
+    // being resumed into, and taking it removes the tree under a running agent.
+    const said: string[] = []
+    const onExit = (): void => void said.push('session-exit')
+    const onMessage = (channel: string): void => void said.push(channel)
+    ptyManager.on('session-exit', onExit)
+    ptyManager.on('client-message', onMessage)
+
+    try {
+      const coming_back = createAgent()
+      ptyManager.releaseForResume(coming_back.session.id)
+      expect(said).toEqual([])
+
+      // The contrast, so this cannot pass by nothing being emitted at all.
+      const going = createAgent()
+      ptyManager.killPty(going.session.id)
+      expect(said).toContain('session-exit')
+    } finally {
+      ptyManager.off('session-exit', onExit)
+      ptyManager.off('client-message', onMessage)
+    }
+  })
+
+  it('leaves the history alone, because the run replacing it resets that', () => {
+    // `killPty` calls `stopHistory`, which queues a recursive remove of the very
+    // directory `startHistory` resets a few lines later -- two queues over one
+    // directory, which the writer is built to never have.
+    const { session } = createAgent()
+    ptyManager.releaseForResume(session.id)
+
+    expect(ptyManager.hasLivePty(session.id)).toBe(false)
+    expect(ptyManager.getActiveSessions().some((s) => s.id === session.id)).toBe(false)
+  })
+})

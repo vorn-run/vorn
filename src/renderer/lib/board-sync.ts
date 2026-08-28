@@ -31,9 +31,14 @@ let inFlight: Promise<void> | null = null
 
 export function syncBoard(options: { showCold: boolean; resume: boolean }): Promise<void> {
   const run = (inFlight ?? Promise.resolve()).catch(() => undefined).then(() => reconcile(options))
-  inFlight = run.finally(() => {
-    if (inFlight === run) inFlight = null
+  // Tracked separately from what is returned. `finally` hands back a new promise
+  // rather than the one it was called on, so comparing against `run` here never
+  // matched and the reset never happened -- passes stayed chained off a promise
+  // that had settled long ago.
+  const tracked: Promise<void> = run.finally(() => {
+    if (inFlight === tracked) inFlight = null
   })
+  inFlight = tracked
   return run
 }
 
@@ -116,6 +121,8 @@ async function reconcile(options: { showCold: boolean; resume: boolean }): Promi
  * back in the order they were in.
  */
 async function resumeAll(ids: string[]): Promise<void> {
+  // One set for the pass, not one per pane. See `resumeEndedSession`.
+  const claimed = new Set<string>()
   for (const id of ids) {
     // Read again rather than carried: each resume above it awaited a spawn, and
     // an exit or a close for this pane could have arrived in that gap.
@@ -123,6 +130,6 @@ async function resumeAll(ids: string[]): Promise<void> {
     if (!term?.ended) continue
     // A failure leaves the pane ended and its strip on screen, which is already
     // the offer to try again by hand. Nothing is said twice.
-    await resumeEndedSession(id, { automatic: true })
+    await resumeEndedSession(id, { automatic: true, claimed })
   }
 }

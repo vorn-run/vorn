@@ -860,6 +860,34 @@ class PtyManager extends EventEmitter {
     recordResize(id, cols, rows)
   }
 
+  /**
+   * Let go of a session that is about to start again under the same id.
+   *
+   * `killPty` was doing this job and doing three other things with it. Its
+   * process has already gone, so it emits `session-exit` for a session that is
+   * coming straight back, and -- when that session was the last one in a
+   * worktree -- broadcasts WORKTREE_CONFIRM_CLEANUP, which reaches the person as
+   * an offer to delete the worktree the agent is at that moment being resumed
+   * into. Taking it removes the tree out from under a running agent.
+   *
+   * It also called `stopHistory`, which queues a recursive remove of the very
+   * directory `startHistory` is about to reset a few lines later.
+   *
+   * So this releases the id and says nothing: the maps, the buffers and the
+   * screen model, which `createPty` is about to replace anyway.
+   */
+  releaseForResume(id: string): void {
+    this.drainBuffer(id)
+    this.clearBuffer(id)
+    this.sessions.delete(id)
+    this.normalizedPaths.delete(id)
+    this.clearSessionTracking(id)
+    this.flushSeq.delete(id)
+    clearScreen(id)
+    this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
+    this.ptys.delete(id)
+  }
+
   killPty(id: string): void {
     const p = this.ptys.get(id)
 

@@ -674,11 +674,11 @@ export function registerAllMethods(): void {
     if (!previous) return { ok: false as const, reason: 'gone' as const }
 
     try {
-      // Claimed, for the second kind. `killPty` is what removes a record whose
-      // process has already gone, and it takes the screen model and the history
-      // with it -- so this is the same forgetting the other branch does below,
-      // by the path that already existed for it.
-      if (dead) ptyManager.killPty(id)
+      // Claimed, for the second kind. Not `killPty`: that announces an exit for
+      // a session which is coming straight back, offers to delete the worktree
+      // this is about to resume into, and removes the history directory
+      // `startHistory` resets moments later.
+      if (dead) ptyManager.releaseForResume(id)
 
       if (previous.agentType === 'shell') {
         // The remembered directory only if it is still a directory. It was

@@ -5,11 +5,13 @@ import type { RestoredSession, TerminalSession } from '../packages/shared/src/ty
 const listActiveSessions = vi.fn()
 const getRestoredSessions = vi.fn()
 const resumeSession = vi.fn()
+const getRecentSessions = vi.fn()
 Object.defineProperty(window, 'api', {
   value: {
     listActiveSessions,
     getRestoredSessions,
     resumeSession,
+    getRecentSessions,
     notifyWidgetStatus: vi.fn()
   },
   writable: true
@@ -57,6 +59,7 @@ beforeEach(() => {
   useAppStore.setState({ terminals: new Map(), terminalOrder: [] })
   vi.clearAllMocks()
   live.length = 0
+  getRecentSessions.mockResolvedValue([])
   listActiveSessions.mockImplementation(async () => [...live])
   getRestoredSessions.mockResolvedValue([])
   // As the server does: a resumed session keeps its id -- that is what makes it
@@ -269,5 +272,40 @@ describe('two reconciliations at once', () => {
     await syncBoard({ showCold: true, resume: true })
 
     expect(useAppStore.getState().terminals.has('contested')).toBe(true)
+  })
+})
+
+describe('two panes resumed in one pass', () => {
+  it('do not both take the same agent transcript', async () => {
+    // codex and opencode can resume an exact session but cannot have an id
+    // pinned on a fresh launch, so there is never an `agentSessionId` and both
+    // fall back to scanning the agent's own history -- which returns the first
+    // match for the project. Resolved independently, two panes get the same id
+    // and the pass starts two agents against one conversation, which is the
+    // thing the record's own claim exists to prevent.
+    getRestoredSessions.mockResolvedValue([
+      held('one', { session: session({ id: 'one', agentType: 'codex' }) }),
+      held('two', { session: session({ id: 'two', agentType: 'codex' }) })
+    ])
+    getRecentSessions.mockResolvedValue([
+      {
+        sessionId: 'transcript-a',
+        agentType: 'codex',
+        canResumeExact: true,
+        projectPath: '/dev/vorn'
+      },
+      {
+        sessionId: 'transcript-b',
+        agentType: 'codex',
+        canResumeExact: true,
+        projectPath: '/dev/vorn'
+      }
+    ])
+
+    await syncBoard({ showCold: true, resume: true })
+
+    const taken = resumeSession.mock.calls.map((c) => c[0].resumeSessionId)
+    expect(taken).toHaveLength(2)
+    expect(new Set(taken).size).toBe(2)
   })
 })
