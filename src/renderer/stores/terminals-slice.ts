@@ -13,14 +13,19 @@ import { clearDirty } from '../lib/editor-dirty'
 export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set) => ({
   terminals: new Map(),
 
-  addTerminal: (session) =>
+  addTerminal: (session, ended) =>
     set((state) => {
       const next = new Map(state.terminals)
       next.set(session.id, {
         id: session.id,
         session,
         status: session.status,
-        lastOutputTimestamp: Date.now()
+        // For a session from a previous run this is when it ended, not now.
+        // Several views sort by it, and stamping every restored pane with the
+        // current time would put a terminal nobody has touched in days at the
+        // top of the list.
+        lastOutputTimestamp: ended?.at ?? Date.now(),
+        ...(ended !== undefined && { ended })
       })
       const order = state.terminalOrder.includes(session.id)
         ? state.terminalOrder
@@ -155,6 +160,43 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       if (term) next.set(id, { ...term, status })
       window.api.notifyWidgetStatus()
       return { terminals: next }
+    }),
+
+  markEnded: (id, ended) =>
+    set((state) => {
+      const next = new Map(state.terminals)
+      const term = next.get(id)
+      if (term) next.set(id, { ...term, ended })
+      return { terminals: next }
+    }),
+
+  clearEnded: (id) =>
+    set((state) => {
+      const next = new Map(state.terminals)
+      const term = next.get(id)
+      if (!term) return { terminals: state.terminals }
+      const { ended: _ended, ...live } = term
+      next.set(id, live)
+      return { terminals: next }
+    }),
+
+  replaceTerminal: (previousId, session) =>
+    set((state) => {
+      const next = new Map(state.terminals)
+      next.delete(previousId)
+      next.set(session.id, {
+        id: session.id,
+        session,
+        status: session.status,
+        lastOutputTimestamp: Date.now()
+      })
+      // In place, so a resumed card keeps the slot it was already occupying.
+      const order = state.terminalOrder.map((id) => (id === previousId ? session.id : id))
+      window.api.notifyWidgetStatus()
+      return {
+        terminals: next,
+        terminalOrder: order.includes(session.id) ? order : [...order, session.id]
+      }
     }),
 
   updateLastOutput: (id, timestamp) =>

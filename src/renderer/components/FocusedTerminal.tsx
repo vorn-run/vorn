@@ -8,7 +8,7 @@ import { AgentStatusIcon } from './AgentStatusIcon'
 import { InlineRename } from './InlineRename'
 import { CardHeader } from './card/CardHeader'
 import { CardStatusBar } from './card/CardStatusBar'
-import { IntentBar } from './IntentBar'
+import { SessionComposer } from './card/SessionComposer'
 import { MobileFontSizeControl } from './MobileFontSizeControl'
 import { MobileTerminalKeybar } from './MobileTerminalKeybar'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
@@ -274,12 +274,11 @@ export function FocusedTerminal() {
 
             {/* +4 for this pane's own container padding, so the caret lands in
             the terminal's text column. */}
-            {!isMobile && (
-              <IntentBar
-                terminalId={effectiveId}
-                indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks) + 4}
-              />
-            )}
+            <SessionComposer
+              terminalId={effectiveId}
+              indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks) + 4}
+              hideIntentBar={isMobile}
+            />
 
             {!isMobile && <CardStatusBar terminalId={effectiveId} />}
           </div>

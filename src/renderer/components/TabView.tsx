@@ -16,7 +16,7 @@ import { PromptLauncher } from './PromptLauncher'
 import { InlineRename } from './InlineRename'
 import { CardContextMenu } from './CardContextMenu'
 import { CardStatusBar } from './card/CardStatusBar'
-import { IntentBar } from './IntentBar'
+import { SessionComposer } from './card/SessionComposer'
 import { getDisplayName, getBranchLabel } from '../lib/terminal-display'
 import { closeTerminalSession } from '../lib/terminal-close'
 import { buildTooltip } from '../lib/tab-tooltip'
@@ -640,7 +640,7 @@ export function TabView() {
               )}
             </div>
             {activeTabId && activeTerminal && (
-              <IntentBar
+              <SessionComposer
                 terminalId={activeTabId}
                 indentPx={terminalTextIndentPx(activeTerminal.session.agentType, domBlocks)}
               />
