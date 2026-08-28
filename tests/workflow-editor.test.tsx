@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
@@ -79,6 +79,15 @@ vi.mock('../src/renderer/stores', () => {
 const { WorkflowEditor } = await import('../src/renderer/components/workflow-editor/WorkflowEditor')
 
 describe('WorkflowEditor', () => {
+  // The editing id decides whether half this toolbar renders at all, and the
+  // store mock is a plain object rather than a store — nothing resets it
+  // between tests. It was on each test that set it to put it back, which holds
+  // right up until one of them forgets and the next test inherits an editor it
+  // never asked for.
+  afterEach(() => {
+    mockState.editingWorkflowId = null
+  })
+
   it('renders the canvas and properties panel when open with no node selected', () => {
     const { getByTestId } = render(<WorkflowEditor />)
     expect(getByTestId('canvas')).toBeInTheDocument()
@@ -188,15 +197,6 @@ describe('WorkflowEditor', () => {
     expect(mockState.setWorkflowEditorOpen).toHaveBeenCalledWith(false)
   })
 
-  it('clicking Run history toggles the run history panel', () => {
-    const { container, getByTestId } = render(<WorkflowEditor />)
-    mockState.editingWorkflowId = 'w1'
-    const historyButton = container.querySelector('svg.lucide-history')?.closest('button')
-    if (historyButton) fireEvent.click(historyButton)
-    expect(getByTestId('properties-panel')).toBeInTheDocument()
-    mockState.editingWorkflowId = null
-  })
-
   it('clicks Delete workflow in the overflow menu when editing', () => {
     mockState.editingWorkflowId = 'w1'
     const { container, getByText } = render(<WorkflowEditor />)
@@ -216,15 +216,19 @@ describe('WorkflowEditor', () => {
 
   it('toggles the run history panel via the history toolbar button when editing', () => {
     mockState.editingWorkflowId = 'w1'
-    const { container, getByTestId, queryByTestId } = render(<WorkflowEditor />)
-    const historyButton = container.querySelector('svg.lucide-history')?.closest('button')
-    expect(historyButton).toBeDefined()
-    if (historyButton) fireEvent.click(historyButton)
+    const { getByRole, getByTestId, queryByTestId } = render(<WorkflowEditor />)
+    // By the name the button carries, not by the icon inside it. lucide renames
+    // icons between releases -- History became an alias for RotateCcwClock in
+    // 1.33, so the old class selector matched nothing and the chained
+    // `?.closest()` handed back undefined. `toBeDefined()` was the only guard,
+    // and undefined is exactly what it fails on, so a renamed icon surfaced as a
+    // puzzle instead.
+    const historyButton = getByRole('button', { name: /Run history/ })
+    fireEvent.click(historyButton)
     expect(getByTestId('run-history')).toBeInTheDocument()
     expect(queryByTestId('properties-panel')).not.toBeInTheDocument()
-    if (historyButton) fireEvent.click(historyButton)
+    fireEvent.click(historyButton)
     expect(queryByTestId('run-history')).not.toBeInTheDocument()
-    mockState.editingWorkflowId = null
   })
 
   it('clicks Workflow settings menu item to open properties', () => {
