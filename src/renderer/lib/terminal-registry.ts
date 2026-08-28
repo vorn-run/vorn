@@ -174,9 +174,24 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
     statusHandlers.get(terminalId)?.(data)
   }
 
+  /**
+   * Whether the pane this seed was started for is still the one holding the id.
+   *
+   * `destroyTerminal` can run while the attach is in flight, and the id can be
+   * mounted again straight after -- a view swap, a pane closed and reopened.
+   * The closure still holds the old entry, so the seed would write into a
+   * terminal that has been disposed. xterm does not object to that (it neither
+   * throws nor drops the callback, which is worth saying because it means the
+   * damage is silent), but `flushHeld` also feeds whatever status handler is
+   * registered for the id -- and by then that belongs to the new pane, which
+   * would be handed the old pane's bytes and read a status out of them.
+   */
+  const stillOurs = (): boolean => registry.get(terminalId) === entry
+
   state.done = (async () => {
     try {
       const { data, seq, live } = await window.api.attachTerminal(terminalId)
+      if (!stillOurs()) return
       if (data) {
         // Cleared from the write callback, which xterm runs once these bytes
         // have been parsed -- so it covers every reply they provoke and nothing
@@ -195,6 +210,7 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
       if (live === false) reportNotLive?.(terminalId)
     } catch (err) {
       console.error('[terminal] could not attach', terminalId, err)
+      if (!stillOurs()) return
       // Held chunks are still the truth about what happened; let them through
       // rather than losing them to a failed seed, and allow another try.
       flushHeld()
