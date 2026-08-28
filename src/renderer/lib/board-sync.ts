@@ -1,6 +1,7 @@
 import type { RestoredSession, TerminalSession } from '../../shared/types'
 import { useAppStore } from '../stores'
 import { coldSessions } from './session-utils'
+import { resumeEndedSession } from './session-resume'
 
 /**
  * Make the board agree with what the server actually has.
@@ -17,7 +18,11 @@ import { coldSessions } from './session-utils'
  * quiet for a moment, which is the one thing a pane must never look like when it
  * is a photograph.
  */
-export async function syncBoard(options: { showCold: boolean }): Promise<void> {
+export async function syncBoard(options: { showCold: boolean; resume: boolean }): Promise<void> {
+  // Sessions this pass found ended, which is not the same as sessions that are
+  // ended. A pane the person already chose to leave sitting there must not be
+  // started again by the next reconciliation that happens to run.
+  const justEnded: string[] = []
   const answers = await Promise.all([
     window.api.listActiveSessions(),
     window.api.getRestoredSessions()
@@ -44,6 +49,7 @@ export async function syncBoard(options: { showCold: boolean }): Promise<void> {
   for (const [id, term] of useAppStore.getState().terminals) {
     if (live.has(id) || term.ended) continue
     const held = heldById.get(id)
+    justEnded.push(id)
     useAppStore.getState().markEnded(id, {
       reason: held?.closedCleanly ? 'app-closed' : 'server-stopped',
       // A held record knows when its run ended. Without one the best available
@@ -58,17 +64,46 @@ export async function syncBoard(options: { showCold: boolean }): Promise<void> {
     })
   }
 
-  if (!options.showCold) return
-
   // And the ones with no pane at all yet: ended before this window opened.
-  for (const one of coldSessions(active, carried)) {
-    if (useAppStore.getState().terminals.has(one.session.id)) continue
-    useAppStore.getState().addTerminal(one.session, {
-      reason: one.closedCleanly ? 'app-closed' : 'server-stopped',
-      at: one.endedAt,
-      replayed: one.replayable,
-      partial: one.partial,
-      ...(one.session.shellCwd !== undefined && { cwd: one.session.shellCwd })
-    })
+  if (options.showCold)
+    for (const one of coldSessions(active, carried)) {
+      if (useAppStore.getState().terminals.has(one.session.id)) continue
+      justEnded.push(one.session.id)
+      useAppStore.getState().addTerminal(one.session, {
+        reason: one.closedCleanly ? 'app-closed' : 'server-stopped',
+        at: one.endedAt,
+        replayed: one.replayable,
+        partial: one.partial,
+        ...(one.session.shellCwd !== undefined && { cwd: one.session.shellCwd })
+      })
+    }
+
+  if (options.resume) await resumeAll(justEnded)
+}
+
+/**
+ * Start again what this pass found stopped -- not everything that is stopped.
+ *
+ * Only ids this reconciliation marked itself, which is what keeps two kinds of
+ * ended session out of it. A pane somebody looked at and chose to leave sitting
+ * there is skipped above, because it was already ended when this began. So is an
+ * agent that exited on its own -- a finished turn, a `/quit` -- which the exit
+ * handler marked at the time; relaunching that would be a surprise the first
+ * time and a loop every time after. Both are the same rule: this starts sessions
+ * that were stopped, never sessions that stopped.
+ *
+ * One at a time, because each one spawns a process: six panes resuming together
+ * is six agents starting in the same instant, and going in order means they come
+ * back in the order they were in.
+ */
+async function resumeAll(ids: string[]): Promise<void> {
+  for (const id of ids) {
+    // Read again rather than carried: each resume above it awaited a spawn, and
+    // an exit or a close for this pane could have arrived in that gap.
+    const term = useAppStore.getState().terminals.get(id)
+    if (!term?.ended) continue
+    // A failure leaves the pane ended and its strip on screen, which is already
+    // the offer to try again by hand. Nothing is said twice.
+    await resumeEndedSession(id, { automatic: true })
   }
 }

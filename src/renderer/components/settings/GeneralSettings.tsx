@@ -101,7 +101,7 @@ export function GeneralSettings() {
         {/* Reopen Sessions */}
         <SettingRow
           label="Reopen Sessions on Startup"
-          description="Bring back the panes you had open, showing the last screen each one drew. Agents that are still running are reconnected to; ones that ended wait for you to resume them."
+          description="Bring back the panes you had open. Agents still running are reconnected to, keeping the turn they were in; ones whose process was stopped are started again where they left off, and shells reopen in the directory they were in."
         >
           <ToggleSwitch
             checked={config.defaults.reopenSessions ?? true}

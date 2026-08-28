@@ -194,7 +194,10 @@ export function App() {
         // The same reconciliation runs again whenever the server is replaced;
         // see `board-sync`.
         const reopen = config.defaults.reopenSessions ?? true
-        await syncBoard({ showCold: reopen })
+        // On means both halves of what it has always meant: the panes come back,
+        // and the sessions behind them are started again. Only the ones that were
+        // stopped -- see `resumeAll`.
+        await syncBoard({ showCold: reopen, resume: reopen })
 
         if (!reopen) {
           // Panes stay off the board, and the banner offers to bring them in.
@@ -220,7 +223,11 @@ export function App() {
     // exactly like a quiet one, and goes on taking input for a process that is
     // gone. Asking again is the only way any of them find out.
     const removeReplacedListener = window.api.onServerReplaced?.(() => {
-      void syncBoard({ showCold: true })
+      // The same rule as start-up, deliberately: a session stopped by a server
+      // dying is stopped whether or not the app happened to be open at the time,
+      // so one setting decides both.
+      const reopen = useAppStore.getState().config?.defaults.reopenSessions ?? true
+      void syncBoard({ showCold: true, resume: reopen })
     })
 
     // Pointed at a host while a server is still running on this machine. Said

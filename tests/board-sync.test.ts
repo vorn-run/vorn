@@ -4,8 +4,14 @@ import type { RestoredSession, TerminalSession } from '../packages/shared/src/ty
 
 const listActiveSessions = vi.fn()
 const getRestoredSessions = vi.fn()
+const resumeSession = vi.fn()
 Object.defineProperty(window, 'api', {
-  value: { listActiveSessions, getRestoredSessions, notifyWidgetStatus: vi.fn() },
+  value: {
+    listActiveSessions,
+    getRestoredSessions,
+    resumeSession,
+    notifyWidgetStatus: vi.fn()
+  },
   writable: true
 })
 
@@ -52,7 +58,14 @@ beforeEach(() => {
   vi.clearAllMocks()
   listActiveSessions.mockResolvedValue([])
   getRestoredSessions.mockResolvedValue([])
+  resumeSession.mockImplementation(async ({ id }: { id: string }) => ({
+    ok: true,
+    session: session({ id: `${id}-again` })
+  }))
 })
+
+/** The ids `sessions:resume` was asked for, in the order it was asked. */
+const resumed = (): string[] => resumeSession.mock.calls.map((c) => c[0].id)
 
 const ended = (id: string) => useAppStore.getState().terminals.get(id)?.ended
 
@@ -64,7 +77,7 @@ describe('a server that died under a running app', () => {
     listActiveSessions.mockResolvedValue([])
     getRestoredSessions.mockResolvedValue([])
 
-    await syncBoard({ showCold: true })
+    await syncBoard({ showCold: true, resume: false })
 
     expect(ended('was-running')).toMatchObject({ reason: 'server-stopped', replayed: false })
   })
@@ -73,7 +86,7 @@ describe('a server that died under a running app', () => {
     useAppStore.getState().addTerminal(session({ id: 'one' }))
     getRestoredSessions.mockResolvedValue([held('one', { closedCleanly: true })])
 
-    await syncBoard({ showCold: true })
+    await syncBoard({ showCold: true, resume: false })
 
     expect(ended('one')).toMatchObject({ reason: 'app-closed', replayed: true })
   })
@@ -82,7 +95,7 @@ describe('a server that died under a running app', () => {
     useAppStore.getState().addTerminal(session({ id: 'alive' }))
     listActiveSessions.mockResolvedValue([session({ id: 'alive' })])
 
-    await syncBoard({ showCold: true })
+    await syncBoard({ showCold: true, resume: false })
 
     expect(ended('alive')).toBeUndefined()
   })
@@ -98,7 +111,7 @@ describe('a server that died under a running app', () => {
       exitCode: 1
     })
 
-    await syncBoard({ showCold: true })
+    await syncBoard({ showCold: true, resume: false })
 
     expect(ended('exited')).toMatchObject({ reason: 'exited', exitCode: 1 })
   })
@@ -109,7 +122,7 @@ describe('what the server has that this board does not', () => {
     // Started from a phone, or by a workflow, or before this window opened.
     listActiveSessions.mockResolvedValue([session({ id: 'elsewhere' })])
 
-    await syncBoard({ showCold: true })
+    await syncBoard({ showCold: true, resume: false })
 
     expect(useAppStore.getState().terminals.has('elsewhere')).toBe(true)
     expect(ended('elsewhere')).toBeUndefined()
@@ -118,7 +131,7 @@ describe('what the server has that this board does not', () => {
   it('shows one that ended before this window opened', async () => {
     getRestoredSessions.mockResolvedValue([held('from-last-run')])
 
-    await syncBoard({ showCold: true })
+    await syncBoard({ showCold: true, resume: false })
 
     expect(ended('from-last-run')).toMatchObject({ reason: 'server-stopped', replayed: true })
   })
@@ -126,7 +139,7 @@ describe('what the server has that this board does not', () => {
   it('keeps it off the board when the setting says so', async () => {
     getRestoredSessions.mockResolvedValue([held('from-last-run')])
 
-    await syncBoard({ showCold: false })
+    await syncBoard({ showCold: false, resume: false })
 
     expect(useAppStore.getState().terminals.has('from-last-run')).toBe(false)
   })
@@ -139,10 +152,70 @@ describe('a server that would not answer', () => {
     listActiveSessions.mockRejectedValue(new Error('socket closed'))
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    await syncBoard({ showCold: true })
+    await syncBoard({ showCold: true, resume: false })
     quiet.mockRestore()
 
     expect(ended('alive')).toBeUndefined()
     expect(useAppStore.getState().terminals.has('alive')).toBe(true)
+  })
+})
+
+describe('starting again what was stopped', () => {
+  it('resumes a session whose server died, because that is what the setting means', async () => {
+    // "Reopen Sessions on Startup" meant this before the pane ever had a strip:
+    // the sessions come back, not just pictures of them.
+    getRestoredSessions.mockResolvedValue([held('stopped')])
+
+    await syncBoard({ showCold: true, resume: true })
+
+    expect(resumed()).toEqual(['stopped'])
+  })
+
+  it('never resumes one that exited on its own', async () => {
+    // An agent that finished its turn chose to end. Starting it again is a
+    // surprise the first time and a loop every time after.
+    useAppStore.getState().addTerminal(session({ id: 'finished' }), {
+      reason: 'exited',
+      at: 123,
+      replayed: false,
+      exitCode: 0
+    })
+
+    await syncBoard({ showCold: true, resume: true })
+
+    expect(resumed()).toEqual([])
+  })
+
+  it('starts nothing when the setting is off', async () => {
+    getRestoredSessions.mockResolvedValue([held('stopped')])
+
+    await syncBoard({ showCold: true, resume: false })
+
+    expect(resumed()).toEqual([])
+    expect(ended('stopped')).toBeDefined()
+  })
+
+  it('leaves alone a pane that was already sitting there ended', async () => {
+    // The setting is on and the server is replaced again -- a second crash, or a
+    // relaunch that took two attempts. A pane somebody looked at and chose not
+    // to resume must not be resumed by the next reconciliation that runs.
+    useAppStore.getState().addTerminal(session({ id: 'left-alone' }), {
+      reason: 'server-stopped',
+      at: 123,
+      replayed: true
+    })
+
+    await syncBoard({ showCold: true, resume: true })
+
+    expect(resumed()).toEqual([])
+  })
+
+  it('does not resume a session that is still running', async () => {
+    listActiveSessions.mockResolvedValue([session({ id: 'alive' })])
+    useAppStore.getState().addTerminal(session({ id: 'alive' }))
+
+    await syncBoard({ showCold: true, resume: true })
+
+    expect(resumed()).toEqual([])
   })
 })

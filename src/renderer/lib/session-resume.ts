@@ -31,8 +31,19 @@ export async function showEndedSession(id: string): Promise<void> {
   })
 }
 
-/** Start it again, and put the live session where the ended one was sitting. */
-export async function resumeEndedSession(terminalId: string): Promise<void> {
+/**
+ * Start it again, and put the live session where the ended one was sitting.
+ *
+ * `automatic` marks the resumes nobody clicked -- the ones start-up and a
+ * replaced server do on their own when "Reopen Sessions on Startup" is on. They
+ * say nothing when they fail: the pane keeps its ended strip, which is already
+ * the offer to try by hand, and a crash that ends six panes would otherwise
+ * stack six toasts saying so.
+ */
+export async function resumeEndedSession(
+  terminalId: string,
+  options: { automatic?: boolean } = {}
+): Promise<void> {
   const state = useAppStore.getState()
   const previous = state.terminals.get(terminalId)?.session
   if (!previous) return
@@ -53,10 +64,10 @@ export async function resumeEndedSession(terminalId: string): Promise<void> {
       // Another pane, window or device took it first. Nothing to resume and
       // nothing to keep showing.
       useAppStore.getState().removeTerminal(terminalId)
-      toast('That session was resumed somewhere else')
+      if (!options.automatic) toast('That session was resumed somewhere else')
       return
     }
-    toast.error(result.message ?? 'Could not resume that session')
+    if (!options.automatic) toast.error(result.message ?? 'Could not resume that session')
     return
   }
 
