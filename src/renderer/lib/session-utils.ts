@@ -3,6 +3,7 @@ import {
   getProjectRemoteHostId,
   type TerminalSession,
   type RecentSession,
+  type RestoredSession,
   type ProjectConfig,
   type AiAgentType
 } from '../../shared/types'
@@ -346,24 +347,26 @@ export function resolveActiveProject() {
 }
 
 /**
- * What the server has against what the database remembers.
+ * Two answers from the server, made into one board.
  *
- * Two different questions, and start-up used to ask only the second. A saved
- * record says a session existed when it was last written down; a running PTY
- * says one exists now. Where both agree the pane binds to the process that never
- * stopped -- relaunching it as well would put a second agent on the same work,
- * and the first would carry on unattached.
+ * The server is asked what is running and what it is still holding from the last
+ * run, and those are separate round trips -- so a resume happening elsewhere
+ * between them can put one id in both answers. A session that is running is not
+ * also ended, and the live one wins: the alternative is two panes for one
+ * terminal, one of them a photograph offering to start what is already going.
  *
- * The server is the authority on the first list, so a session it reports that
- * nothing saved still gets a pane: it exists, whatever the database thinks.
+ * The saved list is not consulted at all. It used to be the only question asked
+ * at start-up, and it is the wrong one: it says what existed when it was last
+ * written down. Between them these two say what exists now and what is left of
+ * what does not, which is the whole board.
  */
 export function reconcileSessions(
   active: TerminalSession[],
-  saved: TerminalSession[]
-): { adopt: TerminalSession[]; orphaned: TerminalSession[] } {
+  restored: RestoredSession[]
+): { adopt: TerminalSession[]; cold: RestoredSession[] } {
   const running = new Set(active.map((s) => s.id))
   return {
     adopt: active,
-    orphaned: saved.filter((s) => !running.has(s.id))
+    cold: restored.filter((one) => !running.has(one.session.id))
   }
 }

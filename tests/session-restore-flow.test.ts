@@ -145,48 +145,51 @@ describe('session restore flow: Codex fallback to history', () => {
   })
 })
 
-describe('what to bind and what to relaunch', () => {
-  /**
-   * The rule the whole phase turns on. Start-up used to read the saved list and
-   * launch a replacement for every record in it -- including sessions that had
-   * never stopped, whose agent was still running and possibly mid-turn. The
-   * saved list says what existed when it was last written down; the server says
-   * what exists now.
-   */
-  it('binds a saved session that is still running rather than relaunching it', () => {
-    const running = makeSession({ id: 'still-going' })
-
-    const { adopt, orphaned } = reconcileSessions([running], [makeSession({ id: 'still-going' })])
-
-    expect(adopt.map((s) => s.id)).toEqual(['still-going'])
-    // Nothing to relaunch. A second agent against the same work is the failure.
-    expect(orphaned).toEqual([])
+describe('two answers from the server, made into one board', () => {
+  const restored = (id: string) => ({
+    session: makeSession({ id }),
+    endedAt: Date.now() - 3_600_000,
+    replayable: true,
+    partial: false
   })
 
-  it('leaves a saved session with no process behind for the other path', () => {
-    const { adopt, orphaned } = reconcileSessions(
-      [makeSession({ id: 'running' })],
-      [makeSession({ id: 'running' }), makeSession({ id: 'gone' })]
+  /**
+   * The saved list is not consulted at start-up any more. It said what existed
+   * when it was last written down, and start-up used to launch a replacement
+   * for every record in it -- including sessions that had never stopped, whose
+   * agent was still running and possibly mid-turn.
+   */
+  it('binds what is running and shows what is left of what is not', () => {
+    const { adopt, cold } = reconcileSessions(
+      [makeSession({ id: 'still-going' })],
+      [restored('ended')]
     )
 
-    expect(adopt.map((s) => s.id)).toEqual(['running'])
-    expect(orphaned.map((s) => s.id)).toEqual(['gone'])
+    expect(adopt.map((s) => s.id)).toEqual(['still-going'])
+    expect(cold.map((r) => r.session.id)).toEqual(['ended'])
+  })
+
+  it('gives a running session one pane, not two', () => {
+    // The two questions are separate round trips, so a resume happening
+    // elsewhere between them can put one id in both answers. The live one wins:
+    // the alternative is a photograph offering to start what is already going.
+    const both = 'resumed-elsewhere'
+    const { adopt, cold } = reconcileSessions([makeSession({ id: both })], [restored(both)])
+
+    expect(adopt.map((s) => s.id)).toEqual([both])
+    expect(cold).toEqual([])
   })
 
   it('gives a pane to a session nothing saved, because the server is the authority', () => {
-    // A session started from a phone, or by a workflow, between the last save
-    // and this start. It exists, whatever the database remembers.
-    const { adopt, orphaned } = reconcileSessions([makeSession({ id: 'unsaved' })], [])
+    // Started from a phone, or by a workflow, since the last save. It exists,
+    // whatever any record says.
+    const { adopt, cold } = reconcileSessions([makeSession({ id: 'unsaved' })], [])
 
     expect(adopt.map((s) => s.id)).toEqual(['unsaved'])
-    expect(orphaned).toEqual([])
+    expect(cold).toEqual([])
   })
 
-  it('has nothing to do when the server has nothing', () => {
-    const saved = [makeSession({ id: 'one' }), makeSession({ id: 'two' })]
-    const { adopt, orphaned } = reconcileSessions([], saved)
-
-    expect(adopt).toEqual([])
-    expect(orphaned.map((s) => s.id)).toEqual(['one', 'two'])
+  it('has nothing to show when the server has nothing', () => {
+    expect(reconcileSessions([], [])).toEqual({ adopt: [], cold: [] })
   })
 })

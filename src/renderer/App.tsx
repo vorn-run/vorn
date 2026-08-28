@@ -26,7 +26,7 @@ import {
   stopWorkflowRun,
   applyGateDecision
 } from './lib/workflow-execution'
-import type { TerminalSession, WorkflowExecution } from '../shared/types'
+import type { RestoredSession, TerminalSession, WorkflowExecution } from '../shared/types'
 import { CommandPalette } from './components/CommandPalette'
 import { SessionRestoredBanner } from './components/SessionRestoredBanner'
 import { GridToolbar } from './components/GridToolbar'
@@ -74,7 +74,7 @@ import { GridContextMenu } from './components/GridContextMenu'
 import { WindowControls } from './components/WindowControls'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from './lib/platform'
 import { useIsMobile } from './hooks/useIsMobile'
-import { resolveResumeSessionId, buildRestorePayload, reconcileSessions } from './lib/session-utils'
+import { reconcileSessions } from './lib/session-utils'
 
 export function App() {
   const {
@@ -163,10 +163,7 @@ export function App() {
     })
     ;(async () => {
       try {
-        const [config, prev] = await Promise.all([
-          window.api.loadConfig(),
-          window.api.getPreviousSessions()
-        ])
+        const config = await window.api.loadConfig()
         useAppStore.getState().setConfig(config)
         if (config.defaults.fontSize) {
           setDefaultFontSize(config.defaults.fontSize)
@@ -192,54 +189,64 @@ export function App() {
         // stopped. A pane bound here is the same terminal, with the same
         // process, mid-turn if it was mid-turn; the seeding happens in
         // `terminal-registry` when the pane's terminal is built.
+        // Both questions go to the server: what is running, and what it is
+        // still holding from the last run. The saved list is not consulted at
+        // all any more -- it says what existed when it was last written down,
+        // which is neither of those.
         let active: TerminalSession[] = []
+        let carried: RestoredSession[] = []
         try {
-          active = await window.api.listActiveSessions()
+          ;[active, carried] = await Promise.all([
+            window.api.listActiveSessions(),
+            window.api.getRestoredSessions()
+          ])
         } catch (err) {
-          console.error('[App] failed to adopt running sessions:', err)
+          console.error('[App] failed to read what the server has:', err)
         }
-        const { adopt, orphaned } = reconcileSessions(active, prev ?? [])
+
+        const { adopt, cold } = reconcileSessions(active, carried)
         const store = useAppStore.getState()
         for (const session of adopt) {
           if (!store.terminals.has(session.id)) store.addTerminal(session)
         }
-        if (orphaned.length > 0) {
+
+        if (cold.length > 0) {
           if (config.defaults.reopenSessions) {
-            // Auto-restore sessions — prefer hook-correlated session ID (exact),
-            // fall back to scanning agent history when hooks weren't active.
-            // Shells restore as fresh PTYs in their saved cwd (no resume concept).
-            const claimed = new Set<string>()
-            for (const s of orphaned) {
-              if (s.agentType === 'shell') {
-                const cwd = s.shellCwd ?? s.worktreePath ?? s.projectPath
-                const session = await window.api.createShellTerminal(cwd)
-                const restored =
-                  s.projectName && s.projectPath
-                    ? {
-                        ...session,
-                        projectName: s.projectName,
-                        projectPath: s.projectPath,
-                        worktreePath: s.worktreePath,
-                        worktreeName: s.worktreeName,
-                        branch: s.branch,
-                        isWorktree: s.isWorktree
-                      }
-                    : session
-                useAppStore.getState().addTerminal(restored)
-                continue
-              }
-              const resumeSessionId = await resolveResumeSessionId(s, claimed)
-              if (resumeSessionId) claimed.add(resumeSessionId)
-              const session = await window.api.createTerminal(
-                buildRestorePayload(s, resumeSessionId)
-              )
-              useAppStore.getState().addTerminal(session)
+            // The panes come back. The agents do not.
+            //
+            // This used to launch a replacement for every saved session --
+            // silently, on start-up, spending tokens and starting processes on
+            // somebody's behalf before they had looked at the screen. Now each
+            // pane shows the last thing its terminal printed and says the
+            // session ended, and resuming is a decision with a button behind it.
+            //
+            // The setting keeps its name and loses a meaning it should not have
+            // had: it governs whether panes reappear, not whether agents are
+            // relaunched. Every tool that restores terminals works this way --
+            // the view comes back, the program does not.
+            for (const one of cold) {
+              useAppStore.getState().addTerminal(one.session, {
+                reason: 'server-stopped',
+                at: one.endedAt,
+                replayed: one.replayable,
+                partial: one.partial,
+                ...(one.session.shellCwd !== undefined && { cwd: one.session.shellCwd })
+              })
             }
-            window.api.clearPreviousSessions()
           } else {
-            useAppStore.getState().setSessionBanner(true, orphaned)
+            useAppStore.getState().setSessionBanner(
+              true,
+              cold.map((one) => one.session)
+            )
           }
         }
+
+        // Nothing calls `clearPreviousSessions()` here any more. A record is
+        // consumed on the server when a pane takes it -- by resuming or by
+        // closing -- so it survives a start that nobody acted on, and two
+        // clients can be looking at the same one safely. Clearing the list as a
+        // side effect of having restored meant a failed restore lost the record
+        // too, with nothing to try again from.
       } catch (err) {
         console.error('[App] startup initialization failed:', err)
       }
