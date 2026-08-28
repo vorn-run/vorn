@@ -25,6 +25,26 @@ interface TerminalEntry {
 export const TERMINAL_ID_ATTR = 'data-terminal-id'
 
 const registry = new Map<string, TerminalEntry>()
+
+/**
+ * Terminals currently being written a screen from the past.
+ *
+ * A replayed screen is a recording, and recordings contain the questions the
+ * old program asked its terminal -- who are you, where is the cursor, what
+ * colour is the background. Written into a real emulator those are asked again,
+ * and this one answers, because answering is what a terminal does. The answers
+ * go down the pty as though they had been typed: the shell echoes them, tries to
+ * run them, and the pane fills with `rgb:d4d4/d4d4/d8d8` and `execute:`.
+ *
+ * The program that asked is gone and nothing is waiting for a reply, so during
+ * a seed there is nobody to answer and the replies are dropped. Only during the
+ * seed -- a live program asking the same question is owed a real answer.
+ *
+ * The server's own screen model has been guarded against this since it was
+ * written (`pty-manager-screen.test.ts`); the client had the same hole and no
+ * seeded screen to fall into it until this branch.
+ */
+const seeding = new Set<string>()
 const readyCallbacks = new Map<string, Set<() => void>>()
 
 // --- Write batching: single global listener + requestAnimationFrame ---
@@ -103,6 +123,7 @@ export function disposeGlobalDataListener(): void {
   }
   pendingWrites.clear()
   hydrating.clear()
+  seeding.clear()
 }
 
 /**
@@ -157,7 +178,11 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
     try {
       const { data, seq, live } = await window.api.attachTerminal(terminalId)
       if (data) {
-        entry.term.write(data)
+        // Cleared from the write callback, which xterm runs once these bytes
+        // have been parsed -- so it covers every reply they provoke and nothing
+        // after them.
+        seeding.add(terminalId)
+        entry.term.write(data, () => seeding.delete(terminalId))
         // This screen is now in the terminal and nowhere else. Said out loud so
         // the first finished command lifts it into the block log rather than
         // clearing it away.
@@ -264,6 +289,9 @@ export function getEffectiveFontSize(size?: number): number {
 const rendererIsMac = navigator.platform.toUpperCase().includes('MAC')
 
 function createTerminalEntry(terminalId: string): TerminalEntry {
+  // A write callback that never ran -- a pane torn down mid-seed -- would
+  // otherwise leave this id suppressed for as long as the window lives.
+  seeding.delete(terminalId)
   const term = new Terminal({ ...TERM_OPTIONS, fontSize: getEffectiveFontSize() })
   const fitAddon = new FitAddon()
   term.loadAddon(fitAddon)
@@ -368,6 +396,7 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
 
   // Forward keystrokes to pty
   term.onData((data) => {
+    if (seeding.has(terminalId)) return
     window.api.writeTerminal(terminalId, data)
   })
 
