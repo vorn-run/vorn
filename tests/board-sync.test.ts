@@ -15,6 +15,12 @@ Object.defineProperty(window, 'api', {
   writable: true
 })
 
+const steps = vi.hoisted(() => [] as string[])
+vi.mock('../src/renderer/lib/terminal-registry', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/terminal-registry')>()),
+  settleTerminalForResume: (id: string) => steps.push(`settled ${id}`)
+}))
+
 import { useAppStore } from '../src/renderer/stores'
 import { syncBoard } from '../src/renderer/lib/board-sync'
 
@@ -62,7 +68,9 @@ beforeEach(() => {
   // As the server does: a resumed session keeps its id -- that is what makes it
   // the same pane -- and is running by the time the call returns, so a later
   // reconciliation sees it live rather than ended.
+  steps.length = 0
   resumeSession.mockImplementation(async ({ id }: { id: string }) => {
+    steps.push(`resumed ${id}`)
     const back = session({ id })
     live.push(back)
     return { ok: true, session: back }
@@ -269,5 +277,21 @@ describe('two reconciliations at once', () => {
     await syncBoard({ showCold: true, resume: true })
 
     expect(useAppStore.getState().terminals.has('contested')).toBe(true)
+  })
+})
+
+describe('the terminal a resumed process writes into', () => {
+  it('is settled before the resume is asked for, not after it returns', async () => {
+    // The pane is kept on purpose, so it still carries whatever the last session
+    // left in the emulator -- a scroll region, an alternate screen it never came
+    // back from. The new process assumes defaults and never sets them, so its
+    // first redraw lands inside the old one's margins. Doing this after the call
+    // returns would be too late and worse: output can arrive the instant the
+    // process exists, and the reset would then undo setup it had already done.
+    getRestoredSessions.mockResolvedValue([held('one')])
+
+    await syncBoard({ showCold: true, resume: true })
+
+    expect(steps).toEqual(['settled one', 'resumed one'])
   })
 })

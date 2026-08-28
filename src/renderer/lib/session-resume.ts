@@ -1,6 +1,7 @@
 import { useAppStore } from '../stores'
 import { toast } from '../components/Toast'
 import { resolveResumeSessionId } from './session-utils'
+import { settleTerminalForResume } from './terminal-registry'
 
 /**
  * Taking a session from a previous run, or letting it go.
@@ -57,6 +58,11 @@ export async function resumeEndedSession(
   } catch {
     // No exact match found. The agent's own picker is better than refusing.
   }
+
+  // Before the ask, not after: the resumed process can write the instant it
+  // exists, and this pane is still carrying the emulator state its last session
+  // left behind.
+  settleTerminalForResume(terminalId)
 
   const result = await window.api.resumeSession({ id: terminalId, resumeSessionId })
   if (!result.ok) {
