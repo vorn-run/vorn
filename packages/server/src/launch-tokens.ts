@@ -135,32 +135,53 @@ function isValue(token: Token | undefined): boolean {
 }
 
 /**
- * A flag and, when it has one, the token carrying its value.
+ * A flag and, when it takes one, the token carrying its value.
  *
- * `--flag=value` is one span. `--flag value` is two, but only when the next
- * token does not itself begin with a dash -- a bare `--resume` is the
- * interactive picker, which is still a selector, and swallowing the flag after
- * it would remove something else.
+ * `--flag=value` is always one span. `--flag value` is two only for flags that
+ * *take* a value, and only when the next token does not itself begin with a dash
+ * -- a bare `--resume` is the interactive picker, which is still a selector, and
+ * the thing after it is then somebody else's argument.
+ *
+ * The distinction is load-bearing. `--continue` takes no value, so treating the
+ * next token as one turned `claude --continue 'fix the failing test'` into
+ * `claude` and dropped the prompt on the floor. That is precisely the failure
+ * this module exists to avoid: not a refusal, but a rewrite that runs something
+ * different from what was written.
  */
-function flagSpans(tokens: Token[], at: number, names: string[]): Span[] | null {
+function flagSpans(tokens: Token[], at: number, selectors: Selectors): Span[] | null {
   const token = tokens[at]!
-  for (const name of names) {
+  for (const name of selectors.withValue) {
     if (token.value === name) {
       const next = tokens[at + 1]
       return isValue(next) ? [span(token), span(next!)] : [span(token)]
     }
     if (token.value.startsWith(`${name}=`)) return [span(token)]
   }
+  for (const name of selectors.bare) {
+    if (token.value === name) return [span(token)]
+  }
   return null
 }
 
 const span = (t: Token): Span => ({ start: t.start, end: t.end })
 
-/** The flag shapes that can be proven to select a session, per agent. */
-const SELECTORS: Record<string, string[]> = {
-  claude: ['--resume', '-r', '--continue', '-c', '--session-id'],
-  copilot: ['--resume', '--session-id'],
-  opencode: ['--session', '-s']
+/**
+ * The flag shapes that can be proven to select a session, per agent.
+ *
+ * Split by whether the flag takes a value, because that decides whether the
+ * token after it belongs to the flag or to the person who wrote the line.
+ */
+interface Selectors {
+  /** `--flag value` and `--flag=value`. */
+  withValue: string[]
+  /** No argument; whatever follows is not theirs. */
+  bare: string[]
+}
+
+const SELECTORS: Record<string, Selectors> = {
+  claude: { withValue: ['--resume', '-r', '--session-id'], bare: ['--continue', '-c'] },
+  copilot: { withValue: ['--resume', '--session-id'], bare: [] },
+  opencode: { withValue: ['--session', '-s'], bare: [] }
 }
 
 /**
@@ -192,11 +213,18 @@ function findSelectorSpans(line: string, agentType: AiAgentType, argsFrom: numbe
     return found.length ? found : null
   }
 
-  const names = SELECTORS[agentType]
-  if (!names) return null
+  const selectors = SELECTORS[agentType]
+  if (!selectors) return null
 
-  for (let at = 0; at < args.length; at++) {
-    const spans = flagSpans(args, at, names)
+  // Everything after a bare `--` is positional by convention, so a `--resume`
+  // there is somebody's prompt and not a flag at all. It is exactly how a prompt
+  // beginning with a dash gets passed, and rewriting it would change what the
+  // agent is asked rather than which session it opens.
+  const end = args.findIndex((t) => t.value === '--')
+  const scannable = end === -1 ? args : args.slice(0, end)
+
+  for (let at = 0; at < scannable.length; at++) {
+    const spans = flagSpans(scannable, at, selectors)
     if (!spans) continue
     found.push(...spans)
     at += spans.length - 1

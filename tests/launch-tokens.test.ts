@@ -96,6 +96,45 @@ describe('everything that is not a selector', () => {
   })
 })
 
+describe('a flag that takes no value', () => {
+  it('does not swallow the argument after it', () => {
+    // `--continue` takes no value, so what follows is somebody's prompt. An
+    // earlier version treated any non-dash token as the flag's value and turned
+    // this into `claude` -- not a refusal, but a command that runs and asks the
+    // agent nothing. Found by differential-testing the rewrite against /bin/sh.
+    expect(
+      stripSessionSelectors("claude --continue 'fix the failing test'", 'claude', from('claude'))
+    ).toBe("claude 'fix the failing test'")
+  })
+
+  it('does not swallow it for the short form either', () => {
+    expect(stripSessionSelectors('claude -c my-prompt', 'claude', from('claude'))).toBe(
+      'claude my-prompt'
+    )
+  })
+
+  it('still removes a flag that does take one, with its value', () => {
+    expect(stripSessionSelectors('claude --resume old-id rest', 'claude', from('claude'))).toBe(
+      'claude rest'
+    )
+  })
+})
+
+describe('after a bare double dash', () => {
+  it('nothing is a flag any more', () => {
+    // `--` is how a prompt beginning with a dash is passed. Rewriting past it
+    // changes what the agent is asked rather than which session it opens.
+    const line = 'claude -- --resume looks-like-a-flag'
+    expect(stripSessionSelectors(line, 'claude', from('claude'))).toBe(line)
+  })
+
+  it('but a selector before it is still removed', () => {
+    expect(
+      stripSessionSelectors('claude --resume old -- --resume text', 'claude', from('claude'))
+    ).toBe('claude -- --resume text')
+  })
+})
+
 describe('what is deliberately left alone', () => {
   it('keeps a joined short selector, and lets two of them ship', () => {
     // `-rold` cannot be told apart from another option taking a dash-leading
