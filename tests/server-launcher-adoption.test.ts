@@ -50,6 +50,16 @@ class FakeBridge extends EventEmitter {
     super()
     bridges.push(this)
   }
+  target(): string {
+    return this.url
+  }
+  /** As the real one does: point somewhere else and reconnect, not instantly. */
+  retarget(url: string): void {
+    if (url === this.url) return
+    this.url = url
+    this.isConnected = false
+    this.connect()
+  }
   connect(): void {
     setImmediate(() => {
       // Mirrors the real ordering: the socket opens and `connected` fires first,
@@ -431,6 +441,32 @@ describe('an adopted server that dies', () => {
     bridges[0].emit('disconnected')
     await new Promise((r) => setTimeout(r, 20))
     expect(spawned).toEqual([])
+  })
+
+  it('is announced only once the bridge can be asked something', async () => {
+    // The port answering and this app being able to talk to it are two events
+    // with a reconnect between them. Announcing at the first one told every pane
+    // to go and ask the server what it still had, and the bridge rejected the
+    // question -- `Cannot send request: not connected` -- one line before it
+    // connected. A pane reads no answer as "leave the board alone", so a server
+    // dying under a running app changed nothing on screen: the freeze this
+    // announcement exists to end.
+    published.port = 50091
+    published.identity = identityFrom()
+    const { launchServer, onServerReplaced } = await import('../src/main/server/server-launcher')
+    await launchServer()
+    await vi.waitFor(() => expect(bridges[0].isConnected).toBe(true))
+
+    const reachable: boolean[] = []
+    onServerReplaced(() => reachable.push(bridges[0].isConnected))
+
+    published.pidAlive = false
+    bridges[0].isConnected = false
+    bridges[0].emit('disconnected')
+
+    await vi.waitFor(() => expect(reachable).toHaveLength(1))
+    expect(reachable).toEqual([true])
+    onServerReplaced(null)
   })
 
   it('is not replaced once the app has decided to quit', async () => {
