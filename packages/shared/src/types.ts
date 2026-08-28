@@ -87,10 +87,65 @@ export interface TerminalSession {
   hookSessionId?: string
   agentSessionId?: string
   statusSource?: 'hooks' | 'pattern'
+  /**
+   * The geometry the PTY is currently running at.
+   *
+   * Held because a program renders against it: wrap points, cursor position and
+   * every full-screen repaint are decided by these numbers, so anything that
+   * models the screen has to agree with them exactly. Nothing recorded them
+   * before -- all three spawn sites passed 80x24 to node-pty and `resizePty`
+   * forwarded new values without keeping them.
+   *
+   * Last writer wins between attached clients, because node-pty already works
+   * that way: a phone fitting to 60x20 and a desktop at 200x50 will fight, and
+   * whichever resized last is what the program is drawing against. That is a
+   * pre-existing behaviour, and this records it rather than changing it.
+   *
+   * Optional because not every `TerminalSession` has a PTY behind it -- a
+   * workflow builds a synthetic one to describe its source, and inventing a
+   * geometry for something that is not being drawn would be a fact nobody
+   * checked. Absent means "whatever a PTY starts at".
+   */
+  cols?: number
+  rows?: number
   /** Shell session only: working directory the PTY was started in. */
   shellCwd?: string
   /** Shell session only: PTY exit code once the shell has exited. */
   shellExitCode?: number
+  /**
+   * When the record was last written down.
+   *
+   * Set by the database on save and read back by `getPreviousSessions`; a
+   * session that has never been persisted does not have one. It is the only
+   * thing on disk that says roughly when a run ended, which is what a pane
+   * restored from a previous process has to tell somebody.
+   */
+  savedAt?: number
+}
+
+/**
+ * A session from a previous run that no pane has taken yet.
+ *
+ * Held by the server rather than the client so two of them can be looking at the
+ * same one: the first to claim it gets it, and the second is told it is gone
+ * rather than starting a second agent against one transcript.
+ */
+export interface RestoredSession {
+  session: TerminalSession
+  /** Roughly when it ended: the last save the previous process managed. */
+  endedAt: number
+  /** Whether a screen was rebuilt for it, so a pane has something to show. */
+  replayable: boolean
+  /** The recorded history stops short of what actually happened. */
+  partial: boolean
+  /**
+   * The last run shut down rather than being stopped under it.
+   *
+   * "You closed Vorn" and "something stopped it" are different events, and a
+   * pane that reports the second for the first reads like a fault report for an
+   * ordinary quit.
+   */
+  closedCleanly: boolean
 }
 
 export type AuthMethod = 'key-file' | 'key-stored' | 'password' | 'agent'
@@ -1374,6 +1429,8 @@ export const IPC = {
   TERMINAL_WRITE: 'terminal:write',
   TERMINAL_RESIZE: 'terminal:resize',
   TERMINAL_KILL: 'terminal:kill',
+  TERMINAL_ATTACH: 'terminal:attach',
+  TERMINAL_LIST_ACTIVE: 'terminal:listActive',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit',
   SESSION_CREATED: 'session:created',
@@ -1384,7 +1441,8 @@ export const IPC = {
   CONFIG_LOAD: 'config:load',
   CONFIG_SAVE: 'config:save',
   CONFIG_CHANGED: 'config:changed',
-  SESSIONS_GET_PREVIOUS: 'sessions:getPrevious',
+  SESSIONS_RESTORED: 'sessions:restored',
+  SESSIONS_RESUME: 'sessions:resume',
   SESSIONS_CLEAR: 'sessions:clear',
   SESSIONS_GET_RECENT: 'sessions:getRecent',
   DIALOG_OPEN_DIRECTORY: 'dialog:openDirectory',

@@ -5,7 +5,7 @@ import { useAppStore } from '../stores'
 import { activePanelIndex } from '../stores/types'
 import { PaneCard, PaneControls } from './PaneCard'
 import { TerminalPane } from './TerminalPane'
-import { IntentBar } from './IntentBar'
+import { SessionComposer } from './card/SessionComposer'
 import { terminalsPaneId } from '../lib/pane-id'
 import { getDisplayName } from '../lib/terminal-display'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
@@ -207,7 +207,7 @@ export const TerminalsCard = memo(
           />
         </div>
 
-        <IntentBar
+        <SessionComposer
           terminalId={active.id}
           compact
           indentPx={terminalTextIndentPx(active.agentType, domBlocks)}

@@ -135,6 +135,43 @@ describe('session persistence (real SQLite)', () => {
   })
 })
 
+describe('what a shell needs to come back where it was', () => {
+  it('round-trips the directory the shell was actually in', () => {
+    // The column never existed, so `shellCwd` wrote to the record in memory and
+    // then vanished on read -- and restoring a shell always fell back to its
+    // project directory, which for anybody who had navigated anywhere was the
+    // wrong place.
+    saveSessions([makeSession({ agentType: 'shell', shellCwd: '/Users/x/dev/vorn/packages' })])
+
+    expect(getPreviousSessions()[0].shellCwd).toBe('/Users/x/dev/vorn/packages')
+  })
+
+  it('leaves it absent when a session never reported one', () => {
+    saveSessions([makeSession()])
+    expect(getPreviousSessions()[0].shellCwd).toBeUndefined()
+  })
+})
+
+describe('when a record was last written down', () => {
+  it('keeps a stamp the record already carried', () => {
+    // Sessions held over from a previous run are persisted beside the live ones,
+    // and re-stamping them with now made their age reset on every save -- so the
+    // window they age out of never elapsed, and a pane reported a terminal as
+    // having ended moments ago however long it had really been gone.
+    const ended = Date.now() - 3 * 24 * 60 * 60 * 1000
+    saveSessions([makeSession({ savedAt: ended })])
+
+    expect(getPreviousSessions()[0].savedAt).toBe(ended)
+  })
+
+  it('stamps one that has never been written down', () => {
+    const before = Date.now()
+    saveSessions([makeSession()])
+
+    expect(getPreviousSessions()[0].savedAt).toBeGreaterThanOrEqual(before)
+  })
+})
+
 describe('verifySchema (real SQLite)', () => {
   it('is idempotent — running initTestDatabase twice does not throw', () => {
     teardown()

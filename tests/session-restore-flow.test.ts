@@ -16,7 +16,11 @@ vi.stubGlobal('window', {
   }
 })
 
-import { resolveResumeSessionId, buildRestorePayload } from '../src/renderer/lib/session-utils'
+import {
+  resolveResumeSessionId,
+  buildRestorePayload,
+  coldSessions
+} from '../src/renderer/lib/session-utils'
 
 const env = { PATH: '/usr/bin' }
 const cmds = DEFAULT_AGENT_COMMANDS
@@ -138,5 +142,35 @@ describe('session restore flow: Codex fallback to history', () => {
     const payload = makePayload({ agentType: 'codex', resumeSessionId: 'codex-sess-1' })
     const line = buildAgentLaunchLine(payload, cmds, env)
     expect(line).toBe('codex resume codex-sess-1')
+  })
+})
+
+describe('what is left of what is not running', () => {
+  const restored = (id: string) => ({
+    session: makeSession({ id }),
+    endedAt: Date.now() - 3_600_000,
+    replayable: true,
+    partial: false
+  })
+
+  it('is what the server holds, minus anything that has a process', () => {
+    expect(
+      coldSessions([makeSession({ id: 'still-going' })], [restored('ended')]).map(
+        (r) => r.session.id
+      )
+    ).toEqual(['ended'])
+  })
+
+  it('never includes a session that is running', () => {
+    // The two questions are separate round trips, so a resume happening
+    // elsewhere between them can put one id in both answers. The live one wins:
+    // the alternative is two panes for one terminal, one of them a photograph
+    // offering to start what is already going.
+    const both = 'resumed-elsewhere'
+    expect(coldSessions([makeSession({ id: both })], [restored(both)])).toEqual([])
+  })
+
+  it('is empty when the server is holding nothing', () => {
+    expect(coldSessions([makeSession({ id: 'live' })], [])).toEqual([])
   })
 })

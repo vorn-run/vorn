@@ -16,6 +16,22 @@
  */
 export const LOCAL_SERVER_RUNNING_CHANNEL = 'local-server:still-running'
 
+/**
+ * The server this app talks to has been replaced by a different process.
+ *
+ * Sent after a crash-relaunch: the bridge reconnects on its own, but what it
+ * reconnects *to* has none of the PTYs the old one held. Without this the panes
+ * carry on showing what they were showing -- their content lives in the
+ * renderer, so nothing about them changes -- and they go on accepting input that
+ * reaches a terminal which no longer exists.
+ *
+ * The app's own start-up asks what is running and what is left of what is not.
+ * This is the same question, at the only other moment the answer can change out
+ * from under it. Not in the `IPC` map for the same reason as above: it is about
+ * a server rather than a call to one.
+ */
+export const SERVER_REPLACED_CHANNEL = 'local-server:replaced'
+
 export interface LocalServerNotice {
   /** How many sessions the local server was holding, when that could be read. */
   sessions: number | null

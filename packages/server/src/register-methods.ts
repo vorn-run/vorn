@@ -1,3 +1,4 @@
+import fs from 'fs'
 import crypto from 'node:crypto'
 import { registerMethod, registerNotification } from './ws-handler'
 import { ptyManager } from './pty-manager'
@@ -12,7 +13,17 @@ import { detectIDEs, openInIDE } from './ide-detector'
 import { detectMobileProject } from './mobile-detector'
 import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
 import { clientRegistry } from './broadcast'
-import { readScrollback } from './terminal-scrollback'
+import {
+  restoredRecords,
+  listRestored,
+  consumeRestored,
+  consumeAllRestored,
+  restoreHeld
+} from './restored-sessions'
+import { clearScreen } from './terminal-screen'
+import { discardHistory } from './history/writer'
+import { buildRestorePayload } from '@vornrun/shared/session-restore'
+import { clearScrollback, readScrollback } from './terminal-scrollback'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
@@ -307,6 +318,37 @@ export function setServerPort(port: number): void {
   serverPort = port
 }
 
+/**
+ * Let go of everything held for a session from a previous run.
+ *
+ * Called when one is claimed, closed or dismissed -- the three ways a carried
+ * over record stops being offered. All three end the same way, so they end in
+ * one place.
+ *
+ * At module scope rather than inside `registerAllMethods` because it captures
+ * nothing from it, and out here it can be tested without standing up a socket.
+ */
+/** Whether a path is a directory right now, answering false for every other case. */
+function isDirectory(at: string): boolean {
+  try {
+    return fs.statSync(at).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+export async function forgetRestored(id: string): Promise<void> {
+  clearScreen(id)
+  // Recovery seeds a restored session's scrollback so a pane can be shown one
+  // (`history/recovery.ts`). Nothing else ever frees it: this session has no PTY,
+  // so it never reaches the `clearScrollback` on the kill path, and letting the
+  // record go is the last thing that happens to it. Without this the bytes stay
+  // held for the life of the server -- the same reasoning that put `clearScreen`
+  // here.
+  clearScrollback(id)
+  await discardHistory(id)
+}
+
 export function registerAllMethods(): void {
   // Wire headless worktree counter into pty-manager for cleanup gating
   ptyManager.setHeadlessWorktreeCounter((worktreePath, excludeId) =>
@@ -317,7 +359,35 @@ export function registerAllMethods(): void {
   registerMethod('terminal:create', (payload) => {
     return ptyManager.createPty(payload)
   })
-  registerMethod('terminal:kill', (id) => ptyManager.killPty(id))
+  /**
+   * Let go of what was kept for a session from the last run.
+   *
+   * The screen the server rebuilt and the files it rebuilt it from. Both go
+   * together, whether the record was claimed or declined -- a live session opens
+   * its own history rather than appending to a record of the one it replaced,
+   * and a declined one is not coming back.
+   */
+
+  registerMethod('terminal:kill', (id) => {
+    // A pane showing a session from the last run has no PTY to kill. Closing it
+    // is a decision about the record and the files, and it is the same decision
+    // resume makes -- so it goes through the same door, and a second client
+    // closing the same pane finds nothing rather than an error.
+    if (consumeRestored(id)) {
+      // Nothing follows, so the caller does not wait on the files going --
+      // but a rejection here still has to land somewhere.
+      void forgetRestored(id).catch((err) => {
+        log.warn({ err, id }, '[restored] could not forget a session that was closed')
+      })
+      // The row is only removed by a save, and saves are event-driven. Without
+      // this, closing a restored pane and quitting leaves the record behind --
+      // and the next start offers a session whose files have gone, as an empty
+      // pane the person already closed.
+      sessionManager.scheduleSave()
+      return
+    }
+    ptyManager.killPty(id)
+  })
   registerMethod('terminal:listActive', () => ptyManager.getActiveSessions())
   registerMethod('terminal:rename', ({ id, displayName }) => {
     ptyManager.renameSession(id, displayName)
@@ -555,6 +625,14 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('terminal:readScrollback', ({ id }) => ({ data: readScrollback(id) }))
+  // Read in one tick on purpose: the scrollback and the flush counter move
+  // together inside `flushBuffer`, so taking both in the same turn is what
+  // guarantees the caller can trust one against the other.
+  registerMethod('terminal:attach', ({ id }) => ({
+    data: readScrollback(id),
+    seq: ptyManager.lastFlushSeq(id),
+    live: ptyManager.hasLivePty(id)
+  }))
   registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.getOutput(id, lines))
   registerMethod('shell:create', (cwd) => {
     const session = ptyManager.createShellPty(cwd)
@@ -578,8 +656,117 @@ export function registerAllMethods(): void {
   })
 
   // Sessions
-  registerMethod('sessions:getPrevious', () => sessionManager.getPreviousSessions())
-  registerMethod('sessions:clear', () => sessionManager.clear())
+  registerMethod('sessions:clear', () => {
+    // The offer is being declined for all of them at once. Same rule as closing
+    // one: the record goes and so does what was written for it.
+    for (const one of consumeAllRestored()) {
+      void forgetRestored(one.session.id).catch((err) => {
+        log.warn({ err, id: one.session.id }, '[restored] could not forget a declined session')
+      })
+    }
+    sessionManager.clear()
+  })
+
+  registerMethod('sessions:restored', () => listRestored())
+
+  /**
+   * What goes between the run that ended and the run taking its place.
+   *
+   * Leave the alternate screen, soft reset, default attributes, cursor shown,
+   * then a line of its own. A soft reset (DECSTR) and deliberately not a full
+   * one: RIS would clear the scrollback, and the scrollback is the thing being
+   * resumed. Without it the new process inherits the last one's scroll region,
+   * origin mode and unclosed attributes -- it assumes a terminal at its defaults
+   * and so never sets them -- and its first redraw lands inside the old frame.
+   */
+  const BETWEEN_RUNS = '\x1b[?1049l\x1b[!p\x1b[0m\x1b[?25h\r\n'
+
+  registerMethod('sessions:resume', async ({ id, resumeSessionId }) => {
+    // Claimed before anything is started, and that ordering is the point. Two
+    // clients can be looking at the same cold pane; the second must be told it
+    // is gone rather than launching a second agent against one transcript.
+    // Two kinds of ended session, and only one of them is held here.
+    //
+    // A session carried over from a previous run is in `held`. One that exited
+    // during *this* run is not: its record outlives its process in the pty
+    // manager, which is what `hasLivePty` exists to tell apart. That second kind
+    // is the common one -- an agent finishing its turn -- and it was answered
+    // `gone`, which the pane reported as "resumed somewhere else" before
+    // deleting itself and its scrollback.
+    const restored = consumeRestored(id)
+    const dead = restored
+      ? undefined
+      : ptyManager.getActiveSessions().find((s) => s.id === id && !ptyManager.hasLivePty(id))
+    const previous = restored?.session ?? dead
+    if (!previous) return { ok: false as const, reason: 'gone' as const }
+
+    try {
+      // Claimed, for the second kind. Not `killPty`: that announces an exit for
+      // a session which is coming straight back, offers to delete the worktree
+      // this is about to resume into, and removes the history directory
+      // `startHistory` resets moments later.
+      if (dead) ptyManager.releaseForResume(id)
+
+      if (previous.agentType === 'shell') {
+        // The remembered directory only if it is still a directory. It was
+        // reported by the shell over the tty, so anything that could write to
+        // that pane could have written it -- and a resume is the one moment it
+        // turns into where a process starts. A stale or fabricated path falls
+        // back to the project rather than being spawned into.
+        const remembered = previous.shellCwd
+        // One question, asked once, and never allowed to throw. Asking whether it
+        // exists and then whether it is a directory is two questions with a gap
+        // between them: a directory removed in that gap turns a fallback into a
+        // rejected resume, and the fallback is the whole point of asking.
+        const usable = remembered !== undefined && isDirectory(remembered)
+        const cwd = usable ? remembered : (previous.worktreePath ?? previous.projectPath)
+        // The same id, which is what makes this the same pane rather than a new
+        // one beside it: the client keys its terminal by this, so a fresh id
+        // would hand back a blank shell and drop the screen being resumed. The
+        // previous run's history is not deleted here either -- `startHistory`
+        // resets it under this name, on the queue that owns it, and only once
+        // something is actually running.
+        const session = ptyManager.createShellPty(cwd, id)
+        // Carried across on the server rather than grafted on by whichever
+        // client asked. `createShellPty` names a session after its directory, so
+        // without this a restored shell loses the project it belonged to -- which
+        // it does today, for exactly this reason.
+        Object.assign(session, {
+          projectName: previous.projectName,
+          projectPath: previous.projectPath,
+          ...(previous.worktreePath !== undefined && { worktreePath: previous.worktreePath }),
+          ...(previous.worktreeName !== undefined && { worktreeName: previous.worktreeName }),
+          ...(previous.branch !== undefined && { branch: previous.branch }),
+          ...(previous.isWorktree !== undefined && { isWorktree: previous.isWorktree }),
+          ...(previous.displayName !== undefined && { displayName: previous.displayName })
+        })
+        // Synchronously, so it is in the buffer before the shell's first byte.
+        ptyManager.injectOutput(session.id, BETWEEN_RUNS)
+        clientRegistry.broadcast(IPC.SESSION_CREATED, session)
+        sessionManager.scheduleSave()
+        return { ok: true as const, session }
+      }
+
+      // Same id, same reasons as the shell branch above.
+      const session = ptyManager.createPty(buildRestorePayload(previous, resumeSessionId), id)
+      ptyManager.injectOutput(session.id, BETWEEN_RUNS)
+      sessionManager.scheduleSave()
+      return { ok: true as const, session }
+    } catch (err) {
+      log.warn({ err, id }, '[restored] could not resume this session')
+      // Put it back. A claim is destructive on purpose, but a claim whose spawn
+      // failed must not be the end of the session. Both kinds, because both were
+      // taken: the carried-over record goes back to `restored-sessions`, and the
+      // one that ended during this run goes back to the pty manager it came from.
+      if (restored) restoreHeld(restored)
+      else if (dead) ptyManager.restoreReleased(dead)
+      return {
+        ok: false as const,
+        reason: 'failed' as const,
+        message: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
   registerMethod('sessions:getRecent', (projectPath) => getRecentSessions(projectPath))
 
   // Resolve remote host by ID
@@ -1530,7 +1717,14 @@ export function registerAllMethods(): void {
   // session-exit, SessionStart hook), this reduces reliance on the shutdown
   // path (which has a race with bridge.close and doesn't cover
   // force-quit / crash).
-  sessionManager.startAutoSave(() => ptyManager.getActiveSessions())
+  //
+  // Live sessions *and* the ones a previous run left unclaimed. A save is a
+  // whole-table replace, so persisting only the live set is what erased every
+  // record from the last run the moment a single pane was opened -- and with the
+  // record gone, the next start judged that session's history unreachable and
+  // deleted it. Holding them here is what makes a terminal survive more than one
+  // restart.
+  sessionManager.startAutoSave(() => [...ptyManager.getActiveSessions(), ...restoredRecords()])
 
   // ─── Hook server integration ──────────────────────────────────
 
@@ -1583,6 +1777,13 @@ export function registerAllMethods(): void {
 
     sessionManager.scheduleSave()
     broadcastWidgetUpdate()
+  })
+
+  // A shell moved. Saved on a debounce, so a script running `cd` in a loop costs
+  // one write rather than hundreds -- and what is being kept is where the shell
+  // ended up, not every step it took to get there.
+  ptyManager.on('session-cwd', () => {
+    sessionManager.scheduleSave()
   })
 
   // Clean up Copilot hooks on session exit

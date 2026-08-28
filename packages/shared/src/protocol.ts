@@ -1,5 +1,6 @@
 import type {
   CreateTerminalPayload,
+  RestoredSession,
   TerminalSession,
   HeadlessSession,
   AppConfig,
@@ -503,10 +504,48 @@ export interface RequestMethods {
    * agent may be never.
    */
   'terminal:readScrollback': { params: { id: string }; result: { data: string } }
+  /**
+   * Everything a pane needs to start showing a terminal it did not create.
+   *
+   * `data` is the scrollback; `seq` is the flush it reflects, so the caller can
+   * discard the live chunks it already has; `live` says whether a process is
+   * still behind it, which decides whether the pane is a terminal or a
+   * photograph of one. All three are read in the same tick, and that is what
+   * makes the pair trustworthy -- see `PtyManager.flushSeq`.
+   *
+   * It serves a session restored from disk as well as a running one. There is
+   * no process behind a restored session, so nothing can arrive while the answer
+   * is in flight and `seq` is zero.
+   */
+  'terminal:attach': {
+    params: { id: string }
+    result: { data: string; seq: number; live: boolean }
+  }
   'shell:create': { params: string | undefined; result: TerminalSession }
   'config:load': { params: void; result: AppConfig }
   'config:save': { params: AppConfig; result: void }
-  'sessions:getPrevious': { params: void; result: TerminalSession[] }
+  /**
+   * Sessions from the last run that no pane has taken yet.
+   *
+   * The server holds them, so two clients can be looking at the same one. Each
+   * says roughly when it ended and whether there is a screen to show, which is
+   * what a pane needs to say what it is looking at rather than pretending it is
+   * live.
+   */
+  'sessions:restored': { params: void; result: RestoredSession[] }
+  /**
+   * Claim one and start it, exactly once.
+   *
+   * `gone` is the honest answer to the second caller: another pane, another
+   * window or another device took it first, and starting a second agent against
+   * one transcript is the failure this prevents.
+   */
+  'sessions:resume': {
+    params: { id: string; resumeSessionId?: string }
+    result:
+      | { ok: true; session: TerminalSession }
+      | { ok: false; reason: 'gone' | 'failed'; message?: string }
+  }
   'sessions:clear': { params: void; result: void }
   'sessions:getRecent': { params: string | undefined; result: RecentSession[] }
   'git:isGitRepo': { params: string; result: boolean }
@@ -992,7 +1031,15 @@ export interface ServerNotifications {
   'server:identity': ServerIdentity
   /** Sent once a socket is admitted, so a client knows it may start sending. */
   'auth:ok': { userId: string }
-  'terminal:data': { id: string; data: string }
+  /**
+   * `seq` numbers the flush this chunk came from, counting up per session.
+   *
+   * It exists so a pane can attach without losing or repeating anything.
+   * `terminal:attach` answers with the scrollback *and* the flush it reflects;
+   * a client subscribes first, buffers, and then applies only the chunks
+   * numbered above what it was handed.
+   */
+  'terminal:data': { id: string; data: string; seq: number }
   'terminal:exit': { id: string; exitCode: number }
   'session:created': TerminalSession
   'session:updated': TerminalSession

@@ -6,7 +6,7 @@ import { TerminalPane } from './TerminalPane'
 import { terminalTextIndentPx } from '../lib/terminal-indent'
 import { CardHeader } from './card/CardHeader'
 import { CardStatusBar } from './card/CardStatusBar'
-import { IntentBar } from './IntentBar'
+import { SessionComposer } from './card/SessionComposer'
 import { PaneColumn } from './PaneColumn'
 import { SplitDivider } from './SplitDivider'
 import { DEFAULT_SPLIT_RATIO } from '../lib/split-ratio'
@@ -237,7 +237,7 @@ export const AgentCard = memo(
             </div>
 
             {!isFocused && (
-              <IntentBar
+              <SessionComposer
                 terminalId={terminalId}
                 compact
                 indentPx={terminalTextIndentPx(terminal.session.agentType, domBlocks)}

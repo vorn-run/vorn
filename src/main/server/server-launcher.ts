@@ -499,6 +499,10 @@ function onServerExit(detail: string, endpointTaken = false): void {
           log.info(`[launcher] server came back on ${port}; repointing the bridge`)
           bridge.retarget(url)
         }
+        // Whether or not the address changed, this is a different process and it
+        // holds none of the PTYs the old one did. The bridge reconnects by
+        // itself; the panes have no way to find out, so they are told.
+        announceReplacement()
       })
       .catch((err) => {
         // Not re-entered here. The child now carries its own `exit` handler from
@@ -877,6 +881,59 @@ async function adoptSomethingRunning(dataDir: string): Promise<ServerBridge | nu
   }
 
   return null
+}
+
+/**
+ * Told when the server has been replaced, so the window can be told.
+ *
+ * A callback rather than a direct send, because this module knows about servers
+ * and not about windows -- `src/main/index.ts` owns the one and wires it here.
+ */
+type ServerReplacedListener = () => void
+let serverReplacedListener: ServerReplacedListener | null = null
+
+export function onServerReplaced(listener: ServerReplacedListener | null): void {
+  serverReplacedListener = listener
+}
+
+function notifyServerReplaced(): void {
+  try {
+    serverReplacedListener?.()
+  } catch (err) {
+    log.warn({ err }, '[launcher] could not announce the replacement server')
+  }
+}
+
+/** Set while a replacement is announced but the bridge has not reconnected. */
+let replacementPending = false
+
+/**
+ * Say a server was replaced, once the replacement can actually be asked
+ * anything.
+ *
+ * The port answering and this app being able to talk to it are two events, and
+ * the gap between them is a whole reconnect. Announcing at the first one told
+ * every pane to go and ask what the server still had, and the bridge rejected
+ * the question -- `Cannot send request: not connected` -- one line before it
+ * connected. The panes read that as "no answer, leave the board alone", so a
+ * server dying under a running app changed nothing on screen: the exact freeze
+ * the announcement exists to end.
+ */
+function announceReplacement(): void {
+  // Nothing was pointed at the old server, so nothing is holding a pane for it.
+  // The first launch of the app comes through here too.
+  if (!bridge) return
+  if (bridge.isConnected) {
+    notifyServerReplaced()
+    return
+  }
+  // Restarts can outpace reconnects. One listener, not one per attempt.
+  if (replacementPending) return
+  replacementPending = true
+  bridge.once('connected', () => {
+    replacementPending = false
+    notifyServerReplaced()
+  })
 }
 
 export function getServerBridge(): ServerBridge | null {

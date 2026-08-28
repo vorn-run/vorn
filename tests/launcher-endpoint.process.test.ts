@@ -135,9 +135,35 @@ beforeEach(() => {
   delete process.env.VORN_DATA_DIR
 })
 
+/**
+ * Every server this sandbox started, published or not.
+ *
+ * `serverPid()` reads the one named in `ws-port`, and killing only that one
+ * leaked. These tests deliberately kill servers and let the launcher relaunch,
+ * and a spawn that dies before it publishes is never named there at all -- so
+ * each run left detached servers behind that nothing would ever reap. They
+ * orphan to init and sit for hours: seventeen of them, holding 117 MB, in
+ * directories that had already been deleted out from under them.
+ *
+ * The data directory really is absent from the command line, as `serverPid`
+ * says. The *entry* is not: the packaged spawn runs
+ * `<home>/Resources/server/index.cjs`, and that path is unique to this sandbox.
+ */
+function sandboxServers(): number[] {
+  try {
+    const ps = spawnSync('ps', ['-eo', 'pid=,command='], { encoding: 'utf-8' })
+    return ps.stdout
+      .split('\n')
+      .filter((line) => line.includes(resources))
+      .map((line) => Number(line.trim().split(/\s+/)[0]))
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid)
+  } catch {
+    return []
+  }
+}
+
 afterEach(async () => {
-  const pid = serverPid()
-  if (pid) {
+  for (const pid of sandboxServers()) {
     try {
       process.kill(pid, 'SIGKILL')
     } catch {

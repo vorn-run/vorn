@@ -12,6 +12,7 @@ import { setArtifactNotify } from './artifact-watcher'
 import { SURFACE } from '../shared/surface'
 import {
   LOCAL_SERVER_RUNNING_CHANNEL,
+  SERVER_REPLACED_CHANNEL,
   STOP_SESSIONS_AND_SERVER_CHANNEL
 } from '../shared/adoption-channels'
 import {
@@ -21,7 +22,8 @@ import {
   getServerBridge,
   getLastAdoptionRefusal,
   AdoptionRefusedError,
-  probeSessions
+  probeSessions,
+  onServerReplaced
 } from './server/server-launcher'
 import { readHostSettings } from './server/host-store'
 import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
@@ -425,6 +427,14 @@ app.whenReady().then(async () => {
   // Before launchServer, unlike everything else: these are what let someone
   // correct an unreachable host, so they cannot depend on reaching one.
   registerConnectHandlers()
+  // A crash-relaunch gives this app a different server holding none of the old
+  // PTYs. The bridge reconnects on its own, but the panes have no way to notice:
+  // their content lives in the renderer, so a frozen terminal looks exactly like
+  // a quiet one and goes on taking input for a process that is gone.
+  onServerReplaced(() => {
+    mainWindow?.webContents.send(SERVER_REPLACED_CHANNEL)
+  })
+
   let bridge: ServerBridge
   try {
     bridge = await launchServer()

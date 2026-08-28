@@ -267,7 +267,11 @@ describe('agent crashes mid-session', () => {
     const channels = messages.map((m) => m.channel)
     expect(channels.indexOf(IPC.TERMINAL_DATA)).toBeLessThan(channels.indexOf(IPC.TERMINAL_EXIT))
     // Exactly one flush — the pending timer must not fire a second, empty one.
-    expect(messagesOn(IPC.TERMINAL_DATA)).toEqual([{ id: session.id, data: 'segfault imminent\n' }])
+    // `seq: 1` says the same thing from the other side: the counter a pane uses
+    // to tell what it already has moved once, so there was one flush.
+    expect(messagesOn(IPC.TERMINAL_DATA)).toEqual([
+      { id: session.id, data: 'segfault imminent\n', seq: 1 }
+    ])
   })
 
   it('cancels the idle timer so a crashed session is never re-marked', () => {

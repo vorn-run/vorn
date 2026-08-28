@@ -386,7 +386,7 @@ export function createApiShim(wsUrl: string) {
     createShellTerminal: (cwd?: string) => rpc.invoke('shell:create', cwd),
 
     // ── Terminal Events ──
-    onTerminalData: (callback: (event: { id: string; data: string }) => void) =>
+    onTerminalData: (callback: (event: { id: string; data: string; seq: number }) => void) =>
       rpc.on('terminal:data', callback as (p: unknown) => void),
     onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) =>
       rpc.on('terminal:exit', callback as (p: unknown) => void),
@@ -417,7 +417,17 @@ export function createApiShim(wsUrl: string) {
 
     // ── Sessions ──
     listActiveSessions: () => rpc.invoke('terminal:listActive'),
-    getPreviousSessions: () => rpc.invoke('sessions:getPrevious'),
+    attachTerminal: (id: string) => rpc.invoke('terminal:attach', { id }),
+    getRestoredSessions: () => rpc.invoke('sessions:restored'),
+    // The desktop hears this from its own launcher, which is the thing that
+    // notices a server has died and starts another. A web client has no
+    // launcher: it reconnects to whatever answers the address it was given, and
+    // has no way to be told that what answered is a different process. Present
+    // so the surface matches, and so a caller does not have to know which client
+    // it is running in.
+    onServerReplaced: (_callback: () => void) => () => {},
+    resumeSession: (params: { id: string; resumeSessionId?: string }) =>
+      rpc.invoke('sessions:resume', params),
     clearPreviousSessions: () => rpc.invoke('sessions:clear'),
     getRecentSessions: (projectPath?: string) => rpc.invoke('sessions:getRecent', projectPath),
     renameSession: (id: string, displayName: string) =>

@@ -38,10 +38,31 @@ import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
+import {
+  createScreen,
+  feedScreen,
+  resizeScreen,
+  clearScreen,
+  setCwdReporter
+} from './terminal-screen'
+import { startHistory, recordOutput, recordResize, stopHistory } from './history/writer'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 
 const MAX_OUTPUT_LINES = 1000
+
+/**
+ * What a PTY starts at, before any client has fitted itself to a pane.
+ *
+ * Named rather than repeated at each spawn site: the session record now carries
+ * these too, and a literal in one place and a constant in another is how the two
+ * come to disagree about what the program is rendering against.
+ */
+/** The largest geometry a resize may ask for. See `resizePty`. */
+const MAX_GEOMETRY = 10_000
+
+const INITIAL_COLS = 80
+const INITIAL_ROWS = 24
 const IDLE_TIMEOUT_MS = 5000
 const IDLE_TIMEOUT_HOOKS_MS = 30_000
 
@@ -90,6 +111,29 @@ class PtyManager extends EventEmitter {
   constructor() {
     super()
     setImmediate(() => this.cleanStaleTempKeys())
+    // Told when a shell moves, rather than checking after every flush. The
+    // report comes from inside xterm's parser, which is the only moment the new
+    // directory is actually known -- a flush ends before the bytes it delivered
+    // have been parsed, so anything reading there reads the previous value.
+    setCwdReporter((id, cwd) => this.noteShellCwd(id, cwd))
+  }
+
+  /**
+   * Keep a shell's record pointing at where the shell actually is.
+   *
+   * `shellCwd` was written once at spawn and never moved, so restoring a shell
+   * put somebody back where they started rather than where they were. This is
+   * the record that gets persisted and the one a restored shell is offered.
+   *
+   * Runs inside the parser, so it stays a map lookup and an event, and the save
+   * it triggers is debounced -- a script running `cd` in a loop costs one write
+   * rather than hundreds.
+   */
+  private noteShellCwd(id: string, cwd: string): void {
+    const session = this.sessions.get(id)
+    if (!session || session.agentType !== 'shell' || session.shellCwd === cwd) return
+    session.shellCwd = cwd
+    this.emit('session-cwd', id, cwd)
   }
 
   /** Remove stale temp key files from previous crashes (older than 1 hour) */
@@ -147,13 +191,24 @@ class PtyManager extends EventEmitter {
     return buildLaunchLine(payload, this.agentCommands, getSafeEnv())
   }
 
-  createPty(payload: CreateTerminalPayload): TerminalSession {
+  /**
+   * @param reuseId Keep an existing session's id instead of minting one.
+   *
+   * Only resume passes this, and it is what makes a resumed session the same
+   * session rather than a replacement for it. Every client keys a pane by this
+   * id -- the xterm holding the replayed screen, the subscription carrying its
+   * output -- so a new id means a new pane, and the screen the person was
+   * looking at is thrown away at the moment they asked for it back. Reusing it
+   * also means the new run's history supersedes the old run's under the same
+   * name, which `startHistory` does on its own queue.
+   */
+  createPty(payload: CreateTerminalPayload, reuseId?: string): TerminalSession {
     // Refused rather than created: a session started on an endpoint this process
     // no longer holds is reachable through a name that now points elsewhere, so
     // nobody would ever see it. Existing sessions are untouched -- their clients
     // hold a descriptor, not a name.
     if (isDraining()) throw new Error(DRAINING_MESSAGE)
-    const id = crypto.randomUUID()
+    const id = reuseId ?? crypto.randomUUID()
     const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
 
     // Check if this is a remote session
@@ -217,8 +272,8 @@ class PtyManager extends EventEmitter {
 
     const ptyProcess = pty.spawn(shell, getShellArgs(), {
       name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       cwd: effectivePath,
       // No shell integration: an agent paints its own full-screen interface
       // and is never drawn as command blocks. Installing the shim anyway made
@@ -249,7 +304,7 @@ class PtyManager extends EventEmitter {
     const launchLine = this.buildAgentLaunchLine(payload)
     setTimeout(() => ptyProcess.write(launchLine + '\r'), 300)
 
-    this.setupPtyEvents(id, ptyProcess)
+    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
     this.ptys.set(id, ptyProcess)
 
     const branch = effectiveBranch || getGitBranch(effectivePath)
@@ -260,6 +315,8 @@ class PtyManager extends EventEmitter {
       projectPath: payload.projectPath,
       status: 'running',
       createdAt: Date.now(),
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       pid: ptyProcess.pid,
       ...(payload.displayName
         ? { displayName: payload.displayName }
@@ -288,8 +345,8 @@ class PtyManager extends EventEmitter {
   ): TerminalSession {
     const ptyProcess = pty.spawn(shell, getShellArgs(), {
       name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       cwd: os.homedir(),
       env: getSafeEnv()
     })
@@ -410,7 +467,7 @@ class PtyManager extends EventEmitter {
     })
 
     // Forward all data to the renderer from the start
-    this.setupPtyEvents(id, ptyProcess)
+    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
     this.ptys.set(id, ptyProcess)
 
     // Clean up the prompt listener after connection or timeout
@@ -435,6 +492,8 @@ class PtyManager extends EventEmitter {
       projectPath: payload.projectPath,
       status: 'running',
       createdAt: Date.now(),
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       pid: ptyProcess.pid,
       remoteHostId: host.id,
       remoteHostLabel: host.label,
@@ -450,8 +509,9 @@ class PtyManager extends EventEmitter {
     return session
   }
 
-  createShellPty(cwd?: string): TerminalSession {
-    const id = crypto.randomUUID()
+  /** @param reuseId As `createPty`: a resumed shell keeps the pane it was in. */
+  createShellPty(cwd?: string, reuseId?: string): TerminalSession {
+    const id = reuseId ?? crypto.randomUUID()
     const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
     const workingDir = cwd || os.homedir()
     const integration = getShellIntegration({
@@ -462,8 +522,8 @@ class PtyManager extends EventEmitter {
     // initialisation, so integration for them replaces the launch arguments.
     const ptyProcess = pty.spawn(shell, integration.args ?? getShellArgs(), {
       name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       cwd: workingDir,
       env: {
         ...getSafeEnv(),
@@ -472,7 +532,7 @@ class PtyManager extends EventEmitter {
         VORN_SESSION_ID: id
       }
     })
-    this.setupPtyEvents(id, ptyProcess)
+    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
     this.ptys.set(id, ptyProcess)
 
     const shellCount =
@@ -485,6 +545,8 @@ class PtyManager extends EventEmitter {
       projectPath: workingDir,
       status: 'running',
       createdAt: Date.now(),
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
       pid: ptyProcess.pid,
       displayName: `Shell ${shellCount}`,
       shellCwd: workingDir
@@ -496,6 +558,27 @@ class PtyManager extends EventEmitter {
   }
 
   private static readonly BUFFER_FLUSH_MS = 8
+
+  /**
+   * Put bytes into a session's output as though the process had written them.
+   *
+   * There is exactly one caller and one reason: a resumed session hands a new
+   * process a terminal the previous one was still using, and something has to
+   * sit between the two runs saying so. Doing it in the client cannot work --
+   * the client is not what orders these bytes. A cold pane has not mounted when
+   * the resume starts, so it has no terminal to reset yet, and the screen it
+   * replays is written when it finally does mount, by which time the new
+   * process has been streaming for a second. The two interleave and what
+   * arrives is both frames at once with the escapes showing.
+   *
+   * Through `bufferData` rather than beside it, so this takes a sequence number,
+   * a place in the scrollback and a line in the history like any other output.
+   * That is what makes it arrive in the right order for a client that attaches
+   * in a minute as well as for the one watching now.
+   */
+  injectOutput(id: string, data: string): void {
+    this.bufferData(id, data)
+  }
 
   private bufferData(id: string, data: string): void {
     const existing = this.dataBuffers.get(id)
@@ -509,12 +592,58 @@ class PtyManager extends EventEmitter {
     }
   }
 
+  /**
+   * How many flushes each session has had.
+   *
+   * The number a client uses to tell what it already has. A pane attaching
+   * asks for the scrollback and is told which flush it reflects; every
+   * `terminal:data` carries the same counter, so anything at or below that
+   * number is already in what it was handed and anything above it is not.
+   *
+   * This works only because `flushBuffer` below is one synchronous block. The
+   * counter moves and the buffer it describes is appended in the same tick, with
+   * nothing awaited between them, so a reader that takes both in one turn cannot
+   * catch them disagreeing. **Introduce an `await` in there and this silently
+   * stops being true**, and the symptom is a terminal that duplicates or loses a
+   * few hundred milliseconds of output on attach.
+   */
+  private flushSeq = new Map<string, number>()
+
+  /** What the last flush of this session was numbered. */
+  lastFlushSeq(id: string): number {
+    return this.flushSeq.get(id) ?? 0
+  }
+
   private flushBuffer(id: string): void {
     const data = this.dataBuffers.get(id)
     this.dataBuffers.delete(id)
     this.flushTimers.delete(id)
     if (data) {
-      this.emit('client-message', IPC.TERMINAL_DATA, { id, data })
+      const seq = this.lastFlushSeq(id) + 1
+      this.flushSeq.set(id, seq)
+
+      // Clients first, always. What follows models the screen for nobody who is
+      // waiting; this line is a person watching their terminal, and it must not
+      // be behind anything that can fail or stall.
+      this.emit('client-message', IPC.TERMINAL_DATA, { id, data, seq })
+
+      // Fed from here rather than from `onData` for two reasons. `term.write`
+      // queues a macrotask per call and node-pty emits a few bytes at a time
+      // while somebody types, so this is one queued write per session per flush
+      // instead of one per keystroke. And it puts the model in step with the
+      // clients rather than ahead of them -- fed from `onData`, a screen read
+      // mid-flush would describe something nobody has seen yet.
+      // All three from here, on the same bytes, in one place.
+      //
+      // `appendScrollback` used to sit on `onData` instead, and that was not
+      // merely inconsistent -- it put the byte buffer ahead of the screen model
+      // by up to one flush. A checkpoint takes both at the same instant, so it
+      // could hold bytes in its scrollback that its screen had not seen; those
+      // bytes then arrived again as log frames after it, and a restore counted
+      // them twice. Fed from one point they cannot disagree.
+      appendScrollback(id, data)
+      feedScreen(id, data)
+      recordOutput(id, data)
     }
   }
 
@@ -523,6 +652,13 @@ class PtyManager extends EventEmitter {
     if (timer) clearTimeout(timer)
     this.flushTimers.delete(id)
     this.dataBuffers.delete(id)
+  }
+
+  /** Push what is buffered now, without waiting out the timer that would. */
+  private drainBuffer(id: string): void {
+    const timer = this.flushTimers.get(id)
+    if (timer) clearTimeout(timer)
+    this.flushBuffer(id)
   }
 
   private clearSessionTracking(id: string): void {
@@ -606,27 +742,43 @@ class PtyManager extends EventEmitter {
     )
   }
 
-  private setupPtyEvents(id: string, ptyProcess: pty.IPty): void {
+  /**
+   * @param cols - what the PTY was spawned at, passed rather than looked up.
+   *   Every caller runs this *before* registering the session, so a lookup here
+   *   finds nothing and silently falls back -- which is invisible while all
+   *   three spawn at the same size and wrong the moment one does not.
+   */
+  private setupPtyEvents(id: string, ptyProcess: pty.IPty, cols: number, rows: number): void {
+    createScreen(id, cols, rows)
+    // Replaces whatever was left under this id. A recovered session that is
+    // being respawned has history describing a process that is gone.
+    startHistory(id)
+
     ptyProcess.onData((data: string) => {
       this.bufferData(id, data)
+      // The one consumer that wants raw chunks rather than coalesced ones: it
+      // reassembles partial lines and scans for bracketed paste, so it has to
+      // see the stream as it arrived. Everything else is fed from the flush.
       this.appendOutput(id, data)
-      // Kept unstripped, and deliberately alongside `appendOutput` rather than
-      // instead of it: one answers what the agent said, the other what a
-      // terminal should draw, and neither can be derived from the other.
-      appendScrollback(id, data)
     })
 
     ptyProcess.onExit(({ exitCode }) => {
-      // Flush any remaining buffered data before signaling exit
-      const pendingTimer = this.flushTimers.get(id)
-      if (pendingTimer) {
-        clearTimeout(pendingTimer)
-        this.flushBuffer(id)
-      }
+      // Whatever is buffered is the last thing this terminal ever printed.
+      this.drainBuffer(id)
       this.clearBuffer(id)
       this.deleteTempKey(id)
       this.clearSessionTracking(id)
+      this.flushSeq.delete(id)
       clearScrollback(id)
+      // Beside the scrollback it belongs to: the PTY is gone and nothing will
+      // draw into it again. The session record survives so the card can show an
+      // exit code, but its history does not -- that is pre-existing, and this
+      // matches it rather than quietly deciding otherwise.
+      clearScreen(id)
+      // And the same for what was written for it. A terminal whose process has
+      // exited has nothing worth restoring -- refused during shutdown, where the
+      // PTYs are killed after the checkpoints have been written.
+      stopHistory(id)
       this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
 
       this.ptys.delete(id)
@@ -667,19 +819,98 @@ class PtyManager extends EventEmitter {
     }
   }
 
+  /**
+   * Change the geometry a program is rendering against.
+   *
+   * Guarded before anything is touched. This arrives as an RPC *notification*
+   * -- fire-and-forget, no caller to catch a throw -- and `resize(0, 0)` throws
+   * inside node-pty, so a client that fitted itself to a collapsed pane would
+   * take down the handler rather than be ignored.
+   *
+   * The session record is updated alongside the PTY, with the same numbers, so
+   * anything modelling the screen can agree with what the program is actually
+   * drawing against. Two clients still fight over it -- node-pty has always been
+   * last-writer-wins here and this does not change that -- but now the record
+   * says which of them won.
+   */
   resizePty(id: string, cols: number, rows: number): void {
+    // An id this manager does not know is not merely a no-op below: the screen
+    // model is keyed by session id and a restored one exists without a PTY, so a
+    // cold pane fitting itself would reflow a screen nothing is drawing to.
+    if (!this.sessions.has(id)) return
+    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) return
+    // Bounded as well as positive, because this now outlives the process. A
+    // resize frame stores its dimensions in sixteen bits, so a client asking for
+    // seventy thousand columns would be recorded as four thousand -- a durable
+    // disagreement between what the program was rendering against and what a
+    // replay lays it out at, and one that is re-applied on every subsequent
+    // start. Nothing a terminal is actually displayed at comes near this.
+    if (cols > MAX_GEOMETRY || rows > MAX_GEOMETRY) return
+
+    const session = this.sessions.get(id)
+    if (session) {
+      session.cols = cols
+      session.rows = rows
+    }
     this.ptys.get(id)?.resize(cols, rows)
+    // The same numbers, so the model wraps where the program does. Not awaited:
+    // this is reached from a fire-and-forget notification, and the model drains
+    // its own queue before applying the size.
+    void resizeScreen(id, cols, rows)
+    recordResize(id, cols, rows)
+  }
+
+  /**
+   * Let go of a session that is about to start again under the same id.
+   *
+   * `killPty` was doing this job and doing three other things with it. Its
+   * process has already gone, so it emits `session-exit` for a session that is
+   * coming straight back, and -- when that session was the last one in a
+   * worktree -- broadcasts WORKTREE_CONFIRM_CLEANUP, which reaches the person as
+   * an offer to delete the worktree the agent is at that moment being resumed
+   * into. Taking it removes the tree out from under a running agent.
+   *
+   * It also called `stopHistory`, which queues a recursive remove of the very
+   * directory `startHistory` is about to reset a few lines later.
+   *
+   * So this releases the id and says nothing: the maps, the buffers and the
+   * screen model, which `createPty` is about to replace anyway.
+   */
+  releaseForResume(id: string): void {
+    this.drainBuffer(id)
+    this.clearBuffer(id)
+    this.sessions.delete(id)
+    this.normalizedPaths.delete(id)
+    this.clearSessionTracking(id)
+    this.flushSeq.delete(id)
+    clearScreen(id)
+    this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
+    this.ptys.delete(id)
+  }
+
+  /**
+   * Put back a record released for a resume whose spawn then failed.
+   *
+   * Releasing is destructive on purpose -- it is what lets the replacement take
+   * the same id -- but a spawn that throws must not be the end of the session.
+   * The restored kind is handed back to `restored-sessions`; this is the other
+   * kind, a session that ended during this run and whose record lives here, and
+   * without this it was released and never put anywhere. The pane's next attempt
+   * found nothing and was told the session was gone.
+   *
+   * Reachable without malice, the same way the other one is: a project directory
+   * renamed, a worktree pruned, a volume unmounted.
+   */
+  restoreReleased(session: TerminalSession): void {
+    this.sessions.set(session.id, session)
+    this.normalizedPaths.set(session.id, normalizePath(session.worktreePath || session.projectPath))
+    if (!this.sessionOrder.includes(session.id)) this.sessionOrder.push(session.id)
   }
 
   killPty(id: string): void {
     const p = this.ptys.get(id)
 
-    // Flush any remaining buffered data before killing
-    const pendingTimer = this.flushTimers.get(id)
-    if (pendingTimer) {
-      clearTimeout(pendingTimer)
-      this.flushBuffer(id)
-    }
+    this.drainBuffer(id)
     this.clearBuffer(id)
 
     // Delete session and PTY from maps BEFORE killing so the onExit handler
@@ -689,6 +920,13 @@ class PtyManager extends EventEmitter {
     this.sessions.delete(id)
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
+    this.flushSeq.delete(id)
+    // Not beside a `clearScrollback`, because there is not one here -- but this
+    // path deletes the session outright, so nothing would ever feed or free the
+    // model again. A `Terminal` holds buffers; leaving it is a leak per closed
+    // session for the life of the server.
+    clearScreen(id)
+    stopHistory(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
 
@@ -725,13 +963,31 @@ class PtyManager extends EventEmitter {
     }
   }
 
+  /**
+   * Push out whatever is sitting in the flush buffers, without waiting for their
+   * timers.
+   *
+   * For shutdown. The buffers hold up to `BUFFER_FLUSH_MS` of output, and that
+   * output is the most recent thing the terminal showed -- the part somebody is
+   * most likely to want back. `killAll` below drops it deliberately, which was
+   * right while nothing outlived the process.
+   */
+  flushPendingOutput(): void {
+    // Copied because `flushBuffer` deletes from the map it is walking.
+    for (const id of [...this.flushTimers.keys()]) this.drainBuffer(id)
+  }
+
   killAll(): void {
-    // Clear all data buffers and flush timers (window is closing, no point flushing)
+    // Dropped rather than flushed. `shutdown()` calls `flushPendingOutput()`
+    // ahead of this precisely because these bytes do matter now that history
+    // outlives the process -- by the time this runs they have been written, and
+    // what is left is whatever arrived in between, with nowhere to go.
     for (const timer of this.flushTimers.values()) {
       clearTimeout(timer)
     }
     this.dataBuffers.clear()
     this.flushTimers.clear()
+    this.flushSeq.clear()
 
     // Clean up any remaining temp key files
     for (const sessionId of this.tempKeyPaths.keys()) {
@@ -763,6 +1019,17 @@ class PtyManager extends EventEmitter {
    */
   livePtyCount(): number {
     return this.ptys.size
+  }
+
+  /**
+   * Whether a process is still behind this session.
+   *
+   * `getActiveSessions()` cannot answer it. That returns session *records*, and
+   * a record outlives its process -- only `killPty` removes one -- so a terminal
+   * that exited on its own is still in that list. This is the map that decides.
+   */
+  hasLivePty(id: string): boolean {
+    return this.ptys.has(id)
   }
 
   getActiveSessions(): TerminalSession[] {

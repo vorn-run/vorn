@@ -34,17 +34,19 @@ describe('sessionManager', () => {
     expect(() => sessionManager.saveSessions([])).not.toThrow()
   })
 
-  it('getPreviousSessions returns DB result', () => {
+  it('readPreviousSessions returns DB result', () => {
     const data = [{ id: 's1' }]
     mockGetPrevious.mockReturnValueOnce(data)
-    expect(sessionManager.getPreviousSessions()).toBe(data)
+    expect(sessionManager.readPreviousSessions()).toBe(data)
   })
 
-  it('getPreviousSessions returns [] on error', () => {
+  it('readPreviousSessions returns null on error, which is not the same as none', () => {
     mockGetPrevious.mockImplementationOnce(() => {
       throw new Error('db error')
     })
-    expect(sessionManager.getPreviousSessions()).toEqual([])
+    // History is swept when no session claims it, so reading a failure as "there
+    // are none" would remove every terminal's history for one bad query.
+    expect(sessionManager.readPreviousSessions()).toBeNull()
   })
 
   it('clear delegates to database', () => {

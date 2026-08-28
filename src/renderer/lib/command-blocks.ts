@@ -272,6 +272,29 @@ function bufferOf(term: Terminal): BufferLike {
 }
 
 /**
+ * Panes holding a screen they did not draw themselves.
+ *
+ * A pane that attaches to a session already running is seeded with what that
+ * session has shown so far, and that screen then lives in the terminal and
+ * nowhere else -- the block log is a renderer thing and does not survive the
+ * window that built it. So the first command to finish would hand its own rows
+ * to the log, call `term.clear()`, and take the whole restored screen with it:
+ * everything from before the pane was opened gone at the first prompt.
+ */
+const seededFromServer = new Set<string>()
+
+/**
+ * Say a pane was seeded rather than grown from an empty terminal.
+ *
+ * Told by whoever does the seeding rather than discovered here, for the same
+ * reason the cwd is: this module is about blocks and should not have to know
+ * how a terminal came to have something in it.
+ */
+export function markSeededFromServer(terminalId: string): void {
+  seededFromServer.add(terminalId)
+}
+
+/**
  * Hand a finished command to the DOM log and clear the terminal.
  *
  * term.clear() keeps the current prompt line and drops everything above it,
@@ -280,6 +303,23 @@ function bufferOf(term: Terminal): BufferLike {
  */
 function liftBlockToDom(term: Terminal, terminalId: string, block: CommandBlock): void {
   const start = (block.marker as IMarker).line
+
+  // Once per seeded pane, and before the clear below can reach it. No command
+  // produced this, so it is logged without one -- the same shape a shell that
+  // cannot report its command text already produces.
+  if (seededFromServer.delete(terminalId) && start > 0) {
+    captureBlock({
+      terminalId,
+      buffer: bufferOf(term),
+      startLine: 0,
+      endLine: start - 1,
+      command: null,
+      exitCode: 0,
+      durationMs: 0,
+      cwd: null
+    })
+  }
+
   const end = term.buffer.active.baseY + term.buffer.active.cursorY
   captureBlock({
     terminalId,

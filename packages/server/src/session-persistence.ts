@@ -55,14 +55,26 @@ class SessionManager {
     }
   }
 
-  getPreviousSessions(): TerminalSession[] {
+  /**
+   * What the last run left, with "there are none" told apart from "could not
+   * read them".
+   *
+   * That distinction is the whole point of the null. Terminal history is keyed
+   * by session id and swept when no session claims it, so one transient database
+   * error read as "there are no sessions" is every terminal's history removed.
+   *
+   * There was a second reader that flattened null to `[]`, for an RPC no client
+   * called after the app stopped asking the database what was open and started
+   * asking the server what exists. Both are gone.
+   */
+  readPreviousSessions(): TerminalSession[] | null {
     try {
       const sessions = dbGetPreviousSessions()
       log.info(`[session-persistence] loaded ${sessions.length} previous session(s)`)
       return sessions
     } catch (err) {
       log.warn({ err }, '[session-persistence] getPreviousSessions failed:')
-      return []
+      return null
     }
   }
 

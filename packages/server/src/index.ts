@@ -35,6 +35,10 @@ import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
 import { DEFAULT_SERVER_PORT, EXIT_ENDPOINT_TAKEN } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
+import { configureHistory, flushHistory } from './history/writer'
+import { recoverHistory } from './history/recovery'
+import { seedRestored, markRecovered } from './restored-sessions'
+import { sessionManager } from './session-persistence'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
@@ -113,6 +117,10 @@ export async function startServer(
   // Anything launched from a session inherits VORN_DATA_DIR and can then find the
   // port and credential files even when --data-dir moved them.
   setLaunchDataDir(dataDir)
+  // Before anything listens, so there is no window where a session is created
+  // and then never recorded. Nothing is written until a terminal exists, and a
+  // server that loses the endpoint claim exits without ever having one.
+  configureHistory(dataDir)
 
   // Who this server is, so a desktop can decide whether to adopt it instead of
   // starting a second one on the same data directory. The channel is passed by
@@ -328,6 +336,13 @@ export async function startServer(
     log.info(`[server] serving web app from ${webDistDir}`)
   }
 
+  // Before `registerAllMethods()`, and that ordering is the point rather than
+  // tidiness. Registering wires `startAutoSave`, and `startInboxWorker()` on the
+  // next line can launch a workflow session -- so a save can fire from here, and
+  // a save is a whole-table replace. Seeding after it would mean the records
+  // this is holding had already been erased by the thing it exists to survive.
+  const carriedOver = seedRestored(sessionManager.readPreviousSessions())
+
   // Register all RPC methods
   registerAllMethods()
   scheduler.startInboxWorker()
@@ -446,6 +461,18 @@ export async function startServer(
   // where it matters.
   if (endpoint) watchEndpoint(() => endpoint.holds())
 
+  // Only now, and for two reasons. It is after `registerAllMethods()`, so
+  // nothing here races the first debounced `saveSessions`. And it is after the
+  // endpoint claim, so a server that arrives second exits above rather than
+  // replaying every terminal on the machine and then standing down.
+  //
+  // It runs before the port file and the credential below, which closes the
+  // window the plan for this expected to have to live with: a client cannot find
+  // this server until both of those exist, so there is no moment where one can
+  // ask for history that has not been read yet. The cost is that discovery waits
+  // on it -- measured at 77ms for fifty terminals.
+  markRecovered((await recoverHistory(dataDir, carriedOver)).recovered)
+
   // Published together, after the claim, because they are one announcement: the
   // port says where, the credential says how, and a reader that finds one
   // without the other cannot reach anything.
@@ -459,7 +486,6 @@ export async function startServer(
   const { uninstallHooks } = await import('./hook-installer')
   const { uninstallAllCopilotHooks } = await import('./copilot-hook-installer')
   const { hookStatusMapper } = await import('./hook-status-mapper')
-  const { sessionManager } = await import('./session-persistence')
 
   // Two failures, and neither is retried -- by the time either is visible this
   // has already cleared the credential and removed the port file, so a second
@@ -483,6 +509,14 @@ export async function startServer(
     // Stop the periodic timer first, then do one final synchronous save
     sessionManager.stopAutoSave()
     sessionManager.persistNow()
+    // The last few milliseconds of output, then every terminal's screen, before
+    // anything kills a PTY. After `killAll()` the buffers this reads have been
+    // emptied; before `persistNow()` the sessions these belong to are not yet
+    // saved. Awaited because serializing a screen is asynchronous by necessity,
+    // and bounded from the inside -- it is on the same path as the unref'd
+    // `SHUTDOWN_DEADLINE_MS` and must not be able to spend all of it.
+    ptyManager.flushPendingOutput()
+    await flushHistory()
     hookServer.stop()
     clearLocalCredential()
     uninstallHooks()

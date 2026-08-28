@@ -1,31 +1,36 @@
 import { useState } from 'react'
 import { useAppStore } from '../stores'
 import { RotateCcw, X } from 'lucide-react'
-import { resolveResumeSessionId, buildRestorePayload } from '../lib/session-utils'
+import { showEndedSession } from '../lib/session-resume'
 
 export function SessionRestoredBanner() {
   const previousSessions = useAppStore((s) => s.previousSessions)
   const setSessionBanner = useAppStore((s) => s.setSessionBanner)
-  const addTerminal = useAppStore((s) => s.addTerminal)
   const [restoring, setRestoring] = useState(false)
 
+  // Dismissing hides the offer for this launch and leaves the records alone.
+  // It used to clear them, so a glance at the banner and a wrong click threw
+  // away every terminal's history -- and there was nothing left to change your
+  // mind from. The server retires them on its own once they age out.
   const handleDismiss = (): void => {
     setSessionBanner(false)
-    window.api.clearPreviousSessions()
   }
 
+  // Shows the panes. It does not relaunch anything, which is the same rule the
+  // rest of start-up now follows: the view comes back, the agent does not.
+  //
+  // This used to build a launch payload and call `createTerminal` per session --
+  // a second implementation of resume that grew apart from the real one, and one
+  // that bypassed the server's claim, so two clients pressing it started two
+  // agents against one transcript.
   const handleRestore = async (): Promise<void> => {
     setRestoring(true)
-    const claimed = new Set<string>()
-    for (const prev of previousSessions) {
-      const resumeSessionId = await resolveResumeSessionId(prev, claimed)
-      if (resumeSessionId) claimed.add(resumeSessionId)
-      const session = await window.api.createTerminal(buildRestorePayload(prev, resumeSessionId))
-      addTerminal(session)
+    try {
+      for (const prev of previousSessions) await showEndedSession(prev.id)
+    } finally {
+      setSessionBanner(false)
+      setRestoring(false)
     }
-    setSessionBanner(false)
-    window.api.clearPreviousSessions()
-    setRestoring(false)
   }
 
   return (

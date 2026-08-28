@@ -50,7 +50,8 @@ import {
   setDefaultFontSize,
   initGlobalDataListener,
   disposeGlobalDataListener,
-  setKeyRedirectHandler
+  setKeyRedirectHandler,
+  setNotLiveReporter
 } from './lib/terminal-registry'
 import {
   setCwdReporter,
@@ -74,7 +75,8 @@ import { GridContextMenu } from './components/GridContextMenu'
 import { WindowControls } from './components/WindowControls'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from './lib/platform'
 import { useIsMobile } from './hooks/useIsMobile'
-import { resolveResumeSessionId, buildRestorePayload } from './lib/session-utils'
+import { syncBoard } from './lib/board-sync'
+import { markPaneEnded } from './lib/session-resume'
 
 export function App() {
   const {
@@ -144,6 +146,10 @@ export function App() {
 
   useEffect(() => {
     initGlobalDataListener()
+    // An attach that finds nothing running is how a window opened onto a dead
+    // terminal learns it is looking at a photograph. Start-up reconciliation
+    // cannot tell it: the session was not there when this client started.
+    setNotLiveReporter(markPaneEnded)
     // The capture path has to know before any command finishes, so it is read
     // from config rather than passed down through the view tree.
     setDomBlockRendering(useAppStore.getState().config?.defaults.domBlockRendering ?? true)
@@ -164,10 +170,7 @@ export function App() {
     })
     ;(async () => {
       try {
-        const [config, prev] = await Promise.all([
-          window.api.loadConfig(),
-          window.api.getPreviousSessions()
-        ])
+        const config = await window.api.loadConfig()
         useAppStore.getState().setConfig(config)
         if (config.defaults.fontSize) {
           setDefaultFontSize(config.defaults.fontSize)
@@ -183,64 +186,50 @@ export function App() {
         if (Number(config.defaults.hasSeenOnboarding ?? 0) < ONBOARDING_VERSION) {
           useAppStore.getState().setOnboardingOpen(true)
         }
-        // Web: hydrate already-running sessions that started before we connected
-        if (isWeb && 'listActiveSessions' in window.api) {
-          try {
-            const active = (await (
-              window.api as { listActiveSessions: () => Promise<unknown[]> }
-            ).listActiveSessions()) as import('../shared/types').TerminalSession[]
-            const state = useAppStore.getState()
-            for (const session of active) {
-              if (!state.terminals.has(session.id)) {
-                state.addTerminal(session)
-              }
-            }
-          } catch (err) {
-            console.error('[App] failed to hydrate active sessions:', err)
-          }
-        }
+        // What the server actually has, asked before what the database
+        // remembers, because they are different questions and only one of them
+        // is about the present. The desktop could not ask this until now, so a
+        // restart read the saved list and launched a replacement for every
+        // session -- including the ones that had never stopped.
+        //
+        // The same reconciliation runs again whenever the server is replaced;
+        // see `board-sync`.
+        const reopen = config.defaults.reopenSessions ?? true
+        // On means both halves of what it has always meant: the panes come back,
+        // and the sessions behind them are started again. Only the ones that were
+        // stopped -- see `resumeAll`.
+        await syncBoard({ showCold: reopen, resume: reopen })
 
-        if (prev && prev.length > 0) {
-          if (config.defaults.reopenSessions) {
-            // Auto-restore sessions — prefer hook-correlated session ID (exact),
-            // fall back to scanning agent history when hooks weren't active.
-            // Shells restore as fresh PTYs in their saved cwd (no resume concept).
-            const claimed = new Set<string>()
-            for (const s of prev) {
-              if (s.agentType === 'shell') {
-                const cwd = s.shellCwd ?? s.worktreePath ?? s.projectPath
-                const session = await window.api.createShellTerminal(cwd)
-                const restored =
-                  s.projectName && s.projectPath
-                    ? {
-                        ...session,
-                        projectName: s.projectName,
-                        projectPath: s.projectPath,
-                        worktreePath: s.worktreePath,
-                        worktreeName: s.worktreeName,
-                        branch: s.branch,
-                        isWorktree: s.isWorktree
-                      }
-                    : session
-                useAppStore.getState().addTerminal(restored)
-                continue
-              }
-              const resumeSessionId = await resolveResumeSessionId(s, claimed)
-              if (resumeSessionId) claimed.add(resumeSessionId)
-              const session = await window.api.createTerminal(
-                buildRestorePayload(s, resumeSessionId)
-              )
-              useAppStore.getState().addTerminal(session)
-            }
-            window.api.clearPreviousSessions()
-          } else {
-            useAppStore.getState().setSessionBanner(true, prev)
+        if (!reopen) {
+          // Panes stay off the board, and the banner offers to bring them in.
+          // It no longer relaunches anything: taking it shows the last screen
+          // each terminal drew, and resuming is still a separate decision.
+          const carried = await window.api.getRestoredSessions().catch(() => [])
+          if (carried.length > 0) {
+            useAppStore.getState().setSessionBanner(
+              true,
+              carried.map((one) => one.session)
+            )
           }
         }
       } catch (err) {
         console.error('[App] startup initialization failed:', err)
       }
     })()
+
+    // The server behind this app has been replaced -- it crashed and the
+    // launcher started another. The bridge reconnects by itself, but nothing
+    // about a pane changes when that happens: its terminal keeps showing what it
+    // was showing, because that content lives here. So a frozen pane looks
+    // exactly like a quiet one, and goes on taking input for a process that is
+    // gone. Asking again is the only way any of them find out.
+    const removeReplacedListener = window.api.onServerReplaced?.(() => {
+      // The same rule as start-up, deliberately: a session stopped by a server
+      // dying is stopped whether or not the app happened to be open at the time,
+      // so one setting decides both.
+      const reopen = useAppStore.getState().config?.defaults.reopenSessions ?? true
+      void syncBoard({ showCold: true, resume: reopen })
+    })
 
     // Pointed at a host while a server is still running on this machine. Said
     // out loud, because an agent working on a machine whose app is showing
@@ -293,6 +282,20 @@ export function App() {
       if (!terminal) return
 
       state.updateStatus(id, 'idle')
+      // And say so. A terminal whose process has gone looked exactly like one
+      // that was merely quiet -- a frozen buffer, an idle dot, nothing to tell
+      // them apart. That is the state a pane restored from a previous run is
+      // in, reached from the other side, so it says the same thing.
+      state.markEnded(id, {
+        reason: 'exited',
+        at: Date.now(),
+        // Nothing was replayed: this pane watched it happen.
+        replayed: false,
+        ...(terminal.session.shellExitCode !== undefined && {
+          exitCode: terminal.session.shellExitCode
+        }),
+        ...(terminal.session.shellCwd !== undefined && { cwd: terminal.session.shellCwd })
+      })
 
       if (terminal.session.agentType !== 'shell') {
         const assignedTask = (state.config?.tasks || []).find(
@@ -538,6 +541,7 @@ export function App() {
 
     return () => {
       disposeGlobalDataListener()
+      removeReplacedListener?.()
       removeLocalServerListener?.()
       removeExitListener()
       removeSessionCreatedListener()

@@ -10,6 +10,7 @@ import {
 } from '@vornrun/shared/types'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import { shellEscape } from './process-utils'
+import { stripSessionSelectors } from './launch-tokens'
 
 function commandExists(cmd: string, env: Record<string, string>): boolean {
   try {
@@ -65,7 +66,29 @@ export function buildAgentLaunchLine(
   const effectiveArgs = payload.args !== undefined ? payload.args : cmd.args
   let launchLine = [cmd.command, ...effectiveArgs.map((a) => shellEscape(a))].join(' ')
 
-  if (payload.resumeSessionId && supportsExactSessionResume(payload.agentType)) {
+  // Where the configured command ends and its arguments begin. Known exactly
+  // rather than guessed, because this line was just composed here -- which is
+  // what lets `npx -y @anthropic-ai/claude-code` be a command and an argument
+  // that merely ends in `/claude` be left alone.
+  const argsFrom = cmd.command.length
+
+  const exactResume = Boolean(
+    payload.resumeSessionId && supportsExactSessionResume(payload.agentType)
+  )
+  const pinning = Boolean(
+    !payload.resumeSessionId && payload.sessionId && supportsSessionIdPinning(payload.agentType)
+  )
+
+  // A configured command may already carry a selector -- somebody who always
+  // resumes the same session, or who pinned an id by hand. Two of them compete
+  // and one wins silently, which is the wrong session with nothing to say a
+  // choice was made. Removed only where it can be proven; a line this cannot
+  // read is handed back untouched and ours is appended beside theirs.
+  if (exactResume || pinning) {
+    launchLine = stripSessionSelectors(launchLine, payload.agentType, argsFrom)
+  }
+
+  if (exactResume && payload.resumeSessionId) {
     const escapedResumeId = shellEscape(payload.resumeSessionId)
     switch (payload.agentType) {
       case 'claude':
@@ -74,9 +97,16 @@ export function buildAgentLaunchLine(
       case 'copilot':
         launchLine += ` --resume ${escapedResumeId}`
         break
-      case 'codex':
-        launchLine = `${cmd.command} resume ${escapedResumeId}`
+      case 'codex': {
+        // Spliced in as the first argument rather than replacing the line.
+        // Rebuilding it as `${cmd.command} resume ${id}` threw away every
+        // argument the person had configured -- a model, a sandbox setting, an
+        // approval policy -- and only ever on the resume path, so a session came
+        // back configured differently from the one it continues.
+        const rest = launchLine.slice(argsFrom)
+        launchLine = `${launchLine.slice(0, argsFrom)} resume ${escapedResumeId}${rest}`
         break
+      }
       case 'opencode':
         launchLine += ` --session ${escapedResumeId}`
         break

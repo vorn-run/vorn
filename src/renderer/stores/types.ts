@@ -199,17 +199,56 @@ export interface DevicePaneState {
   name: string
 }
 
+/**
+ * Why a pane has no process behind it, and what there is to show instead.
+ *
+ * Deliberately not a member of `AgentStatus`. That type is read by the status
+ * parser, the hook mapper, the database column, the filter, notifications and
+ * four tone maps, and a session whose process is gone genuinely *is* idle by
+ * every one of those readings. The pane says the rest.
+ */
+export interface EndedSession {
+  /**
+   * `app-closed` — Vorn was quit and its server went with it.
+   * `server-stopped` — it stopped without getting to shut down: a crash, a kill,
+   *   a machine losing power.
+   * `exited` — the terminal's own process finished while somebody was watching.
+   */
+  reason: 'app-closed' | 'server-stopped' | 'exited'
+  /** Unix ms. The last save the previous run managed, or when the PTY exited. */
+  at: number
+  /** A screen was replayed into this pane, so it is showing something real. */
+  replayed: boolean
+  /** What is on screen stops short of what actually happened. */
+  partial?: boolean
+  /** Shells only, when it exited on its own. */
+  exitCode?: number
+  /** Shells only: the directory a fresh one would start in. */
+  cwd?: string
+}
+
 export interface TerminalState {
   id: string
   session: TerminalSession
   status: AgentStatus
   lastOutputTimestamp: number
+  /** Present only while nothing is running behind this pane. */
+  ended?: EndedSession
 }
 
 export interface TerminalsSlice {
   terminals: Map<string, TerminalState>
-  addTerminal: (session: TerminalSession) => void
+  addTerminal: (session: TerminalSession, ended?: EndedSession) => void
   removeTerminal: (id: string) => void
+  markEnded: (id: string, ended: EndedSession) => void
+  /**
+   * Swap a resumed session in where the old one sat.
+   *
+   * Resuming spawns a new session with a new id, and without this the card
+   * would leave its place on the grid and reappear at the end -- which reads as
+   * a pane that vanished and a different one that arrived.
+   */
+  replaceTerminal: (previousId: string, session: TerminalSession) => void
   updateStatus: (id: string, status: AgentStatus) => void
   updateLastOutput: (id: string, timestamp: number) => void
   renameTerminal: (id: string, displayName: string) => void

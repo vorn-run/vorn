@@ -3,13 +3,15 @@ import {
   getProjectRemoteHostId,
   type TerminalSession,
   type RecentSession,
-  type CreateTerminalPayload,
+  type RestoredSession,
   type ProjectConfig,
   type AiAgentType
 } from '../../shared/types'
 import { useAppStore } from '../stores'
 import { toast } from '../components/Toast'
 import { closeTerminalsPanel } from './terminal-close'
+
+export { buildRestorePayload } from '@vornrun/shared/session-restore'
 
 function normalizeComparablePath(p: string): string {
   const normalized = p.replace(/\\/g, '/').replace(/\/+$/, '')
@@ -150,29 +152,6 @@ export function resolveProjectName(
     return projectPath === normalized || isManagedWorktreePath(session.projectPath, p.path)
   })
   return project?.name || displayBasename || 'untitled'
-}
-
-export function buildRestorePayload(
-  s: TerminalSession,
-  resumeSessionId?: string
-): CreateTerminalPayload {
-  if (s.agentType === 'shell') {
-    throw new Error(
-      'buildRestorePayload: shell sessions restore via createShellTerminal, not createTerminal'
-    )
-  }
-  return {
-    agentType: s.agentType,
-    projectName: s.projectName,
-    projectPath: s.projectPath,
-    displayName: s.displayName,
-    branch: s.isWorktree ? s.branch : undefined,
-    existingWorktreePath: s.isWorktree ? s.worktreePath : undefined,
-    worktreeName: s.worktreeName,
-    useWorktree: (s.isWorktree && !s.worktreePath) || undefined,
-    remoteHostId: s.remoteHostId,
-    resumeSessionId
-  }
 }
 
 /**
@@ -365,4 +344,20 @@ export function resolveActiveProject() {
   }
   const ws = state.activeWorkspace
   return projects.find((p) => (p.workspaceId ?? 'personal') === ws)
+}
+
+/**
+ * The sessions the server is holding that are not also running.
+ *
+ * Two separate round trips answer "what is running" and "what is left of what is
+ * not", so a resume happening elsewhere between them can put one id in both. The
+ * live one wins: the alternative is two panes for one terminal, one of them a
+ * photograph offering to start what is already going.
+ */
+export function coldSessions(
+  active: TerminalSession[],
+  restored: RestoredSession[]
+): RestoredSession[] {
+  const running = new Set(active.map((s) => s.id))
+  return restored.filter((one) => !running.has(one.session.id))
 }

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   LOCAL_SERVER_RUNNING_CHANNEL,
+  SERVER_REPLACED_CHANNEL,
   STOP_SESSIONS_AND_SERVER_CHANNEL,
   type LocalServerNotice
 } from '../shared/adoption-channels'
@@ -8,6 +9,7 @@ import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewe
 import {
   CreateTerminalPayload,
   TerminalSession,
+  RestoredSession,
   ResizePayload,
   AppConfig,
   RecentSession,
@@ -60,12 +62,28 @@ const api = {
 
   killTerminal: (id: string) => ipcRenderer.invoke(IPC.TERMINAL_KILL, id),
 
+  /** Everything a pane needs to show a terminal it did not create. */
+  attachTerminal: (id: string): Promise<{ data: string; seq: number; live: boolean }> =>
+    ipcRenderer.invoke(IPC.TERMINAL_ATTACH, id),
+
+  /**
+   * What the server has, which is not the same as what the database remembers.
+   *
+   * The web client has asked this since it was written; the desktop never could,
+   * which is why its start-up read the saved list and relaunched from it. It is
+   * the same question and it deserves the same answer.
+   */
+  listActiveSessions: (): Promise<TerminalSession[]> =>
+    ipcRenderer.invoke(IPC.TERMINAL_LIST_ACTIVE),
+
   createShellTerminal: (cwd?: string): Promise<TerminalSession> =>
     ipcRenderer.invoke(IPC.SHELL_CREATE, cwd),
 
-  onTerminalData: (callback: (event: { id: string; data: string }) => void) => {
-    const listener = (_: Electron.IpcRendererEvent, event: { id: string; data: string }): void =>
-      callback(event)
+  onTerminalData: (callback: (event: { id: string; data: string; seq: number }) => void) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      event: { id: string; data: string; seq: number }
+    ): void => callback(event)
     ipcRenderer.on(IPC.TERMINAL_DATA, listener)
     return () => {
       ipcRenderer.removeListener(IPC.TERMINAL_DATA, listener)
@@ -114,6 +132,20 @@ const api = {
     }
   },
 
+  /**
+   * The server behind this app has been replaced by a different process.
+   *
+   * Sent after a crash-relaunch. Everything the old one was holding is gone, so
+   * a pane showing a terminal is showing a photograph and does not know it.
+   */
+  onServerReplaced: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(SERVER_REPLACED_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(SERVER_REPLACED_CHANNEL, listener)
+    }
+  },
+
   onLocalServerStillRunning: (callback: (notice: LocalServerNotice) => void) => {
     const listener = (_: Electron.IpcRendererEvent, notice: LocalServerNotice): void =>
       callback(notice)
@@ -131,7 +163,16 @@ const api = {
     }
   },
 
-  getPreviousSessions: () => ipcRenderer.invoke(IPC.SESSIONS_GET_PREVIOUS),
+  /** Sessions from the last run that no pane has taken yet. */
+  getRestoredSessions: (): Promise<RestoredSession[]> => ipcRenderer.invoke(IPC.SESSIONS_RESTORED),
+
+  /** Claim one and start it. `gone` means another pane took it first. */
+  resumeSession: (params: {
+    id: string
+    resumeSessionId?: string
+  }): Promise<
+    { ok: true; session: TerminalSession } | { ok: false; reason: string; message?: string }
+  > => ipcRenderer.invoke(IPC.SESSIONS_RESUME, params),
 
   clearPreviousSessions: () => ipcRenderer.invoke(IPC.SESSIONS_CLEAR),
 
