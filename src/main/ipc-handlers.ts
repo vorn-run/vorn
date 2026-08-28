@@ -131,7 +131,6 @@ export function registerIpcHandlers(): void {
   // Sessions
   safeHandle(IPC.TERMINAL_ATTACH, (_, id) => requireBridge().request(IPC.TERMINAL_ATTACH, { id }))
   safeHandle(IPC.TERMINAL_LIST_ACTIVE, () => requireBridge().request(IPC.TERMINAL_LIST_ACTIVE))
-  safeHandle(IPC.SESSIONS_GET_PREVIOUS, () => requireBridge().request(IPC.SESSIONS_GET_PREVIOUS))
   safeHandle(IPC.SESSIONS_RESTORED, () => requireBridge().request(IPC.SESSIONS_RESTORED))
   safeHandle(IPC.SESSIONS_RESUME, (_, params) =>
     requireBridge().request(IPC.SESSIONS_RESUME, params)

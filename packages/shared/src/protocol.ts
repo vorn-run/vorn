@@ -524,7 +524,6 @@ export interface RequestMethods {
   'shell:create': { params: string | undefined; result: TerminalSession }
   'config:load': { params: void; result: AppConfig }
   'config:save': { params: AppConfig; result: void }
-  'sessions:getPrevious': { params: void; result: TerminalSession[] }
   /**
    * Sessions from the last run that no pane has taken yet.
    *

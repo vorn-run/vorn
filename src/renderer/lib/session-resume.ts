@@ -11,6 +11,26 @@ import { resolveResumeSessionId } from './session-utils'
  * second agent against one transcript.
  */
 
+/**
+ * Put an ended session on screen without starting anything.
+ *
+ * The server still holds its record and the screen it rebuilt from disk; this
+ * asks for both and adds the pane. Used by the banner, which offers to bring
+ * panes back rather than to relaunch agents -- the same rule start-up follows.
+ */
+export async function showEndedSession(id: string): Promise<void> {
+  const carried = await window.api.getRestoredSessions()
+  const one = carried.find((r) => r.session.id === id)
+  if (!one) return
+  useAppStore.getState().addTerminal(one.session, {
+    reason: 'server-stopped',
+    at: one.endedAt,
+    replayed: one.replayable,
+    partial: one.partial,
+    ...(one.session.shellCwd !== undefined && { cwd: one.session.shellCwd })
+  })
+}
+
 /** Start it again, and put the live session where the ended one was sitting. */
 export async function resumeEndedSession(terminalId: string): Promise<void> {
   const state = useAppStore.getState()
@@ -36,20 +56,29 @@ export async function resumeEndedSession(terminalId: string): Promise<void> {
       toast('That session was resumed somewhere else')
       return
     }
-    toast(result.message ?? 'Could not resume that session')
+    toast.error(result.message ?? 'Could not resume that session')
     return
   }
 
   useAppStore.getState().replaceTerminal(terminalId, result.session)
 }
 
-/** Decline the offer. The record and what was written for it both go. */
-export async function dismissEndedSession(terminalId: string): Promise<void> {
-  useAppStore.getState().removeTerminal(terminalId)
-  try {
-    await window.api.killTerminal(terminalId)
-  } catch {
-    // The record is the server's to forget; a pane that has already gone from
-    // this client is not worth a message about it.
-  }
+/**
+ * Say what a pane should do when an attach finds nothing behind it.
+ *
+ * Wired once at start-up. A window opened onto a terminal that died while it was
+ * closed has no start-up reconciliation to tell it, so the attach is where it
+ * finds out -- and this is the only place that knows what the pane should then
+ * look like.
+ */
+export function markPaneEnded(terminalId: string): void {
+  const state = useAppStore.getState()
+  const term = state.terminals.get(terminalId)
+  if (!term || term.ended) return
+  state.markEnded(terminalId, {
+    reason: 'server-stopped',
+    at: term.lastOutputTimestamp,
+    replayed: true,
+    ...(term.session.shellCwd !== undefined && { cwd: term.session.shellCwd })
+  })
 }

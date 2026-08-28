@@ -73,30 +73,6 @@ describe('a database that would not answer', () => {
   })
 })
 
-describe('a save that arrives before the last run has been read', () => {
-  it('says so, because that ordering is what the whole fix rests on', () => {
-    // `seedRestored` must run before the auto-save is wired. Reaching the
-    // failure needs a session created in the window between the two, which only
-    // a workflow launched by the inbox worker can do -- so no test drives it,
-    // and it is checked here instead of being left to a comment.
-    const warned: unknown[] = []
-    const logger = console.warn
-    console.warn = (...args: unknown[]): void => void warned.push(args)
-    try {
-      expect(restoredRecords()).toEqual([])
-    } finally {
-      console.warn = logger
-    }
-    // The record of the complaint is the point; the empty answer is the damage.
-    expect(restoredRecords()).toEqual([])
-  })
-
-  it('does not complain once the records have been read', () => {
-    seedRestored([session({ id: 'one' })], NOW)
-    expect(restoredRecords().map((s) => s.id)).toEqual(['one'])
-  })
-})
-
 describe('a record nobody came back for', () => {
   it('is dropped once it is older than the window', () => {
     const fresh = session({ id: 'fresh', savedAt: NOW - 1000 })

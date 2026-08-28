@@ -11,6 +11,8 @@ import { useAppStore } from '../stores'
 import { toast } from '../components/Toast'
 import { closeTerminalsPanel } from './terminal-close'
 
+export { buildRestorePayload } from '@vornrun/shared/session-restore'
+
 function normalizeComparablePath(p: string): string {
   const normalized = p.replace(/\\/g, '/').replace(/\/+$/, '')
   if (!normalized) return '/'
@@ -82,8 +84,6 @@ function isDefined<T>(value: T | undefined): value is T {
  * @param claimed - session IDs already assigned to other terminals in this
  *   restore batch; prevents multiple terminals from resuming the same session.
  */
-export { buildRestorePayload } from '@vornrun/shared/session-restore'
-
 export async function resolveResumeSessionId(
   s: TerminalSession,
   claimed: Set<string> = new Set()
@@ -347,26 +347,17 @@ export function resolveActiveProject() {
 }
 
 /**
- * Two answers from the server, made into one board.
+ * The sessions the server is holding that are not also running.
  *
- * The server is asked what is running and what it is still holding from the last
- * run, and those are separate round trips -- so a resume happening elsewhere
- * between them can put one id in both answers. A session that is running is not
- * also ended, and the live one wins: the alternative is two panes for one
- * terminal, one of them a photograph offering to start what is already going.
- *
- * The saved list is not consulted at all. It used to be the only question asked
- * at start-up, and it is the wrong one: it says what existed when it was last
- * written down. Between them these two say what exists now and what is left of
- * what does not, which is the whole board.
+ * Two separate round trips answer "what is running" and "what is left of what is
+ * not", so a resume happening elsewhere between them can put one id in both. The
+ * live one wins: the alternative is two panes for one terminal, one of them a
+ * photograph offering to start what is already going.
  */
-export function reconcileSessions(
+export function coldSessions(
   active: TerminalSession[],
   restored: RestoredSession[]
-): { adopt: TerminalSession[]; cold: RestoredSession[] } {
+): RestoredSession[] {
   const running = new Set(active.map((s) => s.id))
-  return {
-    adopt: active,
-    cold: restored.filter((one) => !running.has(one.session.id))
-  }
+  return restored.filter((one) => !running.has(one.session.id))
 }

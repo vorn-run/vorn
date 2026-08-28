@@ -33,7 +33,7 @@ import type { AiAgentType } from '@vornrun/shared/types'
  * worse day.
  */
 
-export interface Token {
+interface Token {
   /** As it appeared, quotes and all. */
   raw: string
   /** With quoting removed, which is what the shell would pass along. */
@@ -124,7 +124,7 @@ export function tokenize(line: string): Token[] | null {
   return tokens
 }
 
-export interface Span {
+interface Span {
   start: number
   end: number
 }
@@ -172,11 +172,7 @@ const SELECTORS: Record<string, string[]> = {
  * `/usr/local/bin/tools/claude` safe to have as a command and an argument merely
  * ending in `/claude` safe to leave alone.
  */
-export function findSelectorSpans(
-  line: string,
-  agentType: AiAgentType,
-  argsFrom: number
-): Span[] | null {
+function findSelectorSpans(line: string, agentType: AiAgentType, argsFrom: number): Span[] | null {
   const tokens = tokenize(line)
   if (!tokens) return null
 

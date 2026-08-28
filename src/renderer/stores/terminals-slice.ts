@@ -170,16 +170,6 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       return { terminals: next }
     }),
 
-  clearEnded: (id) =>
-    set((state) => {
-      const next = new Map(state.terminals)
-      const term = next.get(id)
-      if (!term) return { terminals: state.terminals }
-      const { ended: _ended, ...live } = term
-      next.set(id, live)
-      return { terminals: next }
-    }),
-
   replaceTerminal: (previousId, session) =>
     set((state) => {
       const next = new Map(state.terminals)

@@ -1,6 +1,7 @@
 import * as headless from '@xterm/headless'
 import * as serializeAddon from '@xterm/addon-serialize'
 import log from './logger'
+import { OSC_PRIVATE } from './shell-integration/protocol'
 
 /**
  * Reached through an interop dance rather than by name, and it earns its keep.
@@ -120,7 +121,7 @@ const MAX_LABEL_UNITS = 512
  * client uses xterm's built-in v6 width tables, and a server on v11 would wrap
  * an emoji at a different column.
  */
-function create(cols: number, rows: number): Held {
+function create(id: string, cols: number, rows: number): Held {
   const term = new Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true })
   const serializer = new SerializeAddon()
   term.loadAddon(serializer)
@@ -165,12 +166,24 @@ function create(cols: number, rows: number): Held {
   //
   // Same discipline as above, and for the same reason -- this runs from xterm's
   // timer, where a throw reaches the top of a process with no handler behind it.
-  term.parser.registerOscHandler(5522, (payload) => {
+  term.parser.registerOscHandler(OSC_PRIVATE, (payload) => {
     try {
-      const [kind, ...rest] = payload.split(';')
-      if (kind === 'cwd' && rest.length) {
-        const path = rest.join(';')
-        if (path) held.cwd = path.slice(0, MAX_LABEL_UNITS)
+      // The integration also emits `cmd;` and `dur;` on this number, once per
+      // command a shell runs. Matched by prefix so those cost nothing: splitting
+      // first allocated two arrays and a string before discarding them.
+      if (payload.startsWith('cwd;')) {
+        const next = payload.slice(4, 4 + MAX_LABEL_UNITS)
+        if (next && next !== held.cwd) {
+          held.cwd = next
+          // Told, not polled. An earlier version had `pty-manager` read this
+          // after every flush, which cannot work: xterm parses on its own timer,
+          // so at the moment a flush ends this handler has not run for the bytes
+          // that flush just delivered. It read the previous value -- and since
+          // `cd` is usually the last thing in a burst, nothing came along
+          // afterwards to correct it. The record lagged by one flush, which for
+          // a shell somebody then walked away from is for ever.
+          reportCwd?.(id, next)
+        }
       }
     } catch {
       /* an unreadable cwd is not worth anything at all */
@@ -285,7 +298,7 @@ export function createScreen(
 ): void {
   clearScreen(id)
   try {
-    const held = create(cols, rows)
+    const held = create(id, cols, rows)
     // A restored screen is rebuilt from escape sequences, and neither of these
     // is one -- they arrive as notifications the serializer does not round-trip.
     // The checkpoint has been storing both since it was written and recovery
@@ -432,6 +445,20 @@ export function clearScreen(id: string): void {
   }
 }
 
+/**
+ * Told when a terminal says it has moved.
+ *
+ * One reporter for the process, set once at start-up, mirroring the renderer's
+ * own `setCwdReporter`. It is called from inside xterm's parser, so it must not
+ * throw and must not be slow -- `pty-manager`'s does a map lookup and an event.
+ */
+type CwdReporter = (id: string, cwd: string) => void
+let reportCwd: CwdReporter | null = null
+
+export function setCwdReporter(fn: CwdReporter | null): void {
+  reportCwd = fn
+}
+
 /** How many models are held. For the measurement that bounds this. */
 export function screenCount(): number {
   return screens.size
@@ -440,16 +467,4 @@ export function screenCount(): number {
 /** Test-only, mirroring `resetScrollback`. */
 export function resetScreens(): void {
   for (const id of [...screens.keys()]) clearScreen(id)
-}
-
-/**
- * Where this terminal's shell last said it was.
- *
- * Empty until a shell with Vorn's integration reports one. Read by
- * `pty-manager`, which writes it onto the session record so a restored shell can
- * be offered the directory somebody was actually in rather than the one it was
- * launched in.
- */
-export function screenCwd(id: string): string {
-  return screens.get(id)?.cwd ?? ''
 }

@@ -55,18 +55,17 @@ class SessionManager {
     }
   }
 
-  getPreviousSessions(): TerminalSession[] {
-    return this.readPreviousSessions() ?? []
-  }
-
   /**
-   * The same list, with "there are none" told apart from "could not read them".
+   * What the last run left, with "there are none" told apart from "could not
+   * read them".
    *
-   * `getPreviousSessions` answers `[]` for both, which is right for its callers:
-   * a client asking what was open gets an empty list either way and nothing is
-   * lost. It is wrong for a caller that acts on absence. Terminal history is
-   * keyed by session id and swept when no session claims it, so one transient
-   * database error read as "no sessions" is every terminal's history removed.
+   * That distinction is the whole point of the null. Terminal history is keyed
+   * by session id and swept when no session claims it, so one transient database
+   * error read as "there are no sessions" is every terminal's history removed.
+   *
+   * There was a second reader that flattened null to `[]`, for an RPC no client
+   * called after the app stopped asking the database what was open and started
+   * asking the server what exists. Both are gone.
    */
   readPreviousSessions(): TerminalSession[] | null {
     try {

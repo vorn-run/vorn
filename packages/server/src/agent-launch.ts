@@ -72,9 +72,11 @@ export function buildAgentLaunchLine(
   // that merely ends in `/claude` be left alone.
   const argsFrom = cmd.command.length
 
-  const selecting = Boolean(
-    (payload.resumeSessionId && supportsExactSessionResume(payload.agentType)) ||
-    (!payload.resumeSessionId && payload.sessionId && supportsSessionIdPinning(payload.agentType))
+  const exactResume = Boolean(
+    payload.resumeSessionId && supportsExactSessionResume(payload.agentType)
+  )
+  const pinning = Boolean(
+    !payload.resumeSessionId && payload.sessionId && supportsSessionIdPinning(payload.agentType)
   )
 
   // A configured command may already carry a selector -- somebody who always
@@ -82,11 +84,11 @@ export function buildAgentLaunchLine(
   // and one wins silently, which is the wrong session with nothing to say a
   // choice was made. Removed only where it can be proven; a line this cannot
   // read is handed back untouched and ours is appended beside theirs.
-  if (selecting) {
+  if (exactResume || pinning) {
     launchLine = stripSessionSelectors(launchLine, payload.agentType, argsFrom)
   }
 
-  if (payload.resumeSessionId && supportsExactSessionResume(payload.agentType)) {
+  if (exactResume && payload.resumeSessionId) {
     const escapedResumeId = shellEscape(payload.resumeSessionId)
     switch (payload.agentType) {
       case 'claude':

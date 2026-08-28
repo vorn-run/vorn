@@ -50,7 +50,8 @@ import {
   setDefaultFontSize,
   initGlobalDataListener,
   disposeGlobalDataListener,
-  setKeyRedirectHandler
+  setKeyRedirectHandler,
+  setNotLiveReporter
 } from './lib/terminal-registry'
 import {
   setCwdReporter,
@@ -74,7 +75,8 @@ import { GridContextMenu } from './components/GridContextMenu'
 import { WindowControls } from './components/WindowControls'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from './lib/platform'
 import { useIsMobile } from './hooks/useIsMobile'
-import { reconcileSessions } from './lib/session-utils'
+import { coldSessions } from './lib/session-utils'
+import { markPaneEnded } from './lib/session-resume'
 
 export function App() {
   const {
@@ -143,6 +145,10 @@ export function App() {
 
   useEffect(() => {
     initGlobalDataListener()
+    // An attach that finds nothing running is how a window opened onto a dead
+    // terminal learns it is looking at a photograph. Start-up reconciliation
+    // cannot tell it: the session was not there when this client started.
+    setNotLiveReporter(markPaneEnded)
     // The capture path has to know before any command finishes, so it is read
     // from config rather than passed down through the view tree.
     setDomBlockRendering(useAppStore.getState().config?.defaults.domBlockRendering ?? true)
@@ -163,7 +169,19 @@ export function App() {
     })
     ;(async () => {
       try {
-        const config = await window.api.loadConfig()
+        // All three started together. Config is awaited first because
+        // everything below reads it, but the two session questions do not
+        // depend on it -- and on the web client each is a round trip to another
+        // machine.
+        const configPromise = window.api.loadConfig()
+        const boardPromise = Promise.all([
+          window.api.listActiveSessions(),
+          window.api.getRestoredSessions()
+        ]).catch((err) => {
+          console.error('[App] failed to read what the server has:', err)
+          return [[], []] as [TerminalSession[], RestoredSession[]]
+        })
+        const config = await configPromise
         useAppStore.getState().setConfig(config)
         if (config.defaults.fontSize) {
           setDefaultFontSize(config.defaults.fontSize)
@@ -193,22 +211,12 @@ export function App() {
         // still holding from the last run. The saved list is not consulted at
         // all any more -- it says what existed when it was last written down,
         // which is neither of those.
-        let active: TerminalSession[] = []
-        let carried: RestoredSession[] = []
-        try {
-          ;[active, carried] = await Promise.all([
-            window.api.listActiveSessions(),
-            window.api.getRestoredSessions()
-          ])
-        } catch (err) {
-          console.error('[App] failed to read what the server has:', err)
-        }
-
-        const { adopt, cold } = reconcileSessions(active, carried)
+        const [active, carried] = await boardPromise
         const store = useAppStore.getState()
-        for (const session of adopt) {
+        for (const session of active) {
           if (!store.terminals.has(session.id)) store.addTerminal(session)
         }
+        const cold = coldSessions(active, carried)
 
         if (cold.length > 0) {
           if (config.defaults.reopenSessions) {
@@ -240,13 +248,6 @@ export function App() {
             )
           }
         }
-
-        // Nothing calls `clearPreviousSessions()` here any more. A record is
-        // consumed on the server when a pane takes it -- by resuming or by
-        // closing -- so it survives a start that nobody acted on, and two
-        // clients can be looking at the same one safely. Clearing the list as a
-        // side effect of having restored meant a failed restore lost the record
-        // too, with nothing to try again from.
       } catch (err) {
         console.error('[App] startup initialization failed:', err)
       }
@@ -303,6 +304,20 @@ export function App() {
       if (!terminal) return
 
       state.updateStatus(id, 'idle')
+      // And say so. A terminal whose process has gone looked exactly like one
+      // that was merely quiet -- a frozen buffer, an idle dot, nothing to tell
+      // them apart. That is the state a pane restored from a previous run is
+      // in, reached from the other side, so it says the same thing.
+      state.markEnded(id, {
+        reason: 'exited',
+        at: Date.now(),
+        // Nothing was replayed: this pane watched it happen.
+        replayed: false,
+        ...(terminal.session.shellExitCode !== undefined && {
+          exitCode: terminal.session.shellExitCode
+        }),
+        ...(terminal.session.shellCwd !== undefined && { cwd: terminal.session.shellCwd })
+      })
 
       if (terminal.session.agentType !== 'shell') {
         const assignedTask = (state.config?.tasks || []).find(

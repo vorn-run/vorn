@@ -326,15 +326,27 @@ export function registerAllMethods(): void {
   registerMethod('terminal:create', (payload) => {
     return ptyManager.createPty(payload)
   })
+  /**
+   * Let go of what was kept for a session from the last run.
+   *
+   * The screen the server rebuilt and the files it rebuilt it from. Both go
+   * together, whether the record was claimed or declined -- a live session opens
+   * its own history rather than appending to a record of the one it replaced,
+   * and a declined one is not coming back.
+   */
+  const forgetRestored = async (id: string): Promise<void> => {
+    clearScreen(id)
+    await discardHistory(id)
+  }
+
   registerMethod('terminal:kill', (id) => {
     // A pane showing a session from the last run has no PTY to kill. Closing it
     // is a decision about the record and the files, and it is the same decision
     // resume makes -- so it goes through the same door, and a second client
     // closing the same pane finds nothing rather than an error.
-    const restored = consumeRestored(id)
-    if (restored) {
-      clearScreen(id)
-      void discardHistory(id)
+    if (consumeRestored(id)) {
+      // Nothing follows, so the caller does not wait on the files going.
+      void forgetRestored(id)
       return
     }
     ptyManager.killPty(id)
@@ -607,20 +619,16 @@ export function registerAllMethods(): void {
   })
 
   // Sessions
-  registerMethod('sessions:getPrevious', () => sessionManager.getPreviousSessions())
   registerMethod('sessions:clear', () => {
     // The offer is being declined for all of them at once. Same rule as closing
     // one: the record goes and so does what was written for it.
-    for (const one of consumeAllRestored()) {
-      clearScreen(one.session.id)
-      void discardHistory(one.session.id)
-    }
+    for (const one of consumeAllRestored()) void forgetRestored(one.session.id)
     sessionManager.clear()
   })
 
   registerMethod('sessions:restored', () => listRestored())
 
-  registerMethod('sessions:resume', ({ id, resumeSessionId }) => {
+  registerMethod('sessions:resume', async ({ id, resumeSessionId }) => {
     // Claimed before anything is started, and that ordering is the point. Two
     // clients can be looking at the same cold pane; the second must be told it
     // is gone rather than launching a second agent against one transcript.
@@ -630,10 +638,11 @@ export function registerAllMethods(): void {
     const previous = restored.session
     try {
       // The screen and the files described a session that is now being replaced
-      // by a live one. Cleared before the spawn, so the new session opens its own
-      // history rather than appending to a record of the old one.
-      clearScreen(id)
-      void discardHistory(id)
+      // by a live one. Awaited rather than started, so "cleared before the
+      // spawn" is a fact rather than a hope: the reply carries a live session,
+      // and a caller that acts on it immediately must not find the old one's
+      // files still there.
+      await forgetRestored(id)
 
       if (previous.agentType === 'shell') {
         const cwd = previous.shellCwd ?? previous.worktreePath ?? previous.projectPath
@@ -1680,7 +1689,6 @@ export function registerAllMethods(): void {
     broadcastWidgetUpdate()
   })
 
-  // Clean up Copilot hooks on session exit
   // A shell moved. Saved on a debounce, so a script running `cd` in a loop costs
   // one write rather than hundreds -- and what is being kept is where the shell
   // ended up, not every step it took to get there.
@@ -1688,6 +1696,7 @@ export function registerAllMethods(): void {
     sessionManager.scheduleSave()
   })
 
+  // Clean up Copilot hooks on session exit
   ptyManager.on('session-exit', (session) => {
     const inst = copilotInstallations.get(session.id)
     if (inst) {

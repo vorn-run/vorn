@@ -221,7 +221,9 @@ describe('a server that was killed rather than asked to stop', () => {
     launch()
     ws = await connect(wasOn)
 
-    const previous = await call<Array<{ id: string }>>(ws, 'sessions:getPrevious')
+    const previous = (await call<Array<{ session: { id: string } }>>(ws, 'sessions:restored')).map(
+      (r) => r.session
+    )
     expect(previous.map((s) => s.id)).toContain(session.id)
 
     const { data } = await call<{ data: string }>(ws, 'terminal:readScrollback', { id: session.id })
@@ -267,7 +269,9 @@ describe('a server that was killed rather than asked to stop', () => {
     ws = await connect(wasOn)
     wasOn = JSON.parse(fs.readFileSync(path.join(dataDir(), 'ws-port'), 'utf-8')).port
     expect(
-      (await call<Array<{ id: string }>>(ws, 'sessions:getPrevious')).map((s) => s.id)
+      (await call<Array<{ session: { id: string } }>>(ws, 'sessions:restored'))
+        .map((r) => r.session)
+        .map((s) => s.id)
     ).toContain(original.id)
 
     await call<{ id: string }>(ws, 'shell:create', dir)
@@ -280,7 +284,9 @@ describe('a server that was killed rather than asked to stop', () => {
     // Third run: the original must still be nameable, and still have its history.
     launch()
     ws = await connect(wasOn)
-    const previous = await call<Array<{ id: string }>>(ws, 'sessions:getPrevious')
+    const previous = (await call<Array<{ session: { id: string } }>>(ws, 'sessions:restored')).map(
+      (r) => r.session
+    )
     const { data } = await call<{ data: string }>(ws, 'terminal:readScrollback', {
       id: original.id
     })
@@ -327,7 +333,7 @@ describe('a server that was killed rather than asked to stop', () => {
 
     launch()
     ws = await connect(wasOn)
-    await call(ws, 'sessions:getPrevious')
+    await call(ws, 'sessions:restored')
     ws.close()
 
     expect(fs.existsSync(orphan), 'history nothing can name was left on disk').toBe(false)

@@ -418,7 +418,6 @@ export function createApiShim(wsUrl: string) {
     // ── Sessions ──
     listActiveSessions: () => rpc.invoke('terminal:listActive'),
     attachTerminal: (id: string) => rpc.invoke('terminal:attach', { id }),
-    getPreviousSessions: () => rpc.invoke('sessions:getPrevious'),
     getRestoredSessions: () => rpc.invoke('sessions:restored'),
     resumeSession: (params: { id: string; resumeSessionId?: string }) =>
       rpc.invoke('sessions:resume', params),

@@ -46,10 +46,14 @@ let rafId: number | null = null
  * written -- then the ones the seed already contains are dropped by their number
  * and the rest are applied in order.
  */
-const hydrating = new Map<string, Chunk[]>()
+interface Hydration {
+  /** Live chunks arriving while the seed is in flight. */
+  held: Chunk[]
+  /** The seed itself, so concurrent callers join it rather than starting another. */
+  done: Promise<void>
+}
 
-/** Seeds in flight, so concurrent callers join one rather than starting several. */
-const hydrations = new Map<string, Promise<void>>()
+const hydrating = new Map<string, Hydration>()
 
 function scheduleFlush(): void {
   if (rafId !== null) return
@@ -59,9 +63,9 @@ function scheduleFlush(): void {
 function flushWrites(): void {
   rafId = null
   for (const [id, chunks] of pendingWrites) {
-    const holding = hydrating.get(id)
-    if (holding) {
-      holding.push(...chunks)
+    const seeding = hydrating.get(id)
+    if (seeding) {
+      for (const chunk of chunks) seeding.held.push(chunk)
       continue
     }
     const data = chunks.length === 1 ? chunks[0].data : chunks.map((c) => c.data).join('')
@@ -99,7 +103,6 @@ export function disposeGlobalDataListener(): void {
   }
   pendingWrites.clear()
   hydrating.clear()
-  hydrations.clear()
 }
 
 /**
@@ -126,8 +129,8 @@ export function disposeGlobalDataListener(): void {
  * terminal seeded twice has its scrollback twice.
  */
 export function hydrateTerminal(terminalId: string): Promise<void> {
-  const already = hydrations.get(terminalId)
-  if (already) return already
+  const already = hydrating.get(terminalId)
+  if (already) return already.done
 
   const entry = registry.get(terminalId)
   if (!entry || entry._hydrated) return Promise.resolve()
@@ -136,35 +139,54 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
   if (typeof window.api?.attachTerminal !== 'function') return Promise.resolve()
   entry._hydrated = true
 
-  hydrating.set(terminalId, [])
-  const run = (async () => {
+  const state: Hydration = { held: [], done: Promise.resolve() }
+  hydrating.set(terminalId, state)
+
+  /** Everything held, in order, as one write. xterm queues a task per call. */
+  const flushHeld = (above = -1): void => {
+    const kept = state.held.filter((chunk) => chunk.seq > above)
+    if (!kept.length) return
+    const data = kept.map((chunk) => chunk.data).join('')
+    entry.term.write(data)
+    // Live, unlike the seed: a bell that rang while the seed was in flight rang
+    // just now, and holding it back for a round trip would drop it entirely.
+    statusHandlers.get(terminalId)?.(data)
+  }
+
+  state.done = (async () => {
     try {
-      const { data, seq } = await window.api.attachTerminal(terminalId)
+      const { data, seq, live } = await window.api.attachTerminal(terminalId)
       if (data) entry.term.write(data)
-      for (const chunk of hydrating.get(terminalId) ?? []) {
-        if (chunk.seq <= seq) continue
-        entry.term.write(chunk.data)
-        // These are live, unlike the seed above them. A bell that rang while the
-        // seed was in flight rang just now, and holding it back for the length
-        // of a round trip would drop the notification entirely.
-        statusHandlers.get(terminalId)?.(chunk.data)
-      }
+      flushHeld(seq)
+      // The one moment a pane learns the truth about its session. A window
+      // opened onto a terminal that died while it was closed has no start-up
+      // reconciliation to tell it -- this is where it finds out.
+      if (live === false) reportNotLive?.(terminalId)
     } catch (err) {
       console.error('[terminal] could not attach', terminalId, err)
       // Held chunks are still the truth about what happened; let them through
       // rather than losing them to a failed seed, and allow another try.
-      for (const chunk of hydrating.get(terminalId) ?? []) {
-        entry.term.write(chunk.data)
-        statusHandlers.get(terminalId)?.(chunk.data)
-      }
+      flushHeld()
       entry._hydrated = false
     } finally {
       hydrating.delete(terminalId)
-      hydrations.delete(terminalId)
     }
   })()
-  hydrations.set(terminalId, run)
-  return run
+  return state.done
+}
+
+/**
+ * Told when an attach finds nothing running behind a terminal.
+ *
+ * Set once at start-up by the app, which turns it into the pane's ended state.
+ * Kept as a reporter rather than an import so this module stays about terminals
+ * and knows nothing about the store.
+ */
+type NotLiveReporter = (terminalId: string) => void
+let reportNotLive: NotLiveReporter | null = null
+
+export function setNotLiveReporter(fn: NotLiveReporter | null): void {
+  reportNotLive = fn
 }
 
 // --- Status detection handler registry ---

@@ -19,7 +19,7 @@ vi.stubGlobal('window', {
 import {
   resolveResumeSessionId,
   buildRestorePayload,
-  reconcileSessions
+  coldSessions
 } from '../src/renderer/lib/session-utils'
 
 const env = { PATH: '/usr/bin' }
@@ -145,7 +145,7 @@ describe('session restore flow: Codex fallback to history', () => {
   })
 })
 
-describe('two answers from the server, made into one board', () => {
+describe('what is left of what is not running', () => {
   const restored = (id: string) => ({
     session: makeSession({ id }),
     endedAt: Date.now() - 3_600_000,
@@ -153,43 +153,24 @@ describe('two answers from the server, made into one board', () => {
     partial: false
   })
 
-  /**
-   * The saved list is not consulted at start-up any more. It said what existed
-   * when it was last written down, and start-up used to launch a replacement
-   * for every record in it -- including sessions that had never stopped, whose
-   * agent was still running and possibly mid-turn.
-   */
-  it('binds what is running and shows what is left of what is not', () => {
-    const { adopt, cold } = reconcileSessions(
-      [makeSession({ id: 'still-going' })],
-      [restored('ended')]
-    )
-
-    expect(adopt.map((s) => s.id)).toEqual(['still-going'])
-    expect(cold.map((r) => r.session.id)).toEqual(['ended'])
+  it('is what the server holds, minus anything that has a process', () => {
+    expect(
+      coldSessions([makeSession({ id: 'still-going' })], [restored('ended')]).map(
+        (r) => r.session.id
+      )
+    ).toEqual(['ended'])
   })
 
-  it('gives a running session one pane, not two', () => {
+  it('never includes a session that is running', () => {
     // The two questions are separate round trips, so a resume happening
     // elsewhere between them can put one id in both answers. The live one wins:
-    // the alternative is a photograph offering to start what is already going.
+    // the alternative is two panes for one terminal, one of them a photograph
+    // offering to start what is already going.
     const both = 'resumed-elsewhere'
-    const { adopt, cold } = reconcileSessions([makeSession({ id: both })], [restored(both)])
-
-    expect(adopt.map((s) => s.id)).toEqual([both])
-    expect(cold).toEqual([])
+    expect(coldSessions([makeSession({ id: both })], [restored(both)])).toEqual([])
   })
 
-  it('gives a pane to a session nothing saved, because the server is the authority', () => {
-    // Started from a phone, or by a workflow, since the last save. It exists,
-    // whatever any record says.
-    const { adopt, cold } = reconcileSessions([makeSession({ id: 'unsaved' })], [])
-
-    expect(adopt.map((s) => s.id)).toEqual(['unsaved'])
-    expect(cold).toEqual([])
-  })
-
-  it('has nothing to show when the server has nothing', () => {
-    expect(reconcileSessions([], [])).toEqual({ adopt: [], cold: [] })
+  it('is empty when the server is holding nothing', () => {
+    expect(coldSessions([makeSession({ id: 'live' })], [])).toEqual([])
   })
 })

@@ -1433,7 +1433,6 @@ export const IPC = {
   CONFIG_LOAD: 'config:load',
   CONFIG_SAVE: 'config:save',
   CONFIG_CHANGED: 'config:changed',
-  SESSIONS_GET_PREVIOUS: 'sessions:getPrevious',
   SESSIONS_RESTORED: 'sessions:restored',
   SESSIONS_RESUME: 'sessions:resume',
   SESSIONS_CLEAR: 'sessions:clear',

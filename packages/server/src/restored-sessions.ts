@@ -53,21 +53,6 @@ export const MAX_RESTORED_AGE_MS = 7 * 24 * 60 * 60 * 1000
 const held = new Map<string, RestoredSession>()
 
 /**
- * Whether the previous run's records have been read yet.
- *
- * `seedRestored` has to run before `registerAllMethods()`, which is what wires
- * the auto-save -- and a save is a whole-table replace, so one firing before the
- * seed would erase the very rows the seed is about to read. That ordering has no
- * test: reaching it needs a session created in the window between the two, which
- * only a workflow launched by the inbox worker can do.
- *
- * So it is checked instead. A save that arrives before the seed is the bug,
- * announced once rather than silently taking a terminal's history with it.
- */
-let seeded = false
-let warnedUnseeded = false
-
-/**
  * Take the previous run's records, and answer with the ones worth keeping.
  *
  * The return value is what `recoverHistory` should be given: anything dropped
@@ -84,7 +69,6 @@ export function seedRestored(
   now: number = Date.now()
 ): TerminalSession[] | null {
   held.clear()
-  seeded = true
   if (previous === null) return null
 
   const keep: TerminalSession[] = []
@@ -126,12 +110,6 @@ export function listRestored(): RestoredSession[] {
  * Without this the next save erases them, which is the whole bug.
  */
 export function restoredRecords(): TerminalSession[] {
-  if (!seeded && !warnedUnseeded) {
-    warnedUnseeded = true
-    log.warn(
-      '[restored] a session save ran before the last run was read; its records are being replaced'
-    )
-  }
   return [...held.values()].map((entry) => entry.session)
 }
 
@@ -158,6 +136,4 @@ export function consumeAllRestored(): RestoredSession[] {
 /** Test-only, mirroring the other module-level stores in this package. */
 export function resetRestored(): void {
   held.clear()
-  seeded = false
-  warnedUnseeded = false
 }

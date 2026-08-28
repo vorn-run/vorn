@@ -17,9 +17,16 @@ vi.mock('../src/renderer/lib/terminal-registry', () => registryMocks)
 
 const resumeMocks = vi.hoisted(() => ({
   resumeEndedSession: vi.fn().mockResolvedValue(undefined),
-  dismissEndedSession: vi.fn().mockResolvedValue(undefined)
+  showEndedSession: vi.fn().mockResolvedValue(undefined),
+  markPaneEnded: vi.fn()
 }))
 vi.mock('../src/renderer/lib/session-resume', () => resumeMocks)
+
+// Closing a cold pane goes through the same door every other close does.
+const closeMocks = vi.hoisted(() => ({
+  closeTerminalSession: vi.fn().mockResolvedValue(undefined)
+}))
+vi.mock('../src/renderer/lib/terminal-close', () => closeMocks)
 
 // The composer's other branch pulls in the whole intent bar; this file is about
 // which branch is taken, not what the bar does.
@@ -204,7 +211,7 @@ describe('acting on the offer', () => {
     await waitFor(() => expect(resumeMocks.resumeEndedSession).toHaveBeenCalledWith(ID))
   })
 
-  it('lets it go through the same door', async () => {
+  it('closes through the same path every other pane uses', async () => {
     useAppStore
       .getState()
       .addTerminal(session(), { reason: 'server-stopped', at: Date.now(), replayed: true })
@@ -212,7 +219,10 @@ describe('acting on the offer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /close this pane/i }))
 
-    await waitFor(() => expect(resumeMocks.dismissEndedSession).toHaveBeenCalledWith(ID))
+    // Not a private teardown: `closeTerminalSession` clears focus and selection
+    // and disposes the terminal, and `terminal:kill` already understands a
+    // session with no process behind it.
+    await waitFor(() => expect(closeMocks.closeTerminalSession).toHaveBeenCalledWith(ID))
   })
 })
 

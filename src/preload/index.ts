@@ -148,9 +148,6 @@ const api = {
     }
   },
 
-  getPreviousSessions: (): Promise<TerminalSession[]> =>
-    ipcRenderer.invoke(IPC.SESSIONS_GET_PREVIOUS),
-
   /** Sessions from the last run that no pane has taken yet. */
   getRestoredSessions: (): Promise<RestoredSession[]> => ipcRenderer.invoke(IPC.SESSIONS_RESTORED),
 

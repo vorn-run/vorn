@@ -4,7 +4,8 @@ import type { EndedSession } from '../../stores/types'
 import { useAppStore } from '../../stores'
 import { shortenCwd } from '../../lib/command-blocks'
 import { formatRelativeTime } from '../../lib/format-time'
-import { resumeEndedSession, dismissEndedSession } from '../../lib/session-resume'
+import { resumeEndedSession } from '../../lib/session-resume'
+import { closeTerminalSession } from '../../lib/terminal-close'
 
 interface Props {
   terminalId: string
@@ -61,6 +62,9 @@ export function EndedStrip({ terminalId, ended, compact }: Props) {
           {' · '}
           {formatRelativeTime(new Date(ended.at).toISOString())}
         </span>
+        {!ended.replayed && (
+          <span className="text-ink-faint">{' · nothing of its screen was kept'}</span>
+        )}
         {ended.partial && (
           <span className="text-ink-faint">{' · the last moments were not recorded'}</span>
         )}
@@ -84,7 +88,7 @@ export function EndedStrip({ terminalId, ended, compact }: Props) {
       </button>
 
       <button
-        onClick={() => void dismissEndedSession(terminalId)}
+        onClick={() => void closeTerminalSession(terminalId)}
         disabled={busy}
         title="Close this pane"
         aria-label="Close this pane"

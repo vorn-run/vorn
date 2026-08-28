@@ -195,7 +195,10 @@ describe('what the seed already contains', () => {
     answer({ data: 'THE SEED', seq: 5, live: true })
     await hydrating
 
-    expect(writes()).toEqual(['THE SEED', 'first', 'second', 'third'])
+    // One write, not three. xterm queues a task per call, and the held chunks
+    // are already in order -- joining them is the same bytes at a third of the
+    // scheduling.
+    expect(writes()).toEqual(['THE SEED', 'firstsecondthird'])
   })
 })
 
@@ -225,7 +228,7 @@ describe('the bell', () => {
     // announce itself as though it had just happened.
     const handler = vi.fn()
     registerStatusHandler(ID, handler)
-    attachTerminal.mockResolvedValue({ data: 'ding \x07 ding', seq: 3, live: false })
+    attachTerminal.mockResolvedValue({ data: 'ding \x07 ding', seq: 3, live: true })
 
     await open()
 
