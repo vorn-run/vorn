@@ -2,7 +2,7 @@ import { Terminal, type ITerminalAddon } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import { attachCommandBlocks, jumpToCommand } from './command-blocks'
+import { attachCommandBlocks, jumpToCommand, markSeededFromServer } from './command-blocks'
 import type { BufferMetrics } from './spine-layout'
 import { TERMINAL_BACKGROUND } from '../../shared/surface'
 
@@ -156,7 +156,13 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
   state.done = (async () => {
     try {
       const { data, seq, live } = await window.api.attachTerminal(terminalId)
-      if (data) entry.term.write(data)
+      if (data) {
+        entry.term.write(data)
+        // This screen is now in the terminal and nowhere else. Said out loud so
+        // the first finished command lifts it into the block log rather than
+        // clearing it away.
+        markSeededFromServer(terminalId)
+      }
       flushHeld(seq)
       // The one moment a pane learns the truth about its session. A window
       // opened onto a terminal that died while it was closed has no start-up

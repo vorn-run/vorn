@@ -12,6 +12,8 @@ import {
   type TrackerHost
 } from '../src/renderer/lib/command-blocks'
 import { captureBlock, clearBlockLog, getBlockLog } from '../src/renderer/lib/block-log'
+import { markSeededFromServer, setDomBlockRendering } from '../src/renderer/lib/command-blocks'
+import { registerBlockLogView } from '../src/renderer/lib/block-log'
 
 class FakeMarker implements MarkerLike {
   isDisposed = false
@@ -802,5 +804,122 @@ describe('a shell that also emits markers itself', () => {
     t.handleSequence('D;0')
     expect(finished.map((b) => b.exitCode)).toEqual([3, 0])
     expect(finished[1].command).toBe('pwd')
+  })
+})
+
+describe('a pane seeded with a screen it did not draw', () => {
+  /**
+   * A pane attaching to a session already running is given what that session
+   * has shown so far, and that screen then lives in the terminal and nowhere
+   * else -- the block log dies with the window that built it. Lifting a
+   * finished command calls `term.clear()`, which drops everything above the
+   * prompt, so the first command after attaching used to take the whole
+   * restored screen with it: reopen, type anything, and the session's history
+   * is gone.
+   */
+  const ID = 'seeded-term'
+
+  function cellOf(ch: string): Record<string, () => unknown> {
+    return {
+      getChars: () => ch,
+      getWidth: () => 1,
+      getFgColor: () => 0,
+      getBgColor: () => 0,
+      isFgDefault: () => true,
+      isBgDefault: () => true,
+      isFgRGB: () => false,
+      isBgRGB: () => false,
+      isBold: () => 0,
+      isItalic: () => 0,
+      isDim: () => 0,
+      isUnderline: () => 0,
+      isInverse: () => 0,
+      isStrikethrough: () => 0
+    }
+  }
+
+  function terminalHolding(lines: string[], markerAt: number) {
+    const handlers = new Map<number, (data: string) => boolean>()
+    const clear = vi.fn()
+    const term = {
+      registerDecoration: vi.fn(() => undefined),
+      options: { theme: {} },
+      cols: 80,
+      clear,
+      buffer: {
+        active: {
+          type: 'normal',
+          baseY: 0,
+          cursorY: 0,
+          length: lines.length,
+          getLine: (y: number) =>
+            lines[y] === undefined
+              ? undefined
+              : { length: lines[y].length, getCell: (x: number) => cellOf(lines[y][x] ?? ' ') }
+        },
+        onBufferChange: () => ({ dispose: () => {} })
+      },
+      registerMarker: () => new FakeMarker(markerAt),
+      parser: {
+        registerOscHandler: (id: number, cb: (data: string) => boolean) => {
+          handlers.set(id, cb)
+          return { dispose: () => handlers.delete(id) }
+        },
+        registerCsiHandler: () => ({ dispose: () => {} })
+      }
+    }
+    return { handlers, clear, asTerminal: term as unknown as Terminal }
+  }
+
+  beforeEach(() => {
+    clearBlockLog(ID)
+    setDomBlockRendering(true)
+    registerBlockLogView(ID)
+  })
+
+  /** OSC 133 carries no command text, so blocks are told apart by what is in them. */
+  const holding = (needle: string): number =>
+    getBlockLog(ID).filter((b) => JSON.stringify(b.rows).includes(needle)).length
+
+  function runOneCommand(handlers: Map<number, (data: string) => boolean>): void {
+    const osc133 = handlers.get(133)!
+    osc133('A')
+    osc133('C')
+    osc133('D;0')
+  }
+
+  it('lifts the restored screen into the log before the first clear reaches it', () => {
+    const { handlers, clear, asTerminal } = terminalHolding(['from before', 'the pane', '$ ls'], 2)
+    attachCommandBlocks(ID, asTerminal)
+    markSeededFromServer(ID)
+
+    runOneCommand(handlers)
+
+    // Two: what was restored, and the command just run.
+    expect(getBlockLog(ID)).toHaveLength(2)
+    expect(holding('from before')).toBe(1)
+    expect(clear).toHaveBeenCalled()
+  })
+
+  it('does it once, not on every command after', () => {
+    const { handlers, asTerminal } = terminalHolding(['from before', 'the pane', '$ ls'], 2)
+    attachCommandBlocks(ID, asTerminal)
+    markSeededFromServer(ID)
+
+    runOneCommand(handlers)
+    runOneCommand(handlers)
+
+    expect(holding('from before')).toBe(1)
+  })
+
+  it('adds nothing for a pane that grew from an empty terminal', () => {
+    // Never seeded, so there is nothing above the first command that anything
+    // else is holding a copy of.
+    const { handlers, asTerminal } = terminalHolding(['$ ls'], 0)
+    attachCommandBlocks(ID, asTerminal)
+
+    runOneCommand(handlers)
+
+    expect(getBlockLog(ID)).toHaveLength(1)
   })
 })
