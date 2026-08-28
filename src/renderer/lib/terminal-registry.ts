@@ -168,7 +168,16 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
 
   /** Everything held, in order, as one write. xterm queues a task per call. */
   const flushHeld = (above = -1): void => {
-    const kept = state.held.filter((chunk) => chunk.seq > above)
+    // A chunk whose sequence cannot be compared cannot be deduplicated, and the
+    // choice is then between showing it twice and not showing it at all. Twice
+    // is visible and a person can see what happened; dropping it is silent, and
+    // losing output is the failure this whole mechanism exists to prevent. The
+    // protocol requires `seq`, so this only arises against a server that is not
+    // keeping to it -- which is exactly when guessing is the wrong thing to do.
+    const kept = state.held.filter(
+      (chunk) =>
+        !Number.isFinite(chunk.seq) || !Number.isFinite(above) || (chunk.seq as number) > above
+    )
     if (!kept.length) return
     const data = kept.map((chunk) => chunk.data).join('')
     entry.term.write(data)

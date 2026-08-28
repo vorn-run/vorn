@@ -294,3 +294,38 @@ describe('a seed that never arrives', () => {
     expect(writes()).toEqual(['happened anyway'])
   })
 })
+
+describe('a chunk whose sequence cannot be compared', () => {
+  it('is shown rather than dropped without a word', async () => {
+    // `seq` is required by the protocol, so this means a server not keeping to
+    // it. Filtering on `undefined > 5` is false for every chunk, so the whole
+    // attach window went missing -- silently, which is the one way this must
+    // never fail. Showing it twice would at least be visible.
+    let answer: (v: unknown) => void = () => {}
+    attachTerminal.mockReturnValue(new Promise((r) => (answer = r)))
+
+    const hydrating = open()
+    emit({ id: ID, data: 'no sequence on this', seq: undefined as unknown as number })
+    await frame()
+    answer({ data: 'THE SEED', seq: 5, live: true })
+    await hydrating
+
+    expect(writes().join('')).toContain('no sequence on this')
+  })
+
+  it('still drops what the seed already contained, when the sequence is usable', async () => {
+    // The contrast, so the guard above cannot quietly become "keep everything".
+    let answer: (v: unknown) => void = () => {}
+    attachTerminal.mockReturnValue(new Promise((r) => (answer = r)))
+
+    const hydrating = open()
+    emit({ id: ID, data: 'already in the seed', seq: 5 })
+    emit({ id: ID, data: 'after the seed', seq: 6 })
+    await frame()
+    answer({ data: 'THE SEED', seq: 5, live: true })
+    await hydrating
+
+    expect(writes().join('')).not.toContain('already in the seed')
+    expect(writes().join('')).toContain('after the seed')
+  })
+})
