@@ -297,7 +297,7 @@ export async function flushHistory(): Promise<void> {
   stopTicking()
 
   const all = Promise.all(
-    [...recorded.values()].map((held) => enqueue(held, () => checkpoint(held)))
+    [...recorded.values()].map((held) => enqueue(held, () => checkpoint(held, true)))
   )
   let timer: NodeJS.Timeout | undefined
   const deadline = new Promise<void>((resolve) => {
@@ -502,7 +502,7 @@ async function fold(held: Recorded): Promise<void> {
  * this line ran -- but only if nothing is recorded between taking `seq` and
  * placing that marker. Nothing can be: there is no await between them.
  */
-async function checkpoint(held: Recorded): Promise<boolean> {
+async function checkpoint(held: Recorded, closing = false): Promise<boolean> {
   const cutSeq = held.seq
   const scrollback = readScrollback(held.id)
   const drained = serializeScreen(held.id)
@@ -521,7 +521,11 @@ async function checkpoint(held: Recorded): Promise<boolean> {
       title: snapshot.title,
       cwd: snapshot.cwd,
       generation,
-      seq: cutSeq
+      seq: cutSeq,
+      // Only the flush on the way out. Everything else -- the clock, the size
+      // cap -- leaves this unset, which is what makes its absence mean "this
+      // run did not get to say goodbye".
+      ...(closing && { closedCleanly: true })
     }))
 
   if (!landed) {

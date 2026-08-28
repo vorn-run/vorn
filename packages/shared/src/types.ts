@@ -138,6 +138,14 @@ export interface RestoredSession {
   replayable: boolean
   /** The recorded history stops short of what actually happened. */
   partial: boolean
+  /**
+   * The last run shut down rather than being stopped under it.
+   *
+   * "You closed Vorn" and "something stopped it" are different events, and a
+   * pane that reports the second for the first reads like a fault report for an
+   * ordinary quit.
+   */
+  closedCleanly: boolean
 }
 
 export type AuthMethod = 'key-file' | 'key-stored' | 'password' | 'agent'

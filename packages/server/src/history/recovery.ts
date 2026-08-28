@@ -51,6 +51,8 @@ export interface Recovered {
   stopped: StopReason
   /** Whether a checkpoint was found to replay onto. */
   fromCheckpoint: boolean
+  /** The last run shut down rather than being stopped under it. */
+  closedCleanly: boolean
 }
 
 export interface RecoverableSession {
@@ -265,7 +267,8 @@ async function restore(dir: string, session: RecoverableSession): Promise<Recove
     id: session.id,
     replayed: frames.length,
     stopped,
-    fromCheckpoint: checkpoint !== null
+    fromCheckpoint: checkpoint !== null,
+    closedCleanly: checkpoint?.closedCleanly === true
   }
 }
 

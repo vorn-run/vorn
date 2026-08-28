@@ -316,3 +316,20 @@ describe('two clients saving against the same server', () => {
     expect(loadConfig().revision).toBeGreaterThan(first)
   })
 })
+
+describe('reopening the panes you had open', () => {
+  it('is on unless somebody has turned it off', () => {
+    // It used to decide whether every saved session was relaunched, which spends
+    // tokens and starts processes -- worth asking about, so it was off. Bringing
+    // a pane back no longer does either. Left off, the whole restore behaved
+    // exactly as it had before: a banner, and an empty board.
+    expect(loadConfig().defaults.reopenSessions).toBe(true)
+  })
+
+  it('stays off once it has been', () => {
+    const config = loadConfig()
+    saveConfig({ ...config, defaults: { ...config.defaults, reopenSessions: false } })
+
+    expect(loadConfig().defaults.reopenSessions).toBe(false)
+  })
+})

@@ -59,6 +59,16 @@ export interface Checkpoint {
    * the difference between a file somebody can diagnose and one they cannot.
    */
   seq: number
+  /**
+   * Whether this was written by a shutdown rather than by the clock.
+   *
+   * It is the difference between "you closed Vorn" and "something stopped it",
+   * and a pane has no other way to tell: a crash runs nothing, so the last
+   * checkpoint it leaves is an ordinary periodic one. Only the flush on the way
+   * out sets this, which makes its absence the honest answer for every other
+   * ending -- a kill, an OOM, a machine losing power.
+   */
+  closedCleanly?: boolean
 }
 
 export const CHECKPOINT_FILE = 'checkpoint.json'
@@ -212,6 +222,7 @@ function isCheckpoint(value: unknown): value is Checkpoint {
     typeof v.title === 'string' &&
     typeof v.cwd === 'string' &&
     Number.isInteger(v.generation) &&
-    Number.isInteger(v.seq)
+    Number.isInteger(v.seq) &&
+    (v.closedCleanly === undefined || typeof v.closedCleanly === 'boolean')
   )
 }

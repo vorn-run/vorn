@@ -1209,7 +1209,13 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     ...(map.hasSeenOnboarding !== undefined && {
       hasSeenOnboarding: map.hasSeenOnboarding as boolean | number
     }),
-    ...(map.reopenSessions !== undefined && { reopenSessions: map.reopenSessions as boolean }),
+    // Default on, and that changed meaning rather than merely flipping. It used
+    // to decide whether every saved session was relaunched at start-up, which
+    // spends tokens and starts processes -- worth asking about, so it was off.
+    // Bringing a pane back no longer does either: it shows the last screen its
+    // terminal drew and waits. There is nothing to ask, and leaving it off made
+    // the whole thing invisible unless somebody went looking for a toggle.
+    reopenSessions: (map.reopenSessions as boolean) ?? true,
     // Saving iterates over every key in defaults, but loading is this explicit
     // list — so a key missing here round-trips to nothing and its feature is
     // silently inert.

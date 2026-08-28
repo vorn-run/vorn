@@ -101,10 +101,10 @@ export function GeneralSettings() {
         {/* Reopen Sessions */}
         <SettingRow
           label="Reopen Sessions on Startup"
-          description="Automatically restore previous sessions when the app starts"
+          description="Bring back the panes you had open, showing the last screen each one drew. Agents that are still running are reconnected to; ones that ended wait for you to resume them."
         >
           <ToggleSwitch
-            checked={config.defaults.reopenSessions ?? false}
+            checked={config.defaults.reopenSessions ?? true}
             onChange={(reopenSessions) => updateDefaults({ reopenSessions })}
           />
         </SettingRow>

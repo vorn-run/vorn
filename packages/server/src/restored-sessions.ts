@@ -79,7 +79,13 @@ export function seedRestored(
       aged += 1
       continue
     }
-    held.set(session.id, { session, endedAt, replayable: false, partial: false })
+    held.set(session.id, {
+      session,
+      endedAt,
+      replayable: false,
+      partial: false,
+      closedCleanly: false
+    })
     keep.push(session)
   }
 
@@ -90,12 +96,15 @@ export function seedRestored(
 }
 
 /** Note which of them the server actually rebuilt a screen for. */
-export function markRecovered(recovered: Array<{ id: string; stopped: string }>): void {
+export function markRecovered(
+  recovered: Array<{ id: string; stopped: string; closedCleanly: boolean }>
+): void {
   for (const one of recovered) {
     const entry = held.get(one.id)
     if (!entry) continue
     entry.replayable = true
     entry.partial = one.stopped !== 'end'
+    entry.closedCleanly = one.closedCleanly
   }
 }
 

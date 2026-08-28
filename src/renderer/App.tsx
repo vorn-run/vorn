@@ -26,7 +26,7 @@ import {
   stopWorkflowRun,
   applyGateDecision
 } from './lib/workflow-execution'
-import type { RestoredSession, TerminalSession, WorkflowExecution } from '../shared/types'
+import type { WorkflowExecution } from '../shared/types'
 import { CommandPalette } from './components/CommandPalette'
 import { SessionRestoredBanner } from './components/SessionRestoredBanner'
 import { GridToolbar } from './components/GridToolbar'
@@ -75,7 +75,7 @@ import { GridContextMenu } from './components/GridContextMenu'
 import { WindowControls } from './components/WindowControls'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from './lib/platform'
 import { useIsMobile } from './hooks/useIsMobile'
-import { coldSessions } from './lib/session-utils'
+import { syncBoard } from './lib/board-sync'
 import { markPaneEnded } from './lib/session-resume'
 
 export function App() {
@@ -169,19 +169,7 @@ export function App() {
     })
     ;(async () => {
       try {
-        // All three started together. Config is awaited first because
-        // everything below reads it, but the two session questions do not
-        // depend on it -- and on the web client each is a round trip to another
-        // machine.
-        const configPromise = window.api.loadConfig()
-        const boardPromise = Promise.all([
-          window.api.listActiveSessions(),
-          window.api.getRestoredSessions()
-        ]).catch((err) => {
-          console.error('[App] failed to read what the server has:', err)
-          return [[], []] as [TerminalSession[], RestoredSession[]]
-        })
-        const config = await configPromise
+        const config = await window.api.loadConfig()
         useAppStore.getState().setConfig(config)
         if (config.defaults.fontSize) {
           setDefaultFontSize(config.defaults.fontSize)
@@ -199,52 +187,24 @@ export function App() {
         }
         // What the server actually has, asked before what the database
         // remembers, because they are different questions and only one of them
-        // is about the present.
+        // is about the present. The desktop could not ask this until now, so a
+        // restart read the saved list and launched a replacement for every
+        // session -- including the ones that had never stopped.
         //
-        // The web client has done this since it was written and the desktop
-        // never could, so a desktop restart read the saved list and launched a
-        // replacement for every session -- including the ones that had never
-        // stopped. A pane bound here is the same terminal, with the same
-        // process, mid-turn if it was mid-turn; the seeding happens in
-        // `terminal-registry` when the pane's terminal is built.
-        // Both questions go to the server: what is running, and what it is
-        // still holding from the last run. The saved list is not consulted at
-        // all any more -- it says what existed when it was last written down,
-        // which is neither of those.
-        const [active, carried] = await boardPromise
-        const store = useAppStore.getState()
-        for (const session of active) {
-          if (!store.terminals.has(session.id)) store.addTerminal(session)
-        }
-        const cold = coldSessions(active, carried)
+        // The same reconciliation runs again whenever the server is replaced;
+        // see `board-sync`.
+        const reopen = config.defaults.reopenSessions ?? true
+        await syncBoard({ showCold: reopen })
 
-        if (cold.length > 0) {
-          if (config.defaults.reopenSessions) {
-            // The panes come back. The agents do not.
-            //
-            // This used to launch a replacement for every saved session --
-            // silently, on start-up, spending tokens and starting processes on
-            // somebody's behalf before they had looked at the screen. Now each
-            // pane shows the last thing its terminal printed and says the
-            // session ended, and resuming is a decision with a button behind it.
-            //
-            // The setting keeps its name and loses a meaning it should not have
-            // had: it governs whether panes reappear, not whether agents are
-            // relaunched. Every tool that restores terminals works this way --
-            // the view comes back, the program does not.
-            for (const one of cold) {
-              useAppStore.getState().addTerminal(one.session, {
-                reason: 'server-stopped',
-                at: one.endedAt,
-                replayed: one.replayable,
-                partial: one.partial,
-                ...(one.session.shellCwd !== undefined && { cwd: one.session.shellCwd })
-              })
-            }
-          } else {
+        if (!reopen) {
+          // Panes stay off the board, and the banner offers to bring them in.
+          // It no longer relaunches anything: taking it shows the last screen
+          // each terminal drew, and resuming is still a separate decision.
+          const carried = await window.api.getRestoredSessions().catch(() => [])
+          if (carried.length > 0) {
             useAppStore.getState().setSessionBanner(
               true,
-              cold.map((one) => one.session)
+              carried.map((one) => one.session)
             )
           }
         }
@@ -252,6 +212,16 @@ export function App() {
         console.error('[App] startup initialization failed:', err)
       }
     })()
+
+    // The server behind this app has been replaced -- it crashed and the
+    // launcher started another. The bridge reconnects by itself, but nothing
+    // about a pane changes when that happens: its terminal keeps showing what it
+    // was showing, because that content lives here. So a frozen pane looks
+    // exactly like a quiet one, and goes on taking input for a process that is
+    // gone. Asking again is the only way any of them find out.
+    const removeReplacedListener = window.api.onServerReplaced?.(() => {
+      void syncBoard({ showCold: true })
+    })
 
     // Pointed at a host while a server is still running on this machine. Said
     // out loud, because an agent working on a machine whose app is showing
@@ -563,6 +533,7 @@ export function App() {
 
     return () => {
       disposeGlobalDataListener()
+      removeReplacedListener?.()
       removeLocalServerListener?.()
       removeExitListener()
       removeSessionCreatedListener()

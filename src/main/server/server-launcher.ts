@@ -499,6 +499,10 @@ function onServerExit(detail: string, endpointTaken = false): void {
           log.info(`[launcher] server came back on ${port}; repointing the bridge`)
           bridge.retarget(url)
         }
+        // Whether or not the address changed, this is a different process and it
+        // holds none of the PTYs the old one did. The bridge reconnects by
+        // itself; the panes have no way to find out, so they are told.
+        notifyServerReplaced()
       })
       .catch((err) => {
         // Not re-entered here. The child now carries its own `exit` handler from
@@ -877,6 +881,27 @@ async function adoptSomethingRunning(dataDir: string): Promise<ServerBridge | nu
   }
 
   return null
+}
+
+/**
+ * Told when the server has been replaced, so the window can be told.
+ *
+ * A callback rather than a direct send, because this module knows about servers
+ * and not about windows -- `src/main/index.ts` owns the one and wires it here.
+ */
+type ServerReplacedListener = () => void
+let serverReplacedListener: ServerReplacedListener | null = null
+
+export function onServerReplaced(listener: ServerReplacedListener | null): void {
+  serverReplacedListener = listener
+}
+
+function notifyServerReplaced(): void {
+  try {
+    serverReplacedListener?.()
+  } catch (err) {
+    log.warn({ err }, '[launcher] could not announce the replacement server')
+  }
 }
 
 export function getServerBridge(): ServerBridge | null {

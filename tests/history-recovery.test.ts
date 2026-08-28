@@ -113,7 +113,7 @@ describe('a checkpoint and the log that follows it', () => {
     const report = await recoverHistory(dir, only)
 
     expect(report.recovered).toEqual([
-      { id: ID, replayed: 2, stopped: 'end', fromCheckpoint: true }
+      { id: ID, replayed: 2, stopped: 'end', fromCheckpoint: true, closedCleanly: false }
     ])
     expect(readScrollback(ID)).toBe('from the checkpoint and then the log')
     expect(await screenText()).toContain('from the checkpoint and then the log')
@@ -311,6 +311,23 @@ describe('the two things the serialized screen cannot carry', () => {
       title: 'vorn — building',
       cwd: '/Users/x/dev/vorn'
     })
+  })
+})
+
+describe('how the last run ended', () => {
+  it('says so when the shutdown got to write a final checkpoint', async () => {
+    // The only difference a pane can see. A crash runs nothing, so the last
+    // checkpoint it leaves is an ordinary periodic one -- which is why the flush
+    // on the way out is the only thing that sets this.
+    await put(sample({ closedCleanly: true }), 4)
+
+    expect((await recoverHistory(dir, only)).recovered[0]?.closedCleanly).toBe(true)
+  })
+
+  it('does not, for a checkpoint the clock wrote', async () => {
+    await put(sample(), 4)
+
+    expect((await recoverHistory(dir, only)).recovered[0]?.closedCleanly).toBe(false)
   })
 })
 

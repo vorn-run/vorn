@@ -143,8 +143,29 @@ describe('what the strip says', () => {
     })
     render(<SessionComposer terminalId={ID} />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('the server stopped')
+    expect(screen.getByRole('status')).toHaveTextContent('the server stopped unexpectedly')
     expect(screen.getByRole('status')).toHaveTextContent('3h ago')
+  })
+
+  it('tells a quit apart from something stopping the server', () => {
+    // Reporting an ordinary quit as though the server had been stopped under you
+    // reads like a fault report for closing an app.
+    useAppStore
+      .getState()
+      .addTerminal(session(), { reason: 'app-closed', at: Date.now(), replayed: true })
+    render(<SessionComposer terminalId={ID} />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('Vorn was closed')
+    expect(screen.getByRole('status')).not.toHaveTextContent('unexpectedly')
+  })
+
+  it('says when it was not a quit', () => {
+    useAppStore
+      .getState()
+      .addTerminal(session(), { reason: 'server-stopped', at: Date.now(), replayed: true })
+    render(<SessionComposer terminalId={ID} />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('the server stopped unexpectedly')
   })
 
   it('names an exit code when there was one', () => {

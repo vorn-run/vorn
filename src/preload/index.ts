@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   LOCAL_SERVER_RUNNING_CHANNEL,
+  SERVER_REPLACED_CHANNEL,
   STOP_SESSIONS_AND_SERVER_CHANNEL,
   type LocalServerNotice
 } from '../shared/adoption-channels'
@@ -128,6 +129,20 @@ const api = {
     ipcRenderer.on(IPC.CONFIG_CHANGED, listener)
     return () => {
       ipcRenderer.removeListener(IPC.CONFIG_CHANGED, listener)
+    }
+  },
+
+  /**
+   * The server behind this app has been replaced by a different process.
+   *
+   * Sent after a crash-relaunch. Everything the old one was holding is gone, so
+   * a pane showing a terminal is showing a photograph and does not know it.
+   */
+  onServerReplaced: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(SERVER_REPLACED_CHANNEL, listener)
+    return () => {
+      ipcRenderer.removeListener(SERVER_REPLACED_CHANNEL, listener)
     }
   },
 

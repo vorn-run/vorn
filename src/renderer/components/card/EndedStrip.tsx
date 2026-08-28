@@ -38,12 +38,17 @@ export function EndedStrip({ terminalId, ended, compact }: Props) {
   const isShell = useAppStore((s) => s.terminals.get(terminalId)?.session.agentType === 'shell')
   const cwd = shortenCwd(ended.cwd ?? null)
 
+  // Three endings, and telling them apart is most of the value here. Reporting
+  // an ordinary quit as though something had stopped the server reads like a
+  // fault report for closing an app.
   const cause =
     ended.reason === 'exited'
       ? ended.exitCode !== undefined
         ? `exited with ${ended.exitCode}`
         : 'exited'
-      : 'the server stopped'
+      : ended.reason === 'app-closed'
+        ? 'Vorn was closed'
+        : 'the server stopped unexpectedly'
 
   return (
     <div

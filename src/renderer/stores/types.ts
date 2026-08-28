@@ -208,7 +208,13 @@ export interface DevicePaneState {
  * every one of those readings. The pane says the rest.
  */
 export interface EndedSession {
-  reason: 'server-stopped' | 'exited'
+  /**
+   * `app-closed` — Vorn was quit and its server went with it.
+   * `server-stopped` — it stopped without getting to shut down: a crash, a kill,
+   *   a machine losing power.
+   * `exited` — the terminal's own process finished while somebody was watching.
+   */
+  reason: 'app-closed' | 'server-stopped' | 'exited'
   /** Unix ms. The last save the previous run managed, or when the PTY exited. */
   at: number
   /** A screen was replayed into this pane, so it is showing something real. */

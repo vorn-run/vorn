@@ -334,6 +334,25 @@ describe('a session that ends', () => {
 })
 
 describe('shutting down', () => {
+  it('marks its checkpoints as the ones that got to say goodbye', async () => {
+    // What tells a restored pane "you closed Vorn" apart from "something stopped
+    // it". Nothing else sets it, so its absence is the honest answer for a
+    // crash, a kill, or a machine losing power.
+    begin()
+    emit(ID, 'hello')
+    await flushHistory()
+
+    expect(readCheckpoint(historyDir(dir, ID))?.closedCleanly).toBe(true)
+  })
+
+  it('and an ordinary one is not marked', async () => {
+    begin()
+    emit(ID, 'hello')
+    await quiesce()
+
+    expect(readCheckpoint(historyDir(dir, ID))?.closedCleanly).toBeUndefined()
+  })
+
   it('writes every terminal, not only the ones that had fallen quiet', async () => {
     begin('one')
     begin('two')
