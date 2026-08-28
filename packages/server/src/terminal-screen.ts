@@ -173,7 +173,13 @@ function create(id: string, cols: number, rows: number): Held {
       // first allocated two arrays and a string before discarding them.
       if (payload.startsWith('cwd;')) {
         const next = payload.slice(4, 4 + MAX_LABEL_UNITS)
-        if (next && next !== held.cwd) {
+        // Shaped like a path before it is believed. Anything on the other end of
+        // the tty can write this sequence -- a `cat` of a file from a repository
+        // somebody cloned, a crafted commit message under `git log`, an agent
+        // relaying what it read. It is not shell input, but it does become the
+        // directory a resumed shell is started in, so it is checked here rather
+        // than trusted for the life of the session.
+        if (next && isPlausiblePath(next) && next !== held.cwd) {
           held.cwd = next
           // Told, not polled. An earlier version had `pty-manager` read this
           // after every flush, which cannot work: xterm parses on its own timer,
@@ -192,6 +198,22 @@ function create(id: string, cols: number, rows: number): Held {
   })
 
   return held
+}
+
+/**
+ * Whether a reported directory is shaped like one.
+ *
+ * Not a security boundary on its own -- a person can `cd` anywhere and the whole
+ * point of following this is that they did. What it rules out is a value that
+ * was never a path: a relative fragment, or one carrying control characters that
+ * would make the rest of the system read it as something other than what it is.
+ * The decision a forged-but-plausible path could lead to is guarded where it is
+ * taken: the offer names the directory, and starting one is a click.
+ */
+function isPlausiblePath(value: string): boolean {
+  if (!value.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(value)) return false
+  // eslint-disable-next-line no-control-regex
+  return !/[\u0000-\u001f\u007f]/.test(value)
 }
 
 /** Percent-decoded where that is possible, left alone where it is not. */

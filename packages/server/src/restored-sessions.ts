@@ -127,6 +127,19 @@ export function consumeRestored(id: string): RestoredSession | null {
   return entry
 }
 
+/**
+ * Put one back, because the thing it was claimed for did not happen.
+ *
+ * Claiming is destructive on purpose -- it is what stops two clients starting
+ * two agents against one transcript. But a claim that then fails to spawn would
+ * otherwise leave the session in neither place: gone from here, never in the pty
+ * manager, and erased from the database by the next save. There would be nothing
+ * left to try again from.
+ */
+export function restoreHeld(entry: RestoredSession): void {
+  held.set(entry.session.id, entry)
+}
+
 export function consumeAllRestored(): RestoredSession[] {
   const all = [...held.values()]
   held.clear()

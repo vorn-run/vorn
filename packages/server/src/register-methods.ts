@@ -1,3 +1,4 @@
+import fs from 'fs'
 import crypto from 'node:crypto'
 import { registerMethod, registerNotification } from './ws-handler'
 import { ptyManager } from './pty-manager'
@@ -16,7 +17,8 @@ import {
   restoredRecords,
   listRestored,
   consumeRestored,
-  consumeAllRestored
+  consumeAllRestored,
+  restoreHeld
 } from './restored-sessions'
 import { clearScreen } from './terminal-screen'
 import { discardHistory } from './history/writer'
@@ -345,8 +347,16 @@ export function registerAllMethods(): void {
     // resume makes -- so it goes through the same door, and a second client
     // closing the same pane finds nothing rather than an error.
     if (consumeRestored(id)) {
-      // Nothing follows, so the caller does not wait on the files going.
-      void forgetRestored(id)
+      // Nothing follows, so the caller does not wait on the files going --
+      // but a rejection here still has to land somewhere.
+      void forgetRestored(id).catch((err) => {
+        log.warn({ err, id }, '[restored] could not forget a session that was closed')
+      })
+      // The row is only removed by a save, and saves are event-driven. Without
+      // this, closing a restored pane and quitting leaves the record behind --
+      // and the next start offers a session whose files have gone, as an empty
+      // pane the person already closed.
+      sessionManager.scheduleSave()
       return
     }
     ptyManager.killPty(id)
@@ -622,7 +632,11 @@ export function registerAllMethods(): void {
   registerMethod('sessions:clear', () => {
     // The offer is being declined for all of them at once. Same rule as closing
     // one: the record goes and so does what was written for it.
-    for (const one of consumeAllRestored()) void forgetRestored(one.session.id)
+    for (const one of consumeAllRestored()) {
+      void forgetRestored(one.session.id).catch((err) => {
+        log.warn({ err, id: one.session.id }, '[restored] could not forget a declined session')
+      })
+    }
     sessionManager.clear()
   })
 
@@ -632,20 +646,40 @@ export function registerAllMethods(): void {
     // Claimed before anything is started, and that ordering is the point. Two
     // clients can be looking at the same cold pane; the second must be told it
     // is gone rather than launching a second agent against one transcript.
+    // Two kinds of ended session, and only one of them is held here.
+    //
+    // A session carried over from a previous run is in `held`. One that exited
+    // during *this* run is not: its record outlives its process in the pty
+    // manager, which is what `hasLivePty` exists to tell apart. That second kind
+    // is the common one -- an agent finishing its turn -- and it was answered
+    // `gone`, which the pane reported as "resumed somewhere else" before
+    // deleting itself and its scrollback.
     const restored = consumeRestored(id)
-    if (!restored) return { ok: false as const, reason: 'gone' as const }
+    const dead = restored
+      ? undefined
+      : ptyManager.getActiveSessions().find((s) => s.id === id && !ptyManager.hasLivePty(id))
+    const previous = restored?.session ?? dead
+    if (!previous) return { ok: false as const, reason: 'gone' as const }
 
-    const previous = restored.session
     try {
-      // The screen and the files described a session that is now being replaced
-      // by a live one. Awaited rather than started, so "cleared before the
-      // spawn" is a fact rather than a hope: the reply carries a live session,
-      // and a caller that acts on it immediately must not find the old one's
-      // files still there.
-      await forgetRestored(id)
+      // Claimed, for the second kind. `killPty` is what removes a record whose
+      // process has already gone, and it takes the screen model and the history
+      // with it -- so this is the same forgetting the other branch does below,
+      // by the path that already existed for it.
+      if (dead) ptyManager.killPty(id)
 
       if (previous.agentType === 'shell') {
-        const cwd = previous.shellCwd ?? previous.worktreePath ?? previous.projectPath
+        // The remembered directory only if it is still a directory. It was
+        // reported by the shell over the tty, so anything that could write to
+        // that pane could have written it -- and a resume is the one moment it
+        // turns into where a process starts. A stale or fabricated path falls
+        // back to the project rather than being spawned into.
+        const remembered = previous.shellCwd
+        const usable =
+          remembered !== undefined &&
+          fs.existsSync(remembered) &&
+          fs.statSync(remembered).isDirectory()
+        const cwd = usable ? remembered : (previous.worktreePath ?? previous.projectPath)
         const session = ptyManager.createShellPty(cwd)
         // Carried across on the server rather than grafted on by whichever
         // client asked. `createShellPty` names a session after its directory, so
@@ -661,15 +695,24 @@ export function registerAllMethods(): void {
           ...(previous.displayName !== undefined && { displayName: previous.displayName })
         })
         clientRegistry.broadcast(IPC.SESSION_CREATED, session)
+        // Only once something is running. Discarding first and spawning second
+        // meant a spawn that threw -- a project directory renamed, a worktree
+        // pruned, a volume unmounted -- left the record consumed, the history
+        // deleted and nothing to try again from.
+        if (restored) await forgetRestored(id)
         sessionManager.scheduleSave()
         return { ok: true as const, session }
       }
 
       const session = ptyManager.createPty(buildRestorePayload(previous, resumeSessionId))
+      if (restored) await forgetRestored(id)
       sessionManager.scheduleSave()
       return { ok: true as const, session }
     } catch (err) {
       log.warn({ err, id }, '[restored] could not resume this session')
+      // Put it back. A claim is destructive on purpose, but a claim whose spawn
+      // failed must not be the end of the session.
+      if (restored) restoreHeld(restored)
       return {
         ok: false as const,
         reason: 'failed' as const,

@@ -3047,7 +3047,12 @@ export function saveSessions(sessions: TerminalSession[]): void {
         s.remoteHostLabel ?? null,
         s.hookSessionId ?? null,
         s.statusSource ?? null,
-        savedAt,
+        // A record's own stamp wins. Held sessions from a previous run are
+        // persisted beside the live ones, and re-stamping them with now made
+        // their age reset on every save -- so the window they are supposed to
+        // age out of never elapsed, and the pane reported them as having ended
+        // moments ago however long they had really been gone.
+        s.savedAt ?? savedAt,
         i,
         s.worktreeName ?? null,
         s.agentSessionId ?? null,

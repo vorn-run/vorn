@@ -150,11 +150,21 @@ describe('what a shell needs to come back where it was', () => {
     saveSessions([makeSession()])
     expect(getPreviousSessions()[0].shellCwd).toBeUndefined()
   })
+})
 
-  it('hands back when the record was last written down', () => {
-    // The only thing on disk that says roughly when a run ended, which is what
-    // a pane restored from a previous process has to tell somebody. It has been
-    // selected and discarded since this table was written.
+describe('when a record was last written down', () => {
+  it('keeps a stamp the record already carried', () => {
+    // Sessions held over from a previous run are persisted beside the live ones,
+    // and re-stamping them with now made their age reset on every save -- so the
+    // window they age out of never elapsed, and a pane reported a terminal as
+    // having ended moments ago however long it had really been gone.
+    const ended = Date.now() - 3 * 24 * 60 * 60 * 1000
+    saveSessions([makeSession({ savedAt: ended })])
+
+    expect(getPreviousSessions()[0].savedAt).toBe(ended)
+  })
+
+  it('stamps one that has never been written down', () => {
     const before = Date.now()
     saveSessions([makeSession()])
 

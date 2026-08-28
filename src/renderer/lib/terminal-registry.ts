@@ -815,12 +815,18 @@ export function onTerminalScroll(
 export function destroyTerminal(terminalId: string): void {
   const entry = registry.get(terminalId)
   if (!entry) return
-  // Flush any pending batched writes before destroying
+  // Flush any pending batched writes before destroying. Joined by their data:
+  // these became `{ data, seq }` when attaching needed a way to tell what a seed
+  // already contained, and this line kept joining the objects -- which type-
+  // checks, and writes `[object Object]` instead of the output it exists to save.
   const chunks = pendingWrites.get(terminalId)
   if (chunks) {
-    entry.term.write(chunks.join(''))
+    entry.term.write(chunks.map((chunk) => chunk.data).join(''))
     pendingWrites.delete(terminalId)
   }
+  // A seed still in flight would otherwise resolve and write into a terminal
+  // that no longer exists.
+  hydrating.delete(terminalId)
   statusHandlers.delete(terminalId)
   entry._disposeCommandBlocks?.()
   entry._disposeCommandBlocks = null

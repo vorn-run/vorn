@@ -7,6 +7,7 @@ import {
   seedRestored,
   consumeRestored,
   consumeAllRestored,
+  restoreHeld,
   restoredRecords,
   resetRestored
 } from '../packages/server/src/restored-sessions'
@@ -150,5 +151,26 @@ describe('turning a record back into a launch', () => {
     // A shell restores by starting one in the directory it was in. Building an
     // agent launch line for it would produce a command nothing can run.
     expect(() => buildRestorePayload(session({ agentType: 'shell' }))).toThrow()
+  })
+})
+
+describe('a claim whose spawn then fails', () => {
+  it('puts the record back, because otherwise there is nothing to try again from', () => {
+    // Claiming is destructive on purpose -- it is what stops two clients
+    // starting two agents against one transcript. But a claim that then fails
+    // to spawn would leave the session in neither place: gone from here, never
+    // in the pty manager, and erased by the next save. Reachable without malice:
+    // a project directory renamed, a worktree pruned, a volume unmounted.
+    seedRestored([session({ id: 'one' })], NOW)
+    const claimed = consumeRestored('one')
+    expect(claimed).not.toBeNull()
+    expect(restoredRecords()).toEqual([])
+
+    restoreHeld(claimed!)
+
+    expect(restoredRecords().map((s) => s.id)).toEqual(['one'])
+    // And it can be claimed again, once.
+    expect(consumeRestored('one')).not.toBeNull()
+    expect(consumeRestored('one')).toBeNull()
   })
 })
