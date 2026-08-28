@@ -424,3 +424,74 @@ describe('agent-launch guards against shell sessions', () => {
     )
   })
 })
+
+describe('exactly one selector reaches the agent', () => {
+  /**
+   * A configured command may already carry one -- somebody who always resumes
+   * the same session, or who pinned an id by hand. Two of them compete, one wins
+   * silently, and the session that comes back is not the one that was asked for.
+   */
+  const count = (line: string, needle: RegExp): number => line.match(needle)?.length ?? 0
+
+  it('claude: a configured --resume does not survive beside ours', () => {
+    const line = buildAgentLaunchLine(
+      makePayload({ resumeSessionId: 'wanted' }),
+      { ...cmds, claude: { command: 'claude', args: ['--resume', 'stale'] } },
+      env
+    )
+
+    expect(count(line, /--resume/g)).toBe(1)
+    expect(line).toContain('--resume wanted')
+    expect(line).not.toContain('stale')
+  })
+
+  it('claude: a configured --session-id does not compete with a resume', () => {
+    const line = buildAgentLaunchLine(
+      makePayload({ resumeSessionId: 'wanted' }),
+      { ...cmds, claude: { command: 'claude', args: ['--session-id', 'pinned'] } },
+      env
+    )
+
+    expect(line).not.toContain('--session-id')
+    expect(count(line, /--resume/g)).toBe(1)
+  })
+
+  it('claude: everything else the person configured survives', () => {
+    const line = buildAgentLaunchLine(
+      makePayload({ resumeSessionId: 'wanted' }),
+      { ...cmds, claude: { command: 'claude', args: ['--model', 'opus', '--resume', 'stale'] } },
+      env
+    )
+
+    expect(line).toContain('--model opus')
+  })
+
+  it('codex: resuming no longer throws away the configured arguments', () => {
+    // It used to rebuild the line as `${command} resume ${id}`, so a model, a
+    // sandbox setting or an approval policy vanished -- and only on the resume
+    // path, so a session came back configured differently from the one it
+    // continues.
+    const line = buildAgentLaunchLine(
+      makePayload({ agentType: 'codex', resumeSessionId: 'wanted' }),
+      { ...cmds, codex: { command: 'codex', args: ['--model', 'o3'] } },
+      env
+    )
+
+    expect(line).toContain('--model o3')
+    expect(line).toContain('resume wanted')
+    expect(count(line, /\bresume\b/g)).toBe(1)
+  })
+
+  it('leaves a line it cannot read alone, and appends beside it', () => {
+    // Failing open. Two selectors is a worse launch; a rewritten command line is
+    // a worse day.
+    const line = buildAgentLaunchLine(
+      makePayload({ resumeSessionId: 'wanted' }),
+      { ...cmds, claude: { command: 'sh -c "claude --resume stale"', args: [] } },
+      env
+    )
+
+    expect(line).toContain('stale')
+    expect(line).toContain('--resume wanted')
+  })
+})
