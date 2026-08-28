@@ -627,34 +627,6 @@ export function getTerminalSelection(terminalId: string): string {
   return entry.term.getSelection()
 }
 
-/**
- * Put a terminal into a known state before a resumed process writes to it.
- *
- * Resuming keeps the pane, which is the point -- the replayed screen stays and
- * the new process continues underneath it. But it also keeps everything the
- * previous session left behind in the emulator: a scroll region, origin mode,
- * an alternate screen it never came back from, an unclosed attribute run. The
- * new process assumes a terminal at its defaults and never sets them, so its
- * first redraw lands inside the last one's margins and what the person sees is
- * the two frames on top of each other with the escape sequences showing.
- *
- * A soft reset (DECSTR) is the whole fix, and it is deliberately not a full one:
- * `reset()` would clear the scrollback, which is the thing being resumed.
- *
- * Written before the resume is asked for rather than after it returns. Output
- * from the new process can arrive the instant it exists, and a reset landing
- * mid-stream would undo the setup it had already done.
- */
-export function settleTerminalForResume(terminalId: string): void {
-  const entry = registry.get(terminalId)
-  if (!entry) return
-  entry.term.write(
-    // Leave the alternate screen, soft reset, default attributes, cursor shown,
-    // and begin on a line of its own.
-    '\x1b[?1049l\x1b[!p\x1b[0m\x1b[?25h\r\n'
-  )
-}
-
 export function clearTerminalSelection(terminalId: string): void {
   registry.get(terminalId)?.term.clearSelection()
 }

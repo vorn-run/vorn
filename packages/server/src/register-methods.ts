@@ -642,6 +642,18 @@ export function registerAllMethods(): void {
 
   registerMethod('sessions:restored', () => listRestored())
 
+  /**
+   * What goes between the run that ended and the run taking its place.
+   *
+   * Leave the alternate screen, soft reset, default attributes, cursor shown,
+   * then a line of its own. A soft reset (DECSTR) and deliberately not a full
+   * one: RIS would clear the scrollback, and the scrollback is the thing being
+   * resumed. Without it the new process inherits the last one's scroll region,
+   * origin mode and unclosed attributes -- it assumes a terminal at its defaults
+   * and so never sets them -- and its first redraw lands inside the old frame.
+   */
+  const BETWEEN_RUNS = '\x1b[?1049l\x1b[!p\x1b[0m\x1b[?25h\r\n'
+
   registerMethod('sessions:resume', async ({ id, resumeSessionId }) => {
     // Claimed before anything is started, and that ordering is the point. Two
     // clients can be looking at the same cold pane; the second must be told it
@@ -700,6 +712,8 @@ export function registerAllMethods(): void {
           ...(previous.isWorktree !== undefined && { isWorktree: previous.isWorktree }),
           ...(previous.displayName !== undefined && { displayName: previous.displayName })
         })
+        // Synchronously, so it is in the buffer before the shell's first byte.
+        ptyManager.injectOutput(session.id, BETWEEN_RUNS)
         clientRegistry.broadcast(IPC.SESSION_CREATED, session)
         sessionManager.scheduleSave()
         return { ok: true as const, session }
@@ -707,6 +721,7 @@ export function registerAllMethods(): void {
 
       // Same id, same reasons as the shell branch above.
       const session = ptyManager.createPty(buildRestorePayload(previous, resumeSessionId), id)
+      ptyManager.injectOutput(session.id, BETWEEN_RUNS)
       sessionManager.scheduleSave()
       return { ok: true as const, session }
     } catch (err) {

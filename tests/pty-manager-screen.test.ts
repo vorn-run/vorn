@@ -373,3 +373,38 @@ describe('the terminal is recorded where it is fed', () => {
     expect(fs.existsSync(historyDir(dir, session.id))).toBe(false)
   })
 })
+
+describe('the seam between a session and the one resuming it', () => {
+  it('puts the reset in the output stream, ahead of the new run', async () => {
+    // A resumed session keeps its pane, so the new process inherits whatever the
+    // last one left in the emulator -- a scroll region, an alternate screen it
+    // never came back from. Something has to sit between the two runs saying so,
+    // and it has to be in the stream rather than written by a client: a cold
+    // pane has not mounted when the resume starts, and the screen it replays is
+    // written when it finally does, by which time the new run is already
+    // streaming. Ordering these is the server's job because the server is what
+    // orders them.
+    const { session, fake } = createAgent()
+    fake.emitData('what the last run left')
+    await afterFlush()
+
+    ptyManager.injectOutput(session.id, `${ESC}[!p`)
+    fake.emitData('what the new run draws')
+    await afterFlush()
+
+    const seen = readScrollback(session.id)
+    expect(seen).toContain(`${ESC}[!p`)
+    expect(seen.indexOf(`${ESC}[!p`)).toBeGreaterThan(seen.indexOf('what the last run left'))
+    expect(seen.indexOf(`${ESC}[!p`)).toBeLessThan(seen.indexOf('what the new run draws'))
+  })
+
+  it('never answers it back down the pty, as any injected escape must not', async () => {
+    const { session, fake } = createAgent()
+    const before = fake.written.length
+
+    ptyManager.injectOutput(session.id, `${ESC}[!p${ESC}[?1049l`)
+    await afterFlush()
+
+    expect(fake.written.slice(before)).toEqual([])
+  })
+})

@@ -559,6 +559,27 @@ class PtyManager extends EventEmitter {
 
   private static readonly BUFFER_FLUSH_MS = 8
 
+  /**
+   * Put bytes into a session's output as though the process had written them.
+   *
+   * There is exactly one caller and one reason: a resumed session hands a new
+   * process a terminal the previous one was still using, and something has to
+   * sit between the two runs saying so. Doing it in the client cannot work --
+   * the client is not what orders these bytes. A cold pane has not mounted when
+   * the resume starts, so it has no terminal to reset yet, and the screen it
+   * replays is written when it finally does mount, by which time the new
+   * process has been streaming for a second. The two interleave and what
+   * arrives is both frames at once with the escapes showing.
+   *
+   * Through `bufferData` rather than beside it, so this takes a sequence number,
+   * a place in the scrollback and a line in the history like any other output.
+   * That is what makes it arrive in the right order for a client that attaches
+   * in a minute as well as for the one watching now.
+   */
+  injectOutput(id: string, data: string): void {
+    this.bufferData(id, data)
+  }
+
   private bufferData(id: string, data: string): void {
     const existing = this.dataBuffers.get(id)
     this.dataBuffers.set(id, existing ? existing + data : data)
