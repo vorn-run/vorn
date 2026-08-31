@@ -496,12 +496,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     return () => window.removeEventListener('keydown', handler)
   }, [isActive, undo, redo])
 
-  const handleConnectEdge = useCallback(
-    (sourceId: string, targetId: string) => {
-      setEdges([...edges, { id: crypto.randomUUID(), source: sourceId, target: targetId }])
-    },
-    [edges]
-  )
+  const handleConnectEdge = useCallback((sourceId: string, targetId: string) => {
+    setEdges((eds) => [...eds, { id: crypto.randomUUID(), source: sourceId, target: targetId }])
+  }, [])
 
   const handlePositionsCommit = useCallback(
     (positions: Record<string, { x: number; y: number }>) => {

@@ -110,6 +110,14 @@ describe('the definition projected onto the canvas', () => {
     expect(adds.map((n) => n.id)).toEqual(['add:b'])
   })
 
+  it('trails a workflow that ends in a loop', () => {
+    const terminal = loopNodes.filter((n) => n.id !== 'after')
+    const terminalEdges = loopEdges.filter((e) => e.id !== 'e4')
+    const { nodes: rf } = toCanvasElements(terminal, terminalEdges)
+    // The loop's body edges are not drawn, so the composite is the leaf.
+    expect(rf.some((n) => n.id === 'add:loop')).toBe(true)
+  })
+
   it('uses stored positions once anyone has arranged the workflow', () => {
     const arranged = chainNodes.map((n) =>
       n.id === 'a' ? { ...n, position: { x: 120, y: 300 } } : n

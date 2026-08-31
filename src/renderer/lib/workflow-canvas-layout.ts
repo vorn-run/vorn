@@ -201,7 +201,8 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
     })
   }
 
-  const hasOutgoing = new Set(edges.map((e) => e.source))
+  // Leaves are judged on the drawn graph: a terminal loop's body edges don't count.
+  const hasOutgoing = new Set(rfEdges.map((e) => e.source))
   for (const node of nodes) {
     if (bodySet.has(node.id)) continue
     if (hasOutgoing.has(node.id)) continue
