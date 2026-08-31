@@ -105,6 +105,11 @@ export function RunDetailPane({
           <span className="text-[10px] px-1.5 py-0.5 rounded border border-white/[0.08] text-gray-400 shrink-0">
             {presentation.sourceLabel}
           </span>
+          {run.partial && (
+            <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500 border border-white/[0.08] rounded px-1 shrink-0">
+              partial
+            </span>
+          )}
           <span className="flex-1" />
           {run.status === 'error' && fullWorkflow && (
             <button
