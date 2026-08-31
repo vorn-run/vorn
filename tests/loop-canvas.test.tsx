@@ -8,6 +8,18 @@ vi.hoisted(() => {
     value: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
     writable: true
   })
+  // The graph surface measures itself with ResizeObserver, which jsdom lacks.
+  // Nodes carry explicit dimensions, so a no-op observer is enough to render.
+  class NoopResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.defineProperty(window, 'ResizeObserver', {
+    value: NoopResizeObserver,
+    writable: true
+  })
+  ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = NoopResizeObserver
 })
 
 vi.mock('../src/renderer/lib/use-connections', () => ({
@@ -74,6 +86,10 @@ function renderWith(
       onNodeClick={() => {}}
       onInsertNode={() => {}}
       onAddParallelBranch={() => {}}
+      onConnectEdge={() => {}}
+      onPaletteInsert={() => {}}
+      onPositionsCommit={() => {}}
+      onTidyUp={() => {}}
     />
   )
 }
@@ -149,6 +165,10 @@ describe('adding a step inside the rail', () => {
         onNodeClick={() => {}}
         onInsertNode={onInsertNode as never}
         onAddParallelBranch={() => {}}
+        onConnectEdge={() => {}}
+        onPaletteInsert={() => {}}
+        onPositionsCommit={() => {}}
+        onTidyUp={() => {}}
       />
     )
   }
@@ -160,7 +180,7 @@ describe('adding a step inside the rail', () => {
     const { container } = renderWithSpy(nodes, onInsertNode)
     const rail = container.querySelector('[data-loop-rail]') as HTMLElement
 
-    fireEvent.click(within(rail).getByRole('button', { name: '' }))
+    fireEvent.click(within(rail).getByRole('button', { name: 'Add a step' }))
     fireEvent.click(screen.getByText(/Launch an agent|Add an agent|agent/i))
 
     expect(onInsertNode).toHaveBeenCalledWith(expect.any(String), '__LOOP_BODY__', 'agent')
@@ -171,7 +191,7 @@ describe('adding a step inside the rail', () => {
     const { container } = renderWithSpy(nodes, onInsertNode)
     const rail = container.querySelector('[data-loop-rail]') as HTMLElement
 
-    fireEvent.click(within(rail).getByRole('button', { name: '' }))
+    fireEvent.click(within(rail).getByRole('button', { name: 'Add a step' }))
     fireEvent.click(screen.getByText(/Launch an agent|Add an agent|agent/i))
 
     expect(onInsertNode.mock.calls[0][0]).toBe('review')
@@ -185,7 +205,7 @@ describe('adding a step inside the rail', () => {
     )
     const rail = container.querySelector('[data-loop-rail]') as HTMLElement
 
-    fireEvent.click(within(rail).getByRole('button', { name: '' }))
+    fireEvent.click(within(rail).getByRole('button', { name: 'Add a step' }))
     fireEvent.click(screen.getByText(/Launch an agent|Add an agent|agent/i))
 
     expect(onInsertNode.mock.calls[0][0]).toBe('loop')
@@ -195,9 +215,13 @@ describe('adding a step inside the rail', () => {
 describe('where a loop can be added', () => {
   it('is offered on the trunk', () => {
     const { container } = renderWith(nodes)
-    // The + between trunk steps, outside the rail.
-    const buttons = container.querySelectorAll('button')
-    fireEvent.click(buttons[buttons.length - 1])
+    // The + that trails the leaf, outside the rail: the last add button in
+    // the document that does not sit inside the loop enclosure.
+    const rail = container.querySelector('[data-loop-rail]') as HTMLElement
+    const adds = screen
+      .getAllByRole('button', { name: 'Add a step' })
+      .filter((b) => !rail.contains(b))
+    fireEvent.click(adds[adds.length - 1])
     expect(screen.queryByText(/Repeat steps/)).not.toBeNull()
   })
 })
@@ -216,9 +240,7 @@ describe('the canvas reads in one colour', () => {
     // True was green and False red, which said one path is the good one and
     // the other a failure. A condition is a fork; the word says which way.
     const { container } = renderWith(forkNodes, null, forkEdges)
-    const labels = [...container.querySelectorAll('div')].filter(
-      (el) => el.textContent === 'True' || el.textContent === 'False'
-    )
+    const labels = [...container.querySelectorAll('[data-branch-label]')]
     expect(labels).toHaveLength(2)
     expect(labels[0].className).toBe(labels[1].className)
     for (const el of labels) {

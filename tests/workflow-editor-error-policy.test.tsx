@@ -115,6 +115,8 @@ vi.mock('../src/renderer/stores', () => {
   return { useAppStore }
 })
 ;(global as unknown as { window: object }).window = {
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
   api: {
     listWorkflowRuns: vi.fn().mockResolvedValue([]),
     createTerminal: vi.fn(),
