@@ -68,12 +68,7 @@ export function NodeShell({
         />
       )}
       <div className="flex items-center gap-2">
-        <div
-          className="shrink-0 w-7 h-7 rounded-md border border-white/[0.08] bg-white/[0.04]
-                     flex items-center justify-center"
-        >
-          {icon}
-        </div>
+        {icon}
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-white truncate">{label}</div>
           <div className="text-[11px] text-gray-500 truncate">{subtitle}</div>

@@ -39,7 +39,7 @@ export function LoopNode({
 
   return (
     <NodeShell
-      icon={<Repeat size={14} className={`shrink-0 ${NODE_GLYPH}`} strokeWidth={2} />}
+      icon={<Repeat size={18} className={`shrink-0 ${NODE_GLYPH}`} strokeWidth={2} />}
       label={label}
       subtitle={subtitle}
       selected={selected}

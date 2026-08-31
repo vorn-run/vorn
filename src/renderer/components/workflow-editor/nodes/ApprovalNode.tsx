@@ -18,7 +18,7 @@ export function ApprovalNode({ label, config, selected, executionStatus, onClick
 
   return (
     <NodeShell
-      icon={<Hand size={14} className={`shrink-0 ${NODE_GLYPH}`} strokeWidth={2} />}
+      icon={<Hand size={18} className={`shrink-0 ${NODE_GLYPH}`} strokeWidth={2} />}
       label={label}
       subtitle={subtitle}
       selected={selected}

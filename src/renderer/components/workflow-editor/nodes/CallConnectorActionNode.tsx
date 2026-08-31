@@ -32,11 +32,11 @@ export function CallConnectorActionNode({
           <ConnectorIcon
             connectorId={connectorId}
             icon={icon}
-            size={16}
+            size={18}
             className="text-ink shrink-0"
           />
         ) : (
-          <Zap size={14} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />
+          <Zap size={18} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />
         )
       }
       label={label}
