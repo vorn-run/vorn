@@ -223,7 +223,9 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
       height: 22,
       handles: [{ type: 'target' as const, position: Position.Top, x: 11, y: 0 }],
       draggable: false,
-      selectable: false
+      selectable: false,
+      // Its menu must open above neighbouring cards, and selection elevates those to 1000.
+      zIndex: 1200
     })
     rfEdges.push({
       id: `add-edge:${node.id}`,

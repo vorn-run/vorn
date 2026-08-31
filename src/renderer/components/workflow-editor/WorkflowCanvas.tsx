@@ -3,6 +3,7 @@ import {
   Background,
   BackgroundVariant,
   BaseEdge,
+  ControlButton,
   Controls,
   EdgeLabelRenderer,
   Handle,
@@ -21,7 +22,7 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Repeat } from 'lucide-react'
+import { AlignVerticalSpaceAround, Repeat } from 'lucide-react'
 import { LoopConfig, NodeExecutionStatus, WorkflowEdge, WorkflowNode } from '../../../shared/types'
 import {
   AddStepNodeData,
@@ -204,7 +205,8 @@ function AddStepNode({ data }: NodeProps) {
   const { afterNodeId, insideBranch } = data as unknown as AddStepNodeData
 
   return (
-    <div className="relative">
+    // The wrapper of an unselectable, undraggable node gets pointer-events none.
+    <div className="relative pointer-events-auto">
       <Handle type="target" position={Position.Top} className="!opacity-0 !pointer-events-none" />
       <ConnectorButton
         onAddAction={() => onInsertNode(afterNodeId, null, 'agent')}
@@ -279,7 +281,11 @@ function StepEdge({
       <EdgeLabelRenderer>
         <div
           className="absolute flex flex-col items-center gap-1 pointer-events-auto"
-          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          style={{
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            // Hovered, the + and its menu must rise above the cards (selection elevates those to 1000).
+            zIndex: hovered ? 1300 : 'auto'
+          }}
           onMouseEnter={enter}
           onMouseLeave={leave}
         >
@@ -291,8 +297,8 @@ function StepEdge({
               {label}
             </div>
           ) : null}
-          {insertable && (hovered || !label) && (
-            <div className={hovered ? 'opacity-100' : 'opacity-0 hover:opacity-100'}>
+          {insertable && hovered && (
+            <div>
               <ConnectorButton
                 onAddAction={() =>
                   onInsertNode(edgeData!.afterNodeId, edgeData!.beforeNodeId, 'agent')
@@ -525,6 +531,7 @@ function WorkflowCanvasInner({
           colorMode="dark"
           className="bg-surface-base"
           defaultEdgeOptions={{ type: 'step' }}
+          proOptions={{ hideAttribution: true }}
         >
           <Background
             variant={BackgroundVariant.Dots}
@@ -544,18 +551,12 @@ function WorkflowCanvasInner({
             showInteractive={false}
             className="!bg-surface-overlay !border !border-white/[0.12] !rounded-md !shadow-none
                        [&_button]:!bg-transparent [&_button]:!border-white/[0.08] [&_button]:!fill-gray-400"
-          />
-        </ReactFlow>
-
-        <div className="absolute top-2.5 right-2.5 z-10">
-          <button
-            onClick={onTidyUp}
-            className="text-[11px] text-gray-300 bg-surface-overlay border border-white/[0.12]
-                       rounded-md px-2.5 py-1 hover:text-white hover:border-white/[0.2] transition-colors"
           >
-            Tidy up
-          </button>
-        </div>
+            <ControlButton onClick={onTidyUp} title="Tidy up">
+              <AlignVerticalSpaceAround size={12} className="!fill-none stroke-gray-400" />
+            </ControlButton>
+          </Controls>
+        </ReactFlow>
 
         {palette && (
           <NodePalette
