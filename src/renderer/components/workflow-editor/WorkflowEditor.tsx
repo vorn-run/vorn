@@ -879,6 +879,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           onConnectEdge={handleConnectEdge}
           onPaletteInsert={handlePaletteInsert}
           onPositionsCommit={handlePositionsCommit}
+          onDeleteNode={handleDeleteNode}
           onTidyUp={handleTidyUp}
           selectedNodeId={selectedNodeId}
           nodeStatus={nodeStatus}

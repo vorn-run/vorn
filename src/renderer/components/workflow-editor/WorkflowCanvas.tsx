@@ -61,6 +61,8 @@ interface Props {
   ) => void
   /** Dragged nodes settled; write the new positions into the definition. */
   onPositionsCommit: (positions: Record<string, { x: number; y: number }>) => void
+  /** Delete-key removal of the selected step (never the trigger). */
+  onDeleteNode?: (nodeId: string) => void
   onTidyUp: () => void
   selectedNodeId: string | null
   /** What each node is doing in live runs; absent when nothing is running. */
@@ -346,11 +348,12 @@ function WorkflowCanvasInner({
   onConnectEdge,
   onPaletteInsert,
   onPositionsCommit,
+  onDeleteNode,
   onTidyUp,
   selectedNodeId,
   nodeStatus
 }: Props) {
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView } = useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
 
   const elements = useMemo(() => toCanvasElements(nodes, edges), [nodes, edges])
@@ -471,16 +474,43 @@ function WorkflowCanvasInner({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key !== 'Tab' || palette) return
+      if (palette) return
       const target = e.target as HTMLElement
       if (target.closest('input, textarea, [contenteditable]')) return
-      const afterNodeId = leafForTabInsert()
-      const rect = wrapperRef.current?.getBoundingClientRect()
-      if (!afterNodeId || !rect) return
-      e.preventDefault()
-      openPaletteAt(rect.left + rect.width / 2 - 124, rect.top + rect.height / 3, afterNodeId)
+      if (e.key === 'Tab') {
+        const afterNodeId = leafForTabInsert()
+        const rect = wrapperRef.current?.getBoundingClientRect()
+        if (!afterNodeId || !rect) return
+        e.preventDefault()
+        openPaletteAt(rect.left + rect.width / 2 - 124, rect.top + rect.height / 3, afterNodeId)
+      } else if (e.key === '+' || e.key === '=') {
+        void zoomIn()
+      } else if (e.key === '-') {
+        void zoomOut()
+      } else if (e.key === '0') {
+        void zoomTo(1)
+      } else if (e.key === '1') {
+        void fitView({ padding: 0.2, maxZoom: 1 })
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
+        const node = nodes.find((n) => n.id === selectedNodeId)
+        if (node && node.type !== 'trigger' && onDeleteNode) {
+          e.preventDefault()
+          onDeleteNode(selectedNodeId)
+        }
+      }
     },
-    [palette, leafForTabInsert, openPaletteAt]
+    [
+      palette,
+      leafForTabInsert,
+      openPaletteAt,
+      zoomIn,
+      zoomOut,
+      zoomTo,
+      fitView,
+      selectedNodeId,
+      nodes,
+      onDeleteNode
+    ]
   )
 
   const interactions = useMemo<CanvasInteractions>(
@@ -523,13 +553,17 @@ function WorkflowCanvasInner({
           fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
           minZoom={0.2}
           maxZoom={1.75}
+          snapToGrid
+          snapGrid={[8, 8]}
+          connectionRadius={60}
+          panOnScroll
           deleteKeyCode={null}
           selectionKeyCode={null}
           multiSelectionKeyCode={null}
           nodesFocusable={false}
           edgesFocusable={false}
           colorMode="dark"
-          className="bg-surface-base"
+          style={{ background: 'var(--color-surface-base)' }}
           defaultEdgeOptions={{ type: 'step' }}
           proOptions={{ hideAttribution: true }}
         >
@@ -538,6 +572,7 @@ function WorkflowCanvasInner({
             gap={20}
             size={1}
             color="rgba(255,255,255,0.05)"
+            bgColor="var(--color-surface-base)"
           />
           <MiniMap
             pannable

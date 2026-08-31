@@ -496,9 +496,31 @@ export function placeNewNodes(
     placed.set(node.id, { x: base.x + sibling * 320, y: base.y + 140 })
   }
 
-  return nextNodes.map((node) =>
-    prevIds.has(node.id) ? node : { ...node, position: placed.get(node.id)! }
-  )
+  // Inserting mid-chain must make room: downstream nodes sitting where a new
+  // node landed move down by one pitch instead of being covered.
+  const newIds = new Set(nextNodes.filter((n) => !prevIds.has(n.id)).map((n) => n.id))
+  const successors = buildSuccessorsMap(edges)
+  const shifted = new Set<string>()
+  for (const newId of newIds) {
+    const newPos = placed.get(newId)!
+    const queue = [...(successors.get(newId) ?? [])]
+    const seen = new Set<string>()
+    while (queue.length > 0) {
+      const id = queue.shift()!
+      if (seen.has(id) || newIds.has(id)) continue
+      seen.add(id)
+      const pos = placed.get(id)
+      if (pos && pos.y <= newPos.y + 100) shifted.add(id)
+      queue.push(...(successors.get(id) ?? []))
+    }
+  }
+
+  return nextNodes.map((node) => {
+    if (newIds.has(node.id)) return { ...node, position: placed.get(node.id)! }
+    if (shifted.has(node.id))
+      return { ...node, position: { x: node.position.x, y: node.position.y + 140 } }
+    return node
+  })
 }
 
 export function autoLayoutNodes(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowNode[] {
