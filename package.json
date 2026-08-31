@@ -45,6 +45,7 @@
     "*.{json,css,md,html}": "prettier --write"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
     "@grpc/grpc-js": "^1.14.4",
     "@grpc/proto-loader": "^0.8.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -66,6 +67,7 @@
     "@xterm/addon-web-links": "0.12.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^5.5.0",
+    "@xyflow/react": "^12.11.3",
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.3",
     "framer-motion": "^12.38.0",
