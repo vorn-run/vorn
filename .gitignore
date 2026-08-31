@@ -16,3 +16,5 @@ website/release-videos/
 CLAUDE.md
 # Supabase CLI state: which project this machine is linked to.
 supabase/
+# Design notes are written for this workspace, not for the people reading it.
+docs/design/
