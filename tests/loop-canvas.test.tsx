@@ -281,6 +281,12 @@ describe('a live run on the canvas', () => {
     }
   })
 
+  it('breathes the rail while the loop runs', () => {
+    const { container } = renderWith(nodes, null, edges, { loop: 'running' })
+    const rail = container.querySelector('[data-loop-rail]') as HTMLElement
+    expect(rail.querySelector('span.absolute.inset-0.animate-pulse')).not.toBeNull()
+  })
+
   it('shows the loop itself the state it is in', () => {
     // The rail draws its own header rather than going through a node card, so
     // it is the one node that has to read its status separately — and a loop

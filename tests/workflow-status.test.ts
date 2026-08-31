@@ -57,6 +57,9 @@ describe('workflow status colours', () => {
     // ship at roughly 1.7:1.
     const tone = (c: string): string => c.replace(/^(bg|text)-/, '').replace(/-(faint|ghost)$/, '')
     for (const s of EVERY_STATUS) {
+      // Success is the sanctioned exception: its dot borrows the done green,
+      // while the word stays off the category palette (see task-status.test).
+      if (s === 'success') continue
       expect(tone(WORKFLOW_STATUS_TEXT[s])).toBe(tone(WORKFLOW_STATUS_DOT[s]))
     }
   })

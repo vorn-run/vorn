@@ -48,6 +48,7 @@ export const WORKFLOW_STATUS_DOT_PULSE = {
   success: 'bg-status-sage'
 }
 
+// Words stay off the category palette; only the success dot borrows the done green.
 export const WORKFLOW_STATUS_TEXT = byTone(WORKFLOW_STATUS_TONE, TONE_TEXT)
 
 /**
