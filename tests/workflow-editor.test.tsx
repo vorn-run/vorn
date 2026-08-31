@@ -22,11 +22,21 @@ vi.mock('../src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-const captured = vi.hoisted(() => ({ canvasProps: null as Record<string, unknown> | null }))
+const captured = vi.hoisted(() => ({
+  canvasProps: null as Record<string, unknown> | null,
+  libraryProps: null as Record<string, unknown> | null
+}))
 vi.mock('../src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
   WorkflowCanvas: (props: Record<string, unknown>) => {
     captured.canvasProps = props
     return <div data-testid="canvas" />
+  }
+}))
+
+vi.mock('../src/renderer/components/workflow-editor/panels/StepLibrary', () => ({
+  StepLibrary: (props: Record<string, unknown>) => {
+    captured.libraryProps = props
+    return <div data-testid="step-library" />
   }
 }))
 
@@ -316,11 +326,7 @@ describe('the handlers the canvas drives', () => {
       onConnectEdge: (s: string, t: string) => void
       onPositionsCommit: (p: Record<string, { x: number; y: number }>) => void
       onTidyUp: () => void
-      onPaletteInsert: (
-        pick: { kind: string; type?: string; connectionId?: string; action?: string },
-        after: string,
-        pos: { x: number; y: number }
-      ) => void
+      onOpenLibrary: (anchor: Record<string, unknown>) => void
     }
   const save = (container: HTMLElement) => {
     const saveButton = Array.from(container.querySelectorAll('button')).find((b) =>
@@ -358,33 +364,63 @@ describe('the handlers the canvas drives', () => {
     expect(save(container).nodes[0].position.x).toBe(-140)
   })
 
-  it('a palette pick appends after its anchor at the drop point', () => {
+  const pickFromLibrary = (pick: Record<string, unknown>) =>
+    act(() => (captured.libraryProps!.onPick as (p: unknown) => void)(pick))
+
+  it('a library pick at a dropped position appends after its anchor there', () => {
     mockState.addWorkflow.mockClear()
-    const { container } = render(<WorkflowEditor />)
+    const { container, getByTestId } = render(<WorkflowEditor />)
     const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
     act(() =>
-      canvas().onPaletteInsert({ kind: 'type', type: 'script' }, triggerId, { x: 24, y: 480 })
+      canvas().onOpenLibrary({
+        afterNodeId: triggerId,
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false,
+        position: { x: 24, y: 480 }
+      })
     )
+    expect(getByTestId('step-library')).toBeInTheDocument()
+    pickFromLibrary({ kind: 'type', type: 'script' })
     const saved = save(container)
     const script = saved.nodes.find((n) => n.type === 'script')!
     expect(script.position).toEqual({ x: 24, y: 480 })
     expect(saved.edges.some((e) => e.target === script.id)).toBe(true)
   })
 
-  it('a connector pick lands preconfigured', () => {
+  it('a connector pick lands preconfigured at its anchor', () => {
     mockState.addWorkflow.mockClear()
     const { container } = render(<WorkflowEditor />)
     const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
     act(() =>
-      canvas().onPaletteInsert(
-        { kind: 'connectorAction', connectionId: 'c9', action: 'createIssue' },
-        triggerId,
-        { x: 0, y: 200 }
-      )
+      canvas().onOpenLibrary({
+        afterNodeId: triggerId,
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false
+      })
     )
+    pickFromLibrary({ kind: 'connectorAction', connectionId: 'c9', action: 'createIssue' })
     const saved = save(container)
     const step = saved.nodes.find((n) => n.type === 'callConnectorAction')!
     expect(step.config).toMatchObject({ connectionId: 'c9', action: 'createIssue' })
+  })
+
+  it('a parallel pick forks from the anchor', () => {
+    mockState.addWorkflow.mockClear()
+    const { container } = render(<WorkflowEditor />)
+    const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
+    act(() =>
+      canvas().onOpenLibrary({
+        afterNodeId: triggerId,
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false
+      })
+    )
+    pickFromLibrary({ kind: 'parallel' })
+    const saved = save(container)
+    expect(saved.nodes.some((n) => n.type === 'launchAgent')).toBe(true)
   })
 
   it('cmd+z walks an edit back', () => {

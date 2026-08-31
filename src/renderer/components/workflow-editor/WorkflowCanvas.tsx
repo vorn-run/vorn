@@ -30,12 +30,10 @@ import {
   canConnect,
   toCanvasElements
 } from '../../lib/workflow-canvas-layout'
-import { useConnections } from '../../lib/use-connections'
 import { NODE_GLYPH, NODE_SELECTED, NODE_UNSELECTED } from './node-visuals'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
 import { NodeCard } from './nodes/NodeCard'
 import { ConnectorButton } from './nodes/AddStepNode'
-import { NodePalette, PaletteConnectorItem, PalettePick } from './panels/NodePalette'
 
 export type AddableNodeType =
   | 'agent'
@@ -45,20 +43,31 @@ export type AddableNodeType =
   | 'connectorAction'
   | 'loop'
 
+/** Where a pick from the step library lands, and what that spot allows. */
+export interface InsertAnchor {
+  afterNodeId: string
+  /** A node id to splice before, `'__LOOP_BODY__'`, or null to append. */
+  beforeNodeId: string | null
+  insideBranch: boolean
+  bodyOnly: boolean
+  /** Flow coordinates for picks that land where something was dropped. */
+  position?: { x: number; y: number }
+}
+
+function isAnchor(anchor: InsertAnchor | null, afterNodeId: string, beforeNodeId: string | null) {
+  return anchor?.afterNodeId === afterNodeId && anchor?.beforeNodeId === beforeNodeId
+}
+
 interface Props {
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
   onNodeClick: (nodeId: string) => void
-  onInsertNode: (afterNodeId: string, beforeNodeId: string | null, type: AddableNodeType) => void
-  onAddParallelBranch: (forkFromId: string, type: 'agent' | 'script') => void
+  /** Every + routes here; the editor docks the step library for the anchor. */
+  onOpenLibrary: (anchor: InsertAnchor) => void
+  /** The anchor the open library points at; its + stays lit. */
+  libraryAnchor: InsertAnchor | null
   /** A hand-drawn, validated connection between two existing steps. */
   onConnectEdge: (sourceId: string, targetId: string) => void
-  /** A palette pick, appended after `afterNodeId` at `position` (flow coords). */
-  onPaletteInsert: (
-    pick: PalettePick,
-    afterNodeId: string,
-    position: { x: number; y: number }
-  ) => void
   /** Dragged nodes settled; write the new positions into the definition. */
   onPositionsCommit: (positions: Record<string, { x: number; y: number }>) => void
   /** Delete-key removal of the selected step (never the trigger). */
@@ -76,12 +85,18 @@ interface CanvasInteractions {
   selectedNodeId: string | null
   nodeStatus?: Record<string, NodeExecutionStatus>
   onNodeClick: (nodeId: string) => void
-  onInsertNode: (afterNodeId: string, beforeNodeId: string | null, type: AddableNodeType) => void
-  onAddParallelBranch: (forkFromId: string, type: 'agent' | 'script') => void
+  onOpenLibrary: (anchor: InsertAnchor) => void
+  libraryAnchor: InsertAnchor | null
   onDeleteNode?: (nodeId: string) => void
 }
 
 const InteractionsContext = createContext<CanvasInteractions | null>(null)
+
+function useInteractions(): CanvasInteractions {
+  const ctx = useContext(InteractionsContext)
+  if (!ctx) throw new Error('Canvas node rendered outside the workflow canvas')
+  return ctx
+}
 
 /** The strip that floats over a hovered card; the wrapper must carry `group`. */
 function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
@@ -105,12 +120,6 @@ function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
       </button>
     </div>
   )
-}
-
-function useInteractions(): CanvasInteractions {
-  const ctx = useContext(InteractionsContext)
-  if (!ctx) throw new Error('Canvas node rendered outside the workflow canvas')
-  return ctx
 }
 
 const HANDLE_CLASS = '!w-[7px] !h-[7px] !bg-surface-base !border !border-white/[0.35] !rounded-full'
@@ -142,8 +151,15 @@ function StepNode({ data }: NodeProps) {
 
 /** A loop and its body as one enclosure; membership stays `bodyNodeIds`, not canvas geometry. */
 function LoopNode({ data }: NodeProps) {
-  const { nodesById, allNodes, selectedNodeId, nodeStatus, onNodeClick, onInsertNode } =
-    useInteractions()
+  const {
+    nodesById,
+    allNodes,
+    selectedNodeId,
+    nodeStatus,
+    onNodeClick,
+    onOpenLibrary,
+    libraryAnchor
+  } = useInteractions()
   const node = nodesById.get(data.nodeId as string)
   if (!node || node.type !== 'loop') return null
 
@@ -157,6 +173,7 @@ function LoopNode({ data }: NodeProps) {
     .filter((n): n is WorkflowNode => !!n)
   const lastBodyId = body.length > 0 ? body[body.length - 1].id : null
   const loopStatus = nodeStatus?.[node.id]
+  const bodyAnchorAfter = lastBodyId ?? node.id
 
   return (
     <div className="relative group">
@@ -216,8 +233,15 @@ function LoopNode({ data }: NodeProps) {
           {/* Inside the rail, so position is what decides membership. */}
           <div className="w-px h-[18px] bg-white/[0.08]" />
           <ConnectorButton
-            onAddAction={() => onInsertNode(lastBodyId ?? node.id, '__LOOP_BODY__', 'agent')}
-            onAddScript={() => onInsertNode(lastBodyId ?? node.id, '__LOOP_BODY__', 'script')}
+            active={isAnchor(libraryAnchor, bodyAnchorAfter, '__LOOP_BODY__')}
+            onOpen={() =>
+              onOpenLibrary({
+                afterNodeId: bodyAnchorAfter,
+                beforeNodeId: '__LOOP_BODY__',
+                insideBranch: false,
+                bodyOnly: true
+              })
+            }
           />
         </div>
 
@@ -230,9 +254,9 @@ function LoopNode({ data }: NodeProps) {
   )
 }
 
-/** The + that trails every leaf, carrying the same menu the rail ended with. */
+/** The + that trails every leaf. */
 function AddStepNode({ data }: NodeProps) {
-  const { onInsertNode, onAddParallelBranch } = useInteractions()
+  const { onOpenLibrary, libraryAnchor } = useInteractions()
   const { afterNodeId, insideBranch } = data as unknown as AddStepNodeData
 
   return (
@@ -240,17 +264,9 @@ function AddStepNode({ data }: NodeProps) {
     <div className="relative pointer-events-auto">
       <Handle type="target" position={Position.Top} className="!opacity-0 !pointer-events-none" />
       <ConnectorButton
-        onAddAction={() => onInsertNode(afterNodeId, null, 'agent')}
-        onAddScript={() => onInsertNode(afterNodeId, null, 'script')}
-        onAddCondition={() => onInsertNode(afterNodeId, null, 'condition')}
-        onAddApproval={() => onInsertNode(afterNodeId, null, 'approval')}
-        onAddLoop={
-          // Loop-inside-branch is untested against fork joins, same gate as the rail.
-          !insideBranch ? () => onInsertNode(afterNodeId, null, 'loop') : undefined
-        }
-        onAddConnectorAction={() => onInsertNode(afterNodeId, null, 'connectorAction')}
-        onAddParallelBranch={
-          !insideBranch ? () => onAddParallelBranch(afterNodeId, 'agent') : undefined
+        active={isAnchor(libraryAnchor, afterNodeId, null)}
+        onOpen={() =>
+          onOpenLibrary({ afterNodeId, beforeNodeId: null, insideBranch, bodyOnly: false })
         }
       />
     </div>
@@ -270,7 +286,7 @@ function StepEdge({
   style,
   data
 }: EdgeProps) {
-  const { onInsertNode, onAddParallelBranch } = useInteractions()
+  const { onOpenLibrary, libraryAnchor } = useInteractions()
   const [hovered, setHovered] = useState(false)
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -291,6 +307,8 @@ function StepEdge({
 
   const edgeData = data as CanvasEdgeData | undefined
   const insertable = !!edgeData?.afterNodeId && !!edgeData?.beforeNodeId
+  const anchored =
+    insertable && isAnchor(libraryAnchor, edgeData!.afterNodeId, edgeData!.beforeNodeId)
 
   const enter = () => {
     if (leaveTimer.current) clearTimeout(leaveTimer.current)
@@ -314,8 +332,8 @@ function StepEdge({
           className="absolute flex flex-col items-center gap-1 pointer-events-auto"
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            // Hovered, the + and its menu must rise above the cards (selection elevates those to 1000).
-            zIndex: hovered ? 1300 : 'auto'
+            // Hovered, the + must rise above the cards (selection elevates those to 1000).
+            zIndex: hovered || anchored ? 1300 : 'auto'
           }}
           onMouseEnter={enter}
           onMouseLeave={leave}
@@ -328,36 +346,18 @@ function StepEdge({
               {label}
             </div>
           ) : null}
-          {insertable && hovered && (
-            <div>
-              <ConnectorButton
-                onAddAction={() =>
-                  onInsertNode(edgeData!.afterNodeId, edgeData!.beforeNodeId, 'agent')
-                }
-                onAddScript={() =>
-                  onInsertNode(edgeData!.afterNodeId, edgeData!.beforeNodeId, 'script')
-                }
-                onAddCondition={() =>
-                  onInsertNode(edgeData!.afterNodeId, edgeData!.beforeNodeId, 'condition')
-                }
-                onAddApproval={() =>
-                  onInsertNode(edgeData!.afterNodeId, edgeData!.beforeNodeId, 'approval')
-                }
-                onAddLoop={
-                  !edgeData!.insideBranch
-                    ? () => onInsertNode(edgeData!.afterNodeId, edgeData!.beforeNodeId, 'loop')
-                    : undefined
-                }
-                onAddConnectorAction={() =>
-                  onInsertNode(edgeData!.afterNodeId, edgeData!.beforeNodeId, 'connectorAction')
-                }
-                onAddParallelBranch={
-                  !edgeData!.insideBranch
-                    ? () => onAddParallelBranch(edgeData!.afterNodeId, 'agent')
-                    : undefined
-                }
-              />
-            </div>
+          {insertable && (hovered || anchored) && (
+            <ConnectorButton
+              active={anchored}
+              onOpen={() =>
+                onOpenLibrary({
+                  afterNodeId: edgeData!.afterNodeId,
+                  beforeNodeId: edgeData!.beforeNodeId,
+                  insideBranch: edgeData!.insideBranch,
+                  bodyOnly: false
+                })
+              }
+            />
           )}
         </div>
       </EdgeLabelRenderer>
@@ -372,10 +372,9 @@ function WorkflowCanvasInner({
   nodes,
   edges,
   onNodeClick,
-  onInsertNode,
-  onAddParallelBranch,
+  onOpenLibrary,
+  libraryAnchor,
   onConnectEdge,
-  onPaletteInsert,
   onPositionsCommit,
   onDeleteNode,
   onTidyUp,
@@ -428,53 +427,17 @@ function WorkflowCanvasInner({
     [onConnectEdge]
   )
 
-  // --- Node search palette -------------------------------------------------
-  const [palette, setPalette] = useState<{
-    screen: { x: number; y: number }
-    flow: { x: number; y: number }
-    afterNodeId: string
-  } | null>(null)
-  const [connectorItems, setConnectorItems] = useState<PaletteConnectorItem[]>([])
-  const connections = useConnections()
-
-  useEffect(() => {
-    if (!palette) return
-    let cancelled = false
-    Promise.all(
-      connections.map(async (conn) => {
-        try {
-          const actions = await window.api.listConnectionActions(conn.id)
-          return actions.map((a) => ({
-            connectionId: conn.id,
-            action: a.type,
-            label: a.label || a.type,
-            source: conn.name
-          }))
-        } catch {
-          return []
-        }
-      })
-    ).then((lists) => {
-      if (!cancelled) setConnectorItems(lists.flat())
-    })
-    return () => {
-      cancelled = true
-    }
-    // Loaded once per palette opening.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [palette !== null])
-
-  const openPaletteAt = useCallback(
-    (clientX: number, clientY: number, afterNodeId: string) => {
-      const rect = wrapperRef.current?.getBoundingClientRect()
-      if (!rect) return
-      setPalette({
-        screen: { x: clientX - rect.left, y: clientY - rect.top },
-        flow: screenToFlowPosition({ x: clientX, y: clientY }),
-        afterNodeId
+  const openLibraryAppend = useCallback(
+    (afterNodeId: string, position?: { x: number; y: number }) => {
+      onOpenLibrary({
+        afterNodeId,
+        beforeNodeId: null,
+        insideBranch: elements.branchMembers.has(afterNodeId),
+        bodyOnly: false,
+        position
       })
     },
-    [screenToFlowPosition]
+    [onOpenLibrary, elements.branchMembers]
   )
 
   const pendingConnectSource = useRef<string | null>(null)
@@ -487,12 +450,12 @@ function WorkflowCanvasInner({
     (event: MouseEvent | TouchEvent, connectionState: { isValid: boolean | null }) => {
       const source = pendingConnectSource.current
       pendingConnectSource.current = null
-      // A drop on empty canvas opens the node search where the edge was released.
+      // A drop on empty canvas opens the library, remembering where the edge was released.
       if (connectionState.isValid === null && source && 'clientX' in event) {
-        openPaletteAt(event.clientX, event.clientY, source)
+        openLibraryAppend(source, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
       }
     },
-    [openPaletteAt]
+    [openLibraryAppend, screenToFlowPosition]
   )
 
   const leafForTabInsert = useCallback((): string | null => {
@@ -503,15 +466,13 @@ function WorkflowCanvasInner({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (palette) return
       const target = e.target as HTMLElement
       if (target.closest('input, textarea, [contenteditable]')) return
       if (e.key === 'Tab') {
         const afterNodeId = leafForTabInsert()
-        const rect = wrapperRef.current?.getBoundingClientRect()
-        if (!afterNodeId || !rect) return
+        if (!afterNodeId) return
         e.preventDefault()
-        openPaletteAt(rect.left + rect.width / 2 - 124, rect.top + rect.height / 3, afterNodeId)
+        openLibraryAppend(afterNodeId)
       } else if (e.key === '+' || e.key === '=') {
         void zoomIn()
       } else if (e.key === '-') {
@@ -529,9 +490,8 @@ function WorkflowCanvasInner({
       }
     },
     [
-      palette,
       leafForTabInsert,
-      openPaletteAt,
+      openLibraryAppend,
       zoomIn,
       zoomOut,
       zoomTo,
@@ -549,19 +509,11 @@ function WorkflowCanvasInner({
       selectedNodeId,
       nodeStatus,
       onNodeClick,
-      onInsertNode,
-      onAddParallelBranch,
+      onOpenLibrary,
+      libraryAnchor,
       onDeleteNode
     }),
-    [
-      nodes,
-      selectedNodeId,
-      nodeStatus,
-      onNodeClick,
-      onInsertNode,
-      onAddParallelBranch,
-      onDeleteNode
-    ]
+    [nodes, selectedNodeId, nodeStatus, onNodeClick, onOpenLibrary, libraryAnchor, onDeleteNode]
   )
 
   return (
@@ -583,10 +535,7 @@ function WorkflowCanvasInner({
           onConnectStart={handleConnectStart}
           onConnectEnd={handleConnectEnd}
           isValidConnection={isValidConnection}
-          onPaneClick={() => {
-            setPalette(null)
-            onNodeClick('')
-          }}
+          onPaneClick={() => onNodeClick('')}
           fitView
           fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
           minZoom={0.2}
@@ -630,19 +579,6 @@ function WorkflowCanvasInner({
             </ControlButton>
           </Controls>
         </ReactFlow>
-
-        {palette && (
-          <NodePalette
-            position={palette.screen}
-            allowLoop={!elements.branchMembers.has(palette.afterNodeId)}
-            connectorItems={connectorItems}
-            onPick={(pick) => {
-              onPaletteInsert(pick, palette.afterNodeId, palette.flow)
-              setPalette(null)
-            }}
-            onClose={() => setPalette(null)}
-          />
-        )}
       </div>
     </InteractionsContext.Provider>
   )

@@ -32,8 +32,8 @@ import {
   supportsExactSessionResume,
   getProjectRemoteHostId
 } from '../../../shared/types'
-import { WorkflowCanvas, AddableNodeType } from './WorkflowCanvas'
-import type { PalettePick } from './panels/NodePalette'
+import { WorkflowCanvas, AddableNodeType, InsertAnchor } from './WorkflowCanvas'
+import { StepLibrary, type LibraryPick } from './panels/StepLibrary'
 import { layoutPositions } from '../../lib/workflow-canvas-layout'
 import { useDefinitionHistory } from '../../lib/use-definition-history'
 import { NodeConfigPanel } from './panels/NodeConfigPanel'
@@ -97,6 +97,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [staggerDelayMs, setStaggerDelayMs] = useState<number | undefined>(undefined)
   const [autoCleanupWorktrees, setAutoCleanupWorktrees] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [pendingInsert, setPendingInsert] = useState<InsertAnchor | null>(null)
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [showProperties, setShowProperties] = useState(true)
   const [showIconPicker, setShowIconPicker] = useState(false)
@@ -299,6 +300,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setStaggerDelayMs(undefined)
     }
     setSelectedNodeId(null)
+    setPendingInsert(null)
     setShowRunHistory(false)
   }, [existingWorkflow, editingId, isActive])
 
@@ -418,7 +420,12 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   )
 
   const handleInsertNode = useCallback(
-    (afterNodeId: string, beforeNodeId: string | null, type: AddableNodeType) => {
+    (
+      afterNodeId: string,
+      beforeNodeId: string | null,
+      type: AddableNodeType,
+      preset?: Partial<CallConnectorActionConfig>
+    ) => {
       // Condition nodes use a special insertion that creates true/false branches
       if (type === 'condition') {
         const result = insertConditionBetween(nodes, edges, afterNodeId, beforeNodeId)
@@ -432,7 +439,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         return
       }
 
-      const newNode = createNodeWithUniqueSlug(type)
+      const created = createNodeWithUniqueSlug(type)
+      const newNode = preset
+        ? { ...created, config: { ...(created.config as CallConnectorActionConfig), ...preset } }
+        : created
 
       let result: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
       if (beforeNodeId === '__LOOP_BODY__') {
@@ -476,6 +486,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const handleNodeClick = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId || null)
     setShowRunHistory(false)
+    setPendingInsert(null)
     if (!nodeId) setShowProperties(true)
   }, [])
 
@@ -513,7 +524,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   }, [nodes, edges])
 
   const handlePaletteInsert = useCallback(
-    (pick: PalettePick, afterNodeId: string, position: { x: number; y: number }) => {
+    (
+      pick: Exclude<LibraryPick, { kind: 'parallel' }>,
+      afterNodeId: string,
+      position: { x: number; y: number }
+    ) => {
       // Materialize the computed layout first so the drop doesn't strand the rest on the seed column.
       const placeAll = (
         placed: WorkflowNode[],
@@ -563,6 +578,32 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setSelectedNodeId(newNode.id)
     },
     [nodes, edges, createNodeWithUniqueSlug]
+  )
+
+  const handleOpenLibrary = useCallback((anchor: InsertAnchor) => {
+    setShowRunHistory(false)
+    setPendingInsert(anchor)
+  }, [])
+
+  const handleLibraryPick = useCallback(
+    (pick: LibraryPick) => {
+      const anchor = pendingInsert
+      if (!anchor) return
+      setPendingInsert(null)
+      if (pick.kind === 'parallel') {
+        handleAddParallelBranch(anchor.afterNodeId, 'agent')
+      } else if (anchor.position && anchor.beforeNodeId === null) {
+        handlePaletteInsert(pick, anchor.afterNodeId, anchor.position)
+      } else if (pick.kind === 'connectorAction') {
+        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, 'connectorAction', {
+          connectionId: pick.connectionId,
+          action: pick.action
+        })
+      } else {
+        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, pick.type)
+      }
+    },
+    [pendingInsert, handleAddParallelBranch, handlePaletteInsert, handleInsertNode]
   )
 
   const handleNodeConfigChange = useCallback((nodeId: string, config: WorkflowNode['config']) => {
@@ -871,10 +912,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           nodes={nodes}
           edges={edges}
           onNodeClick={handleNodeClick}
-          onInsertNode={handleInsertNode}
-          onAddParallelBranch={handleAddParallelBranch}
+          onOpenLibrary={handleOpenLibrary}
+          libraryAnchor={pendingInsert}
           onConnectEdge={handleConnectEdge}
-          onPaletteInsert={handlePaletteInsert}
           onPositionsCommit={handlePositionsCommit}
           onDeleteNode={handleDeleteNode}
           onTidyUp={handleTidyUp}
@@ -882,7 +922,15 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           nodeStatus={nodeStatus}
         />
 
-        {showRunHistory && (
+        {pendingInsert && (
+          <StepLibrary
+            scope={{ bodyOnly: pendingInsert.bodyOnly, insideBranch: pendingInsert.insideBranch }}
+            onPick={handleLibraryPick}
+            onClose={() => setPendingInsert(null)}
+          />
+        )}
+
+        {showRunHistory && !pendingInsert && (
           <RunHistoryPanel
             executions={executionHistory}
             nodes={nodes}
@@ -893,7 +941,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           />
         )}
 
-        {selectedNode && !showRunHistory && (
+        {selectedNode && !showRunHistory && !pendingInsert && (
           <NodeConfigPanel
             node={selectedNode}
             allNodes={nodes}
@@ -909,7 +957,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           />
         )}
 
-        {!selectedNode && !showRunHistory && showProperties && (
+        {!selectedNode && !showRunHistory && !pendingInsert && showProperties && (
           <WorkflowPropertiesPanel
             enabled={enabled}
             onEnabledChange={setEnabled}
