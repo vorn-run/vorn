@@ -11,12 +11,13 @@
   //
   // `src/renderer/env.d.ts` is in `include` deliberately. It declares
   // `Window.api` and references `vite/client` for the `*.css` and `*.svg?raw`
-  // module declarations. Without it the same run reports 536 errors instead of
-  // 169, and every one of the extra 366 is phantom.
+  // module declarations. Leaving it out roughly triples the error count, and
+  // every one of the extra errors is phantom -- a property that does exist, on a
+  // window this project would otherwise know nothing about.
   "compilerOptions": {
     "noEmit": true,
     "target": "ESNext",
-    // DOM because 163 test files run under jsdom. That makes this more
+    // DOM because much of the suite runs under jsdom. That makes this more
     // permissive than `packages/server`'s own project, which has no DOM lib --
     // it cannot add errors here, but a server file reaching for a DOM global is
     // still only caught over there.
