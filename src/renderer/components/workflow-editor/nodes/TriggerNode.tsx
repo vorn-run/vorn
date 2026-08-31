@@ -76,8 +76,8 @@ export function TriggerNode({ label, config, selected, onClick }: Props) {
           <ConnectorIcon
             connectorId={connectorId}
             icon={connectorGlyph}
-            size={14}
-            className={`${NODE_GLYPH} shrink-0`}
+            size={16}
+            className="text-ink shrink-0"
           />
         ) : (
           <Icon size={14} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />

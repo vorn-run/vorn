@@ -28,11 +28,12 @@ export function CallConnectorActionNode({
     <NodeShell
       icon={
         connectorId ? (
+          // A brand mark identifies the step; it gets full ink and a step up in size.
           <ConnectorIcon
             connectorId={connectorId}
             icon={icon}
-            size={14}
-            className={`${NODE_GLYPH} shrink-0`}
+            size={16}
+            className="text-ink shrink-0"
           />
         ) : (
           <Zap size={14} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />

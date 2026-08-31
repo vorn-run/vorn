@@ -89,7 +89,7 @@ function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
   if (!onDeleteNode) return null
   return (
     <div
-      className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100
+      className="absolute left-full top-1/2 -translate-y-1/2 ml-1.5 opacity-0 group-hover:opacity-100
                  transition-opacity duration-100 z-10"
     >
       <button
