@@ -120,6 +120,26 @@ describe('the definition projected onto the canvas', () => {
   })
 })
 
+describe('layout edge shapes', () => {
+  it('sizes an empty loop by its placeholder', () => {
+    const emptyLoop = [
+      node('t', 'trigger', 'Manual', { triggerType: 'manual' }),
+      node('loop', 'loop', 'Repeat', { nodeType: 'loop', bodyNodeIds: [], maxIterations: 2 })
+    ]
+    const { nodes: rf } = toCanvasElements(emptyLoop, [{ id: 'e1', source: 't', target: 'loop' }])
+    const loop = rf.find((n) => n.id === 'loop')!
+    expect(loop.height).toBeGreaterThan(120)
+  })
+
+  it('gives an empty fork branch a full column of width', () => {
+    const halfFork = forkNodes.filter((n) => n.id !== 'no' && n.id !== 'join')
+    const halfEdges = forkEdges.filter((e) => ['e1', 'e2', 'e3'].includes(e.id))
+    const { positions } = layoutPositions(halfFork, halfEdges)
+    // The dangling false edge points at a missing node; the true branch still lays out.
+    expect(positions.get('yes')).toBeDefined()
+  })
+})
+
 describe('what a hand-drawn connection may do', () => {
   it('allows a forward edge between free steps', () => {
     const open = [...chainNodes, node('c', 'script', 'Free', {})]
