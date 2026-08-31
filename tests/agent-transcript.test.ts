@@ -9,8 +9,10 @@ vi.mock('../packages/server/src/agent-history', () => ({
 import {
   resolveTranscriptId,
   heldTranscripts,
-  transcriptHolder
+  transcriptHolder,
+  claimTranscriptFor
 } from '../packages/server/src/agent-transcript'
+import { resetTranscriptClaims } from '../packages/server/src/transcript-claims'
 
 /**
  * Which conversation a session continues.
@@ -49,6 +51,7 @@ function recent(overrides: Partial<RecentSession> = {}): RecentSession {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  resetTranscriptClaims()
   getRecentSessionsFor.mockReturnValue([])
 })
 
@@ -147,5 +150,44 @@ describe('who is writing a conversation right now', () => {
   it('counts only sessions that know which conversation they took', () => {
     const live = [session({ id: 'a' }), session({ id: 'b', agentSessionId: 'sess-9' })]
     expect(heldTranscripts(live)).toEqual(new Set(['sess-9']))
+  })
+})
+
+describe('two cold panes resumed one after the other', () => {
+  /**
+   * The case the whole change exists for. codex reports which conversation it
+   * took seconds after it starts, so the first resume is still nameless when the
+   * second asks -- and both would take the newest thread.
+   */
+  it('take different conversations, because the first claims while it starts', () => {
+    getRecentSessionsFor.mockReturnValue([
+      recent({ sessionId: 'transcript-a', agentType: 'codex' }),
+      recent({ sessionId: 'transcript-b', agentType: 'codex' })
+    ])
+    const first = session({ id: 'one', agentType: 'codex' })
+    const second = session({ id: 'two', agentType: 'codex' })
+
+    const firstTranscript = claimTranscriptFor(first, [], 'one')
+    // Started, but has not yet reported what it took.
+    const live = [{ ...first, agentSessionId: undefined }]
+    const secondTranscript = claimTranscriptFor(second, live, 'two')
+
+    expect(firstTranscript).toBe('transcript-a')
+    expect(secondTranscript).toBe('transcript-b')
+  })
+
+  it('skip a conversation a live session has already reported', () => {
+    getRecentSessionsFor.mockReturnValue([
+      recent({ sessionId: 'transcript-a' }),
+      recent({ sessionId: 'transcript-b' })
+    ])
+    const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
+    expect(claimTranscriptFor(session({ id: 'two' }), live, 'two')).toBe('transcript-b')
+  })
+
+  it('leave the agent to choose when every conversation is taken', () => {
+    getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'transcript-a' })])
+    const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
+    expect(claimTranscriptFor(session({ id: 'two' }), live, 'two')).toBeUndefined()
   })
 })

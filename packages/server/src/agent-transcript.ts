@@ -1,6 +1,7 @@
 import type { AiAgentType, RecentSession, TerminalSession } from '@vornrun/shared/types'
 import { supportsExactSessionResume } from '@vornrun/shared/types'
 import { getRecentSessionsFor } from './agent-history'
+import { claimSpawningTranscript, spawningTranscripts } from './transcript-claims'
 import { normalizePath } from './process-utils'
 
 function comparablePath(value: string): string {
@@ -68,4 +69,18 @@ export function transcriptHolder(
   live: TerminalSession[]
 ): TerminalSession | undefined {
   return live.find((session) => session.agentSessionId === transcriptId)
+}
+
+/**
+ * The conversation a resume should continue, claimed against everything in flight.
+ */
+export function claimTranscriptFor(
+  session: TerminalSession,
+  live: TerminalSession[],
+  sessionId: string
+): string | undefined {
+  const held = new Set([...heldTranscripts(live), ...spawningTranscripts()])
+  const transcriptId = resolveTranscriptId(session, held)
+  if (transcriptId) claimSpawningTranscript(transcriptId, sessionId)
+  return transcriptId
 }

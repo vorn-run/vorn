@@ -24,12 +24,8 @@ import { clearScreen } from './terminal-screen'
 import { discardHistory } from './history/writer'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
 import { clearScrollback, readScrollback } from './terminal-scrollback'
-import { heldTranscripts, resolveTranscriptId, transcriptHolder } from './agent-transcript'
-import {
-  claimSpawningTranscript,
-  releaseSpawningTranscript,
-  spawningTranscripts
-} from './transcript-claims'
+import { claimTranscriptFor, transcriptHolder } from './agent-transcript'
+import { releaseSpawningTranscript } from './transcript-claims'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
@@ -764,9 +760,7 @@ export function registerAllMethods(): void {
         return { ok: true as const, session }
       }
 
-      const held = new Set([...heldTranscripts(live), ...spawningTranscripts()])
-      const transcriptId = resolveTranscriptId(previous, held)
-      if (transcriptId) claimSpawningTranscript(transcriptId, id)
+      const transcriptId = claimTranscriptFor(previous, live, id)
 
       // Same id, same reasons as the shell branch above.
       const session = ptyManager.createPty(buildRestorePayload(previous, transcriptId), id)
