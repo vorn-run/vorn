@@ -153,7 +153,14 @@ export function SourcePromptDialog() {
             } satisfies TerminalSession
           }
         : null
-    void executeWorkflow(workflow, { ...base, inputs }, { source: 'manual' })
+    void executeWorkflow(
+      workflow,
+      { ...base, inputs },
+      {
+        source: 'manual',
+        targetNodeId: pendingRun?.targetNodeId
+      }
+    )
     close()
   }
 

@@ -271,7 +271,15 @@ export function buildStepGroups(
       const runOutputs = lastRun?.outputs[n.slug!]
       const runState = lastRun?.states[n.id]
       if (runOutputs) {
-        keys = keys.map((k) => ({ ...k, value: formatRunValue(runOutputs[k.key]) || undefined }))
+        // Fields the run actually produced count as known even without a schema.
+        const declared = new Set(keys.map((k) => k.key))
+        const discovered = Object.keys(runOutputs)
+          .filter((key) => !declared.has(key))
+          .map((key) => ({ key, label: key, description: 'From the last run' }))
+        keys = [...discovered, ...keys].map((k) => ({
+          ...k,
+          value: formatRunValue(runOutputs[k.key]) || undefined
+        }))
       }
       const cfg = n.config as { connectionId?: string } | undefined
       return {

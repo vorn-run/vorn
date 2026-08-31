@@ -63,7 +63,6 @@ import {
 import { startManualRun } from '../../lib/workflow-menu-items'
 import {
   buildStepOutputsMap,
-  executeWorkflow,
   retryRunFromFailure,
   rerunWorkflowRun
 } from '../../lib/workflow-execution'
@@ -404,9 +403,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     (nodeId: string) => {
       const workflow = persistWorkflow()
       setShowRunHistory(false)
-      executeWorkflow(workflow, undefined, { source: 'manual', targetNodeId: nodeId }).catch(
-        (err) => toast.error(err instanceof Error ? err.message : String(err))
-      )
+      startManualRun(workflow, undefined, { targetNodeId: nodeId })
     },
     [persistWorkflow]
   )

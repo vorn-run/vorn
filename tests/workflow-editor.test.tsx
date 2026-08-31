@@ -188,7 +188,7 @@ describe('WorkflowEditor', () => {
     const { container } = render(<WorkflowEditor />)
     fireEvent.click(container.querySelector('button[aria-label="Run workflow"]')!)
 
-    expect(mockState.setPendingWorkflowRun).toHaveBeenCalledWith('wf-inputs', undefined)
+    expect(mockState.setPendingWorkflowRun).toHaveBeenCalledWith('wf-inputs', undefined, undefined)
     expect(executeWorkflow).not.toHaveBeenCalled()
 
     mockState.editingWorkflowId = null
