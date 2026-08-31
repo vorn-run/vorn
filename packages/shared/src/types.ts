@@ -877,6 +877,8 @@ export type NodeExecutionStatus =
 export interface NodeExecutionState {
   nodeId: string
   status: NodeExecutionStatus
+  /** Why a skipped node was skipped: a condition branch or a partial run's target slice. */
+  skipReason?: 'branch' | 'target'
   startedAt?: string
   completedAt?: string
   sessionId?: string

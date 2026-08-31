@@ -1486,15 +1486,13 @@ export async function executeWorkflow(
     workflowId: workflow.id,
     startedAt: new Date().toISOString(),
     status: 'running',
-    nodeStates: workflow.nodes.map((n) => ({
-      nodeId: n.id,
-      status:
-        n.type === 'trigger'
-          ? 'success'
-          : targetSlice && !targetSlice.has(n.id)
-            ? 'skipped'
-            : 'pending'
-    })),
+    nodeStates: workflow.nodes.map((n) => {
+      if (n.type === 'trigger') return { nodeId: n.id, status: 'success' as const }
+      if (targetSlice && !targetSlice.has(n.id)) {
+        return { nodeId: n.id, status: 'skipped' as const, skipReason: 'target' as const }
+      }
+      return { nodeId: n.id, status: 'pending' as const }
+    }),
     ...(targetSlice && { partial: true }),
     triggerTaskId: context?.task?.id,
     connectorItem: context?.connectorItem,
@@ -1528,6 +1526,33 @@ export function contextFromRun(run: WorkflowExecution): WorkflowExecutionContext
 }
 
 /**
+ * The node states a retry starts from: successes adopted, deliberate skips
+ * (condition branches, a partial run's slice) preserved, everything else —
+ * failures, gate rejections, loop bodies — reset to pending.
+ */
+export function seedRetryStates(
+  workflow: WorkflowDefinition,
+  failedRun: WorkflowExecution
+): NodeExecutionState[] {
+  const priorById = new Map(failedRun.nodeStates.map((ns) => [ns.nodeId, ns]))
+  // Body steps chain by real edges but are driven only by their loop; adopting
+  // one as completed would let the wave loop race its successor with the loop.
+  const bodyIds = new Set<string>()
+  for (const n of workflow.nodes) {
+    if (n.type !== 'loop') continue
+    for (const id of (n.config as LoopConfig).bodyNodeIds ?? []) bodyIds.add(id)
+  }
+  return workflow.nodes.map((n) => {
+    const prior = priorById.get(n.id)
+    if (n.type === 'trigger') return { nodeId: n.id, status: 'success' }
+    if (bodyIds.has(n.id)) return { nodeId: n.id, status: 'pending' }
+    if (prior?.status === 'success') return { ...prior }
+    if (prior?.status === 'skipped' && prior.skipReason) return { ...prior }
+    return { nodeId: n.id, status: 'pending' }
+  })
+}
+
+/**
  * Resume a failed run as a new one: completed steps keep their recorded
  * outputs and are never re-executed; scheduling restarts at the failure.
  */
@@ -1544,20 +1569,12 @@ export async function retryRunFromFailure(
     throw new Error(`A retry of this run is already in flight`)
   }
 
-  const priorById = new Map(failedRun.nodeStates.map((ns) => [ns.nodeId, ns]))
   const execution: WorkflowExecution = {
     runId: claim.runId,
     workflowId: workflow.id,
     startedAt: new Date().toISOString(),
     status: 'running',
-    nodeStates: workflow.nodes.map((n) => {
-      const prior = priorById.get(n.id)
-      if (n.type === 'trigger') return { nodeId: n.id, status: 'success' }
-      if (prior?.status === 'success') return { ...prior }
-      // Condition skips carry no error; failure skips do and must re-run.
-      if (prior?.status === 'skipped' && !prior.error) return { ...prior }
-      return { nodeId: n.id, status: 'pending' }
-    }),
+    nodeStates: seedRetryStates(workflow, failedRun),
     partial: failedRun.partial,
     retryOfRunId: failedRun.runId,
     triggerTaskId: failedRun.triggerTaskId,
@@ -1871,6 +1888,7 @@ async function runExecution(
               for (const skippedId of skippedByCondition) {
                 updateNodeState(execution, skippedId, {
                   status: 'skipped',
+                  skipReason: 'branch',
                   completedAt: new Date().toISOString()
                 })
               }

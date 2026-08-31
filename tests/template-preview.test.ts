@@ -70,7 +70,25 @@ describe('previewing steps tokens', () => {
   })
 })
 
+describe('declared paths are trusted', () => {
+  it('never breaks a schema-declared path the last run did not emit', () => {
+    // `status` is declared on every step; this run's outputs lack it.
+    const partialRun: LastRunData = {
+      outputs: { triage: { severity: 'bug' } },
+      states: { n1: { status: 'success' } }
+    }
+    const declared = buildStepGroups([agent('n1', 'triage')], undefined, partialRun)
+    const preview = previewStepTokens('{{steps.triage.status}}', declared)
+    expect(preview.broken).toBeUndefined()
+    expect(preview.resolved).toBeUndefined()
+  })
+})
+
 describe('suggestNearestPath', () => {
+  it('never suggests the token itself', () => {
+    expect(suggestNearestPath('steps.triage.output', ['steps.triage.output'])).toBeUndefined()
+  })
+
   it('offers nothing when everything is far away', () => {
     expect(suggestNearestPath('steps.zzzzzzzzzzzz.qqq', ['steps.triage.output'])).toBeUndefined()
   })

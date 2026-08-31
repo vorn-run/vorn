@@ -79,7 +79,7 @@ vi.mock('../src/renderer/lib/notifications', () => ({
   sendWorkflowGateNotification: vi.fn()
 }))
 
-const { executeWorkflow, retryRunFromFailure, rerunWorkflowRun, contextFromRun } =
+const { executeWorkflow, retryRunFromFailure, rerunWorkflowRun, contextFromRun, seedRetryStates } =
   await import('../src/renderer/lib/workflow-execution')
 
 const agentNode = (id: string, prompt: string) => ({
@@ -180,6 +180,7 @@ describe('running up to one step', () => {
     expect(execution.nodeStates.find((n) => n.nodeId === 'a')?.status).toBe('success')
     expect(execution.nodeStates.find((n) => n.nodeId === 'b')?.status).toBe('success')
     expect(execution.nodeStates.find((n) => n.nodeId === 'c')?.status).toBe('skipped')
+    expect(execution.nodeStates.find((n) => n.nodeId === 'c')?.skipReason).toBe('target')
     expect(createHeadlessSession).toHaveBeenCalledTimes(2)
   })
 
@@ -261,5 +262,73 @@ describe('retrying a failed run', () => {
     expect(context?.connectorItem?.inboxId).toBeUndefined()
     expect(context?.connectorItem?.inboxLeaseToken).toBeUndefined()
     expect(context?.connectorItem?.externalId).toBe('1')
+  })
+})
+
+describe('what a retry adopts', () => {
+  const seededStatus = (
+    states: { nodeId: string; status: string }[],
+    id: string
+  ): string | undefined => states.find((n) => n.nodeId === id)?.status
+
+  it('never adopts a loop-body success; the loop re-drives its body', () => {
+    const wf = {
+      ...makeChain(),
+      nodes: [
+        { id: 'trigger', type: 'trigger', label: 'Trigger', position: { x: 0, y: 0 }, config: {} },
+        {
+          id: 'loop',
+          type: 'loop',
+          label: 'Loop',
+          slug: 'loop',
+          position: { x: 0, y: 0 },
+          config: { nodeType: 'loop', bodyNodeIds: ['x'], maxIterations: 2 }
+        },
+        agentNode('x', 'body'),
+        agentNode('after', 'after')
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'loop' },
+        { id: 'e2', source: 'loop', target: 'x' },
+        { id: 'e3', source: 'x', target: 'after' }
+      ]
+    } as unknown as WorkflowDefinition
+    const failed = {
+      runId: 'r0',
+      workflowId: wf.id,
+      startedAt: 's',
+      status: 'error',
+      nodeStates: [
+        { nodeId: 'trigger', status: 'success' },
+        { nodeId: 'loop', status: 'success' },
+        { nodeId: 'x', status: 'success' },
+        { nodeId: 'after', status: 'error', error: 'Exit code 1' }
+      ]
+    } as unknown as WorkflowExecution
+
+    const seeded = seedRetryStates(wf, failed)
+    expect(seededStatus(seeded, 'loop')).toBe('success')
+    expect(seededStatus(seeded, 'x')).toBe('pending')
+  })
+
+  it('resets a gate rejection but preserves condition and target skips', () => {
+    const wf = makeChain()
+    const failed = {
+      runId: 'r0',
+      workflowId: wf.id,
+      startedAt: 's',
+      status: 'error',
+      nodeStates: [
+        { nodeId: 'trigger', status: 'success' },
+        { nodeId: 'a', status: 'skipped' },
+        { nodeId: 'b', status: 'skipped', skipReason: 'branch' },
+        { nodeId: 'c', status: 'skipped', skipReason: 'target' }
+      ]
+    } as unknown as WorkflowExecution
+
+    const seeded = seedRetryStates(wf, failed)
+    expect(seededStatus(seeded, 'a')).toBe('pending')
+    expect(seededStatus(seeded, 'b')).toBe('skipped')
+    expect(seededStatus(seeded, 'c')).toBe('skipped')
   })
 })

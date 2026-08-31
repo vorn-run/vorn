@@ -324,6 +324,7 @@ export function suggestNearestPath(path: string, candidates: string[]): string |
   let best: string | undefined
   let bestScore = Infinity
   for (const candidate of candidates) {
+    if (candidate === path) continue
     const score = editDistance(path, candidate)
     if (score < bestScore) {
       bestScore = score
@@ -343,6 +344,7 @@ export function previewStepTokens(template: string, groups: StepVariableGroup[])
 
   const bySlug = new Map(groups.map((g) => [g.slug, g]))
   const knownPaths = groups.flatMap((g) => g.keys.map((k) => `steps.${g.slug}.${k.key}`))
+  const knownSet = new Set(knownPaths)
 
   let broken: TemplatePreview['broken']
   let anyData = false
@@ -351,6 +353,8 @@ export function previewStepTokens(template: string, groups: StepVariableGroup[])
     (match, path: string): string => {
       const [slug, ...rest] = path.split('.')
       const group = bySlug.get(slug)
+      // A declared path is never broken; without run data it just shows nothing.
+      const declared = rest.length > 0 && knownSet.has(`steps.${slug}.${rest[0]}`)
       if (!group || rest.length === 0) {
         broken ??= {
           token: `steps.${path}`,
@@ -361,9 +365,11 @@ export function previewStepTokens(template: string, groups: StepVariableGroup[])
       if (!group.runOutputs) return match
       const value = walkPath(group.runOutputs, rest)
       if (value === undefined) {
-        broken ??= {
-          token: `steps.${path}`,
-          suggestion: suggestNearestPath(`steps.${path}`, knownPaths)
+        if (!declared) {
+          broken ??= {
+            token: `steps.${path}`,
+            suggestion: suggestNearestPath(`steps.${path}`, knownPaths)
+          }
         }
         return match
       }

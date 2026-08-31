@@ -251,3 +251,44 @@ describe('completion toasts', () => {
     expect(retryRunFromFailure).toHaveBeenCalled()
   })
 })
+
+describe('switching workflows mid-run', () => {
+  const otherWorkflow = { ...workflow, id: 'wf-y', name: 'Other' }
+
+  it('drops the tracked run so its ending never toasts against the wrong workflow', () => {
+    const utils = render(<WorkflowEditor inline />)
+    fireEvent.click(utils.getByLabelText('Run workflow'))
+    act(() => {
+      mockState.workflowExecutions.set('r1', runningExec())
+    })
+    utils.rerender(<WorkflowEditor inline />)
+    expect(captured.historyProps?.followRunId).toBe('r1')
+
+    act(() => {
+      mockState.editingWorkflowId = 'wf-y'
+      mockState.config.workflows = [workflow, otherWorkflow]
+    })
+    utils.rerender(<WorkflowEditor inline />)
+
+    act(() => {
+      const failed = runningExec()
+      failed.status = 'error'
+      failed.nodeStates[1] = { nodeId: 'agent', status: 'error', error: 'Exit code 1' }
+      mockState.workflowExecutions.set('r1', failed)
+    })
+    utils.rerender(<WorkflowEditor inline />)
+
+    expect(toastFn).not.toHaveBeenCalled()
+    mockState.editingWorkflowId = 'wf-x'
+    mockState.config.workflows = [workflow]
+  })
+
+  it('refuses to retry a run that belongs to another workflow', () => {
+    const utils = render(<WorkflowEditor inline />)
+    fireEvent.click(utils.getByLabelText('Run workflow'))
+    utils.rerender(<WorkflowEditor inline />)
+    const onRetryRun = captured.historyProps?.onRetryRun as (run: WorkflowExecution) => void
+    onRetryRun({ ...runningExec(), workflowId: 'wf-somewhere-else' })
+    expect(retryRunFromFailure).not.toHaveBeenCalled()
+  })
+})

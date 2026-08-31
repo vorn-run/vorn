@@ -376,6 +376,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setSelectedNodeId(null)
       setPendingInsert(null)
       setShowRunHistory(false)
+      // Run feedback belongs to the workflow that launched it.
+      setFollowRunId(null)
+      setLaunchingSince(null)
+      followArmRef.current = false
+      trackedRunsRef.current.clear()
     }
   }, [existingWorkflow, editingId, isActive])
 
@@ -468,6 +473,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const handleRetryRun = useCallback(
     (run: WorkflowExecution) => {
       const workflow = persistWorkflow()
+      // A stale toast or row must never replay another workflow's run here.
+      if (run.workflowId !== workflow.id) return
       retryRunFromFailure(workflow, run).catch((err) =>
         toast.error(err instanceof Error ? err.message : String(err))
       )
