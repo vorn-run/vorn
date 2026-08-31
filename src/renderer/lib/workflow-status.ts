@@ -30,7 +30,11 @@ export const WORKFLOW_STATUS_TONE: Record<WorkflowStatusKey, StatusTone> = {
   cancelled: 'idle'
 }
 
-export const WORKFLOW_STATUS_DOT = byTone(WORKFLOW_STATUS_TONE, TONE_DOT)
+// Success earns the task board's done green: a finished step must read at a glance.
+export const WORKFLOW_STATUS_DOT = {
+  ...byTone(WORKFLOW_STATUS_TONE, TONE_DOT),
+  success: 'bg-status-sage'
+}
 
 /**
  * The same dots, animated for the state that is actually moving.
@@ -39,7 +43,10 @@ export const WORKFLOW_STATUS_DOT = byTone(WORKFLOW_STATUS_TONE, TONE_DOT)
  * legends, not live indicators — a pulsing key would suggest the *filter* is
  * doing something.
  */
-export const WORKFLOW_STATUS_DOT_PULSE = byTone(WORKFLOW_STATUS_TONE, TONE_DOT_MOVING)
+export const WORKFLOW_STATUS_DOT_PULSE = {
+  ...byTone(WORKFLOW_STATUS_TONE, TONE_DOT_MOVING),
+  success: 'bg-status-sage'
+}
 
 export const WORKFLOW_STATUS_TEXT = byTone(WORKFLOW_STATUS_TONE, TONE_TEXT)
 

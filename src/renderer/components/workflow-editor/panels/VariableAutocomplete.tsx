@@ -436,7 +436,7 @@ export function VariableAutocomplete({
 
                       return (
                         <button
-                          key={item.pattern}
+                          key={`${item.groupId}:${item.key}`}
                           onClick={() => !item.disabled && insertPattern(item.pattern)}
                           disabled={item.disabled}
                           className={`w-full flex items-center gap-2 px-3 pl-6 py-1.5 text-left transition-colors
