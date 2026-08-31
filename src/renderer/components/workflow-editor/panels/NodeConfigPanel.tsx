@@ -147,12 +147,6 @@ export function NodeConfigPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-5">
-        {node.slug && node.type !== 'trigger' && (
-          <p className="text-[10px] text-gray-600 font-mono -mt-2 mb-3">
-            Ref: {`{{steps.${node.slug}.output}}`}
-          </p>
-        )}
-
         {node.type === 'trigger' && (
           <TriggerConfigForm
             config={node.config as TriggerConfig}

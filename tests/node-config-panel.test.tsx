@@ -127,18 +127,9 @@ describe('NodeConfigPanel', () => {
     expect(onDelete).toHaveBeenCalledWith('n1')
   })
 
-  it('renders a step ref hint for non-trigger nodes with a slug', () => {
-    const node = { ...makeNode('script'), slug: 'my_step' }
-    render(
-      <NodeConfigPanel
-        node={node}
-        onChange={vi.fn()}
-        onLabelChange={vi.fn()}
-        onDelete={vi.fn()}
-        onClose={vi.fn()}
-      />
-    )
-    expect(screen.getByText(/steps\.my_step\.output/)).toBeInTheDocument()
+  it('keeps raw step references out of the panel chrome', () => {
+    const { container } = renderPanel(scriptNode)
+    expect(container.textContent).not.toContain('Ref:')
   })
 
   it('renders the approval form for approval nodes', () => {
