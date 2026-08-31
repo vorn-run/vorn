@@ -22,7 +22,7 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlignVerticalSpaceAround, Repeat } from 'lucide-react'
+import { AlignVerticalSpaceAround, Repeat, Trash2 } from 'lucide-react'
 import { LoopConfig, NodeExecutionStatus, WorkflowEdge, WorkflowNode } from '../../../shared/types'
 import {
   AddStepNodeData,
@@ -78,9 +78,34 @@ interface CanvasInteractions {
   onNodeClick: (nodeId: string) => void
   onInsertNode: (afterNodeId: string, beforeNodeId: string | null, type: AddableNodeType) => void
   onAddParallelBranch: (forkFromId: string, type: 'agent' | 'script') => void
+  onDeleteNode?: (nodeId: string) => void
 }
 
 const InteractionsContext = createContext<CanvasInteractions | null>(null)
+
+/** The strip that floats over a hovered card; the wrapper must carry `group`. */
+function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
+  const { onDeleteNode } = useInteractions()
+  if (!onDeleteNode) return null
+  return (
+    <div
+      className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100
+                 transition-opacity duration-100 z-10"
+    >
+      <button
+        aria-label="Delete step"
+        onClick={(e) => {
+          e.stopPropagation()
+          onDeleteNode(nodeId)
+        }}
+        className="p-1.5 rounded-md bg-surface-overlay border border-white/[0.12] text-gray-400
+                   hover:text-white hover:border-white/[0.2] transition-colors"
+      >
+        <Trash2 size={12} />
+      </button>
+    </div>
+  )
+}
 
 function useInteractions(): CanvasInteractions {
   const ctx = useContext(InteractionsContext)
@@ -97,9 +122,12 @@ function StepNode({ data }: NodeProps) {
   if (!node) return null
 
   return (
-    <div className="relative">
+    <div className="relative group">
       {node.type !== 'trigger' && (
-        <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
+        <>
+          <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
+          <NodeHoverToolbar nodeId={node.id} />
+        </>
       )}
       <NodeCard
         node={node}
@@ -131,8 +159,9 @@ function LoopNode({ data }: NodeProps) {
   const loopStatus = nodeStatus?.[node.id]
 
   return (
-    <div className="relative">
+    <div className="relative group">
       <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
+      <NodeHoverToolbar nodeId={node.id} />
       <div
         data-loop-rail
         className={`w-[312px] rounded-lg border transition-all
@@ -521,9 +550,18 @@ function WorkflowCanvasInner({
       nodeStatus,
       onNodeClick,
       onInsertNode,
-      onAddParallelBranch
+      onAddParallelBranch,
+      onDeleteNode
     }),
-    [nodes, selectedNodeId, nodeStatus, onNodeClick, onInsertNode, onAddParallelBranch]
+    [
+      nodes,
+      selectedNodeId,
+      nodeStatus,
+      onNodeClick,
+      onInsertNode,
+      onAddParallelBranch,
+      onDeleteNode
+    ]
   )
 
   return (

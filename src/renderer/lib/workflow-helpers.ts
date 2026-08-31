@@ -461,6 +461,20 @@ export function insertConditionBetween(
   return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }
 
+/** Every node id reachable by following edges forward from `startId`. */
+function reachableFrom(startId: string, edges: WorkflowEdge[]): Set<string> {
+  const successors = buildSuccessorsMap(edges)
+  const seen = new Set<string>()
+  const queue = [...(successors.get(startId) ?? [])]
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    if (seen.has(id)) continue
+    seen.add(id)
+    queue.push(...(successors.get(id) ?? []))
+  }
+  return seen
+}
+
 /** Whether every stored position is still the untouched seed column (x = 0 everywhere). */
 export function positionsAreSeed(nodes: WorkflowNode[]): boolean {
   return nodes.every((n) => !n.position || n.position.x === 0)
@@ -493,25 +507,30 @@ export function placeNewNodes(
     const base = (incoming && placed.get(incoming.source)) ?? { x: 0, y: 0 }
     const sibling = incoming ? (siblingCount.get(incoming.source) ?? 0) : 0
     if (incoming) siblingCount.set(incoming.source, sibling + 1)
-    placed.set(node.id, { x: base.x + sibling * 320, y: base.y + 140 })
+    let candidate = { x: base.x + sibling * 320, y: base.y + 140 }
+    // Probe downward until the spot is free, ignoring this node's own
+    // downstream — those get shifted out of the way below.
+    const downstream = reachableFrom(node.id, edges)
+    const occupied = (p: WorkflowNodePosition): boolean =>
+      [...placed.entries()].some(
+        ([id, o]) => !downstream.has(id) && Math.abs(o.x - p.x) < 300 && Math.abs(o.y - p.y) < 120
+      )
+    for (let tries = 0; occupied(candidate) && tries < 50; tries++) {
+      candidate = { x: candidate.x, y: candidate.y + 140 }
+    }
+    placed.set(node.id, candidate)
   }
 
   // Inserting mid-chain must make room: downstream nodes sitting where a new
   // node landed move down by one pitch instead of being covered.
   const newIds = new Set(nextNodes.filter((n) => !prevIds.has(n.id)).map((n) => n.id))
-  const successors = buildSuccessorsMap(edges)
   const shifted = new Set<string>()
   for (const newId of newIds) {
     const newPos = placed.get(newId)!
-    const queue = [...(successors.get(newId) ?? [])]
-    const seen = new Set<string>()
-    while (queue.length > 0) {
-      const id = queue.shift()!
-      if (seen.has(id) || newIds.has(id)) continue
-      seen.add(id)
+    for (const id of reachableFrom(newId, edges)) {
+      if (newIds.has(id)) continue
       const pos = placed.get(id)
       if (pos && pos.y <= newPos.y + 100) shifted.add(id)
-      queue.push(...(successors.get(id) ?? []))
     }
   }
 

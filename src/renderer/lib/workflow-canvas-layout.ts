@@ -213,7 +213,7 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
       type: 'addStep',
       position: {
         x: anchor.position.x + width / 2 - 11,
-        y: anchor.position.y + estimateNodeHeight(node, nodes) + 26
+        y: anchor.position.y + estimateNodeHeight(node, nodes) + 18
       },
       data: {
         afterNodeId: node.id,
@@ -232,7 +232,6 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
       source: node.id,
       target: `add:${node.id}`,
       type: 'step',
-      style: { strokeDasharray: '4 4' },
       selectable: false
     })
   }
