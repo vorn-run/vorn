@@ -1,5 +1,4 @@
 import {
-  supportsExactSessionResume,
   getProjectRemoteHostId,
   type TerminalSession,
   type RecentSession,
@@ -71,68 +70,6 @@ export function countSessionsByWorktree(
     if (wtPath) counts.set(wtPath, (counts.get(wtPath) ?? 0) + 1)
   }
   return counts
-}
-
-function isDefined<T>(value: T | undefined): value is T {
-  return value !== undefined
-}
-
-/**
- * Resolve the agent session ID to pass as --resume when restoring a session.
- * Falls back through progressively looser matching strategies.
- *
- * @param claimed - session IDs already assigned to other terminals in this
- *   restore batch; prevents multiple terminals from resuming the same session.
- */
-export async function resolveResumeSessionId(
-  s: TerminalSession,
-  claimed: Set<string> = new Set()
-): Promise<string | undefined> {
-  if (!supportsExactSessionResume(s.agentType)) return undefined
-  // Only use agentSessionId for resume — it's the real agent session ID passed
-  // via --session-id on fresh launch. hookSessionId is a Vorn-internal UUID
-  // for hook event routing; the agent CLI doesn't know about it. For agents
-  // without pinning support, fall through to the history-based scan.
-  const resumeId = s.agentSessionId
-  if (resumeId && !claimed.has(resumeId)) return resumeId
-
-  const isAvailable = (r: RecentSession): boolean =>
-    r.agentType === s.agentType && r.canResumeExact && !claimed.has(r.sessionId)
-
-  // Fallback for agents without hookSessionId: progressively looser matching
-  const targetPaths = [s.worktreePath, s.projectPath].filter(isDefined).map(normalizeComparablePath)
-  const findPreferredPathMatch = (sessions: RecentSession[]): RecentSession | undefined => {
-    for (const targetPath of targetPaths) {
-      const match = sessions.find(
-        (session) =>
-          isAvailable(session) && normalizeComparablePath(session.projectPath) === targetPath
-      )
-      if (match) return match
-    }
-    return undefined
-  }
-
-  // Scoped fetch first — the global unscoped list has a default limit of 20,
-  // so a project's sessions may not appear in the global results.
-  try {
-    const scopedRecent = await window.api.getRecentSessions(s.projectPath)
-    const scopedExact = findPreferredPathMatch(scopedRecent)
-    if (scopedExact) return scopedExact.sessionId
-
-    const scopedMatch = scopedRecent.find(isAvailable)
-    if (scopedMatch) return scopedMatch.sessionId
-  } catch {
-    // Scoped fetch failed — fall through to unscoped lookup
-  }
-
-  // Unscoped fallback for looser matching (path normalization mismatches)
-  const allRecent = await window.api.getRecentSessions()
-
-  // Exact project path match
-  const exact = findPreferredPathMatch(allRecent)
-  if (exact) return exact.sessionId
-
-  return undefined
 }
 
 /**

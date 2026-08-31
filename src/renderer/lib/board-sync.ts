@@ -121,8 +121,6 @@ async function reconcile(options: { showCold: boolean; resume: boolean }): Promi
  * back in the order they were in.
  */
 async function resumeAll(ids: string[]): Promise<void> {
-  // One set for the pass, not one per pane. See `resumeEndedSession`.
-  const claimed = new Set<string>()
   for (const id of ids) {
     // Read again rather than carried: each resume above it awaited a spawn, and
     // an exit or a close for this pane could have arrived in that gap.
@@ -130,6 +128,6 @@ async function resumeAll(ids: string[]): Promise<void> {
     if (!term?.ended) continue
     // A failure leaves the pane ended and its strip on screen, which is already
     // the offer to try again by hand. Nothing is said twice.
-    await resumeEndedSession(id, { automatic: true, claimed })
+    await resumeEndedSession(id, { automatic: true })
   }
 }

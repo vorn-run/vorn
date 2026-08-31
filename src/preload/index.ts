@@ -166,12 +166,12 @@ const api = {
   /** Sessions from the last run that no pane has taken yet. */
   getRestoredSessions: (): Promise<RestoredSession[]> => ipcRenderer.invoke(IPC.SESSIONS_RESTORED),
 
-  /** Claim one and start it. `gone` means another pane took it first. */
+  /** Claim one and start it. `boundTo` names the session already writing it. */
   resumeSession: (params: {
     id: string
-    resumeSessionId?: string
   }): Promise<
-    { ok: true; session: TerminalSession } | { ok: false; reason: string; message?: string }
+    | { ok: true; session: TerminalSession; boundTo?: string }
+    | { ok: false; reason: string; message?: string }
   > => ipcRenderer.invoke(IPC.SESSIONS_RESUME, params),
 
   clearPreviousSessions: () => ipcRenderer.invoke(IPC.SESSIONS_CLEAR),
