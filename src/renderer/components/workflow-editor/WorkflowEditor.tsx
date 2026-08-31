@@ -124,6 +124,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     import('../../../shared/types').WorkflowExecution[]
   >([])
   const loadedRunsForId = useRef<string | null>(null)
+  const loadedEditorIdRef = useRef<string | null | undefined>(undefined)
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) || null,
@@ -369,9 +370,13 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setEnabled(true)
       setStaggerDelayMs(undefined)
     }
-    setSelectedNodeId(null)
-    setPendingInsert(null)
-    setShowRunHistory(false)
+    // Saving hands back a new workflow object; only an actual switch resets the panels.
+    if (loadedEditorIdRef.current !== editingId) {
+      loadedEditorIdRef.current = editingId
+      setSelectedNodeId(null)
+      setPendingInsert(null)
+      setShowRunHistory(false)
+    }
   }, [existingWorkflow, editingId, isActive])
 
   useEffect(() => {
