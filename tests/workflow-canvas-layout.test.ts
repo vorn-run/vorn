@@ -22,12 +22,12 @@ const node = (
   position
 })
 
-const linearNodes = [
+const chainNodes = [
   node('t', 'trigger', 'Manual', { triggerType: 'manual' }),
   node('a', 'script', 'One', { scriptType: 'bash', scriptContent: '' }),
   node('b', 'script', 'Two', { scriptType: 'bash', scriptContent: '' })
 ]
-const linearEdges: WorkflowEdge[] = [
+const chainEdges: WorkflowEdge[] = [
   { id: 'e1', source: 't', target: 'a' },
   { id: 'e2', source: 'a', target: 'b' }
 ]
@@ -62,8 +62,8 @@ const loopEdges: WorkflowEdge[] = [
 ]
 
 describe('the definition projected onto the canvas', () => {
-  it('keeps a linear chain in trigger order, top to bottom', () => {
-    const { positions } = layoutPositions(linearNodes, linearEdges)
+  it('keeps a straight chain in trigger order, top to bottom', () => {
+    const { positions } = layoutPositions(chainNodes, chainEdges)
     expect(positions.get('t')!.y).toBeLessThan(positions.get('a')!.y)
     expect(positions.get('a')!.y).toBeLessThan(positions.get('b')!.y)
     expect(positions.get('t')!.x).toBe(positions.get('a')!.x)
@@ -105,30 +105,30 @@ describe('the definition projected onto the canvas', () => {
   })
 
   it('trails every leaf with an add button and nothing else', () => {
-    const { nodes: rf } = toCanvasElements(linearNodes, linearEdges)
+    const { nodes: rf } = toCanvasElements(chainNodes, chainEdges)
     const adds = rf.filter((n) => n.type === 'addStep')
     expect(adds.map((n) => n.id)).toEqual(['add:b'])
   })
 
   it('uses stored positions once anyone has arranged the workflow', () => {
-    const arranged = linearNodes.map((n) =>
+    const arranged = chainNodes.map((n) =>
       n.id === 'a' ? { ...n, position: { x: 120, y: 300 } } : n
     )
     expect(positionsAreSeed(arranged)).toBe(false)
-    const { nodes: rf } = toCanvasElements(arranged, linearEdges)
+    const { nodes: rf } = toCanvasElements(arranged, chainEdges)
     expect(rf.find((n) => n.id === 'a')!.position).toEqual({ x: 120, y: 300 })
   })
 })
 
 describe('what a hand-drawn connection may do', () => {
   it('allows a forward edge between free steps', () => {
-    const open = [...linearNodes, node('c', 'script', 'Free', {})]
-    expect(canConnect(open, linearEdges, 'b', 'c')).toBe(true)
+    const open = [...chainNodes, node('c', 'script', 'Free', {})]
+    expect(canConnect(open, chainEdges, 'b', 'c')).toBe(true)
   })
 
   it('refuses a cycle', () => {
-    expect(canConnect(linearNodes, linearEdges, 'b', 't')).toBe(false)
-    expect(canConnect(linearNodes, linearEdges, 'b', 'a')).toBe(false)
+    expect(canConnect(chainNodes, chainEdges, 'b', 't')).toBe(false)
+    expect(canConnect(chainNodes, chainEdges, 'b', 'a')).toBe(false)
   })
 
   it('refuses edges into the trigger and out of a condition', () => {
@@ -142,6 +142,6 @@ describe('what a hand-drawn connection may do', () => {
   })
 
   it('refuses a duplicate of an existing edge', () => {
-    expect(canConnect(linearNodes, linearEdges, 'a', 'b')).toBe(false)
+    expect(canConnect(chainNodes, chainEdges, 'a', 'b')).toBe(false)
   })
 })
