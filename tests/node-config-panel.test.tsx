@@ -128,7 +128,15 @@ describe('NodeConfigPanel', () => {
   })
 
   it('keeps raw step references out of the panel chrome', () => {
-    const { container } = renderPanel(scriptNode)
+    const { container } = render(
+      <NodeConfigPanel
+        node={makeNode('script')}
+        onChange={vi.fn()}
+        onLabelChange={vi.fn()}
+        onDelete={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
     expect(container.textContent).not.toContain('Ref:')
   })
 

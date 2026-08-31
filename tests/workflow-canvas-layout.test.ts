@@ -136,7 +136,7 @@ describe('layout edge shapes', () => {
     ]
     const { nodes: rf } = toCanvasElements(emptyLoop, [{ id: 'e1', source: 't', target: 'loop' }])
     const loop = rf.find((n) => n.id === 'loop')!
-    expect(loop.height).toBeGreaterThan(120)
+    expect(loop.initialHeight).toBeGreaterThan(120)
   })
 
   it('gives an empty fork branch a full column of width', () => {
