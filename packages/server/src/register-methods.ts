@@ -24,6 +24,12 @@ import { clearScreen } from './terminal-screen'
 import { discardHistory } from './history/writer'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
 import { clearScrollback, readScrollback } from './terminal-scrollback'
+import { heldTranscripts, resolveTranscriptId, transcriptHolder } from './agent-transcript'
+import {
+  claimSpawningTranscript,
+  releaseSpawningTranscript,
+  spawningTranscripts
+} from './transcript-claims'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
@@ -681,7 +687,7 @@ export function registerAllMethods(): void {
    */
   const BETWEEN_RUNS = '\x1b[?1049l\x1b[!p\x1b[0m\x1b[?25h\r\n'
 
-  registerMethod('sessions:resume', async ({ id, resumeSessionId }) => {
+  registerMethod('sessions:resume', async ({ id }) => {
     // Claimed before anything is started, and that ordering is the point. Two
     // clients can be looking at the same cold pane; the second must be told it
     // is gone rather than launching a second agent against one transcript.
@@ -699,6 +705,17 @@ export function registerAllMethods(): void {
       : ptyManager.getActiveSessions().find((s) => s.id === id && !ptyManager.hasLivePty(id))
     const previous = restored?.session ?? dead
     if (!previous) return { ok: false as const, reason: 'gone' as const }
+
+    const live = ptyManager.getActiveSessions().filter((s) => ptyManager.hasLivePty(s.id))
+    const pinned = previous.agentSessionId
+    const holder = pinned ? transcriptHolder(pinned, live) : undefined
+    if (holder) {
+      // Its conversation is already running; hand back what is writing it.
+      if (dead) ptyManager.releaseForResume(id)
+      await forgetRestored(id)
+      sessionManager.scheduleSave()
+      return { ok: true as const, session: holder, boundTo: holder.id }
+    }
 
     try {
       // Claimed, for the second kind. Not `killPty`: that announces an exit for
@@ -747,8 +764,12 @@ export function registerAllMethods(): void {
         return { ok: true as const, session }
       }
 
+      const held = new Set([...heldTranscripts(live), ...spawningTranscripts()])
+      const transcriptId = resolveTranscriptId(previous, held)
+      if (transcriptId) claimSpawningTranscript(transcriptId, id)
+
       // Same id, same reasons as the shell branch above.
-      const session = ptyManager.createPty(buildRestorePayload(previous, resumeSessionId), id)
+      const session = ptyManager.createPty(buildRestorePayload(previous, transcriptId), id)
       ptyManager.injectOutput(session.id, BETWEEN_RUNS)
       sessionManager.scheduleSave()
       return { ok: true as const, session }
@@ -760,6 +781,7 @@ export function registerAllMethods(): void {
       // one that ended during this run goes back to the pty manager it came from.
       if (restored) restoreHeld(restored)
       else if (dead) ptyManager.restoreReleased(dead)
+      releaseSpawningTranscript(previous.agentSessionId ?? '', id)
       return {
         ok: false as const,
         reason: 'failed' as const,

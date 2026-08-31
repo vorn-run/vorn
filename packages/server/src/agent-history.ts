@@ -471,13 +471,15 @@ const opencodeProvider: AgentHistoryProvider = {
 // Registry
 // ---------------------------------------------------------------------------
 
-const providers: AgentHistoryProvider[] = [
-  claudeProvider,
-  geminiProvider,
-  codexProvider,
-  copilotProvider,
-  opencodeProvider
-]
+const providerByAgent: Record<AiAgentType, AgentHistoryProvider> = {
+  claude: claudeProvider,
+  gemini: geminiProvider,
+  codex: codexProvider,
+  copilot: copilotProvider,
+  opencode: opencodeProvider
+}
+
+const providers = Object.values(providerByAgent)
 
 export function getRecentSessions(projectPath?: string, limit = 20): RecentSession[] {
   const allSessions: RecentSession[] = []
@@ -488,4 +490,17 @@ export function getRecentSessions(projectPath?: string, limit = 20): RecentSessi
   }
 
   return allSessions.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit)
+}
+
+/** One agent's sessions, unmerged, so a busy agent cannot crowd out a quiet one. */
+export function getRecentSessionsFor(
+  agentType: AiAgentType,
+  projectPath?: string,
+  limit = 20
+): RecentSession[] {
+  const provider = providerByAgent[agentType]
+  if (!provider) return []
+  return provider
+    .getRecentSessions(createProjectScope(projectPath), limit)
+    .sort((a, b) => b.timestamp - a.timestamp)
 }
