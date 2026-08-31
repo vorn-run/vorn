@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { Mock } from 'vitest'
 import { render, screen, act, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
@@ -67,10 +68,12 @@ const mockTerminal = {
 
 const initialState = useAppStore.getState()
 
-let toggleFilesPane: ReturnType<typeof vi.fn>
-let toggleBrowserPane: ReturnType<typeof vi.fn>
-let setFocused: ReturnType<typeof vi.fn>
-let toggleMinimized: ReturnType<typeof vi.fn>
+// Declared with the signatures the store expects. `ReturnType<typeof vi.fn>` is
+// a zero-argument mock, which no store field will accept.
+let toggleFilesPane: Mock<(sessionId: string) => void>
+let toggleBrowserPane: Mock<(sessionId: string) => void>
+let setFocused: Mock<(id: string | null) => void>
+let toggleMinimized: Mock<(id: string) => void>
 
 beforeEach(() => {
   vi.clearAllMocks()

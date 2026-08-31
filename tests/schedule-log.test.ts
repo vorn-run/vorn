@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 
-const mockAddEntry = vi.fn()
-const mockGetEntries = vi.fn(() => [])
-const mockClear = vi.fn()
+const mockAddEntry = vi.fn<(...args: unknown[]) => unknown>()
+const mockGetEntries = vi.fn<(...args: unknown[]) => unknown[]>(() => [])
+const mockClear = vi.fn<(...args: unknown[]) => unknown>()
 
 vi.mock('../packages/server/src/database', () => ({
   addScheduleLogEntry: (...args: unknown[]) => mockAddEntry(...args),

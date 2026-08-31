@@ -27,6 +27,7 @@ import type { WorkflowExecution, NodeExecutionState, WorkflowDefinition } from '
 
 function execution(): WorkflowExecution {
   return {
+    runId: 'wf-1:2026-04-20T10:00:00Z',
     workflowId: 'wf-1',
     startedAt: '2026-04-20T10:00:00Z',
     status: 'running',
@@ -44,7 +45,7 @@ function workflow(msg?: string): WorkflowDefinition {
     name: 'Deploy',
     icon: 'Zap',
     iconColor: '#ff0',
-    trigger: { type: 'manual' },
+    enabled: true,
     nodes: [
       {
         id: 'n1',

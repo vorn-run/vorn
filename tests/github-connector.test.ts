@@ -61,7 +61,7 @@ function makeFakeChild(stdout: string, exitCode = 0): FakeChild {
       })
     }
   }
-  ;(child as { _writes: string[] })._writes = writes
+  ;(child as unknown as { _writes: string[] })._writes = writes
   return child
 }
 

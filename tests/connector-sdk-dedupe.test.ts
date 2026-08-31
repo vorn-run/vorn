@@ -39,20 +39,29 @@ function lastItemConnector(
 describe('declarative triggers', () => {
   it('rejects a trigger that mixes or omits the two polling styles', () => {
     const base = { type: 'a', label: 'A' }
+    /**
+     * A trigger definition the type forbids, which is the whole point: the
+     * validation asserted below exists for a definition that reaches
+     * `defineConnector` at runtime, and the compiler would not otherwise let a
+     * test build one.
+     */
+    const invalid = (trigger: Record<string, unknown>): never => trigger as never
     expect(() =>
       defineConnector({
         id: 'x',
         name: 'X',
-        triggers: [{ ...base, dedupe: 'timestamp', fetch: () => [], poll: () => ({ items: [] }) }]
+        triggers: [
+          invalid({ ...base, dedupe: 'timestamp', fetch: () => [], poll: () => ({ items: [] }) })
+        ]
       })
     ).toThrow(/declares both fetch\(\) and poll\(\)/)
 
     expect(() =>
-      defineConnector({ id: 'x', name: 'X', triggers: [{ ...base, fetch: () => [] }] })
+      defineConnector({ id: 'x', name: 'X', triggers: [invalid({ ...base, fetch: () => [] })] })
     ).toThrow(/fetch\(\) and a dedupe strategy together/)
 
     expect(() =>
-      defineConnector({ id: 'x', name: 'X', triggers: [{ ...base, dedupe: 'timestamp' }] })
+      defineConnector({ id: 'x', name: 'X', triggers: [invalid({ ...base, dedupe: 'timestamp' })] })
     ).toThrow(/fetch\(\) and a dedupe strategy together/)
   })
 

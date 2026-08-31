@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const mockLoading = vi.fn(() => 'toast-id-1')
-const mockUpdate = vi.fn()
+const mockLoading = vi.fn((_msg: string) => 'toast-id-1')
+const mockUpdate = vi.fn<(...args: unknown[]) => unknown>()
 
 vi.mock('../src/renderer/components/Toast', () => ({
   toast: {

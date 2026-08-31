@@ -106,7 +106,7 @@ describe('handleConnection', () => {
 
     await vi.waitFor(() => expect(replies(ws).length).toBeGreaterThan(0))
     const response = replies(ws)[0]
-    expect(response.error.code).toBe(-32601)
+    expect(response.error?.code).toBe(-32601)
   })
 
   it('dispatches to registered method handler', async () => {
@@ -151,8 +151,8 @@ describe('handleConnection', () => {
 
     await vi.waitFor(() => expect(replies(ws).length).toBeGreaterThan(0))
     const response = replies(ws)[0]
-    expect(response.error.code).toBe(-32000)
-    expect(response.error.message).toBe('boom')
+    expect(response.error?.code).toBe(-32000)
+    expect(response.error?.message).toBe('boom')
   })
 })
 

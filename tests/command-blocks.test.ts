@@ -554,7 +554,11 @@ describe('shell integration detection', () => {
    * PowerShell, cmd — runs without it, and the marker itself is the only
    * evidence of which kind this is.
    */
-  function fake(): { term: Terminal; handlers: Map<number, (d: string) => boolean> } {
+  function fake(): {
+    term: Terminal
+    handlers: Map<number, (d: string) => boolean>
+    bufferListeners: Set<() => void>
+  } {
     const handlers = new Map<number, (d: string) => boolean>()
     const bufferListeners = new Set<() => void>()
     const term = {

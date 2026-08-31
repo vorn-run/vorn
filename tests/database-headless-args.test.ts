@@ -12,12 +12,19 @@ import { initTestDatabase, saveConfig, loadConfig } from '../packages/server/src
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import type { AppConfig } from '@vornrun/shared/types'
 
+/** The commands a test just saved, refusing rather than assuming they came back. */
+function commandsOf(config: AppConfig): NonNullable<AppConfig['agentCommands']> {
+  const commands = config.agentCommands
+  if (!commands) throw new Error('loadConfig returned a config with no agentCommands')
+  return commands
+}
+
 let teardown: () => void
 
 function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     version: 1,
-    defaults: { theme: 'dark' },
+    defaults: { theme: 'dark', shell: '/bin/zsh', fontSize: 13 },
     projects: [],
     agentCommands: { ...DEFAULT_AGENT_COMMANDS },
     workflows: [],
@@ -47,7 +54,7 @@ describe('headlessArgs persistence (real SQLite)', () => {
     })
     saveConfig(config)
     const loaded = loadConfig()
-    expect(loaded.agentCommands.claude?.headlessArgs).toEqual([
+    expect(commandsOf(loaded).claude?.headlessArgs).toEqual([
       '--dangerously-skip-permissions',
       '--verbose'
     ])
@@ -62,7 +69,7 @@ describe('headlessArgs persistence (real SQLite)', () => {
     })
     saveConfig(config)
     const loaded = loadConfig()
-    expect(loaded.agentCommands.opencode?.headlessArgs).toBeUndefined()
+    expect(commandsOf(loaded).opencode?.headlessArgs).toBeUndefined()
   })
 
   it('preserves headlessArgs across save/load round-trips', () => {
@@ -71,15 +78,15 @@ describe('headlessArgs persistence (real SQLite)', () => {
 
     // Update with custom headlessArgs
     const loaded = loadConfig()
-    loaded.agentCommands.gemini = {
+    commandsOf(loaded).gemini = {
       ...DEFAULT_AGENT_COMMANDS.gemini,
       headlessArgs: ['-y', '--no-confirm']
     }
     saveConfig(loaded)
 
     const reloaded = loadConfig()
-    expect(reloaded.agentCommands.gemini?.headlessArgs).toEqual(['-y', '--no-confirm'])
+    expect(commandsOf(reloaded).gemini?.headlessArgs).toEqual(['-y', '--no-confirm'])
     // Other agents should keep their defaults
-    expect(reloaded.agentCommands.claude?.headlessArgs).toEqual(['--dangerously-skip-permissions'])
+    expect(commandsOf(reloaded).claude?.headlessArgs).toEqual(['--dangerously-skip-permissions'])
   })
 })

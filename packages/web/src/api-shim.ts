@@ -73,6 +73,15 @@ class RpcClient {
   /** Whether `_ready` has settled, so `resetReady` knows if replacing it is safe. */
   private readySettled = false
   /**
+   * Whether there is one yet at all.
+   *
+   * The constructor's own call is the only moment there is not, and `_ready` is
+   * declared with a definite-assignment assertion -- so testing the promise for
+   * truthiness read as always true and the guard below never fired on the case it
+   * was written for.
+   */
+  private hasReady = false
+  /**
    * Called when the server rejects our credential, on any connection.
    *
    * A callback rather than only the readiness promise: `_ready` is replaced on
@@ -105,7 +114,8 @@ class RpcClient {
    * drop waits for the next connection rather than resolving against the closed one.
    */
   private resetReady(): void {
-    if (this._ready && !this.readySettled) return
+    if (this.hasReady && !this.readySettled) return
+    this.hasReady = true
     this.readySettled = false
     this._ready = new Promise((resolve, reject) => {
       this._resolveReady = () => {

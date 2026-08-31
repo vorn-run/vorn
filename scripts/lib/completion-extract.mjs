@@ -87,6 +87,9 @@ function extractFlags(options) {
 
 function extractSubcommands(subcommands, depth, trail) {
   if (!Array.isArray(subcommands) || depth >= MAX_DEPTH) return undefined
+  // Annotated because it is filled by name at runtime: without this it infers as
+  // `{}` and every reader of a subcommand is untyped.
+  /** @type {Record<string, ReturnType<typeof extractNode>>} */
   const sub = {}
   let dropped = 0
   for (const entry of subcommands) {

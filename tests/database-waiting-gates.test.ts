@@ -31,6 +31,7 @@ function run(
   nodeStatus: 'waiting' | 'success' | 'pending'
 ): WorkflowExecution {
   return {
+    runId: `${id}:2026-04-20T10:00:0${id.slice(-1)}Z`,
     workflowId: id,
     startedAt: `2026-04-20T10:00:0${id.slice(-1)}Z`,
     status,
@@ -66,6 +67,7 @@ describe('listRunsWithWaitingGates', () => {
 
   it('preserves approved_at and agent metadata through the round-trip', () => {
     const exec: WorkflowExecution = {
+      runId: 'wf-9:2026-04-20T10:00:00Z',
       workflowId: 'wf-9',
       startedAt: '2026-04-20T10:00:00Z',
       status: 'running',

@@ -1,0 +1,45 @@
+{
+  // The tests, which nothing compiled until now. Vitest strips their types
+  // through esbuild without checking them, and no other project includes this
+  // directory, so a test could disagree with the code it tests and both the
+  // suite and `yarn typecheck` stayed green.
+  //
+  // Its own project rather than an addition to `tsconfig.web.json`: tests reach
+  // into the renderer, the server, main and shared -- several in one file -- and
+  // dragging those into a `composite` project the root references would put the
+  // same files in two projects with conflicting `rootDir`s.
+  //
+  // `src/renderer/env.d.ts` is in `include` deliberately. It declares
+  // `Window.api` and references `vite/client` for the `*.css` and `*.svg?raw`
+  // module declarations. Without it the same run reports 536 errors instead of
+  // 169, and every one of the extra 366 is phantom.
+  "compilerOptions": {
+    "noEmit": true,
+    "target": "ESNext",
+    // DOM because 163 test files run under jsdom. That makes this more
+    // permissive than `packages/server`'s own project, which has no DOM lib --
+    // it cannot add errors here, but a server file reaching for a DOM global is
+    // still only caught over there.
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    // `completion-extract` and `lockfile-entries` import helpers from
+    // `scripts/*.mjs`. Resolved, not checked -- those are outside this gate.
+    "allowJs": true,
+    "checkJs": false,
+    // Not `vitest/globals`, despite `globals: true` in vitest.config.ts: every
+    // test file imports what it uses from 'vitest' by name.
+    "types": ["node"],
+    "paths": {
+      "@vornrun/shared": ["./packages/shared/src/index.ts"],
+      "@vornrun/shared/*": ["./packages/shared/src/*"]
+    }
+  },
+  "include": ["tests/**/*", "src/renderer/env.d.ts"]
+}

@@ -16,6 +16,7 @@ import {
   saveConfig
 } from '../packages/server/src/database'
 import type { AppConfig, WorkflowExecution } from '@vornrun/shared/types'
+import { workflowRunId } from '@vornrun/shared/types'
 
 let teardown: () => void
 
@@ -31,6 +32,7 @@ describe('workflow run persistence', () => {
   it('round-trips agentType / projectName / projectPath on node states', () => {
     const exec: WorkflowExecution = {
       workflowId: 'wf-1',
+      runId: 'wf-1:2026-04-20T10:00:00Z',
       startedAt: '2026-04-20T10:00:00Z',
       completedAt: '2026-04-20T10:00:05Z',
       status: 'success',
@@ -67,6 +69,7 @@ describe('workflow run persistence', () => {
       '[+3600.0s] Step timed out. The agent was started but never produced any output.'
     const exec: WorkflowExecution = {
       workflowId: 'wf-diag',
+      runId: 'wf-diag:2026-04-20T10:00:00Z',
       startedAt: '2026-04-20T10:00:00Z',
       status: 'error',
       nodeStates: [{ nodeId: 'node-1', status: 'error', diagnostics: timeline }]
@@ -80,6 +83,7 @@ describe('workflow run persistence', () => {
   it('round-trips the connector inbox row across approval-gate resumes', () => {
     const exec: WorkflowExecution = {
       workflowId: 'wf-connector',
+      runId: 'wf-connector:2026-04-20T10:00:00Z',
       startedAt: '2026-04-20T10:00:00Z',
       status: 'running',
       connectorInboxId: 73,
@@ -111,6 +115,7 @@ describe('workflow run persistence', () => {
   it('omits fields that were not set', () => {
     const exec: WorkflowExecution = {
       workflowId: 'wf-2',
+      runId: 'wf-2:2026-04-20T11:00:00Z',
       startedAt: '2026-04-20T11:00:00Z',
       status: 'success',
       nodeStates: [{ nodeId: 'node-1', status: 'success' }]
@@ -215,6 +220,7 @@ describe('listAllWorkflowRuns', () => {
     )
     saveWorkflowRun({
       workflowId: 'wf-a',
+      runId: 'wf-a:2026-04-20T10:00:00Z',
       startedAt: '2026-04-20T10:00:00Z',
       completedAt: '2026-04-20T10:00:05Z',
       status: 'success',
@@ -222,6 +228,7 @@ describe('listAllWorkflowRuns', () => {
     })
     saveWorkflowRun({
       workflowId: 'wf-b',
+      runId: 'wf-b:2026-04-20T10:01:00Z',
       startedAt: '2026-04-20T10:01:00Z',
       completedAt: '2026-04-20T10:01:09Z',
       status: 'error',
@@ -242,12 +249,14 @@ describe('listAllWorkflowRuns', () => {
     )
     saveWorkflowRun({
       workflowId: 'wf-personal',
+      runId: 'wf-personal:2026-04-20T10:00:00Z',
       startedAt: '2026-04-20T10:00:00Z',
       status: 'success',
       nodeStates: []
     })
     saveWorkflowRun({
       workflowId: 'wf-team',
+      runId: 'wf-team:2026-04-20T10:00:30Z',
       startedAt: '2026-04-20T10:00:30Z',
       status: 'success',
       nodeStates: []
@@ -265,6 +274,7 @@ describe('listAllWorkflowRuns', () => {
     for (let i = 0; i < 5; i++) {
       saveWorkflowRun({
         workflowId: 'wf-x',
+        runId: `wf-x:2026-04-20T10:0${i}:00Z`,
         startedAt: `2026-04-20T10:0${i}:00Z`,
         status: 'success',
         nodeStates: []
@@ -278,6 +288,7 @@ describe('listAllWorkflowRuns', () => {
     saveConfig(configWithWorkflows([{ id: 'wf-orphan', name: 'O' }]))
     saveWorkflowRun({
       workflowId: 'wf-orphan',
+      runId: 'wf-orphan:2026-04-20T10:00:00Z',
       startedAt: '2026-04-20T10:00:00Z',
       status: 'success',
       triggerTaskId: 'task-7',
@@ -299,6 +310,7 @@ describe('listAllWorkflowRuns', () => {
     saveConfig(configWithWorkflows([{ id: 'wf-orphan', name: 'O', workspaceId: 'team' }]))
     saveWorkflowRun({
       workflowId: 'wf-orphan',
+      runId: 'wf-orphan:2026-04-20T10:00:00Z',
       startedAt: '2026-04-20T10:00:00Z',
       status: 'success',
       nodeStates: []
@@ -367,6 +379,7 @@ describe('step results survive a reload', () => {
   // "completed" for an agent that had said otherwise.
   const withResult = (over: Record<string, unknown> = {}): WorkflowExecution => ({
     workflowId: 'wf-results',
+    runId: 'wf-results:2026-08-10T10:00:00Z',
     startedAt: '2026-08-10T10:00:00Z',
     status: 'success',
     nodeStates: [
@@ -406,6 +419,7 @@ describe('step results survive a reload', () => {
   it('omits the fields entirely when a step produced none', () => {
     saveWorkflowRun({
       workflowId: 'wf-bare',
+      runId: 'wf-bare:2026-08-10T10:00:00Z',
       startedAt: '2026-08-10T10:00:00Z',
       status: 'success',
       nodeStates: [{ nodeId: 'plain', status: 'success' }]
@@ -429,6 +443,7 @@ describe('step results survive a reload', () => {
   it('keeps the rest of the run when one typed output is unreadable', () => {
     saveWorkflowRun({
       workflowId: 'wf-mixed',
+      runId: 'wf-mixed:2026-08-10T10:00:00Z',
       startedAt: '2026-08-10T10:00:00Z',
       status: 'success',
       nodeStates: [
@@ -444,5 +459,32 @@ describe('step results survive a reload', () => {
     expect(run.nodeStates).toHaveLength(2)
     expect(run.nodeStates[0]).not.toHaveProperty('structuredOutput')
     expect(run.nodeStates[1].structuredOutput).toEqual({ ok: true })
+  })
+})
+
+describe('identifying a run whose history predates the id', () => {
+  /**
+   * Every fixture in this file used to omit `runId` and lean on the fallback
+   * without saying so. `runId` is required now and they all carry one, which is
+   * correct -- and which quietly removed the only exercise this branch had. It
+   * still runs in production every time a row written before the field is read
+   * back, so it is tested here on purpose rather than by accident.
+   */
+  it('uses the id it was given', () => {
+    expect(
+      workflowRunId({ runId: 'chosen', workflowId: 'wf-1', startedAt: '2026-04-20T10:00:00Z' })
+    ).toBe('chosen')
+  })
+
+  it('falls back to workflow and start time when there is none', () => {
+    expect(workflowRunId({ workflowId: 'wf-1', startedAt: '2026-04-20T10:00:00Z' })).toBe(
+      'wf-1:2026-04-20T10:00:00Z'
+    )
+  })
+
+  it('treats an empty id as absent, because a blank is not an identity', () => {
+    expect(
+      workflowRunId({ runId: '', workflowId: 'wf-1', startedAt: '2026-04-20T10:00:00Z' })
+    ).toBe('wf-1:2026-04-20T10:00:00Z')
   })
 })

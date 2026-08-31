@@ -123,10 +123,10 @@ describe('readFileContent', () => {
       typeof fs.statSync
     >)
     vi.mocked(fs.openSync).mockReturnValue(42)
-    vi.mocked(fs.readSync).mockImplementation((_fd, buffer: Buffer) => {
-      buf.copy(buffer)
+    vi.mocked(fs.readSync).mockImplementation(((_fd: number, buffer: NodeJS.ArrayBufferView) => {
+      buf.copy(buffer as Buffer)
       return buf.length
-    })
+    }) as typeof fs.readSync)
 
     const result = readFileContent('/test/file.txt')
     expect(result).toBe('hello world')
@@ -140,10 +140,10 @@ describe('readFileContent', () => {
       typeof fs.statSync
     >)
     vi.mocked(fs.openSync).mockReturnValue(42)
-    vi.mocked(fs.readSync).mockImplementation((_fd, buffer: Buffer) => {
-      buf.copy(buffer)
+    vi.mocked(fs.readSync).mockImplementation(((_fd: number, buffer: NodeJS.ArrayBufferView) => {
+      buf.copy(buffer as Buffer)
       return buf.length
-    })
+    }) as typeof fs.readSync)
 
     const result = readFileContent('/test/binary.bin')
     expect(result).toBeNull()
@@ -168,10 +168,11 @@ describe('readFileContent', () => {
       size: 1000
     } as ReturnType<typeof fs.statSync>)
     vi.mocked(fs.openSync).mockReturnValue(42)
-    vi.mocked(fs.readSync).mockImplementation((_fd, buffer: Buffer) => {
-      buf.copy(buffer, 0, 0, buffer.length)
-      return buffer.length
-    })
+    vi.mocked(fs.readSync).mockImplementation(((_fd: number, buffer: NodeJS.ArrayBufferView) => {
+      const target = buffer as Buffer
+      buf.copy(target, 0, 0, target.length)
+      return target.length
+    }) as typeof fs.readSync)
 
     const result = readFileContent('/test/big.txt', 50)
     expect(result).toContain('--- truncated (1000 bytes total) ---')

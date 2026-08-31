@@ -16,7 +16,7 @@ import {
   dbInsertTaskSourceLink,
   dbGetTaskSourceLink
 } from '../packages/server/src/database'
-import type { AppConfig } from '../packages/shared/src/types'
+import type { AppConfig, TaskConfig } from '../packages/shared/src/types'
 
 /**
  * Saving iterates every key in `defaults`, but loading rebuilds the object
@@ -162,7 +162,7 @@ describe('collections survive a save that did not carry them', () => {
     } as AppConfig
   }
 
-  const task = (id: string, title: string) => ({
+  const task = (id: string, title: string): TaskConfig => ({
     id,
     projectName: 'vorn',
     title,
@@ -259,7 +259,7 @@ describe('two clients saving against the same server', () => {
     } as AppConfig
   }
 
-  const task = (id: string) => ({
+  const task = (id: string): TaskConfig => ({
     id,
     projectName: 'vorn',
     title: id,

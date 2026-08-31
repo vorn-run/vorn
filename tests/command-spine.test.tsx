@@ -94,7 +94,7 @@ describe('CommandSpine', () => {
     // The contract that keeps agent cards untouched: their TUI owns the
     // screen and has no command boundaries to mark.
     seed({ agentType: 'claude' })
-    const { container } = render(<CommandSpine terminalId="term-1" />)
+    const { container } = render(<CommandSpine terminalId="term-1" className="" />)
     expect(container).toBeEmptyDOMElement()
   })
 
@@ -104,7 +104,7 @@ describe('CommandSpine', () => {
       { command: 'git status', exitCode: 0, durationMs: 200, outputLines: 2, marker: marker(0) },
       { command: 'yarn test', exitCode: 1, durationMs: 4100, outputLines: 40, marker: marker(10) }
     ])
-    render(<CommandSpine terminalId="term-1" />)
+    render(<CommandSpine terminalId="term-1" className="" />)
     expect(screen.getByLabelText('git status · exit 0')).toBeInTheDocument()
     expect(screen.getByLabelText('yarn test · exit 1')).toBeInTheDocument()
   })
@@ -114,7 +114,7 @@ describe('CommandSpine', () => {
     blockMocks.getCommandBlocks.mockReturnValue([
       { command: 'yarn build', exitCode: 0, durationMs: 900, outputLines: 3, marker: marker(12) }
     ])
-    render(<CommandSpine terminalId="term-1" />)
+    render(<CommandSpine terminalId="term-1" className="" />)
     fireEvent.click(screen.getByLabelText('yarn build · exit 0'))
     expect(registryMocks.scrollTerminalToLine).toHaveBeenCalledWith('term-1', 12)
   })
@@ -132,7 +132,7 @@ describe('CommandSpine', () => {
     blockMocks.getCommandBlocks.mockReturnValue([
       { command: 'git status', exitCode: 0, durationMs: 200, outputLines: 2, marker: marker(0) }
     ])
-    render(<CommandSpine terminalId="term-1" />)
+    render(<CommandSpine terminalId="term-1" className="" />)
     expect(screen.queryByLabelText(/git status/)).not.toBeInTheDocument()
   })
 
@@ -141,7 +141,7 @@ describe('CommandSpine', () => {
     blockMocks.getCommandBlocks.mockReturnValue([
       { command: 'yarn lint', exitCode: 0, durationMs: 1800, outputLines: 2, marker: marker(5) }
     ])
-    const { container } = render(<CommandSpine terminalId="term-1" />)
+    const { container } = render(<CommandSpine terminalId="term-1" className="" />)
     fireEvent.mouseEnter(screen.getByLabelText('yarn lint · exit 0'))
     const tip = screen.getByText('yarn lint')
     expect(tip).toBeInTheDocument()
@@ -158,7 +158,7 @@ describe('CommandSpine block highlight', () => {
       { command: 'yarn test', exitCode: 1, durationMs: 4100, outputLines: 40, marker: marker(0) },
       { command: 'git status', exitCode: 0, durationMs: 200, outputLines: 2, marker: marker(10) }
     ])
-    const { container } = render(<CommandSpine terminalId="term-1" />)
+    const { container } = render(<CommandSpine terminalId="term-1" className="" />)
 
     fireEvent.mouseEnter(screen.getByLabelText('yarn test · exit 1'))
     expect(registryMocks.highlightTerminalBlock).toHaveBeenCalledWith('term-1', {

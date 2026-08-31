@@ -7,7 +7,9 @@ const windowMinimize = vi.fn()
 const windowMaximize = vi.fn()
 const windowClose = vi.fn()
 const isWindowMaximized = vi.fn().mockResolvedValue(false)
-const onWindowMaximizedChange = vi.fn(() => () => {})
+// Takes the listener it is given; the bare form infers a zero-argument call and
+// no `mockImplementationOnce` that actually uses the callback will fit it.
+const onWindowMaximizedChange = vi.fn((_cb: (maximized: boolean) => void) => () => {})
 
 Object.defineProperty(window, 'api', {
   value: {

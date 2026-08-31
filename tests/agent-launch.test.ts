@@ -10,14 +10,14 @@ import {
   buildHeadlessSpawnArgs
 } from '../packages/server/src/agent-launch'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
-import type { AgentType, CreateTerminalPayload } from '@vornrun/shared/types'
+import type { AiAgentType, CreateTerminalPayload } from '@vornrun/shared/types'
 
 const env = { PATH: '/usr/bin' }
 const cmds = DEFAULT_AGENT_COMMANDS
 
 function makePayload(overrides: Partial<CreateTerminalPayload> = {}): CreateTerminalPayload {
   return {
-    agentType: 'claude' as AgentType,
+    agentType: 'claude',
     projectName: 'test',
     projectPath: '/test',
     ...overrides
@@ -404,7 +404,10 @@ describe('agent-launch guards against shell sessions', () => {
   // Shells don't go through this file — they have their own PTY creation path.
   // Guards exist so that if something mistakenly routes a shell through here,
   // we surface the bug instead of silently running the wrong command.
-  const shellPayload = makePayload({ agentType: 'shell' as AgentType })
+  // Deliberately a payload the type forbids: `agentType` here is `AiAgentType`,
+  // which has no 'shell'. That is the point -- the guards below exist for the
+  // case where something routes one through anyway, so the test has to build one.
+  const shellPayload = makePayload({ agentType: 'shell' as unknown as AiAgentType })
 
   it('buildAgentLaunchLine throws for shell payloads', () => {
     expect(() => buildAgentLaunchLine(shellPayload, cmds, env)).toThrow(

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { Mock } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { AgentPicker } from '../src/renderer/components/AgentPicker'
-import type { AiAgentType } from '../src/shared/types'
+import type { AiAgentType, LaunchAgentType } from '../src/shared/types'
 
 // Mock createPortal to render inline
 vi.mock('react-dom', async () => {
@@ -33,7 +34,9 @@ const ALL_INSTALLED: Record<AiAgentType, boolean> = {
 }
 
 describe('AgentPicker with allowNone', () => {
-  let onChange: ReturnType<typeof vi.fn>
+  // Typed, because an untyped `vi.fn()` infers a zero-argument signature and
+  // will not satisfy the prop it is passed as.
+  let onChange: Mock<(agent: LaunchAgentType | null) => void>
 
   beforeEach(() => {
     onChange = vi.fn()
@@ -141,7 +144,7 @@ describe('AgentPicker with allowNone', () => {
 })
 
 describe('AgentPicker with allowFromTask', () => {
-  let onChange: ReturnType<typeof vi.fn>
+  let onChange: Mock<(agent: LaunchAgentType | null) => void>
 
   beforeEach(() => {
     onChange = vi.fn()

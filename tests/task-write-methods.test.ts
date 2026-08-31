@@ -83,95 +83,104 @@ vi.mock('../packages/server/src/tailscale', () => ({
   clearBinaryCache: vi.fn()
 }))
 
-vi.mock('../packages/server/src/database', () => ({
-  getDb: vi.fn(),
-  closeDatabase: vi.fn(),
-  initDatabase: vi.fn(),
-  getDataDir: vi.fn(() => '/tmp/vorn-task-write-test'),
-  dbGetOwnerUser: vi.fn(() => ({
-    id: 'owner-1',
-    name: 'test',
-    role: 'owner' as const,
-    createdAt: new Date().toISOString()
-  })),
-  dbInsertDeviceToken: vi.fn(),
-  dbListDeviceTokens: vi.fn(() => []),
-  dbGetDeviceTokenSecret: vi.fn(),
-  dbRevokeDeviceToken: vi.fn(() => true),
-  dbTouchDeviceToken: vi.fn(),
-  loadFullConfig: vi.fn(() => ({
-    version: 1,
-    defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
-    projects: [],
-    workflows: [],
-    remoteHosts: [],
-    tasks: [],
-    workspaces: []
-  })),
-  saveFullConfig: vi.fn(),
+// The keys are constrained to names the module actually exports. A mock naming a
+// function the module does not have is a mock that can never be wrong: it stands
+// in for nothing, the real import stays undefined, and whatever calls it fails
+// into somebody's catch. Values are deliberately unconstrained -- these are
+// stubs, not implementations.
+vi.mock(
+  '../packages/server/src/database',
+  () =>
+    ({
+      closeDatabase: vi.fn(),
+      initDatabase: vi.fn(),
+      getDataDir: vi.fn(() => '/tmp/vorn-task-write-test'),
+      dbGetOwnerUser: vi.fn(() => ({
+        id: 'owner-1',
+        name: 'test',
+        role: 'owner' as const,
+        createdAt: new Date().toISOString()
+      })),
+      dbInsertDeviceToken: vi.fn(),
+      dbListDeviceTokens: vi.fn(() => []),
+      dbGetDeviceTokenSecret: vi.fn(),
+      dbRevokeDeviceToken: vi.fn(() => true),
+      dbTouchDeviceToken: vi.fn(),
+      loadConfig: vi.fn(() => ({
+        version: 1,
+        defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
+        projects: [],
+        workflows: [],
+        remoteHosts: [],
+        tasks: [],
+        workspaces: []
+      })),
+      saveConfig: vi.fn(),
 
-  // ── the task table, for real ──────────────────────────────────
-  dbListTasks: vi.fn((projectName?: string) =>
-    [...store.tasks.values()].filter((t) => !projectName || t.projectName === projectName)
-  ),
-  dbGetTask: vi.fn((id: string) => store.tasks.get(id) ?? null),
-  dbInsertTask: vi.fn((task: TaskConfig) => {
-    store.tasks.set(task.id, { ...task })
-  }),
-  dbUpdateTask: vi.fn((id: string, updates: Record<string, unknown>) => {
-    const row = store.tasks.get(id)
-    if (!row) return
-    for (const [key, value] of Object.entries(updates)) {
-      // Mirrors the real `dbUpdateTask`: an absent key leaves the column alone,
-      // and only `completedAt` and `archivedAt` treat an explicit `undefined`
-      // as "clear it". Getting this wrong here would hide the bug it exists to
-      // catch — a reopened task keeping the date it was finished.
-      if (value === undefined && key !== 'completedAt' && key !== 'archivedAt') continue
-      // And the column whitelist, which this mock used not to have. Without it a
-      // test could hand `dbUpdateTask` a field the real one silently drops and
-      // watch it pass — which is exactly the state `projectName` was in before
-      // it was added to the real function.
-      if (!WRITABLE.has(key)) continue
-      row[key] = value
-    }
-  }),
-  dbDeleteTask: vi.fn((id: string) => {
-    store.tasks.delete(id)
-  }),
-  dbGetMaxTaskOrder: vi.fn((projectName: string) =>
-    [...store.tasks.values()]
-      .filter((t) => t.projectName === projectName)
-      .reduce((max, t) => Math.max(max, (t.order as number) ?? -1), -1)
-  ),
-  dbGetProject: vi.fn((name: string) => (store.projects.has(name) ? { name, path: '/tmp' } : null)),
+      // ── the task table, for real ──────────────────────────────────
+      dbListTasks: vi.fn((projectName?: string) =>
+        [...store.tasks.values()].filter((t) => !projectName || t.projectName === projectName)
+      ),
+      dbGetTask: vi.fn((id: string) => store.tasks.get(id) ?? null),
+      dbInsertTask: vi.fn((task: TaskConfig) => {
+        store.tasks.set(task.id, { ...task })
+      }),
+      dbUpdateTask: vi.fn((id: string, updates: Record<string, unknown>) => {
+        const row = store.tasks.get(id)
+        if (!row) return
+        for (const [key, value] of Object.entries(updates)) {
+          // Mirrors the real `dbUpdateTask`: an absent key leaves the column alone,
+          // and only `completedAt` and `archivedAt` treat an explicit `undefined`
+          // as "clear it". Getting this wrong here would hide the bug it exists to
+          // catch — a reopened task keeping the date it was finished.
+          if (value === undefined && key !== 'completedAt' && key !== 'archivedAt') continue
+          // And the column whitelist, which this mock used not to have. Without it a
+          // test could hand `dbUpdateTask` a field the real one silently drops and
+          // watch it pass — which is exactly the state `projectName` was in before
+          // it was added to the real function.
+          if (!WRITABLE.has(key)) continue
+          row[key] = value
+        }
+      }),
+      dbDeleteTask: vi.fn((id: string) => {
+        store.tasks.delete(id)
+      }),
+      dbGetMaxTaskOrder: vi.fn((projectName: string) =>
+        [...store.tasks.values()]
+          .filter((t) => t.projectName === projectName)
+          .reduce((max, t) => Math.max(max, (t.order as number) ?? -1), -1)
+      ),
+      dbGetProject: vi.fn((name: string) =>
+        store.projects.has(name) ? { name, path: '/tmp' } : null
+      ),
 
-  dbListProjects: vi.fn(() => []),
-  dbListWorkflows: vi.fn(() => []),
-  dbInsertWorkflow: vi.fn(),
-  dbUpdateWorkflow: vi.fn(),
-  dbDeleteWorkflow: vi.fn(),
-  dbGetWorkflow: vi.fn(),
-  dbSignalChange: vi.fn(),
-  saveWorkflowRun: vi.fn(),
-  listWorkflowRuns: vi.fn(() => []),
-  listWorkflowRunsByTask: vi.fn(() => []),
-  updateWorkflowRunStatus: vi.fn(),
-  dbListSourceConnections: vi.fn(() => []),
-  dbGetSourceConnection: vi.fn(),
-  dbInsertSourceConnection: vi.fn(),
-  dbUpdateSourceConnection: vi.fn(),
-  dbDeleteSourceConnection: vi.fn(),
-  dbGetTaskSourceLink: vi.fn(),
-  dbGetTaskSourceLinkByExternalId: vi.fn(),
-  dbFindTaskByConnectorExternalId: vi.fn(),
-  dbInsertTaskSourceLink: vi.fn(),
-  dbUpdateTaskSourceLink: vi.fn(),
-  dbReleaseConnectorInboxLeases: vi.fn(),
-  dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
-  dbClaimConnectorInbox: vi.fn(() => []),
-  dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null),
-  loadWorkspaces: vi.fn(() => [])
-}))
+      dbListProjects: vi.fn(() => []),
+      dbListWorkflows: vi.fn(() => []),
+      dbInsertWorkflow: vi.fn(),
+      dbUpdateWorkflow: vi.fn(),
+      dbDeleteWorkflow: vi.fn(),
+      dbGetWorkflow: vi.fn(),
+      dbSignalChange: vi.fn(),
+      saveWorkflowRun: vi.fn(),
+      listWorkflowRuns: vi.fn(() => []),
+      listWorkflowRunsByTask: vi.fn(() => []),
+      updateWorkflowRunStatus: vi.fn(),
+      dbListSourceConnections: vi.fn(() => []),
+      dbGetSourceConnection: vi.fn(),
+      dbInsertSourceConnection: vi.fn(),
+      dbUpdateSourceConnection: vi.fn(),
+      dbDeleteSourceConnection: vi.fn(),
+      dbGetTaskSourceLink: vi.fn(),
+      dbGetTaskSourceLinkByExternalId: vi.fn(),
+      dbFindTaskByConnectorExternalId: vi.fn(),
+      dbInsertTaskSourceLink: vi.fn(),
+      dbUpdateTaskSourceLink: vi.fn(),
+      dbReleaseConnectorInboxLeases: vi.fn(),
+      dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
+      dbClaimConnectorInbox: vi.fn(() => []),
+      dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null)
+    }) satisfies Partial<Record<keyof typeof import('../packages/server/src/database'), unknown>>
+)
 
 let serverPort: number
 let serverClose: () => Promise<void>

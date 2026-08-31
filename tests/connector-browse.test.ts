@@ -278,7 +278,7 @@ describe('listingDetails', () => {
     const listings = buildConnectorListings(
       [],
       [],
-      [connection({ id: 'c1', connectorId: 'mcp', name: 'thing', mcpServerId: 'thing' })]
+      [connection({ id: 'c1', connectorId: 'mcp', name: 'thing' })]
     )
     const installed = listings.find((listing) => listing.source === 'installed')
     if (installed) expect(listingDetails(installed).known).toBe(false)

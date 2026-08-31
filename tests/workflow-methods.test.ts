@@ -63,90 +63,97 @@ vi.mock('../packages/server/src/tailscale', () => ({
   clearBinaryCache: vi.fn()
 }))
 
-vi.mock('../packages/server/src/database', () => ({
-  getDb: vi.fn(),
-  closeDatabase: vi.fn(),
-  initDatabase: vi.fn(),
-  getDataDir: vi.fn(() => '/tmp/vorn-workflow-methods-test'),
-  dbGetOwnerUser: vi.fn(() => ({
-    id: 'owner-1',
-    name: 'test',
-    role: 'owner' as const,
-    createdAt: new Date().toISOString()
-  })),
-  dbInsertDeviceToken: vi.fn(),
-  dbListDeviceTokens: vi.fn(() => []),
-  dbGetDeviceTokenSecret: vi.fn(),
-  dbRevokeDeviceToken: vi.fn(() => true),
-  dbTouchDeviceToken: vi.fn(),
-  loadFullConfig: vi.fn(() => ({
-    version: 1,
-    defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
-    projects: [],
-    workflows: [],
-    remoteHosts: [],
-    tasks: [],
-    workspaces: []
-  })),
-  saveFullConfig: vi.fn(),
+// The keys are constrained to names the module actually exports. A mock naming a
+// function the module does not have is a mock that can never be wrong: it stands
+// in for nothing, the real import stays undefined, and whatever calls it fails
+// into somebody's catch. Values are deliberately unconstrained -- these are
+// stubs, not implementations.
+vi.mock(
+  '../packages/server/src/database',
+  () =>
+    ({
+      closeDatabase: vi.fn(),
+      initDatabase: vi.fn(),
+      getDataDir: vi.fn(() => '/tmp/vorn-workflow-methods-test'),
+      dbGetOwnerUser: vi.fn(() => ({
+        id: 'owner-1',
+        name: 'test',
+        role: 'owner' as const,
+        createdAt: new Date().toISOString()
+      })),
+      dbInsertDeviceToken: vi.fn(),
+      dbListDeviceTokens: vi.fn(() => []),
+      dbGetDeviceTokenSecret: vi.fn(),
+      dbRevokeDeviceToken: vi.fn(() => true),
+      dbTouchDeviceToken: vi.fn(),
+      loadConfig: vi.fn(() => ({
+        version: 1,
+        defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
+        projects: [],
+        workflows: [],
+        remoteHosts: [],
+        tasks: [],
+        workspaces: []
+      })),
+      saveConfig: vi.fn(),
 
-  // ── the task table: names only ─────────────────────────────────
-  // These exist so the mocked module has the exports `registerAllMethods`
-  // imports. Nothing in this file calls them, and a copied implementation would
-  // be worse than none: it reached for a `store.tasks` this file does not have
-  // and filtered through the workflow column list, which is not the task one.
-  // `tests/task-write-methods.test.ts` is where task writes are tested.
-  dbListTasks: vi.fn(() => []),
-  dbGetTask: vi.fn(() => null),
-  dbInsertTask: vi.fn(),
-  dbUpdateTask: vi.fn(),
-  dbDeleteTask: vi.fn(),
-  dbGetMaxTaskOrder: vi.fn(() => -1),
-  dbGetProject: vi.fn(() => null),
+      // ── the task table: names only ─────────────────────────────────
+      // These exist so the mocked module has the exports `registerAllMethods`
+      // imports. Nothing in this file calls them, and a copied implementation would
+      // be worse than none: it reached for a `store.tasks` this file does not have
+      // and filtered through the workflow column list, which is not the task one.
+      // `tests/task-write-methods.test.ts` is where task writes are tested.
+      dbListTasks: vi.fn(() => []),
+      dbGetTask: vi.fn(() => null),
+      dbInsertTask: vi.fn(),
+      dbUpdateTask: vi.fn(),
+      dbDeleteTask: vi.fn(),
+      dbGetMaxTaskOrder: vi.fn(() => -1),
+      dbGetProject: vi.fn(() => null),
 
-  dbListProjects: vi.fn(() => []),
-  // ── the workflow table, for real ──────────────────────────────
-  dbListWorkflows: vi.fn(() => [...store.workflows.values()]),
-  dbGetWorkflow: vi.fn((id: string) => store.workflows.get(id) ?? null),
-  dbUpdateWorkflow: vi.fn((id: string, updates: Record<string, unknown>) => {
-    const row = store.workflows.get(id)
-    // The count, as the real one returns: zero rows matched is how an unknown id
-    // is answered, and a mock that returned nothing would make every call look
-    // like a miss.
-    if (!row) return 0
-    // The real `dbUpdateWorkflow` builds its SET list from a fixed set of
-    // columns and ignores anything else. Mirrored, because a mock that accepts
-    // any key lets a handler pass here while writing nothing in production --
-    // which is the state `project_name` was in before PR #488.
-    for (const [key, value] of Object.entries(updates)) {
-      if (!WORKFLOW_COLUMNS.has(key)) continue
-      row[key] = value
-    }
-    return 1
-  }),
-  dbInsertWorkflow: vi.fn(),
-  dbDeleteWorkflow: vi.fn(),
-  dbSignalChange: vi.fn(),
-  saveWorkflowRun: vi.fn(),
-  listWorkflowRuns: vi.fn(() => []),
-  listWorkflowRunsByTask: vi.fn(() => []),
-  updateWorkflowRunStatus: vi.fn(),
-  dbListSourceConnections: vi.fn(() => []),
-  dbGetSourceConnection: vi.fn(),
-  dbInsertSourceConnection: vi.fn(),
-  dbUpdateSourceConnection: vi.fn(),
-  dbDeleteSourceConnection: vi.fn(),
-  dbGetTaskSourceLink: vi.fn(),
-  dbGetTaskSourceLinkByExternalId: vi.fn(),
-  dbFindTaskByConnectorExternalId: vi.fn(),
-  dbInsertTaskSourceLink: vi.fn(),
-  dbUpdateTaskSourceLink: vi.fn(),
-  dbReleaseConnectorInboxLeases: vi.fn(),
-  dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
-  dbClaimConnectorInbox: vi.fn(() => []),
-  dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null),
-  loadWorkspaces: vi.fn(() => [])
-}))
+      dbListProjects: vi.fn(() => []),
+      // ── the workflow table, for real ──────────────────────────────
+      dbListWorkflows: vi.fn(() => [...store.workflows.values()]),
+      dbGetWorkflow: vi.fn((id: string) => store.workflows.get(id) ?? null),
+      dbUpdateWorkflow: vi.fn((id: string, updates: Record<string, unknown>) => {
+        const row = store.workflows.get(id)
+        // The count, as the real one returns: zero rows matched is how an unknown id
+        // is answered, and a mock that returned nothing would make every call look
+        // like a miss.
+        if (!row) return 0
+        // The real `dbUpdateWorkflow` builds its SET list from a fixed set of
+        // columns and ignores anything else. Mirrored, because a mock that accepts
+        // any key lets a handler pass here while writing nothing in production --
+        // which is the state `project_name` was in before PR #488.
+        for (const [key, value] of Object.entries(updates)) {
+          if (!WORKFLOW_COLUMNS.has(key)) continue
+          row[key] = value
+        }
+        return 1
+      }),
+      dbInsertWorkflow: vi.fn(),
+      dbDeleteWorkflow: vi.fn(),
+      dbSignalChange: vi.fn(),
+      saveWorkflowRun: vi.fn(),
+      listWorkflowRuns: vi.fn(() => []),
+      listWorkflowRunsByTask: vi.fn(() => []),
+      updateWorkflowRunStatus: vi.fn(),
+      dbListSourceConnections: vi.fn(() => []),
+      dbGetSourceConnection: vi.fn(),
+      dbInsertSourceConnection: vi.fn(),
+      dbUpdateSourceConnection: vi.fn(),
+      dbDeleteSourceConnection: vi.fn(),
+      dbGetTaskSourceLink: vi.fn(),
+      dbGetTaskSourceLinkByExternalId: vi.fn(),
+      dbFindTaskByConnectorExternalId: vi.fn(),
+      dbInsertTaskSourceLink: vi.fn(),
+      dbUpdateTaskSourceLink: vi.fn(),
+      dbReleaseConnectorInboxLeases: vi.fn(),
+      dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
+      dbClaimConnectorInbox: vi.fn(() => []),
+      dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null)
+    }) satisfies Partial<Record<keyof typeof import('../packages/server/src/database'), unknown>>
+)
 
 let serverPort: number
 let serverClose: () => Promise<void>

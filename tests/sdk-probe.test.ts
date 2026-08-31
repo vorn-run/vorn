@@ -109,7 +109,7 @@ describe('probeSdkConnector', () => {
   it('rejects a blank command without spawning anything', async () => {
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: '   ' })
+    const result = await probeSdkConnector({ command: '   ', args: [] })
 
     expect(result).toEqual({ ok: false, error: 'A command is required' })
     expect(transportInstances).toHaveLength(0)
@@ -129,7 +129,7 @@ describe('probeSdkConnector', () => {
     listTools.mockResolvedValue({ tools: [{ name: 'search' }] })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -141,7 +141,7 @@ describe('probeSdkConnector', () => {
     callTool.mockResolvedValue({ isError: true, content: [{ type: 'text', text: 'boom' }] })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result).toEqual({ ok: false, error: 'boom' })
   })
@@ -150,7 +150,7 @@ describe('probeSdkConnector', () => {
     callTool.mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify(manifest()) }] })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -161,7 +161,7 @@ describe('probeSdkConnector', () => {
     respond({ ...manifest(), id: '  ' })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result).toEqual({ ok: false, error: 'Connector manifest is missing an id or a name' })
   })
@@ -170,7 +170,7 @@ describe('probeSdkConnector', () => {
     respond({ ...manifest(), triggers: [], actions: [] })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -181,7 +181,7 @@ describe('probeSdkConnector', () => {
     callTool.mockResolvedValue({ content: [{ type: 'text', text: 'not json' }] })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result).toEqual({ ok: false, error: 'vorn_connector_manifest returned no manifest' })
   })
@@ -211,7 +211,7 @@ describe('probeSdkConnector', () => {
     )
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -225,7 +225,7 @@ describe('probeSdkConnector', () => {
     respond(manifest({ triggers: [{ type: 'items', label: 'Items', setup: { filters: {} } }] }))
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -253,7 +253,7 @@ describe('probeSdkConnector', () => {
     )
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -265,7 +265,7 @@ describe('probeSdkConnector', () => {
     clientConnect.mockImplementation(() => new Promise(() => {}))
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' }, { timeoutMs: 10 })
+    const result = await probeSdkConnector({ command: 'npx', args: [] }, { timeoutMs: 10 })
 
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -278,7 +278,7 @@ describe('probeSdkConnector', () => {
     clientConnect.mockRejectedValue(new Error('spawn failed'))
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result).toEqual({ ok: false, error: 'spawn failed' })
     expect(transportInstances[0].closed).toBe(true)
@@ -289,7 +289,7 @@ describe('probeSdkConnector', () => {
     clientClose.mockRejectedValue(new Error('already gone'))
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
   })
@@ -302,7 +302,7 @@ describe('probeSdkConnector icon handling', () => {
     withIcon({ viewBox: '0 0 16 16', paths: ['M1 1h4v4z', 'M8 8l2 2'] })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -313,7 +313,7 @@ describe('probeSdkConnector icon handling', () => {
     withIcon({ viewBox: 'not a viewbox', paths: ['M1 1h4v4z'] })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -324,7 +324,7 @@ describe('probeSdkConnector icon handling', () => {
     withIcon({ paths: ['M1 1h4v4z', '"/><script>alert(1)</script>'] })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -344,7 +344,7 @@ describe('probeSdkConnector icon handling', () => {
     withIcon(icon)
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -355,7 +355,7 @@ describe('probeSdkConnector icon handling', () => {
     withIcon({ paths: ['<svg/>'] })
     const { probeSdkConnector } = await importProbe()
 
-    const result = await probeSdkConnector({ command: 'npx' })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
 
     expect(result.ok).toBe(true)
     if (!result.ok) return

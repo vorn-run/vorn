@@ -53,17 +53,13 @@ beforeEach(async () => {
   sockets.length = 0
   vi.useFakeTimers()
   vi.stubGlobal('WebSocket', FakeSocket)
+  // Held in a closure rather than on the object: `this` inside an object literal
+  // method has no contextual type, so every access to it was untyped.
+  const store = new Map<string, string>()
   vi.stubGlobal('localStorage', {
-    store: new Map<string, string>(),
-    getItem(k: string) {
-      return this.store.get(k) ?? null
-    },
-    setItem(k: string, v: string) {
-      this.store.set(k, v)
-    },
-    removeItem(k: string) {
-      this.store.delete(k)
-    }
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k)
   })
   vi.resetModules()
   createApiShim = (await import('../packages/web/src/api-shim')).createApiShim

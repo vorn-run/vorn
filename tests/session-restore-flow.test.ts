@@ -6,7 +6,7 @@ vi.mock('node:child_process', () => ({
 
 import { buildAgentLaunchLine } from '../packages/server/src/agent-launch'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
-import type { AgentType, CreateTerminalPayload, TerminalSession } from '@vornrun/shared/types'
+import type { CreateTerminalPayload, TerminalSession } from '@vornrun/shared/types'
 
 // Mock the renderer API for resolveResumeSessionId
 const mockGetRecentSessions = vi.fn()
@@ -40,7 +40,7 @@ function makeSession(overrides: Partial<TerminalSession> = {}): TerminalSession 
 
 function makePayload(overrides: Partial<CreateTerminalPayload> = {}): CreateTerminalPayload {
   return {
-    agentType: 'claude' as AgentType,
+    agentType: 'claude',
     projectName: 'test',
     projectPath: '/test',
     ...overrides
@@ -150,7 +150,8 @@ describe('what is left of what is not running', () => {
     session: makeSession({ id }),
     endedAt: Date.now() - 3_600_000,
     replayable: true,
-    partial: false
+    partial: false,
+    closedCleanly: false
   })
 
   it('is what the server holds, minus anything that has a process', () => {

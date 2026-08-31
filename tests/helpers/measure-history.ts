@@ -89,7 +89,7 @@ async function main(): Promise<void> {
       recordOutput('warm', c)
     }
     await flushHistory()
-    await recoverHistory(warm, [{ id: 'warm', cols: COLS, rows: ROWS }])
+    await recoverHistory(warm, [{ id: 'warm' }])
     clean()
     fs.rmSync(warm, { recursive: true, force: true })
   }

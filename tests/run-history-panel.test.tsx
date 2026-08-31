@@ -38,6 +38,7 @@ function makeExec(
   overrides: Partial<WorkflowExecution> = {}
 ): WorkflowExecution {
   return {
+    runId: `wf-1:${startedAt}`,
     workflowId: 'wf-1',
     startedAt,
     completedAt: startedAt,
