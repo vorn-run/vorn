@@ -9,6 +9,38 @@ import type {
 } from '../../shared/types'
 import { WORKFLOW_STATUS_DOT, type WorkflowStatusKey, type RunOutcomeTone } from './workflow-status'
 import type { RunBucket } from '../stores/types'
+import { formatRunDuration } from './format-time'
+
+/** What the editor toasts when a run it launched reaches a terminal state. */
+export function runCompletionToast(
+  execution: WorkflowExecution,
+  nodes: WorkflowNode[]
+): { kind: 'success' | 'error' | 'quiet'; message: string; failedNodeId?: string } {
+  const triggerIds = new Set(nodes.filter((n) => n.type === 'trigger').map((n) => n.id))
+  if (execution.status === 'success') {
+    const steps = execution.nodeStates.filter(
+      (ns) => ns.status === 'success' && !triggerIds.has(ns.nodeId)
+    ).length
+    const duration = formatRunDuration(execution.startedAt, execution.completedAt)
+    return {
+      kind: 'success',
+      message: `Run finished — ${steps} step${steps === 1 ? '' : 's'} in ${duration}`
+    }
+  }
+  if (execution.status === 'error') {
+    // The true failure is the errored step that was not skipped by another one.
+    const failed = execution.nodeStates.find(
+      (ns) => ns.status === 'error' && !ns.error?.startsWith('Skipped:')
+    )
+    const failedNode = failed ? nodes.find((n) => n.id === failed.nodeId) : undefined
+    return {
+      kind: 'error',
+      message: failedNode ? `Run failed at "${failedNode.label}"` : 'Run failed',
+      failedNodeId: failedNode?.id
+    }
+  }
+  return { kind: 'quiet', message: '' }
+}
 
 /**
  * Which filter bucket a run belongs to. A paused run is `waiting` rather than

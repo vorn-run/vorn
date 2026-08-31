@@ -181,10 +181,16 @@ function LoopNode({ data }: NodeProps) {
       <NodeHoverToolbar nodeId={node.id} />
       <div
         data-loop-rail
-        className={`w-[312px] rounded-lg border transition-all
-                    ${selected ? NODE_SELECTED : NODE_UNSELECTED}
+        className={`w-[312px] rounded-lg border transition-all relative
+                    ${selected ? NODE_SELECTED : loopStatus === 'error' ? 'border-danger/60' : NODE_UNSELECTED}
                     bg-surface-node`}
       >
+        {loopStatus === 'running' && (
+          <span
+            aria-hidden
+            className="absolute inset-0 rounded-lg border border-white/[0.35] animate-pulse pointer-events-none"
+          />
+        )}
         <div
           onClick={(e) => {
             e.stopPropagation()

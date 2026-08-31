@@ -18,6 +18,8 @@ interface Props {
   onClickTask?: (taskId: string) => void
   onRetryRun?: (execution: WorkflowExecution) => void
   onRerunRun?: (execution: WorkflowExecution) => void
+  /** Run to keep expanded and following its live steps; set by editor launches. */
+  followRunId?: string | null
   onResumeSession?: (
     agentSessionId: string,
     agentType: AiAgentType,
@@ -36,7 +38,8 @@ export function RunHistoryPanel({
   onClickTask,
   onRetryRun,
   onRerunRun,
-  onResumeSession
+  onResumeSession,
+  followRunId
 }: Props) {
   const [fullOutputLogs, setFullOutputLogs] = useState<string | null>(null)
 
@@ -68,6 +71,7 @@ export function RunHistoryPanel({
                 onRetryRun={onRetryRun}
                 onRerunRun={onRerunRun}
                 onResumeSession={onResumeSession}
+                follow={workflowRunId(exec) === followRunId}
               />
             ))
           )}

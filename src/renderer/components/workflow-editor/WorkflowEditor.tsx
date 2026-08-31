@@ -8,14 +8,16 @@ import {
   History,
   Workflow,
   MoreHorizontal,
-  Settings
+  Settings,
+  Loader2,
+  Square
 } from 'lucide-react'
 import { ICON_MAP } from '../project-sidebar/icon-map'
 import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../../lib/project-icons'
 import { Tooltip } from '../Tooltip'
 import { useAppStore } from '../../stores'
 import { useShallow } from 'zustand/react/shallow'
-import { liveNodeStatus } from '../../lib/run-presentation'
+import { liveNodeStatus, runCompletionToast } from '../../lib/run-presentation'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from '../../lib/platform'
 import { SidebarToggleButton } from '../SidebarToggleButton'
 import { MainViewPills } from '../MainViewPills'
@@ -58,13 +60,15 @@ import {
   loopOwningInsertPoint,
   addParallelBranch,
   removeNode,
-  getWorktreeMode
+  getWorktreeMode,
+  needsRunPrompt
 } from '../../lib/workflow-helpers'
 import { startManualRun } from '../../lib/workflow-menu-items'
 import {
   buildStepOutputsMap,
   retryRunFromFailure,
-  rerunWorkflowRun
+  rerunWorkflowRun,
+  stopWorkflowRun
 } from '../../lib/workflow-execution'
 import { loopBodyMembers } from '../../lib/workflow-canvas-layout'
 import { toast } from '../Toast'
@@ -107,6 +111,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [pendingInsert, setPendingInsert] = useState<InsertAnchor | null>(null)
   const [showRunHistory, setShowRunHistory] = useState(false)
+  const [launchingSince, setLaunchingSince] = useState<number | null>(null)
+  const [followRunId, setFollowRunId] = useState<string | null>(null)
+  const followArmRef = useRef(false)
+  const trackedRunsRef = useRef(new Map<string, WorkflowExecution['status']>())
   const [showProperties, setShowProperties] = useState(true)
   const [showIconPicker, setShowIconPicker] = useState(false)
   const [showOverflowMenu, setShowOverflowMenu] = useState(false)
@@ -284,6 +292,44 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     )
   )
 
+  const runningRun = useAppStore(
+    useShallow((s) => {
+      if (!editingId) return null
+      for (const exec of s.workflowExecutions.values()) {
+        if (exec.workflowId === editingId && exec.status === 'running') {
+          return { runId: exec.runId, startedAt: exec.startedAt }
+        }
+      }
+      return null
+    })
+  )
+
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    if (!runningRun && launchingSince === null) return
+    const timer = setInterval(() => setNowTick(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [runningRun, launchingSince])
+
+  // The click answered before the server did; the real run takes over here.
+  useEffect(() => {
+    if (!runningRun) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLaunchingSince(null)
+    if (followArmRef.current) {
+      followArmRef.current = false
+      setFollowRunId(runningRun.runId)
+      trackedRunsRef.current.set(runningRun.runId, 'running')
+    }
+  }, [runningRun])
+
+  // A cancelled prompt or refused claim must not leave the button spinning.
+  useEffect(() => {
+    if (launchingSince === null) return
+    const timer = setTimeout(() => setLaunchingSince(null), 8000)
+    return () => clearTimeout(timer)
+  }, [launchingSince])
+
   // Load existing workflow when editing (with slug migration)
   useEffect(() => {
     if (existingWorkflow) {
@@ -399,13 +445,19 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     setEditingId
   ])
 
+  const beginEditorRun = useCallback((workflow: WorkflowDefinition, targetNodeId?: string) => {
+    if (!needsRunPrompt(workflow)) setLaunchingSince(Date.now())
+    followArmRef.current = true
+    setShowRunHistory(true)
+    setSelectedNodeId(null)
+    startManualRun(workflow, undefined, targetNodeId ? { targetNodeId } : undefined)
+  }, [])
+
   const handleRunToStep = useCallback(
     (nodeId: string) => {
-      const workflow = persistWorkflow()
-      setShowRunHistory(false)
-      startManualRun(workflow, undefined, { targetNodeId: nodeId })
+      beginEditorRun(persistWorkflow(), nodeId)
     },
-    [persistWorkflow]
+    [persistWorkflow, beginEditorRun]
   )
 
   const handleRetryRun = useCallback(
@@ -417,6 +469,37 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     },
     [persistWorkflow]
   )
+
+  // Terminal transitions of editor-launched runs land as toasts.
+  useEffect(() => {
+    if (!editingId) return
+    const execs = useAppStore.getState().workflowExecutions
+    for (const [runId, prev] of trackedRunsRef.current) {
+      const exec = execs.get(runId)
+      if (!exec || exec.status === prev) continue
+      trackedRunsRef.current.set(runId, exec.status)
+      if (exec.status === 'running') continue
+      trackedRunsRef.current.delete(runId)
+      const note = runCompletionToast(exec, nodes)
+      if (note.kind === 'success') {
+        toast.success(note.message)
+      } else if (note.kind === 'error') {
+        toast(note.message, 'error', {
+          duration: Number.POSITIVE_INFINITY,
+          actions: [
+            {
+              label: 'Retry',
+              onClick: (toastId) => {
+                toast.dismiss(toastId)
+                const latest = useAppStore.getState().workflowExecutions.get(runId) ?? exec
+                handleRetryRun(latest)
+              }
+            }
+          ]
+        })
+      }
+    }
+  }, [editingId, liveExecSignature, nodes, handleRetryRun])
 
   const handleRerunRun = useCallback(
     (run: WorkflowExecution) => {
@@ -445,9 +528,13 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
   const handleRun = useCallback(() => {
     const workflow = persistWorkflow()
-    if (!inline) handleClose()
-    startManualRun(workflow)
-  }, [persistWorkflow, inline, handleClose])
+    if (!inline) {
+      handleClose()
+      startManualRun(workflow)
+      return
+    }
+    beginEditorRun(workflow)
+  }, [persistWorkflow, inline, handleClose, beginEditorRun])
 
   const handleDelete = useCallback(() => {
     if (editingId) {
@@ -875,15 +962,43 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         </div>
 
         <div className="flex items-center gap-1 titlebar-no-drag">
-          <Tooltip label="Run workflow" position="bottom">
-            <button
-              onClick={handleRun}
-              aria-label="Run workflow"
-              className="text-gray-400 hover:text-white p-1.5 rounded-md hover:bg-white/[0.06] transition-colors"
-            >
-              <Play size={15} />
-            </button>
-          </Tooltip>
+          {runningRun || launchingSince !== null ? (
+            <div className="flex items-center gap-0.5">
+              <span className="flex items-center gap-1.5 px-1.5 text-gray-300">
+                <Loader2 size={13} className="animate-spin" />
+                <span className="text-[11px] font-mono tabular-nums">
+                  {(() => {
+                    const startMs = runningRun
+                      ? Date.parse(runningRun.startedAt)
+                      : (launchingSince ?? nowTick)
+                    const total = Math.max(0, Math.floor((nowTick - startMs) / 1000))
+                    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+                  })()}
+                </span>
+              </span>
+              <Tooltip label="Stop run" position="bottom">
+                <button
+                  onClick={() => runningRun && void stopWorkflowRun(runningRun.runId)}
+                  aria-label="Stop run"
+                  disabled={!runningRun}
+                  className="text-gray-400 hover:text-danger p-1.5 rounded-md hover:bg-white/[0.06]
+                             transition-colors disabled:opacity-50"
+                >
+                  <Square size={13} />
+                </button>
+              </Tooltip>
+            </div>
+          ) : (
+            <Tooltip label="Run workflow" position="bottom">
+              <button
+                onClick={handleRun}
+                aria-label="Run workflow"
+                className="text-gray-400 hover:text-white p-1.5 rounded-md hover:bg-white/[0.06] transition-colors"
+              >
+                <Play size={15} />
+              </button>
+            </Tooltip>
+          )}
 
           {editingId && (
             <Tooltip
@@ -1004,11 +1119,15 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             executions={executionHistory}
             nodes={nodes}
             tasks={tasks}
-            onClose={() => setShowRunHistory(false)}
+            onClose={() => {
+              setShowRunHistory(false)
+              setFollowRunId(null)
+            }}
             onClickTask={handleClickTask}
             onResumeSession={handleResumeSession}
             onRetryRun={handleRetryRun}
             onRerunRun={handleRerunRun}
+            followRunId={followRunId}
           />
         )}
 

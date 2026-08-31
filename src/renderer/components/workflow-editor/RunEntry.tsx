@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
 import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw, Check, X } from 'lucide-react'
 import {
@@ -93,6 +93,8 @@ interface RunStepsListProps {
   includeTrigger?: boolean
   onViewFullOutput?: (logs: string) => void
   onClickTask?: (taskId: string) => void
+  /** Auto-expand whichever step is running and keep it scrolled into view. */
+  followActive?: boolean
   onResumeSession?: (
     agentSessionId: string,
     agentType: AiAgentType,
@@ -121,9 +123,23 @@ export function RunStepsList({
   includeTrigger = false,
   onViewFullOutput,
   onClickTask,
+  followActive,
   onResumeSession
 }: RunStepsListProps) {
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
+  const activeNodeId = followActive
+    ? (execution.nodeStates.find((ns) => ns.status === 'running')?.nodeId ?? null)
+    : null
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (activeNodeId) setExpandedNodeId(activeNodeId)
+  }, [activeNodeId])
+  const expandedRowRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (followActive && expandedNodeId) {
+      expandedRowRef.current?.scrollIntoView?.({ block: 'nearest' })
+    }
+  }, [followActive, expandedNodeId])
   const connections = useConnections()
 
   const actionStates = includeTrigger
@@ -224,7 +240,7 @@ export function RunStepsList({
             node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
 
           return (
-            <div key={ns.nodeId}>
+            <div key={ns.nodeId} ref={isExpanded ? expandedRowRef : undefined}>
               {/* Line linking the previous step to this one so the cards read
                   as one continuous flow. Neutral on purpose: the status dots
                   carry the colour, and tinting the connectors too turns the
@@ -434,6 +450,8 @@ interface RunEntryProps {
   onRerunRun?: (execution: WorkflowExecution) => void
   /** Resume this failed run from its failed step, reusing completed outputs. */
   onRetryRun?: (execution: WorkflowExecution) => void
+  /** Keep this run expanded and its active step in view while it streams. */
+  follow?: boolean
   onResumeSession?: (
     agentSessionId: string,
     agentType: AiAgentType,
@@ -453,15 +471,16 @@ export function RunEntry({
   onClickTask,
   onRerunRun,
   onRetryRun,
+  follow,
   onResumeSession
 }: RunEntryProps) {
   const hasWaitingGate = execution.nodeStates.some((ns) => ns.status === 'waiting')
-  const [expanded, setExpanded] = useState(hasWaitingGate)
+  const [expanded, setExpanded] = useState(hasWaitingGate || !!follow)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (hasWaitingGate) setExpanded(true)
-  }, [hasWaitingGate])
+    if (hasWaitingGate || follow) setExpanded(true)
+  }, [hasWaitingGate, follow])
 
   const triggerTask =
     execution.triggerTaskId && tasks
@@ -547,6 +566,7 @@ export function RunEntry({
           onViewFullOutput={onViewFullOutput}
           onClickTask={onClickTask}
           onResumeSession={onResumeSession}
+          followActive={follow}
         />
       )}
     </div>
