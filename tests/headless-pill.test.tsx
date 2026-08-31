@@ -26,6 +26,7 @@ const workflow: WorkflowDefinition = {
   name: 'My Workflow',
   icon: 'workflow',
   iconColor: '#aabbcc',
+  enabled: true,
   nodes: [],
   edges: []
 }

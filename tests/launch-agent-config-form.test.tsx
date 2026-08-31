@@ -150,7 +150,7 @@ describe('LaunchAgentConfigForm — canUseFromTask visibility', () => {
 
 describe('LaunchAgentConfigForm — auto-revert on context loss', () => {
   it('reverts agentType from "fromTask" to the default agent when canUseFromTask flips to false', async () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: LaunchAgentConfig) => void>()
     const { rerender } = render(
       <LaunchAgentConfigForm
         config={baseConfig({ agentType: 'fromTask' })}
@@ -179,7 +179,7 @@ describe('LaunchAgentConfigForm — auto-revert on context loss', () => {
   })
 
   it('does not revert when the user selects a concrete agent with a task trigger still active', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: LaunchAgentConfig) => void>()
     render(
       <LaunchAgentConfigForm
         config={baseConfig({ agentType: 'codex' })}
@@ -227,7 +227,7 @@ describe('LaunchAgentConfigForm — UI sections', () => {
   })
 
   it('toggles the headless mode when the switch is clicked', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: LaunchAgentConfig) => void>()
     const { container } = render(
       <LaunchAgentConfigForm config={baseConfig({ headless: false })} onChange={onChange} />
     )
@@ -359,7 +359,7 @@ describe('LaunchAgentConfigForm — Output Schema (typed outputs)', () => {
   })
 
   it('commits a parsed object when valid JSON is entered', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: LaunchAgentConfig) => void>()
     const { container } = render(
       <LaunchAgentConfigForm config={baseConfig({ headless: true })} onChange={onChange} />
     )
@@ -371,7 +371,7 @@ describe('LaunchAgentConfigForm — Output Schema (typed outputs)', () => {
   })
 
   it('shows an error and does not commit when JSON is invalid', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: LaunchAgentConfig) => void>()
     const { container } = render(
       <LaunchAgentConfigForm config={baseConfig({ headless: true })} onChange={onChange} />
     )
@@ -382,7 +382,7 @@ describe('LaunchAgentConfigForm — Output Schema (typed outputs)', () => {
   })
 
   it('rejects a non-object schema (array)', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: LaunchAgentConfig) => void>()
     const { container } = render(
       <LaunchAgentConfigForm config={baseConfig({ headless: true })} onChange={onChange} />
     )
@@ -393,7 +393,7 @@ describe('LaunchAgentConfigForm — Output Schema (typed outputs)', () => {
   })
 
   it('clears the schema (onChange undefined) when the field is emptied', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: LaunchAgentConfig) => void>()
     const { container } = render(
       <LaunchAgentConfigForm
         config={baseConfig({ headless: true, outputSchema: { type: 'object' } })}
@@ -485,7 +485,7 @@ describe('LaunchAgentConfigForm — contextual workflow surface', () => {
   })
 
   it('clears From Context fields when the trigger flips off contextual', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: LaunchAgentConfig) => void>()
     const { rerender } = render(
       <LaunchAgentConfigForm
         config={baseConfig({

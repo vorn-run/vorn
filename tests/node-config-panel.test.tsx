@@ -40,7 +40,7 @@ function makeNode(type: WorkflowNode['type']): WorkflowNode {
       type === 'trigger'
         ? { triggerType: 'manual' }
         : type === 'script'
-          ? { scriptType: 'bash' }
+          ? { scriptType: 'bash', scriptContent: '' }
           : type === 'condition'
             ? { variable: '', operator: 'equals', value: '' }
             : type === 'approval'

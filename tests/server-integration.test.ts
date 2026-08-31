@@ -30,57 +30,64 @@ vi.mock('../packages/server/src/tailscale', () => ({
 }))
 
 // Mock database to avoid SQLite dependency
-vi.mock('../packages/server/src/database', () => ({
-  getDb: vi.fn(),
-  closeDatabase: vi.fn(),
-  initDatabase: vi.fn(),
-  // The single resolved data directory the whole server process reads.
-  getDataDir: vi.fn(() => '/tmp/vorn-integration-test'),
-  dbGetOwnerUser: vi.fn(() => ({
-    id: 'owner-1',
-    name: 'test',
-    role: 'owner' as const,
-    createdAt: new Date().toISOString()
-  })),
-  // Pairing mints a real device token when one is collected, and minting is
-  // the only part of that flow which reaches storage.
-  dbInsertDeviceToken: vi.fn(),
-  dbListDeviceTokens: vi.fn(() => []),
-  dbGetDeviceTokenSecret: vi.fn(),
-  dbRevokeDeviceToken: vi.fn(() => true),
-  dbTouchDeviceToken: vi.fn(),
-  loadFullConfig: vi.fn(() => ({
-    version: 1,
-    defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
-    projects: [],
-    workflows: [],
-    remoteHosts: [],
-    tasks: [],
-    workspaces: []
-  })),
-  saveFullConfig: vi.fn(),
-  dbListTasks: vi.fn(() => []),
-  dbGetTask: vi.fn(),
-  dbInsertTask: vi.fn(),
-  dbUpdateTask: vi.fn(),
-  dbDeleteTask: vi.fn(),
-  dbGetMaxTaskOrder: vi.fn(() => 0),
-  dbGetProject: vi.fn(),
-  dbListProjects: vi.fn(() => []),
-  dbListWorkflows: vi.fn(() => []),
-  dbInsertWorkflow: vi.fn(),
-  dbUpdateWorkflow: vi.fn(),
-  dbDeleteWorkflow: vi.fn(),
-  saveWorkflowRun: vi.fn(),
-  listWorkflowRuns: vi.fn(() => []),
-  listWorkflowRunsByTask: vi.fn(() => []),
-  updateWorkflowRunStatus: vi.fn(),
-  dbReleaseConnectorInboxLeases: vi.fn(),
-  dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
-  dbClaimConnectorInbox: vi.fn(() => []),
-  dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null),
-  loadWorkspaces: vi.fn(() => [])
-}))
+// The keys are constrained to names the module actually exports. A mock naming a
+// function the module does not have is a mock that can never be wrong: it stands
+// in for nothing, the real import stays undefined, and whatever calls it fails
+// into somebody's catch. Values are deliberately unconstrained -- these are
+// stubs, not implementations.
+vi.mock(
+  '../packages/server/src/database',
+  () =>
+    ({
+      closeDatabase: vi.fn(),
+      initDatabase: vi.fn(),
+      // The single resolved data directory the whole server process reads.
+      getDataDir: vi.fn(() => '/tmp/vorn-integration-test'),
+      dbGetOwnerUser: vi.fn(() => ({
+        id: 'owner-1',
+        name: 'test',
+        role: 'owner' as const,
+        createdAt: new Date().toISOString()
+      })),
+      // Pairing mints a real device token when one is collected, and minting is
+      // the only part of that flow which reaches storage.
+      dbInsertDeviceToken: vi.fn(),
+      dbListDeviceTokens: vi.fn(() => []),
+      dbGetDeviceTokenSecret: vi.fn(),
+      dbRevokeDeviceToken: vi.fn(() => true),
+      dbTouchDeviceToken: vi.fn(),
+      loadConfig: vi.fn(() => ({
+        version: 1,
+        defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
+        projects: [],
+        workflows: [],
+        remoteHosts: [],
+        tasks: [],
+        workspaces: []
+      })),
+      saveConfig: vi.fn(),
+      dbListTasks: vi.fn(() => []),
+      dbGetTask: vi.fn(),
+      dbInsertTask: vi.fn(),
+      dbUpdateTask: vi.fn(),
+      dbDeleteTask: vi.fn(),
+      dbGetMaxTaskOrder: vi.fn(() => 0),
+      dbGetProject: vi.fn(),
+      dbListProjects: vi.fn(() => []),
+      dbListWorkflows: vi.fn(() => []),
+      dbInsertWorkflow: vi.fn(),
+      dbUpdateWorkflow: vi.fn(),
+      dbDeleteWorkflow: vi.fn(),
+      saveWorkflowRun: vi.fn(),
+      listWorkflowRuns: vi.fn(() => []),
+      listWorkflowRunsByTask: vi.fn(() => []),
+      updateWorkflowRunStatus: vi.fn(),
+      dbReleaseConnectorInboxLeases: vi.fn(),
+      dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
+      dbClaimConnectorInbox: vi.fn(() => []),
+      dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null)
+    }) satisfies Partial<Record<keyof typeof import('../packages/server/src/database'), unknown>>
+)
 
 let serverPort: number
 let serverClose: () => Promise<void>
@@ -315,7 +322,7 @@ describe('server integration', () => {
       const code = await startPairing()
       const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
 
-      const polled = await post('/api/pair/poll', { requestId: json.requestId })
+      const polled = await post('/api/pair/poll', { requestId: String(json.requestId) })
 
       expect(polled.json).toEqual({ status: 'pending' })
     })
@@ -323,9 +330,9 @@ describe('server integration', () => {
     it('hands over a token once a person approved it', async () => {
       const code = await startPairing()
       const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
-      await decide('pairing:approve', json.requestId)
+      await decide('pairing:approve', String(json.requestId))
 
-      const polled = await post('/api/pair/poll', { requestId: json.requestId })
+      const polled = await post('/api/pair/poll', { requestId: String(json.requestId) })
 
       expect(polled.json.status).toBe('approved')
       expect(polled.json.token).toMatch(/^vorn_/)
@@ -335,9 +342,9 @@ describe('server integration', () => {
     it('hands over nothing once a person denied it', async () => {
       const code = await startPairing()
       const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
-      await decide('pairing:deny', json.requestId)
+      await decide('pairing:deny', String(json.requestId))
 
-      const polled = await post('/api/pair/poll', { requestId: json.requestId })
+      const polled = await post('/api/pair/poll', { requestId: String(json.requestId) })
 
       expect(polled.json).toEqual({ status: 'denied' })
     })
@@ -345,10 +352,10 @@ describe('server integration', () => {
     it('lets the token be collected once and not again', async () => {
       const code = await startPairing()
       const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
-      await decide('pairing:approve', json.requestId)
-      await post('/api/pair/poll', { requestId: json.requestId })
+      await decide('pairing:approve', String(json.requestId))
+      await post('/api/pair/poll', { requestId: String(json.requestId) })
 
-      const second = await post('/api/pair/poll', { requestId: json.requestId })
+      const second = await post('/api/pair/poll', { requestId: String(json.requestId) })
 
       expect(second.json).toEqual({ status: 'expired' })
     })
@@ -384,10 +391,10 @@ describe('server integration', () => {
     async function notificationsFor(query: string): Promise<string[]> {
       const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws${query}`, authOptions())
       const methods: string[] = []
-      let idle: ReturnType<typeof setTimeout>
+      let idle: ReturnType<typeof setTimeout> | undefined
       const settled = new Promise<void>((resolve) => {
         const restart = (): void => {
-          clearTimeout(idle)
+          if (idle) clearTimeout(idle)
           idle = setTimeout(resolve, 60)
         }
         ws.on('message', (raw) => {

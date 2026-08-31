@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const mockSaveSessions = vi.fn()
-const mockGetPrevious = vi.fn(() => [])
-const mockClearSessions = vi.fn()
+const mockSaveSessions = vi.fn<(...args: unknown[]) => unknown>()
+const mockGetPrevious = vi.fn<(...args: unknown[]) => unknown[]>(() => [])
+const mockClearSessions = vi.fn<(...args: unknown[]) => unknown>()
 
 vi.mock('../packages/server/src/database', () => ({
   saveSessions: (...args: unknown[]) => mockSaveSessions(...args),

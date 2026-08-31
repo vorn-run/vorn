@@ -52,14 +52,22 @@ function workflow(): WorkflowDefinition {
     id: 'wf-1',
     name: 'Deploy',
     icon: 'Zap',
-    trigger: { type: 'manual' },
+    iconColor: 'bronzo',
+    enabled: true,
     nodes: [],
     edges: []
   }
 }
 
 let notificationInstances: Array<{ onclick?: () => void }> = []
-const NotificationMock = vi.fn(function (this: { onclick?: () => void }) {
+// Declared with the arguments the real constructor takes. Without them the mock
+// infers a zero-argument call, and `mock.calls[0]` is an empty tuple -- so every
+// assertion about what was dispatched had nothing to read.
+const NotificationMock = vi.fn(function (
+  this: { onclick?: () => void },
+  _title: string,
+  _options?: NotificationOptions
+) {
   this.onclick = undefined
   notificationInstances.push(this)
 })

@@ -19,7 +19,7 @@ import {
 function makeSession(overrides: Partial<TerminalSession> = {}): TerminalSession {
   return {
     id: 'term-1',
-    agentType: 'claude' as AgentType,
+    agentType: 'claude',
     projectName: 'my-app',
     projectPath: '/home/user/my-app',
     status: 'running',
@@ -32,7 +32,7 @@ function makeSession(overrides: Partial<TerminalSession> = {}): TerminalSession 
 function makeRecent(overrides: Partial<RecentSession> = {}): RecentSession {
   return {
     sessionId: 'sess-1',
-    agentType: 'claude' as AgentType,
+    agentType: 'claude',
     display: 'Fix bug',
     projectPath: '/home/user/my-app',
     timestamp: Date.now(),
@@ -108,7 +108,7 @@ describe('resolveResumeSessionId', () => {
       return Promise.resolve([
         makeRecent({
           sessionId: 'sess-other',
-          agentType: 'copilot' as AgentType,
+          agentType: 'copilot',
           projectPath: '/completely/different'
         })
       ])
@@ -157,7 +157,7 @@ describe('resolveResumeSessionId', () => {
 
   it('does not attempt exact resume for gemini sessions', async () => {
     const session = makeSession({
-      agentType: 'gemini' as AgentType,
+      agentType: 'gemini',
       hookSessionId: 'gemini-hook'
     })
     const result = await resolveResumeSessionId(session)

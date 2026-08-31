@@ -571,13 +571,18 @@ describe('TabView merged toolbar controls', () => {
         config: {
           version: 1,
           defaults: { shell: 'bash', fontSize: 14, theme: 'dark' as const },
+          projects: [],
           tasks: [
             {
               id: 'task-1',
+              projectName: 'demo',
               title: 'Fix auth bug',
+              description: '',
               status: 'in_progress' as const,
+              order: 0,
               assignedSessionId: 'term-1',
-              createdAt: Date.now()
+              createdAt: '2026-04-20T10:00:00Z',
+              updatedAt: '2026-04-20T10:00:00Z'
             }
           ]
         }

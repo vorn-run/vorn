@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
+import type { WorkflowDefinition } from '../src/shared/types'
 
 vi.mock('framer-motion', () => ({
   motion: {
@@ -43,13 +44,13 @@ vi.mock('../src/renderer/lib/workflow-execution', () => ({
 
 const mockState = {
   isWorkflowEditorOpen: true,
-  editingWorkflowId: null,
+  editingWorkflowId: null as string | null,
   setWorkflowEditorOpen: vi.fn(),
   setEditingWorkflowId: vi.fn(),
   addWorkflow: vi.fn(),
   updateWorkflow: vi.fn(),
   removeWorkflow: vi.fn(),
-  config: { workflows: [], tasks: [], projects: [], defaults: {} },
+  config: { workflows: [] as WorkflowDefinition[], tasks: [], projects: [], defaults: {} },
   setPendingWorkflowRun: vi.fn(),
   addTerminal: vi.fn(),
   setFocusedTerminal: vi.fn(),
@@ -275,7 +276,7 @@ describe('WorkflowEditor', () => {
       enabled: true,
       staggerDelayMs: 500,
       autoCleanupWorktrees: true,
-      lastRunAt: 1234567890,
+      lastRunAt: '2026-04-20T10:00:00Z',
       lastRunStatus: 'success' as const,
       workspaceId: 'personal'
     }
@@ -292,7 +293,7 @@ describe('WorkflowEditor', () => {
         id: 'w1',
         staggerDelayMs: 500,
         autoCleanupWorktrees: true,
-        lastRunAt: 1234567890,
+        lastRunAt: '2026-04-20T10:00:00Z',
         lastRunStatus: 'success',
         workspaceId: 'personal'
       })

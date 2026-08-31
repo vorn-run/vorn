@@ -90,6 +90,7 @@ describe('WorkflowPropertiesPanel', () => {
 
   it('renders Last run with a status dot when lastRun is provided', () => {
     const lastRun = {
+      runId: 'w1:last',
       workflowId: 'w1',
       startedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
       status: 'success' as const,

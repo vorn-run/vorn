@@ -41,6 +41,8 @@ const initialState = useAppStore.getState()
 const taskA: TaskConfig = {
   id: 'task-a',
   projectName: 'demo',
+  createdAt: '2026-04-20T10:00:00Z',
+  updatedAt: '2026-04-20T10:00:00Z',
   title: 'Alpha task',
   description: 'Alpha description',
   status: 'todo',
@@ -53,6 +55,8 @@ const taskA: TaskConfig = {
 const taskB: TaskConfig = {
   id: 'task-b',
   projectName: 'demo',
+  createdAt: '2026-04-20T10:00:00Z',
+  updatedAt: '2026-04-20T10:00:00Z',
   title: 'Beta task',
   description: 'Beta description',
   status: 'todo',
@@ -62,7 +66,7 @@ const taskB: TaskConfig = {
 
 const baseConfig: AppConfig = {
   ...(initialState.config as AppConfig),
-  projects: [{ name: 'demo', path: '/demo' }],
+  projects: [{ name: 'demo', path: '/demo', preferredAgents: [] }],
   tasks: [taskA, taskB],
   workflows: []
 } as AppConfig

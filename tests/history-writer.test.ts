@@ -453,7 +453,7 @@ describe('a log that outgrows its cap', () => {
     expect(logOf().generation).toBe(3)
     expect(readCheckpoint(historyDir(dir, ID))?.generation).toBe(2)
 
-    const report = await recoverHistory(dir, [{ id: ID, cols: 80, rows: 24 }])
+    const report = await recoverHistory(dir, [{ id: ID }])
     expect(report.recovered[0]?.replayed).toBe(0)
     expect(readScrollback(ID)).toBe('this much was checkpointed')
   })

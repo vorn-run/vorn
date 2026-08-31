@@ -51,7 +51,14 @@ const CARDS: [string, (selected: boolean) => React.ReactElement][] = [
   ],
   [
     'ScriptNode',
-    (s) => <ScriptNode label="S" config={{ scriptType: 'bash' }} selected={s} onClick={vi.fn()} />
+    (s) => (
+      <ScriptNode
+        label="S"
+        config={{ scriptType: 'bash', scriptContent: '' }}
+        selected={s}
+        onClick={vi.fn()}
+      />
+    )
   ],
   [
     'ConditionNode',
@@ -65,14 +72,43 @@ const CARDS: [string, (selected: boolean) => React.ReactElement][] = [
     )
   ],
   ['ApprovalNode', (s) => <ApprovalNode label="Ap" config={{}} selected={s} onClick={vi.fn()} />],
-  ['LoopNode', (s) => <LoopNode label="L" config={{}} nodes={[]} selected={s} onClick={vi.fn()} />],
+  [
+    'LoopNode',
+    (s) => (
+      <LoopNode
+        label="L"
+        config={{ nodeType: 'loop', bodyNodeIds: [], maxIterations: 1 }}
+        nodes={[]}
+        selected={s}
+        onClick={vi.fn()}
+      />
+    )
+  ],
   [
     'CreateTaskFromItemNode',
-    (s) => <CreateTaskFromItemNode label="Ct" config={{}} selected={s} onClick={vi.fn()} />
+    (s) => (
+      <CreateTaskFromItemNode
+        label="Ct"
+        config={{
+          nodeType: 'createTaskFromItem',
+          project: 'fromConnection',
+          initialStatus: 'todo'
+        }}
+        selected={s}
+        onClick={vi.fn()}
+      />
+    )
   ],
   [
     'CallConnectorActionNode',
-    (s) => <CallConnectorActionNode label="Cc" config={{}} selected={s} onClick={vi.fn()} />
+    (s) => (
+      <CallConnectorActionNode
+        label="Cc"
+        config={{ nodeType: 'callConnectorAction', connectionId: 'c1', action: 'run', args: {} }}
+        selected={s}
+        onClick={vi.fn()}
+      />
+    )
   ]
 ]
 
@@ -99,17 +135,32 @@ describe('node card selection', () => {
     const withStatus: [string, React.ReactElement][] = [
       [
         'LoopNode',
-        <LoopNode label="L" config={{}} nodes={[]} executionStatus="running" onClick={vi.fn()} />
+        <LoopNode
+          label="L"
+          config={{ nodeType: 'loop', bodyNodeIds: [], maxIterations: 1 }}
+          nodes={[]}
+          executionStatus="running"
+          onClick={vi.fn()}
+        />
       ],
       [
         'CreateTaskFromItemNode',
-        <CreateTaskFromItemNode label="Ct" config={{}} executionStatus="error" onClick={vi.fn()} />
+        <CreateTaskFromItemNode
+          label="Ct"
+          config={{
+            nodeType: 'createTaskFromItem',
+            project: 'fromConnection',
+            initialStatus: 'todo'
+          }}
+          executionStatus="error"
+          onClick={vi.fn()}
+        />
       ],
       [
         'CallConnectorActionNode',
         <CallConnectorActionNode
           label="Cc"
-          config={{}}
+          config={{ nodeType: 'callConnectorAction', connectionId: 'c1', action: 'run', args: {} }}
           executionStatus="waiting"
           onClick={vi.fn()}
         />

@@ -338,7 +338,15 @@ describe('SessionItem with popped-out cards', () => {
             'other',
             {
               id: 'other',
-              session: { id: 'other', projectPath: '/p2', projectName: 'p2', agentType: 'claude' },
+              session: {
+                id: 'other',
+                projectPath: '/p2',
+                projectName: 'p2',
+                agentType: 'claude',
+                status: 'idle',
+                createdAt: 1,
+                pid: 1
+              },
               status: 'idle',
               lastOutputTimestamp: 1
             }

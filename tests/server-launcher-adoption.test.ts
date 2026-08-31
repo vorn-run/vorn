@@ -566,7 +566,7 @@ describe('what the reviews caught', () => {
       const { launchServer, detachFromServer } = await import('../src/main/server/server-launcher')
       await launchServer()
       const killed: string[] = []
-      ;(spawnedChildren[0] as Record<string, unknown>).kill = (sig: string): void => {
+      ;(spawnedChildren[0] as unknown as Record<string, unknown>).kill = (sig: string): void => {
         killed.push(sig)
       }
 

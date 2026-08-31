@@ -17,6 +17,7 @@ function block(over: Partial<CommandBlock> & { line: number }): CommandBlock {
     command: 'cmd',
     exitCode: 0,
     durationMs: 100,
+    cwd: null,
     outputLines: 1,
     marker: marker(line),
     ...rest

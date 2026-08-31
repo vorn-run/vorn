@@ -28,7 +28,7 @@ describe('node cards — executionStatus dot', () => {
     const { container } = render(
       <ScriptNode
         label="Script"
-        config={{ scriptType: 'bash' }}
+        config={{ scriptType: 'bash', scriptContent: '' }}
         executionStatus="success"
         onClick={vi.fn()}
       />

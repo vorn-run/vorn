@@ -167,7 +167,12 @@ describe('SourcePromptDialog', () => {
         {
           id: 'a',
           type: 'launchAgent',
-          config: { agentType: 'claude', prompt: 'No context references' },
+          config: {
+            agentType: 'claude',
+            projectName: '',
+            projectPath: '',
+            prompt: 'No context references'
+          },
           position: { x: 0, y: 0 },
           label: 'Run'
         }

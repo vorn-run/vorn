@@ -11,7 +11,8 @@ vi.mock('../src/renderer/components/Toast', () => ({
 
 const project: ProjectConfig = {
   name: 'test-project',
-  path: '/tmp/test'
+  path: '/tmp/test',
+  preferredAgents: []
 }
 
 describe('ProjectContextMenu', () => {

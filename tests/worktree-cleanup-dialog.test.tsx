@@ -31,8 +31,8 @@ vi.mock('framer-motion', () => ({
   )
 }))
 
-const mockLoading = vi.fn(() => 'toast-id')
-const mockUpdate = vi.fn()
+const mockLoading = vi.fn((_msg: string) => 'toast-id')
+const mockUpdate = vi.fn<(...args: unknown[]) => unknown>()
 const mockDismiss = vi.fn()
 
 vi.mock('../src/renderer/components/Toast', () => ({
@@ -57,7 +57,7 @@ const mockIsWorktreeDirty = vi.fn()
 const mockRemoveWorktree = vi.fn()
 const mockKillTerminal = vi.fn()
 const mockKillHeadlessSession = vi.fn()
-const mockOnWorktreeCleanup = vi.fn(() => () => {})
+const mockOnWorktreeCleanup = vi.fn((_cb: unknown) => () => {})
 const mockLoadWorktreesStoreFn = vi.fn()
 
 Object.defineProperty(window, 'api', {

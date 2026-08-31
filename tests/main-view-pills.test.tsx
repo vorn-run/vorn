@@ -37,7 +37,8 @@ beforeEach(() => {
         fontSize: 14,
         theme: 'dark' as const,
         mainViewMode: 'sessions' as const
-      }
+      },
+      projects: []
     },
     setMainViewMode
   })

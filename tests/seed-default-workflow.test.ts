@@ -129,7 +129,6 @@ describe('seedSystemDefaults', () => {
     // a manual reset — and confirm seeding still runs.
     saveConfig(
       baseConfig({
-        // @ts-expect-error — AppConfig.defaults.hasSeededDefaultTaskWorkflow is optional boolean
         defaults: {
           theme: 'dark',
           shell: '/bin/zsh',

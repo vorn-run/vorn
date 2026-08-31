@@ -33,6 +33,18 @@ function tsStopped() {
   return { installed: true, running: false, selfIP: '', peers: [] }
 }
 
+/**
+ * Put a stub where a real server method was.
+ *
+ * `http.Server` types `close` and `listen` more tightly than any fake can
+ * satisfy -- overloads, and a return of the server's own type -- so the slot is
+ * written through one cast that says so, rather than four stubs each pretending
+ * to have the real signature.
+ */
+function stubMethod(target: object, name: 'close' | 'listen', impl: unknown): void {
+  ;(target as unknown as Record<string, unknown>)[name] = impl
+}
+
 /** Create a fake http.Server that resolves close/listen synchronously. */
 function makeFakeServer(): Server & {
   closeCalls: number
@@ -45,22 +57,25 @@ function makeFakeServer(): Server & {
   emitter.closeCalls = 0
   emitter.listenCalls = []
 
-  emitter.close = vi.fn(function (this: typeof emitter, cb?: (err?: Error) => void) {
-    emitter.closeCalls++
-    if (cb) cb()
-    return this
-  }) as unknown as Server['close']
+  stubMethod(
+    emitter,
+    'close',
+    vi.fn(function (this: typeof emitter, cb?: (err?: Error) => void) {
+      emitter.closeCalls++
+      if (cb) cb()
+      return this
+    })
+  )
 
-  emitter.listen = vi.fn(function (
-    this: typeof emitter,
-    port: number,
-    host: string,
-    cb?: () => void
-  ) {
-    emitter.listenCalls.push({ port, host })
-    if (cb) cb()
-    return this
-  }) as unknown as Server['listen']
+  stubMethod(
+    emitter,
+    'listen',
+    vi.fn(function (this: typeof emitter, port: number, host: string, cb?: () => void) {
+      emitter.listenCalls.push({ port, host })
+      if (cb) cb()
+      return this
+    })
+  )
 
   emitter.closeAllConnections = vi.fn()
 
@@ -158,16 +173,15 @@ describe('server-rebind', () => {
 
   it('handles listen error gracefully without crashing', async () => {
     const errorServer = makeFakeServer()
-    errorServer.listen = vi.fn(function (
-      this: typeof errorServer,
-      _port: number,
-      _host: string,
-      _cb?: () => void
-    ) {
-      // Simulate EADDRINUSE by emitting error instead of calling cb
-      process.nextTick(() => errorServer.emit('error', new Error('EADDRINUSE')))
-      return errorServer
-    }) as unknown as Server['listen']
+    stubMethod(
+      errorServer,
+      'listen',
+      vi.fn(function (this: typeof errorServer, _port: number, _host: string, _cb?: () => void) {
+        // Simulate EADDRINUSE by emitting error instead of calling cb
+        process.nextTick(() => errorServer.emit('error', new Error('EADDRINUSE')))
+        return errorServer
+      })
+    )
     initRebind(errorServer, '127.0.0.1', 59081)
 
     mockLoadConfig.mockReturnValue(makeConfig(true))
@@ -187,11 +201,15 @@ describe('server-rebind', () => {
     })
 
     // Make close() slow so we can test concurrency
-    server.close = vi.fn(function (this: typeof server, cb?: () => void) {
-      server.closeCalls++
-      slowClose.then(() => cb?.())
-      return server
-    }) as unknown as Server['close']
+    stubMethod(
+      server,
+      'close',
+      vi.fn(function (this: typeof server, cb?: () => void) {
+        server.closeCalls++
+        slowClose.then(() => cb?.())
+        return server
+      })
+    )
 
     mockLoadConfig.mockReturnValue(makeConfig(true))
     mockGetTailscaleStatus.mockResolvedValue(tsRunning())

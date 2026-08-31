@@ -20,7 +20,7 @@ vi.mock('../src/renderer/stores', () => ({
 const { resolveEffectiveAgent } = await import('../src/renderer/lib/workflow-execution')
 
 import type {
-  AgentType,
+  AiAgentType,
   LaunchAgentConfig,
   TaskConfig,
   WorkflowExecutionContext
@@ -34,7 +34,7 @@ function makeConfig(agentType: LaunchAgentConfig['agentType']): LaunchAgentConfi
   }
 }
 
-function makeTask(assignedAgent: AgentType | undefined): TaskConfig {
+function makeTask(assignedAgent: AiAgentType | undefined): TaskConfig {
   return {
     id: 't1',
     projectName: 'p',

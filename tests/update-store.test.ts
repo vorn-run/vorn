@@ -19,7 +19,7 @@ interface MinimalState {
 }
 
 function makeSlice() {
-  let state: MinimalState & Record<string, unknown> = {} as MinimalState
+  let state: MinimalState & Record<string, unknown> = {} as MinimalState & Record<string, unknown>
   const set = (updater: ((s: MinimalState) => Partial<MinimalState>) | Partial<MinimalState>) => {
     const patch = typeof updater === 'function' ? updater(state) : updater
     state = { ...state, ...patch }

@@ -101,7 +101,7 @@ describe('Claude provider', () => {
       return String(p).includes('.claude/history.jsonl')
     })
     vi.mocked(listWorktrees).mockReturnValue([
-      { path: '/worktrees/my-app/feature-a', branch: 'feature-a', isMain: false }
+      { name: 'feature-a', path: '/worktrees/my-app/feature-a', branch: 'feature-a', isMain: false }
     ])
     vi.mocked(fs.readFileSync).mockReturnValueOnce(
       JSON.stringify({
@@ -168,7 +168,7 @@ describe('Codex provider', () => {
   it('queries known worktree paths when filtering by project path', () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes('.codex/state_5.sqlite'))
     vi.mocked(listWorktrees).mockReturnValue([
-      { path: '/worktrees/my-app/feature-a', branch: 'feature-a', isMain: false }
+      { name: 'feature-a', path: '/worktrees/my-app/feature-a', branch: 'feature-a', isMain: false }
     ])
     libsqlRowsQueue.push([
       {

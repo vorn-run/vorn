@@ -61,7 +61,7 @@ describe('ScriptConfigForm — contextual surface', () => {
   })
 
   it('writes context sentinels when onSelectFromContext is invoked', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: ScriptConfig) => void>()
     render(<ScriptConfigForm config={base()} onChange={onChange} isContextualTrigger />)
     const onSelect = projectPickerProps.at(-1)!.onSelectFromContext as () => void
     onSelect()
@@ -75,7 +75,7 @@ describe('ScriptConfigForm — contextual surface', () => {
   })
 
   it('clears From Context fields when the trigger flips off contextual', () => {
-    const onChange = vi.fn()
+    const onChange = vi.fn<(config: ScriptConfig) => void>()
     const { rerender } = render(
       <ScriptConfigForm
         config={base({

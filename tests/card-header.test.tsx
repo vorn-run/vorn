@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { Mock } from 'vitest'
 import { render, screen, act, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
@@ -62,7 +63,7 @@ const mockTerminal = {
 
 const initialState = useAppStore.getState()
 
-let setRenamingTerminalId: ReturnType<typeof vi.fn>
+let setRenamingTerminalId: Mock<(id: string | null) => void>
 
 beforeEach(() => {
   vi.clearAllMocks()

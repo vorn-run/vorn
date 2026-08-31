@@ -30,8 +30,8 @@ vi.mock('framer-motion', () => ({
   )
 }))
 
-const mockLoading = vi.fn(() => 'toast-id')
-const mockUpdate = vi.fn()
+const mockLoading = vi.fn((_msg: string) => 'toast-id')
+const mockUpdate = vi.fn<(...args: unknown[]) => unknown>()
 
 vi.mock('../src/renderer/components/Toast', () => ({
   toast: Object.assign(
@@ -77,7 +77,8 @@ import type { WorktreeInfo } from '../src/renderer/stores/types'
 
 const project: ProjectConfig = {
   name: 'test-proj',
-  path: '/tmp/test-proj'
+  path: '/tmp/test-proj',
+  preferredAgents: []
 }
 
 const mainWorktree: WorktreeInfo = {

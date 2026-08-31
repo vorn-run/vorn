@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { BrowserTabState } from '../src/renderer/stores/types'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { TerminalState } from '../src/renderer/stores/types'
@@ -13,7 +14,10 @@ const toggleMinimized = vi.fn()
 const setActiveTabId = vi.fn()
 let terminal: TerminalState | undefined
 let editorPanes = new Map<string, { filePath: string; sessionId: string }>()
-let browserPanes = new Map<string, { tabs: string[]; activeTab: number; sessionId: string }>()
+let browserPanes = new Map<
+  string,
+  { tabs: BrowserTabState[]; activeTab: number; sessionId: string }
+>()
 vi.mock('../src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) => {
     const state = {
