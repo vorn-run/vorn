@@ -30,7 +30,7 @@ export function ScriptNode({ label, config, selected, executionStatus, onClick }
 
   return (
     <NodeShell
-      icon={<Icon size={14} strokeWidth={2} className={`${NODE_GLYPH} shrink-0`} />}
+      icon={<Icon size={18} strokeWidth={2} className={`${NODE_GLYPH} shrink-0`} />}
       label={label}
       subtitle={
         <>

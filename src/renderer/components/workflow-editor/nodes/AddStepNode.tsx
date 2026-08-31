@@ -38,6 +38,7 @@ export function ConnectorButton({
   return (
     <div className="relative flex flex-col items-center" ref={menuRef}>
       <button
+        aria-label="Add a step"
         onClick={(e) => {
           e.stopPropagation()
           setOpen(!open)

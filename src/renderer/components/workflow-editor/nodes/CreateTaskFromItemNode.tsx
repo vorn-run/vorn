@@ -23,7 +23,7 @@ export function CreateTaskFromItemNode({
 
   return (
     <NodeShell
-      icon={<ListPlus size={14} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />}
+      icon={<ListPlus size={18} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />}
       label={label}
       subtitle={`${projectLabel} · initial: ${config.initialStatus}`}
       selected={selected}

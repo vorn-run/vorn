@@ -33,9 +33,9 @@ export function LaunchAgentNode({ label, config, selected, executionStatus, onCl
       icon={
         <span className="shrink-0">
           {isFromTask ? (
-            <ClipboardList size={14} className={NODE_GLYPH} />
+            <ClipboardList size={18} className={NODE_GLYPH} />
           ) : (
-            <AgentIcon agentType={config.agentType as AiAgentType} size={14} />
+            <AgentIcon agentType={config.agentType as AiAgentType} size={18} />
           )}
         </span>
       }

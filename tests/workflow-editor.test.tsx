@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, fireEvent } from '@testing-library/react'
+import { render, fireEvent, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { WorkflowDefinition } from '../src/shared/types'
 
@@ -22,8 +22,12 @@ vi.mock('../src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
+const captured = vi.hoisted(() => ({ canvasProps: null as Record<string, unknown> | null }))
 vi.mock('../src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
-  WorkflowCanvas: () => <div data-testid="canvas" />
+  WorkflowCanvas: (props: Record<string, unknown>) => {
+    captured.canvasProps = props
+    return <div data-testid="canvas" />
+  }
 }))
 
 vi.mock('../src/renderer/components/workflow-editor/panels/NodeConfigPanel', () => ({
@@ -66,6 +70,8 @@ vi.mock('../src/renderer/stores', () => {
   return { useAppStore }
 })
 ;(global as unknown as { window: object }).window = {
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
   api: {
     listWorkflowRuns: vi.fn().mockResolvedValue([]),
     createTerminal: vi.fn(),
@@ -300,5 +306,106 @@ describe('WorkflowEditor', () => {
     )
     mockState.editingWorkflowId = null
     mockState.config = { workflows: [], tasks: [], projects: [], defaults: {} }
+  })
+})
+
+describe('the handlers the canvas drives', () => {
+  const canvas = () =>
+    captured.canvasProps as unknown as {
+      nodes: { id: string; type: string; position: { x: number; y: number } }[]
+      onConnectEdge: (s: string, t: string) => void
+      onPositionsCommit: (p: Record<string, { x: number; y: number }>) => void
+      onTidyUp: () => void
+      onPaletteInsert: (
+        pick: { kind: string; type?: string; connectionId?: string; action?: string },
+        after: string,
+        pos: { x: number; y: number }
+      ) => void
+    }
+  const save = (container: HTMLElement) => {
+    const saveButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Save')
+    )!
+    fireEvent.click(saveButton)
+    return mockState.addWorkflow.mock.lastCall![0] as {
+      nodes: { id: string; type: string; position: { x: number; y: number }; config: unknown }[]
+      edges: { source: string; target: string }[]
+    }
+  }
+
+  it('writes a hand-drawn connection into the definition', () => {
+    mockState.addWorkflow.mockClear()
+    const { container } = render(<WorkflowEditor />)
+    const trigger = canvas().nodes?.[0] ?? { id: '' }
+    void trigger
+    const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
+    act(() => canvas().onConnectEdge(triggerId, 'ghost-target'))
+    expect(save(container).edges.some((e) => e.target === 'ghost-target')).toBe(true)
+  })
+
+  it('persists committed drag positions', () => {
+    mockState.addWorkflow.mockClear()
+    const { container } = render(<WorkflowEditor />)
+    const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
+    act(() => canvas().onPositionsCommit({ [triggerId]: { x: 48, y: 96 } }))
+    expect(save(container).nodes[0].position).toEqual({ x: 48, y: 96 })
+  })
+
+  it('tidy up writes the computed layout into the definition', () => {
+    mockState.addWorkflow.mockClear()
+    const { container } = render(<WorkflowEditor />)
+    act(() => canvas().onTidyUp())
+    expect(save(container).nodes[0].position.x).toBe(-140)
+  })
+
+  it('a palette pick appends after its anchor at the drop point', () => {
+    mockState.addWorkflow.mockClear()
+    const { container } = render(<WorkflowEditor />)
+    const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
+    act(() =>
+      canvas().onPaletteInsert({ kind: 'type', type: 'script' }, triggerId, { x: 24, y: 480 })
+    )
+    const saved = save(container)
+    const script = saved.nodes.find((n) => n.type === 'script')!
+    expect(script.position).toEqual({ x: 24, y: 480 })
+    expect(saved.edges.some((e) => e.target === script.id)).toBe(true)
+  })
+
+  it('a connector pick lands preconfigured', () => {
+    mockState.addWorkflow.mockClear()
+    const { container } = render(<WorkflowEditor />)
+    const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
+    act(() =>
+      canvas().onPaletteInsert(
+        { kind: 'connectorAction', connectionId: 'c9', action: 'createIssue' },
+        triggerId,
+        { x: 0, y: 200 }
+      )
+    )
+    const saved = save(container)
+    const step = saved.nodes.find((n) => n.type === 'callConnectorAction')!
+    expect(step.config).toMatchObject({ connectionId: 'c9', action: 'createIssue' })
+  })
+
+  it('cmd+z walks an edit back', () => {
+    mockState.addWorkflow.mockClear()
+    const winAdd = (window.addEventListener as ReturnType<typeof vi.fn>).mock
+    const { container } = render(<WorkflowEditor />)
+    const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
+    act(() => canvas().onConnectEdge(triggerId, 'ghost-target'))
+    const keydown = winAdd.calls.filter((c) => c[0] === 'keydown').at(-1)![1] as (
+      e: unknown
+    ) => void
+    act(() =>
+      keydown({
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        key: 'z',
+        target: document.createElement('div'),
+        preventDefault: () => {}
+      })
+    )
+    expect(save(container).edges).toHaveLength(0)
   })
 })

@@ -67,7 +67,7 @@ export function NodeShell({
           className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[executionStatus]}`}
         />
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         {icon}
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-white truncate">{label}</div>

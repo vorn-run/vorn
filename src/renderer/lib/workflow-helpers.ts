@@ -301,7 +301,7 @@ export function appendToLoopBody(
   // its default (0,0) position and the persisted layout drifts from what the
   // rest of the editor produces.
   const withNew = [...nextNodes, newNode]
-  return { nodes: autoLayoutNodes(withNew, nextEdges), edges: nextEdges }
+  return { nodes: placeNewNodes(nodes, withNew, nextEdges), edges: nextEdges }
 }
 
 /**
@@ -458,7 +458,88 @@ export function insertConditionBetween(
     newEdges.push({ id: crypto.randomUUID(), source: afterNodeId, target: conditionNode.id })
   }
 
-  return { nodes: autoLayoutNodes(newNodes, newEdges), edges: newEdges }
+  return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
+}
+
+/** Every node id reachable by following edges forward from `startId`. */
+function reachableFrom(startId: string, edges: WorkflowEdge[]): Set<string> {
+  const successors = buildSuccessorsMap(edges)
+  const seen = new Set<string>()
+  const queue = [...(successors.get(startId) ?? [])]
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    if (seen.has(id)) continue
+    seen.add(id)
+    queue.push(...(successors.get(id) ?? []))
+  }
+  return seen
+}
+
+/** Whether every stored position is still the untouched seed column (x = 0 everywhere). */
+export function positionsAreSeed(nodes: WorkflowNode[]): boolean {
+  return nodes.every((n) => !n.position || n.position.x === 0)
+}
+
+/** Seed definitions reflow into the legacy column; arranged ones keep their positions and only new nodes are placed. */
+export function placeNewNodes(
+  prevNodes: WorkflowNode[],
+  nextNodes: WorkflowNode[],
+  edges: WorkflowEdge[]
+): WorkflowNode[] {
+  if (positionsAreSeed(prevNodes)) return autoLayoutNodes(nextNodes, edges)
+
+  const prevIds = new Set(prevNodes.map((n) => n.id))
+  // Positions accumulate so chained new nodes hang off placed predecessors, siblings fanned apart.
+  const placed = new Map<string, WorkflowNodePosition>()
+  for (const node of nextNodes) {
+    if (prevIds.has(node.id)) placed.set(node.id, node.position)
+  }
+  const siblingCount = new Map<string, number>()
+  const remaining = nextNodes.filter((n) => !prevIds.has(n.id))
+  while (remaining.length > 0) {
+    const readyIndex = remaining.findIndex((n) => {
+      const incoming = edges.find((e) => e.target === n.id)
+      return !incoming || placed.has(incoming.source)
+    })
+    const index = readyIndex === -1 ? 0 : readyIndex
+    const node = remaining.splice(index, 1)[0]
+    const incoming = edges.find((e) => e.target === node.id)
+    const base = (incoming && placed.get(incoming.source)) ?? { x: 0, y: 0 }
+    const sibling = incoming ? (siblingCount.get(incoming.source) ?? 0) : 0
+    if (incoming) siblingCount.set(incoming.source, sibling + 1)
+    let candidate = { x: base.x + sibling * 320, y: base.y + 140 }
+    // Probe downward until the spot is free, ignoring this node's own
+    // downstream — those get shifted out of the way below.
+    const downstream = reachableFrom(node.id, edges)
+    const occupied = (p: WorkflowNodePosition): boolean =>
+      [...placed.entries()].some(
+        ([id, o]) => !downstream.has(id) && Math.abs(o.x - p.x) < 300 && Math.abs(o.y - p.y) < 120
+      )
+    for (let tries = 0; occupied(candidate) && tries < 50; tries++) {
+      candidate = { x: candidate.x, y: candidate.y + 140 }
+    }
+    placed.set(node.id, candidate)
+  }
+
+  // Inserting mid-chain must make room: downstream nodes sitting where a new
+  // node landed move down by one pitch instead of being covered.
+  const newIds = new Set(nextNodes.filter((n) => !prevIds.has(n.id)).map((n) => n.id))
+  const shifted = new Set<string>()
+  for (const newId of newIds) {
+    const newPos = placed.get(newId)!
+    for (const id of reachableFrom(newId, edges)) {
+      if (newIds.has(id)) continue
+      const pos = placed.get(id)
+      if (pos && pos.y <= newPos.y + 100) shifted.add(id)
+    }
+  }
+
+  return nextNodes.map((node) => {
+    if (newIds.has(node.id)) return { ...node, position: placed.get(node.id)! }
+    if (shifted.has(node.id))
+      return { ...node, position: { x: node.position.x, y: node.position.y + 140 } }
+    return node
+  })
 }
 
 export function autoLayoutNodes(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowNode[] {
@@ -516,12 +597,18 @@ export function insertNodeBetween(
 
   const newEdges = edges.filter((e) => e.id !== edgeId)
   newEdges.push(
-    { id: crypto.randomUUID(), source: edge.source, target: newNode.id },
+    // The branch tag rides the first half of the split so the fork keeps telling branches apart.
+    {
+      id: crypto.randomUUID(),
+      source: edge.source,
+      target: newNode.id,
+      ...(edge.conditionBranch && { conditionBranch: edge.conditionBranch })
+    },
     { id: crypto.randomUUID(), source: newNode.id, target: edge.target }
   )
 
   const newNodes = [...nodes, newNode]
-  return { nodes: autoLayoutNodes(newNodes, newEdges), edges: newEdges }
+  return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }
 
 export function appendNode(
@@ -538,7 +625,7 @@ export function appendNode(
   }
 
   const newNodes = [...nodes, newNode]
-  return { nodes: autoLayoutNodes(newNodes, newEdges), edges: newEdges }
+  return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }
 
 export function removeNode(
@@ -569,7 +656,7 @@ export function removeNode(
       }
     }
     const remainingNodes = nodes.filter((n) => !toRemove.has(n.id))
-    return { nodes: autoLayoutNodes(remainingNodes, remainingEdges), edges: remainingEdges }
+    return { nodes: placeNewNodes(nodes, remainingNodes, remainingEdges), edges: remainingEdges }
   }
 
   const incomingEdges = edges.filter((e) => e.target === nodeId)
@@ -584,7 +671,7 @@ export function removeNode(
   }
 
   const newNodes = nodes.filter((n) => n.id !== nodeId)
-  return { nodes: autoLayoutNodes(newNodes, newEdges), edges: newEdges }
+  return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }
 
 /**
@@ -739,7 +826,7 @@ export function appendNodeAfter(
 ): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
   const newNodes = [...nodes, newNode]
   const newEdges = [...edges, { id: crypto.randomUUID(), source: afterNodeId, target: newNode.id }]
-  return { nodes: autoLayoutNodes(newNodes, newEdges), edges: newEdges }
+  return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }
 
 export function insertBeforeFork(
@@ -754,7 +841,7 @@ export function insertBeforeFork(
   newEdges.push({ id: crypto.randomUUID(), source: forkNodeId, target: newNode.id })
 
   const newNodes = [...nodes, newNode]
-  return { nodes: autoLayoutNodes(newNodes, newEdges), edges: newEdges }
+  return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }
 
 export function addParallelBranch(
@@ -803,5 +890,5 @@ export function addParallelBranch(
     }
   }
 
-  return { nodes: autoLayoutNodes(newNodes, newEdges), edges: newEdges }
+  return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }

@@ -6,12 +6,13 @@ const root = join(__dirname, '..')
 const panels = join(root, 'src/renderer/components/workflow-editor/panels')
 const read = (name: string): string => readFileSync(join(panels, name), 'utf8')
 
-/** The panels docked to an edge of the editor, each a permanent region of it. */
+/** The panels docked to an edge of the editor, each a permanent region of it.
+ *  NodePalette left this list when it became the floating node search — it
+ *  floats over the canvas now, so the overlay rung is the correct one for it. */
 const DOCKED = [
   'NodeConfigPanel.tsx',
   'WorkflowPropertiesPanel.tsx',
-  'RunHistoryPanel.tsx',
-  'NodePalette.tsx'
+  'RunHistoryPanel.tsx'
 ] as const
 
 /** The one panel element in each file: the root, which carries the edge border. */

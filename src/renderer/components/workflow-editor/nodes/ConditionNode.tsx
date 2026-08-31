@@ -37,7 +37,7 @@ export function ConditionNode({ label, config, selected, executionStatus, onClic
 
   return (
     <NodeShell
-      icon={<GitFork size={14} strokeWidth={2} className={`${NODE_GLYPH} shrink-0`} />}
+      icon={<GitFork size={18} strokeWidth={2} className={`${NODE_GLYPH} shrink-0`} />}
       label={label}
       subtitle={hasConfig ? OPERATOR_LABELS[config.operator] : 'Not configured'}
       selected={selected}

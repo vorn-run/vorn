@@ -33,12 +33,16 @@ import {
   getProjectRemoteHostId
 } from '../../../shared/types'
 import { WorkflowCanvas, AddableNodeType } from './WorkflowCanvas'
+import type { PalettePick } from './panels/NodePalette'
+import { layoutPositions } from '../../lib/workflow-canvas-layout'
+import { useDefinitionHistory } from '../../lib/use-definition-history'
 import { NodeConfigPanel } from './panels/NodeConfigPanel'
 import { RunHistoryPanel } from './panels/RunHistoryPanel'
 import { WorkflowPropertiesPanel } from './panels/WorkflowPropertiesPanel'
 import {
   createTriggerNode,
   createLaunchAgentNode,
+  positionsAreSeed,
   createScriptNode,
   createConditionNode,
   createApprovalNode,
@@ -475,6 +479,92 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     if (!nodeId) setShowProperties(true)
   }, [])
 
+  const { undo, redo } = useDefinitionHistory(nodes, edges, setNodes, setEdges, editingId ?? 'new')
+
+  useEffect(() => {
+    if (!isActive) return
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
+      const target = e.target as HTMLElement
+      // Text fields keep their native undo.
+      if (target.closest('input, textarea, [contenteditable="true"]')) return
+      e.preventDefault()
+      if (e.shiftKey) redo()
+      else undo()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [isActive, undo, redo])
+
+  const handleConnectEdge = useCallback((sourceId: string, targetId: string) => {
+    setEdges((eds) => [...eds, { id: crypto.randomUUID(), source: sourceId, target: targetId }])
+  }, [])
+
+  const handlePositionsCommit = useCallback(
+    (positions: Record<string, { x: number; y: number }>) => {
+      setNodes((nds) => nds.map((n) => (positions[n.id] ? { ...n, position: positions[n.id] } : n)))
+    },
+    []
+  )
+
+  const handleTidyUp = useCallback(() => {
+    const { positions } = layoutPositions(nodes, edges)
+    setNodes(nodes.map((n) => (positions.has(n.id) ? { ...n, position: positions.get(n.id)! } : n)))
+  }, [nodes, edges])
+
+  const handlePaletteInsert = useCallback(
+    (pick: PalettePick, afterNodeId: string, position: { x: number; y: number }) => {
+      // Materialize the computed layout first so the drop doesn't strand the rest on the seed column.
+      const placeAll = (
+        placed: WorkflowNode[],
+        edgesForLayout: WorkflowEdge[],
+        newNodeId: string | undefined
+      ): WorkflowNode[] => {
+        const base = positionsAreSeed(nodes)
+          ? (() => {
+              const { positions } = layoutPositions(placed, edgesForLayout)
+              return placed.map((n) =>
+                positions.has(n.id) ? { ...n, position: positions.get(n.id)! } : n
+              )
+            })()
+          : placed
+        return base.map((n) => (n.id === newNodeId ? { ...n, position } : n))
+      }
+
+      if (pick.kind === 'type' && pick.type === 'condition') {
+        const result = insertConditionBetween(nodes, edges, afterNodeId, null)
+        const condNode = result.nodes.find(
+          (n) => n.type === 'condition' && !nodes.some((o) => o.id === n.id)
+        )
+        setNodes(placeAll(result.nodes, result.edges, condNode?.id))
+        setEdges(result.edges)
+        if (condNode) setSelectedNodeId(condNode.id)
+        return
+      }
+
+      const newNode =
+        pick.kind === 'connectorAction'
+          ? (() => {
+              const n = createNodeWithUniqueSlug('connectorAction')
+              return {
+                ...n,
+                config: {
+                  ...(n.config as CallConnectorActionConfig),
+                  connectionId: pick.connectionId,
+                  action: pick.action
+                }
+              }
+            })()
+          : createNodeWithUniqueSlug(pick.type)
+
+      const result = appendNodeAfter(nodes, edges, afterNodeId, newNode)
+      setNodes(placeAll(result.nodes, result.edges, newNode.id))
+      setEdges(result.edges)
+      setSelectedNodeId(newNode.id)
+    },
+    [nodes, edges, createNodeWithUniqueSlug]
+  )
+
   const handleNodeConfigChange = useCallback((nodeId: string, config: WorkflowNode['config']) => {
     setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, config } : n)))
   }, [])
@@ -783,6 +873,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           onNodeClick={handleNodeClick}
           onInsertNode={handleInsertNode}
           onAddParallelBranch={handleAddParallelBranch}
+          onConnectEdge={handleConnectEdge}
+          onPaletteInsert={handlePaletteInsert}
+          onPositionsCommit={handlePositionsCommit}
+          onDeleteNode={handleDeleteNode}
+          onTidyUp={handleTidyUp}
           selectedNodeId={selectedNodeId}
           nodeStatus={nodeStatus}
         />
