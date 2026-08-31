@@ -1,5 +1,7 @@
 import { useEffect } from 'react'
-import { Check, X, Inbox } from 'lucide-react'
+import { useAppStore } from '../../stores'
+import { toast } from '../Toast'
+import { Check, X, Inbox, Play, RotateCcw } from 'lucide-react'
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
   completedStageCount,
@@ -10,7 +12,12 @@ import {
   runSummaryText,
   type RunWorkflowRef
 } from '../../lib/run-presentation'
-import { approveWorkflowGate, rejectWorkflowGate } from '../../lib/workflow-execution'
+import {
+  approveWorkflowGate,
+  rejectWorkflowGate,
+  retryRunFromFailure,
+  rerunWorkflowRun
+} from '../../lib/workflow-execution'
 import { RunStepsList, StatusDot } from '../workflow-editor/RunEntry'
 import { RunIcon } from './RunIcon'
 import { StopRunButton } from './StopRunButton'
@@ -51,6 +58,11 @@ export function RunDetailPane({
 }: Props) {
   const nodes = workflow?.nodes ?? []
   const workflowName = workflow?.name?.trim() || undefined
+  // Retry and re-run need the full definition, not the render-only ref.
+  const fullWorkflow = useAppStore((s) => s.config?.workflows?.find((w) => w.id === run.workflowId))
+  const onLaunchError = (err: unknown): void => {
+    toast.error(err instanceof Error ? err.message : String(err))
+  }
   const presentation = describeRun(run, workflow)
   const outcome = describeOutcome(run, nodes)
   const stages = runStages(run, nodes)
@@ -94,6 +106,26 @@ export function RunDetailPane({
             {presentation.sourceLabel}
           </span>
           <span className="flex-1" />
+          {run.status === 'error' && fullWorkflow && (
+            <button
+              aria-label="Retry from failed step"
+              title="Retry from failed step"
+              onClick={() => retryRunFromFailure(fullWorkflow, run).catch(onLaunchError)}
+              className="p-1 rounded text-gray-500 hover:text-white transition-colors shrink-0"
+            >
+              <RotateCcw size={13} strokeWidth={2} />
+            </button>
+          )}
+          {run.status !== 'running' && fullWorkflow && (
+            <button
+              aria-label="Run again"
+              title="Run again"
+              onClick={() => rerunWorkflowRun(fullWorkflow, run).catch(onLaunchError)}
+              className="p-1 rounded text-gray-500 hover:text-white transition-colors shrink-0"
+            >
+              <Play size={13} strokeWidth={2} />
+            </button>
+          )}
           <StopRunButton execution={run} stopPropagation={false} />
         </div>
         <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-500 font-mono truncate">

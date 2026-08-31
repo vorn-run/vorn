@@ -16,6 +16,8 @@ interface Props {
   tasks?: TaskConfig[]
   onClose: () => void
   onClickTask?: (taskId: string) => void
+  onRetryRun?: (execution: WorkflowExecution) => void
+  onRerunRun?: (execution: WorkflowExecution) => void
   onResumeSession?: (
     agentSessionId: string,
     agentType: AiAgentType,
@@ -32,6 +34,8 @@ export function RunHistoryPanel({
   tasks,
   onClose,
   onClickTask,
+  onRetryRun,
+  onRerunRun,
   onResumeSession
 }: Props) {
   const [fullOutputLogs, setFullOutputLogs] = useState<string | null>(null)
@@ -61,6 +65,8 @@ export function RunHistoryPanel({
                 tasks={tasks}
                 onViewFullOutput={setFullOutputLogs}
                 onClickTask={onClickTask}
+                onRetryRun={onRetryRun}
+                onRerunRun={onRerunRun}
                 onResumeSession={onResumeSession}
               />
             ))

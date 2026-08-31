@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
-import { ChevronDown, ChevronRight, Maximize2, RotateCcw, Check, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw, Check, X } from 'lucide-react'
 import {
   WorkflowExecution,
   WorkflowNode,
@@ -430,6 +430,10 @@ interface RunEntryProps {
   tasks?: TaskConfig[]
   onViewFullOutput?: (logs: string) => void
   onClickTask?: (taskId: string) => void
+  /** Start a fresh run with this run's launch context. */
+  onRerunRun?: (execution: WorkflowExecution) => void
+  /** Resume this failed run from its failed step, reusing completed outputs. */
+  onRetryRun?: (execution: WorkflowExecution) => void
   onResumeSession?: (
     agentSessionId: string,
     agentType: AiAgentType,
@@ -447,6 +451,8 @@ export function RunEntry({
   tasks,
   onViewFullOutput,
   onClickTask,
+  onRerunRun,
+  onRetryRun,
   onResumeSession
 }: RunEntryProps) {
   const hasWaitingGate = execution.nodeStates.some((ns) => ns.status === 'waiting')
@@ -493,10 +499,41 @@ export function RunEntry({
               {triggerTask.title}
             </span>
           )}
+          {execution.partial && (
+            <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500 border border-white/[0.08] rounded px-1 shrink-0">
+              partial
+            </span>
+          )}
           <span className="text-[11px] text-gray-500 shrink-0">
             {formatRunDuration(execution.startedAt, execution.completedAt)}
           </span>
         </button>
+        {execution.status === 'error' && onRetryRun && (
+          <span className="shrink-0">
+            <Tooltip label="Retry from failed step" position="top">
+              <button
+                aria-label="Retry from failed step"
+                onClick={() => onRetryRun(execution)}
+                className="p-1 rounded text-gray-500 hover:text-white transition-colors"
+              >
+                <RotateCcw size={12} strokeWidth={2} />
+              </button>
+            </Tooltip>
+          </span>
+        )}
+        {execution.status !== 'running' && onRerunRun && (
+          <span className="shrink-0">
+            <Tooltip label="Run again" position="top">
+              <button
+                aria-label="Run again"
+                onClick={() => onRerunRun(execution)}
+                className="p-1 rounded text-gray-500 hover:text-white transition-colors"
+              >
+                <Play size={12} strokeWidth={2} />
+              </button>
+            </Tooltip>
+          </span>
+        )}
         <span className="pr-2 shrink-0">
           <StopRunButton execution={execution} stopPropagation={false} />
         </span>

@@ -7,7 +7,8 @@ import {
   CallConnectorActionConfig,
   LaunchAgentConfig,
   ConnectorActionDef,
-  WorkflowInputDef
+  WorkflowInputDef,
+  NodeExecutionStatus
 } from '../../shared/types'
 import { schemaProperties, schemaTypeHint } from '../../shared/json-schema-utils'
 
@@ -53,7 +54,20 @@ export interface StepVariableGroup {
   slug: string
   nodeType: string
   disabled?: boolean
-  keys: { key: string; label: string; description: string }[]
+  keys: { key: string; label: string; description: string; value?: string }[]
+  /** The connection behind a connector step, so the picker can show its brand mark. */
+  connectionId?: string
+  /** How this step ended in the run whose values the picker shows. */
+  runStatus?: NodeExecutionStatus
+  runCompletedAt?: string
+  /** The step's raw last-run output object, for resolved previews. */
+  runOutputs?: Record<string, unknown>
+}
+
+/** What buildStepGroups reads from the workflow's most recent run. */
+export interface LastRunData {
+  outputs: StepOutputs
+  states: Record<string, { status: NodeExecutionStatus; completedAt?: string }>
 }
 
 // --- Template Variable Types ---
@@ -204,9 +218,26 @@ function schemaTopLevelKeys(
   })
 }
 
+/** Compact single-line rendering of a run value for the picker's value column. */
+export function formatRunValue(val: unknown): string {
+  if (val === undefined) return ''
+  if (typeof val === 'string') {
+    const flat = val.replace(/\s+/g, ' ').trim()
+    const clipped = flat.length > 60 ? `${flat.slice(0, 60)}…` : flat
+    return JSON.stringify(clipped)
+  }
+  try {
+    const text = JSON.stringify(val) ?? String(val)
+    return text.length > 60 ? `${text.slice(0, 60)}…` : text
+  } catch {
+    return String(val)
+  }
+}
+
 export function buildStepGroups(
   ancestorNodes: WorkflowNode[],
-  lookupAction?: ConnectorActionLookup
+  lookupAction?: ConnectorActionLookup,
+  lastRun?: LastRunData
 ): StepVariableGroup[] {
   return ancestorNodes
     .filter((n) => n.slug)
@@ -237,14 +268,104 @@ export function buildStepGroups(
           keys = [...schemaKeys, ...defaultKeys]
         }
       }
+      const runOutputs = lastRun?.outputs[n.slug!]
+      const runState = lastRun?.states[n.id]
+      if (runOutputs) {
+        keys = keys.map((k) => ({ ...k, value: formatRunValue(runOutputs[k.key]) || undefined }))
+      }
+      const cfg = n.config as { connectionId?: string } | undefined
       return {
         nodeId: n.id,
         label: n.label,
         slug: n.slug!,
         nodeType: n.type,
-        keys
+        keys,
+        connectionId: n.type === 'callConnectorAction' ? cfg?.connectionId : undefined,
+        runStatus: runState?.status,
+        runCompletedAt: runState?.completedAt,
+        runOutputs
       }
     })
+}
+
+// --- Template Preview ---
+
+export interface TemplatePreview {
+  /** The template with every steps.* token resolved, when data allows it. */
+  resolved?: string
+  /** The first steps.* token that resolves nowhere, with the closest real path. */
+  broken?: { token: string; suggestion?: string }
+}
+
+function editDistance(a: string, b: string): number {
+  const rows = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) rows[0][j] = j
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      rows[i][j] = Math.min(
+        rows[i - 1][j] + 1,
+        rows[i][j - 1] + 1,
+        rows[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      )
+    }
+  }
+  return rows[a.length][b.length]
+}
+
+export function suggestNearestPath(path: string, candidates: string[]): string | undefined {
+  let best: string | undefined
+  let bestScore = Infinity
+  for (const candidate of candidates) {
+    const score = editDistance(path, candidate)
+    if (score < bestScore) {
+      bestScore = score
+      best = candidate
+    }
+  }
+  return bestScore <= Math.max(3, Math.floor(path.length / 3)) ? best : undefined
+}
+
+/**
+ * Preview a template's steps.* tokens against the picker's own groups: known
+ * paths resolve to their last-run text, unknown ones come back as broken.
+ */
+export function previewStepTokens(template: string, groups: StepVariableGroup[]): TemplatePreview {
+  const tokens = [...template.matchAll(/\{\{\s*steps\.([\w.]+)\s*\}\}/g)]
+  if (tokens.length === 0) return {}
+
+  const bySlug = new Map(groups.map((g) => [g.slug, g]))
+  const knownPaths = groups.flatMap((g) => g.keys.map((k) => `steps.${g.slug}.${k.key}`))
+
+  let broken: TemplatePreview['broken']
+  let anyData = false
+  const resolved = template.replace(
+    /\{\{\s*steps\.([\w.]+)\s*\}\}/g,
+    (match, path: string): string => {
+      const [slug, ...rest] = path.split('.')
+      const group = bySlug.get(slug)
+      if (!group || rest.length === 0) {
+        broken ??= {
+          token: `steps.${path}`,
+          suggestion: suggestNearestPath(`steps.${path}`, knownPaths)
+        }
+        return match
+      }
+      if (!group.runOutputs) return match
+      const value = walkPath(group.runOutputs, rest)
+      if (value === undefined) {
+        broken ??= {
+          token: `steps.${path}`,
+          suggestion: suggestNearestPath(`steps.${path}`, knownPaths)
+        }
+        return match
+      }
+      anyData = true
+      return stringifyResolved(value)
+    }
+  )
+
+  if (broken) return { broken }
+  return anyData ? { resolved } : {}
 }
 
 // --- Template Variable Resolution ---

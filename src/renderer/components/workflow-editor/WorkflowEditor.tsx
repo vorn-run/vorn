@@ -25,6 +25,8 @@ import {
   WorkflowNode,
   WorkflowNodeErrorPolicy,
   WorkflowEdge,
+  NodeExecutionStatus,
+  WorkflowExecution,
   TriggerConfig,
   AiAgentType,
   CallConnectorActionConfig,
@@ -59,6 +61,13 @@ import {
   getWorktreeMode
 } from '../../lib/workflow-helpers'
 import { startManualRun } from '../../lib/workflow-menu-items'
+import {
+  buildStepOutputsMap,
+  executeWorkflow,
+  retryRunFromFailure,
+  rerunWorkflowRun
+} from '../../lib/workflow-execution'
+import { loopBodyMembers } from '../../lib/workflow-canvas-layout'
 import { toast } from '../Toast'
 import {
   slugify,
@@ -196,11 +205,27 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     [connectionActions]
   )
 
+  // The freshest run, live or finished, feeds values into the {} picker.
+  const latestRun = useMemo(() => {
+    const sorted = [...executionHistory].sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    return sorted[0]
+  }, [executionHistory])
+
+  const lastRunData = useMemo(() => {
+    if (!latestRun) return undefined
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+    const states: Record<string, { status: NodeExecutionStatus; completedAt?: string }> = {}
+    for (const ns of latestRun.nodeStates) {
+      states[ns.nodeId] = { status: ns.status, completedAt: ns.completedAt }
+    }
+    return { outputs: buildStepOutputsMap(latestRun, nodeMap), states }
+  }, [latestRun, nodes])
+
   const stepGroups = useMemo(() => {
     if (!selectedNodeId) return []
     const ancestors = getAncestorNodes(nodes, edges, selectedNodeId)
-    return buildStepGroups(ancestors, lookupAction)
-  }, [nodes, edges, selectedNodeId, lookupAction])
+    return buildStepGroups(ancestors, lookupAction, lastRunData)
+  }, [nodes, edges, selectedNodeId, lookupAction, lastRunData])
 
   // Load execution history from database
   useEffect(() => {
@@ -374,6 +399,46 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     inline,
     setEditingId
   ])
+
+  const handleRunToStep = useCallback(
+    (nodeId: string) => {
+      const workflow = persistWorkflow()
+      setShowRunHistory(false)
+      executeWorkflow(workflow, undefined, { source: 'manual', targetNodeId: nodeId }).catch(
+        (err) => toast.error(err instanceof Error ? err.message : String(err))
+      )
+    },
+    [persistWorkflow]
+  )
+
+  const handleRetryRun = useCallback(
+    (run: WorkflowExecution) => {
+      const workflow = persistWorkflow()
+      retryRunFromFailure(workflow, run).catch((err) =>
+        toast.error(err instanceof Error ? err.message : String(err))
+      )
+    },
+    [persistWorkflow]
+  )
+
+  const handleRerunRun = useCallback(
+    (run: WorkflowExecution) => {
+      const workflow = persistWorkflow()
+      rerunWorkflowRun(workflow, run).catch((err) =>
+        toast.error(err instanceof Error ? err.message : String(err))
+      )
+    },
+    [persistWorkflow]
+  )
+
+  // Loop bodies are driven by their loop, so a body step cannot be a run target.
+  const runToStepEligible = useMemo(() => {
+    const body = loopBodyMembers(nodes)
+    return (nodeId: string): boolean => {
+      const node = nodes.find((n) => n.id === nodeId)
+      return !!node && node.type !== 'trigger' && !body.has(nodeId)
+    }
+  }, [nodes])
 
   const handleSave = useCallback(() => {
     persistWorkflow()
@@ -945,6 +1010,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             onClose={() => setShowRunHistory(false)}
             onClickTask={handleClickTask}
             onResumeSession={handleResumeSession}
+            onRetryRun={handleRetryRun}
+            onRerunRun={handleRerunRun}
           />
         )}
 
@@ -961,6 +1028,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             isContextualTrigger={isContextualTrigger}
             inputVars={inputVars}
             stepGroups={stepGroups}
+            onRunToStep={runToStepEligible(selectedNode.id) ? handleRunToStep : undefined}
           />
         )}
 
