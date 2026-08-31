@@ -590,8 +590,12 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       const anchor = pendingInsert
       if (!anchor) return
       setPendingInsert(null)
-      // A delete or undo can outlive the anchor; inserting after a ghost writes a dangling edge.
+      // A delete or undo can outlive the anchor; inserting against a ghost writes dangling edges.
       if (!nodes.some((n) => n.id === anchor.afterNodeId)) return
+      const before = anchor.beforeNodeId
+      if (before && before !== '__FORK__' && before !== '__LOOP_BODY__') {
+        if (!nodes.some((n) => n.id === before)) return
+      }
       if (pick.kind === 'parallel') {
         handleAddParallelBranch(anchor.afterNodeId, 'agent')
       } else if (anchor.position && anchor.beforeNodeId === null) {

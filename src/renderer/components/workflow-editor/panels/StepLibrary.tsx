@@ -164,7 +164,7 @@ export function StepLibrary({
           onClose()
         } else if (e.key === 'ArrowDown') {
           e.preventDefault()
-          setHighlight((h) => Math.min(h + 1, pickable.length - 1))
+          setHighlight((h) => Math.min(h + 1, Math.max(0, pickable.length - 1)))
         } else if (e.key === 'ArrowUp') {
           e.preventDefault()
           setHighlight((h) => Math.max(h - 1, 0))
@@ -209,34 +209,37 @@ export function StepLibrary({
             Steps
           </div>
         )}
-        {rows.map((row) => {
-          if ('header' in row && row.header) {
+        {(() => {
+          const pickIndex = new Map(pickable.map((r, i) => [r.key, i]))
+          return rows.map((row) => {
+            if ('header' in row && row.header) {
+              return (
+                <div key={row.key} className="flex items-center gap-2 px-2 pt-3 pb-1">
+                  <ConnectionMark connection={row.connection} />
+                  <span className="text-[12px] font-semibold text-ink-secondary truncate">
+                    {row.connection.name}
+                  </span>
+                  <span className="ml-auto text-[10px] font-mono text-gray-600">{row.count}</span>
+                </div>
+              )
+            }
+            const index = pickIndex.get(row.key) ?? -1
+            const Icon = row.icon
             return (
-              <div key={row.key} className="flex items-center gap-2 px-2 pt-3 pb-1">
-                <ConnectionMark connection={row.connection} />
-                <span className="text-[12px] font-semibold text-ink-secondary truncate">
-                  {row.connection.name}
-                </span>
-                <span className="ml-auto text-[10px] font-mono text-gray-600">{row.count}</span>
-              </div>
-            )
-          }
-          const index = pickable.indexOf(row)
-          const Icon = row.icon
-          return (
-            <button
-              key={row.key}
-              onClick={() => onPick(row.pick)}
-              onMouseEnter={() => setHighlight(index)}
-              className={`w-full flex items-center gap-2.5 rounded-md text-[12.5px] text-left transition-colors
+              <button
+                key={row.key}
+                onClick={() => onPick(row.pick)}
+                onMouseEnter={() => setHighlight(index)}
+                className={`w-full flex items-center gap-2.5 rounded-md text-[12.5px] text-left transition-colors
                           ${row.connection ? 'pl-8 pr-2 py-1.5' : 'px-2 py-1.5'}
                           ${index === clamped ? 'bg-white/[0.06] text-white' : 'text-gray-300'}`}
-            >
-              {Icon && <Icon size={14} className={`${NODE_GLYPH} shrink-0`} />}
-              <span className="truncate">{row.label}</span>
-            </button>
-          )
-        })}
+              >
+                {Icon && <Icon size={14} className={`${NODE_GLYPH} shrink-0`} />}
+                <span className="truncate">{row.label}</span>
+              </button>
+            )
+          })
+        })()}
       </div>
     </div>
   )
