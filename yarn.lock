@@ -4683,7 +4683,7 @@ __metadata:
   dependencies:
     "@types/ws": "npm:^8.18.1"
     "@vornrun/shared": "workspace:*"
-    electron: "npm:^43.1.0"
+    electron: "npm:^44.0.0"
     electron-log: "npm:^5.4.4"
     electron-updater: "npm:^6.8.3"
     electron-vite: "npm:^5.0.0"
@@ -6291,22 +6291,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"electron@npm:^41.10.3":
-  version: 41.10.5
-  resolution: "electron@npm:41.10.5"
-  dependencies:
-    "@electron-internal/extract-zip": "npm:^1.0.1"
-    "@electron/get": "npm:^5.0.0"
-    "@types/node": "npm:^24.9.0"
-  bin:
-    electron: cli.js
-  checksum: 10c0/25239f3efe5dc4f2c35419a2d8a640e5315df3dd874397976e9e512767d7ed1ca19b8645dc67381f7028f3432294c02383267e70f2bad596283da6d4e9e0671c
-  languageName: node
-  linkType: hard
-
-"electron@npm:^43.1.0":
-  version: 43.1.0
-  resolution: "electron@npm:43.1.0"
+"electron@npm:^44.0.0":
+  version: 44.0.0
+  resolution: "electron@npm:44.0.0"
   dependencies:
     "@electron-internal/extract-zip": "npm:^1.0.1"
     "@electron/get": "npm:^5.0.0"
@@ -6314,7 +6301,7 @@ __metadata:
   bin:
     electron: cli.js
     install-electron: install.js
-  checksum: 10c0/f5543ce1114ddf84f4872f4c214fb4f0a3990bc2634bbdb60ebbc49b155c46cfde71efb7852863da27ed0592cac1db074424868009495de07ea07f12a8dcfd9d
+  checksum: 10c0/50fa36d8f3a56f499934ee3077a98f866fd216ac69d05ebed6200613f905fce893365b4ad9bb299272daeaebd1354b668e45f40948d85cd213489faee46ab305
   languageName: node
   linkType: hard
 
@@ -12518,7 +12505,7 @@ __metadata:
     "@xterm/addon-webgl": "npm:^0.19.0"
     "@xterm/xterm": "npm:^5.5.0"
     "@xyflow/react": "npm:^12.11.3"
-    electron: "npm:^41.10.3"
+    electron: "npm:^44.0.0"
     electron-builder: "npm:^26.10.0"
     electron-log: "npm:^5.4.4"
     electron-updater: "npm:^6.8.3"
