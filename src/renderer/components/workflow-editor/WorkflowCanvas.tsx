@@ -22,7 +22,7 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlignVerticalSpaceAround, Repeat, Trash2 } from 'lucide-react'
+import { AlignVerticalSpaceAround, Repeat, StepForward, Trash2 } from 'lucide-react'
 import { LoopConfig, NodeExecutionStatus, WorkflowEdge, WorkflowNode } from '../../../shared/types'
 import {
   AddStepNodeData,
@@ -32,6 +32,7 @@ import {
 } from '../../lib/workflow-canvas-layout'
 import { NODE_GLYPH, NODE_SELECTED, NODE_UNSELECTED } from './node-visuals'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
+import { Tooltip } from '../Tooltip'
 import { NodeCard } from './nodes/NodeCard'
 import { ConnectorButton } from './nodes/AddStepNode'
 
@@ -72,6 +73,8 @@ interface Props {
   onPositionsCommit: (positions: Record<string, { x: number; y: number }>) => void
   /** Delete-key removal of the selected step (never the trigger). */
   onDeleteNode?: (nodeId: string) => void
+  /** Hover-toolbar shortcut into the editor's run-to-step path. */
+  onRunToStep?: (nodeId: string) => void
   onTidyUp: () => void
   selectedNodeId: string | null
   /** What each node is doing in live runs; absent when nothing is running. */
@@ -88,6 +91,7 @@ interface CanvasInteractions {
   onOpenLibrary: (anchor: InsertAnchor) => void
   libraryAnchor: InsertAnchor | null
   onDeleteNode?: (nodeId: string) => void
+  onRunToStep?: (nodeId: string) => void
 }
 
 const InteractionsContext = createContext<CanvasInteractions | null>(null)
@@ -99,25 +103,45 @@ function useInteractions(): CanvasInteractions {
 }
 
 /** The strip that floats over a hovered card; the wrapper must carry `group`. */
+const TOOLBAR_BUTTON = `p-1.5 rounded-md bg-surface-overlay border border-white/[0.12] text-gray-400
+                        hover:text-white hover:border-white/[0.2] transition-colors`
+
 function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
-  const { onDeleteNode } = useInteractions()
-  if (!onDeleteNode) return null
+  const { onDeleteNode, onRunToStep } = useInteractions()
+  if (!onDeleteNode && !onRunToStep) return null
   return (
     <div
-      className="absolute left-full top-1/2 -translate-y-1/2 ml-1.5 opacity-0 group-hover:opacity-100
-                 transition-opacity duration-100 z-10"
+      className="absolute left-full top-1/2 -translate-y-1/2 ml-1.5 flex flex-col gap-1 opacity-0
+                 group-hover:opacity-100 transition-opacity duration-100 z-10"
     >
-      <button
-        aria-label="Delete step"
-        onClick={(e) => {
-          e.stopPropagation()
-          onDeleteNode(nodeId)
-        }}
-        className="p-1.5 rounded-md bg-surface-overlay border border-white/[0.12] text-gray-400
-                   hover:text-white hover:border-white/[0.2] transition-colors"
-      >
-        <Trash2 size={12} />
-      </button>
+      {onRunToStep && (
+        <Tooltip label="Run to this step" position="right">
+          <button
+            aria-label="Run to this step"
+            onClick={(e) => {
+              e.stopPropagation()
+              onRunToStep(nodeId)
+            }}
+            className={TOOLBAR_BUTTON}
+          >
+            <StepForward size={12} />
+          </button>
+        </Tooltip>
+      )}
+      {onDeleteNode && (
+        <Tooltip label="Delete step" position="right">
+          <button
+            aria-label="Delete step"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDeleteNode(nodeId)
+            }}
+            className={TOOLBAR_BUTTON}
+          >
+            <Trash2 size={12} />
+          </button>
+        </Tooltip>
+      )}
     </div>
   )
 }
@@ -383,6 +407,7 @@ function WorkflowCanvasInner({
   onConnectEdge,
   onPositionsCommit,
   onDeleteNode,
+  onRunToStep,
   onTidyUp,
   selectedNodeId,
   nodeStatus
@@ -517,9 +542,19 @@ function WorkflowCanvasInner({
       onNodeClick,
       onOpenLibrary,
       libraryAnchor,
-      onDeleteNode
+      onDeleteNode,
+      onRunToStep
     }),
-    [nodes, selectedNodeId, nodeStatus, onNodeClick, onOpenLibrary, libraryAnchor, onDeleteNode]
+    [
+      nodes,
+      selectedNodeId,
+      nodeStatus,
+      onNodeClick,
+      onOpenLibrary,
+      libraryAnchor,
+      onDeleteNode,
+      onRunToStep
+    ]
   )
 
   return (

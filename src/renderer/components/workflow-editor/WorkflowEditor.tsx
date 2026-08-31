@@ -1106,6 +1106,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           onConnectEdge={handleConnectEdge}
           onPositionsCommit={handlePositionsCommit}
           onDeleteNode={handleDeleteNode}
+          onRunToStep={handleRunToStep}
           onTidyUp={handleTidyUp}
           selectedNodeId={selectedNodeId}
           nodeStatus={nodeStatus}
