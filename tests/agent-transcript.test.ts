@@ -191,3 +191,24 @@ describe('two cold panes resumed one after the other', () => {
     expect(claimTranscriptFor(session({ id: 'two' }), live, 'two')).toBeUndefined()
   })
 })
+
+describe('a launch that names no conversation', () => {
+  /**
+   * A workflow step launches through `terminal:create` with no transcript, and
+   * keeps its own claim over the worktree in `workflow-run-claims`. The two stay
+   * separate on purpose; this pins that rather than leaving it implied.
+   */
+  it('claims nothing, so a workflow step and a resume never contend', () => {
+    getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'transcript-a' })])
+    const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
+
+    expect(transcriptHolder('', live)).toBeUndefined()
+    // The resume beside it still resolves normally.
+    expect(claimTranscriptFor(session({ id: 'two' }), live, 'two')).toBeUndefined()
+  })
+
+  it('does not treat a session with no reported conversation as holding one', () => {
+    const live = [session({ id: 'one' }), session({ id: 'two' })]
+    expect(heldTranscripts(live).size).toBe(0)
+  })
+})

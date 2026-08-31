@@ -67,9 +67,9 @@ export async function resumeEndedSession(
   }
 
   useAppStore.getState().replaceTerminal(terminalId, result.session)
-  if (result.boundTo && !options.automatic) {
-    toast('That conversation was already running. This pane is showing it.')
-  }
+  // Said even for an automatic resume: a pane quietly becoming a second view of
+  // a session open elsewhere is the one surprise worth a line.
+  if (result.boundTo) toast('That conversation was already running. This pane shows it.')
 }
 
 /**

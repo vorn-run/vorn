@@ -359,6 +359,13 @@ export function registerAllMethods(): void {
 
   // Terminal
   registerMethod('terminal:create', (payload) => {
+    // A conversation picked by hand -- the palette, a task -- may already be open.
+    const wanted = payload.resumeSessionId
+    if (wanted) {
+      const live = ptyManager.getActiveSessions().filter((s) => ptyManager.hasLivePty(s.id))
+      const holder = transcriptHolder(wanted, live)
+      if (holder) return holder
+    }
     return ptyManager.createPty(payload)
   })
   /**
