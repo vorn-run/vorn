@@ -84,10 +84,9 @@ function renderWith(
       nodeStatus={nodeStatus}
       selectedNodeId={selectedNodeId}
       onNodeClick={() => {}}
-      onInsertNode={() => {}}
-      onAddParallelBranch={() => {}}
+      onOpenLibrary={() => {}}
+      libraryAnchor={null}
       onConnectEdge={() => {}}
-      onPaletteInsert={() => {}}
       onPositionsCommit={() => {}}
       onTidyUp={() => {}}
     />
@@ -153,76 +152,84 @@ describe('the loop rail on the canvas', () => {
 })
 
 describe('adding a step inside the rail', () => {
-  function renderWithSpy(
-    list: WorkflowNode[],
-    onInsertNode: (a: string, b: string | null, t: string) => void
-  ) {
+  function renderWithSpy(list: WorkflowNode[], onOpenLibrary: (a: unknown) => void) {
     return render(
       <WorkflowCanvas
         nodes={list}
         edges={edges}
         selectedNodeId={null}
         onNodeClick={() => {}}
-        onInsertNode={onInsertNode as never}
-        onAddParallelBranch={() => {}}
+        onOpenLibrary={onOpenLibrary as never}
+        libraryAnchor={null}
         onConnectEdge={() => {}}
-        onPaletteInsert={() => {}}
         onPositionsCommit={() => {}}
         onTidyUp={() => {}}
       />
     )
   }
 
-  it('reports the loop body, so membership follows position', () => {
+  it('opens the library scoped to the body, so membership follows position', () => {
     // The sentinel is what tells the editor to write the edge and the
     // membership together instead of appending after the loop.
-    const onInsertNode = vi.fn()
-    const { container } = renderWithSpy(nodes, onInsertNode)
+    const onOpenLibrary = vi.fn()
+    const { container } = renderWithSpy(nodes, onOpenLibrary)
     const rail = container.querySelector('[data-loop-rail]') as HTMLElement
 
     fireEvent.click(within(rail).getByRole('button', { name: 'Add a step' }))
-    fireEvent.click(screen.getByText(/Launch an agent|Add an agent|agent/i))
 
-    expect(onInsertNode).toHaveBeenCalledWith(expect.any(String), '__LOOP_BODY__', 'agent')
+    expect(onOpenLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeNodeId: '__LOOP_BODY__', bodyOnly: true })
+    )
   })
 
   it('anchors the insert on the last body step', () => {
-    const onInsertNode = vi.fn()
-    const { container } = renderWithSpy(nodes, onInsertNode)
+    const onOpenLibrary = vi.fn()
+    const { container } = renderWithSpy(nodes, onOpenLibrary)
     const rail = container.querySelector('[data-loop-rail]') as HTMLElement
 
     fireEvent.click(within(rail).getByRole('button', { name: 'Add a step' }))
-    fireEvent.click(screen.getByText(/Launch an agent|Add an agent|agent/i))
 
-    expect(onInsertNode.mock.calls[0][0]).toBe('review')
+    expect(onOpenLibrary.mock.calls[0][0].afterNodeId).toBe('review')
   })
 
   it('anchors on the loop itself when the body is empty', () => {
-    const onInsertNode = vi.fn()
+    const onOpenLibrary = vi.fn()
     const { container } = renderWithSpy(
       withLoopConfig({ nodeType: 'loop', bodyNodeIds: [], maxIterations: 2 }),
-      onInsertNode
+      onOpenLibrary
     )
     const rail = container.querySelector('[data-loop-rail]') as HTMLElement
 
     fireEvent.click(within(rail).getByRole('button', { name: 'Add a step' }))
-    fireEvent.click(screen.getByText(/Launch an agent|Add an agent|agent/i))
 
-    expect(onInsertNode.mock.calls[0][0]).toBe('loop')
+    expect(onOpenLibrary.mock.calls[0][0].afterNodeId).toBe('loop')
   })
 })
 
 describe('where a loop can be added', () => {
-  it('is offered on the trunk', () => {
-    const { container } = renderWith(nodes)
-    // The + that trails the leaf, outside the rail: the last add button in
-    // the document that does not sit inside the loop enclosure.
+  it('a trunk anchor reaches the library unrestricted', () => {
+    const onOpenLibrary = vi.fn()
+    const { container } = render(
+      <WorkflowCanvas
+        nodes={nodes}
+        edges={edges}
+        selectedNodeId={null}
+        onNodeClick={() => {}}
+        onOpenLibrary={onOpenLibrary as never}
+        libraryAnchor={null}
+        onConnectEdge={() => {}}
+        onPositionsCommit={() => {}}
+        onTidyUp={() => {}}
+      />
+    )
     const rail = container.querySelector('[data-loop-rail]') as HTMLElement
     const adds = screen
       .getAllByRole('button', { name: 'Add a step' })
       .filter((b) => !rail.contains(b))
     fireEvent.click(adds[adds.length - 1])
-    expect(screen.queryByText(/Repeat steps/)).not.toBeNull()
+    expect(onOpenLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ insideBranch: false, bodyOnly: false })
+    )
   })
 })
 

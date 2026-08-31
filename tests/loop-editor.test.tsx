@@ -200,27 +200,20 @@ describe('LoopConfigForm with no condition yet', () => {
   })
 })
 
-describe('the + menu offers a loop', () => {
-  it('hides the entry where a loop cannot be added', () => {
-    // Inside a fork branch there is no loop affordance, so the prop is absent
-    // and the item must not appear.
-    render(<ConnectorButton onAddAction={() => {}} />)
-    fireEvent.click(screen.getByRole('button'))
+describe('the + on the canvas', () => {
+  it('opens the step library instead of carrying its own menu', () => {
+    const onOpen = vi.fn()
+    render(<ConnectorButton onOpen={onOpen} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add a step' }))
+    expect(onOpen).toHaveBeenCalledOnce()
+    // Whether a loop is offered is the library's decision now.
     expect(screen.queryByText(/Repeat steps/)).toBeNull()
   })
 
-  it('shows the entry when the caller can handle it', () => {
-    render(<ConnectorButton onAddAction={() => {}} onAddLoop={() => {}} />)
-    fireEvent.click(screen.getByRole('button'))
-    expect(screen.getByText(/Repeat steps/)).toBeInTheDocument()
-  })
-
-  it('calls back and closes when chosen', () => {
-    const onAddLoop = vi.fn()
-    render(<ConnectorButton onAddAction={() => {}} onAddLoop={onAddLoop} />)
-    fireEvent.click(screen.getByRole('button'))
-    fireEvent.click(screen.getByText(/Repeat steps/))
-    expect(onAddLoop).toHaveBeenCalledOnce()
-    expect(screen.queryByText(/Repeat steps/)).toBeNull()
+  it('stays lit while it is the library anchor', () => {
+    render(<ConnectorButton onOpen={() => {}} active />)
+    expect(screen.getByRole('button', { name: 'Add a step' }).className).toContain(
+      'border-white/40'
+    )
   })
 })
