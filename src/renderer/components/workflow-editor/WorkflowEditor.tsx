@@ -590,6 +590,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       const anchor = pendingInsert
       if (!anchor) return
       setPendingInsert(null)
+      // A delete or undo can outlive the anchor; inserting after a ghost writes a dangling edge.
+      if (!nodes.some((n) => n.id === anchor.afterNodeId)) return
       if (pick.kind === 'parallel') {
         handleAddParallelBranch(anchor.afterNodeId, 'agent')
       } else if (anchor.position && anchor.beforeNodeId === null) {
@@ -603,7 +605,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, pick.type)
       }
     },
-    [pendingInsert, handleAddParallelBranch, handlePaletteInsert, handleInsertNode]
+    [pendingInsert, nodes, handleAddParallelBranch, handlePaletteInsert, handleInsertNode]
   )
 
   const handleNodeConfigChange = useCallback((nodeId: string, config: WorkflowNode['config']) => {
@@ -656,6 +658,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setNodes(result.nodes)
       setEdges(result.edges)
       setSelectedNodeId(null)
+      setPendingInsert(null)
     },
     [nodes, edges]
   )

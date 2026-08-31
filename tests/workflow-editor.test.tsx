@@ -367,6 +367,45 @@ describe('the handlers the canvas drives', () => {
   const pickFromLibrary = (pick: Record<string, unknown>) =>
     act(() => (captured.libraryProps!.onPick as (p: unknown) => void)(pick))
 
+  it('refuses a pick whose anchor no longer exists', () => {
+    mockState.addWorkflow.mockClear()
+    const { container, getByTestId } = render(<WorkflowEditor />)
+    act(() =>
+      canvas().onOpenLibrary({
+        afterNodeId: 'ghost',
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false
+      })
+    )
+    expect(getByTestId('step-library')).toBeInTheDocument()
+    pickFromLibrary({ kind: 'type', type: 'script' })
+    const saved = save(container)
+    // No orphan step and no edge hanging off the ghost.
+    expect(saved.nodes).toHaveLength(1)
+    expect(saved.edges.some((e) => e.source === 'ghost')).toBe(false)
+  })
+
+  it('closes the library when its anchor node is deleted', () => {
+    const { getByTestId, queryByTestId } = render(<WorkflowEditor />)
+    const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
+    act(() =>
+      canvas().onOpenLibrary({
+        afterNodeId: triggerId,
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false
+      })
+    )
+    expect(getByTestId('step-library')).toBeInTheDocument()
+    act(() =>
+      (captured.canvasProps as unknown as { onDeleteNode: (id: string) => void }).onDeleteNode(
+        triggerId
+      )
+    )
+    expect(queryByTestId('step-library')).toBeNull()
+  })
+
   it('a library pick at a dropped position appends after its anchor there', () => {
     mockState.addWorkflow.mockClear()
     const { container, getByTestId } = render(<WorkflowEditor />)
