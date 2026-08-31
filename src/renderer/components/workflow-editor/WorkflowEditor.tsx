@@ -486,7 +486,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     const handler = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
       const target = e.target as HTMLElement
-      // Text fields keep their native undo; the shortcut is for the graph.
+      // Text fields keep their native undo.
       if (target.closest('input, textarea, [contenteditable="true"]')) return
       e.preventDefault()
       if (e.shiftKey) redo()
@@ -517,9 +517,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
   const handlePaletteInsert = useCallback(
     (pick: PalettePick, afterNodeId: string, position: { x: number; y: number }) => {
-      // A workflow nobody has arranged shows the computed layout; materialize
-      // it first so placing one node at the drop point doesn't strand the rest
-      // on the seed column.
+      // Materialize the computed layout first so the drop doesn't strand the rest on the seed column.
       const placeAll = (
         placed: WorkflowNode[],
         edgesForLayout: WorkflowEdge[],

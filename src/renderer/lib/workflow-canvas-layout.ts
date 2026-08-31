@@ -3,16 +3,7 @@ import { LoopConfig, WorkflowEdge, WorkflowNode } from '../../shared/types'
 import { stepPreview } from '../components/workflow-editor/node-visuals'
 import { computeFlowLayout, FlowRow } from './workflow-helpers'
 
-/**
- * Everything the canvas derives from a workflow definition: which definition
- * nodes become canvas nodes, where they sit, and which edges are drawn.
- *
- * The definition stays the source of truth. A loop and its body render as one
- * composite canvas node — membership is the loop's own `bodyNodeIds`, so body
- * steps never appear as free canvas nodes and an edge that leaves the body is
- * drawn from the composite. The layout walks the same `FlowRow` tree the rail
- * drew, so Tidy up reproduces exactly the order the rail showed.
- */
+// Projects a workflow definition into canvas elements; the definition stays the source of truth.
 
 export const CARD_WIDTH = 280
 export const LOOP_WIDTH = 312
@@ -21,9 +12,7 @@ const BRANCH_GAP = 56
 /** Vertical gap between consecutive steps (room for the edge). */
 const ROW_GAP = 56
 
-/** Data every canvas step/loop node carries: only the definition node's id.
- *  Content, selection, and status come from context so the node array is
- *  stable across selection and run-status changes. */
+/** Only the id: content, selection, and status come from context, keeping the node array stable. */
 export interface CanvasNodeData extends Record<string, unknown> {
   nodeId: string
 }
@@ -35,11 +24,9 @@ export interface AddStepNodeData extends Record<string, unknown> {
 }
 
 export interface CanvasEdgeData extends Record<string, unknown> {
-  /** Arguments for the editor's insert path when the edge's + is used. */
   afterNodeId: string
   beforeNodeId: string
   conditionBranch?: 'true' | 'false'
-  /** Loop and parallel insertion stay off edges inside a fork branch. */
   insideBranch: boolean
 }
 
@@ -63,11 +50,7 @@ function owningLoopId(nodes: WorkflowNode[], bodyNodeId: string): string | undef
   )?.id
 }
 
-/**
- * Rendered height of a step card, from the same facts the card renders:
- * a header is two lines, a preview adds a footer. Only feeds the layout —
- * a few points of drift just widens a gap.
- */
+/** Estimated card height; only feeds the layout, so drift just widens a gap. */
 export function estimateNodeHeight(node: WorkflowNode, allNodes: WorkflowNode[]): number {
   if (node.type === 'loop') {
     const body = ((node.config as LoopConfig).bodyNodeIds ?? [])
@@ -75,9 +58,9 @@ export function estimateNodeHeight(node: WorkflowNode, allNodes: WorkflowNode[])
       .filter((n): n is WorkflowNode => !!n)
     const bodyHeights =
       body.length === 0
-        ? 52 // the "no steps yet" placeholder
+        ? 52
         : body.reduce((sum, b) => sum + estimateNodeHeight(b, allNodes), 0) + (body.length - 1) * 18
-    // header + top padding + body + line + add button + footer
+    // header + padding + body + line + add button + footer
     return 41 + 16 + bodyHeights + 18 + 22 + 40
   }
   return stepPreview(node) ? 90 : 58
@@ -85,15 +68,11 @@ export function estimateNodeHeight(node: WorkflowNode, allNodes: WorkflowNode[])
 
 interface Placed {
   positions: Map<string, { x: number; y: number }>
-  /** Node ids drawn inside a fork branch — loop/parallel insertion stays off there. */
+  /** Node ids drawn inside a fork branch, where loop/parallel insertion is off. */
   branchMembers: Set<string>
 }
 
-/**
- * Positions for every top-level canvas node, derived from the FlowRow tree:
- * a vertical trunk, fork branches side by side, a loop as one tall block.
- * `xCenter` is the trunk's centerline in canvas coordinates.
- */
+/** Positions from the FlowRow tree: vertical trunk, branches side by side, loops as one block. */
 export function layoutPositions(nodes: WorkflowNode[], edges: WorkflowEdge[]): Placed {
   const rows = computeFlowLayout(nodes, edges)
   const positions = new Map<string, { x: number; y: number }>()
@@ -113,8 +92,7 @@ export function layoutPositions(nodes: WorkflowNode[], edges: WorkflowEdge[]): P
     let cursor = y
     for (const row of rows) {
       if (row.kind === 'node') {
-        // Body members can appear as appended orphans; they draw inside their
-        // loop, so they take no space on the trunk.
+        // Orphaned body members draw inside their loop, not on the trunk.
         if (bodySet.has(row.node.id)) continue
         positions.set(row.node.id, { x: xCenter - CARD_WIDTH / 2, y: cursor })
         if (insideBranch) branchMembers.add(row.node.id)
@@ -155,11 +133,7 @@ export interface CanvasElements {
   branchMembers: Set<string>
 }
 
-/**
- * Project the definition into canvas elements. Positions come from the
- * definition when someone has arranged it, and from the layout walk when the
- * stored positions are still the seeded single column.
- */
+/** Stored positions when someone has arranged the workflow, the layout walk otherwise. */
 export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): CanvasElements {
   const bodySet = loopBodyMembers(nodes)
   const { positions: computed, branchMembers } = layoutPositions(nodes, edges)
@@ -178,8 +152,7 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
       type: node.type === 'loop' ? 'loop' : 'step',
       position,
       data: { nodeId: node.id } satisfies CanvasNodeData,
-      // Explicit dimensions and declared handles let edges render before the
-      // first DOM measure — and at all in environments with no layout (tests).
+      // Explicit dimensions and handles let edges render without a DOM measure.
       width,
       height,
       handles: [
@@ -197,12 +170,11 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
     const sourceInBody = bodySet.has(edge.source)
     const targetInBody = bodySet.has(edge.target)
     if (sourceInBody && targetInBody) continue
-    if (!sourceInBody && targetInBody) continue // the loop draws its own entry
+    if (!sourceInBody && targetInBody) continue
     if (seenEdgeIds.has(edge.id)) continue
     seenEdgeIds.add(edge.id)
 
-    // An edge that leaves a loop body continues the trunk: draw it from the
-    // composite, but keep the real endpoints so insertion splices correctly.
+    // Edges leaving a loop body draw from the composite; real endpoints stay for splicing.
     const drawnSource = sourceInBody ? owningLoopId(nodes, edge.source) : edge.source
     if (!drawnSource) continue
 
@@ -229,7 +201,6 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
     })
   }
 
-  // Every leaf gets a trailing +, matching the rail's end-of-chain button.
   const hasOutgoing = new Set(edges.map((e) => e.source))
   for (const node of nodes) {
     if (bodySet.has(node.id)) continue
@@ -267,10 +238,7 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
   return { nodes: rfNodes, edges: rfEdges, branchMembers }
 }
 
-/**
- * Would connecting `source` → `target` keep the definition a DAG with the
- * shapes the engine understands? Used to validate hand-drawn connections.
- */
+/** Whether a hand-drawn source → target edge keeps the graph a DAG the engine understands. */
 export function canConnect(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
@@ -282,13 +250,11 @@ export function canConnect(
   const targetNode = nodes.find((n) => n.id === target)
   if (!sourceNode || !targetNode) return false
   if (targetNode.type === 'trigger') return false
-  // A condition's branches carry true/false tags the panel manages; a loop
-  // drives its own body. Hand-drawn edges from either would bypass that.
+  // Condition branches carry managed tags; hand-drawn edges would bypass them.
   if (sourceNode.type === 'condition') return false
   const bodySet = loopBodyMembers(nodes)
   if (bodySet.has(source) || bodySet.has(target)) return false
   if (edges.some((e) => e.source === source && e.target === target)) return false
-  // No cycles: if source is reachable from target, this edge closes a loop.
   const successors = new Map<string, string[]>()
   for (const e of edges) {
     const list = successors.get(e.source) ?? []

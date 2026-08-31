@@ -461,22 +461,12 @@ export function insertConditionBetween(
   return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }
 
-/** Whether every stored position is still the untouched seed column (x = 0
- *  everywhere). True for every definition that predates the canvas and for
- *  anything authored over MCP with default positions. */
+/** Whether every stored position is still the untouched seed column (x = 0 everywhere). */
 export function positionsAreSeed(nodes: WorkflowNode[]): boolean {
   return nodes.every((n) => !n.position || n.position.x === 0)
 }
 
-/**
- * Position policy for every structural mutation.
- *
- * A definition nobody has arranged keeps the legacy single-column reflow, so
- * its stored order stays meaningful. Once someone has dragged a node, the
- * arrangement is theirs: existing positions are kept untouched and only the
- * nodes this mutation created are placed — under their predecessor, offset
- * enough to be visibly a new step rather than a stack.
- */
+/** Seed definitions reflow into the legacy column; arranged ones keep their positions and only new nodes are placed. */
 export function placeNewNodes(
   prevNodes: WorkflowNode[],
   nextNodes: WorkflowNode[],
@@ -485,14 +475,30 @@ export function placeNewNodes(
   if (positionsAreSeed(prevNodes)) return autoLayoutNodes(nextNodes, edges)
 
   const prevIds = new Set(prevNodes.map((n) => n.id))
-  const byId = new Map(nextNodes.map((n) => [n.id, n]))
-  return nextNodes.map((node) => {
-    if (prevIds.has(node.id)) return node
+  // Positions accumulate so chained new nodes hang off placed predecessors, siblings fanned apart.
+  const placed = new Map<string, WorkflowNodePosition>()
+  for (const node of nextNodes) {
+    if (prevIds.has(node.id)) placed.set(node.id, node.position)
+  }
+  const siblingCount = new Map<string, number>()
+  const remaining = nextNodes.filter((n) => !prevIds.has(n.id))
+  while (remaining.length > 0) {
+    const readyIndex = remaining.findIndex((n) => {
+      const incoming = edges.find((e) => e.target === n.id)
+      return !incoming || placed.has(incoming.source)
+    })
+    const index = readyIndex === -1 ? 0 : readyIndex
+    const node = remaining.splice(index, 1)[0]
     const incoming = edges.find((e) => e.target === node.id)
-    const pred = incoming ? byId.get(incoming.source) : undefined
-    const base = pred?.position ?? { x: 0, y: 0 }
-    return { ...node, position: { x: base.x, y: base.y + 140 } }
-  })
+    const base = (incoming && placed.get(incoming.source)) ?? { x: 0, y: 0 }
+    const sibling = incoming ? (siblingCount.get(incoming.source) ?? 0) : 0
+    if (incoming) siblingCount.set(incoming.source, sibling + 1)
+    placed.set(node.id, { x: base.x + sibling * 320, y: base.y + 140 })
+  }
+
+  return nextNodes.map((node) =>
+    prevIds.has(node.id) ? node : { ...node, position: placed.get(node.id)! }
+  )
 }
 
 export function autoLayoutNodes(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowNode[] {
@@ -550,8 +556,7 @@ export function insertNodeBetween(
 
   const newEdges = edges.filter((e) => e.id !== edgeId)
   newEdges.push(
-    // A condition's branch tag rides the first half of the split: the new node
-    // still sits on that branch, so the fork must keep telling them apart.
+    // The branch tag rides the first half of the split so the fork keeps telling branches apart.
     {
       id: crypto.randomUUID(),
       source: edge.source,

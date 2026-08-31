@@ -62,19 +62,11 @@ interface Props {
   onPositionsCommit: (positions: Record<string, { x: number; y: number }>) => void
   onTidyUp: () => void
   selectedNodeId: string | null
-  /**
-   * What each node is doing in the runs that are live right now, so the canvas
-   * reports a run rather than only describing a definition. Absent when nothing
-   * is running, which is most of the time.
-   */
+  /** What each node is doing in live runs; absent when nothing is running. */
   nodeStatus?: Record<string, NodeExecutionStatus>
 }
 
-/**
- * Everything a canvas node needs beyond its own id. Kept in context so the
- * node array only changes on structural edits — selection, status, and
- * callback identity churn re-render the cards without rebuilding the graph.
- */
+/** Kept in context so selection/status churn re-renders cards without rebuilding the node array. */
 interface CanvasInteractions {
   nodesById: Map<string, WorkflowNode>
   allNodes: WorkflowNode[]
@@ -117,12 +109,7 @@ function StepNode({ data }: NodeProps) {
   )
 }
 
-/**
- * A loop and the steps it repeats, drawn as one enclosure — the same composite
- * the rail drew. The body renders inside, so a repeated step can never be
- * mistaken for one that runs once, and membership stays the loop's own
- * `bodyNodeIds` rather than canvas geometry.
- */
+/** A loop and its body as one enclosure; membership stays `bodyNodeIds`, not canvas geometry. */
 function LoopNode({ data }: NodeProps) {
   const { nodesById, allNodes, selectedNodeId, nodeStatus, onNodeClick, onInsertNode } =
     useInteractions()
@@ -225,8 +212,7 @@ function AddStepNode({ data }: NodeProps) {
         onAddCondition={() => onInsertNode(afterNodeId, null, 'condition')}
         onAddApproval={() => onInsertNode(afterNodeId, null, 'approval')}
         onAddLoop={
-          // Gated like the rail: a loop lifts its body out of the trunk, and
-          // how that interacts with a fork's join is untested.
+          // Loop-inside-branch is untested against fork joins, same gate as the rail.
           !insideBranch ? () => onInsertNode(afterNodeId, null, 'loop') : undefined
         }
         onAddConnectorAction={() => onInsertNode(afterNodeId, null, 'connectorAction')}
@@ -238,12 +224,7 @@ function AddStepNode({ data }: NodeProps) {
   )
 }
 
-/**
- * A step edge: the connecting line, the True/False pill on condition branches,
- * and an insert button that appears while the pointer lingers. The generous
- * `interactionWidth` and the delayed leave exist so the mouse can travel from
- * the line to the button without the button vanishing under it.
- */
+/** The line, the branch pill, and a hover + whose delayed leave lets the mouse reach it. */
 function StepEdge({
   id,
   sourceX,
@@ -369,9 +350,7 @@ function WorkflowCanvasInner({
   const elements = useMemo(() => toCanvasElements(nodes, edges), [nodes, edges])
   const [rfNodes, setRfNodes] = useState<Node[]>(elements.nodes)
 
-  // The definition is the source of truth: rebuild whenever it changes.
-  // Interim drag positions live only in local state, so this is the
-  // adjust-state-while-rendering pattern rather than an effect.
+  // Adjust-state-while-rendering: rebuild from the definition; drag positions stay local.
   const [syncedElements, setSyncedElements] = useState(elements)
   if (syncedElements !== elements) {
     setSyncedElements(elements)
@@ -379,16 +358,13 @@ function WorkflowCanvasInner({
   }
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    // Position is the only thing the canvas owns. Selection is driven by
-    // `selectedNodeId`, structure by the editor's own handlers.
+    // The canvas owns position only; selection and structure stay the editor's.
     const positional = changes.filter((c) => c.type === 'position' || c.type === 'dimensions')
     if (positional.length > 0) setRfNodes((prev) => applyNodeChanges(positional, prev))
   }, [])
 
   const handleDragStop = useCallback(() => {
-    // Commit every node's displayed position, not only the dragged one: the
-    // first drag on a never-arranged workflow materializes the computed
-    // layout, so the rest must not stay behind on the seed column.
+    // Committing every displayed position materializes the computed layout on first drag.
     const positions: Record<string, { x: number; y: number }> = {}
     for (const rfNode of rfNodes) {
       if (rfNode.type === 'addStep') continue
@@ -446,7 +422,7 @@ function WorkflowCanvasInner({
     return () => {
       cancelled = true
     }
-    // Loaded once per palette opening; the set of connections is stable within it.
+    // Loaded once per palette opening.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [palette !== null])
 
@@ -473,8 +449,7 @@ function WorkflowCanvasInner({
     (event: MouseEvent | TouchEvent, connectionState: { isValid: boolean | null }) => {
       const source = pendingConnectSource.current
       pendingConnectSource.current = null
-      // A drop on empty canvas means "add a step here": open the search where
-      // the edge was released, remembering what it should hang off.
+      // A drop on empty canvas opens the node search where the edge was released.
       if (connectionState.isValid === null && source && 'clientX' in event) {
         openPaletteAt(event.clientX, event.clientY, source)
       }

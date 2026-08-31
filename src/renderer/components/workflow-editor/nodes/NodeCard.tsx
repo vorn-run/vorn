@@ -17,13 +17,7 @@ import { ApprovalNode } from './ApprovalNode'
 import { CreateTaskFromItemNode } from './CreateTaskFromItemNode'
 import { CallConnectorActionNode } from './CallConnectorActionNode'
 
-/**
- * The card for a single step, dispatched by type.
- *
- * Loops are not here on purpose: on the canvas a loop is a composite that
- * draws its own body, and a loop can never be another loop's body step, so a
- * card-shaped loop has no call site left.
- */
+/** The card for a single step, dispatched by type; loops render as composites, not cards. */
 export function NodeCard({
   node,
   selected,

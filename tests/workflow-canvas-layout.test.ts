@@ -91,7 +91,7 @@ describe('the definition projected onto the canvas', () => {
     const { edges: rf } = toCanvasElements(loopNodes, loopEdges)
     const exit = rf.find((e) => e.id === 'e4')!
     expect(exit.source).toBe('loop')
-    // The real endpoints survive, so an insert there still splices correctly.
+    // Real endpoints survive so inserts still splice correctly.
     expect(exit.data).toMatchObject({ afterNodeId: 'r', beforeNodeId: 'after' })
     expect(rf.find((e) => e.id === 'e2')).toBeUndefined()
     expect(rf.find((e) => e.id === 'e3')).toBeUndefined()

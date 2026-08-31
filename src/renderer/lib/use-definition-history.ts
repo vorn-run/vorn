@@ -7,18 +7,10 @@ interface Snapshot {
 }
 
 const STACK_LIMIT = 100
-/** Edits landing this close together read as one gesture — typing a label,
- *  nudging a node — and undo as one step. */
+/** Edits this close together read as one gesture and undo as one step. */
 const MERGE_WINDOW_MS = 500
 
-/**
- * Undo/redo over the workflow definition, as snapshots.
- *
- * A definition is kilobytes, so whole-state snapshots buy the same UX as a
- * command system for none of its machinery. The hook watches the definition
- * the editor already owns; applying an undo sets the same state, flagged so
- * the application itself is not recorded as a new edit.
- */
+/** Snapshot undo/redo over the definition; applying an undo is flagged so it isn't re-recorded. */
 export function useDefinitionHistory(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
@@ -33,6 +25,8 @@ export function useDefinitionHistory(
   const applying = useRef(false)
   const lastPushAt = useRef(0)
   const key = useRef(resetKey)
+  // The first change after mount or a reset is the load landing, not an edit — undo must not reach past it.
+  const absorbingLoad = useRef(true)
 
   useEffect(() => {
     if (key.current !== resetKey) {
@@ -41,11 +35,17 @@ export function useDefinitionHistory(
       future.current = []
       lastPushAt.current = 0
       current.current = { nodes, edges }
+      absorbingLoad.current = true
       return
     }
     if (nodes === current.current.nodes && edges === current.current.edges) return
     if (applying.current) {
       applying.current = false
+      current.current = { nodes, edges }
+      return
+    }
+    if (absorbingLoad.current) {
+      absorbingLoad.current = false
       current.current = { nodes, edges }
       return
     }

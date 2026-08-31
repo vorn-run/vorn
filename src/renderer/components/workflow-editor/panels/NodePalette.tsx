@@ -4,10 +4,7 @@ import type { LucideIcon } from 'lucide-react'
 import { NODE_GLYPH } from '../node-visuals'
 import type { AddableNodeType } from '../WorkflowCanvas'
 
-/**
- * What picking a palette entry means: a bare step type, or a connector action
- * with the connection and action already chosen.
- */
+/** A bare step type, or a connector action with connection and action chosen. */
 export type PalettePick =
   | { kind: 'type'; type: AddableNodeType }
   | { kind: 'connectorAction'; connectionId: string; action: string }
@@ -29,11 +26,7 @@ const TYPE_ITEMS: { type: AddableNodeType; label: string; icon: LucideIcon }[] =
   { type: 'connectorAction', label: 'Call a connector action', icon: Zap }
 ]
 
-/**
- * The node search panel: opened by dropping a connection on empty canvas or
- * pressing Tab. Lists the step types and every installed connector action,
- * filtered as the user types; Enter picks the highlighted row.
- */
+/** The node search panel: step types and installed connector actions, filtered as you type. */
 export function NodePalette({
   position,
   allowLoop,
@@ -43,7 +36,7 @@ export function NodePalette({
 }: {
   /** Where to place the panel, in the canvas container's coordinates. */
   position: { x: number; y: number }
-  /** Loops lift their body out of the trunk; inside a branch that is untested. */
+  /** Loop-inside-branch is untested, so branches disallow it. */
   allowLoop: boolean
   connectorItems: PaletteConnectorItem[]
   onPick: (pick: PalettePick) => void
