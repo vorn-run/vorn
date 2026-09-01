@@ -194,7 +194,9 @@ function StepNode({ data, id }: NodeProps) {
   // A replace-in-place keeps the id, so React Flow would keep the old card's
   // measured handle positions; re-measure when the rendered shape changes.
   // Never on mount: that races the initial measure while fitView settles.
-  const shape = node ? `${node.type}:${estimateNodeHeight(node, allNodes)}` : ''
+  // Trigger kinds share a type and height, so the kind is part of the shape.
+  const kind = (node?.config as { triggerType?: string } | undefined)?.triggerType ?? ''
+  const shape = node ? `${node.type}:${kind}:${estimateNodeHeight(node, allNodes)}` : ''
   const lastShape = useRef<string | null>(null)
   useEffect(() => {
     if (shape && lastShape.current !== null && lastShape.current !== shape) {

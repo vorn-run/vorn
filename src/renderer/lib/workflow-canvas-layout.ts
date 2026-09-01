@@ -77,6 +77,9 @@ export function estimateNodeHeight(node: WorkflowNode, allNodes: WorkflowNode[])
     const cfg = node.config as { variable?: string }
     return cfg.variable ? 90 : 58
   }
+  // A trigger card draws one subtitle line for every kind; its stepPreview
+  // (cron/event) belongs to the run trace, not the card.
+  if (node.type === 'trigger') return 58
   return stepPreview(node) ? 90 : 58
 }
 

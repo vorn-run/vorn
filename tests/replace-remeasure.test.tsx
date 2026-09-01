@@ -96,7 +96,39 @@ function renderCanvas(nodes: WorkflowNode[]) {
   )
 }
 
+const manualTrigger: WorkflowNode = {
+  id: 't',
+  type: 'trigger',
+  label: 'Manual Trigger',
+  config: { triggerType: 'manual' },
+  position: { x: 0, y: 0 }
+}
+
+const recurringTrigger: WorkflowNode = {
+  id: 't',
+  type: 'trigger',
+  label: 'Schedule (Recurring)',
+  config: { triggerType: 'recurring', cron: '0 9 * * *' } as WorkflowNode['config'],
+  position: { x: 0, y: 0 }
+}
+
 describe('re-measuring after a replace-in-place', () => {
+  it('re-measures a trigger whose kind swaps under the same id', () => {
+    const { rerender } = renderCanvas([manualTrigger, script])
+    expect(internalsCalls.ids).toHaveLength(0)
+
+    rerender(
+      <WorkflowCanvas
+        nodes={[recurringTrigger, script]}
+        edges={edges}
+        selectedNodeId={null}
+        libraryAnchor={null}
+        {...handlers}
+      />
+    )
+    expect(internalsCalls.ids).toContain('t')
+  })
+
   it('re-declares the node height and source-handle y for the swapped type', () => {
     const handleY = (nodes: WorkflowNode[]) => {
       const rf = toCanvasElements(nodes, edges).nodes.find((n) => n.id === 'a')!
