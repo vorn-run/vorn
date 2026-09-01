@@ -103,4 +103,18 @@ describe('installing from a catalog row', () => {
     expect((await screen.findAllByText(/the server went away/)).length).toBeGreaterThan(0)
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull())
   })
+
+  it('drops what the last attempt said when a new one starts', async () => {
+    installConnectorPack.mockRejectedValue(new Error('the server went away'))
+    await pressInstall()
+    const sheet = (await screen.findByRole('button', { name: 'Cancel' }))
+      .parentElement as HTMLElement
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Install' }))
+    await screen.findAllByText(/the server went away/)
+
+    installConnectorPack.mockResolvedValue({ ok: true, pack: { ...PREVIEW, path: '/p', bytes: 1 } })
+    fireEvent.click(await screen.findByRole('button', { name: /^(Install|Retry)$/ }))
+
+    await waitFor(() => expect(screen.queryByText(/the server went away/)).toBeNull())
+  })
 })

@@ -136,6 +136,9 @@ export function ConnectorSettings() {
             } as ConnectorPackSource)
           : ({ kind: 'npm', packageName: listing.catalogItem?.packageName ?? listing.id } as const))
 
+      // Whatever the last attempt said is about that attempt, not this one.
+      setFileInstallError(null)
+      setPendingPack(null)
       setInstallProgress((current) => {
         const next = { ...current }
         delete next[listing.id]
