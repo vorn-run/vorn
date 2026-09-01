@@ -1,4 +1,5 @@
-import type { WorkflowDefinition, WorkflowNode } from '@vornrun/shared/types'
+import { connectionConnectorId } from './types'
+import type { SourceConnection, WorkflowDefinition, WorkflowNode } from './types'
 
 /**
  * Making a workflow portable, and putting it back.
@@ -13,6 +14,12 @@ import type { WorkflowDefinition, WorkflowNode } from '@vornrun/shared/types'
  * is no flat list of paths to walk — every rewrite has to know the node type it
  * is looking at. That is the whole reason this file exists rather than a
  * two-line `JSON.stringify`.
+ *
+ * Connections are the other machine-specific thing, and they are handled
+ * differently from paths: a connection id cannot be rewritten to a placeholder
+ * because there is nothing on the far side to resolve it against. Export drops
+ * the id and records what it stood for; import rebinds it when this machine has
+ * an unambiguous answer, and leaves the step unconfigured when it does not.
  */
 
 /** Stands in for the importing project's directory. */
@@ -22,6 +29,21 @@ export const PROJECT_NAME_TOKEN = '{{project.name}}'
 
 export const PORTABLE_FORMAT_VERSION = 1
 
+/** The built-in connector whose connections are HTTP auth profiles. */
+export const HTTP_PROFILE_CONNECTOR = 'http'
+
+/** What a step needs bound before it can run, named so any machine can match it. */
+export type PortableRequirement =
+  | {
+      kind: 'connection'
+      nodeId: string
+      /** Empty when the exporting machine could not name the connector. */
+      connectorId: string
+      name: string
+      event?: string
+    }
+  | { kind: 'httpProfile'; nodeId: string; name: string }
+
 export type PortableWorkflow = {
   version: number
   slug: string
@@ -29,8 +51,18 @@ export type PortableWorkflow = {
   icon?: string
   iconColor?: string
   staggerDelayMs?: number
+  /** Absent when nothing in the workflow was bound to a connection. */
+  requires?: PortableRequirement[]
   nodes: WorkflowNode[]
   edges: WorkflowDefinition['edges']
+}
+
+/** Enough of a connection to match one; a whole `SourceConnection` satisfies it. */
+export interface PortableConnection {
+  id: string
+  name: string
+  connectorId: string
+  filters?: SourceConnection['filters']
 }
 
 /**
@@ -64,35 +96,54 @@ export function slugify(name: string): string {
   )
 }
 
-/**
- * Why a workflow cannot travel, if it cannot.
- *
- * A connector-bound workflow carries a `connectionId` that is a UUID minted on
- * this machine. Rewriting it to a placeholder would produce a file that
- * imports cleanly and then fails at run time against a connection that does
- * not exist — so this refuses instead, the way install_connector refuses
- * secrets rather than guessing at them.
- */
-export function portabilityBlockers(workflow: WorkflowDefinition): string[] {
-  const blockers: string[] = []
-
-  for (const node of workflow.nodes) {
-    const config = node.config as Record<string, unknown>
-
-    if (node.type === 'trigger' && config.triggerType === 'connectorPoll') {
-      blockers.push(`the trigger polls a connector connection, which exists only on this machine`)
-    }
-    if (node.type === 'callConnectorAction') {
-      blockers.push(`step "${node.label}" calls a connector action bound to a local connection`)
-    }
-  }
-
-  return blockers
+/** The connector a connection belongs to, packaged connectors included. */
+function connectorOf(connection: PortableConnection): string {
+  return connectionConnectorId({
+    connectorId: connection.connectorId,
+    filters: connection.filters ?? {}
+  })
 }
 
-/** Replace this machine's paths with placeholders. */
-export function toPortable(workflow: WorkflowDefinition, projectPath: string): PortableWorkflow {
+/** Whether this node runs against a connector connection. */
+function boundConnectionKey(node: WorkflowNode, config: Record<string, unknown>): string | null {
+  if (node.type === 'trigger' && config.triggerType === 'connectorPoll') return 'connectionId'
+  if (node.type === 'callConnectorAction') return 'connectionId'
+  if (node.type === 'httpRequest') return 'profileConnectionId'
+  return null
+}
+
+/**
+ * The connection a requirement should bind to here, if this machine has one answer.
+ *
+ * A name match wins over a bare type match, so re-importing where the file was
+ * written rebinds what it was actually pointed at. Anything ambiguous is left
+ * for a person, because guessing binds a workflow to the wrong account.
+ */
+export function resolveRequirement(
+  requirement: PortableRequirement,
+  connections: PortableConnection[]
+): string | undefined {
+  const candidates = connections.filter((connection) =>
+    requirement.kind === 'httpProfile'
+      ? connectorOf(connection) === HTTP_PROFILE_CONNECTOR
+      : requirement.connectorId !== '' && connectorOf(connection) === requirement.connectorId
+  )
+  if (candidates.length === 0) return undefined
+  if (requirement.name !== '') {
+    const named = candidates.filter((connection) => connection.name === requirement.name)
+    if (named.length === 1) return named[0].id
+  }
+  return candidates.length === 1 ? candidates[0].id : undefined
+}
+
+/** Replace this machine's paths with placeholders and unbind its connections. */
+export function toPortable(
+  workflow: WorkflowDefinition,
+  projectPath: string,
+  connections: PortableConnection[] = []
+): PortableWorkflow {
   const slug = slugify(workflow.name)
+  const requires: PortableRequirement[] = []
 
   const nodes = workflow.nodes.map((node) => {
     const config = { ...(node.config as Record<string, unknown>) }
@@ -113,6 +164,27 @@ export function toPortable(workflow: WorkflowDefinition, projectPath: string): P
       delete config.remoteHostId
     }
 
+    const key = boundConnectionKey(node, config)
+    const bound = key === null ? '' : config[key]
+    if (key !== null && typeof bound === 'string' && bound !== '') {
+      const source = connections.find((connection) => connection.id === bound)
+      const event = config.event
+      requires.push(
+        key === 'profileConnectionId'
+          ? { kind: 'httpProfile', nodeId: node.id, name: source?.name ?? '' }
+          : {
+              kind: 'connection',
+              nodeId: node.id,
+              connectorId: source ? connectorOf(source) : '',
+              name: source?.name ?? '',
+              ...(typeof event === 'string' && event !== '' && { event })
+            }
+      )
+      // Optional on the node, so the step reads as simply having no profile.
+      if (key === 'profileConnectionId') delete config[key]
+      else config[key] = ''
+    }
+
     return { ...node, config } as WorkflowNode
   })
 
@@ -123,6 +195,7 @@ export function toPortable(workflow: WorkflowDefinition, projectPath: string): P
     ...(workflow.icon && { icon: workflow.icon }),
     ...(workflow.iconColor && { iconColor: workflow.iconColor }),
     ...(workflow.staggerDelayMs !== undefined && { staggerDelayMs: workflow.staggerDelayMs }),
+    ...(requires.length > 0 && { requires }),
     nodes,
     edges: workflow.edges
   }
@@ -150,12 +223,30 @@ function replacePath(value: string, projectPath: string): string {
   return value
 }
 
+/** Which of this file's requirements this machine cannot answer on its own. */
+export function unresolvedRequirements(
+  portable: PortableWorkflow,
+  connections: PortableConnection[]
+): PortableRequirement[] {
+  const present = new Set(portable.nodes.map((node) => node.id))
+  return (portable.requires ?? []).filter(
+    (requirement) =>
+      present.has(requirement.nodeId) && resolveRequirement(requirement, connections) === undefined
+  )
+}
+
 /** Resolve placeholders against the project this workflow is being imported into. */
 export function fromPortable(
   portable: PortableWorkflow,
   bundle: string,
-  project: { name: string; path: string }
+  project: { name: string; path: string },
+  connections: PortableConnection[] = []
 ): WorkflowDefinition {
+  const bindings = new Map<string, PortableRequirement[]>()
+  for (const requirement of portable.requires ?? []) {
+    bindings.set(requirement.nodeId, [...(bindings.get(requirement.nodeId) ?? []), requirement])
+  }
+
   const nodes = portable.nodes.map((node) => {
     const config = { ...(node.config as Record<string, unknown>) }
 
@@ -168,6 +259,13 @@ export function fromPortable(
         .join(project.path.replace(/[/\\]+$/, ''))
         .split(PROJECT_NAME_TOKEN)
         .join(project.name)
+    }
+
+    for (const requirement of bindings.get(node.id) ?? []) {
+      const resolved = resolveRequirement(requirement, connections)
+      if (resolved === undefined) continue
+      if (requirement.kind === 'httpProfile') config.profileConnectionId = resolved
+      else config.connectionId = resolved
     }
 
     return { ...node, config } as WorkflowNode

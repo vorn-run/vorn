@@ -26,12 +26,13 @@ import { rpcCall } from '../ws-client'
 import {
   toPortable,
   fromPortable,
-  portabilityBlockers,
+  unresolvedRequirements,
   residualAbsolutePaths,
   slugify,
   PORTABLE_FORMAT_VERSION,
+  type PortableConnection,
   type PortableWorkflow
-} from '../workflow-portability'
+} from '@vornrun/shared/workflow-portability'
 
 const launchAgentConfigSchema = z
   .object({
@@ -451,6 +452,15 @@ export function resolveWorkflowId(args: {
   return { id }
 }
 
+/** Connections for naming and rebinding requirements; absent ones cost detail, not the export. */
+async function listPortableConnections(): Promise<PortableConnection[]> {
+  try {
+    return await rpcCall<PortableConnection[]>('connection:list', { connectorId: undefined })
+  } catch {
+    return []
+  }
+}
+
 export function registerWorkflowTools(server: McpServer): void {
   server.tool(
     'list_workflows',
@@ -834,7 +844,7 @@ export function registerWorkflowTools(server: McpServer): void {
 
   server.tool(
     'export_workflow',
-    'Export a workflow as a portable file you can commit beside the code it drives. Absolute paths become {{project.path}} and the local remote-host binding is dropped, so it runs on another machine after import. Refuses a workflow bound to a connector connection, whose id means nothing elsewhere.',
+    'Export a workflow as a portable file you can commit beside the code it drives. Absolute paths become {{project.path}} and the local remote-host binding is dropped, so it runs on another machine after import. Connections are dropped too and recorded as requirements the importing machine rebinds by connector and name.',
     {
       workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
       id: V.id.optional().describe('Deprecated alias for workflow_id')
@@ -849,22 +859,6 @@ export function registerWorkflowTools(server: McpServer): void {
       if (!workflow) {
         return {
           content: [{ type: 'text', text: `Error: workflow "${resolved.id}" not found` }],
-          isError: true
-        }
-      }
-
-      const blockers = portabilityBlockers(workflow)
-      if (blockers.length > 0) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text:
-                `Error: "${workflow.name}" cannot be exported portably because ` +
-                blockers.join('; ') +
-                '. Rebuild those steps without the connection, or keep this workflow local.'
-            }
-          ],
           isError: true
         }
       }
@@ -889,8 +883,11 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      const portable = toPortable(workflow, project.path)
+      const portable = toPortable(workflow, project.path, await listPortableConnections())
       const residual = residualAbsolutePaths(portable)
+      const unnamed = (portable.requires ?? []).filter(
+        (requirement) => requirement.kind === 'connection' && requirement.connectorId === ''
+      )
 
       return {
         content: [
@@ -900,6 +897,9 @@ export function registerWorkflowTools(server: McpServer): void {
               JSON.stringify(portable, null, 2) +
               (residual.length > 0
                 ? `\n\nWarning: these still hold a machine-specific path and will not travel: ${residual.join(', ')}`
+                : '') +
+              (unnamed.length > 0
+                ? `\n\nWarning: ${unnamed.length} step(s) point at a connection this install could not name, so an import cannot rebind them automatically.`
                 : '')
           }
         ]
@@ -909,7 +909,7 @@ export function registerWorkflowTools(server: McpServer): void {
 
   server.tool(
     'import_workflow',
-    "Import a workflow exported by export_workflow, resolving {{project.path}} and {{project.name}} against a registered project. The id is derived from the bundle and the workflow's slug, so importing the same file again updates it in place instead of creating a duplicate.",
+    "Import a workflow exported by export_workflow, resolving {{project.path}} and {{project.name}} against a registered project. Recorded connection requirements are rebound when this machine has one unambiguous match, and reported as still to connect otherwise. The id is derived from the bundle and the workflow's slug, so importing the same file again updates it in place instead of creating a duplicate.",
     {
       workflow: z.string().max(500_000).describe('The exported workflow JSON'),
       project_name: V.name.describe('Registered project to resolve paths against'),
@@ -978,31 +978,18 @@ export function registerWorkflowTools(server: McpServer): void {
       }
 
       const bundle = args.bundle ?? slugify(project.name)
+      const portable = { ...parsed, slug: parsed.slug ?? slugify(parsed.name) }
+      const connections = await listPortableConnections()
       const definition = fromPortable(
-        { ...parsed, slug: parsed.slug ?? slugify(parsed.name) },
+        portable,
         bundle,
         {
           name: project.name,
           path: project.path
-        }
+        },
+        connections
       )
-
-      // Export refuses a connector-bound workflow because its connectionId is
-      // local. Import has to refuse the same shape, or a hand-written file
-      // walks straight past that contract and lands a workflow that fails at
-      // run time against a connection this machine never had.
-      const blockers = portabilityBlockers(definition)
-      if (blockers.length > 0) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Error: this workflow cannot be imported because ${blockers.join('; ')}.`
-            }
-          ],
-          isError: true
-        }
-      }
+      const unresolved = unresolvedRequirements(portable, connections)
 
       const existing = (await dbListWorkflows()).find((w) => w.id === definition.id)
       if (existing) {
@@ -1012,11 +999,21 @@ export function registerWorkflowTools(server: McpServer): void {
       }
       dbSignalChange()
 
+      const pending = unresolved
+        .map((requirement) =>
+          requirement.kind === 'httpProfile'
+            ? `${requirement.nodeId} needs an HTTP profile${requirement.name ? ` like "${requirement.name}"` : ''}`
+            : `${requirement.nodeId} needs a ${requirement.connectorId || 'connector'} connection${requirement.name ? ` like "${requirement.name}"` : ''}`
+        )
+        .join('; ')
+
       return {
         content: [
           {
             type: 'text',
-            text: `${existing ? 'Updated' : 'Imported'} "${definition.name}" as ${definition.id}, resolved against ${project.path}`
+            text:
+              `${existing ? 'Updated' : 'Imported'} "${definition.name}" as ${definition.id}, resolved against ${project.path}` +
+              (pending ? `\n\nStill to connect: ${pending}` : '')
           }
         ]
       }

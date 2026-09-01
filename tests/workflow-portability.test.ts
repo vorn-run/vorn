@@ -2,13 +2,15 @@ import { describe, it, expect } from 'vitest'
 import {
   toPortable,
   fromPortable,
-  portabilityBlockers,
+  resolveRequirement,
+  unresolvedRequirements,
   residualAbsolutePaths,
   importedWorkflowId,
   parseImportedWorkflowId,
   slugify,
-  PROJECT_PATH_TOKEN
-} from '../packages/mcp/src/workflow-portability'
+  PROJECT_PATH_TOKEN,
+  type PortableConnection
+} from '../packages/shared/src/workflow-portability'
 import type { WorkflowDefinition } from '../packages/shared/src/types'
 
 const PROJECT = '/Users/someone/dev/novum'
@@ -63,6 +65,34 @@ function workflow(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefiniti
   }
 }
 
+function connection(overrides: Partial<PortableConnection> = {}): PortableConnection {
+  return { id: 'conn-1', name: 'workspace-eng', connectorId: 'github', ...overrides }
+}
+
+/** A workflow whose trigger polls a connector and whose step calls one. */
+function connectorWorkflow(): WorkflowDefinition {
+  const wf = workflow()
+  wf.nodes[0].config = {
+    triggerType: 'connectorPoll',
+    connectionId: 'conn-1',
+    event: 'issueCreated',
+    cron: '*/5 * * * *'
+  } as WorkflowDefinition['nodes'][number]['config']
+  wf.nodes.push({
+    id: 'act-1',
+    type: 'callConnectorAction',
+    label: 'Create issue',
+    config: {
+      nodeType: 'callConnectorAction',
+      connectionId: 'conn-1',
+      action: 'createIssue',
+      args: {}
+    } as WorkflowDefinition['nodes'][number]['config'],
+    position: { x: 0, y: 330 }
+  })
+  return wf
+}
+
 describe('toPortable', () => {
   it('replaces the project path everywhere it appears', () => {
     const p = toPortable(workflow(), PROJECT)
@@ -91,6 +121,10 @@ describe('toPortable', () => {
     const wf = workflow()
     toPortable(wf, PROJECT)
     expect((wf.nodes[1].config as Record<string, unknown>).projectPath).toBe(PROJECT)
+  })
+
+  it('says nothing about requirements when nothing is bound', () => {
+    expect(toPortable(workflow(), PROJECT).requires).toBeUndefined()
   })
 })
 
@@ -130,37 +164,111 @@ describe('round trip', () => {
   })
 })
 
-describe('portabilityBlockers', () => {
-  it('passes an ordinary workflow', () => {
-    expect(portabilityBlockers(workflow())).toEqual([])
+describe('connections travel as requirements', () => {
+  it('drops the local id and records what it stood for', () => {
+    const p = toPortable(connectorWorkflow(), PROJECT, [connection()])
+
+    expect((p.nodes[0].config as Record<string, unknown>).connectionId).toBe('')
+    expect(p.requires).toEqual([
+      {
+        kind: 'connection',
+        nodeId: 'trigger-1',
+        connectorId: 'github',
+        name: 'workspace-eng',
+        event: 'issueCreated'
+      },
+      { kind: 'connection', nodeId: 'act-1', connectorId: 'github', name: 'workspace-eng' }
+    ])
   })
 
-  it('refuses a connector-poll trigger rather than exporting a broken file', () => {
-    const wf = workflow()
-    wf.nodes[0].config = {
-      triggerType: 'connectorPoll',
-      connectionId: 'local-uuid',
-      event: 'issue.created',
-      cron: '*/5 * * * *'
-    }
-    expect(portabilityBlockers(wf)[0]).toContain('connector connection')
+  it('names a packaged connector by its manifest id, not mcp', () => {
+    const packaged = connection({ connectorId: 'mcp', filters: { sdkConnectorId: 'packdemo' } })
+    const p = toPortable(connectorWorkflow(), PROJECT, [packaged])
+    expect((p.requires ?? [])[0]).toMatchObject({ connectorId: 'packdemo' })
   })
 
-  it('refuses a connector action step', () => {
+  it('unbinds an http profile even when the connection is unknown here', () => {
     const wf = workflow()
     wf.nodes.push({
-      id: 'act-1',
-      type: 'callConnectorAction',
-      label: 'Create issue',
+      id: 'http-1',
+      type: 'httpRequest',
+      label: 'Report',
       config: {
-        nodeType: 'callConnectorAction',
-        connectionId: 'local-uuid',
-        action: 'x',
-        args: {}
-      },
-      position: { x: 0, y: 330 }
+        nodeType: 'httpRequest',
+        method: 'POST',
+        url: '/report',
+        headers: {},
+        body: '',
+        profileConnectionId: 'gone'
+      } as WorkflowDefinition['nodes'][number]['config'],
+      position: { x: 0, y: 440 }
     })
-    expect(portabilityBlockers(wf).some((b) => b.includes('Create issue'))).toBe(true)
+
+    const p = toPortable(wf, PROJECT)
+    const http = p.nodes.find((n) => n.id === 'http-1')!.config as Record<string, unknown>
+    expect(http).not.toHaveProperty('profileConnectionId')
+    expect(p.requires).toEqual([{ kind: 'httpProfile', nodeId: 'http-1', name: '' }])
+  })
+
+  it('never lets a local id reach the file', () => {
+    const p = toPortable(connectorWorkflow(), PROJECT, [connection()])
+    expect(JSON.stringify(p)).not.toContain('conn-1')
+  })
+
+  it('rebinds on import when this machine has one match', () => {
+    const p = toPortable(connectorWorkflow(), PROJECT, [connection()])
+    const here = [connection({ id: 'other-uuid', name: 'their-workspace' })]
+
+    const imported = fromPortable(p, 'novum', { name: 'N', path: '/n' }, here)
+    const trigger = imported.nodes[0].config as Record<string, unknown>
+    const action = imported.nodes.find((n) => n.id === 'act-1')!.config as Record<string, unknown>
+    expect(trigger.connectionId).toBe('other-uuid')
+    expect(action.connectionId).toBe('other-uuid')
+  })
+
+  it('prefers the connection the file named when several could match', () => {
+    const p = toPortable(connectorWorkflow(), PROJECT, [connection()])
+    const here = [
+      connection({ id: 'a', name: 'other-team' }),
+      connection({ id: 'b', name: 'workspace-eng' })
+    ]
+    const imported = fromPortable(p, 'novum', { name: 'N', path: '/n' }, here)
+    expect((imported.nodes[0].config as Record<string, unknown>).connectionId).toBe('b')
+  })
+
+  it('leaves the step unbound rather than guessing between two accounts', () => {
+    const p = toPortable(connectorWorkflow(), PROJECT, [connection()])
+    const here = [connection({ id: 'a', name: 'one' }), connection({ id: 'b', name: 'two' })]
+
+    const imported = fromPortable(p, 'novum', { name: 'N', path: '/n' }, here)
+    expect((imported.nodes[0].config as Record<string, unknown>).connectionId).toBe('')
+    expect(unresolvedRequirements(p, here)).toHaveLength(2)
+  })
+
+  it('leaves the step unbound when nothing here is that connector', () => {
+    const p = toPortable(connectorWorkflow(), PROJECT, [connection()])
+    const imported = fromPortable(p, 'novum', { name: 'N', path: '/n' }, [
+      connection({ id: 'z', connectorId: 'slack' })
+    ])
+    expect((imported.nodes[0].config as Record<string, unknown>).connectionId).toBe('')
+  })
+
+  it('matches an http profile by its connector, whatever it is called', () => {
+    const requirement = { kind: 'httpProfile', nodeId: 'http-1', name: 'reporting API' } as const
+    const profiles = [connection({ id: 'p1', name: 'anything', connectorId: 'http' })]
+    expect(resolveRequirement(requirement, profiles)).toBe('p1')
+  })
+
+  it('cannot rebind a requirement the exporter could not name', () => {
+    const p = toPortable(connectorWorkflow(), PROJECT)
+    expect((p.requires ?? [])[0]).toMatchObject({ connectorId: '', name: '' })
+    expect(resolveRequirement((p.requires ?? [])[0], [connection()])).toBeUndefined()
+  })
+
+  it('ignores a requirement for a node the file no longer carries', () => {
+    const p = toPortable(connectorWorkflow(), PROJECT, [connection()])
+    const trimmed = { ...p, nodes: p.nodes.filter((n) => n.id !== 'act-1') }
+    expect(unresolvedRequirements(trimmed, []).map((r) => r.nodeId)).toEqual(['trigger-1'])
   })
 })
 
@@ -258,49 +366,5 @@ describe('Windows paths', () => {
     const imported = fromPortable(p, 'novum', { name: 'N', path: '/Users/other/novum/' })
     const script = imported.nodes.find((n) => n.id === 'fetch-1')!.config as Record<string, unknown>
     expect(script.projectPath).toBe('/Users/other/novum')
-  })
-})
-
-describe('import refuses what export refuses', () => {
-  // Export rejects a connector-bound workflow because its connectionId is
-  // local. Without the same check on the way in, a hand-written file walks
-  // past that contract and lands a workflow that fails at run time against a
-  // connection this machine never had.
-  it('detects a connector trigger in a resolved definition', () => {
-    const portable = toPortable(workflow(), PROJECT)
-    portable.nodes[0].config = {
-      triggerType: 'connectorPoll',
-      connectionId: 'from-another-machine',
-      event: 'issue.created',
-      cron: '*/5 * * * *'
-    } as never
-    const resolved = fromPortable(portable, 'novum', { name: 'N', path: '/tmp/n' })
-    expect(portabilityBlockers(resolved)).not.toEqual([])
-  })
-
-  it('detects a connector action step in a resolved definition', () => {
-    const portable = toPortable(workflow(), PROJECT)
-    portable.nodes.push({
-      id: 'act',
-      type: 'callConnectorAction',
-      label: 'Create issue',
-      config: {
-        nodeType: 'callConnectorAction',
-        connectionId: 'x',
-        action: 'a',
-        args: {}
-      } as never,
-      position: { x: 0, y: 0 }
-    })
-    const resolved = fromPortable(portable, 'novum', { name: 'N', path: '/tmp/n' })
-    expect(portabilityBlockers(resolved).some((b) => b.includes('Create issue'))).toBe(true)
-  })
-
-  it('passes an ordinary workflow through both directions', () => {
-    const resolved = fromPortable(toPortable(workflow(), PROJECT), 'novum', {
-      name: 'N',
-      path: '/tmp/n'
-    })
-    expect(portabilityBlockers(resolved)).toEqual([])
   })
 })
