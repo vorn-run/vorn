@@ -237,5 +237,7 @@ describe('the editor without a trigger', () => {
     expect(triggers).toHaveLength(1)
     expect(triggers[0].id).toBe(firstId)
     expect(triggers[0].config).toMatchObject({ triggerType: 'recurring', cron: '0 9 * * *' })
+    // The old type's label does not survive the swap.
+    expect(triggers[0].label).toBe('Schedule (Recurring)')
   })
 })

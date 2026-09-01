@@ -203,7 +203,9 @@ export function createTriggerNode(config: TriggerConfig = { triggerType: 'manual
     once: 'Schedule (Once)',
     recurring: 'Schedule (Recurring)',
     taskCreated: 'When Task Created',
-    taskStatusChanged: 'When Task Status Changes'
+    taskStatusChanged: 'When Task Status Changes',
+    connectorPoll: 'Connector Poll',
+    webhook: 'Webhook'
   }
   return {
     id: crypto.randomUUID(),

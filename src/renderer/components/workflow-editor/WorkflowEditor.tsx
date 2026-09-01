@@ -789,10 +789,16 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                 event: pick.event,
                 cron: '*/5 * * * *'
               }
-        // A pick replaces the existing trigger in place; edges stay put.
+        // A pick replaces the existing trigger in place; edges stay put,
+        // while the label resets to the new type's default like any swap.
         const existing = nodes.find((n) => n.type === 'trigger')
         if (existing) {
-          setNodes(nodes.map((n) => (n.id === existing.id ? { ...n, config } : n)))
+          const fresh = createTriggerNode(config)
+          setNodes(
+            nodes.map((n) =>
+              n.id === existing.id ? { ...fresh, id: existing.id, position: existing.position } : n
+            )
+          )
           setSelectedNodeId(existing.id)
         } else {
           const trigger = createTriggerNode(config)
