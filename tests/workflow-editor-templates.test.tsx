@@ -120,31 +120,27 @@ const CONNECTION = {
   createdAt: '2026-09-01T00:00:00Z'
 }
 
-;(global as unknown as { window: object }).window = {
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
-  api: {
-    listWorkflowRuns: vi.fn().mockResolvedValue([]),
-    isWindowMaximized: vi.fn().mockResolvedValue(false),
-    onWindowMaximizedChange: vi.fn(() => () => {}),
-    onConfigChanged: vi.fn(() => () => {}),
-    listConnections: vi.fn().mockResolvedValue([CONNECTION]),
-    listConnectorPacks: vi.fn().mockResolvedValue([]),
-    listConnectors: vi.fn().mockResolvedValue([
-      {
-        id: 'github',
-        name: 'GitHub',
-        manifest: {
-          defaultWorkflows: [
-            { name: 'New issues to tasks', event: 'issueCreated', defaultCronFromMinutes: 5 }
-          ]
-        }
+;(window as unknown as { api: object }).api = {
+  listWorkflowRuns: vi.fn().mockResolvedValue([]),
+  isWindowMaximized: vi.fn().mockResolvedValue(false),
+  onWindowMaximizedChange: vi.fn(() => () => {}),
+  onConfigChanged: vi.fn(() => () => {}),
+  listConnections: vi.fn().mockResolvedValue([CONNECTION]),
+  listConnectorPacks: vi.fn().mockResolvedValue([]),
+  listConnectors: vi.fn().mockResolvedValue([
+    {
+      id: 'github',
+      name: 'GitHub',
+      manifest: {
+        defaultWorkflows: [
+          { name: 'New issues to tasks', event: 'issueCreated', defaultCronFromMinutes: 5 }
+        ]
       }
-    ]),
-    listConnectorCatalog: vi.fn(),
-    seedConnectorWorkflow,
-    saveTextFile
-  }
+    }
+  ]),
+  listConnectorCatalog: vi.fn(),
+  seedConnectorWorkflow,
+  saveTextFile
 }
 
 const { TEMPLATE_SEED } = await import('../packages/server/src/connectors/template-seed')
