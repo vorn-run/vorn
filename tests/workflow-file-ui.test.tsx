@@ -124,6 +124,38 @@ describe('bringing a workflow file in', () => {
     expect(addWorkflow).not.toHaveBeenCalled()
   })
 
+  it('says where to drop while a file is over the list', () => {
+    render(<WorkflowsSection isCollapsed={false} workspaceWorkflows={[workflow()]} />)
+    const list = screen.getByLabelText('All runs')
+
+    fireEvent.dragOver(list, { dataTransfer: { types: ['Files'] } })
+    expect(screen.getByText('Drop to import a workflow file')).toBeInTheDocument()
+
+    fireEvent.dragLeave(list, { relatedTarget: document.body })
+    expect(screen.queryByText('Drop to import a workflow file')).not.toBeInTheDocument()
+  })
+
+  it('stays quiet while a row is being dragged to reorder', () => {
+    render(<WorkflowsSection isCollapsed={false} workspaceWorkflows={[workflow()]} />)
+    fireEvent.dragOver(screen.getByLabelText('All runs'), {
+      dataTransfer: { types: ['text/plain'] }
+    })
+    expect(screen.queryByText('Drop to import a workflow file')).not.toBeInTheDocument()
+  })
+
+  it('refuses to import when there is no project to resolve against', async () => {
+    act(() => {
+      useAppStore.setState({
+        config: { ...(useAppStore.getState().config as AppConfig), projects: [] } as AppConfig
+      })
+    })
+    render(<WorkflowsSection isCollapsed={false} workspaceWorkflows={[workflow()]} />)
+
+    dropFile(fileFromWorkflow(workflow(), PROJECT.path, []).contents)
+
+    await waitFor(() => expect(addWorkflow).not.toHaveBeenCalled())
+  })
+
   it('ignores a drop carrying no file it can read', async () => {
     render(<WorkflowsSection isCollapsed={false} workspaceWorkflows={[workflow()]} />)
 
@@ -133,5 +165,32 @@ describe('bringing a workflow file in', () => {
     })
 
     await waitFor(() => expect(addWorkflow).not.toHaveBeenCalled())
+  })
+})
+
+describe('sending a workflow out to a file', () => {
+  const saveTextFile = () =>
+    (window as unknown as { api: { saveTextFile: ReturnType<typeof vi.fn> } }).api.saveTextFile
+
+  async function exportFromMenu(): Promise<void> {
+    render(<WorkflowsSection isCollapsed={false} workspaceWorkflows={[workflow()]} />)
+    fireEvent.contextMenu(screen.getByText('Nightly digest'))
+    fireEvent.click(await screen.findByText('Export as file…'))
+  }
+
+  it('writes the workflow the row names', async () => {
+    await exportFromMenu()
+
+    await waitFor(() => expect(saveTextFile()).toHaveBeenCalledTimes(1))
+    const written = saveTextFile().mock.calls[0][0]
+    expect(written.defaultName).toBe('nightly-digest.vorn-workflow.json')
+    expect(JSON.parse(written.contents)).toMatchObject({ name: 'Nightly digest', version: 1 })
+  })
+
+  it('closes the menu whether or not a file was written', async () => {
+    saveTextFile().mockResolvedValue(null)
+    await exportFromMenu()
+
+    await waitFor(() => expect(screen.queryByText('Export as file…')).not.toBeInTheDocument())
   })
 })

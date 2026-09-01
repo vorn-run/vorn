@@ -65,6 +65,25 @@ describe('the connector list', () => {
     return { ...utils, onSelect, onAdd }
   }
 
+  it('calls connecting to an MCP server adding a server, and offers no install', () => {
+    const server = { id: 'playwright', name: 'Playwright', command: 'npx', args: [] }
+    const onAdd = vi.fn()
+    const { getByText, queryByText } = render(
+      <ConnectorDirectory
+        listings={buildConnectorListings([], [], [], [], [server])}
+        builtIns={[]}
+        onSelect={vi.fn()}
+        onAdd={onAdd}
+        onInstall={vi.fn()}
+      />
+    )
+
+    // There is no pack behind a server, so an Install button would be a lie.
+    expect(queryByText('Install')).not.toBeInTheDocument()
+    fireEvent.click(getByText('Add server'))
+    expect(onAdd).toHaveBeenCalled()
+  })
+
   it('says what a connector offers, and what would be installed, in one line', () => {
     // A name and a blurb cannot answer "will this do what I need", and both
     // blurbs here start with the same four words.

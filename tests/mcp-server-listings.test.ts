@@ -61,6 +61,14 @@ describe('MCP servers in the directory', () => {
     expect(canAddConnection({ kind: 'absent' }, { source: 'mcp' })).toBe(true)
   })
 
+  it('lists a bare entry without inventing anything for it', () => {
+    const bare = { id: 'tiny', name: 'Tiny', command: 'tiny-mcp', args: [] }
+    const [listing] = buildConnectorListings([], [], [], [], [bare])
+    expect(listing.keywords).toEqual([])
+    expect(listing.category).toBe('MCP servers')
+    expect(listing).not.toHaveProperty('description')
+  })
+
   it('lists nothing when the catalog publishes no servers', () => {
     expect(buildConnectorListings([], [], [], [], [])).toEqual([])
   })

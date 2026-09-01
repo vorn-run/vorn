@@ -222,7 +222,9 @@ export function ConnectorRow({
     progress
   })
   const status = describePackStatus(state)
-  const installable = listing.source !== 'builtin' && onInstall !== undefined
+  // An MCP server is a command this machine runs, so there is no pack to install.
+  const installable =
+    listing.source !== 'builtin' && listing.source !== 'mcp' && onInstall !== undefined
 
   return (
     <div className="flex items-start gap-3 py-3 border-t border-white/[0.06]">
