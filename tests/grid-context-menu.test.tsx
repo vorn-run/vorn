@@ -172,7 +172,15 @@ describe('GridContextMenu', () => {
           name: 'Deploy',
           icon: 'Rocket',
           iconColor: '#ff6600',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -200,7 +208,15 @@ describe('GridContextMenu', () => {
           name: 'Deploy Staging',
           icon: 'Rocket',
           iconColor: '#ff6600',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -234,7 +250,15 @@ describe('GridContextMenu', () => {
           name: 'Personal Deploy',
           icon: 'Zap',
           iconColor: '#fff',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -244,7 +268,15 @@ describe('GridContextMenu', () => {
           name: 'Work Deploy',
           icon: 'Zap',
           iconColor: '#fff',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'work'
@@ -270,7 +302,15 @@ describe('GridContextMenu', () => {
           name: 'Manual Deploy',
           icon: 'Zap',
           iconColor: '#fff',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'

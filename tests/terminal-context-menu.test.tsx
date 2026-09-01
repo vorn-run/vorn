@@ -113,7 +113,15 @@ describe('TerminalContextMenu', () => {
           name: 'Deploy',
           icon: 'Rocket',
           iconColor: '#ff6600',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -138,7 +146,15 @@ describe('TerminalContextMenu', () => {
           name: 'Deploy Staging',
           icon: 'Rocket',
           iconColor: '#ff6600',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -177,7 +193,15 @@ describe('TerminalContextMenu', () => {
           name: 'Deploy',
           icon: 'Rocket',
           iconColor: '#ff6600',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -210,7 +234,15 @@ describe('TerminalContextMenu', () => {
           name: 'Deploy',
           icon: 'Rocket',
           iconColor: '#ff6600',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -246,7 +278,15 @@ describe('TerminalContextMenu', () => {
           name: 'Personal WF',
           icon: 'Zap',
           iconColor: '#fff',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
@@ -256,7 +296,15 @@ describe('TerminalContextMenu', () => {
           name: 'Work WF',
           icon: 'Zap',
           iconColor: '#fff',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'work'
@@ -307,7 +355,15 @@ describe('TerminalContextMenu', () => {
           name: 'Manual Deploy',
           icon: 'Zap',
           iconColor: '#fff',
-          nodes: [],
+          nodes: [
+            {
+              id: 'trigger',
+              type: 'trigger',
+              label: 'Manual',
+              config: { triggerType: 'manual' },
+              position: { x: 0, y: 0 }
+            }
+          ],
           edges: [],
           enabled: true,
           workspaceId: 'personal'
