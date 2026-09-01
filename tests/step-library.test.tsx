@@ -92,7 +92,8 @@ describe('the step library', () => {
     expect(onPick).toHaveBeenCalledWith({
       kind: 'connectorAction',
       connectionId: 'c1',
-      action: 'createIssue'
+      action: 'createIssue',
+      actionLabel: 'Create issue'
     } satisfies LibraryPick)
 
     const root = container.querySelector('[data-step-library]') as HTMLElement
