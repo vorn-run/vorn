@@ -1672,6 +1672,7 @@ export const IPC = {
   CONNECTOR_PROBE_SDK: 'connector:probeSdk',
   CONNECTOR_CATALOG: 'connector:catalog',
   CONNECTOR_CATALOG_REFRESH: 'connector:catalogRefresh',
+  CONNECTOR_INSPECT_PACK: 'connector:inspectPack',
   CONNECTOR_INSTALL_PACK: 'connector:installPack',
   CONNECTOR_REMOVE_PACK: 'connector:removePack',
   CONNECTOR_ROLLBACK_PACK: 'connector:rollbackPack',
@@ -1837,6 +1838,24 @@ export type ConnectorPackSource =
 
 export type ConnectorPackResult =
   | { ok: true; pack: InstalledConnectorPack }
+  | { ok: false; error: string }
+
+/** What a verified pack says about itself, before any of it is kept. */
+export interface ConnectorPackSummary {
+  id: string
+  name: string
+  version: string
+  description?: string
+  icon?: SdkConnectorIcon
+  triggers: SdkTrigger[]
+  actions: Array<{ type: string; label: string; description?: string }>
+  env: SdkEnvVar[]
+  /** The version already on disk, when this would replace one. */
+  installedVersion?: string
+}
+
+export type ConnectorPackPreview =
+  | { ok: true; preview: ConnectorPackSummary }
   | { ok: false; error: string }
 
 /** `id` is the connector's once its manifest is read, and the source label until then. */

@@ -11,12 +11,14 @@ import type {
   ConnectorCatalogSnapshot,
   ConnectorInstallProgress,
   ConnectorPackSource,
+  ConnectorPackSummary,
   InstalledConnectorPack,
   SourceConnection,
   ConnectorManifest,
   TaskStatus
 } from '../../../shared/types'
 import { SdkConnectorForm } from './SdkConnectorForm'
+import { PackInstallConfirm } from './PackInstallConfirm'
 import { DynamicField } from './DynamicField'
 import { Check, AlertCircle } from 'lucide-react'
 
@@ -65,6 +67,11 @@ export function ConnectorSettings() {
   )
   // A file install has no row to fail on until its manifest is read.
   const [fileInstallError, setFileInstallError] = useState<string | null>(null)
+  const [pendingPack, setPendingPack] = useState<{
+    source: ConnectorPackSource
+    preview: ConnectorPackSummary
+  } | null>(null)
+  const [installingPending, setInstallingPending] = useState(false)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [backfillingId, setBackfillingId] = useState<string | null>(null)
   const [backfillResult, setBackfillResult] = useState<
@@ -139,15 +146,28 @@ export function ConnectorSettings() {
     [load]
   )
 
-  const handleInstallFile = useCallback(
-    async (filePath: string) => {
-      setFileInstallError(null)
-      const result = await window.api.installConnectorPack({ kind: 'file', path: filePath })
-      if (!result.ok) setFileInstallError(result.error)
-      await load()
-    },
-    [load]
-  )
+  // Verified first and installed only on confirm, so a drop is a question.
+  const handleInstallFile = useCallback(async (filePath: string) => {
+    setFileInstallError(null)
+    setPendingPack(null)
+    const source = { kind: 'file', path: filePath } as const
+    const result = await window.api.inspectConnectorPack(source)
+    if (!result.ok) {
+      setFileInstallError(result.error)
+      return
+    }
+    setPendingPack({ source, preview: result.preview })
+  }, [])
+
+  const handleConfirmPending = useCallback(async () => {
+    if (!pendingPack) return
+    setInstallingPending(true)
+    const result = await window.api.installConnectorPack(pendingPack.source)
+    setInstallingPending(false)
+    setPendingPack(null)
+    if (!result.ok) setFileInstallError(result.error)
+    await load()
+  }, [pendingPack, load])
 
   const handleRollback = useCallback(
     async (id: string) => {
@@ -286,6 +306,16 @@ export function ConnectorSettings() {
           onInstallFile={handleInstallFile}
           onPickFile={() => window.api.openFileDialog()}
           installError={fileInstallError}
+          {...(pendingPack && {
+            pending: (
+              <PackInstallConfirm
+                preview={pendingPack.preview}
+                busy={installingPending}
+                onConfirm={handleConfirmPending}
+                onCancel={() => setPendingPack(null)}
+              />
+            )
+          })}
         />
       )}
 

@@ -48,6 +48,7 @@ import type {
   ConnectorActionDef,
   ConnectorCatalogSnapshot,
   ConnectorInstallProgress,
+  ConnectorPackPreview,
   ConnectorPackResult,
   ConnectorPackSource,
   InstalledConnectorPack,
@@ -309,6 +310,7 @@ export interface RequestMethods {
   'connector:catalog': { params: void; result: ConnectorCatalogSnapshot }
   'connector:catalogRefresh': { params: void; result: ConnectorCatalogSnapshot }
   'connector:probeSdk': { params: SdkProbeRequest; result: SdkProbeResult }
+  'connector:inspectPack': { params: ConnectorPackSource; result: ConnectorPackPreview }
   'connector:installPack': { params: ConnectorPackSource; result: ConnectorPackResult }
   'connector:removePack': { params: string; result: { ok: boolean; error?: string } }
   'connector:rollbackPack': { params: string; result: ConnectorPackResult }

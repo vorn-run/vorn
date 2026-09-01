@@ -34,6 +34,7 @@ export function ConnectorDirectory({
   onInstallFile,
   onPickFile,
   installError,
+  pending,
   progress,
   fetchedAt,
   onRefresh
@@ -49,6 +50,8 @@ export function ConnectorDirectory({
   onPickFile?: () => Promise<string | null>
   /** Why the last file install was refused, for the one that has no row yet. */
   installError?: string | null
+  /** The confirm sheet for a pack that has been verified but not yet kept. */
+  pending?: React.ReactNode
   /** Installs running right now, by connector id. */
   progress?: Record<string, ConnectorInstallProgress>
   /** When the published list was last read. Absent until one has been. */
@@ -145,6 +148,9 @@ export function ConnectorDirectory({
           {installError}
         </p>
       )}
+
+      {/* A verified pack waiting on the decision to keep it. */}
+      {pending && <div className="mt-2">{pending}</div>}
 
       <div>
         {visible.map((listing) => (

@@ -133,6 +133,7 @@ import {
   mcpConnectionActions,
   stopMcpClient,
   stopClientsForConnector,
+  inspectPack,
   installPack,
   removePack,
   rollbackPack,
@@ -1556,6 +1557,9 @@ export function registerAllMethods(): void {
     await refreshCatalog()
     return catalogSnapshot()
   })
+
+  /** Verify and describe a pack without keeping any of it, so an install can be confirmed. */
+  registerMethod('connector:inspectPack', (source: ConnectorPackSource) => inspectPack(source))
 
   /** Progress is pushed, not returned, so a caller can show the download as it runs. */
   registerMethod('connector:installPack', async (source: ConnectorPackSource) => {

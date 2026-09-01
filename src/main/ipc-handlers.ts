@@ -366,6 +366,10 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.CONNECTOR_CATALOG_REFRESH, () =>
     requireBridge().request(IPC.CONNECTOR_CATALOG_REFRESH)
   )
+  safeHandle(IPC.CONNECTOR_INSPECT_PACK, (_, source) =>
+    requireBridge().request(IPC.CONNECTOR_INSPECT_PACK, source)
+  )
+
   safeHandle(IPC.CONNECTOR_INSTALL_PACK, (_, source) =>
     requireBridge().request(IPC.CONNECTOR_INSTALL_PACK, source)
   )

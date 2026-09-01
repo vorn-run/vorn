@@ -8,6 +8,7 @@ export {
   stopClientsForConnector
 } from './mcp-clients'
 export {
+  inspectPack,
   installPack,
   removePack,
   rollbackPack,

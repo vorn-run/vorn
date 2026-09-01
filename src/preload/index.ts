@@ -885,6 +885,11 @@ const api = {
     import('../../packages/shared/src/types').ConnectorCatalogSnapshot
   > => ipcRenderer.invoke(IPC.CONNECTOR_CATALOG_REFRESH),
 
+  inspectConnectorPack: (
+    source: import('../../packages/shared/src/types').ConnectorPackSource
+  ): Promise<import('../../packages/shared/src/types').ConnectorPackPreview> =>
+    ipcRenderer.invoke(IPC.CONNECTOR_INSPECT_PACK, source),
+
   installConnectorPack: (
     source: import('../../packages/shared/src/types').ConnectorPackSource
   ): Promise<import('../../packages/shared/src/types').ConnectorPackResult> =>

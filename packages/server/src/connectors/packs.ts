@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import { extract } from 'tar'
 import type {
   ConnectorInstallProgress,
+  ConnectorPackPreview,
   ConnectorPackResult,
   ConnectorPackSource,
   InstalledConnectorPack,
@@ -262,6 +263,87 @@ function describeSource(source: ConnectorPackSource): string {
   return source.kind === 'file' ? source.path : source.url
 }
 
+/** A staging directory nothing has been committed from yet. */
+function stagingDir(options: PackOptions): string {
+  const root = packsRoot(options)
+  mkdirSync(root, { recursive: true })
+  return join(root, `.tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`)
+}
+
+/**
+ * Fetch, unpack and verify a pack into a staging directory.
+ *
+ * The caller decides what happens next: an install renames the contents into
+ * place, an inspection reads the manifest and throws the directory away. Both
+ * answer the same question first, so what a preview shows is exactly what was
+ * checked.
+ */
+async function stagePack(
+  source: ConnectorPackSource,
+  options: PackOptions,
+  staging: string,
+  report: (progress: Omit<ConnectorInstallProgress, 'id'>) => void
+): Promise<{ contents: string; manifest: SdkConnectorManifest }> {
+  const archive = await readSource(source, options, report)
+  if (archive.byteLength > MAX_PACK_BYTES) throw new Error(sizeMessage(archive.byteLength))
+
+  report({ phase: 'verifying' })
+  mkdirSync(staging, { recursive: true })
+  const archivePath = join(staging, 'pack.tgz')
+  await writeFile(archivePath, archive)
+  const unpacked = join(staging, 'unpacked')
+  mkdirSync(unpacked, { recursive: true })
+  await extract({
+    file: archivePath,
+    cwd: unpacked,
+    preservePaths: false,
+    filter: (path, entry) =>
+      isSafeArchiveEntry(path, String((entry as { type?: unknown }).type ?? ''))
+  })
+
+  const contents = packRootOf(unpacked)
+  const manifest = verifyPackDir(contents)
+  requireSafeId(manifest.id)
+  return { contents, manifest }
+}
+
+/**
+ * Verify a pack and describe it without installing anything.
+ *
+ * Dropping a file used to be the decision; this makes it the question, so what
+ * a connector is and what it can do is on screen before its files are kept.
+ */
+export async function inspectPack(
+  source: ConnectorPackSource,
+  options: PackOptions = {}
+): Promise<ConnectorPackPreview> {
+  const staging = stagingDir(options)
+  try {
+    const { manifest } = await stagePack(source, options, staging, () => {})
+    const installed = describePack(manifest.id, options)
+    return {
+      ok: true,
+      preview: {
+        id: manifest.id,
+        name: manifest.name,
+        version: manifest.version,
+        ...(manifest.description !== undefined && { description: manifest.description }),
+        ...(manifest.icon !== undefined && { icon: manifest.icon }),
+        triggers: manifest.triggers,
+        actions: manifest.actions,
+        env: manifest.env,
+        ...(installed && { installedVersion: installed.version })
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    log.warn(`[packs] inspect of ${describeSource(source)} refused: ${message}`)
+    return { ok: false, error: message }
+  } finally {
+    rmSync(staging, { recursive: true, force: true })
+  }
+}
+
 /** The rename is the commit point; everything before it is in a temporary directory. */
 export async function installPack(
   source: ConnectorPackSource,
@@ -273,34 +355,10 @@ export async function installPack(
     options.onProgress?.({ id, ...progress })
   }
 
-  const root = packsRoot(options)
-  mkdirSync(root, { recursive: true })
-  const staging = join(
-    root,
-    `.tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  )
+  const staging = stagingDir(options)
 
   try {
-    const archive = await readSource(source, options, report)
-    if (archive.byteLength > MAX_PACK_BYTES) throw new Error(sizeMessage(archive.byteLength))
-
-    report({ phase: 'verifying' })
-    mkdirSync(staging, { recursive: true })
-    const archivePath = join(staging, 'pack.tgz')
-    await writeFile(archivePath, archive)
-    const unpacked = join(staging, 'unpacked')
-    mkdirSync(unpacked, { recursive: true })
-    await extract({
-      file: archivePath,
-      cwd: unpacked,
-      preservePaths: false,
-      filter: (path, entry) =>
-        isSafeArchiveEntry(path, String((entry as { type?: unknown }).type ?? ''))
-    })
-
-    const contents = packRootOf(unpacked)
-    const manifest = verifyPackDir(contents)
-    requireSafeId(manifest.id)
+    const { contents, manifest } = await stagePack(source, options, staging, report)
     id = manifest.id
 
     report({ phase: 'installing', version: manifest.version })

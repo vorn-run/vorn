@@ -6,6 +6,7 @@ import { create } from 'tar'
 import {
   MAX_PACK_BYTES,
   describePack,
+  inspectPack,
   installPack,
   installedLaunch,
   isSafeArchiveEntry,
@@ -158,6 +159,65 @@ describe('verifyPackDir', () => {
     expect(() =>
       verifyPackDir(dirWith({ ...goodFiles(), 'index.js': 'x'.repeat(33 * 1024 * 1024) }))
     ).toThrow(/unpacks to/)
+  })
+})
+
+describe('inspectPack', () => {
+  it('describes what a pack would install without keeping any of it', async () => {
+    const root = tempDir()
+    const file = await buildArchive(goodFiles())
+
+    const result = await inspectPack({ kind: 'file', path: file }, { root })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.preview.id).toBe('acme')
+    expect(result.preview.version).toBe('1.2.0')
+    expect(result.preview.triggers.map((t) => t.label)).toEqual(['New ticket'])
+    expect(result.preview.actions.map((a) => a.label)).toEqual(['Close ticket'])
+    expect(result.preview.env.map((e) => e.name)).toEqual(['API_TOKEN'])
+    expect(result.preview.installedVersion).toBeUndefined()
+    // Nothing was kept: no connector directory, and no staging left behind.
+    expect(readdirSync(root)).toEqual([])
+  })
+
+  it('names the version an install would replace', async () => {
+    const root = tempDir()
+    await installPack({ kind: 'file', path: await buildArchive(goodFiles('1.2.0')) }, { root })
+
+    const result = await inspectPack(
+      { kind: 'file', path: await buildArchive(goodFiles('1.3.0')) },
+      { root }
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.preview.installedVersion).toBe('1.2.0')
+    expect(result.preview.version).toBe('1.3.0')
+  })
+
+  it('refuses a pack that declares dependencies, leaving the disk untouched', async () => {
+    const root = tempDir()
+    const file = await buildArchive({
+      ...goodFiles(),
+      'package.json': JSON.stringify({ dependencies: { 'left-pad': '1.0.0' } })
+    })
+
+    const result = await inspectPack({ kind: 'file', path: file }, { root })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toMatch(/dependencies/)
+    expect(readdirSync(root)).toEqual([])
+  })
+
+  it('reports a source that cannot be read rather than throwing', async () => {
+    const root = tempDir()
+
+    const result = await inspectPack({ kind: 'file', path: join(root, 'absent.tgz') }, { root })
+
+    expect(result.ok).toBe(false)
+    expect(readdirSync(root)).toEqual([])
   })
 })
 
