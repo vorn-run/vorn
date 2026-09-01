@@ -1,6 +1,5 @@
 import { useAppStore } from '../stores'
 import { toast } from '../components/Toast'
-import { resolveResumeSessionId } from './session-utils'
 
 /**
  * Taking a session from a previous run, or letting it go.
@@ -46,31 +45,11 @@ export async function showEndedSession(id: string): Promise<void> {
  */
 export async function resumeEndedSession(
   terminalId: string,
-  options: { automatic?: boolean; claimed?: Set<string> } = {}
+  options: { automatic?: boolean } = {}
 ): Promise<void> {
-  const state = useAppStore.getState()
-  const previous = state.terminals.get(terminalId)?.session
-  if (!previous) return
+  if (!useAppStore.getState().terminals.has(terminalId)) return
 
-  // Which agent-side conversation to continue. Resolved here rather than on the
-  // server because it fans out to the agent history, which is a client concern
-  // and already lives here; the server is given the answer, not the search.
-  let resumeSessionId: string | undefined
-  try {
-    // `claimed` carries across a whole pass. Where an agent cannot be asked for
-    // an exact id -- codex and opencode support resuming but not pinning, so
-    // there is never an `agentSessionId` to use -- this falls back to scanning
-    // the agent's own history and taking the first match for the project. Two
-    // panes resolved independently would take the same one, and the pass would
-    // start two agents against a single transcript: the thing the record's own
-    // claim exists to prevent, undone one layer down.
-    resumeSessionId = await resolveResumeSessionId(previous, options.claimed)
-    if (resumeSessionId) options.claimed?.add(resumeSessionId)
-  } catch {
-    // No exact match found. The agent's own picker is better than refusing.
-  }
-
-  const result = await window.api.resumeSession({ id: terminalId, resumeSessionId })
+  const result = await window.api.resumeSession({ id: terminalId })
   if (!result.ok) {
     if (result.reason === 'gone') {
       // Another pane, window or device took it first. Nothing to resume and
@@ -87,7 +66,23 @@ export async function resumeEndedSession(
     return
   }
 
-  useAppStore.getState().replaceTerminal(terminalId, result.session)
+  const state = useAppStore.getState()
+  // Bound to a session this client already draws: the ended pane goes and the
+  // running one is brought forward. Replacing in place would key two panes by
+  // one id -- and closing either would then close both.
+  if (
+    result.boundTo &&
+    result.session.id !== terminalId &&
+    state.terminals.has(result.session.id)
+  ) {
+    state.removeTerminal(terminalId)
+    state.setFocusedTerminal(result.session.id)
+  } else {
+    state.replaceTerminal(terminalId, result.session)
+  }
+  // Said even for an automatic resume: a pane quietly becoming a second view of
+  // a session open elsewhere is the one surprise worth a line.
+  if (result.boundTo) toast('That conversation was already running. This pane shows it.')
 }
 
 /**

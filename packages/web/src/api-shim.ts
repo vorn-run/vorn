@@ -436,8 +436,7 @@ export function createApiShim(wsUrl: string) {
     // so the surface matches, and so a caller does not have to know which client
     // it is running in.
     onServerReplaced: (_callback: () => void) => () => {},
-    resumeSession: (params: { id: string; resumeSessionId?: string }) =>
-      rpc.invoke('sessions:resume', params),
+    resumeSession: (params: { id: string }) => rpc.invoke('sessions:resume', params),
     clearPreviousSessions: () => rpc.invoke('sessions:clear'),
     getRecentSessions: (projectPath?: string) => rpc.invoke('sessions:getRecent', projectPath),
     renameSession: (id: string, displayName: string) =>

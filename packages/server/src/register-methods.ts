@@ -24,6 +24,17 @@ import { clearScreen } from './terminal-screen'
 import { discardHistory } from './history/writer'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
 import { clearScrollback, readScrollback } from './terminal-scrollback'
+import {
+  claimTranscriptFor,
+  sessionToBindOnCreate,
+  transcriptHolder,
+  transcriptNamedOnCreate
+} from './agent-transcript'
+import {
+  claimSpawningTranscript,
+  releaseSpawningTranscript,
+  releaseSpawningTranscriptsFor
+} from './transcript-claims'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
@@ -364,7 +375,16 @@ export function registerAllMethods(): void {
 
   // Terminal
   registerMethod('terminal:create', (payload) => {
-    return ptyManager.createPty(payload)
+    const named = transcriptNamedOnCreate(payload.agentType, payload.resumeSessionId)
+    // Naming a conversation that is already running: show what is writing it
+    // rather than starting a second agent on it, as a resume does.
+    const running = sessionToBindOnCreate(named, ptyManager.getLiveSessions())
+    if (running) return running
+    const session = ptyManager.createPty(payload)
+    // Only until the session names the conversation itself: an agent that can be
+    // told an id already carries it, and one that cannot reports seconds later.
+    if (named && !session.agentSessionId) claimSpawningTranscript(named, session.id)
+    return session
   })
   /**
    * Let go of what was kept for a session from the last run.
@@ -688,7 +708,7 @@ export function registerAllMethods(): void {
    */
   const BETWEEN_RUNS = '\x1b[?1049l\x1b[!p\x1b[0m\x1b[?25h\r\n'
 
-  registerMethod('sessions:resume', async ({ id, resumeSessionId }) => {
+  registerMethod('sessions:resume', async ({ id }) => {
     // Claimed before anything is started, and that ordering is the point. Two
     // clients can be looking at the same cold pane; the second must be told it
     // is gone rather than launching a second agent against one transcript.
@@ -706,6 +726,18 @@ export function registerAllMethods(): void {
       : ptyManager.getActiveSessions().find((s) => s.id === id && !ptyManager.hasLivePty(id))
     const previous = restored?.session ?? dead
     if (!previous) return { ok: false as const, reason: 'gone' as const }
+
+    const live = ptyManager.getLiveSessions()
+    let transcriptId: string | undefined
+    const pinned = previous.agentSessionId
+    const holder = pinned ? transcriptHolder(pinned, live) : undefined
+    if (holder) {
+      // Its conversation is already running; hand back what is writing it.
+      if (dead) ptyManager.releaseForResume(id)
+      await forgetRestored(id)
+      sessionManager.scheduleSave()
+      return { ok: true as const, session: holder, boundTo: holder.id }
+    }
 
     try {
       // Claimed, for the second kind. Not `killPty`: that announces an exit for
@@ -754,8 +786,13 @@ export function registerAllMethods(): void {
         return { ok: true as const, session }
       }
 
+      transcriptId = claimTranscriptFor(previous, live, id, headlessManager.getActiveSessions())
+
       // Same id, same reasons as the shell branch above.
-      const session = ptyManager.createPty(buildRestorePayload(previous, resumeSessionId), id)
+      const session = ptyManager.createPty(buildRestorePayload(previous, transcriptId), id)
+      // The record names the conversation now, so the claim standing in for it is
+      // spent; leaving it would hold an id the session already reports.
+      if (session.agentSessionId) releaseSpawningTranscriptsFor(id)
       ptyManager.injectOutput(session.id, BETWEEN_RUNS)
       sessionManager.scheduleSave()
       return { ok: true as const, session }
@@ -767,6 +804,7 @@ export function registerAllMethods(): void {
       // one that ended during this run goes back to the pty manager it came from.
       if (restored) restoreHeld(restored)
       else if (dead) ptyManager.restoreReleased(dead)
+      if (transcriptId) releaseSpawningTranscript(transcriptId, id)
       return {
         ok: false as const,
         reason: 'failed' as const,
@@ -1801,19 +1839,33 @@ export function registerAllMethods(): void {
       !supportsSessionIdPinning(payload.agentType)
     ) {
       const captureSessionId = session.id
-      setTimeout(() => {
-        const s = ptyManager.getActiveSessions().find((t) => t.id === captureSessionId)
-        if (!s || s.agentSessionId) return
-        const cwd = s.worktreePath || s.projectPath
-        const capturedId = captureAgentSessionId(s.agentType, cwd)
-        if (capturedId) {
+      // Asked more than once: an agent slow to write its own history used to be
+      // read at five seconds, come up empty, and never be asked again -- leaving
+      // the session holding a conversation it could not name, which a later
+      // resume was then free to take.
+      const attempt = (remaining: number[]): void => {
+        const [delay, ...rest] = remaining
+        if (delay === undefined) return
+        setTimeout(() => {
+          const s = ptyManager.getActiveSessions().find((t) => t.id === captureSessionId)
+          if (!s) {
+            releaseSpawningTranscriptsFor(captureSessionId)
+            return
+          }
+          if (s.agentSessionId) return
+          const cwd = s.worktreePath || s.projectPath
+          const capturedId = captureAgentSessionId(s.agentType, cwd)
+          if (!capturedId) return attempt(rest)
           s.agentSessionId = capturedId
+          // Its own record names the conversation now, so the spawn claim is spent.
+          releaseSpawningTranscriptsFor(captureSessionId)
           sessionManager.scheduleSave()
           clientRegistry.broadcast(IPC.SESSION_UPDATED, s)
           broadcastWidgetUpdate()
           log.info(`[session] captured ${s.agentType} session ID: ${capturedId}`)
-        }
-      }, 5000)
+        }, delay)
+      }
+      attempt([5000, 5000, 10_000, 20_000])
     }
 
     sessionManager.scheduleSave()
@@ -1829,6 +1881,9 @@ export function registerAllMethods(): void {
 
   // Clean up Copilot hooks on session exit
   ptyManager.on('session-exit', (session) => {
+    // A session that died early holds nothing; without this its conversation
+    // stays unreachable for the rest of the spawn window.
+    releaseSpawningTranscriptsFor(session.id)
     const inst = copilotInstallations.get(session.id)
     if (inst) {
       uninstallCopilotHooks(inst)

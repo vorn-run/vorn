@@ -542,9 +542,9 @@ export interface RequestMethods {
    * one transcript is the failure this prevents.
    */
   'sessions:resume': {
-    params: { id: string; resumeSessionId?: string }
-    result:
-      | { ok: true; session: TerminalSession }
+    params: { id: string }
+    result: /** `boundTo` names the session already writing this conversation, when one was. */
+      | { ok: true; session: TerminalSession; boundTo?: string }
       | { ok: false; reason: 'gone' | 'failed'; message?: string }
   }
   'sessions:clear': { params: void; result: void }

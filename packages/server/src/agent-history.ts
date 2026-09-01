@@ -45,9 +45,14 @@ function escapeSqlString(value: string): string {
   return value.replace(/'/g, "''")
 }
 
+/** One form for comparing a Vorn path against a path an agent recorded. */
+export function comparablePath(value: string): string {
+  return normalizePath(value).replace(/\\/g, '/').toLowerCase()
+}
+
 function buildPathWhereClause(column: string, scope: ProjectScope): string {
   const clauses = scope.rawPaths.map((projectPath) => {
-    const normalized = normalizePath(projectPath).replace(/\\/g, '/').toLowerCase()
+    const normalized = comparablePath(projectPath)
     return `lower(rtrim(replace(${column}, char(92), '/'), '/')) = '${escapeSqlString(normalized)}'`
   })
   return clauses.length === 1 ? clauses[0] : `(${clauses.join(' OR ')})`
@@ -471,13 +476,15 @@ const opencodeProvider: AgentHistoryProvider = {
 // Registry
 // ---------------------------------------------------------------------------
 
-const providers: AgentHistoryProvider[] = [
-  claudeProvider,
-  geminiProvider,
-  codexProvider,
-  copilotProvider,
-  opencodeProvider
-]
+const providerByAgent: Record<AiAgentType, AgentHistoryProvider> = {
+  claude: claudeProvider,
+  gemini: geminiProvider,
+  codex: codexProvider,
+  copilot: copilotProvider,
+  opencode: opencodeProvider
+}
+
+const providers = Object.values(providerByAgent)
 
 export function getRecentSessions(projectPath?: string, limit = 20): RecentSession[] {
   const allSessions: RecentSession[] = []
@@ -488,4 +495,17 @@ export function getRecentSessions(projectPath?: string, limit = 20): RecentSessi
   }
 
   return allSessions.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit)
+}
+
+/** One agent's sessions, unmerged, so a busy agent cannot crowd out a quiet one. */
+export function getRecentSessionsFor(
+  agentType: AiAgentType,
+  projectPath?: string,
+  limit = 20
+): RecentSession[] {
+  const provider = providerByAgent[agentType]
+  if (!provider) return []
+  return provider
+    .getRecentSessions(createProjectScope(projectPath), limit)
+    .sort((a, b) => b.timestamp - a.timestamp)
 }

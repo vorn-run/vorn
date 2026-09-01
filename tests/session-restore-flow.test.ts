@@ -8,19 +8,14 @@ import { buildAgentLaunchLine } from '../packages/server/src/agent-launch'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import type { CreateTerminalPayload, TerminalSession } from '@vornrun/shared/types'
 
-// Mock the renderer API for resolveResumeSessionId
 const mockGetRecentSessions = vi.fn()
-vi.stubGlobal('window', {
-  api: {
-    getRecentSessions: mockGetRecentSessions
-  }
-})
+vi.mock('../packages/server/src/agent-history', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../packages/server/src/agent-history')>()),
+  getRecentSessionsFor: (...args: unknown[]) => mockGetRecentSessions(...args)
+}))
 
-import {
-  resolveResumeSessionId,
-  buildRestorePayload,
-  coldSessions
-} from '../src/renderer/lib/session-utils'
+import { resolveTranscriptId } from '../packages/server/src/agent-transcript'
+import { buildRestorePayload, coldSessions } from '../src/renderer/lib/session-utils'
 
 const env = { PATH: '/usr/bin' }
 const cmds = DEFAULT_AGENT_COMMANDS
@@ -49,13 +44,13 @@ function makePayload(overrides: Partial<CreateTerminalPayload> = {}): CreateTerm
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockGetRecentSessions.mockResolvedValue([])
+  mockGetRecentSessions.mockReturnValue([])
 })
 
 describe('session restore flow: Claude with agentSessionId', () => {
   it('agentSessionId is used as resumeSessionId without scanning history', async () => {
     const session = makeSession({ agentSessionId: 'exact-uuid-123' })
-    const resumeId = await resolveResumeSessionId(session)
+    const resumeId = resolveTranscriptId(session)
     expect(resumeId).toBe('exact-uuid-123')
     // Should NOT have called getRecentSessions — agentSessionId was sufficient
     expect(mockGetRecentSessions).not.toHaveBeenCalled()
@@ -63,7 +58,7 @@ describe('session restore flow: Claude with agentSessionId', () => {
 
   it('hookSessionId alone is NOT used for resume (VibeGrid-internal UUID)', async () => {
     const session = makeSession({ hookSessionId: 'hook-only-uuid' })
-    const resumeId = await resolveResumeSessionId(session)
+    const resumeId = resolveTranscriptId(session)
     // hookSessionId is a VibeGrid routing UUID, not a real agent session ID
     expect(resumeId).toBeUndefined()
   })
@@ -93,7 +88,7 @@ describe('session restore flow: Claude with agentSessionId', () => {
     const session = makeSession({ agentSessionId: 'chain-uuid' })
 
     // Step 1: resolve
-    const resumeId = await resolveResumeSessionId(session)
+    const resumeId = resolveTranscriptId(session)
     expect(resumeId).toBe('chain-uuid')
 
     // Step 2: build payload
@@ -107,9 +102,9 @@ describe('session restore flow: Claude with agentSessionId', () => {
 })
 
 describe('session restore flow: Gemini (no resume support)', () => {
-  it('resolveResumeSessionId returns undefined for gemini', async () => {
+  it('resolveTranscriptId returns undefined for gemini', async () => {
     const session = makeSession({ agentType: 'gemini' })
-    const resumeId = await resolveResumeSessionId(session)
+    const resumeId = resolveTranscriptId(session)
     expect(resumeId).toBeUndefined()
   })
 
@@ -123,7 +118,7 @@ describe('session restore flow: Gemini (no resume support)', () => {
 
 describe('session restore flow: Codex fallback to history', () => {
   it('codex without hookSessionId falls back to getRecentSessions', async () => {
-    mockGetRecentSessions.mockResolvedValue([
+    mockGetRecentSessions.mockReturnValue([
       {
         sessionId: 'codex-sess-1',
         agentType: 'codex',
@@ -133,7 +128,7 @@ describe('session restore flow: Codex fallback to history', () => {
       }
     ])
     const session = makeSession({ agentType: 'codex' })
-    const resumeId = await resolveResumeSessionId(session)
+    const resumeId = resolveTranscriptId(session)
     expect(resumeId).toBe('codex-sess-1')
     expect(mockGetRecentSessions).toHaveBeenCalled()
   })

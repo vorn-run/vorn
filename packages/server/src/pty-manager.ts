@@ -1032,6 +1032,11 @@ class PtyManager extends EventEmitter {
     return this.ptys.has(id)
   }
 
+  /** Records with a process behind them, which `getActiveSessions` alone cannot say. */
+  getLiveSessions(): TerminalSession[] {
+    return this.getActiveSessions().filter((session) => this.hasLivePty(session.id))
+  }
+
   getActiveSessions(): TerminalSession[] {
     if (this.sessionOrder.length === 0) {
       return Array.from(this.sessions.values())

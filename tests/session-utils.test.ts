@@ -1,20 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import type { TerminalSession, RecentSession, AgentType } from '../packages/shared/src/types'
 
-const mockGetRecentSessions = vi.fn()
-
-// Mock window.api
-Object.defineProperty(window, 'api', {
-  value: { getRecentSessions: (...args: unknown[]) => mockGetRecentSessions(...args) },
-  writable: true
-})
-
-import {
-  resolveResumeSessionId,
-  resolveProjectName,
-  buildRestorePayload
-} from '../src/renderer/lib/session-utils'
+import { resolveProjectName, buildRestorePayload } from '../src/renderer/lib/session-utils'
 
 function makeSession(overrides: Partial<TerminalSession> = {}): TerminalSession {
   return {
@@ -42,129 +30,6 @@ function makeRecent(overrides: Partial<RecentSession> = {}): RecentSession {
     ...overrides
   }
 }
-
-beforeEach(() => {
-  vi.clearAllMocks()
-  mockGetRecentSessions.mockResolvedValue([])
-})
-
-describe('resolveResumeSessionId', () => {
-  it('returns agentSessionId immediately when present', async () => {
-    const session = makeSession({ agentSessionId: 'claude-abc' })
-    const result = await resolveResumeSessionId(session)
-    expect(result).toBe('claude-abc')
-    expect(mockGetRecentSessions).not.toHaveBeenCalled()
-  })
-
-  it('ignores hookSessionId for resume (VibeGrid-internal, not a real agent session ID)', async () => {
-    const session = makeSession({ hookSessionId: 'hook-abc' })
-    const result = await resolveResumeSessionId(session)
-    // hookSessionId alone should NOT be used — falls through to history scan
-    expect(result).toBeUndefined()
-  })
-
-  it('returns exact-match sessionId from recent sessions', async () => {
-    mockGetRecentSessions.mockResolvedValue([
-      makeRecent({ sessionId: 'sess-match', projectPath: '/home/user/my-app' })
-    ])
-    const session = makeSession({ projectPath: '/home/user/my-app' })
-    const result = await resolveResumeSessionId(session)
-    expect(result).toBe('sess-match')
-  })
-
-  it('prefers worktree path matches over project root matches', async () => {
-    mockGetRecentSessions.mockResolvedValue([
-      makeRecent({ sessionId: 'sess-root', projectPath: '/home/user/my-app' }),
-      makeRecent({
-        sessionId: 'sess-worktree',
-        projectPath: '/home/user/.vorn-worktrees/my-app/feature-a'
-      })
-    ])
-    const session = makeSession({
-      projectPath: '/home/user/my-app',
-      worktreePath: '/home/user/.vorn-worktrees/my-app/feature-a'
-    })
-
-    const result = await resolveResumeSessionId(session)
-    expect(result).toBe('sess-worktree')
-  })
-
-  it('does not fall back to basename match (prevents cross-project confusion)', async () => {
-    mockGetRecentSessions.mockImplementation((projectPath?: string) => {
-      if (projectPath) return Promise.resolve([])
-      return Promise.resolve([
-        makeRecent({ sessionId: 'sess-fuzzy', projectPath: '/private/var/folders/my-app' })
-      ])
-    })
-    const session = makeSession({ projectPath: '/var/folders/my-app' })
-    const result = await resolveResumeSessionId(session)
-    expect(result).toBeUndefined()
-  })
-
-  it('returns undefined when no match found', async () => {
-    // Scoped call returns nothing; unscoped returns non-matching session
-    mockGetRecentSessions.mockImplementation((projectPath?: string) => {
-      if (projectPath) return Promise.resolve([])
-      return Promise.resolve([
-        makeRecent({
-          sessionId: 'sess-other',
-          agentType: 'copilot',
-          projectPath: '/completely/different'
-        })
-      ])
-    })
-    const session = makeSession({ projectPath: '/home/user/my-app' })
-    const result = await resolveResumeSessionId(session)
-    expect(result).toBeUndefined()
-  })
-
-  it('tries scoped fetch first, then unscoped fallback', async () => {
-    mockGetRecentSessions.mockResolvedValue([])
-    const session = makeSession()
-    await resolveResumeSessionId(session)
-    expect(mockGetRecentSessions).toHaveBeenCalledTimes(2)
-    expect(mockGetRecentSessions).toHaveBeenNthCalledWith(1, session.projectPath)
-    expect(mockGetRecentSessions).toHaveBeenNthCalledWith(2)
-  })
-
-  it('skips already-claimed session IDs', async () => {
-    mockGetRecentSessions.mockResolvedValue([
-      makeRecent({ sessionId: 'sess-1', projectPath: '/home/user/my-app' }),
-      makeRecent({ sessionId: 'sess-2', projectPath: '/home/user/my-app' })
-    ])
-    const session = makeSession({ projectPath: '/home/user/my-app' })
-
-    // First call claims sess-1
-    const claimed = new Set<string>()
-    const first = await resolveResumeSessionId(session, claimed)
-    expect(first).toBe('sess-1')
-    claimed.add(first!)
-
-    // Second call with same session skips sess-1, returns sess-2
-    const second = await resolveResumeSessionId(session, claimed)
-    expect(second).toBe('sess-2')
-  })
-
-  it('skips claimed hookSessionId', async () => {
-    const claimed = new Set(['hook-abc'])
-    const session = makeSession({ hookSessionId: 'hook-abc' })
-    mockGetRecentSessions.mockResolvedValue([
-      makeRecent({ sessionId: 'sess-fallback', projectPath: '/home/user/my-app' })
-    ])
-    const result = await resolveResumeSessionId(session, claimed)
-    expect(result).toBe('sess-fallback')
-  })
-
-  it('does not attempt exact resume for gemini sessions', async () => {
-    const session = makeSession({
-      agentType: 'gemini',
-      hookSessionId: 'gemini-hook'
-    })
-    const result = await resolveResumeSessionId(session)
-    expect(result).toBeUndefined()
-    expect(mockGetRecentSessions).not.toHaveBeenCalled()
-  })
-})
 
 describe('resolveProjectName', () => {
   const projects = [
