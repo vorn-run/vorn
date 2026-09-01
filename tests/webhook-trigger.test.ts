@@ -4,7 +4,9 @@ import type { WorkflowDefinition } from '../packages/shared/src/types'
 import {
   dbClaimConnectorInbox,
   dbInsertWorkflow,
-  initTestDatabase
+  dbRetryConnectorInbox,
+  initTestDatabase,
+  MAX_INBOX_ATTEMPTS
 } from '../packages/server/src/database'
 import { registerWebhookRoute } from '../packages/server/src/webhook-trigger'
 
@@ -196,5 +198,39 @@ describe('the webhook route', () => {
     })
     expect(res.statusCode).toBe(403)
     expect(claimAll()).toHaveLength(0)
+  })
+})
+
+describe('the inbox retry cap', () => {
+  it('marks a persistently failing event dead instead of retrying forever', async () => {
+    dbInsertWorkflow(webhookWorkflow())
+    await app.inject({ method: 'POST', url: '/wf-hooks/wf-hook/sekret-token', payload: {} })
+
+    // A virtual clock that jumps past each round's backoff (capped at 1h).
+    const base = Date.now()
+    const HOURS_3 = 3 * 60 * 60_000
+    for (let attempt = 1; attempt <= MAX_INBOX_ATTEMPTS; attempt++) {
+      const now = base + attempt * HOURS_3
+      const claimed = dbClaimConnectorInbox({
+        now: new Date(now).toISOString(),
+        leaseUntil: new Date(now + 60_000).toISOString(),
+        limit: 10
+      })
+      expect(claimed).toHaveLength(1)
+      const ok = dbRetryConnectorInbox({
+        id: claimed[0].id,
+        leaseToken: claimed[0].leaseToken,
+        error: 'renderer exploded',
+        now: new Date(now).toISOString()
+      })
+      expect(ok).toBe(true)
+    }
+
+    const after = dbClaimConnectorInbox({
+      now: new Date(base + 100 * HOURS_3).toISOString(),
+      leaseUntil: new Date(base + 101 * HOURS_3).toISOString(),
+      limit: 10
+    })
+    expect(after).toHaveLength(0)
   })
 })
