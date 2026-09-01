@@ -1341,6 +1341,9 @@ export function registerAllMethods(): void {
 
   registerMethod('connection:update', ({ id, updates }) => {
     dbUpdateSourceConnection(id, updates)
+    // A child started before this edit keeps running the old command, args and
+    // env for the life of the process, so it is stopped and respawned on next use.
+    void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
     dbSignalChange()
     return dbGetSourceConnection(id)
   })

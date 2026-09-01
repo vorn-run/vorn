@@ -170,11 +170,22 @@ export function catalogLaunchSpec(
   entry: ConnectorCatalogEntry,
   repoRoot: string | undefined = process.env.VORN_CONNECTORS_ROOT
 ): { command: string; args: string[] } {
-  if (repoRoot) {
-    const local = join(repoRoot, 'packages', localPackageDir(entry.packageName), 'dist', 'index.js')
-    if (existsSync(local)) return { command: 'node', args: [local] }
-  }
-  return { command: 'npx', args: ['-y', entry.packageName] }
+  return (
+    localLaunchSpec(localPackageDir(entry.packageName), repoRoot) ?? {
+      command: 'npx',
+      args: ['-y', entry.packageName]
+    }
+  )
+}
+
+/** A build from a connectors checkout, when `VORN_CONNECTORS_ROOT` names one. */
+export function localLaunchSpec(
+  dirName: string,
+  repoRoot: string | undefined = process.env.VORN_CONNECTORS_ROOT
+): { command: string; args: string[] } | undefined {
+  if (!repoRoot) return undefined
+  const local = join(repoRoot, 'packages', dirName, 'dist', 'index.js')
+  return existsSync(local) ? { command: 'node', args: [local] } : undefined
 }
 
 /** `@vornrun/connector-kusto` lives in `packages/kusto`. */

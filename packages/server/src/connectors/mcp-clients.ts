@@ -13,8 +13,15 @@
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import type { SourceConnection } from '@vornrun/shared/types'
+import {
+  SDK_FILTER_KEYS,
+  connectionConnectorId,
+  type SourceConnection
+} from '@vornrun/shared/types'
+import { dbListSourceConnections } from '../database'
 import { getDecryptedCreds } from './decrypted-creds'
+import { localLaunchSpec } from './catalog'
+import { installedLaunch } from './packs'
 import { getSafeEnv } from '../process-utils'
 import log from '../logger'
 
@@ -53,14 +60,41 @@ function parseJsonArray(raw: unknown): string[] {
   return arr.map((v) => String(v))
 }
 
-function buildSpawnConfig(conn: SourceConnection): {
+/** Before the database has resolved a data directory there is nowhere to look. */
+function installedPackLaunch(id: string): { command: string; args: string[] } | undefined {
+  try {
+    return installedLaunch(id)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Where this connection's child actually comes from.
+ *
+ * A local checkout wins so connector development is testable at all, then the
+ * installed pack, which is the version the user chose and the only one that
+ * launches with no registry. The stored `command`/`args` are last rather than
+ * first: they are what every npx-era connection still carries, and honouring
+ * them ahead of a pack would mean installing a version that never runs.
+ */
+export function resolveLaunch(conn: SourceConnection): { command: string; args: string[] } {
+  const sdkId = String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
+  if (sdkId) {
+    const resolved = localLaunchSpec(sdkId) ?? installedPackLaunch(sdkId)
+    if (resolved) return resolved
+  }
+  const command = String(conn.filters.command ?? '').trim()
+  if (!command) throw new Error('MCP connection is missing a command')
+  return { command, args: parseJsonArray(conn.filters.args) }
+}
+
+export function buildSpawnConfig(conn: SourceConnection): {
   command: string
   args: string[]
   env: Record<string, string>
 } {
-  const command = String(conn.filters.command ?? '').trim()
-  if (!command) throw new Error('MCP connection is missing a command')
-  const args = parseJsonArray(conn.filters.args)
+  const { command, args } = resolveLaunch(conn)
   const env = parseJsonObject(conn.filters.env)
   // Decrypted secret env (pushed from main via safeStorage) overrides plain env.
   const decrypted = getDecryptedCreds(conn.id) ?? {}
@@ -143,4 +177,23 @@ export async function stopAllClients(): Promise<void> {
 
 export function hasClient(connectionId: string): boolean {
   return clients.has(connectionId)
+}
+
+/** Which connections a pack change affects, which for a package is not by `connectorId`. */
+export function connectionIdsForConnector(connectorId: string): string[] {
+  return dbListSourceConnections()
+    .filter((conn) => connectionConnectorId(conn) === connectorId)
+    .map((conn) => conn.id)
+}
+
+/**
+ * Stop the live children of every connection belonging to a connector.
+ *
+ * Installing, updating, rolling back or removing a pack changes which files a
+ * connection launches, and a child started before the change keeps running the
+ * old ones for the life of the process. Stopping them here is what makes the
+ * new version take effect on the next call rather than the next restart.
+ */
+export async function stopClientsForConnector(connectorId: string): Promise<void> {
+  await Promise.allSettled(connectionIdsForConnector(connectorId).map(stopClient))
 }
