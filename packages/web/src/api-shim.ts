@@ -707,6 +707,15 @@ export function createApiShim(wsUrl: string) {
       rpc.invoke('connection:backfill', { connectionId }),
     listConnectionActions: (connectionId: string) =>
       rpc.invoke('connection:listActions', connectionId),
+    getWebhookInfo: () => rpc.invoke('webhook:info', undefined),
+    httpRequest: (params: {
+      profileConnectionId?: string
+      method: string
+      url: string
+      headers?: Record<string, string>
+      body?: string
+    }) => rpc.invoke('http:request', params),
+    preflightConnection: (connectionId: string) => rpc.invoke('connection:preflight', connectionId),
     executeConnectorAction: (params: {
       connectionId: string
       action: string

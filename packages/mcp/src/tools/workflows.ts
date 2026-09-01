@@ -149,7 +149,7 @@ export const workflowInputsSchema = z.array(workflowInputDefSchema).superRefine(
   })
 })
 
-const triggerConfigSchema = z.union([
+export const triggerConfigSchema = z.union([
   z.object({
     triggerType: z.literal('manual'),
     contextual: z.boolean().optional(),
@@ -182,7 +182,7 @@ const triggerConfigSchema = z.union([
   })
 ])
 
-const nodeSchema = z
+export const nodeSchema = z
   .object({
     id: V.id,
     // Full node palette — parity with the editor. `config` is a passthrough so
