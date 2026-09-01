@@ -188,16 +188,13 @@ describe('replacing a step in place', () => {
     expect(canvasNodes()).toHaveLength(3)
   })
 
-  it('resets the slug to the new type, kept unique against its siblings', () => {
+  it('keeps the slug so downstream {{steps.old-script.*}} references resolve', () => {
     render(<WorkflowEditor />)
     openReplace('s1')
     pick({ kind: 'type', type: 'httpRequest' })
 
     const swapped = canvasNodes().find((n) => n.id === 's1')!
-    // 'http-request' is taken by s2, so the fresh slug steps around it.
-    expect(swapped.slug).toBeTruthy()
-    expect(swapped.slug).not.toBe('old-script')
-    expect(swapped.slug).not.toBe('http-request')
+    expect(swapped.slug).toBe('old-script')
   })
 
   it('swaps to a preconfigured connector action', () => {

@@ -40,6 +40,7 @@ import { WorkflowCanvas, AddableNodeType, InsertAnchor } from './WorkflowCanvas'
 import { StepLibrary, type LibraryPick } from './panels/StepLibrary'
 import {
   layoutPositions,
+  loopBodyMembers,
   TRIGGER_ANCHOR,
   TRIGGER_ANCHOR_ID
 } from '../../lib/workflow-canvas-layout'
@@ -76,7 +77,6 @@ import {
   rerunWorkflowRun,
   stopWorkflowRun
 } from '../../lib/workflow-execution'
-import { loopBodyMembers } from '../../lib/workflow-canvas-layout'
 import { toast } from '../Toast'
 import {
   slugify,
@@ -793,16 +793,37 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         // while the label resets to the new type's default like any swap.
         const existing = nodes.find((n) => n.type === 'trigger')
         if (existing) {
+          const cur = existing.config as TriggerConfig
+          // Re-picking what is already there must not rotate tokens or reset config.
+          const same =
+            pick.kind === 'triggerType'
+              ? cur.triggerType === pick.triggerType
+              : cur.triggerType === 'connectorPoll' &&
+                cur.connectionId === pick.connectionId &&
+                cur.event === pick.event
+          if (same) return
           const fresh = createTriggerNode(config)
           setNodes(
             nodes.map((n) =>
-              n.id === existing.id ? { ...fresh, id: existing.id, position: existing.position } : n
+              n.id === existing.id
+                ? { ...fresh, id: existing.id, position: existing.position, slug: existing.slug }
+                : n
             )
           )
           setSelectedNodeId(existing.id)
         } else {
           const trigger = createTriggerNode(config)
+          // Re-adding a trigger reconnects the orphaned chain: every top-level
+          // node with no incoming edge becomes its successor.
+          const bodySet = loopBodyMembers(nodes)
+          const hasIncoming = new Set(edges.map((e) => e.target))
           setNodes([...nodes, trigger])
+          setEdges([
+            ...edges,
+            ...nodes
+              .filter((n) => !hasIncoming.has(n.id) && !bodySet.has(n.id))
+              .map((n) => ({ id: crypto.randomUUID(), source: trigger.id, target: n.id }))
+          ])
           setSelectedNodeId(trigger.id)
         }
         return
@@ -826,10 +847,18 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                 }
               })()
             : createNodeWithUniqueSlug(pick.type, target.id)
-        // Same in-place swap the trigger uses: id, position, and edges survive.
+        // Same swap the trigger uses: id, position, edges, and the slug survive,
+        // so downstream {{steps.<slug>.*}} references keep resolving.
         setNodes(
           nodes.map((n) =>
-            n.id === target.id ? { ...fresh, id: target.id, position: target.position } : n
+            n.id === target.id
+              ? {
+                  ...fresh,
+                  id: target.id,
+                  position: target.position,
+                  slug: target.slug ?? fresh.slug
+                }
+              : n
           )
         )
         setSelectedNodeId(target.id)
@@ -857,6 +886,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     [
       pendingInsert,
       nodes,
+      edges,
       createNodeWithUniqueSlug,
       handleAddParallelBranch,
       handlePaletteInsert,

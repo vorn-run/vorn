@@ -181,6 +181,46 @@ describe('the editor without a trigger', () => {
     expect(container.querySelector('button[aria-label="Run workflow"]')).toBeEnabled()
   })
 
+  it('re-adding a trigger reconnects the orphaned chain', () => {
+    render(<WorkflowEditor />)
+    openTriggerLibrary()
+    pickFromLibrary({ kind: 'triggerType', triggerType: 'manual' })
+    const triggerId = canvasNodes().find((n) => n.type === 'trigger')!.id
+    act(() => {
+      ;(captured.canvasProps!.onOpenLibrary as (a: unknown) => void)({
+        afterNodeId: triggerId,
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false
+      })
+    })
+    pickFromLibrary({ kind: 'type', type: 'script' })
+    const script = canvasNodes().find((n) => n.type === 'script')!
+
+    act(() => {
+      ;(captured.canvasProps!.onDeleteNode as (id: string) => void)(triggerId)
+    })
+    openTriggerLibrary()
+    pickFromLibrary({ kind: 'triggerType', triggerType: 'recurring' })
+
+    const newTrigger = canvasNodes().find((n) => n.type === 'trigger')!
+    const edges = captured.canvasProps!.edges as { source: string; target: string }[]
+    expect(edges.some((e) => e.source === newTrigger.id && e.target === script.id)).toBe(true)
+  })
+
+  it('re-picking the current trigger type changes nothing', () => {
+    render(<WorkflowEditor />)
+    openTriggerLibrary()
+    pickFromLibrary({ kind: 'triggerType', triggerType: 'webhook' })
+    const before = canvasNodes().find((n) => n.type === 'trigger')!
+    const token = (before.config as { token: string }).token
+
+    openTriggerLibrary()
+    pickFromLibrary({ kind: 'triggerType', triggerType: 'webhook' })
+    const after = canvasNodes().find((n) => n.type === 'trigger')!
+    expect((after.config as { token: string }).token).toBe(token)
+  })
+
   it('deleting the trigger keeps downstream steps and drops its edges', () => {
     render(<WorkflowEditor />)
     openTriggerLibrary()
