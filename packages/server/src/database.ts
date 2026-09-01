@@ -2089,14 +2089,18 @@ export function dbEnqueueWebhookEvent(args: {
   item: ConnectorItemContext
 }): void {
   const d = getDb()
+  // The inbox requires a connection row; webhook events share one internal one.
+  d.prepare(
+    `INSERT OR IGNORE INTO source_connections (id, connector_id, name, created_at)
+     VALUES ('webhook', 'webhook', 'Webhook', ?)`
+  ).run(args.receivedAt)
   d.prepare(
     `INSERT OR IGNORE INTO connector_inbox (
       workflow_id, connection_id, connector_id, event_id, event_type,
       event_timestamp, payload, status, attempts, available_at, created_at
-    ) VALUES (?, ?, 'webhook', ?, 'webhook', ?, ?, 'pending', 0, ?, ?)`
+    ) VALUES (?, 'webhook', 'webhook', ?, 'webhook', ?, ?, 'pending', 0, ?, ?)`
   ).run(
     args.workflowId,
-    args.item.connectionId,
     args.eventId,
     args.receivedAt,
     JSON.stringify(args.item),

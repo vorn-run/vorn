@@ -1219,7 +1219,8 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('connection:list', ({ connectorId }) => {
-    return dbListSourceConnections(connectorId)
+    // The internal webhook row only satisfies the inbox's connection reference.
+    return dbListSourceConnections(connectorId).filter((c) => c.connectorId !== 'webhook')
   })
 
   registerMethod('connection:create', (params) => {

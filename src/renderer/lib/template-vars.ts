@@ -441,7 +441,8 @@ export function resolveTemplateVars(
   // `{{ ns.k1.k2.k3... }}` — identifier-first, then any number of dotted
   // segments. The resolver walks those segments into whichever namespace
   // matches (steps / task / trigger / connectorItem).
-  return template.replace(/\{\{\s*([a-zA-Z_][\w.]*)\s*\}\}/g, (match, path: string) => {
+  // Hyphens allowed so header names like content-type resolve as path segments.
+  return template.replace(/\{\{\s*([a-zA-Z_][\w.-]*)\s*\}\}/g, (match, path: string) => {
     const segments = path.split('.')
     const ns = segments[0]
     const rest = segments.slice(1)

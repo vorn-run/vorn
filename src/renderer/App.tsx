@@ -1,3 +1,4 @@
+import { schedulerExecutionContext } from './lib/workflow-helpers'
 import { useEffect, useState, Suspense, lazy } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AnimatePresence } from 'framer-motion'
@@ -359,30 +360,7 @@ export function App() {
           return
         }
 
-        // A webhook event rides the connector pipe; its payload feeds {{trigger.*}}.
-        const webhookRaw =
-          connectorItem?.connectorId === 'webhook'
-            ? (connectorItem.raw as {
-                body?: unknown
-                headers?: Record<string, string>
-                method?: string
-              })
-            : null
-        const context =
-          connectorItem || inputs
-            ? {
-                connectorItem,
-                inputs,
-                ...(webhookRaw && {
-                  trigger: {
-                    type: 'webhook' as const,
-                    body: webhookRaw.body,
-                    headers: webhookRaw.headers,
-                    method: webhookRaw.method
-                  }
-                })
-              }
-            : undefined
+        const context = schedulerExecutionContext(connectorItem, inputs)
         try {
           const execution = await runWorkflow(workflow, context, { source: 'scheduler' })
           // A different run may be parked on an approval gate. It did not

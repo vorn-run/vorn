@@ -388,6 +388,34 @@ export function createCallConnectorActionNode(
   }
 }
 
+/**
+ * The run context for a scheduler-delivered event. A webhook event rides the
+ * connector pipe for durability, so its payload is lifted into the trigger
+ * namespace here while the connectorItem keeps the lease machinery working.
+ */
+export function schedulerExecutionContext(
+  connectorItem: import('../../shared/types').ConnectorItemContext | undefined,
+  inputs: Record<string, unknown> | undefined
+): import('../../shared/types').WorkflowExecutionContext | undefined {
+  if (!connectorItem && !inputs) return undefined
+  const webhookRaw =
+    connectorItem?.connectorId === 'webhook'
+      ? (connectorItem.raw as { body?: unknown; headers?: Record<string, string>; method?: string })
+      : null
+  return {
+    connectorItem,
+    inputs,
+    ...(webhookRaw && {
+      trigger: {
+        type: 'webhook' as const,
+        body: webhookRaw.body,
+        headers: webhookRaw.headers,
+        method: webhookRaw.method
+      }
+    })
+  }
+}
+
 /** The default config for each trigger type, used by the form and the library. */
 export function switchTriggerType(type: TriggerConfig['triggerType']): TriggerConfig {
   switch (type) {
