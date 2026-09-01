@@ -31,8 +31,9 @@ export type { SdkProbeRequest }
 import { getSafeEnv } from '../process-utils'
 import log from '../logger'
 
-/** Tool an SDK connector serves to describe itself. */
-export const MANIFEST_TOOL = 'vorn_connector_manifest'
+import { MANIFEST_TOOL } from './sdk-tools'
+
+export { MANIFEST_TOOL }
 
 /**
  * Give up rather than leave a child running. `npx -y <pkg>` downloads the
@@ -190,7 +191,7 @@ const str = (value: unknown, fallback = ''): string =>
  * the form reads is checked here rather than trusted downstream — a connector
  * that omits `triggers` should be a clear message, not a render crash.
  */
-function toManifest(payload: Record<string, unknown>): SdkConnectorManifest {
+export function toManifest(payload: Record<string, unknown>): SdkConnectorManifest {
   const id = str(payload.id).trim()
   const name = str(payload.name).trim()
   if (!id || !name) throw new Error('Connector manifest is missing an id or a name')

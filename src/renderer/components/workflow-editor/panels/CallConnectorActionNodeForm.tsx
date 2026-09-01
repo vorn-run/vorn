@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import type {
   CallConnectorActionConfig,
-  SourceConnection,
   ConnectorActionDef,
   TriggerConfig
 } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
 import { ConnectorIcon } from '../../ConnectorIcon'
-import { connectionIcon } from '../../../lib/connection-icon'
+import { useConnections, iconForConnection } from '../../../lib/use-connections'
 import { TEMPLATE_VARIABLES, StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 
@@ -26,12 +25,9 @@ export function CallConnectorActionNodeForm({
   inputVars = [],
   stepGroups = []
 }: Props) {
-  const [connections, setConnections] = useState<SourceConnection[]>([])
+  // The shared cache, so the glyphs here resolve the same way the cards' do.
+  const connections = useConnections()
   const [actions, setActions] = useState<ConnectorActionDef[]>([])
-
-  useEffect(() => {
-    window.api.listConnections().then(setConnections)
-  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -91,7 +87,7 @@ export function CallConnectorActionNodeForm({
             icon: (
               <ConnectorIcon
                 connectorId={c.connectorId}
-                icon={connectionIcon(c)}
+                icon={iconForConnection(c)}
                 size={14}
                 className="text-gray-400"
               />
@@ -113,8 +109,21 @@ export function CallConnectorActionNodeForm({
           <label className="text-[13px] text-gray-400 font-medium block mb-2">Action</label>
           <SelectPicker
             value={config.action}
-            options={actions.map((a) => ({ value: a.type, label: a.label }))}
-            onChange={(v) => onChange({ ...config, action: v, args: {} })}
+            options={actions.map((a) => ({
+              value: a.type,
+              label: a.label,
+              // The tool name stays visible; it is what a run and its logs name.
+              ...(a.label !== a.type && { hint: a.type })
+            }))}
+            onChange={(v) =>
+              onChange({
+                ...config,
+                action: v,
+                // Denormalized so the card can name the action without an IPC call per render.
+                actionLabel: actions.find((a) => a.type === v)?.label ?? v,
+                args: {}
+              })
+            }
             variant="form"
             placeholder={
               actions.length === 0

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Search, Plus, RefreshCw, ChevronRight } from 'lucide-react'
+import { Search, Plus, RefreshCw, ChevronRight, Download, FolderOpen } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
+import type { ConnectorInstallProgress } from '../../../shared/types'
 import {
   describeCatalogAge,
   filterConnectorListings,
@@ -10,6 +11,8 @@ import {
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
+import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
+import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
 
 /**
  * The connectors Vorn can talk to, one per row.
@@ -27,6 +30,12 @@ export function ConnectorDirectory({
   builtIns,
   onSelect,
   onAdd,
+  onInstall,
+  onInstallFile,
+  onPickFile,
+  installError,
+  pending,
+  progress,
   fetchedAt,
   onRefresh
 }: {
@@ -34,6 +43,17 @@ export function ConnectorDirectory({
   builtIns: BuiltInConnector[]
   onSelect: (listing: ConnectorListing) => void
   onAdd: (listing: ConnectorListing) => void
+  onInstall?: (listing: ConnectorListing) => void
+  /** A pack chosen from disk, by absolute path. */
+  onInstallFile?: (filePath: string) => void
+  /** Opens the file picker and answers with what was chosen. */
+  onPickFile?: () => Promise<string | null>
+  /** Why the last file install was refused, for the one that has no row yet. */
+  installError?: string | null
+  /** The confirm sheet for a pack that has been verified but not yet kept. */
+  pending?: React.ReactNode
+  /** Installs running right now, by connector id. */
+  progress?: Record<string, ConnectorInstallProgress>
   /** When the published list was last read. Absent until one has been. */
   fetchedAt?: number
   onRefresh?: () => Promise<void> | void
@@ -41,6 +61,7 @@ export function ConnectorDirectory({
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
 
   const categories = useMemo(() => connectorCategories(listings), [listings])
   const visible = useMemo(
@@ -48,8 +69,37 @@ export function ConnectorDirectory({
     [listings, search, category]
   )
 
+  const handleDrop = (event: React.DragEvent): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    setDragOver(false)
+    if (!onInstallFile) return
+    for (const file of Array.from(event.dataTransfer?.files ?? [])) {
+      const filePath = (file as File & { path?: string }).path
+      if (filePath) onInstallFile(filePath)
+    }
+  }
+
   return (
-    <div>
+    <div
+      onDragOver={
+        onInstallFile
+          ? (event) => {
+              event.preventDefault()
+              setDragOver(true)
+            }
+          : undefined
+      }
+      onDragLeave={(event) => {
+        event.preventDefault()
+        setDragOver(false)
+      }}
+      onDrop={onInstallFile ? handleDrop : undefined}
+      className={
+        dragOver ? 'outline-dashed outline-1 outline-offset-4 outline-white/[0.25]' : undefined
+      }
+      data-drop-active={dragOver ? 'true' : undefined}
+    >
       <div className="flex items-center gap-2 mb-1">
         <div className="relative flex-1">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
@@ -61,6 +111,18 @@ export function ConnectorDirectory({
             className="w-full pl-7 pr-2 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-200 focus:border-white/[0.2] outline-none"
           />
         </div>
+        {onInstallFile && onPickFile && (
+          <button
+            onClick={async () => {
+              const filePath = await onPickFile()
+              if (filePath) onInstallFile(filePath)
+            }}
+            title="Install a .vorn.tgz you already have"
+            className="shrink-0 py-1.5 px-2 text-xs text-gray-300 hover:text-white border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+          >
+            <FolderOpen size={11} /> Install from file
+          </button>
+        )}
         {/* A dropdown rather than a row of chips, which wrapped to a second
             line and pushed the list down. */}
         {categories.length > 1 && (
@@ -80,14 +142,26 @@ export function ConnectorDirectory({
         )}
       </div>
 
+      {installError && (
+        <p className={`flex items-start gap-1.5 text-[11px] mt-2 ${TONE_TEXT.broken}`}>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 ${TONE_DOT.broken}`} />
+          {installError}
+        </p>
+      )}
+
+      {/* A verified pack waiting on the decision to keep it. */}
+      {pending && <div className="mt-2">{pending}</div>}
+
       <div>
         {visible.map((listing) => (
           <ConnectorRow
             key={listing.key}
             listing={listing}
             builtIns={builtIns}
+            {...(progress?.[listing.id] && { progress: progress[listing.id] })}
             onSelect={() => onSelect(listing)}
             onAdd={() => onAdd(listing)}
+            {...(onInstall && { onInstall: () => onInstall(listing) })}
           />
         ))}
       </div>
@@ -125,18 +199,30 @@ export function ConnectorDirectory({
   )
 }
 
-function ConnectorRow({
+export function ConnectorRow({
   listing,
   builtIns,
+  progress,
   onSelect,
-  onAdd
+  onAdd,
+  onInstall
 }: {
   listing: ConnectorListing
   builtIns: BuiltInConnector[]
+  /** The install running for this connector, when one is. */
+  progress?: ConnectorInstallProgress
   onSelect: () => void
   onAdd: () => void
+  onInstall?: () => void
 }) {
   const details = listingDetails(listing, builtIns)
+  const state = packStateFor({
+    installed: listing.pack,
+    catalogVersion: listing.catalogItem?.version,
+    progress
+  })
+  const status = describePackStatus(state)
+  const installable = listing.source !== 'builtin' && onInstall !== undefined
 
   return (
     <div className="flex items-start gap-3 py-3 border-t border-white/[0.06]">
@@ -163,24 +249,60 @@ function ConnectorRow({
             </span>
           )}
           <span className="block text-[11px] text-gray-600 mt-1.5">{facts(listing, details)}</span>
-          {/* Without this nothing says the row opens anything, and the Add
-              button next to it reads as the only thing that does. */}
+
+          {status.percent !== null && (
+            <span className="block h-px w-full max-w-[220px] bg-white/[0.08] mt-2 overflow-hidden">
+              <span
+                className="block h-px bg-ink transition-[width] duration-200"
+                style={{ width: `${status.percent}%` }}
+                role="progressbar"
+                aria-valuenow={status.percent}
+                aria-label={`Installing ${listing.name}`}
+              />
+            </span>
+          )}
+
+          {/* The only colour on the row: a rejection, or the dot saying it is on disk. */}
+          {state.kind !== 'absent' && (
+            <span
+              className={`flex items-center gap-1.5 text-[11px] mt-1.5 ${TONE_TEXT[status.tone]}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT[status.tone]}`} />
+              {status.detail ?? status.label}
+            </span>
+          )}
+
+          {/* Without this nothing says the row opens anything. */}
           <span className="inline-flex items-center gap-0.5 text-[11px] text-gray-500 group-hover:text-gray-300 transition-colors mt-1.5">
             Details <ChevronRight size={11} />
           </span>
         </span>
       </button>
 
-      {/* An installed row has no manifest and no package spec, so there is
-          nothing to open a form against. */}
-      {listing.source !== 'installed' && (
-        <button
-          onClick={onAdd}
-          className="shrink-0 self-center text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
-        >
-          <Plus size={11} /> {listing.connectedCount > 0 ? 'Add another' : 'Add'}
-        </button>
-      )}
+      <div className="shrink-0 self-center flex items-center gap-1.5">
+        {installable && status.action && (
+          <button
+            onClick={onInstall}
+            disabled={status.busy}
+            className="text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1 disabled:opacity-50"
+          >
+            {status.action === 'install' ? <Download size={11} /> : <RefreshCw size={11} />}
+            {status.label}
+          </button>
+        )}
+        {/* A pack must be on disk before there is anything to connect to. */}
+        {canAddConnection(state, {
+          source: listing.source,
+          hasLegacyLaunch: Boolean(listing.catalogItem?.packageName)
+        }) && (
+          <button
+            onClick={onAdd}
+            className="text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+          >
+            <Plus size={11} /> {listing.connectedCount > 0 ? 'Add another' : 'Add'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

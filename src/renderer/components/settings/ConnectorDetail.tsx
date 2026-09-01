@@ -1,10 +1,13 @@
-import { Plus, ArrowLeft, ExternalLink } from 'lucide-react'
+import { Plus, ArrowLeft, ExternalLink, Download, RefreshCw, Undo2, Trash2 } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
+import type { ConnectorInstallProgress } from '../../../shared/types'
 import {
   listingDetails,
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
+import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
+import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
 
 /**
  * What a connector does, before anything is downloaded.
@@ -22,16 +25,31 @@ import {
 export function ConnectorDetail({
   listing,
   builtIns,
+  progress,
   onAdd,
+  onInstall,
+  onRollback,
+  onRemove,
   onClose
 }: {
   listing: ConnectorListing
   builtIns: BuiltInConnector[]
+  /** The install running for this connector, when one is. */
+  progress?: ConnectorInstallProgress
   onAdd: () => void
+  onInstall?: () => void
+  onRollback?: () => void
+  onRemove?: () => void
   onClose: () => void
 }) {
   const details = listingDetails(listing, builtIns)
   const entry = listing.catalogItem
+  const state = packStateFor({
+    installed: listing.pack,
+    catalogVersion: entry?.version,
+    progress
+  })
+  const status = describePackStatus(state)
 
   return (
     <div>
@@ -115,10 +133,29 @@ export function ConnectorDetail({
 
       {entry?.auth && <p className="text-[12.5px] text-gray-400 mt-4">{entry.auth}</p>}
 
+      {/* The question this page could not answer while a connector was a package name. */}
+      {listing.pack && (
+        <Section label="On this machine">
+          <dl className="text-[12px] leading-relaxed">
+            <Fact term="Installed" value={`v${listing.pack.version}`} />
+            <Fact term="On disk" value={listing.pack.path} mono />
+            <Fact term="Runs via" value={`node ${listing.pack.path}/index.js`} mono />
+          </dl>
+        </Section>
+      )}
+
+      {status.detail && state.kind !== 'installed' && (
+        <p className={`flex items-start gap-1.5 text-[12px] mt-4 ${TONE_TEXT[status.tone]}`}>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1.5 ${TONE_DOT[status.tone]}`} />
+          {status.detail}
+        </p>
+      )}
+
       <div className="flex items-center gap-2 mt-6">
-        {/* An installed row has no manifest and no package spec, so there is
-            nothing to open a form against. */}
-        {listing.source !== 'installed' && (
+        {canAddConnection(state, {
+          source: listing.source,
+          hasLegacyLaunch: Boolean(entry?.packageName)
+        }) && (
           <button
             onClick={onAdd}
             className="text-xs text-gray-100 bg-white/[0.1] hover:bg-white/[0.16] px-3 py-1.5 rounded-sm transition-colors flex items-center gap-1"
@@ -126,6 +163,43 @@ export function ConnectorDetail({
             <Plus size={12} /> Add a connection
           </button>
         )}
+
+        {onInstall && status.action && (
+          <button
+            onClick={onInstall}
+            disabled={status.busy}
+            title={
+              state.kind === 'absent'
+                ? 'Install this connector as a file'
+                : 'Install the newer version'
+            }
+            className="text-xs text-gray-300 hover:text-white px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1 disabled:opacity-50"
+          >
+            {status.action === 'install' ? <Download size={12} /> : <RefreshCw size={12} />}
+            {status.label}
+          </button>
+        )}
+
+        {onRollback && state.kind === 'installed' && state.previousVersion && (
+          <button
+            onClick={onRollback}
+            title={`Go back to v${state.previousVersion}`}
+            className="text-xs text-gray-400 hover:text-gray-200 px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+          >
+            <Undo2 size={12} /> Roll back
+          </button>
+        )}
+
+        {onRemove && listing.pack && (
+          <button
+            onClick={onRemove}
+            title="Delete the installed files"
+            className="text-xs text-danger hover:text-danger px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+          >
+            <Trash2 size={12} /> Remove
+          </button>
+        )}
+
         {entry?.packageName && (
           <a
             href={`https://www.npmjs.com/package/${entry.packageName}`}
@@ -136,12 +210,24 @@ export function ConnectorDetail({
             <ExternalLink size={11} /> View on npm
           </a>
         )}
-        {listing.source === 'catalog' && (
+
+        {listing.source === 'catalog' && !listing.pack && (
           <span className="text-[11px] text-gray-600 ml-auto">
-            Runs on demand. Nothing is installed until you add it.
+            Nothing is on disk until you install it.
           </span>
         )}
       </div>
+    </div>
+  )
+}
+
+function Fact({ term, value, mono }: { term: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex gap-3">
+      <dt className="text-gray-600 w-[72px] shrink-0">{term}</dt>
+      <dd className={`text-gray-300 min-w-0 break-all ${mono ? 'font-mono text-[11px]' : ''}`}>
+        {value}
+      </dd>
     </div>
   )
 }

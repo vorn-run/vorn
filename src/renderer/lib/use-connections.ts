@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { SdkConnectorIcon, SourceConnection } from '../../shared/types'
+import type {
+  InstalledConnectorPack,
+  SdkConnectorIcon,
+  SourceConnection
+} from '../../shared/types'
+import { connectionConnectorId } from '../../shared/types'
 import { connectionIcon } from './connection-icon'
 
 /**
@@ -14,12 +19,16 @@ import { connectionIcon } from './connection-icon'
  */
 
 let cache: SourceConnection[] | null = null
+/** Installed packs, so a glyph can come from the files that run rather than only the connection. */
+let packCache: InstalledConnectorPack[] = []
 const listeners = new Set<(c: SourceConnection[]) => void>()
 let initPromise: Promise<void> | null = null
 let unsubscribeConfigChange: (() => void) | null = null
 
 async function refresh(): Promise<void> {
   const conns = await window.api.listConnections()
+  // A missing pack list costs a glyph, never the connections themselves.
+  packCache = (await window.api.listConnectorPacks?.().catch(() => [])) ?? []
   cache = conns
   for (const l of listeners) l(conns)
 }
@@ -66,18 +75,34 @@ export function useConnectorIdFor(connectionId: string | null | undefined): stri
 /**
  * Resolve a connectionId → the connector's own glyph, for the nodes and panels
  * that hold only a connection id. Undefined means "use the built-in icon".
+ *
+ * The connection records the glyph it was made with; the installed pack is what
+ * actually runs. Falling back to the pack means a connector that gained an icon
+ * in a later version stops drawing the generic MCP mark.
  */
 export function useConnectionIconFor(
   connectionId: string | null | undefined
 ): SdkConnectorIcon | undefined {
   const connections = useConnections()
   if (!connectionId) return undefined
-  return connectionIcon(connections.find((c) => c.id === connectionId))
+  return iconForConnection(connections.find((c) => c.id === connectionId))
+}
+
+/** The same resolution for callers that already hold the connection, such as a picker's options. */
+export function iconForConnection(
+  connection: SourceConnection | null | undefined
+): SdkConnectorIcon | undefined {
+  if (!connection) return undefined
+  const stored = connectionIcon(connection)
+  if (stored) return stored
+  const connectorId = connectionConnectorId(connection)
+  return packCache.find((pack) => pack.id === connectorId)?.icon
 }
 
 /** Test hook — drop cached state so unit tests can start clean. */
 export function __resetConnectionsCacheForTests(): void {
   cache = null
+  packCache = []
   initPromise = null
   listeners.clear()
   if (unsubscribeConfigChange) {

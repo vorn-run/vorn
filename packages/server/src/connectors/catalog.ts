@@ -134,13 +134,18 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
     return undefined
   }
 
+  // A conditional spread cannot remove a key the raw entry already carries.
+  const { packUrl, sha256, ...rest } = entry
+
   return {
-    ...entry,
+    ...rest,
     id: entry.id,
     name: entry.name,
     packageName: entry.packageName,
     description: typeof entry.description === 'string' ? entry.description : '',
     capabilities: list(entry.capabilities) as ConnectorCatalogEntry['capabilities'],
+    ...(typeof packUrl === 'string' && packUrl !== '' && { packUrl }),
+    ...(typeof sha256 === 'string' && sha256 !== '' && { sha256 }),
     ...(entry.triggers !== undefined && { triggers: list(entry.triggers) }),
     ...(entry.actions !== undefined && { actions: list(entry.actions) }),
     ...(entry.env !== undefined && { env: list(entry.env) }),
@@ -170,11 +175,22 @@ export function catalogLaunchSpec(
   entry: ConnectorCatalogEntry,
   repoRoot: string | undefined = process.env.VORN_CONNECTORS_ROOT
 ): { command: string; args: string[] } {
-  if (repoRoot) {
-    const local = join(repoRoot, 'packages', localPackageDir(entry.packageName), 'dist', 'index.js')
-    if (existsSync(local)) return { command: 'node', args: [local] }
-  }
-  return { command: 'npx', args: ['-y', entry.packageName] }
+  return (
+    localLaunchSpec(localPackageDir(entry.packageName), repoRoot) ?? {
+      command: 'npx',
+      args: ['-y', entry.packageName]
+    }
+  )
+}
+
+/** A build from a connectors checkout, when `VORN_CONNECTORS_ROOT` names one. */
+export function localLaunchSpec(
+  dirName: string,
+  repoRoot: string | undefined = process.env.VORN_CONNECTORS_ROOT
+): { command: string; args: string[] } | undefined {
+  if (!repoRoot) return undefined
+  const local = join(repoRoot, 'packages', dirName, 'dist', 'index.js')
+  return existsSync(local) ? { command: 'node', args: [local] } : undefined
 }
 
 /** `@vornrun/connector-kusto` lives in `packages/kusto`. */

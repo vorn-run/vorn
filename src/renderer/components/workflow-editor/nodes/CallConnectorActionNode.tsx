@@ -40,7 +40,7 @@ export function CallConnectorActionNode({
         )
       }
       label={label}
-      subtitle={config.action || 'Select action'}
+      subtitle={config.actionLabel || config.action || 'Select action'}
       selected={selected}
       executionStatus={executionStatus}
       onClick={onClick}

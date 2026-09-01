@@ -25,8 +25,13 @@ import type {
   ExternalItem,
   SourceConnection
 } from '@vornrun/shared/types'
+import { SDK_FILTER_KEYS } from '@vornrun/shared/types'
 import { schemaProperties, schemaTypeHint, schemaRequired } from '@vornrun/shared/json-schema-utils'
 import { getOrStartClient } from './mcp-clients'
+import { PREFLIGHT_TOOL, isReservedSdkTool } from './sdk-tools'
+import { describePack } from './packs'
+
+export { PREFLIGHT_TOOL }
 
 /** Stable id for the generic MCP connector. Used everywhere the server
  *  needs to distinguish MCP from static connectors. */
@@ -39,6 +44,8 @@ export const MCP_POLL_EVENT = 'mcpPoll'
 
 export interface McpDiscoveredTool {
   name: string
+  /** The server's own display name for the tool, when it offers one. */
+  title?: string
   description?: string
   inputSchema?: Record<string, unknown>
   outputSchema?: Record<string, unknown>
@@ -79,7 +86,7 @@ export function mcpToolToConnectorAction(tool: McpDiscoveredTool): ConnectorActi
   })
   return {
     type: tool.name,
-    label: tool.name,
+    label: tool.title?.trim() || tool.name,
     ...(tool.description && { description: tool.description }),
     configFields,
     ...(tool.outputSchema && { outputSchema: tool.outputSchema })
@@ -147,9 +154,10 @@ export async function discoverTools(conn: SourceConnection): Promise<McpDiscover
   const client = await getOrStartClient(conn)
   const result = await client.listTools()
   return (result.tools ?? []).map((t) => {
-    const tool = t as typeof t & { outputSchema?: Record<string, unknown> }
+    const tool = t as typeof t & { outputSchema?: Record<string, unknown>; title?: unknown }
     return {
       name: tool.name,
+      ...(typeof tool.title === 'string' && tool.title !== '' && { title: tool.title }),
       ...(tool.description && { description: tool.description }),
       ...(tool.inputSchema && { inputSchema: tool.inputSchema as Record<string, unknown> }),
       ...(tool.outputSchema && { outputSchema: tool.outputSchema })
@@ -158,15 +166,40 @@ export async function discoverTools(conn: SourceConnection): Promise<McpDiscover
 }
 
 /** Return the actions a given MCP connection exposes, in the same shape as
- *  any other connector's static manifest. Empty until discovery completes. */
+ *  any other connector's static manifest. Empty until discovery completes.
+ *
+ *  A packaged connector also serves the manifest, preflight and poll tools the
+ *  app drives itself; those are plumbing, not steps a workflow can call. A raw
+ *  MCP server keeps every tool, because there nothing is reserved. */
 export function mcpConnectionActions(conn: SourceConnection): ConnectorActionDef[] {
-  const tools = conn.filters.discoveredTools
-  if (!Array.isArray(tools)) return []
-  return (tools as McpDiscoveredTool[]).map(mcpToolToConnectorAction)
+  return visibleMcpTools(conn).map(mcpToolToConnectorAction)
 }
 
-/** Tool a packaged connector registers when it can report its own readiness. */
-export const PREFLIGHT_TOOL = 'vorn_connector_preflight'
+/**
+ * The tools on a connection that are the connector's own, not Vorn's.
+ *
+ * One answer for every surface that lists them — the step picker, the variable
+ * picker, an agent, and the tools console — so they cannot disagree about what
+ * a connector offers.
+ */
+export function visibleMcpTools(conn: SourceConnection): McpDiscoveredTool[] {
+  const tools = conn.filters.discoveredTools
+  if (!Array.isArray(tools)) return []
+  const packaged = typeof conn.filters[SDK_FILTER_KEYS.connectorId] === 'string'
+  if (!packaged) return tools as McpDiscoveredTool[]
+  let triggerTypes: string[] | undefined
+  try {
+    triggerTypes = describePack(String(conn.filters[SDK_FILTER_KEYS.connectorId]))?.triggers.map(
+      (trigger) => trigger.type
+    )
+  } catch {
+    // No data directory yet, or nothing installed: the prefix rule still holds.
+    triggerTypes = undefined
+  }
+  return (tools as McpDiscoveredTool[]).filter(
+    (tool) => !isReservedSdkTool(tool.name, triggerTypes)
+  )
+}
 
 export interface PreflightReport {
   /** `null` when the connector declares no preflight — nothing to check. */

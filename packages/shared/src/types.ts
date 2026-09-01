@@ -803,6 +803,8 @@ export interface CallConnectorActionConfig {
   connectionId: string
   /** Action type from manifest.actions[].type — e.g. 'commentOnIssue'. */
   action: string
+  /** The action's authored label, kept so a card can name it without asking the connector. */
+  actionLabel?: string
   /** Raw args map; values support template placeholders. */
   args: Record<string, string>
 }
@@ -1669,7 +1671,13 @@ export const IPC = {
   CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
   CONNECTOR_PROBE_SDK: 'connector:probeSdk',
   CONNECTOR_CATALOG: 'connector:catalog',
-  CONNECTOR_CATALOG_REFRESH: 'connector:catalogRefresh'
+  CONNECTOR_CATALOG_REFRESH: 'connector:catalogRefresh',
+  CONNECTOR_INSPECT_PACK: 'connector:inspectPack',
+  CONNECTOR_INSTALL_PACK: 'connector:installPack',
+  CONNECTOR_REMOVE_PACK: 'connector:removePack',
+  CONNECTOR_ROLLBACK_PACK: 'connector:rollbackPack',
+  CONNECTOR_LIST_PACKS: 'connector:listPacks',
+  CONNECTOR_INSTALL_PROGRESS: 'connector:installProgress'
 } as const
 
 /**
@@ -1749,6 +1757,10 @@ export interface ConnectorCatalogEntry {
   packageName: string
   /** Published version, so a listing can say what would be installed. */
   version?: string
+  /** Where the installable pack is published, when one is. */
+  packUrl?: string
+  /** Checksum the download must match, when the catalog publishes one. */
+  sha256?: string
   capabilities: Array<'tasks' | 'triggers' | 'actions'>
   /** One line on how it authenticates, shown before anyone commits to install. */
   auth?: string
@@ -1798,6 +1810,65 @@ export interface SdkConnectorManifest {
   actions: Array<{ type: string; label: string; description?: string }>
   /** Union of the environment variables the connector reads. */
   env: SdkEnvVar[]
+}
+
+/** A connector installed on disk, where `version` is what runs rather than what was asked for. */
+export interface InstalledConnectorPack {
+  id: string
+  name: string
+  version: string
+  description?: string
+  icon?: SdkConnectorIcon
+  /** Directory holding the running version's files. */
+  path: string
+  /** The one version kept behind the current one, when a rollback is possible. */
+  previousVersion?: string
+  installedAt: number
+  bytes: number
+  triggers: SdkTrigger[]
+  actions: Array<{ type: string; label: string; description?: string }>
+  env: SdkEnvVar[]
+}
+
+/** Where a pack is read from; `staged` is one an inspection already verified. */
+export type ConnectorPackSource =
+  | { kind: 'file'; path: string }
+  | { kind: 'url'; url: string; sha256?: string }
+  | { kind: 'npm'; packageName: string }
+  | { kind: 'staged'; token: string }
+
+export type ConnectorPackResult =
+  | { ok: true; pack: InstalledConnectorPack }
+  | { ok: false; error: string }
+
+/** What a verified pack says about itself, before any of it is kept. */
+export interface ConnectorPackSummary {
+  id: string
+  name: string
+  version: string
+  description?: string
+  icon?: SdkConnectorIcon
+  triggers: SdkTrigger[]
+  actions: Array<{ type: string; label: string; description?: string }>
+  env: SdkEnvVar[]
+  /** The version already on disk, when this would replace one. */
+  installedVersion?: string
+  /** Handle to the verified files, so confirming installs exactly what was shown. */
+  token: string
+}
+
+export type ConnectorPackPreview =
+  | { ok: true; preview: ConnectorPackSummary }
+  | { ok: false; error: string }
+
+/** `id` is the connector's once its manifest is read, and the source label until then. */
+export interface ConnectorInstallProgress {
+  id: string
+  phase: 'downloading' | 'verifying' | 'installing' | 'installed' | 'failed'
+  /** Download completion, absent when the size was not advertised. */
+  percent?: number
+  version?: string
+  error?: string
 }
 
 export interface SdkProbeRequest {

@@ -13,6 +13,15 @@ export {
   PREFLIGHT_TOOL
 } from './setup'
 export type { ConnectionSetup, ConnectorManifest } from './setup'
+export {
+  packConnector,
+  packFileName,
+  lifecycleScriptFindings,
+  bundleDependencyFindings,
+  readNearestPackageJson,
+  MAX_PACK_BYTES
+} from './pack'
+export type { PackOptions, PackResult, BundleRequest, BundleOutput } from './pack'
 export { createConnectorServer, serveConnector } from './server'
 export type { ConnectorServerOptions } from './server'
 export { createConnectorHarness } from './harness'

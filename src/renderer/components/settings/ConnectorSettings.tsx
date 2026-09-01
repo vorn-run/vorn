@@ -9,11 +9,16 @@ import { ConnectionGroups, type ConnectorStatus } from './ConnectionGroups'
 import type {
   ConnectorCatalogItem,
   ConnectorCatalogSnapshot,
+  ConnectorInstallProgress,
+  ConnectorPackSource,
+  ConnectorPackSummary,
+  InstalledConnectorPack,
   SourceConnection,
   ConnectorManifest,
   TaskStatus
 } from '../../../shared/types'
 import { SdkConnectorForm } from './SdkConnectorForm'
+import { PackInstallConfirm } from './PackInstallConfirm'
 import { DynamicField } from './DynamicField'
 import { Check, AlertCircle } from 'lucide-react'
 
@@ -55,6 +60,18 @@ export function ConnectorSettings() {
   // Connections lead once there are any; with none there is nothing to lead
   // with, so the catalog opens instead of a second empty-state layout.
   const [view, setView] = useState<'connections' | 'browse'>('connections')
+  const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
+  // Rejections live only here: nothing was written to disk, so they clear on reload.
+  const [installProgress, setInstallProgress] = useState<Record<string, ConnectorInstallProgress>>(
+    {}
+  )
+  // A file install has no row to fail on until its manifest is read.
+  const [fileInstallError, setFileInstallError] = useState<string | null>(null)
+  const [pendingPack, setPendingPack] = useState<{
+    source: ConnectorPackSource
+    preview: ConnectorPackSummary
+  } | null>(null)
+  const [installingPending, setInstallingPending] = useState(false)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [backfillingId, setBackfillingId] = useState<string | null>(null)
   const [backfillResult, setBackfillResult] = useState<
@@ -67,14 +84,16 @@ export function ConnectorSettings() {
   const decidedView = useRef(false)
 
   const load = useCallback(async () => {
-    const [c, conns, st] = await Promise.all([
+    const [c, conns, st, installed] = await Promise.all([
       window.api.listConnectors(),
       window.api.listConnections(),
-      window.api.getConnectorStatus()
+      window.api.getConnectorStatus(),
+      window.api.listConnectorPacks()
     ])
     setConnectors(c)
     setConnections(conns)
     setStatuses(st)
+    setPacks(installed)
     if (!decidedView.current && conns.length === 0) setView('browse')
     decidedView.current = true
   }, [])
@@ -96,9 +115,128 @@ export function ConnectorSettings() {
     void window.api.listConnectorCatalog().then(applyCatalog)
   }, [applyCatalog])
 
+  // The unsubscribe is what keeps a reopened panel from stacking a second listener.
+  useEffect(() => {
+    return window.api.onConnectorInstallProgress((progress) => {
+      setInstallProgress((current) => ({ ...current, [progress.id]: progress }))
+    })
+  }, [])
+
+  // Every install is checked and shown first, so a catalog row and a dropped
+  // file ask the same question before any of it is kept.
+  const handleInstall = useCallback(
+    async (listing: ConnectorListing, source?: ConnectorPackSource) => {
+      const resolved =
+        source ??
+        (listing.catalogItem?.packUrl
+          ? ({
+              kind: 'url',
+              url: listing.catalogItem.packUrl,
+              ...(listing.catalogItem.sha256 && { sha256: listing.catalogItem.sha256 })
+            } as ConnectorPackSource)
+          : ({ kind: 'npm', packageName: listing.catalogItem?.packageName ?? listing.id } as const))
+
+      // Whatever the last attempt said is about that attempt, not this one.
+      setFileInstallError(null)
+      setPendingPack(null)
+      setInstallProgress((current) => {
+        const next = { ...current }
+        delete next[listing.id]
+        return next
+      })
+      const result = await window.api.inspectConnectorPack(resolved)
+      if (!result.ok) {
+        // Keyed by the row that asked, which is the row that shows the refusal.
+        setInstallProgress((current) => ({
+          ...current,
+          [listing.id]: { id: listing.id, phase: 'failed', error: result.error }
+        }))
+        return
+      }
+      setPendingPack({
+        source: { kind: 'staged', token: result.preview.token },
+        preview: result.preview
+      })
+    },
+    []
+  )
+
+  // Verified first and installed only on confirm, so a drop is a question.
+  const handleInstallFile = useCallback(async (filePath: string) => {
+    setFileInstallError(null)
+    setPendingPack(null)
+    const result = await window.api.inspectConnectorPack({ kind: 'file', path: filePath })
+    if (!result.ok) {
+      setFileInstallError(result.error)
+      return
+    }
+    setPendingPack({
+      source: { kind: 'staged', token: result.preview.token },
+      preview: result.preview
+    })
+  }, [])
+
+  // Installs the files the sheet described, not the source they came from.
+  const handleConfirmPending = useCallback(async () => {
+    if (!pendingPack) return
+    const id = pendingPack.preview.id
+    setInstallingPending(true)
+    try {
+      const result = await window.api.installConnectorPack(pendingPack.source)
+      if (result.ok) {
+        setInstallProgress((current) => {
+          const next = { ...current }
+          delete next[id]
+          return next
+        })
+      } else {
+        setInstallProgress((current) => ({
+          ...current,
+          [id]: { id, phase: 'failed', error: result.error }
+        }))
+        setFileInstallError(result.error)
+      }
+    } catch (error) {
+      // A transport failure lands where a refusal lands, or the sheet never closes.
+      const message = error instanceof Error ? error.message : 'The pack could not be installed'
+      setInstallProgress((current) => ({
+        ...current,
+        [id]: { id, phase: 'failed', error: message }
+      }))
+      setFileInstallError(message)
+    } finally {
+      setInstallingPending(false)
+      setPendingPack(null)
+    }
+    await load()
+  }, [pendingPack, load])
+
+  const handleRollback = useCallback(
+    async (id: string) => {
+      await window.api.rollbackConnectorPack(id)
+      await load()
+    },
+    [load]
+  )
+
+  const handleRemovePack = useCallback(
+    async (id: string) => {
+      const result = await window.api.removeConnectorPack(id)
+      // Said after the fact rather than asked before it: the count is what the
+      // server counted, and a connection left without files is worth naming.
+      if (result.ok && (result.connections ?? 0) > 0) {
+        setFileInstallError(
+          `Removed the files. ${result.connections} connection${result.connections === 1 ? '' : 's'} will stop working until the connector is installed again.`
+        )
+      }
+      await load()
+    },
+    [load]
+  )
+
   const listings = useMemo(
-    () => buildConnectorListings(connectors, catalog, connections),
-    [connectors, catalog, connections]
+    () => buildConnectorListings(connectors, catalog, connections, packs),
+    [connectors, catalog, connections, packs]
   )
   // Re-read from the current listings so a connection made while the panel is
   // open updates its "connected" count rather than showing the stale copy.
@@ -208,10 +346,25 @@ export function ConnectorSettings() {
         <ConnectorDirectory
           listings={listings}
           builtIns={connectors}
+          progress={installProgress}
           fetchedAt={catalogFetchedAt}
           onRefresh={async () => applyCatalog(await window.api.refreshConnectorCatalog())}
           onSelect={setSelected}
           onAdd={setAdding}
+          onInstall={handleInstall}
+          onInstallFile={handleInstallFile}
+          onPickFile={() => window.api.openFileDialog()}
+          installError={fileInstallError}
+          {...(pendingPack && {
+            pending: (
+              <PackInstallConfirm
+                preview={pendingPack.preview}
+                busy={installingPending}
+                onConfirm={handleConfirmPending}
+                onCancel={() => setPendingPack(null)}
+              />
+            )
+          })}
         />
       )}
 
@@ -219,16 +372,24 @@ export function ConnectorSettings() {
         <ConnectorDetail
           listing={selectedListing}
           builtIns={connectors}
+          {...(installProgress[selectedListing.id] && {
+            progress: installProgress[selectedListing.id]
+          })}
           onAdd={() => setAdding(selectedListing)}
+          onInstall={() => handleInstall(selectedListing)}
+          onRollback={() => handleRollback(selectedListing.id)}
+          onRemove={() => handleRemovePack(selectedListing.id)}
           onClose={() => setSelected(null)}
         />
       )}
 
-      {adding?.catalogItem && (
+      {/* A side-loaded pack has no catalog entry but does have files to probe. */}
+      {(adding?.catalogItem || adding?.pack) && (
         <div className="p-4 bg-white/[0.03] border border-white/[0.08] rounded-sm">
           <h4 className="text-sm text-gray-200 font-medium mb-3">Add {adding.name} connection</h4>
           <SdkConnectorForm
-            catalogEntry={adding.catalogItem}
+            {...(adding.catalogItem && { catalogEntry: adding.catalogItem })}
+            {...(adding.pack && { pack: adding.pack })}
             onDone={() => {
               setAdding(null)
               setView('connections')

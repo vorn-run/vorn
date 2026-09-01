@@ -187,6 +187,8 @@ export function createConnectorServer(
     server.registerTool(
       action.type,
       {
+        // Carries the authored label, so a picker can name the action rather than its tool.
+        title: action.label,
         description: `${base}${retryHint}`,
         inputSchema: inputShape(action.inputs ?? []),
         outputSchema: outputSchema(action.outputs ?? [])

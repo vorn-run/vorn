@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
 import type {
   ConnectorCatalogItem,
+  InstalledConnectorPack,
   SdkConnectorManifest,
   SdkTrigger,
   TaskStatus
@@ -10,6 +11,7 @@ import { useAppStore } from '../../stores'
 import { parseLaunchSpec } from './parse-launch-spec'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { SDK_FILTER_KEYS } from '../../lib/connection-icon'
+import { packLaunch } from '../../lib/pack-status'
 
 const INPUT_CLASS =
   'w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none'
@@ -38,7 +40,8 @@ function seedStatusMapping(suggestions: SdkTrigger['statusMapping']): Record<str
 export function SdkConnectorForm({
   onDone,
   onCancel,
-  catalogEntry
+  catalogEntry,
+  pack
 }: {
   onDone: () => void
   onCancel: () => void
@@ -49,6 +52,8 @@ export function SdkConnectorForm({
    * only the person can answer.
    */
   catalogEntry?: ConnectorCatalogItem
+  /** Set when installed as a pack, so the probe reads the files that will run. */
+  pack?: InstalledConnectorPack
 }) {
   const projects = useAppStore((s) => s.config?.projects || [])
 
@@ -98,10 +103,13 @@ export function SdkConnectorForm({
   // installs race to fill the same form.
   const probedRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!catalogEntry || probedRef.current === catalogEntry.packageName) return
-    probedRef.current = catalogEntry.packageName
-    void probe(catalogEntry.launch)
-  }, [catalogEntry, probe])
+    // The installed pack wins: it is the code that will run, and needs no registry.
+    const target = pack ? packLaunch(pack) : catalogEntry?.launch
+    const key = pack ? `${pack.id}@${pack.version}` : catalogEntry?.packageName
+    if (!target || !key || probedRef.current === key) return
+    probedRef.current = key
+    void probe(target)
+  }, [catalogEntry, pack, probe])
 
   const trigger = manifest?.triggers.find((entry) => entry.type === triggerType)
   const missing = (manifest?.env ?? []).filter(

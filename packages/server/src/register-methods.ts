@@ -131,7 +131,15 @@ import {
   invokeMcpTool,
   discoverTools,
   mcpConnectionActions,
-  stopMcpClient
+  visibleMcpTools,
+  stopMcpClient,
+  stopClientsForConnector,
+  connectionIdsForConnector,
+  inspectPack,
+  installPack,
+  removePack,
+  rollbackPack,
+  listInstalledPacks
 } from './connectors'
 import {
   MCP_CONNECTOR_ID,
@@ -147,6 +155,7 @@ import {
 } from './connectors/http'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
+import type { ConnectorPackSource } from '@vornrun/shared/types'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
@@ -189,6 +198,61 @@ function terminalStamps(
   if (is && !was) return { completedAt: new Date().toISOString() }
   if (!is && was) return { completedAt: undefined, archivedAt: undefined }
   return {}
+}
+
+/**
+ * Why a pack source cannot be used, or empty when it can.
+ *
+ * Stated at the boundary because this arrives from a renderer, the web shim or
+ * an agent: an unknown shape would otherwise reach the installer, and a plain
+ * `http` URL would fetch a connector's code over a link anyone can rewrite.
+ */
+function unusableSource(source: ConnectorPackSource): string {
+  if (!source || typeof source !== 'object') return 'That is not a pack to install'
+  switch (source.kind) {
+    case 'file':
+      return typeof source.path === 'string' && source.path !== '' ? '' : 'That file path is empty'
+    case 'npm':
+      return typeof source.packageName === 'string' && source.packageName !== ''
+        ? ''
+        : 'That package name is empty'
+    case 'staged':
+      return typeof source.token === 'string' && source.token !== '' ? '' : 'That pack has expired'
+    case 'url': {
+      let url: URL
+      try {
+        url = new URL(source.url)
+      } catch {
+        return 'That is not a URL a pack can be fetched from'
+      }
+      if (url.protocol === 'https:') return ''
+      const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+      return url.protocol === 'http:' && local
+        ? ''
+        : 'A pack is fetched over https, or from this machine'
+    }
+    default:
+      return 'That is not a pack to install'
+  }
+}
+
+/**
+ * Settle every connection of a connector whose files just changed.
+ *
+ * Stopping the child is only half of it: the tools a step can call were
+ * discovered from the version that is now gone, so a rename or a removed
+ * action would keep being offered until someone refreshed the row by hand.
+ */
+async function onPackChanged(connectorId: string): Promise<void> {
+  const ids = connectionIdsForConnector(connectorId)
+  await stopClientsForConnector(connectorId)
+  await Promise.allSettled(
+    ids.map((id) =>
+      runMcpDiscovery(id).catch((err) =>
+        log.warn(`[packs] rediscovery failed for ${id}: ${err}`)
+      )
+    )
+  )
 }
 
 /** Discover tools on an MCP connection and persist them on the row. */
@@ -1339,8 +1403,11 @@ export function registerAllMethods(): void {
     return conn
   })
 
-  registerMethod('connection:update', ({ id, updates }) => {
+  registerMethod('connection:update', async ({ id, updates }) => {
     dbUpdateSourceConnection(id, updates)
+    // Awaited, so an action issued right after an edit cannot still be served
+    // by the child holding the command this edit replaced.
+    await stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
     dbSignalChange()
     return dbGetSourceConnection(id)
   })
@@ -1480,8 +1547,8 @@ export function registerAllMethods(): void {
   registerMethod('connection:listMcpTools', (connectionId: string) => {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn || conn.connectorId !== MCP_CONNECTOR_ID) return []
-    const tools = conn.filters.discoveredTools
-    return Array.isArray(tools) ? tools : []
+    // The console shows what the connector offers, matching every other list.
+    return visibleMcpTools(conn)
   })
 
   registerMethod('connection:refreshMcpTools', async (connectionId: string) => {
@@ -1548,6 +1615,40 @@ export function registerAllMethods(): void {
     await refreshCatalog()
     return catalogSnapshot()
   })
+
+  /** Verify and describe a pack without keeping any of it, so an install can be confirmed. */
+  registerMethod('connector:inspectPack', (source: ConnectorPackSource) => {
+    const refusal = unusableSource(source)
+    return refusal ? { ok: false as const, error: refusal } : inspectPack(source)
+  })
+
+  /** Progress is pushed, not returned, so a caller can show the download as it runs. */
+  registerMethod('connector:installPack', async (source: ConnectorPackSource) => {
+    const refusal = unusableSource(source)
+    if (refusal) return { ok: false as const, error: refusal }
+    const result = await installPack(source, {
+      onProgress: (progress) => clientRegistry.broadcast(IPC.CONNECTOR_INSTALL_PROGRESS, progress),
+      onChanged: onPackChanged
+    })
+    if (result.ok) dbSignalChange()
+    return result
+  })
+
+  registerMethod('connector:removePack', async (id: string) => {
+    // Counted before the files go, so the answer can name what stops working.
+    const connections = connectionIdsForConnector(id).length
+    const result = await removePack(id, { onChanged: onPackChanged })
+    if (result.ok) dbSignalChange()
+    return { ...result, connections }
+  })
+
+  registerMethod('connector:rollbackPack', async (id: string) => {
+    const result = await rollbackPack(id, { onChanged: onPackChanged })
+    if (result.ok) dbSignalChange()
+    return result
+  })
+
+  registerMethod('connector:listPacks', () => listInstalledPacks())
 
   /**
    * One-shot backfill for a connection. Calls listItems() (not poll()) so it

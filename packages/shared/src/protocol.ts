@@ -47,6 +47,11 @@ import type {
   DeviceToken,
   ConnectorActionDef,
   ConnectorCatalogSnapshot,
+  ConnectorInstallProgress,
+  ConnectorPackPreview,
+  ConnectorPackResult,
+  ConnectorPackSource,
+  InstalledConnectorPack,
   SdkProbeRequest,
   SdkProbeResult,
   InstalledShell,
@@ -305,6 +310,14 @@ export interface RequestMethods {
   'connector:catalog': { params: void; result: ConnectorCatalogSnapshot }
   'connector:catalogRefresh': { params: void; result: ConnectorCatalogSnapshot }
   'connector:probeSdk': { params: SdkProbeRequest; result: SdkProbeResult }
+  'connector:inspectPack': { params: ConnectorPackSource; result: ConnectorPackPreview }
+  'connector:installPack': { params: ConnectorPackSource; result: ConnectorPackResult }
+  'connector:removePack': {
+    params: string
+    result: { ok: boolean; error?: string; connections?: number }
+  }
+  'connector:rollbackPack': { params: string; result: ConnectorPackResult }
+  'connector:listPacks': { params: void; result: InstalledConnectorPack[] }
 
   // Workflow runs
   'workflowRun:claim': {
@@ -1060,6 +1073,8 @@ export interface ServerNotifications {
   'headless:data': { id: string; data: string }
   'headless:exit': { id: string; exitCode: number }
   'config:changed': AppConfig
+  /** How far a connector pack install has got, while it runs. */
+  'connector:installProgress': ConnectorInstallProgress
   'widget:status-update': WidgetAgentInfo[]
   'widget:permission-request': PermissionRequestInfo
   'widget:permission-cancelled': string

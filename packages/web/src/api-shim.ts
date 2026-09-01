@@ -731,6 +731,13 @@ export function createApiShim(wsUrl: string) {
     listConnectorCatalog: () => rpc.invoke('connector:catalog'),
     refreshConnectorCatalog: () => rpc.invoke('connector:catalogRefresh'),
     probeSdkConnector: (request: unknown) => rpc.invoke('connector:probeSdk', request),
+    inspectConnectorPack: (source: unknown) => rpc.invoke('connector:inspectPack', source),
+    installConnectorPack: (source: unknown) => rpc.invoke('connector:installPack', source),
+    removeConnectorPack: (id: string) => rpc.invoke('connector:removePack', id),
+    rollbackConnectorPack: (id: string) => rpc.invoke('connector:rollbackPack', id),
+    listConnectorPacks: () => rpc.invoke('connector:listPacks'),
+    onConnectorInstallProgress: (cb: (progress: unknown) => void) =>
+      rpc.on('connector:installProgress', cb),
     detectRepo: (projectPath: string) => rpc.invoke('connector:detectRepo', projectPath),
     seedConnectorWorkflow: (connectionId: string, event: string) =>
       rpc.invoke('connector:seedWorkflow', { connectionId, event }),
