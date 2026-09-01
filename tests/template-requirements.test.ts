@@ -56,7 +56,14 @@ describe('what a connection already knows how to build', () => {
     return { defaultWorkflows: defaults } as ConnectorManifest
   }
 
-  const seeded = [{ name: 'New issues to tasks', event: 'issueCreated', defaultCronFromMinutes: 5 }]
+  const seeded = [
+    {
+      name: 'New issues to tasks',
+      event: 'issueCreated',
+      defaultCronFromMinutes: 5,
+      downstream: 'createTaskFromItem' as const
+    }
+  ]
 
   it('offers one row per workflow the connector ships', () => {
     const suggestions = connectorSuggestions(
