@@ -105,10 +105,20 @@ describe('WorkflowEditor', () => {
     mockState.editingWorkflowId = null
   })
 
-  it('renders the canvas and properties panel when open with no node selected', () => {
-    const { getByTestId } = render(<WorkflowEditor />)
+  it('opens a new workflow on the start-from panel rather than its settings', () => {
+    // Settings for a workflow that does not exist yet are not the question a
+    // blank canvas is asking, and two panels never share the slot.
+    const { getByTestId, queryByTestId, container } = render(<WorkflowEditor />)
     expect(getByTestId('canvas')).toBeInTheDocument()
+    expect(container.querySelector('[data-start-from]')).toBeTruthy()
+    expect(queryByTestId('properties-panel')).not.toBeInTheDocument()
+  })
+
+  it('shows the properties panel for a workflow that exists', () => {
+    mockState.editingWorkflowId = 'w1'
+    const { getByTestId, container } = render(<WorkflowEditor />)
     expect(getByTestId('properties-panel')).toBeInTheDocument()
+    expect(container.querySelector('[data-start-from]')).toBeNull()
   })
 
   it('renders workflow name input', () => {

@@ -22,7 +22,10 @@ vi.mock('../src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-const captured = vi.hoisted(() => ({ canvasProps: null as Record<string, unknown> | null }))
+const captured = vi.hoisted(() => ({
+  canvasProps: null as Record<string, unknown> | null,
+  propertiesProps: null as Record<string, unknown> | null
+}))
 vi.mock('../src/renderer/components/workflow-editor/WorkflowCanvas', () => ({
   WorkflowCanvas: (props: Record<string, unknown>) => {
     captured.canvasProps = props
@@ -40,7 +43,10 @@ vi.mock('../src/renderer/components/workflow-editor/panels/RunHistoryPanel', () 
   RunHistoryPanel: () => <div data-testid="run-history" />
 }))
 vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPanel', () => ({
-  WorkflowPropertiesPanel: () => <div data-testid="properties-panel" />
+  WorkflowPropertiesPanel: (props: Record<string, unknown>) => {
+    captured.propertiesProps = props
+    return <div data-testid="properties-panel" />
+  }
 }))
 vi.mock('../src/renderer/lib/workflow-execution', () => ({
   executeWorkflow: vi.fn().mockResolvedValue(undefined)
@@ -152,6 +158,7 @@ const api = (window as unknown as { api: Record<string, ReturnType<typeof vi.fn>
 beforeEach(() => {
   __resetConnectionsCacheForTests()
   vi.clearAllMocks()
+  api.listWorkflowRuns.mockResolvedValue([])
   api.listConnections.mockResolvedValue([CONNECTION])
   api.listConnectorPacks.mockResolvedValue([])
   api.listConnectorCatalog.mockResolvedValue({
@@ -177,6 +184,76 @@ beforeEach(() => {
 afterEach(() => {
   mockState.editingWorkflowId = null
   captured.canvasProps = null
+  captured.propertiesProps = null
+})
+
+describe('the one panel a new workflow opens with', () => {
+  it('asks what to start from, and does not offer settings beside it', () => {
+    const { container, queryByTestId } = render(<WorkflowEditor />)
+    expect(container.querySelector('[data-start-from]')).toBeTruthy()
+    expect(queryByTestId('properties-panel')).not.toBeInTheDocument()
+  })
+
+  it('hands the slot to settings when they are asked for', async () => {
+    render(<WorkflowEditor />)
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('More options'))
+    })
+    fireEvent.click(screen.getByText('Workflow settings'))
+
+    expect(screen.getByTestId('properties-panel')).toBeInTheDocument()
+    expect(document.querySelector('[data-start-from]')).toBeNull()
+  })
+
+  it('gives the slot back to settings once the canvas has something on it', async () => {
+    const { container } = render(<WorkflowEditor />)
+    fireEvent.click(await screen.findByText('Morning digest'))
+
+    await waitFor(() => expect(container.querySelector('[data-start-from]')).toBeNull())
+    expect(screen.getByTestId('properties-panel')).toBeInTheDocument()
+  })
+})
+
+describe('a new workflow carries none of the last one', () => {
+  const RUN = {
+    runId: 'run-1',
+    workflowId: 'wf-1',
+    startedAt: '2026-09-01T08:00:00Z',
+    completedAt: '2026-09-01T08:01:00Z',
+    status: 'success' as const,
+    nodeStates: []
+  }
+
+  it('forgets the previous workflow runs when New is opened', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    api.listWorkflowRuns.mockResolvedValue([RUN])
+    const { rerender } = render(<WorkflowEditor />)
+    await waitFor(() => expect(captured.propertiesProps?.lastRun).toBeTruthy())
+
+    mockState.editingWorkflowId = null
+    rerender(<WorkflowEditor />)
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('More options'))
+    })
+    fireEvent.click(screen.getByText('Workflow settings'))
+
+    // The last run belonged to the workflow that was open, not to this one.
+    await waitFor(() => expect(captured.propertiesProps?.lastRun).toBeNull())
+  })
+
+  it('stops counting the previous workflow runs in the toolbar', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    api.listWorkflowRuns.mockResolvedValue([RUN])
+    const { rerender } = render(<WorkflowEditor />)
+    await screen.findByRole('button', { name: /Run history \(1\)/ })
+
+    mockState.editingWorkflowId = null
+    rerender(<WorkflowEditor />)
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /Run history \(1\)/ })).toBeNull()
+    )
+  })
 })
 
 describe('starting a new workflow from a template', () => {

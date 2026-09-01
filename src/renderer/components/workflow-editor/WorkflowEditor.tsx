@@ -157,6 +157,20 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const triggerNode = useMemo(() => nodes.find((n) => n.type === 'trigger') ?? null, [nodes])
   const triggerConfig = triggerNode?.config as TriggerConfig | undefined
 
+  /**
+   * The right-hand slot holds one panel, and a workflow with nothing in it yet
+   * has one thing worth asking. Settings for a workflow that does not exist are
+   * not it, so start-from wins the empty canvas and yields to everything a
+   * person opened deliberately.
+   */
+  const startFromOpen =
+    !editingId &&
+    nodes.length === 0 &&
+    showStartFrom &&
+    !pendingInsert &&
+    !showRunHistory &&
+    !selectedNode
+
   const triggerType = triggerConfig?.triggerType
   const isContextualTrigger =
     triggerConfig?.triggerType === 'manual' && triggerConfig.contextual === true
@@ -264,7 +278,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       loadedRunsForId.current = editingId
       window.api.listWorkflowRuns(editingId, 20).then(setExecutionHistory)
     }
-    if (!isActive) {
+    // A new workflow has no runs, and the last one's must not answer for it.
+    // Clearing the id too means returning to that workflow re-reads its runs.
+    if (!isActive || !editingId) {
       loadedRunsForId.current = null
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setExecutionHistory([])
@@ -406,6 +422,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setEdges([])
       setEnabled(true)
       setStaggerDelayMs(undefined)
+      // Settings are the previous workflow's until they are put back too.
+      setAutoCleanupWorktrees(false)
       setShowStartFrom(true)
     }
     // Saving hands back a new workflow object; only an actual switch resets the panels.
@@ -1294,6 +1312,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                   onClick={() => {
                     setSelectedNodeId(null)
                     setShowRunHistory(false)
+                    // Asking for settings answers what start-from was asking.
+                    setShowStartFrom(false)
                     setShowProperties(true)
                     setShowOverflowMenu(false)
                   }}
@@ -1367,7 +1387,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           />
         )}
 
-        {!editingId && nodes.length === 0 && showStartFrom && !pendingInsert && (
+        {startFromOpen && (
           <StartFromPanel
             templates={templates}
             connections={connections}
@@ -1423,7 +1443,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           />
         )}
 
-        {!selectedNode && !showRunHistory && !pendingInsert && showProperties && (
+        {!selectedNode && !showRunHistory && !pendingInsert && !startFromOpen && showProperties && (
           <WorkflowPropertiesPanel
             enabled={enabled}
             onEnabledChange={setEnabled}
