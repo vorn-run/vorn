@@ -192,6 +192,8 @@ export function ProjectItem({
           role="button"
           tabIndex={0}
           onKeyDown={(e) => {
+            // Keys bubbling from a nested control are that control's, not the row's.
+            if (e.target !== e.currentTarget) return
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
               e.currentTarget.click()
@@ -201,7 +203,7 @@ export function ProjectItem({
             setActiveProject(project.name)
             setFocusedTerminal(null)
           }}
-          className={`flex-1 cursor-pointer text-left px-2 py-1.5 rounded-md text-[13px] transition-colors flex items-center gap-2 ${
+          className={`flex-1 cursor-pointer select-none text-left px-2 py-1.5 rounded-md text-[13px] transition-colors flex items-center gap-2 ${
             isActive
               ? 'bg-white/[0.08] text-white'
               : 'text-gray-300 hover:text-white hover:bg-white/[0.04]'
@@ -375,6 +377,8 @@ export function ProjectItem({
                       role="button"
                       tabIndex={0}
                       onKeyDown={(e) => {
+                        // Keys bubbling from a nested control are that control's, not the row's.
+                        if (e.target !== e.currentTarget) return
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
                           e.currentTarget.click()
@@ -385,7 +389,7 @@ export function ProjectItem({
                         setActiveWorktreePath(isMainActive ? null : MAIN_WORKTREE_SENTINEL)
                         setFocusedTerminal(null)
                       }}
-                      className={`flex-1 cursor-pointer text-left px-2 py-1.5 rounded-md text-[13px] flex items-center gap-2 min-w-0 transition-colors ${
+                      className={`flex-1 cursor-pointer select-none text-left px-2 py-1.5 rounded-md text-[13px] flex items-center gap-2 min-w-0 transition-colors ${
                         isMainActive
                           ? 'bg-white/[0.08] text-white'
                           : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'

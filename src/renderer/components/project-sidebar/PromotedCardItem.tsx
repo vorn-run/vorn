@@ -69,6 +69,8 @@ export function PromotedCardItem({ card }: { card: PromotedCard }) {
       tabIndex={0}
       onClick={reveal}
       onKeyDown={(e) => {
+        // Keys bubbling from a nested control are that control's, not the row's.
+        if (e.target !== e.currentTarget) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           reveal()

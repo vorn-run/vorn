@@ -272,3 +272,31 @@ describe('a gate waiting for approval', () => {
     expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.waiting}`)).toBeNull()
   })
 })
+
+describe('the row keyboard', () => {
+  it('ignores Enter bubbling up from a nested button', () => {
+    render(
+      <WorkflowItem
+        workflow={makeManual()}
+        isCollapsed={false}
+        iconSize={14}
+        onContextMenu={vi.fn()}
+      />
+    )
+    fireEvent.keyDown(screen.getByRole('button', { name: /Run workflow/ }), { key: 'Enter' })
+    expect(mockStore.setEditingWorkflowId).not.toHaveBeenCalled()
+  })
+
+  it('activates the row itself on Enter', () => {
+    const { container } = render(
+      <WorkflowItem
+        workflow={makeManual()}
+        isCollapsed={false}
+        iconSize={14}
+        onContextMenu={vi.fn()}
+      />
+    )
+    fireEvent.keyDown(container.querySelector('.group\\/wf') as HTMLElement, { key: 'Enter' })
+    expect(mockStore.setEditingWorkflowId).toHaveBeenCalledWith('w1')
+  })
+})

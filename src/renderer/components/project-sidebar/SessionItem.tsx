@@ -95,14 +95,15 @@ export function SessionItem({
   }, [previewTerminalId, session.id, setPreviewTerminal])
 
   return (
-    // A fragment, because the cards this session popped out are listed beneath
-    // it — and they cannot go inside the row, which is itself a button.
+    // A fragment, because the cards this session popped out are listed beneath the row.
     <>
       {/* A div with the button role: the row nests real buttons inside it. */}
       <div
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
+          // Keys bubbling from a nested control are that control's, not the row's.
+          if (e.target !== e.currentTarget) return
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
             e.currentTarget.click()
@@ -122,7 +123,7 @@ export function SessionItem({
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`group/session relative w-full cursor-pointer text-left px-2 py-1 rounded-md text-[12px] flex items-center gap-2 min-w-0 transition-colors ${
+        className={`group/session relative w-full cursor-pointer select-none text-left px-2 py-1 rounded-md text-[12px] flex items-center gap-2 min-w-0 transition-colors ${
           isSelected ? 'text-white' : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
         }`}
       >
