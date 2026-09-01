@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Search, Plus, RefreshCw, ChevronRight } from 'lucide-react'
+import { Search, Plus, RefreshCw, ChevronRight, Download } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
+import type { ConnectorInstallProgress } from '../../../shared/types'
 import {
   describeCatalogAge,
   filterConnectorListings,
@@ -10,6 +11,8 @@ import {
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
+import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
+import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
 
 /**
  * The connectors Vorn can talk to, one per row.
@@ -27,6 +30,8 @@ export function ConnectorDirectory({
   builtIns,
   onSelect,
   onAdd,
+  onInstall,
+  progress,
   fetchedAt,
   onRefresh
 }: {
@@ -34,6 +39,9 @@ export function ConnectorDirectory({
   builtIns: BuiltInConnector[]
   onSelect: (listing: ConnectorListing) => void
   onAdd: (listing: ConnectorListing) => void
+  onInstall?: (listing: ConnectorListing) => void
+  /** Installs running right now, by connector id. */
+  progress?: Record<string, ConnectorInstallProgress>
   /** When the published list was last read. Absent until one has been. */
   fetchedAt?: number
   onRefresh?: () => Promise<void> | void
@@ -86,8 +94,10 @@ export function ConnectorDirectory({
             key={listing.key}
             listing={listing}
             builtIns={builtIns}
+            {...(progress?.[listing.id] && { progress: progress[listing.id] })}
             onSelect={() => onSelect(listing)}
             onAdd={() => onAdd(listing)}
+            {...(onInstall && { onInstall: () => onInstall(listing) })}
           />
         ))}
       </div>
@@ -125,18 +135,30 @@ export function ConnectorDirectory({
   )
 }
 
-function ConnectorRow({
+export function ConnectorRow({
   listing,
   builtIns,
+  progress,
   onSelect,
-  onAdd
+  onAdd,
+  onInstall
 }: {
   listing: ConnectorListing
   builtIns: BuiltInConnector[]
+  /** The install running for this connector, when one is. */
+  progress?: ConnectorInstallProgress
   onSelect: () => void
   onAdd: () => void
+  onInstall?: () => void
 }) {
   const details = listingDetails(listing, builtIns)
+  const state = packStateFor({
+    installed: listing.pack,
+    catalogVersion: listing.catalogItem?.version,
+    progress
+  })
+  const status = describePackStatus(state)
+  const installable = listing.source !== 'builtin' && onInstall !== undefined
 
   return (
     <div className="flex items-start gap-3 py-3 border-t border-white/[0.06]">
@@ -163,24 +185,63 @@ function ConnectorRow({
             </span>
           )}
           <span className="block text-[11px] text-gray-600 mt-1.5">{facts(listing, details)}</span>
-          {/* Without this nothing says the row opens anything, and the Add
-              button next to it reads as the only thing that does. */}
+
+          {status.percent !== null && (
+            <span className="block h-px w-full max-w-[220px] bg-white/[0.08] mt-2 overflow-hidden">
+              <span
+                className="block h-px bg-ink transition-[width] duration-200"
+                style={{ width: `${status.percent}%` }}
+                role="progressbar"
+                aria-valuenow={status.percent}
+                aria-label={`Installing ${listing.name}`}
+              />
+            </span>
+          )}
+
+          {/* Colour is only spent here: a rejection, and the sage dot that says
+              a connector is on disk. Everything else on this page stays muted. */}
+          {state.kind !== 'absent' && (
+            <span
+              className={`flex items-center gap-1.5 text-[11px] mt-1.5 ${TONE_TEXT[status.tone]}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT[status.tone]}`} />
+              {status.detail ?? status.label}
+            </span>
+          )}
+
+          {/* Without this nothing says the row opens anything, and the button
+              next to it reads as the only thing that does. */}
           <span className="inline-flex items-center gap-0.5 text-[11px] text-gray-500 group-hover:text-gray-300 transition-colors mt-1.5">
             Details <ChevronRight size={11} />
           </span>
         </span>
       </button>
 
-      {/* An installed row has no manifest and no package spec, so there is
-          nothing to open a form against. */}
-      {listing.source !== 'installed' && (
-        <button
-          onClick={onAdd}
-          className="shrink-0 self-center text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
-        >
-          <Plus size={11} /> {listing.connectedCount > 0 ? 'Add another' : 'Add'}
-        </button>
-      )}
+      <div className="shrink-0 self-center flex items-center gap-1.5">
+        {installable && status.action && (
+          <button
+            onClick={onInstall}
+            disabled={status.busy}
+            className="text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1 disabled:opacity-50"
+          >
+            {status.action === 'install' ? <Download size={11} /> : <RefreshCw size={11} />}
+            {status.label}
+          </button>
+        )}
+        {/* A pack has to be on disk before there is anything to connect to; a
+            built-in is already there. */}
+        {canAddConnection(state, {
+          source: listing.source,
+          hasLegacyLaunch: Boolean(listing.catalogItem?.packageName)
+        }) && (
+          <button
+            onClick={onAdd}
+            className="text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+          >
+            <Plus size={11} /> {listing.connectedCount > 0 ? 'Add another' : 'Add'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

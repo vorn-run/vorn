@@ -1,4 +1,9 @@
-import type { ConnectorCatalogItem, SdkConnectorIcon, SourceConnection } from '../../shared/types'
+import type {
+  ConnectorCatalogItem,
+  InstalledConnectorPack,
+  SdkConnectorIcon,
+  SourceConnection
+} from '../../shared/types'
 import { connectionConnectorId, connectionIcon } from './connection-icon'
 
 /**
@@ -20,8 +25,9 @@ export interface ConnectorListing {
   /**
    * Where the row came from, which decides what "Add" can do.
    *
-   * An `installed` row is a connector we can see connections for but hold no
-   * manifest or package spec for, so there is nothing to open a form against.
+   * An `installed` row is a pack on disk the catalog does not carry — dropped
+   * in from a file, or published since the last fetch. It brings its own
+   * manifest, so it describes itself and can be connected to like any other.
    */
   source: 'builtin' | 'catalog' | 'installed'
   /** Extra search terms, so a connector is findable by what it talks to. */
@@ -31,6 +37,8 @@ export interface ConnectorListing {
   catalogItem?: ConnectorCatalogItem
   /** Set for a packaged connector that is installed but not in the catalog. */
   icon?: SdkConnectorIcon
+  /** The pack on disk, when this connector has been installed as one. */
+  pack?: InstalledConnectorPack
 }
 
 export interface BuiltInConnector {
@@ -79,6 +87,25 @@ export function listingDetails(
   listing: ConnectorListing,
   builtIns: BuiltInConnector[] = []
 ): ConnectorDetails {
+  // A pack on disk is the one source that cannot be stale: its manifest is the
+  // one the installed files serve, so it is preferred over the catalog's copy.
+  if (listing.pack) {
+    return {
+      triggers: listing.pack.triggers.map((trigger) => ({
+        type: trigger.type,
+        label: trigger.label,
+        ...(trigger.description !== undefined && { description: trigger.description })
+      })),
+      actions: listing.pack.actions,
+      settings: listing.pack.env.map((variable) => ({
+        name: variable.name,
+        required: variable.required,
+        ...(variable.description !== undefined && { description: variable.description })
+      })),
+      known: true
+    }
+  }
+
   if (listing.source === 'catalog') {
     const entry = listing.catalogItem
     // An entry from a catalog published before these fields existed says
@@ -111,6 +138,14 @@ export function listingDetails(
 
 const UNCATEGORIZED = 'Other'
 
+/** What a pack offers, in the vocabulary the catalog uses for the same thing. */
+function packCapabilities(pack: InstalledConnectorPack): string[] {
+  return [
+    ...(pack.triggers.length > 0 ? ['triggers'] : []),
+    ...(pack.actions.length > 0 ? ['actions'] : [])
+  ]
+}
+
 /**
  * The connectors that can be added: the built-ins and the catalog.
  *
@@ -125,10 +160,12 @@ const UNCATEGORIZED = 'Other'
 export function buildConnectorListings(
   builtIns: BuiltInConnector[],
   catalog: ConnectorCatalogItem[],
-  connections: SourceConnection[]
+  connections: SourceConnection[],
+  packs: InstalledConnectorPack[] = []
 ): ConnectorListing[] {
   const countFor = (id: string) =>
     connections.filter((conn) => connectionConnectorId(conn) === id).length
+  const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
   const listings: ConnectorListing[] = [
     ...builtIns.map((c) => ({
@@ -148,8 +185,27 @@ export function buildConnectorListings(
       source: 'catalog' as const,
       keywords: entry.keywords ?? [],
       connectedCount: countFor(entry.id),
-      catalogItem: entry
-    }))
+      catalogItem: entry,
+      ...(packFor(entry.id) && { pack: packFor(entry.id) })
+    })),
+    // A pack the catalog does not carry — side-loaded from a file, or published
+    // after the last catalog fetch. It describes itself, so unlike the rows this
+    // arm was written for it can be shown in full rather than as a bare id.
+    ...packs
+      .filter((pack) => !catalog.some((entry) => entry.id === pack.id))
+      .map((pack) => ({
+        key: `installed:${pack.id}`,
+        id: pack.id,
+        name: pack.name,
+        ...(pack.description !== undefined && { description: pack.description }),
+        capabilities: packCapabilities(pack),
+        category: 'Installed',
+        source: 'installed' as const,
+        keywords: [],
+        connectedCount: countFor(pack.id),
+        ...(pack.icon !== undefined && { icon: pack.icon }),
+        pack
+      }))
   ]
 
   return listings.sort((a, b) => {

@@ -245,6 +245,6 @@ describe('the connector detail panel', () => {
 
   it('is honest that reading about a connector installs nothing', () => {
     const { getByText } = setup(find('ado'))
-    expect(getByText(/Nothing is installed until you add it/)).toBeInTheDocument()
+    expect(getByText(/Nothing is on disk until you install it/)).toBeInTheDocument()
   })
 })

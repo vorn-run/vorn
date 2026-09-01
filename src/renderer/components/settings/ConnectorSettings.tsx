@@ -9,6 +9,9 @@ import { ConnectionGroups, type ConnectorStatus } from './ConnectionGroups'
 import type {
   ConnectorCatalogItem,
   ConnectorCatalogSnapshot,
+  ConnectorInstallProgress,
+  ConnectorPackSource,
+  InstalledConnectorPack,
   SourceConnection,
   ConnectorManifest,
   TaskStatus
@@ -55,6 +58,12 @@ export function ConnectorSettings() {
   // Connections lead once there are any; with none there is nothing to lead
   // with, so the catalog opens instead of a second empty-state layout.
   const [view, setView] = useState<'connections' | 'browse'>('connections')
+  const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
+  // Rejections live only here: nothing was written to disk, so the message
+  // belongs to the session that tried it and goes away on reload.
+  const [installProgress, setInstallProgress] = useState<Record<string, ConnectorInstallProgress>>(
+    {}
+  )
   const [runningId, setRunningId] = useState<string | null>(null)
   const [backfillingId, setBackfillingId] = useState<string | null>(null)
   const [backfillResult, setBackfillResult] = useState<
@@ -67,14 +76,16 @@ export function ConnectorSettings() {
   const decidedView = useRef(false)
 
   const load = useCallback(async () => {
-    const [c, conns, st] = await Promise.all([
+    const [c, conns, st, installed] = await Promise.all([
       window.api.listConnectors(),
       window.api.listConnections(),
-      window.api.getConnectorStatus()
+      window.api.getConnectorStatus(),
+      window.api.listConnectorPacks()
     ])
     setConnectors(c)
     setConnections(conns)
     setStatuses(st)
+    setPacks(installed)
     if (!decidedView.current && conns.length === 0) setView('browse')
     decidedView.current = true
   }, [])
@@ -96,9 +107,58 @@ export function ConnectorSettings() {
     void window.api.listConnectorCatalog().then(applyCatalog)
   }, [applyCatalog])
 
+  // Subscribing rather than polling: the server already pushes a rounded
+  // percent per step, and the unsubscribe is what keeps a reopened panel from
+  // stacking a second listener on the first.
+  useEffect(() => {
+    return window.api.onConnectorInstallProgress((progress) => {
+      setInstallProgress((current) => ({ ...current, [progress.id]: progress }))
+    })
+  }, [])
+
+  const handleInstall = useCallback(
+    async (listing: ConnectorListing, source?: ConnectorPackSource) => {
+      const resolved =
+        source ??
+        (listing.catalogItem?.packUrl
+          ? ({
+              kind: 'url',
+              url: listing.catalogItem.packUrl,
+              ...(listing.catalogItem.sha256 && { sha256: listing.catalogItem.sha256 })
+            } as ConnectorPackSource)
+          : ({ kind: 'npm', packageName: listing.catalogItem?.packageName ?? listing.id } as const))
+      const result = await window.api.installConnectorPack(resolved)
+      if (result.ok) {
+        setInstallProgress((current) => {
+          const next = { ...current }
+          delete next[result.pack.id]
+          return next
+        })
+      }
+      await load()
+    },
+    [load]
+  )
+
+  const handleRollback = useCallback(
+    async (id: string) => {
+      await window.api.rollbackConnectorPack(id)
+      await load()
+    },
+    [load]
+  )
+
+  const handleRemovePack = useCallback(
+    async (id: string) => {
+      await window.api.removeConnectorPack(id)
+      await load()
+    },
+    [load]
+  )
+
   const listings = useMemo(
-    () => buildConnectorListings(connectors, catalog, connections),
-    [connectors, catalog, connections]
+    () => buildConnectorListings(connectors, catalog, connections, packs),
+    [connectors, catalog, connections, packs]
   )
   // Re-read from the current listings so a connection made while the panel is
   // open updates its "connected" count rather than showing the stale copy.
@@ -208,10 +268,12 @@ export function ConnectorSettings() {
         <ConnectorDirectory
           listings={listings}
           builtIns={connectors}
+          progress={installProgress}
           fetchedAt={catalogFetchedAt}
           onRefresh={async () => applyCatalog(await window.api.refreshConnectorCatalog())}
           onSelect={setSelected}
           onAdd={setAdding}
+          onInstall={handleInstall}
         />
       )}
 
@@ -219,7 +281,13 @@ export function ConnectorSettings() {
         <ConnectorDetail
           listing={selectedListing}
           builtIns={connectors}
+          {...(installProgress[selectedListing.id] && {
+            progress: installProgress[selectedListing.id]
+          })}
           onAdd={() => setAdding(selectedListing)}
+          onInstall={() => handleInstall(selectedListing)}
+          onRollback={() => handleRollback(selectedListing.id)}
+          onRemove={() => handleRemovePack(selectedListing.id)}
           onClose={() => setSelected(null)}
         />
       )}

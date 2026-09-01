@@ -141,6 +141,8 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
     packageName: entry.packageName,
     description: typeof entry.description === 'string' ? entry.description : '',
     capabilities: list(entry.capabilities) as ConnectorCatalogEntry['capabilities'],
+    ...(typeof entry.packUrl === 'string' && entry.packUrl !== '' && { packUrl: entry.packUrl }),
+    ...(typeof entry.sha256 === 'string' && entry.sha256 !== '' && { sha256: entry.sha256 }),
     ...(entry.triggers !== undefined && { triggers: list(entry.triggers) }),
     ...(entry.actions !== undefined && { actions: list(entry.actions) }),
     ...(entry.env !== undefined && { env: list(entry.env) }),

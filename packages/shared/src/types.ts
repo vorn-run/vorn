@@ -1754,6 +1754,10 @@ export interface ConnectorCatalogEntry {
   packageName: string
   /** Published version, so a listing can say what would be installed. */
   version?: string
+  /** Where the installable pack is published, when one is. */
+  packUrl?: string
+  /** Checksum the download must match, when the catalog publishes one. */
+  sha256?: string
   capabilities: Array<'tasks' | 'triggers' | 'actions'>
   /** One line on how it authenticates, shown before anyone commits to install. */
   auth?: string
