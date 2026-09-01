@@ -113,8 +113,21 @@ export function CallConnectorActionNodeForm({
           <label className="text-[13px] text-gray-400 font-medium block mb-2">Action</label>
           <SelectPicker
             value={config.action}
-            options={actions.map((a) => ({ value: a.type, label: a.label }))}
-            onChange={(v) => onChange({ ...config, action: v, args: {} })}
+            options={actions.map((a) => ({
+              value: a.type,
+              label: a.label,
+              // The tool name stays visible; it is what a run and its logs name.
+              ...(a.label !== a.type && { hint: a.type })
+            }))}
+            onChange={(v) =>
+              onChange({
+                ...config,
+                action: v,
+                // Denormalized so the card can name the action without an IPC call per render.
+                actionLabel: actions.find((a) => a.type === v)?.label ?? v,
+                args: {}
+              })
+            }
             variant="form"
             placeholder={
               actions.length === 0

@@ -31,8 +31,9 @@ export type { SdkProbeRequest }
 import { getSafeEnv } from '../process-utils'
 import log from '../logger'
 
-/** Tool an SDK connector serves to describe itself. */
-export const MANIFEST_TOOL = 'vorn_connector_manifest'
+import { MANIFEST_TOOL } from './sdk-tools'
+
+export { MANIFEST_TOOL }
 
 /**
  * Give up rather than leave a child running. `npx -y <pkg>` downloads the

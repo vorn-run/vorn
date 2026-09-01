@@ -803,6 +803,8 @@ export interface CallConnectorActionConfig {
   connectionId: string
   /** Action type from manifest.actions[].type — e.g. 'commentOnIssue'. */
   action: string
+  /** The action's authored label, kept so a card can name it without asking the connector. */
+  actionLabel?: string
   /** Raw args map; values support template placeholders. */
   args: Record<string, string>
 }

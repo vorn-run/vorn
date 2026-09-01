@@ -755,7 +755,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                 config: {
                   ...(n.config as CallConnectorActionConfig),
                   connectionId: pick.connectionId,
-                  action: pick.action
+                  action: pick.action,
+                  actionLabel: pick.actionLabel
                 }
               }
             })()
@@ -842,7 +843,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                   config: {
                     ...(n.config as CallConnectorActionConfig),
                     connectionId: pick.connectionId,
-                    action: pick.action
+                    action: pick.action,
+                    actionLabel: pick.actionLabel
                   }
                 }
               })()

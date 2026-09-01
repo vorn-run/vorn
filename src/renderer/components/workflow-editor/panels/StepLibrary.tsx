@@ -35,7 +35,7 @@ import type { AddableNodeType } from '../WorkflowCanvas'
 export type LibraryPick =
   | { kind: 'type'; type: AddableNodeType }
   | { kind: 'parallel' }
-  | { kind: 'connectorAction'; connectionId: string; action: string }
+  | { kind: 'connectorAction'; connectionId: string; action: string; actionLabel: string }
   | { kind: 'triggerType'; triggerType: TriggerConfig['triggerType'] }
   | { kind: 'connectorTrigger'; connectionId: string; event: string }
 
@@ -234,7 +234,12 @@ export function StepLibrary({
             key: `action:${conn.id}:${action.type}`,
             label: action.label || action.type,
             connection: conn,
-            pick: { kind: 'connectorAction', connectionId: conn.id, action: action.type }
+            pick: {
+              kind: 'connectorAction',
+              connectionId: conn.id,
+              action: action.type,
+              actionLabel: action.label || action.type
+            }
           })
         }
       }
