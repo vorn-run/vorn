@@ -128,7 +128,12 @@ import {
   backfillMcpConnection,
   preflightMcpConnection
 } from './connectors/mcp'
-import { httpConnector, lockedProfileError, performHttpRequest } from './connectors/http'
+import {
+  httpConnector,
+  httpProfileError,
+  lockedProfileError,
+  performHttpRequest
+} from './connectors/http'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
@@ -1377,8 +1382,8 @@ export function registerAllMethods(): void {
     if (profileConnectionId) {
       const conn = dbGetSourceConnection(profileConnectionId)
       if (!conn) return { success: false, error: `Connection ${profileConnectionId} not found` }
-      const locked = lockedProfileError(conn.filters, getDecryptedCreds(conn.id))
-      if (locked) return { success: false, error: locked }
+      const problem = httpProfileError(conn, getDecryptedCreds(conn.id))
+      if (problem) return { success: false, error: problem }
       profile = applyDecryptedCreds(conn)
     }
     return performHttpRequest(profile, { method, url, headers, body })

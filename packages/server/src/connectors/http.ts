@@ -39,6 +39,18 @@ export function lockedProfileError(
   return "This profile's secret is locked - decryption is unavailable or has not synced yet."
 }
 
+export const HTTP_CONNECTOR_ID = 'http'
+
+/** Why this connection cannot sign a request: it is not an auth profile, or its secret is locked. */
+export function httpProfileError(
+  conn: { connectorId: string; filters: Record<string, unknown> },
+  decrypted: Record<string, string> | undefined
+): string | null {
+  if (conn.connectorId !== HTTP_CONNECTOR_ID)
+    return `Connection belongs to the ${conn.connectorId} connector, not an HTTP auth profile`
+  return lockedProfileError(conn.filters, decrypted)
+}
+
 /**
  * Execute one HTTP request with a profile's injection applied. This runs in
  * the server so the secret never crosses into the renderer and responses skip

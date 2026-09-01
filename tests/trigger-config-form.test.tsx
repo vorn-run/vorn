@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { TriggerConfig } from '../src/shared/types'
@@ -19,6 +19,8 @@ const getWebhookInfo = vi.fn(async () => ({ baseUrl: 'http://127.0.0.1:4444' }))
 
 const { TriggerConfigForm } =
   await import('../src/renderer/components/workflow-editor/panels/TriggerConfigForm')
+
+afterEach(() => vi.unstubAllGlobals())
 
 describe('TriggerConfigForm', () => {
   it('renders the trigger type label and current type hint', () => {
@@ -221,7 +223,7 @@ describe('TriggerConfigForm - webhook fields', () => {
 
   it('shows the full URL with a copy control and the local-only note', async () => {
     const writeText = vi.fn()
-    Object.assign(navigator, { clipboard: { writeText } })
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
     render(<TriggerConfigForm config={config} onChange={vi.fn()} />)
     expect(await screen.findByText('http://127.0.0.1:4444/wf-hooks/wf-1/tok-1')).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText('Copy URL'))

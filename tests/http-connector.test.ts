@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   httpConnector,
+  httpProfileError,
   lockedProfileError,
   performHttpRequest
 } from '../packages/server/src/connectors/http'
@@ -161,6 +162,29 @@ describe('lockedProfileError', () => {
 
   it('passes for a profile with no secret at all', () => {
     expect(lockedProfileError({ baseUrl: 'https://x.test' }, undefined)).toBeNull()
+  })
+})
+
+/**
+ * A profile id travels from the renderer as a plain string, so the request path
+ * has to say what a profile is rather than trust the caller to send one.
+ */
+describe('httpProfileError', () => {
+  it('refuses a connection belonging to another connector', () => {
+    const problem = httpProfileError({ connectorId: 'github', filters: {} }, undefined)
+    expect(problem).toContain('github')
+    expect(problem).toContain('not an HTTP auth profile')
+  })
+
+  it('still reports a locked secret on a real profile', () => {
+    const profile = { connectorId: 'http', filters: { secret: 'blob' } }
+    expect(httpProfileError(profile, undefined)).toContain('locked')
+  })
+
+  it('passes an unlocked profile', () => {
+    expect(
+      httpProfileError({ connectorId: 'http', filters: { secret: 'blob' } }, { secret: 'plain' })
+    ).toBeNull()
   })
 })
 
