@@ -5,6 +5,16 @@ import { computeFlowLayout, FlowRow } from './workflow-helpers'
 
 // Projects a workflow definition into canvas elements; the definition stays the source of truth.
 
+/** The anchor id that opens the library in trigger scope. */
+export const TRIGGER_ANCHOR_ID = '__TRIGGER__'
+
+export const TRIGGER_ANCHOR = {
+  afterNodeId: TRIGGER_ANCHOR_ID,
+  beforeNodeId: null,
+  insideBranch: false,
+  bodyOnly: false
+}
+
 export const CARD_WIDTH = 280
 export const LOOP_WIDTH = 312
 /** Horizontal gap between fork branches. */
@@ -238,6 +248,20 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
       source: node.id,
       target: `add:${node.id}`,
       type: 'step',
+      selectable: false
+    })
+  }
+
+  // A workflow with no trigger yet shows the spot where one goes.
+  if (!nodes.some((n) => n.type === 'trigger')) {
+    rfNodes.push({
+      id: 'add-trigger',
+      type: 'addTrigger',
+      position: { x: 0, y: 0 },
+      data: {},
+      width: CARD_WIDTH,
+      height: 58,
+      draggable: false,
       selectable: false
     })
   }

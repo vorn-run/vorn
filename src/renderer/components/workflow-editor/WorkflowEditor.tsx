@@ -38,7 +38,11 @@ import {
 } from '../../../shared/types'
 import { WorkflowCanvas, AddableNodeType, InsertAnchor } from './WorkflowCanvas'
 import { StepLibrary, type LibraryPick } from './panels/StepLibrary'
-import { layoutPositions } from '../../lib/workflow-canvas-layout'
+import {
+  layoutPositions,
+  TRIGGER_ANCHOR,
+  TRIGGER_ANCHOR_ID
+} from '../../lib/workflow-canvas-layout'
 import { useDefinitionHistory } from '../../lib/use-definition-history'
 import { NodeConfigPanel } from './panels/NodeConfigPanel'
 import { RunHistoryPanel } from './panels/RunHistoryPanel'
@@ -50,6 +54,7 @@ import {
   createScriptNode,
   createConditionNode,
   createHttpRequestNode,
+  switchTriggerType,
   createApprovalNode,
   createCallConnectorActionNode,
   appendNodeAfter,
@@ -376,12 +381,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setStaggerDelayMs(existingWorkflow.staggerDelayMs)
       setAutoCleanupWorktrees(existingWorkflow.autoCleanupWorktrees ?? false)
     } else if (!editingId) {
-      // New workflow — start with a manual trigger
-      const trigger = createTriggerNode({ triggerType: 'manual' })
+      // New workflow — an empty canvas whose first pick is the trigger.
       setName('New Workflow')
       setIcon('Workflow')
       setIconColor('#3b82f6')
-      setNodes([trigger])
+      setNodes([])
       setEdges([])
       setEnabled(true)
       setStaggerDelayMs(undefined)
@@ -554,6 +558,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     if (!inline) handleClose()
   }, [persistWorkflow, editingId, inline, handleClose])
 
+  const hasTrigger = nodes.some((n) => n.type === 'trigger')
+
   const handleRun = useCallback(() => {
     const workflow = persistWorkflow()
     if (!inline) {
@@ -703,7 +709,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
   const handlePaletteInsert = useCallback(
     (
-      pick: Exclude<LibraryPick, { kind: 'parallel' }>,
+      pick: Exclude<
+        LibraryPick,
+        { kind: 'parallel' } | { kind: 'triggerType' } | { kind: 'connectorTrigger' }
+      >,
       afterNodeId: string,
       position: { x: number; y: number }
     ) => {
@@ -768,6 +777,28 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       const anchor = pendingInsert
       if (!anchor) return
       setPendingInsert(null)
+      if (pick.kind === 'triggerType' || pick.kind === 'connectorTrigger') {
+        const config: TriggerConfig =
+          pick.kind === 'triggerType'
+            ? switchTriggerType(pick.triggerType)
+            : {
+                triggerType: 'connectorPoll',
+                connectionId: pick.connectionId,
+                event: pick.event,
+                cron: '*/5 * * * *'
+              }
+        // A pick replaces the existing trigger in place; edges stay put.
+        const existing = nodes.find((n) => n.type === 'trigger')
+        if (existing) {
+          setNodes(nodes.map((n) => (n.id === existing.id ? { ...n, config } : n)))
+          setSelectedNodeId(existing.id)
+        } else {
+          const trigger = createTriggerNode(config)
+          setNodes([...nodes, trigger])
+          setSelectedNodeId(trigger.id)
+        }
+        return
+      }
       // A delete or undo can outlive the anchor; inserting against a ghost writes dangling edges.
       if (!nodes.some((n) => n.id === anchor.afterNodeId)) return
       const before = anchor.beforeNodeId
@@ -1018,11 +1049,15 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
               </Tooltip>
             </div>
           ) : (
-            <Tooltip label="Run workflow" position="bottom">
+            <Tooltip
+              label={hasTrigger ? 'Run workflow' : 'Add a trigger before running'}
+              position="bottom"
+            >
               <button
                 onClick={handleRun}
+                disabled={!hasTrigger}
                 aria-label="Run workflow"
-                className="text-gray-400 hover:text-white p-1.5 rounded-md hover:bg-white/[0.06] transition-colors"
+                className="text-gray-400 hover:text-white p-1.5 rounded-md hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
               >
                 <Play size={15} />
               </button>
@@ -1138,7 +1173,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
         {pendingInsert && (
           <StepLibrary
-            scope={{ bodyOnly: pendingInsert.bodyOnly, insideBranch: pendingInsert.insideBranch }}
+            scope={{
+              bodyOnly: pendingInsert.bodyOnly,
+              insideBranch: pendingInsert.insideBranch,
+              triggers: pendingInsert.afterNodeId === TRIGGER_ANCHOR_ID
+            }}
             onPick={handleLibraryPick}
             onClose={() => setPendingInsert(null)}
           />
@@ -1164,6 +1203,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         {selectedNode && !showRunHistory && !pendingInsert && (
           <NodeConfigPanel
             node={selectedNode}
+            onOpenTriggerLibrary={() => handleOpenLibrary(TRIGGER_ANCHOR)}
             allNodes={nodes}
             onChange={handleNodeConfigChange}
             onLabelChange={handleNodeLabelChange}

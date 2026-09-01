@@ -15,11 +15,14 @@ import { TriggerConfig, TaskStatus } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
 import { ProjectPicker } from '../../ProjectPicker'
 import { ConnectorPollTriggerForm } from './ConnectorPollTriggerForm'
+import { switchTriggerType } from '../../../lib/workflow-helpers'
 import { WorkflowInputsEditor } from './WorkflowInputsEditor'
 
 interface Props {
   config: TriggerConfig
   onChange: (config: TriggerConfig) => void
+  /** Open the step library in trigger scope to swap this trigger. */
+  onOpenLibrary?: () => void
 }
 
 const CRON_PRESETS = [
@@ -79,28 +82,9 @@ const STATUS_PICKER_OPTIONS = [
   { value: 'cancelled', label: 'Cancelled' }
 ]
 
-function switchTriggerType(type: TriggerConfig['triggerType']): TriggerConfig {
-  switch (type) {
-    case 'manual':
-      return { triggerType: 'manual' }
-    case 'once':
-      return { triggerType: 'once', runAt: new Date().toISOString() }
-    case 'recurring':
-      return { triggerType: 'recurring', cron: '0 9 * * *' }
-    case 'taskCreated':
-      return { triggerType: 'taskCreated' }
-    case 'taskStatusChanged':
-      return { triggerType: 'taskStatusChanged' }
-    case 'connectorPoll':
-      return { triggerType: 'connectorPoll', connectionId: '', event: '', cron: '*/5 * * * *' }
-    case 'webhook':
-      return { triggerType: 'webhook', method: 'POST', token: crypto.randomUUID().slice(0, 13) }
-  }
-}
-
 const EMPTY_PROJECTS: import('../../../../shared/types').ProjectConfig[] = []
 
-export function TriggerConfigForm({ config, onChange }: Props) {
+export function TriggerConfigForm({ config, onChange, onOpenLibrary }: Props) {
   const projects = useAppStore((s) => s.config?.projects ?? EMPTY_PROJECTS)
 
   return (
@@ -120,6 +104,14 @@ export function TriggerConfigForm({ config, onChange }: Props) {
         <p className="text-[11px] text-gray-500 mt-1.5">
           {TRIGGER_TYPES.find((t) => t.type === config.triggerType)?.hint}
         </p>
+        {onOpenLibrary && (
+          <button
+            onClick={onOpenLibrary}
+            className="mt-2 text-[11px] text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors"
+          >
+            Choose from the library, including connector events
+          </button>
+        )}
       </div>
 
       {config.triggerType === 'manual' &&

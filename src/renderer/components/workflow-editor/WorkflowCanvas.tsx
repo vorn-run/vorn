@@ -22,13 +22,15 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlignVerticalSpaceAround, Repeat, StepForward, Trash2 } from 'lucide-react'
+import { AlignVerticalSpaceAround, Repeat, StepForward, Trash2, Zap } from 'lucide-react'
 import { LoopConfig, NodeExecutionStatus, WorkflowEdge, WorkflowNode } from '../../../shared/types'
 import {
   AddStepNodeData,
   CanvasEdgeData,
   canConnect,
-  toCanvasElements
+  toCanvasElements,
+  TRIGGER_ANCHOR,
+  TRIGGER_ANCHOR_ID
 } from '../../lib/workflow-canvas-layout'
 import { NODE_GLYPH, NODE_SELECTED, NODE_UNSELECTED } from './node-visuals'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
@@ -304,6 +306,29 @@ function AddStepNode({ data }: NodeProps) {
   )
 }
 
+/** The dashed spot where a workflow's trigger goes; opens the library in trigger scope. */
+function AddTriggerNode() {
+  const { onOpenLibrary, libraryAnchor } = useInteractions()
+  const active = libraryAnchor?.afterNodeId === TRIGGER_ANCHOR_ID
+  return (
+    <div className="relative pointer-events-auto">
+      <button
+        onClick={() => onOpenLibrary(TRIGGER_ANCHOR)}
+        className={`w-[280px] h-[58px] flex items-center justify-center gap-2 rounded-lg border border-dashed
+                    text-[13px] transition-colors
+                    ${
+                      active
+                        ? 'border-white/40 text-white'
+                        : 'border-white/[0.15] text-gray-500 hover:text-gray-300 hover:border-white/[0.3]'
+                    }`}
+      >
+        <Zap size={14} strokeWidth={2} />
+        Add a trigger
+      </button>
+    </div>
+  )
+}
+
 /** The line, the branch pill, and a hover + whose delayed leave lets the mouse reach it. */
 function StepEdge({
   id,
@@ -396,7 +421,12 @@ function StepEdge({
   )
 }
 
-const NODE_TYPES = { step: StepNode, loop: LoopNode, addStep: AddStepNode }
+const NODE_TYPES = {
+  step: StepNode,
+  loop: LoopNode,
+  addStep: AddStepNode,
+  addTrigger: AddTriggerNode
+}
 const EDGE_TYPES = { step: StepEdge }
 
 function WorkflowCanvasInner({
@@ -436,7 +466,7 @@ function WorkflowCanvasInner({
     // Committing every displayed position materializes the computed layout on first drag.
     const positions: Record<string, { x: number; y: number }> = {}
     for (const rfNode of rfNodes) {
-      if (rfNode.type === 'addStep') continue
+      if (rfNode.type === 'addStep' || rfNode.type === 'addTrigger') continue
       positions[rfNode.id] = { x: rfNode.position.x, y: rfNode.position.y }
     }
     onPositionsCommit(positions)

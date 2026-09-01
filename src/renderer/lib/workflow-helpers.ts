@@ -388,6 +388,26 @@ export function createCallConnectorActionNode(
   }
 }
 
+/** The default config for each trigger type, used by the form and the library. */
+export function switchTriggerType(type: TriggerConfig['triggerType']): TriggerConfig {
+  switch (type) {
+    case 'manual':
+      return { triggerType: 'manual' }
+    case 'once':
+      return { triggerType: 'once', runAt: new Date().toISOString() }
+    case 'recurring':
+      return { triggerType: 'recurring', cron: '0 9 * * *' }
+    case 'taskCreated':
+      return { triggerType: 'taskCreated' }
+    case 'taskStatusChanged':
+      return { triggerType: 'taskStatusChanged' }
+    case 'connectorPoll':
+      return { triggerType: 'connectorPoll', connectionId: '', event: '', cron: '*/5 * * * *' }
+    case 'webhook':
+      return { triggerType: 'webhook', method: 'POST', token: crypto.randomUUID().slice(0, 13) }
+  }
+}
+
 export function createHttpRequestNode(
   config: Partial<import('../../shared/types').HttpRequestConfig> = {}
 ): WorkflowNode {

@@ -1,7 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Play, Terminal, GitFork, Hand, Repeat, Split, Search, X, Zap, Globe } from 'lucide-react'
+import {
+  Play,
+  Terminal,
+  GitFork,
+  Hand,
+  Repeat,
+  Split,
+  Search,
+  X,
+  Zap,
+  Globe,
+  Clock,
+  Calendar,
+  ListPlus,
+  ArrowRightLeft
+} from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { ConnectorActionDef, SourceConnection } from '../../../../shared/types'
+import type {
+  ConnectorActionDef,
+  ConnectorManifest,
+  SourceConnection,
+  TriggerConfig
+} from '../../../../shared/types'
 import {
   useConnections,
   useConnectorIdFor,
@@ -11,11 +31,13 @@ import { ConnectorIcon } from '../../ConnectorIcon'
 import { NODE_GLYPH } from '../node-visuals'
 import type { AddableNodeType } from '../WorkflowCanvas'
 
-/** A step type, a parallel branch, or a connector action with its connection chosen. */
+/** A step type, a parallel branch, a connector action, or a trigger. */
 export type LibraryPick =
   | { kind: 'type'; type: AddableNodeType }
   | { kind: 'parallel' }
   | { kind: 'connectorAction'; connectionId: string; action: string }
+  | { kind: 'triggerType'; triggerType: TriggerConfig['triggerType'] }
+  | { kind: 'connectorTrigger'; connectionId: string; event: string }
 
 /** What the anchor that opened the library allows. */
 export interface LibraryScope {
@@ -23,7 +45,22 @@ export interface LibraryScope {
   bodyOnly: boolean
   /** Loop and parallel insertion stay off anchors inside a fork branch. */
   insideBranch: boolean
+  /** The trigger spot takes only triggers: built-in types and connector events. */
+  triggers?: boolean
 }
+
+const TRIGGER_ITEMS: {
+  triggerType: TriggerConfig['triggerType']
+  label: string
+  icon: LucideIcon
+}[] = [
+  { triggerType: 'manual', label: 'Manual', icon: Zap },
+  { triggerType: 'recurring', label: 'Recurring schedule', icon: Clock },
+  { triggerType: 'once', label: 'Schedule once', icon: Calendar },
+  { triggerType: 'taskCreated', label: 'Task created', icon: ListPlus },
+  { triggerType: 'taskStatusChanged', label: 'Task moved', icon: ArrowRightLeft },
+  { triggerType: 'webhook', label: 'Webhook', icon: Globe }
+]
 
 const STEP_ITEMS: { type: AddableNodeType; label: string; icon: LucideIcon }[] = [
   { type: 'agent', label: 'Agent', icon: Play },
@@ -76,6 +113,16 @@ export function StepLibrary({
   const [actionsByConnection, setActionsByConnection] = useState<Map<string, ConnectorActionDef[]>>(
     () => new Map()
   )
+  const [manifestsByConnector, setManifestsByConnector] = useState<Map<string, ConnectorManifest>>(
+    () => new Map()
+  )
+
+  useEffect(() => {
+    if (!scope.triggers) return
+    window.api.listConnectors().then((connectors) => {
+      setManifestsByConnector(new Map(connectors.map((c) => [c.id, c.manifest])))
+    })
+  }, [scope.triggers])
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -102,6 +149,41 @@ export function StepLibrary({
   const { rows, pickable } = useMemo(() => {
     const q = query.trim().toLowerCase()
     const rows: (Row | GroupHeader)[] = []
+
+    if (scope.triggers) {
+      rows.push(
+        ...TRIGGER_ITEMS.filter((t) => !q || t.label.toLowerCase().includes(q)).map((t) => ({
+          key: `trigger:${t.triggerType}`,
+          label: t.label,
+          icon: t.icon,
+          pick: { kind: 'triggerType', triggerType: t.triggerType } as LibraryPick
+        }))
+      )
+      for (const conn of connections) {
+        const triggers = (manifestsByConnector.get(conn.connectorId)?.triggers ?? []).filter(
+          (t) =>
+            !q ||
+            (t.label || t.type).toLowerCase().includes(q) ||
+            conn.name.toLowerCase().includes(q)
+        )
+        if (triggers.length === 0) continue
+        rows.push({
+          key: `group:${conn.id}`,
+          header: true,
+          connection: conn,
+          count: triggers.length
+        })
+        for (const trigger of triggers) {
+          rows.push({
+            key: `event:${conn.id}:${trigger.type}`,
+            label: trigger.label || trigger.type,
+            connection: conn,
+            pick: { kind: 'connectorTrigger', connectionId: conn.id, event: trigger.type }
+          })
+        }
+      }
+      return { rows, pickable: rows.filter((r): r is Row => !('header' in r && r.header)) }
+    }
 
     const steps: Row[] = STEP_ITEMS.filter(
       (s) => !scope.bodyOnly || s.type === 'agent' || s.type === 'script'
@@ -151,7 +233,7 @@ export function StepLibrary({
     }
 
     return { rows, pickable: rows.filter((r): r is Row => !('header' in r && r.header)) }
-  }, [query, scope, connections, actionsByConnection])
+  }, [query, scope, connections, actionsByConnection, manifestsByConnector])
 
   const clamped = Math.min(highlight, Math.max(0, pickable.length - 1))
 
@@ -177,7 +259,9 @@ export function StepLibrary({
     >
       <div className="px-4 py-3 border-b border-white/[0.08]">
         <div className="flex items-center justify-between mb-2.5">
-          <span className="text-[13px] font-medium text-white">Add a step</span>
+          <span className="text-[13px] font-medium text-white">
+            {scope.triggers ? 'Add a trigger' : 'Add a step'}
+          </span>
           <button
             aria-label="Close"
             onClick={onClose}
@@ -195,7 +279,7 @@ export function StepLibrary({
               setQuery(e.target.value)
               setHighlight(0)
             }}
-            placeholder="Search steps and actions"
+            placeholder={scope.triggers ? 'Search triggers' : 'Search steps and actions'}
             className="w-full bg-transparent text-[12px] text-white placeholder:text-gray-600 outline-none"
           />
         </div>
@@ -207,7 +291,7 @@ export function StepLibrary({
         )}
         {pickable.length > 0 && rows[0] && !('header' in rows[0] && rows[0].header) && (
           <div className="px-2 pt-1 pb-1 text-[10px] font-mono uppercase tracking-wider text-gray-600">
-            Steps
+            {scope.triggers ? 'Triggers' : 'Steps'}
           </div>
         )}
         {(() => {

@@ -28,6 +28,8 @@ import { NODE_TYPE_ICON, NODE_GLYPH } from '../node-visuals'
 import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 
 interface Props {
+  /** Open the step library in trigger scope; shown on trigger nodes. */
+  onOpenTriggerLibrary?: () => void
   node: WorkflowNode
   allNodes?: WorkflowNode[]
   onChange: (nodeId: string, config: WorkflowNode['config']) => void
@@ -45,6 +47,7 @@ interface Props {
 }
 
 export function NodeConfigPanel({
+  onOpenTriggerLibrary,
   node,
   onRunToStep,
   allNodes,
@@ -153,6 +156,7 @@ export function NodeConfigPanel({
           <TriggerConfigForm
             config={node.config as TriggerConfig}
             onChange={(config) => onChange(node.id, config)}
+            onOpenLibrary={onOpenTriggerLibrary}
           />
         )}
 
