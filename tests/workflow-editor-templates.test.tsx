@@ -158,7 +158,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.listConnections.mockResolvedValue([CONNECTION])
   api.listConnectorPacks.mockResolvedValue([])
-  api.listConnectorCatalog.mockResolvedValue({ items: [], templates: TEMPLATE_SEED, mcpServers: [] })
+  api.listConnectorCatalog.mockResolvedValue({
+    items: [],
+    templates: TEMPLATE_SEED,
+    mcpServers: []
+  })
   api.listConnectors.mockResolvedValue([
     {
       id: 'github',
@@ -206,7 +210,10 @@ describe('starting a new workflow from a template', () => {
     fireEvent.click(await screen.findByText('Morning digest'))
 
     await waitFor(() => expect(captured.canvasProps?.nodes).toBeTruthy())
-    const nodes = captured.canvasProps?.nodes as Array<{ id: string; config: Record<string, unknown> }>
+    const nodes = captured.canvasProps?.nodes as Array<{
+      id: string
+      config: Record<string, unknown>
+    }>
     expect(nodes.find((n) => n.id === 'gather')?.config.projectPath).toBe(
       '/Users/someone/dev/novum'
     )
@@ -234,7 +241,9 @@ describe('starting from what a connection already builds', () => {
     render(<WorkflowEditor />)
     fireEvent.click(await screen.findByText('New issues to tasks'))
 
-    await waitFor(() => expect(seedConnectorWorkflow).toHaveBeenCalledWith('conn-1', 'issueCreated'))
+    await waitFor(() =>
+      expect(seedConnectorWorkflow).toHaveBeenCalledWith('conn-1', 'issueCreated')
+    )
     expect(mockState.setEditingWorkflowId).toHaveBeenCalledWith('seeded-1')
     expect(toasts.success).toHaveBeenCalled()
   })
