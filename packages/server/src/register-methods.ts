@@ -24,8 +24,12 @@ import { clearScreen } from './terminal-screen'
 import { discardHistory } from './history/writer'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
 import { clearScrollback, readScrollback } from './terminal-scrollback'
-import { claimTranscriptFor, transcriptHolder } from './agent-transcript'
-import { releaseSpawningTranscript } from './transcript-claims'
+import { claimTranscriptFor, sessionToBindOnCreate, transcriptHolder } from './agent-transcript'
+import {
+  claimSpawningTranscript,
+  releaseSpawningTranscript,
+  releaseSpawningTranscriptsFor
+} from './transcript-claims'
 import { browserBridge } from './browser-bridge'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
@@ -359,7 +363,14 @@ export function registerAllMethods(): void {
 
   // Terminal
   registerMethod('terminal:create', (payload) => {
-    return ptyManager.createPty(payload)
+    // Naming a conversation that is already running: show what is writing it
+    // rather than starting a second agent on it, as a resume does.
+    const running = sessionToBindOnCreate(payload.resumeSessionId, ptyManager.getLiveSessions())
+    if (running) return running
+    const session = ptyManager.createPty(payload)
+    // Agents that cannot be told an id report theirs seconds later; hold it meanwhile.
+    if (payload.resumeSessionId) claimSpawningTranscript(payload.resumeSessionId, session.id)
+    return session
   })
   /**
    * Let go of what was kept for a session from the last run.
@@ -761,7 +772,7 @@ export function registerAllMethods(): void {
         return { ok: true as const, session }
       }
 
-      transcriptId = claimTranscriptFor(previous, live, id)
+      transcriptId = claimTranscriptFor(previous, live, id, headlessManager.getActiveSessions())
 
       // Same id, same reasons as the shell branch above.
       const session = ptyManager.createPty(buildRestorePayload(previous, transcriptId), id)
@@ -1777,19 +1788,33 @@ export function registerAllMethods(): void {
       !supportsSessionIdPinning(payload.agentType)
     ) {
       const captureSessionId = session.id
-      setTimeout(() => {
-        const s = ptyManager.getActiveSessions().find((t) => t.id === captureSessionId)
-        if (!s || s.agentSessionId) return
-        const cwd = s.worktreePath || s.projectPath
-        const capturedId = captureAgentSessionId(s.agentType, cwd)
-        if (capturedId) {
+      // Asked more than once: an agent slow to write its own history used to be
+      // read at five seconds, come up empty, and never be asked again -- leaving
+      // the session holding a conversation it could not name, which a later
+      // resume was then free to take.
+      const attempt = (remaining: number[]): void => {
+        const [delay, ...rest] = remaining
+        if (delay === undefined) return
+        setTimeout(() => {
+          const s = ptyManager.getActiveSessions().find((t) => t.id === captureSessionId)
+          if (!s) {
+            releaseSpawningTranscriptsFor(captureSessionId)
+            return
+          }
+          if (s.agentSessionId) return
+          const cwd = s.worktreePath || s.projectPath
+          const capturedId = captureAgentSessionId(s.agentType, cwd)
+          if (!capturedId) return attempt(rest)
           s.agentSessionId = capturedId
+          // Its own record names the conversation now, so the spawn claim is spent.
+          releaseSpawningTranscriptsFor(captureSessionId)
           sessionManager.scheduleSave()
           clientRegistry.broadcast(IPC.SESSION_UPDATED, s)
           broadcastWidgetUpdate()
           log.info(`[session] captured ${s.agentType} session ID: ${capturedId}`)
-        }
-      }, 5000)
+        }, delay)
+      }
+      attempt([5000, 5000, 10_000, 20_000])
     }
 
     sessionManager.scheduleSave()
@@ -1805,6 +1830,9 @@ export function registerAllMethods(): void {
 
   // Clean up Copilot hooks on session exit
   ptyManager.on('session-exit', (session) => {
+    // A session that died early holds nothing; without this its conversation
+    // stays unreachable for the rest of the spawn window.
+    releaseSpawningTranscriptsFor(session.id)
     const inst = copilotInstallations.get(session.id)
     if (inst) {
       uninstallCopilotHooks(inst)
