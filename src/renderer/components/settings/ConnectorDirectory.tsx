@@ -299,7 +299,12 @@ export function ConnectorRow({
             onClick={onAdd}
             className="text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
           >
-            <Plus size={11} /> {listing.connectedCount > 0 ? 'Add another' : 'Add'}
+            <Plus size={11} />{' '}
+            {listing.connectedCount > 0
+              ? 'Add another'
+              : listing.source === 'mcp'
+                ? 'Add server'
+                : 'Add'}
           </button>
         )}
       </div>

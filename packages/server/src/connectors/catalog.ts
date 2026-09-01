@@ -24,6 +24,7 @@ import os from 'os'
 import type {
   ConnectorCatalogEntry,
   ConnectorCatalogItem,
+  McpServerCatalogEntry,
   WorkflowTemplate
 } from '@vornrun/shared/types'
 import {
@@ -101,6 +102,7 @@ interface CachedCatalog {
   connectors: ConnectorCatalogEntry[]
   /** Absent in a cache written before templates were published. */
   templates?: WorkflowTemplate[]
+  mcpServers?: McpServerCatalogEntry[]
 }
 
 /**
@@ -117,6 +119,47 @@ export function parseTemplates(document: unknown): WorkflowTemplate[] {
   return root.templates
     .map(normalizeTemplate)
     .filter((template): template is WorkflowTemplate => template !== undefined)
+}
+
+/**
+ * Read the MCP servers a catalog document lists, if it lists any.
+ *
+ * Absent for the same reason templates are, and repaired the same way: an
+ * entry without a command is nothing anyone can start, but a missing blurb or
+ * a mistyped keyword list is not worth dropping a server over.
+ */
+export function parseMcpServers(document: unknown): McpServerCatalogEntry[] {
+  const root = document as { mcpServers?: unknown }
+  if (!Array.isArray(root?.mcpServers)) return []
+  return root.mcpServers
+    .map(normalizeMcpServer)
+    .filter((entry): entry is McpServerCatalogEntry => entry !== undefined)
+}
+
+function normalizeMcpServer(raw: unknown): McpServerCatalogEntry | undefined {
+  const entry = raw as Record<string, unknown> | null
+  if (
+    typeof entry?.id !== 'string' ||
+    typeof entry.name !== 'string' ||
+    typeof entry.command !== 'string' ||
+    entry.command.length === 0
+  ) {
+    return undefined
+  }
+
+  return {
+    ...entry,
+    id: entry.id,
+    name: entry.name,
+    command: entry.command,
+    args: strings(entry.args),
+    ...(entry.keywords !== undefined && { keywords: strings(entry.keywords) }),
+    ...(entry.env !== undefined && { env: strings(entry.env) })
+  } as McpServerCatalogEntry
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
 /** A template is only usable if it carries a workflow this build can read. */
@@ -272,7 +315,8 @@ function readCache(cachePath: string): CachedCatalog | undefined {
     return {
       fetchedAt: Number(cached.fetchedAt) || 0,
       connectors,
-      templates: parseTemplates(cached)
+      templates: parseTemplates(cached),
+      mcpServers: parseMcpServers(cached)
     }
   } catch {
     // No cache yet, or one written by a version that shaped it differently.
@@ -291,13 +335,22 @@ function writeCache(cachePath: string, document: Omit<CachedCatalog, 'fetchedAt'
 
 async function download(
   get: typeof fetch
-): Promise<{ connectors: ConnectorCatalogEntry[]; templates: WorkflowTemplate[] } | undefined> {
+): Promise<
+  | {
+      connectors: ConnectorCatalogEntry[]
+      templates: WorkflowTemplate[]
+      mcpServers: McpServerCatalogEntry[]
+    }
+  | undefined
+> {
   try {
     const response = await get(CATALOG_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (!response.ok) return undefined
     const document = await response.json()
     const connectors = parseCatalog(document)
-    return connectors ? { connectors, templates: parseTemplates(document) } : undefined
+    return connectors
+      ? { connectors, templates: parseTemplates(document), mcpServers: parseMcpServers(document) }
+      : undefined
   } catch {
     // Offline, blocked by a proxy, or serving something that is not the
     // catalog. All of them mean the same thing here: keep what we have.
@@ -307,6 +360,7 @@ async function download(
 
 let resolved: ConnectorCatalogItem[] | undefined
 let resolvedTemplates: WorkflowTemplate[] | undefined
+let resolvedMcpServers: McpServerCatalogEntry[] | undefined
 let resolvedAt: number | undefined
 
 /**
@@ -325,6 +379,7 @@ export function catalogItems(options: CatalogOptions = {}): ConnectorCatalogItem
     // A cached document that predates templates falls back to the seed rather
     // than to nothing, so the start-from list is never empty on an old cache.
     resolvedTemplates = cache?.templates?.length ? cache.templates : TEMPLATE_SEED
+    resolvedMcpServers = cache?.mcpServers ?? []
     resolvedAt = cache?.fetchedAt
     if (!cache || now - cache.fetchedAt > MAX_AGE_MS) void refreshCatalog(options)
   }
@@ -335,6 +390,12 @@ export function catalogItems(options: CatalogOptions = {}): ConnectorCatalogItem
 export function catalogTemplates(options: CatalogOptions = {}): WorkflowTemplate[] {
   catalogItems(options)
   return resolvedTemplates ?? TEMPLATE_SEED
+}
+
+/** The MCP servers the catalog lists. No bundled seed: there is nothing to fall back to. */
+export function catalogMcpServers(options: CatalogOptions = {}): McpServerCatalogEntry[] {
+  catalogItems(options)
+  return resolvedMcpServers ?? []
 }
 
 /**
@@ -348,13 +409,15 @@ export function catalogTemplates(options: CatalogOptions = {}): WorkflowTemplate
 export function catalogSnapshot(options: CatalogOptions = {}): {
   items: ConnectorCatalogItem[]
   templates: WorkflowTemplate[]
+  mcpServers: McpServerCatalogEntry[]
   fetchedAt?: number
 } {
   const items = catalogItems(options)
   const templates = catalogTemplates(options)
+  const mcpServers = catalogMcpServers(options)
   return resolvedAt === undefined
-    ? { items, templates }
-    : { items, templates, fetchedAt: resolvedAt }
+    ? { items, templates, mcpServers }
+    : { items, templates, mcpServers, fetchedAt: resolvedAt }
 }
 
 /** Fetch the published catalog and adopt it if it parses. Never throws. */
@@ -365,6 +428,7 @@ export async function refreshCatalog(options: CatalogOptions = {}): Promise<bool
   writeCache(options.cachePath ?? CACHE_PATH, document, now)
   resolved = withLaunch(document.connectors)
   resolvedTemplates = document.templates.length > 0 ? document.templates : TEMPLATE_SEED
+  resolvedMcpServers = document.mcpServers
   resolvedAt = now
   return true
 }
@@ -377,5 +441,6 @@ function withLaunch(entries: ConnectorCatalogEntry[]): ConnectorCatalogItem[] {
 export function resetCatalogCache(): void {
   resolved = undefined
   resolvedTemplates = undefined
+  resolvedMcpServers = undefined
   resolvedAt = undefined
 }

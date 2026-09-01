@@ -4,7 +4,9 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import {
   parseTemplates,
+  parseMcpServers,
   catalogTemplates,
+  catalogMcpServers,
   catalogSnapshot,
   refreshCatalog,
   resetCatalogCache
@@ -131,6 +133,38 @@ describe('the bundled seed', () => {
   })
 })
 
+describe('parseMcpServers', () => {
+  const server = { id: 'playwright', name: 'Playwright', command: 'npx', args: ['-y', 'mcp'] }
+
+  it('reads what a catalog publishes', () => {
+    expect(parseMcpServers({ mcpServers: [server] })).toEqual([
+      { id: 'playwright', name: 'Playwright', command: 'npx', args: ['-y', 'mcp'] }
+    ])
+  })
+
+  it('treats a document with no servers as having none', () => {
+    expect(parseMcpServers({ version: 1, connectors: CONNECTORS })).toEqual([])
+    expect(parseMcpServers(null)).toEqual([])
+  })
+
+  it('refuses an entry with nothing to start', () => {
+    expect(parseMcpServers({ mcpServers: [{ id: 'x', name: 'X' }] })).toEqual([])
+    expect(parseMcpServers({ mcpServers: [{ ...server, command: '' }] })).toEqual([])
+  })
+
+  it('repairs a list where a string was published instead', () => {
+    const [entry] = parseMcpServers({
+      mcpServers: [{ ...server, args: 'not a list', keywords: ['browser', 7] }]
+    })
+    expect(entry).toMatchObject({ args: [], keywords: ['browser'] })
+  })
+
+  it('has no seed, because a server nobody published is not a suggestion', () => {
+    resetCatalogCache()
+    expect(catalogMcpServers({ ...offline(), cachePath: emptyCache() })).toEqual([])
+  })
+})
+
 describe('templates ride the catalog', () => {
   it('adopts published templates and caches them beside the connectors', async () => {
     resetCatalogCache()
@@ -162,5 +196,22 @@ describe('templates ride the catalog', () => {
     const snapshot = catalogSnapshot({ ...offline(), cachePath: emptyCache() })
     expect(snapshot.templates).toEqual(TEMPLATE_SEED)
     expect(Array.isArray(snapshot.items)).toBe(true)
+    expect(snapshot.mcpServers).toEqual([])
+  })
+
+  it('carries published servers through the cache too', async () => {
+    resetCatalogCache()
+    const cachePath = emptyCache()
+    const server = { id: 'playwright', name: 'Playwright', command: 'npx', args: [] }
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({ version: 1, connectors: CONNECTORS, mcpServers: [server] })
+      )) as unknown as typeof fetch
+
+    expect(await refreshCatalog({ fetchImpl, cachePath, now: 7 })).toBe(true)
+    resetCatalogCache()
+    expect(catalogMcpServers({ ...offline(), cachePath, now: 7 }).map((s) => s.id)).toEqual([
+      'playwright'
+    ])
   })
 })

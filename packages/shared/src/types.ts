@@ -1816,9 +1816,29 @@ export interface WorkflowTemplate {
   portable: PortableWorkflow
 }
 
+/**
+ * An MCP server worth knowing about, listed beside the connectors.
+ *
+ * It carries a command rather than a package because that is what a generic
+ * server is: something Vorn starts and speaks MCP to. There is no manifest to
+ * probe, so what a person needs is the launch line filled in for them.
+ */
+export interface McpServerCatalogEntry {
+  id: string
+  name: string
+  description?: string
+  command: string
+  args: string[]
+  category?: string
+  keywords?: string[]
+  /** Environment variables the server expects, named so the form can ask. */
+  env?: string[]
+}
+
 export interface ConnectorCatalogSnapshot {
   items: ConnectorCatalogItem[]
   templates: WorkflowTemplate[]
+  mcpServers: McpServerCatalogEntry[]
   fetchedAt?: number
 }
 

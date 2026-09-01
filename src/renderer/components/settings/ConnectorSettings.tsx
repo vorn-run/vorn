@@ -13,6 +13,7 @@ import type {
   ConnectorPackSource,
   ConnectorPackSummary,
   InstalledConnectorPack,
+  McpServerCatalogEntry,
   SourceConnection,
   ConnectorManifest,
   TaskStatus
@@ -53,6 +54,7 @@ export function ConnectorSettings() {
   // One selection, so "both open at once" is not a representable state.
   const [adding, setAdding] = useState<ConnectorListing | null>(null)
   const [catalog, setCatalog] = useState<ConnectorCatalogItem[]>([])
+  const [mcpServers, setMcpServers] = useState<McpServerCatalogEntry[]>([])
   const [catalogFetchedAt, setCatalogFetchedAt] = useState<number>()
   // What the detail view is describing. Separate from `adding` so opening a
   // connector to read about it is not the same as committing to install it.
@@ -108,6 +110,7 @@ export function ConnectorSettings() {
   // would be a round trip that always returns the same answer.
   const applyCatalog = useCallback((snapshot: ConnectorCatalogSnapshot) => {
     setCatalog(snapshot.items)
+    setMcpServers(snapshot.mcpServers ?? [])
     setCatalogFetchedAt(snapshot.fetchedAt)
   }, [])
 
@@ -235,8 +238,8 @@ export function ConnectorSettings() {
   )
 
   const listings = useMemo(
-    () => buildConnectorListings(connectors, catalog, connections, packs),
-    [connectors, catalog, connections, packs]
+    () => buildConnectorListings(connectors, catalog, connections, packs, mcpServers),
+    [connectors, catalog, connections, packs, mcpServers]
   )
   // Re-read from the current listings so a connection made while the panel is
   // open updates its "connected" count rather than showing the stale copy.
@@ -253,6 +256,8 @@ export function ConnectorSettings() {
   // connector to hand it.
   const addingBuiltIn =
     adding?.source === 'builtin' ? connectors.find((c) => c.id === adding.id) : undefined
+  // Every listed server is a connection to the built-in `mcp` connector.
+  const mcpConnector = connectors.find((c) => c.id === MCP_CONNECTOR_ID)
 
   const handleRun = async (workflowId: string) => {
     setRunningId(workflowId)
@@ -411,16 +416,40 @@ export function ConnectorSettings() {
           onCancel={() => setAdding(null)}
         />
       )}
+
+      {/* A generic server has no manifest to probe, so it goes to the manual
+          form with its launch line already written. */}
+      {adding?.mcpServer && mcpConnector && (
+        <AddConnectionForm
+          connector={mcpConnector}
+          startManual
+          initialAuth={{
+            command: adding.mcpServer.command,
+            args: JSON.stringify(adding.mcpServer.args)
+          }}
+          onDone={() => {
+            setAdding(null)
+            setView('connections')
+            load()
+          }}
+          onCancel={() => setAdding(null)}
+        />
+      )}
     </div>
   )
 }
 
 function AddConnectionForm({
   connector,
+  initialAuth,
+  startManual,
   onDone,
   onCancel
 }: {
   connector: ConnectorInfo
+  /** Pre-filled fields, so a listed server arrives with its launch line written. */
+  initialAuth?: Record<string, string>
+  startManual?: boolean
   onDone: () => void
   onCancel: () => void
 }) {
@@ -431,7 +460,7 @@ function AddConnectionForm({
   // a raw server the user wires up by hand. The first covers most cases, so
   // it leads.
   const isMcp = connector.id === MCP_CONNECTOR_ID
-  const [fromPackage, setFromPackage] = useState(isMcp)
+  const [fromPackage, setFromPackage] = useState(isMcp && startManual !== true)
 
   const [selectedProject, setSelectedProject] = useState(projects[0]?.name || '')
   const [detectedRepo, setDetectedRepo] = useState<{
@@ -439,7 +468,7 @@ function AddConnectionForm({
     repo: string
   } | null>(null)
   const [detecting, setDetecting] = useState(false)
-  const [auth, setAuth] = useState<Record<string, string>>({})
+  const [auth, setAuth] = useState<Record<string, string>>(initialAuth ?? {})
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [manualRepo, setManualRepo] = useState<{ owner: string; repo: string }>({
     owner: '',

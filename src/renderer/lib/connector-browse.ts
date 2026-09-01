@@ -1,6 +1,7 @@
 import type {
   ConnectorCatalogItem,
   InstalledConnectorPack,
+  McpServerCatalogEntry,
   SdkConnectorIcon,
   SourceConnection
 } from '../../shared/types'
@@ -23,7 +24,9 @@ export interface ConnectorListing {
   capabilities: string[]
   category: string
   /** `installed` is a pack the catalog does not carry; it brings its own manifest. */
-  source: 'builtin' | 'catalog' | 'installed'
+  source: 'builtin' | 'catalog' | 'installed' | 'mcp'
+  /** Set for an MCP server, which is a launch line rather than a package. */
+  mcpServer?: McpServerCatalogEntry
   /** Extra search terms, so a connector is findable by what it talks to. */
   keywords: string[]
   connectedCount: number
@@ -154,7 +157,8 @@ export function buildConnectorListings(
   builtIns: BuiltInConnector[],
   catalog: ConnectorCatalogItem[],
   connections: SourceConnection[],
-  packs: InstalledConnectorPack[] = []
+  packs: InstalledConnectorPack[] = [],
+  mcpServers: McpServerCatalogEntry[] = []
 ): ConnectorListing[] {
   const countFor = (id: string) =>
     connections.filter((conn) => connectionConnectorId(conn) === id).length
@@ -205,7 +209,21 @@ export function buildConnectorListings(
         connectedCount: countFor(pack.id),
         ...(pack.icon !== undefined && { icon: pack.icon }),
         pack
-      }))
+      })),
+    // A server Vorn starts and speaks MCP to; its connections are stored as
+    // `mcp` ones, so they are counted against the server's own id, never shared.
+    ...mcpServers.map((server) => ({
+      key: `mcp:${server.id}`,
+      id: server.id,
+      name: server.name,
+      ...(server.description !== undefined && { description: server.description }),
+      capabilities: ['actions'],
+      category: server.category ?? 'MCP servers',
+      source: 'mcp' as const,
+      keywords: server.keywords ?? [],
+      connectedCount: countFor(server.id),
+      mcpServer: server
+    }))
   ]
 
   return listings.sort((a, b) => {
