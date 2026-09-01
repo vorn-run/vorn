@@ -133,7 +133,7 @@ describe('verifyPackDir', () => {
       verifyPackDir(dirWith({ 'manifest.json': JSON.stringify(manifestFor('acme', '1.0.0')) }))
     ).toThrow(/no entry to run/)
     expect(() => verifyPackDir(dirWith({ ...goodFiles(), 'other.js': '' }))).toThrow(
-      /exactly one index.js/
+      /nothing else/
     )
   })
 
@@ -158,10 +158,12 @@ describe('verifyPackDir', () => {
       verifyPackDir(
         dirWith({
           ...goodFiles(),
-          'package.json': JSON.stringify({ name: 'acme', dependencies: {}, scripts: {} }),
-          'nested/package.json': 'not json'
+          'package.json': JSON.stringify({ name: 'acme', dependencies: {}, scripts: {} })
         })
       )
+    ).not.toThrow()
+    expect(() =>
+      verifyPackDir(dirWith({ ...goodFiles(), 'package.json': 'not json' }))
     ).not.toThrow()
   })
 
@@ -297,12 +299,8 @@ describe('installPack', () => {
       args: [join(root, 'acme', '1.2.0', 'index.js')]
     })
     expect(listInstalledPacks({ root }).map((pack) => pack.id)).toEqual(['acme'])
-    expect(seen.map((progress) => progress.phase)).toEqual([
-      'downloading',
-      'verifying',
-      'installing',
-      'installed'
-    ])
+    // Progress stays silent until the manifest names the connector.
+    expect(seen.map((progress) => progress.phase)).toEqual(['installing', 'installed'])
     expect(seen.at(-1)?.id).toBe('acme')
     expect(readdirSync(root).filter((entry) => entry.startsWith('.tmp-'))).toEqual([])
   })
@@ -360,7 +358,8 @@ describe('installPack', () => {
     if (result.ok) return
     expect(result.error).toMatch(/declares dependencies/)
     expect(readdirSync(root)).toEqual([])
-    expect(seen.at(-1)).toMatchObject({ phase: 'failed' })
+    // Refused before identification, so no event carries a key no row matches.
+    expect(seen).toEqual([])
     expect(describePack('acme', { root })).toBeUndefined()
   })
 
@@ -496,7 +495,7 @@ describe('installPack over the network', () => {
   const respond = (body: Uint8Array, headers: Record<string, string> = {}): Response =>
     new Response(body as unknown as BodyInit, { status: 200, headers })
 
-  it('downloads a url pack and reports deduped progress', async () => {
+  it('downloads a url pack and reports it once the manifest names it', async () => {
     const root = tempDir()
     const bytes = await archiveBytes(goodFiles())
     const seen: ConnectorInstallProgress[] = []
@@ -509,11 +508,8 @@ describe('installPack over the network', () => {
     )
 
     expect(result.ok).toBe(true)
-    const percents = seen
-      .filter((progress) => progress.phase === 'downloading')
-      .map((progress) => progress.percent)
-    expect(percents).toEqual([...new Set(percents)])
-    expect(percents.at(-1)).toBe(100)
+    expect(seen.map((progress) => progress.phase)).toEqual(['installing', 'installed'])
+    expect(seen.every((progress) => progress.id === 'acme')).toBe(true)
   })
 
   it('refuses a download that does not match the published checksum', async () => {
