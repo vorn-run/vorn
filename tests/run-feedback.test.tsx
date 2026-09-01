@@ -117,6 +117,7 @@ const mockState = {
   setFocusedTerminal: vi.fn(),
   setSelectedTaskId: vi.fn(),
   activeWorkspace: 'personal',
+  pendingWorkflowRun: null as { workflowId: string } | null,
   workflowExecutions: new Map<string, WorkflowExecution>()
 }
 
@@ -157,6 +158,7 @@ const runningExec = (): WorkflowExecution =>
 
 beforeEach(() => {
   mockState.workflowExecutions.clear()
+  mockState.pendingWorkflowRun = null
   captured.historyProps = null
   toastFn.mockClear()
   toastFn.success.mockClear()
@@ -290,5 +292,54 @@ describe('switching workflows mid-run', () => {
     const onRetryRun = captured.historyProps?.onRetryRun as (run: WorkflowExecution) => void
     onRetryRun({ ...runningExec(), workflowId: 'wf-somewhere-else' })
     expect(retryRunFromFailure).not.toHaveBeenCalled()
+  })
+})
+
+describe('a dismissed run prompt', () => {
+  const promptWorkflow = {
+    ...workflow,
+    id: 'wf-x',
+    nodes: [
+      {
+        ...workflow.nodes[0],
+        config: {
+          triggerType: 'manual',
+          inputs: [{ key: 'pr_number', label: 'PR number', type: 'text' }]
+        }
+      },
+      workflow.nodes[1]
+    ]
+  }
+
+  it('drops the arm, so the next background run is not adopted', () => {
+    vi.useFakeTimers()
+    try {
+      mockState.config.workflows = [promptWorkflow] as unknown as typeof mockState.config.workflows
+      const utils = render(<WorkflowEditor inline />)
+      fireEvent.click(utils.getByLabelText('Run workflow'))
+      expect(mockState.setPendingWorkflowRun).toHaveBeenCalled()
+
+      act(() => {
+        mockState.pendingWorkflowRun = { workflowId: 'wf-x' }
+      })
+      utils.rerender(<WorkflowEditor inline />)
+      act(() => {
+        mockState.pendingWorkflowRun = null
+      })
+      utils.rerender(<WorkflowEditor inline />)
+      act(() => {
+        vi.advanceTimersByTime(2100)
+      })
+
+      act(() => {
+        mockState.workflowExecutions.set('r1', runningExec())
+      })
+      utils.rerender(<WorkflowEditor inline />)
+
+      expect(captured.historyProps?.followRunId ?? null).toBeNull()
+    } finally {
+      vi.useRealTimers()
+      mockState.config.workflows = [workflow]
+    }
   })
 })

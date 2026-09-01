@@ -353,8 +353,6 @@ export function previewStepTokens(template: string, groups: StepVariableGroup[])
     (match, path: string): string => {
       const [slug, ...rest] = path.split('.')
       const group = bySlug.get(slug)
-      // A declared path is never broken; without run data it just shows nothing.
-      const declared = rest.length > 0 && knownSet.has(`steps.${slug}.${rest[0]}`)
       if (!group || rest.length === 0) {
         broken ??= {
           token: `steps.${path}`,
@@ -365,7 +363,13 @@ export function previewStepTokens(template: string, groups: StepVariableGroup[])
       if (!group.runOutputs) return match
       const value = walkPath(group.runOutputs, rest)
       if (value === undefined) {
-        if (!declared) {
+        // Trusted while unverifiable: the exact token is declared, or its key
+        // is declared and this run did not emit it. A deeper walk failing on
+        // an emitted key is a real mistake and gets flagged.
+        const exactKnown = knownSet.has(`steps.${path}`)
+        const keyDeclared = knownSet.has(`steps.${slug}.${rest[0]}`)
+        const keyEmitted = Object.prototype.hasOwnProperty.call(group.runOutputs, rest[0])
+        if (!exactKnown && !(keyDeclared && !keyEmitted)) {
           broken ??= {
             token: `steps.${path}`,
             suggestion: suggestNearestPath(`steps.${path}`, knownPaths)

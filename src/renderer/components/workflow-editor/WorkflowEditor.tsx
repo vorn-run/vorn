@@ -331,6 +331,21 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     return () => clearTimeout(timer)
   }, [launchingSince])
 
+  // A dismissed run prompt must also drop the arm, or the next background run
+  // of this workflow would be adopted and toasted as editor-launched.
+  const promptOpenFor = useAppStore((s) => s.pendingWorkflowRun?.workflowId ?? null)
+  const prevPromptRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevPromptRef.current
+    prevPromptRef.current = promptOpenFor
+    if (!editingId || prev !== editingId || promptOpenFor !== null) return
+    // A confirm launches within moments; a cancel never does.
+    const timer = setTimeout(() => {
+      followArmRef.current = false
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [promptOpenFor, editingId])
+
   // Load existing workflow when editing (with slug migration)
   useEffect(() => {
     if (existingWorkflow) {

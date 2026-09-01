@@ -71,6 +71,23 @@ describe('previewing steps tokens', () => {
 })
 
 describe('declared paths are trusted', () => {
+  it('flags a deeper walk that fails on a key the run did emit', () => {
+    // `output` came back as a string; walking into it cannot succeed.
+    const emitted = buildStepGroups([agent('n1', 'triage')], undefined, lastRun)
+    const preview = previewStepTokens('{{steps.triage.output.foo}}', emitted)
+    expect(preview.broken?.token).toBe('steps.triage.output.foo')
+    expect(preview.broken?.suggestion).not.toBe('steps.triage.output.foo')
+  })
+
+  it('still trusts a deeper path under a declared key this run did not emit', () => {
+    const partialRun: LastRunData = {
+      outputs: { triage: { severity: 'bug' } },
+      states: { n1: { status: 'success' } }
+    }
+    const declared = buildStepGroups([agent('n1', 'triage')], undefined, partialRun)
+    expect(previewStepTokens('{{steps.triage.status.x}}', declared).broken).toBeUndefined()
+  })
+
   it('never breaks a schema-declared path the last run did not emit', () => {
     // `status` is declared on every step; this run's outputs lack it.
     const partialRun: LastRunData = {
