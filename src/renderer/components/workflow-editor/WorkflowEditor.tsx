@@ -28,6 +28,7 @@ import {
   WorkflowNode,
   WorkflowNodeErrorPolicy,
   WorkflowEdge,
+  WorkflowTemplate,
   NodeExecutionStatus,
   WorkflowExecution,
   TriggerConfig,
@@ -80,7 +81,9 @@ import {
 } from '../../lib/workflow-execution'
 import { toast } from '../Toast'
 import { useConnections } from '../../lib/use-connections'
-import { fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
+import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
+import { templateSeed } from '../../lib/template-requirements'
+import { StartFromPanel } from './panels/StartFromPanel'
 import {
   slugify,
   ensureUniqueSlug,
@@ -121,6 +124,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [pendingInsert, setPendingInsert] = useState<InsertAnchor | null>(null)
   const [showRunHistory, setShowRunHistory] = useState(false)
+  const [showStartFrom, setShowStartFrom] = useState(true)
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [launchingSince, setLaunchingSince] = useState<number | null>(null)
   const [followRunId, setFollowRunId] = useState<string | null>(null)
   const followArmRef = useRef(false)
@@ -385,7 +390,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setStaggerDelayMs(existingWorkflow.staggerDelayMs)
       setAutoCleanupWorktrees(existingWorkflow.autoCleanupWorktrees ?? false)
     } else if (!editingId) {
-      // New workflow — an empty canvas whose first pick is the trigger.
+      // New workflow — an empty canvas, offered a template before the first pick.
       setName('New Workflow')
       setIcon('Workflow')
       setIconColor('#3b82f6')
@@ -393,6 +398,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setEdges([])
       setEnabled(true)
       setStaggerDelayMs(undefined)
+      setShowStartFrom(true)
     }
     // Saving hands back a new workflow object; only an actual switch resets the panels.
     if (loadedEditorIdRef.current !== editingId) {
@@ -580,6 +586,35 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     }
     handleClose()
   }, [editingId, removeWorkflowFromStore, handleClose])
+
+  // Only fetched when there is an empty canvas to offer them for.
+  useEffect(() => {
+    if (editingId || templates.length > 0) return
+    void window.api
+      .listConnectorCatalog()
+      .then((snapshot) => setTemplates(snapshot.templates ?? []))
+      .catch(() => setTemplates([]))
+  }, [editingId, templates.length])
+
+  const handlePickTemplate = useCallback(
+    (template: WorkflowTemplate) => {
+      const state = useAppStore.getState()
+      const projects = state.config?.projects ?? []
+      const project = projects.find((p) => p.name === state.activeProject) ?? projects[0]
+      const seed = templateSeed(template, project, connections)
+
+      setName(seed.name)
+      if (seed.icon) setIcon(seed.icon)
+      if (seed.iconColor) setIconColor(seed.iconColor)
+      setNodes(seed.nodes)
+      setEdges(seed.edges)
+      setShowStartFrom(false)
+
+      const pending = seed.unresolved.map(describeRequirement).join(', ')
+      if (pending) toast.warning(`Started from "${template.name}" — still needs ${pending}`)
+    },
+    [connections]
+  )
 
   // Saves first, so the file is what the canvas shows rather than the last save.
   const handleExportFile = useCallback(async () => {
@@ -1291,6 +1326,16 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             }}
             onPick={handleLibraryPick}
             onClose={() => setPendingInsert(null)}
+          />
+        )}
+
+        {!editingId && nodes.length === 0 && showStartFrom && !pendingInsert && (
+          <StartFromPanel
+            templates={templates}
+            connections={connections}
+            onPickBlank={() => setShowStartFrom(false)}
+            onPickTemplate={handlePickTemplate}
+            onClose={() => setShowStartFrom(false)}
           />
         )}
 
