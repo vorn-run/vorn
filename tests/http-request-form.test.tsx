@@ -74,3 +74,22 @@ describe('the HTTP request form', () => {
     expect(screen.getByText(/its secret never/)).toBeInTheDocument()
   })
 })
+
+describe('the profile dropdown and header rows', () => {
+  it('lists only http connections and reports a selection', async () => {
+    const { onChange } = renderForm()
+    fireEvent.click(screen.getByText('None'))
+    expect(await screen.findByText('Acme API')).toBeInTheDocument()
+    expect(screen.queryByText('owner/repo')).not.toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByText('Acme API'))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ profileConnectionId: 'p1' }))
+  })
+
+  it('edits an existing header name and value', () => {
+    const { onChange } = renderForm({ headers: { 'X-One': '1' } })
+    fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'X-Two' } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ headers: { 'X-Two': '1' } }))
+    fireEvent.change(screen.getByPlaceholderText('Value'), { target: { value: '2' } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ headers: { 'X-One': '2' } }))
+  })
+})

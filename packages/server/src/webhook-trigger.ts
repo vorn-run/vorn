@@ -47,9 +47,8 @@ export function registerWebhookRoute(app: FastifyInstance, onEnqueued: () => voi
 
       const headers: Record<string, string> = {}
       for (const [key, value] of Object.entries(req.headers)) {
-        if (!HEADER_DENYLIST.has(key.toLowerCase()) && typeof value === 'string') {
-          headers[key] = value
-        }
+        if (HEADER_DENYLIST.has(key.toLowerCase()) || value === undefined) continue
+        headers[key] = Array.isArray(value) ? value.join(', ') : value
       }
       const query: Record<string, string> = {}
       for (const [key, value] of Object.entries((req.query as Record<string, unknown>) ?? {})) {

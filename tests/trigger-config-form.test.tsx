@@ -5,11 +5,17 @@ import '@testing-library/jest-dom/vitest'
 import type { TriggerConfig } from '../src/shared/types'
 
 vi.mock('../src/renderer/stores', () => {
-  const state = { config: { projects: [] } }
+  const state = { config: { projects: [] }, editingWorkflowId: 'wf-1' }
   return {
     useAppStore: (selector?: (s: unknown) => unknown) => (selector ? selector(state) : state)
   }
 })
+
+const getWebhookInfo = vi.fn(async () => ({ baseUrl: 'http://127.0.0.1:4444' }))
+;(window as unknown as { api: Record<string, unknown> }).api = {
+  ...(window as unknown as { api?: Record<string, unknown> }).api,
+  getWebhookInfo
+}
 
 const { TriggerConfigForm } =
   await import('../src/renderer/components/workflow-editor/panels/TriggerConfigForm')
@@ -207,5 +213,34 @@ describe('TriggerConfigForm — run inputs', () => {
     fireEvent.click(screen.getByLabelText('Remove input issue'))
 
     expect(onChange).toHaveBeenCalledWith({ triggerType: 'manual', inputs: undefined })
+  })
+})
+
+describe('TriggerConfigForm - webhook fields', () => {
+  const config: TriggerConfig = { triggerType: 'webhook', method: 'POST', token: 'tok-1' }
+
+  it('shows the full URL with a copy control and the local-only note', async () => {
+    const writeText = vi.fn()
+    Object.assign(navigator, { clipboard: { writeText } })
+    render(<TriggerConfigForm config={config} onChange={vi.fn()} />)
+    expect(await screen.findByText('http://127.0.0.1:4444/wf-hooks/wf-1/tok-1')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Copy URL'))
+    expect(writeText).toHaveBeenCalledWith('http://127.0.0.1:4444/wf-hooks/wf-1/tok-1')
+    expect(screen.getByText(/Local machine only/)).toBeInTheDocument()
+  })
+
+  it('switches the method through the picker', async () => {
+    const onChange = vi.fn()
+    render(<TriggerConfigForm config={config} onChange={onChange} />)
+    await screen.findByText(/wf-hooks/)
+    fireEvent.click(screen.getByText('POST'))
+    fireEvent.mouseDown(screen.getByText('GET'))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ method: 'GET' }))
+  })
+
+  it('mentions the template variables the request lands as', async () => {
+    render(<TriggerConfigForm config={config} onChange={vi.fn()} />)
+    expect(await screen.findByText(/trigger.body/)).toBeInTheDocument()
+    expect(screen.getByText(/trigger.query/)).toBeInTheDocument()
   })
 })

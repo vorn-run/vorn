@@ -260,3 +260,35 @@ describe('ProjectItem progress-toast handlers', () => {
     await waitFor(() => expect(mockUpdate).toHaveBeenCalled())
   })
 })
+
+describe('the project row keyboard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockIsGitRepo.mockResolvedValue(true)
+    useAppStore.setState({ config: baseConfig as AppConfig })
+  })
+
+  afterEach(() => {
+    useAppStore.setState(initialState)
+  })
+
+  it('activates the project on Enter pressed on the row itself', async () => {
+    const setActiveProject = vi.fn()
+    useAppStore.setState({ setActiveProject })
+    const { container } = renderProjectItem()
+    await waitFor(() => expect(mockIsGitRepo).toHaveBeenCalled())
+    const row = container.querySelector('[role="button"]') as HTMLElement
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(setActiveProject).toHaveBeenCalled()
+  })
+
+  it('ignores Enter bubbling from the nested new-session button', async () => {
+    const setActiveProject = vi.fn()
+    useAppStore.setState({ setActiveProject })
+    const { container } = renderProjectItem()
+    await waitFor(() => expect(mockIsGitRepo).toHaveBeenCalled())
+    const sessionBtn = container.querySelector('button[aria-label="New session"]') as HTMLElement
+    fireEvent.keyDown(sessionBtn, { key: 'Enter' })
+    expect(setActiveProject).not.toHaveBeenCalled()
+  })
+})

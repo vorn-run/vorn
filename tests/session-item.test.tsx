@@ -78,6 +78,25 @@ describe('SessionItem', () => {
     expect(setFocused).toHaveBeenCalledWith('sess-1')
   })
 
+  it('activates the row itself on Enter and Space', () => {
+    const setFocused = vi.fn()
+    useAppStore.setState({ setFocusedTerminal: setFocused })
+    const { container } = render(<SessionItem session={session} />)
+    const row = container.querySelector('[role="button"]') as HTMLElement
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(setFocused).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(setFocused).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores Enter bubbling from a nested control', () => {
+    const setFocused = vi.fn()
+    useAppStore.setState({ setFocusedTerminal: setFocused })
+    render(<SessionItem session={session} />)
+    fireEvent.keyDown(screen.getByLabelText(`Close session ${session.name}`), { key: 'Enter' })
+    expect(setFocused).not.toHaveBeenCalled()
+  })
+
   it('applies focused style when session is focused', () => {
     useAppStore.setState({ focusedTerminalId: 'sess-1' })
     const { container } = render(<SessionItem session={session} />)

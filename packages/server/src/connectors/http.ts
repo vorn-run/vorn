@@ -249,7 +249,7 @@ export const httpConnector: VornConnector = {
             properties: {
               status: { type: 'number' },
               headers: { type: 'object' },
-              body: { type: 'object' }
+              body: { type: ['object', 'array', 'string', 'number', 'boolean', 'null'] }
             }
           }
         }

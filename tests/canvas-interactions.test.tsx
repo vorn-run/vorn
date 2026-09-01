@@ -164,6 +164,70 @@ describe('the keyboard on the canvas', () => {
   })
 })
 
+describe('the add-trigger placeholder card', () => {
+  it('opens the library in trigger scope when clicked', () => {
+    const { onOpenLibrary } = renderCanvas({
+      nodes: [nodes[1], nodes[2]],
+      edges: [{ id: 'e2', source: 'a', target: 'b' }]
+    })
+    const placeholder = screen.getByRole('button', { name: /Add a trigger/ })
+    fireEvent.click(placeholder)
+    expect(onOpenLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ afterNodeId: '__TRIGGER__' })
+    )
+  })
+
+  it('highlights while the library points at the trigger anchor', () => {
+    renderCanvas({
+      nodes: [nodes[1]],
+      edges: [],
+      libraryAnchor: {
+        afterNodeId: '__TRIGGER__',
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false
+      }
+    })
+    expect(screen.getByRole('button', { name: /Add a trigger/ }).className).toContain(
+      'border-white/40'
+    )
+  })
+})
+
+describe('the load fit', () => {
+  it('survives a workflow switch re-fitting the view', () => {
+    const { rerender } = render(
+      <WorkflowCanvas
+        nodes={nodes}
+        edges={edges}
+        selectedNodeId={null}
+        libraryAnchor={null}
+        loadKey="wf-a"
+        onNodeClick={vi.fn()}
+        onOpenLibrary={vi.fn()}
+        onConnectEdge={vi.fn()}
+        onPositionsCommit={vi.fn()}
+        onTidyUp={vi.fn()}
+      />
+    )
+    rerender(
+      <WorkflowCanvas
+        nodes={nodes}
+        edges={edges}
+        selectedNodeId={null}
+        libraryAnchor={null}
+        loadKey="wf-b"
+        onNodeClick={vi.fn()}
+        onOpenLibrary={vi.fn()}
+        onConnectEdge={vi.fn()}
+        onPositionsCommit={vi.fn()}
+        onTidyUp={vi.fn()}
+      />
+    )
+    expect(screen.getByText('First step')).toBeInTheDocument()
+  })
+})
+
 describe('the tidy up control', () => {
   it('sits with the zoom controls', () => {
     const { onTidyUp } = renderCanvas()

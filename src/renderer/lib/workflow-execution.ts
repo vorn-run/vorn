@@ -865,7 +865,7 @@ async function executeNode(
     const cfg = node.config as HttpRequestConfig
     const headers: Record<string, string> = {}
     for (const [name, value] of Object.entries(cfg.headers ?? {})) {
-      if (name.trim()) headers[name] = resolveTemplateVars(value, context, stepOutputs)
+      if (name.trim()) headers[name.trim()] = resolveTemplateVars(value, context, stepOutputs)
     }
     try {
       const result = await window.api.httpRequest({
