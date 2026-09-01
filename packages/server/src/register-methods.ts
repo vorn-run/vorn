@@ -1327,6 +1327,12 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('workflow:runManual', ({ workflowId, inputs }) => {
+    const wf = dbGetWorkflow(workflowId)
+    if (!wf) throw new Error(`Workflow ${workflowId} not found`)
+    // Refuse a startless run here rather than burning a claim on a fake run.
+    if (!wf.nodes.some((n) => n.type === 'trigger')) {
+      throw new Error(`Workflow "${wf.name}" has no trigger; add one before running it`)
+    }
     scheduler.triggerWorkflow(workflowId, inputs)
   })
 
