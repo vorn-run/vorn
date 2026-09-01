@@ -1800,6 +1800,56 @@ export interface SdkConnectorManifest {
   env: SdkEnvVar[]
 }
 
+/**
+ * A connector pack installed on disk.
+ *
+ * The point of the format is that launching involves no registry: the files are
+ * already there, so `path` is enough to start it offline and `version` is what
+ * actually runs rather than what was asked for.
+ */
+export interface InstalledConnectorPack {
+  id: string
+  name: string
+  version: string
+  description?: string
+  icon?: SdkConnectorIcon
+  /** Directory holding the running version's files. */
+  path: string
+  /** The one version kept behind the current one, when a rollback is possible. */
+  previousVersion?: string
+  installedAt: number
+  bytes: number
+  triggers: SdkTrigger[]
+  actions: Array<{ type: string; label: string; description?: string }>
+  env: SdkEnvVar[]
+}
+
+/** Where a pack is read from. */
+export type ConnectorPackSource =
+  | { kind: 'file'; path: string }
+  | { kind: 'url'; url: string; sha256?: string }
+  | { kind: 'npm'; packageName: string }
+
+export type ConnectorPackResult =
+  | { ok: true; pack: InstalledConnectorPack }
+  | { ok: false; error: string }
+
+/**
+ * How far an install has got, pushed while it runs.
+ *
+ * `id` is the connector's id once the manifest has been read and a label for
+ * the source until then, so a row can follow its own install from the first
+ * byte rather than only from the point the pack identifies itself.
+ */
+export interface ConnectorInstallProgress {
+  id: string
+  phase: 'downloading' | 'verifying' | 'installing' | 'installed' | 'failed'
+  /** Download completion, absent when the size was not advertised. */
+  percent?: number
+  version?: string
+  error?: string
+}
+
 export interface SdkProbeRequest {
   command: string
   args: string[]
