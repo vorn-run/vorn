@@ -216,6 +216,9 @@ function normalizeForCompare(p: string): string {
 function replacePath(value: string, projectPath: string): string {
   const v = normalizeForCompare(value)
   const root = normalizeForCompare(projectPath)
+  // No project to be relative to: leaving the path alone beats rewriting every
+  // absolute path as if it sat inside an empty root.
+  if (root === '') return value
   if (v === root) return PROJECT_PATH_TOKEN
   // A path inside the project keeps its tail, so a worktree or a subdirectory
   // survives the round trip instead of collapsing onto the project root.

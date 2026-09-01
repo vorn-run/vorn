@@ -1600,6 +1600,7 @@ export const IPC = {
   TASK_IMAGE_GET_PATH: 'task:imageGetPath',
   TASK_IMAGE_CLEANUP: 'task:imageCleanup',
   DIALOG_OPEN_IMAGE: 'dialog:openImage',
+  DIALOG_SAVE_TEXT_FILE: 'dialog:saveTextFile',
   HEADLESS_CREATE: 'headless:create',
   HEADLESS_KILL: 'headless:kill',
   HEADLESS_LIST: 'headless:list',

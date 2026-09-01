@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
-import { Pencil, Trash2, Power } from 'lucide-react'
+import { Pencil, Trash2, Power, Upload } from 'lucide-react'
 
 const MENU_WIDTH = 180
-const MENU_MAX_HEIGHT = 132
+const MENU_MAX_HEIGHT = 176
 const MENU_MARGIN = 8
 
 function clampToViewport(x: number, y: number) {
@@ -19,6 +19,7 @@ function clampToViewport(x: number, y: number) {
 
 export function WorkflowContextMenu({
   onEdit,
+  onExport,
   onDelete,
   onToggleEnabled,
   isScheduled,
@@ -28,6 +29,7 @@ export function WorkflowContextMenu({
   y
 }: {
   onEdit: () => void
+  onExport?: () => void
   onDelete: () => void
   onToggleEnabled?: () => void
   isScheduled?: boolean
@@ -88,6 +90,19 @@ export function WorkflowContextMenu({
         >
           <Power size={12} strokeWidth={1.5} />
           {isEnabled ? 'Disable Schedule' : 'Enable Schedule'}
+        </button>
+      )}
+      {onExport && (
+        <button
+          onClick={() => {
+            onExport()
+            onClose()
+          }}
+          className="w-full px-3 py-2 text-left text-[12px] text-gray-300 hover:text-white
+                     hover:bg-white/[0.06] active:bg-white/[0.1] flex items-center gap-2 transition-colors"
+        >
+          <Upload size={12} strokeWidth={1.5} />
+          Export as file…
         </button>
       )}
       <button

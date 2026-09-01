@@ -10,7 +10,8 @@ import {
   MoreHorizontal,
   Settings,
   Loader2,
-  Square
+  Square,
+  Upload
 } from 'lucide-react'
 import { ICON_MAP } from '../project-sidebar/icon-map'
 import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../../lib/project-icons'
@@ -78,6 +79,8 @@ import {
   stopWorkflowRun
 } from '../../lib/workflow-execution'
 import { toast } from '../Toast'
+import { useConnections } from '../../lib/use-connections'
+import { fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
 import {
   slugify,
   ensureUniqueSlug,
@@ -96,6 +99,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const setOpen = useAppStore((s) => s.setWorkflowEditorOpen)
   const setEditingId = useAppStore((s) => s.setEditingWorkflowId)
   const addWorkflow = useAppStore((s) => s.addWorkflow)
+  const connections = useConnections()
   const updateWorkflow = useAppStore((s) => s.updateWorkflow)
   const removeWorkflowFromStore = useAppStore((s) => s.removeWorkflow)
   const existingWorkflow = useAppStore((s) =>
@@ -576,6 +580,25 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     }
     handleClose()
   }, [editingId, removeWorkflowFromStore, handleClose])
+
+  // Saves first, so the file is what the canvas shows rather than the last save.
+  const handleExportFile = useCallback(async () => {
+    const workflow = persistWorkflow()
+    const projects = useAppStore.getState().config?.projects ?? []
+    const project = projectForWorkflow(workflow, projects)
+    const file = fileFromWorkflow(workflow, project?.path ?? '', connections)
+    const saved = await window.api.saveTextFile({
+      defaultName: file.name,
+      contents: file.contents,
+      title: 'Export workflow'
+    })
+    if (!saved) return
+    if (file.residual.length > 0) {
+      toast.error(`Exported, but these still name this machine: ${file.residual.join(', ')}`)
+    } else {
+      toast.success(`Exported "${workflow.name}"`)
+    }
+  }, [persistWorkflow, connections])
 
   const createNodeWithUniqueSlug = useCallback(
     (type: AddableNodeType, excludeNodeId?: string) => {
@@ -1209,6 +1232,17 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                 </button>
                 {editingId && (
                   <>
+                    <button
+                      onClick={() => {
+                        setShowOverflowMenu(false)
+                        void handleExportFile()
+                      }}
+                      className="w-full px-3 py-2 text-left text-[12px] text-gray-300 hover:text-white
+                                 hover:bg-white/[0.06] flex items-center gap-2 transition-colors"
+                    >
+                      <Upload size={12} strokeWidth={1.5} />
+                      Export as file…
+                    </button>
                     <div className="my-1 border-t border-white/[0.06]" />
                     <button
                       onClick={() => {
