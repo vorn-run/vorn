@@ -182,8 +182,14 @@ export function buildConnectorListings(
       ...(packFor(entry.id) && { pack: packFor(entry.id) })
     })),
     // Side-loaded, or published since the last fetch; it describes itself either way.
+    // A pack sharing a built-in's id is refused at install, and skipped here too
+    // so an older one on disk cannot draw a second row beside the connector it shadows.
     ...packs
-      .filter((pack) => !catalog.some((entry) => entry.id === pack.id))
+      .filter(
+        (pack) =>
+          !catalog.some((entry) => entry.id === pack.id) &&
+          !builtIns.some((builtIn) => builtIn.id === pack.id)
+      )
       .map((pack) => ({
         key: `installed:${pack.id}`,
         id: pack.id,

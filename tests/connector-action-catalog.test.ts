@@ -34,6 +34,14 @@ function connection(filters: Record<string, unknown>): SourceConnection {
 }
 
 describe('reserved SDK tool names', () => {
+  it('hides only the poll tools a connector declared, when its triggers are known', () => {
+    expect(isReservedSdkTool(pollToolName('tick'), ['tick'])).toBe(true)
+    // A connector may genuinely offer an action that starts this way.
+    expect(isReservedSdkTool('poll_status', ['tick'])).toBe(false)
+    expect(isReservedSdkTool('poll_status')).toBe(true)
+    expect(isReservedSdkTool(MANIFEST_TOOL, ['tick'])).toBe(true)
+  })
+
   it('knows the three kinds of plumbing a connector serves', () => {
     expect(isReservedSdkTool(MANIFEST_TOOL)).toBe(true)
     expect(isReservedSdkTool(PREFLIGHT_TOOL)).toBe(true)

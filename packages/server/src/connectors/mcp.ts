@@ -29,6 +29,7 @@ import { SDK_FILTER_KEYS } from '@vornrun/shared/types'
 import { schemaProperties, schemaTypeHint, schemaRequired } from '@vornrun/shared/json-schema-utils'
 import { getOrStartClient } from './mcp-clients'
 import { PREFLIGHT_TOOL, isReservedSdkTool } from './sdk-tools'
+import { describePack } from './packs'
 
 export { PREFLIGHT_TOOL }
 
@@ -171,12 +172,33 @@ export async function discoverTools(conn: SourceConnection): Promise<McpDiscover
  *  app drives itself; those are plumbing, not steps a workflow can call. A raw
  *  MCP server keeps every tool, because there nothing is reserved. */
 export function mcpConnectionActions(conn: SourceConnection): ConnectorActionDef[] {
+  return visibleMcpTools(conn).map(mcpToolToConnectorAction)
+}
+
+/**
+ * The tools on a connection that are the connector's own, not Vorn's.
+ *
+ * One answer for every surface that lists them — the step picker, the variable
+ * picker, an agent, and the tools console — so they cannot disagree about what
+ * a connector offers.
+ */
+export function visibleMcpTools(conn: SourceConnection): McpDiscoveredTool[] {
   const tools = conn.filters.discoveredTools
   if (!Array.isArray(tools)) return []
   const packaged = typeof conn.filters[SDK_FILTER_KEYS.connectorId] === 'string'
-  return (tools as McpDiscoveredTool[])
-    .filter((tool) => !packaged || !isReservedSdkTool(tool.name))
-    .map(mcpToolToConnectorAction)
+  if (!packaged) return tools as McpDiscoveredTool[]
+  let triggerTypes: string[] | undefined
+  try {
+    triggerTypes = describePack(String(conn.filters[SDK_FILTER_KEYS.connectorId]))?.triggers.map(
+      (trigger) => trigger.type
+    )
+  } catch {
+    // No data directory yet, or nothing installed: the prefix rule still holds.
+    triggerTypes = undefined
+  }
+  return (tools as McpDiscoveredTool[]).filter(
+    (tool) => !isReservedSdkTool(tool.name, triggerTypes)
+  )
 }
 
 export interface PreflightReport {

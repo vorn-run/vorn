@@ -1,11 +1,18 @@
 export { connectorRegistry } from './registry'
 export { githubConnector } from './github'
-export { mcpConnector, invokeMcpTool, discoverTools, mcpConnectionActions } from './mcp'
+export {
+  mcpConnector,
+  invokeMcpTool,
+  discoverTools,
+  mcpConnectionActions,
+  visibleMcpTools
+} from './mcp'
 export type { McpDiscoveredTool } from './mcp'
 export {
   stopClient as stopMcpClient,
   stopAllClients as stopAllMcpClients,
-  stopClientsForConnector
+  stopClientsForConnector,
+  connectionIdsForConnector
 } from './mcp-clients'
 export {
   inspectPack,

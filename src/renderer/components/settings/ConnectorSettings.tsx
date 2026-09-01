@@ -122,6 +122,8 @@ export function ConnectorSettings() {
     })
   }, [])
 
+  // Every install is checked and shown first, so a catalog row and a dropped
+  // file ask the same question before any of it is kept.
   const handleInstall = useCallback(
     async (listing: ConnectorListing, source?: ConnectorPackSource) => {
       const resolved =
@@ -133,39 +135,62 @@ export function ConnectorSettings() {
               ...(listing.catalogItem.sha256 && { sha256: listing.catalogItem.sha256 })
             } as ConnectorPackSource)
           : ({ kind: 'npm', packageName: listing.catalogItem?.packageName ?? listing.id } as const))
-      const result = await window.api.installConnectorPack(resolved)
-      if (result.ok) {
-        setInstallProgress((current) => {
-          const next = { ...current }
-          delete next[result.pack.id]
-          return next
-        })
+
+      setInstallProgress((current) => {
+        const next = { ...current }
+        delete next[listing.id]
+        return next
+      })
+      const result = await window.api.inspectConnectorPack(resolved)
+      if (!result.ok) {
+        // Keyed by the row that asked, which is the row that shows the refusal.
+        setInstallProgress((current) => ({
+          ...current,
+          [listing.id]: { id: listing.id, phase: 'failed', error: result.error }
+        }))
+        return
       }
-      await load()
+      setPendingPack({ source: { kind: 'staged', token: result.preview.token }, preview: result.preview })
     },
-    [load]
+    []
   )
 
   // Verified first and installed only on confirm, so a drop is a question.
   const handleInstallFile = useCallback(async (filePath: string) => {
     setFileInstallError(null)
     setPendingPack(null)
-    const source = { kind: 'file', path: filePath } as const
-    const result = await window.api.inspectConnectorPack(source)
+    const result = await window.api.inspectConnectorPack({ kind: 'file', path: filePath })
     if (!result.ok) {
       setFileInstallError(result.error)
       return
     }
-    setPendingPack({ source, preview: result.preview })
+    setPendingPack({
+      source: { kind: 'staged', token: result.preview.token },
+      preview: result.preview
+    })
   }, [])
 
+  // Installs the files the sheet described, not the source they came from.
   const handleConfirmPending = useCallback(async () => {
     if (!pendingPack) return
+    const id = pendingPack.preview.id
     setInstallingPending(true)
     const result = await window.api.installConnectorPack(pendingPack.source)
     setInstallingPending(false)
     setPendingPack(null)
-    if (!result.ok) setFileInstallError(result.error)
+    if (result.ok) {
+      setInstallProgress((current) => {
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
+    } else {
+      setInstallProgress((current) => ({
+        ...current,
+        [id]: { id, phase: 'failed', error: result.error }
+      }))
+      setFileInstallError(result.error)
+    }
     await load()
   }, [pendingPack, load])
 
@@ -179,7 +204,14 @@ export function ConnectorSettings() {
 
   const handleRemovePack = useCallback(
     async (id: string) => {
-      await window.api.removeConnectorPack(id)
+      const result = await window.api.removeConnectorPack(id)
+      // Said after the fact rather than asked before it: the count is what the
+      // server counted, and a connection left without files is worth naming.
+      if (result.ok && (result.connections ?? 0) > 0) {
+        setFileInstallError(
+          `Removed the files. ${result.connections} connection${result.connections === 1 ? '' : 's'} will stop working until the connector is installed again.`
+        )
+      }
       await load()
     },
     [load]

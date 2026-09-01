@@ -21,9 +21,13 @@ export function pollToolName(triggerType: string): string {
 /**
  * Whether a tool is plumbing rather than something a workflow step can call.
  *
- * Triggers are matched by the prefix `pollToolName` builds, because a
- * connector's trigger list is not in hand everywhere actions are offered.
+ * Given the connector's trigger types, only their exact poll tools are hidden,
+ * so an action a connector genuinely named `poll_status` survives. The prefix
+ * is the fallback for callers that cannot say what the triggers are.
  */
-export function isReservedSdkTool(name: string): boolean {
-  return name === MANIFEST_TOOL || name === PREFLIGHT_TOOL || name.startsWith(pollToolName(''))
+export function isReservedSdkTool(name: string, triggerTypes?: readonly string[]): boolean {
+  if (name === MANIFEST_TOOL || name === PREFLIGHT_TOOL) return true
+  return triggerTypes
+    ? triggerTypes.some((type) => name === pollToolName(type))
+    : name.startsWith(pollToolName(''))
 }

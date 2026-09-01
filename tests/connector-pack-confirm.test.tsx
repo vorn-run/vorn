@@ -9,6 +9,7 @@ const PREVIEW: ConnectorPackSummary = {
   id: 'packdemo',
   name: 'Pack Demo',
   version: '1.1.0',
+  token: 'staged-token',
   description: 'Answers back whatever it is asked.',
   triggers: [
     {

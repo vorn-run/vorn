@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { create } from 'tar'
@@ -12,6 +20,7 @@ import {
   isSafeArchiveEntry,
   listInstalledPacks,
   removePack,
+  resetStagedPacks,
   rollbackPack,
   verifyPackDir
 } from '../packages/server/src/connectors/packs'
@@ -26,6 +35,7 @@ function tempDir(): string {
 }
 
 afterEach(() => {
+  resetStagedPacks()
   while (temps.length > 0) rmSync(temps.pop() as string, { recursive: true, force: true })
 })
 
@@ -177,8 +187,32 @@ describe('inspectPack', () => {
     expect(result.preview.actions.map((a) => a.label)).toEqual(['Close ticket'])
     expect(result.preview.env.map((e) => e.name)).toEqual(['API_TOKEN'])
     expect(result.preview.installedVersion).toBeUndefined()
-    // Nothing was kept: no connector directory, and no staging left behind.
-    expect(readdirSync(root)).toEqual([])
+    // Nothing is installed; the checked files wait under a staging entry.
+    expect(readdirSync(root).filter((entry) => !entry.startsWith('.'))).toEqual([])
+    expect(describePack('acme', { root })).toBeUndefined()
+  })
+
+  it('installs the files it checked rather than reading the source again', async () => {
+    const root = tempDir()
+    const file = await buildArchive(goodFiles('1.2.0'))
+    const inspected = await inspectPack({ kind: 'file', path: file }, { root })
+    expect(inspected.ok).toBe(true)
+    if (!inspected.ok) return
+
+    // The source is swapped for a different connector after the sheet was shown.
+    rmSync(file, { force: true })
+    const result = await installPack({ kind: 'staged', token: inspected.preview.token }, { root })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.pack.version).toBe('1.2.0')
+    expect(readdirSync(root).filter((entry) => entry.startsWith('.'))).toEqual([])
+  })
+
+  it('refuses a token it is no longer holding', async () => {
+    const result = await installPack({ kind: 'staged', token: 'gone' }, { root: tempDir() })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/checked too long ago/)
   })
 
   it('names the version an install would replace', async () => {
@@ -209,6 +243,24 @@ describe('inspectPack', () => {
     if (result.ok) return
     expect(result.error).toMatch(/dependencies/)
     expect(readdirSync(root)).toEqual([])
+  })
+
+  it('refuses a pack carrying anything beside its manifest and entry', async () => {
+    const file = await buildArchive({ ...goodFiles(), 'native.node': 'binary' })
+
+    const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/native\.node/)
+  })
+
+  it('refuses a pack claiming the id of a connector Vorn ships', async () => {
+    const file = await buildArchive(goodFiles('1.0.0', 'github'))
+
+    const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/already ships/)
   })
 
   it('reports a source that cannot be read rather than throwing', async () => {
@@ -312,6 +364,72 @@ describe('installPack', () => {
     expect(describePack('acme', { root })).toBeUndefined()
   })
 
+  it('names the connector in every progress event, never the file it came from', async () => {
+    const root = tempDir()
+    const file = await buildArchive(goodFiles())
+    const inspected = await inspectPack({ kind: 'file', path: file }, { root })
+    expect(inspected.ok).toBe(true)
+    if (!inspected.ok) return
+    const seen: ConnectorInstallProgress[] = []
+
+    await installPack(
+      { kind: 'staged', token: inspected.preview.token },
+      { root, onProgress: (progress) => seen.push(progress) }
+    )
+
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every((event) => event.id === 'acme')).toBe(true)
+  })
+
+  it('reports a refusal against the connector, so a row can show it', async () => {
+    const root = tempDir()
+    const file = await buildArchive({
+      ...goodFiles(),
+      'package.json': JSON.stringify({ dependencies: { 'left-pad': '1.0.0' } })
+    })
+    const seen: ConnectorInstallProgress[] = []
+
+    await installPack(
+      { kind: 'file', path: file },
+      { root, onProgress: (progress) => seen.push(progress) }
+    )
+
+    // Nothing is keyed by the path: an unidentified pack reports no progress at all.
+    expect(seen.some((event) => event.id.includes(file))).toBe(false)
+  })
+
+  it('keeps the installed version when the commit cannot be made', async () => {
+    const root = tempDir()
+    await installPack({ kind: 'file', path: await buildArchive(goodFiles('1.2.0')) }, { root })
+    const target = join(root, 'acme', '1.2.0')
+    // A directory nothing can be moved within: the old copy must survive being
+    // replaced, which the delete-then-rename order could not promise.
+    chmodSync(join(root, 'acme'), 0o555)
+
+    const result = await installPack(
+      { kind: 'file', path: await buildArchive(goodFiles('1.2.0')) },
+      { root }
+    )
+
+    chmodSync(join(root, 'acme'), 0o755)
+    expect(result.ok).toBe(false)
+    expect(readdirSync(target).sort()).toEqual(['index.js', 'manifest.json'])
+    expect(describePack('acme', { root })?.version).toBe('1.2.0')
+  })
+
+  it('reinstalling a version in place leaves no half-replaced copy behind', async () => {
+    const root = tempDir()
+    await installPack({ kind: 'file', path: await buildArchive(goodFiles('1.2.0')) }, { root })
+
+    const result = await installPack(
+      { kind: 'file', path: await buildArchive(goodFiles('1.2.0')) },
+      { root }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(readdirSync(join(root, 'acme')).sort()).toEqual(['1.2.0', 'current.json'])
+  })
+
   it('refuses an archive whose entries try to escape', async () => {
     const root = tempDir()
     const outside = tempDir()
@@ -325,6 +443,38 @@ describe('installPack', () => {
     const result = await installPack({ kind: 'file', path: file }, { root })
     expect(result.ok).toBe(true)
     expect(readdirSync(join(root, 'acme', '1.2.0')).sort()).toEqual(['index.js', 'manifest.json'])
+  })
+
+  it('refuses a manifest whose version would climb out of the packs root', async () => {
+    const root = tempDir()
+    const bystander = tempDir()
+    writeFileSync(join(bystander, 'keep.txt'), 'not yours to delete')
+    const escape = `../../../../${bystander.split('/').slice(-1)[0]}`
+    const file = await buildArchive({
+      'manifest.json': JSON.stringify(manifestFor('acme', escape)),
+      'index.js': ''
+    })
+
+    const result = await installPack({ kind: 'file', path: file }, { root })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/not a usable connector version/)
+    expect(readdirSync(bystander)).toEqual(['keep.txt'])
+    expect(readdirSync(root)).toEqual([])
+  })
+
+  it('keeps every installed version when a later pack names a hostile one', async () => {
+    const root = tempDir()
+    await installPack({ kind: 'file', path: await buildArchive(goodFiles('1.0.0')) }, { root })
+    const hostile = await buildArchive({
+      'manifest.json': JSON.stringify(manifestFor('acme', '../../escape')),
+      'index.js': ''
+    })
+
+    await installPack({ kind: 'file', path: hostile }, { root })
+
+    expect(describePack('acme', { root })?.version).toBe('1.0.0')
+    expect(readdirSync(join(root, 'acme')).sort()).toEqual(['1.0.0', 'current.json'])
   })
 
   it('reports a missing file rather than throwing', async () => {

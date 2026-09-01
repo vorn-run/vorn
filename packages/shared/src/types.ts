@@ -1830,11 +1830,12 @@ export interface InstalledConnectorPack {
   env: SdkEnvVar[]
 }
 
-/** Where a pack is read from. */
+/** Where a pack is read from; `staged` is one an inspection already verified. */
 export type ConnectorPackSource =
   | { kind: 'file'; path: string }
   | { kind: 'url'; url: string; sha256?: string }
   | { kind: 'npm'; packageName: string }
+  | { kind: 'staged'; token: string }
 
 export type ConnectorPackResult =
   | { ok: true; pack: InstalledConnectorPack }
@@ -1852,6 +1853,8 @@ export interface ConnectorPackSummary {
   env: SdkEnvVar[]
   /** The version already on disk, when this would replace one. */
   installedVersion?: string
+  /** Handle to the verified files, so confirming installs exactly what was shown. */
+  token: string
 }
 
 export type ConnectorPackPreview =

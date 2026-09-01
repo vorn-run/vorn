@@ -38,6 +38,13 @@ const ENTRY_FILE = 'index.js'
 const MANIFEST_FILE = 'manifest.json'
 const CURRENT_FILE = 'current.json'
 
+/**
+ * Everything a pack may carry, so nothing else can be reached at run time.
+ * `package.json` is tolerated because an npm tarball always has one; it is
+ * still held to the dependency and script gates below.
+ */
+const PACK_FILES = [MANIFEST_FILE, ENTRY_FILE, 'package.json']
+
 interface CurrentPack {
   version: string
   previousVersion?: string
@@ -66,7 +73,10 @@ function readCurrent(id: string, options: PackOptions): CurrentPack | undefined 
     const parsed = JSON.parse(
       readFileSync(join(packDir(id, options), CURRENT_FILE), 'utf8')
     ) as CurrentPack
-    return typeof parsed?.version === 'string' && parsed.version !== '' ? parsed : undefined
+    if (typeof parsed?.version !== 'string' || !isSafeVersion(parsed.version)) return undefined
+    return parsed.previousVersion !== undefined && !isSafeVersion(parsed.previousVersion)
+      ? { ...parsed, previousVersion: undefined }
+      : parsed
   } catch {
     // Never installed, or a pointer written by a version that shaped it differently.
     return undefined
@@ -98,6 +108,24 @@ function requireSafeId(id: string): void {
   if (!isSafeId(id)) throw new Error(`"${id}" is not a usable connector id`)
 }
 
+/** Ids the app already answers to; a pack claiming one would shadow it in every list. */
+const RESERVED_IDS = new Set(['mcp', 'http', 'github', 'ado', 'kusto'])
+
+function requireUnreservedId(id: string): void {
+  if (RESERVED_IDS.has(id.toLowerCase())) {
+    throw new Error(`"${id}" is the id of a connector Vorn already ships`)
+  }
+}
+
+/** A version names a directory too, so it is held to the same rule as an id. */
+function isSafeVersion(version: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/.test(version) && !version.includes('..')
+}
+
+function requireSafeVersion(version: string): void {
+  if (!isSafeVersion(version)) throw new Error(`"${version}" is not a usable connector version`)
+}
+
 function readManifest(dir: string): SdkConnectorManifest {
   let payload: unknown
   try {
@@ -127,11 +155,7 @@ export function verifyPackDir(dir: string): SdkConnectorManifest {
   const files = walk(dir)
   if (!files.includes(MANIFEST_FILE)) throw new Error('The pack has no manifest.json')
 
-  const scripts = files.filter((file) => file.endsWith('.js') || file.endsWith('.mjs'))
-  if (scripts.length === 0) throw new Error('The pack has no entry to run')
-  if (scripts.length > 1 || scripts[0] !== ENTRY_FILE) {
-    throw new Error(`The pack must carry exactly one ${ENTRY_FILE}, not ${scripts.join(', ')}`)
-  }
+  if (!files.includes(ENTRY_FILE)) throw new Error('The pack has no entry to run')
 
   for (const file of files.filter((entry) => entry.endsWith('package.json'))) {
     let pkg: Record<string, unknown>
@@ -157,12 +181,17 @@ export function verifyPackDir(dir: string): SdkConnectorManifest {
     }
   }
 
-  const bytes = directoryBytes(dir)
-  if (bytes > MAX_UNPACKED_BYTES) {
+  // An allowlist rather than a script headcount: a `.cjs`, `.node` or `.wasm`
+  // beside the entry is code the entry can reach, so it is code Vorn installed.
+  const strays = files.filter((file) => !PACK_FILES.includes(file))
+  if (strays.length > 0) {
     throw new Error(
-      `The pack unpacks to ${Math.round(bytes / 1024 / 1024)} MB; Vorn installs at most ${MAX_UNPACKED_BYTES / 1024 / 1024} MB`
+      `The pack carries ${strays.join(', ')}; a pack is ${MANIFEST_FILE} and ${ENTRY_FILE} and nothing else`
     )
   }
+
+  const bytes = directoryBytes(dir)
+  if (bytes > MAX_UNPACKED_BYTES) throw new Error(unpackedMessage(bytes))
 
   return readManifest(dir)
 }
@@ -187,7 +216,12 @@ async function readSource(
   options: PackOptions,
   report: (progress: Omit<ConnectorInstallProgress, 'id'>) => void
 ): Promise<Buffer> {
+  // Staged packs are already unpacked on disk; nothing here has to read them.
+  if (source.kind === 'staged') throw new Error('That pack was already checked')
+
   if (source.kind === 'file') {
+    const size = statSync(source.path).size
+    if (size > MAX_PACK_BYTES) throw new Error(sizeMessage(size))
     const bytes = readFileSync(source.path)
     report({ phase: 'downloading', percent: 100 })
     return bytes
@@ -258,8 +292,13 @@ function sizeMessage(bytes: number): string {
   return `The pack is ${Math.round(bytes / 1024)} KB; Vorn installs at most ${MAX_PACK_BYTES / 1024 / 1024} MB`
 }
 
+function unpackedMessage(bytes: number): string {
+  return `The pack unpacks to ${Math.round(bytes / 1024 / 1024)} MB; Vorn installs at most ${MAX_UNPACKED_BYTES / 1024 / 1024} MB`
+}
+
 function describeSource(source: ConnectorPackSource): string {
   if (source.kind === 'npm') return source.packageName
+  if (source.kind === 'staged') return `a checked pack`
   return source.kind === 'file' ? source.path : source.url
 }
 
@@ -293,18 +332,57 @@ async function stagePack(
   await writeFile(archivePath, archive)
   const unpacked = join(staging, 'unpacked')
   mkdirSync(unpacked, { recursive: true })
+  // Counted as entries are admitted, so a small archive claiming gigabytes is
+  // refused mid-stream rather than after it has been written out.
+  let unpackedBytes = 0
   await extract({
     file: archivePath,
     cwd: unpacked,
     preservePaths: false,
-    filter: (path, entry) =>
-      isSafeArchiveEntry(path, String((entry as { type?: unknown }).type ?? ''))
+    filter: (path, entry) => {
+      const header = entry as { type?: unknown; size?: unknown }
+      if (!isSafeArchiveEntry(path, String(header.type ?? ''))) return false
+      unpackedBytes += typeof header.size === 'number' ? header.size : 0
+      if (unpackedBytes > MAX_UNPACKED_BYTES) throw new Error(unpackedMessage(unpackedBytes))
+      return true
+    }
   })
 
   const contents = packRootOf(unpacked)
   const manifest = verifyPackDir(contents)
   requireSafeId(manifest.id)
+  requireUnreservedId(manifest.id)
+  requireSafeVersion(manifest.version)
   return { contents, manifest }
+}
+
+/** Verified files an inspection is holding until it is confirmed or forgotten. */
+interface StagedPack {
+  staging: string
+  contents: string
+  manifest: SdkConnectorManifest
+  expiresAt: number
+}
+
+const staged = new Map<string, StagedPack>()
+
+/** Long enough to read a confirm sheet, short enough that abandoning one costs nothing. */
+const STAGED_TTL_MS = 10 * 60 * 1000
+
+function sweepStaged(now = Date.now()): void {
+  for (const [token, entry] of staged) {
+    if (entry.expiresAt > now) continue
+    staged.delete(token)
+    rmSync(entry.staging, { recursive: true, force: true })
+  }
+}
+
+/** Test seam: forget and delete everything an inspection is holding. */
+export function resetStagedPacks(): void {
+  for (const [token, entry] of staged) {
+    staged.delete(token)
+    rmSync(entry.staging, { recursive: true, force: true })
+  }
 }
 
 /**
@@ -312,15 +390,27 @@ async function stagePack(
  *
  * Dropping a file used to be the decision; this makes it the question, so what
  * a connector is and what it can do is on screen before its files are kept.
+ * The verified files are held under a token so confirming installs the bytes
+ * that were checked rather than fetching the source a second time.
  */
 export async function inspectPack(
   source: ConnectorPackSource,
   options: PackOptions = {}
 ): Promise<ConnectorPackPreview> {
+  sweepStaged()
   const staging = stagingDir(options)
+  let keep = false
   try {
-    const { manifest } = await stagePack(source, options, staging, () => {})
+    const { contents, manifest } = await stagePack(source, options, staging, () => {})
     const installed = describePack(manifest.id, options)
+    const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    staged.set(token, {
+      staging,
+      contents,
+      manifest,
+      expiresAt: Date.now() + STAGED_TTL_MS
+    })
+    keep = true
     return {
       ok: true,
       preview: {
@@ -332,7 +422,8 @@ export async function inspectPack(
         triggers: manifest.triggers,
         actions: manifest.actions,
         env: manifest.env,
-        ...(installed && { installedVersion: installed.version })
+        ...(installed && { installedVersion: installed.version }),
+        token
       }
     }
   } catch (error) {
@@ -340,7 +431,7 @@ export async function inspectPack(
     log.warn(`[packs] inspect of ${describeSource(source)} refused: ${message}`)
     return { ok: false, error: message }
   } finally {
-    rmSync(staging, { recursive: true, force: true })
+    if (!keep) rmSync(staging, { recursive: true, force: true })
   }
 }
 
@@ -350,23 +441,40 @@ export async function installPack(
   options: PackOptions = {}
 ): Promise<ConnectorPackResult> {
   const label = describeSource(source)
-  let id = label
+  const entry = source.kind === 'staged' ? staged.get(source.token) : undefined
+  if (source.kind === 'staged' && !entry) {
+    return { ok: false, error: 'That pack was checked too long ago; open it again to install it' }
+  }
+
+  // Keyed by the connector, never by a local path, and known up front for a
+  // staged install so its row shows progress from the first event.
+  let id = entry?.manifest.id ?? ''
   const report = (progress: Omit<ConnectorInstallProgress, 'id'>): void => {
+    if (id === '') return
     options.onProgress?.({ id, ...progress })
   }
 
-  const staging = stagingDir(options)
+  const staging = entry?.staging ?? stagingDir(options)
 
   try {
-    const { contents, manifest } = await stagePack(source, options, staging, report)
+    const { contents, manifest } = entry ?? (await stagePack(source, options, staging, report))
     id = manifest.id
 
     report({ phase: 'installing', version: manifest.version })
     const current = readCurrent(manifest.id, options)
     const target = join(packDir(manifest.id, options), manifest.version)
     mkdirSync(packDir(manifest.id, options), { recursive: true })
-    rmSync(target, { recursive: true, force: true })
-    renameSync(contents, target)
+    // The old copy moves aside rather than being deleted first, so a rename
+    // that fails leaves the version that was working still installed.
+    const displaced = existsSync(target) ? `${target}.replaced-${Date.now().toString(36)}` : ''
+    if (displaced !== '') renameSync(target, displaced)
+    try {
+      renameSync(contents, target)
+    } catch (error) {
+      if (displaced !== '') renameSync(displaced, target)
+      throw error
+    }
+    if (displaced !== '') rmSync(displaced, { recursive: true, force: true })
 
     // One version is kept behind the current one, so a bad update is a click to undo.
     const previousVersion =
@@ -395,6 +503,7 @@ export async function installPack(
     report({ phase: 'failed', error: message })
     return { ok: false, error: message }
   } finally {
+    if (source.kind === 'staged') staged.delete(source.token)
     rmSync(staging, { recursive: true, force: true })
   }
 }

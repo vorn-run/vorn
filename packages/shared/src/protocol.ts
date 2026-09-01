@@ -312,7 +312,10 @@ export interface RequestMethods {
   'connector:probeSdk': { params: SdkProbeRequest; result: SdkProbeResult }
   'connector:inspectPack': { params: ConnectorPackSource; result: ConnectorPackPreview }
   'connector:installPack': { params: ConnectorPackSource; result: ConnectorPackResult }
-  'connector:removePack': { params: string; result: { ok: boolean; error?: string } }
+  'connector:removePack': {
+    params: string
+    result: { ok: boolean; error?: string; connections?: number }
+  }
   'connector:rollbackPack': { params: string; result: ConnectorPackResult }
   'connector:listPacks': { params: void; result: InstalledConnectorPack[] }
 

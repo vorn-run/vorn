@@ -895,7 +895,9 @@ const api = {
   ): Promise<import('../../packages/shared/src/types').ConnectorPackResult> =>
     ipcRenderer.invoke(IPC.CONNECTOR_INSTALL_PACK, source),
 
-  removeConnectorPack: (id: string): Promise<{ ok: boolean; error?: string }> =>
+  removeConnectorPack: (
+    id: string
+  ): Promise<{ ok: boolean; error?: string; connections?: number }> =>
     ipcRenderer.invoke(IPC.CONNECTOR_REMOVE_PACK, id),
 
   rollbackConnectorPack: (
