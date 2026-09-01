@@ -181,7 +181,10 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         lastOutputTimestamp: Date.now()
       })
       // In place, so a resumed card keeps the slot it was already occupying.
-      const order = state.terminalOrder.map((id) => (id === previousId ? session.id : id))
+      const mapped = state.terminalOrder.map((id) => (id === previousId ? session.id : id))
+      // Once, even when the session was already on the board: two slots under one
+      // id draw the same pane twice and close together.
+      const order = mapped.filter((id, at) => mapped.indexOf(id) === at)
       window.api.notifyWidgetStatus()
       return {
         terminals: next,

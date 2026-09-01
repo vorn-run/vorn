@@ -66,7 +66,20 @@ export async function resumeEndedSession(
     return
   }
 
-  useAppStore.getState().replaceTerminal(terminalId, result.session)
+  const state = useAppStore.getState()
+  // Bound to a session this client already draws: the ended pane goes and the
+  // running one is brought forward. Replacing in place would key two panes by
+  // one id -- and closing either would then close both.
+  if (
+    result.boundTo &&
+    result.session.id !== terminalId &&
+    state.terminals.has(result.session.id)
+  ) {
+    state.removeTerminal(terminalId)
+    state.setFocusedTerminal(result.session.id)
+  } else {
+    state.replaceTerminal(terminalId, result.session)
+  }
   // Said even for an automatic resume: a pane quietly becoming a second view of
   // a session open elsewhere is the one surprise worth a line.
   if (result.boundTo) toast('That conversation was already running. This pane shows it.')
