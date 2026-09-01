@@ -113,7 +113,7 @@ describe('installing from a catalog row', () => {
     await screen.findAllByText(/the server went away/)
 
     installConnectorPack.mockResolvedValue({ ok: true, pack: { ...PREVIEW, path: '/p', bytes: 1 } })
-    fireEvent.click(await screen.findByRole('button', { name: /^(Install|Retry)$/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Couldn't install/ }))
 
     await waitFor(() => expect(screen.queryByText(/the server went away/)).toBeNull())
   })
