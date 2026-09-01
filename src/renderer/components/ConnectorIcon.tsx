@@ -1,4 +1,4 @@
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Globe } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import type { SdkConnectorIcon } from '../../shared/types'
 
@@ -16,6 +16,7 @@ const CONNECTOR_ICONS: Record<string, React.FC<{ size: number; className?: strin
       <path d="M5.66301 5.59517C9.18091 2.12137 14.8488 2.135 18.3498 5.63604C21.8508 9.13708 21.8645 14.8049 18.3907 18.3228L5.66301 5.59517Z" />
     </svg>
   ),
+  http: ({ size, className }) => <Globe size={size} className={className} />,
   mcp: ({ size, className }) => (
     <svg
       viewBox="0 0 24 24"

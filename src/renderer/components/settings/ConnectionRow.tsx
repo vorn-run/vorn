@@ -1,4 +1,5 @@
-import { Play, Trash2, AlertCircle, Workflow, Import } from 'lucide-react'
+import { useState } from 'react'
+import { Play, Trash2, AlertCircle, Workflow, Import, Activity } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { connectionIcon } from '../../lib/connection-icon'
@@ -45,6 +46,23 @@ export function ConnectionRow({
   onOpenWorkflow: (workflowId: string) => void
   onRefresh: () => void
 }) {
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean | null; message?: string } | null>(
+    null
+  )
+
+  const runTest = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      setTestResult(await window.api.preflightConnection(conn.id))
+    } catch (err) {
+      setTestResult({ ok: false, message: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   return (
     <div className="px-4 py-2 bg-white/[0.03] border border-white/[0.06] rounded-sm">
       <div className="flex items-center justify-between">
@@ -69,6 +87,17 @@ export function ConnectionRow({
               <Import size={13} className={backfillingId === conn.id ? 'animate-pulse' : ''} />
             </button>
           </Tooltip>
+          {conn.connectorId === 'http' && (
+            <Tooltip label="Send a request through this profile now and report the status">
+              <button
+                onClick={runTest}
+                disabled={testing}
+                className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors disabled:opacity-50"
+              >
+                <Activity size={13} className={testing ? 'animate-pulse' : ''} />
+              </button>
+            </Tooltip>
+          )}
           <Tooltip label="Remove this connection (seeded workflows are also deleted)">
             <button
               onClick={() => onDelete(conn.id)}
@@ -79,6 +108,12 @@ export function ConnectionRow({
           </Tooltip>
         </div>
       </div>
+
+      {testResult && (
+        <div className={`mt-1 text-[11px] ${testResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+          {testResult.message || (testResult.ok ? 'Reachable' : 'Failed')}
+        </div>
+      )}
 
       {/* Polled-by-workflow rows — make the mechanism visible */}
       <div className="mt-1.5 space-y-1">
