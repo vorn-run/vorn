@@ -1,4 +1,5 @@
 import type {
+  AgentType,
   AiAgentType,
   HeadlessSession,
   RecentSession,
@@ -70,6 +71,21 @@ export function transcriptHolder(
   live: TerminalSession[]
 ): TerminalSession | undefined {
   return live.find((session) => session.agentSessionId === transcriptId)
+}
+
+/**
+ * The conversation a fresh launch is really naming.
+ *
+ * Nothing for an agent that cannot be sent back to one: `agent-launch` drops the
+ * id there, so binding on it would answer with an unrelated session and claiming
+ * it would hold a transcript nobody is going to open.
+ */
+export function transcriptNamedOnCreate(
+  agentType: AgentType,
+  resumeSessionId: string | undefined
+): string | undefined {
+  if (!resumeSessionId || !supportsExactSessionResume(agentType)) return undefined
+  return resumeSessionId
 }
 
 /** The session a fresh launch should show instead, when it names one already running. */

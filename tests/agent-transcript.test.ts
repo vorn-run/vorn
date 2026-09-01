@@ -12,6 +12,7 @@ import {
   heldTranscripts,
   transcriptHolder,
   sessionToBindOnCreate,
+  transcriptNamedOnCreate,
   claimTranscriptFor
 } from '../packages/server/src/agent-transcript'
 import {
@@ -244,6 +245,18 @@ describe('a launch that names a conversation already running', () => {
   it('starts normally when it names no conversation at all', () => {
     const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
     expect(sessionToBindOnCreate(undefined, live)).toBeUndefined()
+  })
+
+  it('names one only for an agent that can be sent back to it', () => {
+    expect(transcriptNamedOnCreate('claude', 'transcript-a')).toBe('transcript-a')
+    expect(transcriptNamedOnCreate('codex', 'transcript-a')).toBe('transcript-a')
+    // The launch line drops the id for these, so nothing should be held on it.
+    expect(transcriptNamedOnCreate('gemini', 'transcript-a')).toBeUndefined()
+    expect(transcriptNamedOnCreate('shell', 'transcript-a')).toBeUndefined()
+  })
+
+  it('names nothing when the launch carried no id', () => {
+    expect(transcriptNamedOnCreate('claude', undefined)).toBeUndefined()
   })
 })
 

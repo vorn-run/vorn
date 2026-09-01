@@ -24,7 +24,12 @@ import { clearScreen } from './terminal-screen'
 import { discardHistory } from './history/writer'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
 import { clearScrollback, readScrollback } from './terminal-scrollback'
-import { claimTranscriptFor, sessionToBindOnCreate, transcriptHolder } from './agent-transcript'
+import {
+  claimTranscriptFor,
+  sessionToBindOnCreate,
+  transcriptHolder,
+  transcriptNamedOnCreate
+} from './agent-transcript'
 import {
   claimSpawningTranscript,
   releaseSpawningTranscript,
@@ -363,13 +368,15 @@ export function registerAllMethods(): void {
 
   // Terminal
   registerMethod('terminal:create', (payload) => {
+    const named = transcriptNamedOnCreate(payload.agentType, payload.resumeSessionId)
     // Naming a conversation that is already running: show what is writing it
     // rather than starting a second agent on it, as a resume does.
-    const running = sessionToBindOnCreate(payload.resumeSessionId, ptyManager.getLiveSessions())
+    const running = sessionToBindOnCreate(named, ptyManager.getLiveSessions())
     if (running) return running
     const session = ptyManager.createPty(payload)
-    // Agents that cannot be told an id report theirs seconds later; hold it meanwhile.
-    if (payload.resumeSessionId) claimSpawningTranscript(payload.resumeSessionId, session.id)
+    // Only until the session names the conversation itself: an agent that can be
+    // told an id already carries it, and one that cannot reports seconds later.
+    if (named && !session.agentSessionId) claimSpawningTranscript(named, session.id)
     return session
   })
   /**
@@ -776,6 +783,9 @@ export function registerAllMethods(): void {
 
       // Same id, same reasons as the shell branch above.
       const session = ptyManager.createPty(buildRestorePayload(previous, transcriptId), id)
+      // The record names the conversation now, so the claim standing in for it is
+      // spent; leaving it would hold an id the session already reports.
+      if (session.agentSessionId) releaseSpawningTranscriptsFor(id)
       ptyManager.injectOutput(session.id, BETWEEN_RUNS)
       sessionManager.scheduleSave()
       return { ok: true as const, session }
