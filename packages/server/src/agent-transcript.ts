@@ -1,4 +1,9 @@
-import type { AiAgentType, RecentSession, TerminalSession } from '@vornrun/shared/types'
+import type {
+  AiAgentType,
+  HeadlessSession,
+  RecentSession,
+  TerminalSession
+} from '@vornrun/shared/types'
 import { supportsExactSessionResume } from '@vornrun/shared/types'
 import { comparablePath, getRecentSessionsFor } from './agent-history'
 import { claimSpawningTranscript, spawningTranscripts } from './transcript-claims'
@@ -43,12 +48,23 @@ export function resolveTranscriptId(
   return atPreferredPath(getRecentSessionsFor(agentType))?.sessionId
 }
 
-/** The conversations processes are writing right now. */
-export function heldTranscripts(live: TerminalSession[]): Set<string> {
-  const ids = live.map((session) => session.agentSessionId)
+/**
+ * The conversations processes are writing right now.
+ *
+ * A workflow step runs in its own manager rather than the pty one, and it can be
+ * launched naming a conversation. Left out, its transcript reads as free and a
+ * resume beside it starts a second agent on the run in progress.
+ */
+export function heldTranscripts(
+  live: TerminalSession[],
+  headless: HeadlessSession[] = []
+): Set<string> {
+  const running = headless.filter((session) => session.status === 'running')
+  const ids = [...live, ...running].map((session) => session.agentSessionId)
   return new Set(ids.filter((id): id is string => id !== undefined))
 }
 
+/** Only a pane can be handed back, so a headless run holds without being a holder. */
 export function transcriptHolder(
   transcriptId: string,
   live: TerminalSession[]
@@ -56,14 +72,25 @@ export function transcriptHolder(
   return live.find((session) => session.agentSessionId === transcriptId)
 }
 
+/** The session a fresh launch should show instead, when it names one already running. */
+export function sessionToBindOnCreate(
+  resumeSessionId: string | undefined,
+  live: TerminalSession[]
+): TerminalSession | undefined {
+  return resumeSessionId ? transcriptHolder(resumeSessionId, live) : undefined
+}
+
 /** The conversation a resume should continue, claimed against everything in flight. */
 export function claimTranscriptFor(
   session: TerminalSession,
   live: TerminalSession[],
-  sessionId: string
+  sessionId: string,
+  headless: HeadlessSession[] = []
 ): string | undefined {
-  const held = new Set([...heldTranscripts(live), ...spawningTranscripts()])
+  const held = new Set([...heldTranscripts(live, headless), ...spawningTranscripts()])
   const transcriptId = resolveTranscriptId(session, held)
-  if (transcriptId) claimSpawningTranscript(transcriptId, sessionId)
-  return transcriptId
+  if (!transcriptId) return undefined
+  // Taken between resolving and claiming: let the agent choose rather than double up.
+  const taken = claimSpawningTranscript(transcriptId, sessionId)
+  return taken === undefined ? transcriptId : undefined
 }

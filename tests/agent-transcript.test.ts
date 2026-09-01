@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { RecentSession, TerminalSession } from '../packages/shared/src/types'
+import type { HeadlessSession, RecentSession, TerminalSession } from '../packages/shared/src/types'
 
 const getRecentSessionsFor = vi.fn()
 vi.mock('../packages/server/src/agent-history', async (importOriginal) => ({
@@ -11,6 +11,7 @@ import {
   resolveTranscriptId,
   heldTranscripts,
   transcriptHolder,
+  sessionToBindOnCreate,
   claimTranscriptFor
 } from '../packages/server/src/agent-transcript'
 import {
@@ -188,6 +189,61 @@ describe('a launch that names no conversation', () => {
   it('does not treat a session with no reported conversation as holding one', () => {
     const live = [session({ id: 'one' }), session({ id: 'two' })]
     expect(heldTranscripts(live).size).toBe(0)
+  })
+})
+
+describe('a workflow step running beside the panes', () => {
+  const headless = (overrides: Partial<HeadlessSession> = {}): HeadlessSession =>
+    ({
+      id: 'headless-1',
+      pid: 99,
+      agentType: 'claude',
+      projectName: 'my-app',
+      projectPath: '/home/user/my-app',
+      status: 'running',
+      startedAt: Date.now(),
+      ...overrides
+    }) as HeadlessSession
+
+  it('holds the conversation it was launched on, though no pane is drawing it', () => {
+    expect(heldTranscripts([], [headless({ agentSessionId: 'transcript-a' })])).toEqual(
+      new Set(['transcript-a'])
+    )
+  })
+
+  it('is let go of once it has exited', () => {
+    const done = headless({ agentSessionId: 'transcript-a', status: 'exited' })
+    expect(heldTranscripts([], [done]).size).toBe(0)
+  })
+
+  it('is not resumed onto, even by the pane that pinned that conversation', () => {
+    getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'transcript-b' })])
+    const resumed = session({ id: 'pane', agentSessionId: 'transcript-a' })
+    const running = [headless({ agentSessionId: 'transcript-a' })]
+    expect(claimTranscriptFor(resumed, [], 'pane', running)).toBe('transcript-b')
+  })
+
+  it('leaves the agent to choose when its conversation is the only one', () => {
+    getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'transcript-a' })])
+    const running = [headless({ agentSessionId: 'transcript-a' })]
+    expect(claimTranscriptFor(session({ id: 'pane' }), [], 'pane', running)).toBeUndefined()
+  })
+})
+
+describe('a launch that names a conversation already running', () => {
+  it('is handed the session writing it rather than starting beside it', () => {
+    const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
+    expect(sessionToBindOnCreate('transcript-a', live)?.id).toBe('one')
+  })
+
+  it('starts normally when nothing is writing that conversation', () => {
+    const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
+    expect(sessionToBindOnCreate('transcript-b', live)).toBeUndefined()
+  })
+
+  it('starts normally when it names no conversation at all', () => {
+    const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
+    expect(sessionToBindOnCreate(undefined, live)).toBeUndefined()
   })
 })
 
