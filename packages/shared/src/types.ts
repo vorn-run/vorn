@@ -1669,7 +1669,12 @@ export const IPC = {
   CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
   CONNECTOR_PROBE_SDK: 'connector:probeSdk',
   CONNECTOR_CATALOG: 'connector:catalog',
-  CONNECTOR_CATALOG_REFRESH: 'connector:catalogRefresh'
+  CONNECTOR_CATALOG_REFRESH: 'connector:catalogRefresh',
+  CONNECTOR_INSTALL_PACK: 'connector:installPack',
+  CONNECTOR_REMOVE_PACK: 'connector:removePack',
+  CONNECTOR_ROLLBACK_PACK: 'connector:rollbackPack',
+  CONNECTOR_LIST_PACKS: 'connector:listPacks',
+  CONNECTOR_INSTALL_PROGRESS: 'connector:installProgress'
 } as const
 
 /**

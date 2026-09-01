@@ -885,6 +885,36 @@ const api = {
     import('../../packages/shared/src/types').ConnectorCatalogSnapshot
   > => ipcRenderer.invoke(IPC.CONNECTOR_CATALOG_REFRESH),
 
+  installConnectorPack: (
+    source: import('../../packages/shared/src/types').ConnectorPackSource
+  ): Promise<import('../../packages/shared/src/types').ConnectorPackResult> =>
+    ipcRenderer.invoke(IPC.CONNECTOR_INSTALL_PACK, source),
+
+  removeConnectorPack: (id: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IPC.CONNECTOR_REMOVE_PACK, id),
+
+  rollbackConnectorPack: (
+    id: string
+  ): Promise<import('../../packages/shared/src/types').ConnectorPackResult> =>
+    ipcRenderer.invoke(IPC.CONNECTOR_ROLLBACK_PACK, id),
+
+  listConnectorPacks: (): Promise<
+    import('../../packages/shared/src/types').InstalledConnectorPack[]
+  > => ipcRenderer.invoke(IPC.CONNECTOR_LIST_PACKS),
+
+  onConnectorInstallProgress: (
+    callback: (progress: import('../../packages/shared/src/types').ConnectorInstallProgress) => void
+  ) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      progress: import('../../packages/shared/src/types').ConnectorInstallProgress
+    ): void => callback(progress)
+    ipcRenderer.on(IPC.CONNECTOR_INSTALL_PROGRESS, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.CONNECTOR_INSTALL_PROGRESS, listener)
+    }
+  },
+
   upsertTaskFromItem: (params: {
     connectionId: string
     item: import('../../packages/shared/src/types').ConnectorItemContext

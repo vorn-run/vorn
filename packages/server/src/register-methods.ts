@@ -131,7 +131,12 @@ import {
   invokeMcpTool,
   discoverTools,
   mcpConnectionActions,
-  stopMcpClient
+  stopMcpClient,
+  stopClientsForConnector,
+  installPack,
+  removePack,
+  rollbackPack,
+  listInstalledPacks
 } from './connectors'
 import {
   MCP_CONNECTOR_ID,
@@ -147,6 +152,7 @@ import {
 } from './connectors/http'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
+import type { ConnectorPackSource } from '@vornrun/shared/types'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
@@ -1551,6 +1557,36 @@ export function registerAllMethods(): void {
     await refreshCatalog()
     return catalogSnapshot()
   })
+
+  /**
+   * Install a connector as a file, so launching it later needs no registry.
+   *
+   * Progress is pushed rather than returned because verification of a download
+   * is the part worth watching, and a caller holding one promise for the whole
+   * install can show nothing until it is over.
+   */
+  registerMethod('connector:installPack', async (source: ConnectorPackSource) => {
+    const result = await installPack(source, {
+      onProgress: (progress) => clientRegistry.broadcast(IPC.CONNECTOR_INSTALL_PROGRESS, progress),
+      onChanged: stopClientsForConnector
+    })
+    if (result.ok) dbSignalChange()
+    return result
+  })
+
+  registerMethod('connector:removePack', async (id: string) => {
+    const result = await removePack(id, { onChanged: stopClientsForConnector })
+    if (result.ok) dbSignalChange()
+    return result
+  })
+
+  registerMethod('connector:rollbackPack', async (id: string) => {
+    const result = await rollbackPack(id, { onChanged: stopClientsForConnector })
+    if (result.ok) dbSignalChange()
+    return result
+  })
+
+  registerMethod('connector:listPacks', () => listInstalledPacks())
 
   /**
    * One-shot backfill for a connection. Calls listItems() (not poll()) so it
