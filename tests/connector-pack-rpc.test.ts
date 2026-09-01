@@ -9,6 +9,7 @@ const read = (file: string): string => readFileSync(join(ROOT, file), 'utf8')
 /** A half-wired method hangs at runtime rather than failing at build. */
 describe('connector pack RPC wiring', () => {
   const channels = {
+    CONNECTOR_INSPECT_PACK: 'connector:inspectPack',
     CONNECTOR_INSTALL_PACK: 'connector:installPack',
     CONNECTOR_REMOVE_PACK: 'connector:removePack',
     CONNECTOR_ROLLBACK_PACK: 'connector:rollbackPack',
@@ -55,6 +56,7 @@ describe('connector pack RPC wiring', () => {
   it('exposes each one on the preload, progress included', () => {
     const preload = read('src/preload/index.ts')
     for (const method of [
+      'inspectConnectorPack',
       'installConnectorPack',
       'removeConnectorPack',
       'rollbackConnectorPack',
