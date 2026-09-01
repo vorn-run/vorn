@@ -38,7 +38,12 @@ import {
 } from '../../../shared/types'
 import { WorkflowCanvas, AddableNodeType, InsertAnchor } from './WorkflowCanvas'
 import { StepLibrary, type LibraryPick } from './panels/StepLibrary'
-import { layoutPositions } from '../../lib/workflow-canvas-layout'
+import {
+  layoutPositions,
+  loopBodyMembers,
+  TRIGGER_ANCHOR,
+  TRIGGER_ANCHOR_ID
+} from '../../lib/workflow-canvas-layout'
 import { useDefinitionHistory } from '../../lib/use-definition-history'
 import { NodeConfigPanel } from './panels/NodeConfigPanel'
 import { RunHistoryPanel } from './panels/RunHistoryPanel'
@@ -49,6 +54,8 @@ import {
   positionsAreSeed,
   createScriptNode,
   createConditionNode,
+  createHttpRequestNode,
+  switchTriggerType,
   createApprovalNode,
   createCallConnectorActionNode,
   appendNodeAfter,
@@ -70,7 +77,6 @@ import {
   rerunWorkflowRun,
   stopWorkflowRun
 } from '../../lib/workflow-execution'
-import { loopBodyMembers } from '../../lib/workflow-canvas-layout'
 import { toast } from '../Toast'
 import {
   slugify,
@@ -375,12 +381,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setStaggerDelayMs(existingWorkflow.staggerDelayMs)
       setAutoCleanupWorktrees(existingWorkflow.autoCleanupWorktrees ?? false)
     } else if (!editingId) {
-      // New workflow — start with a manual trigger
-      const trigger = createTriggerNode({ triggerType: 'manual' })
+      // New workflow — an empty canvas whose first pick is the trigger.
       setName('New Workflow')
       setIcon('Workflow')
       setIconColor('#3b82f6')
-      setNodes([trigger])
+      setNodes([])
       setEdges([])
       setEnabled(true)
       setStaggerDelayMs(undefined)
@@ -553,6 +558,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     if (!inline) handleClose()
   }, [persistWorkflow, editingId, inline, handleClose])
 
+  const hasTrigger = nodes.some((n) => n.type === 'trigger')
+
   const handleRun = useCallback(() => {
     const workflow = persistWorkflow()
     if (!inline) {
@@ -571,7 +578,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   }, [editingId, removeWorkflowFromStore, handleClose])
 
   const createNodeWithUniqueSlug = useCallback(
-    (type: AddableNodeType) => {
+    (type: AddableNodeType, excludeNodeId?: string) => {
       const projects = useAppStore.getState().config?.projects || []
       const firstProject = projects[0]
       const factories: Record<AddableNodeType, () => WorkflowNode> = {
@@ -580,6 +587,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         loop: () => createLoopNode(),
         script: () => createScriptNode(),
         connectorAction: () => createCallConnectorActionNode(),
+        httpRequest: () => createHttpRequestNode(),
         agent: () =>
           createLaunchAgentNode(
             firstProject ? { projectName: firstProject.name, projectPath: firstProject.path } : {}
@@ -587,7 +595,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       }
       const newNode = factories[type]()
       if (newNode.slug) {
-        const existingSlugs = new Set(nodes.filter((n) => n.slug).map((n) => n.slug!))
+        const existingSlugs = new Set(
+          nodes.filter((n) => n.slug && n.id !== excludeNodeId).map((n) => n.slug!)
+        )
         newNode.slug = ensureUniqueSlug(newNode.slug, existingSlugs)
       }
       return newNode
@@ -701,7 +711,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
   const handlePaletteInsert = useCallback(
     (
-      pick: Exclude<LibraryPick, { kind: 'parallel' }>,
+      pick: Exclude<
+        LibraryPick,
+        { kind: 'parallel' } | { kind: 'triggerType' } | { kind: 'connectorTrigger' }
+      >,
       afterNodeId: string,
       position: { x: number; y: number }
     ) => {
@@ -766,6 +779,91 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       const anchor = pendingInsert
       if (!anchor) return
       setPendingInsert(null)
+      if (pick.kind === 'triggerType' || pick.kind === 'connectorTrigger') {
+        const config: TriggerConfig =
+          pick.kind === 'triggerType'
+            ? switchTriggerType(pick.triggerType)
+            : {
+                triggerType: 'connectorPoll',
+                connectionId: pick.connectionId,
+                event: pick.event,
+                cron: '*/5 * * * *'
+              }
+        // A pick replaces the existing trigger in place; edges stay put,
+        // while the label resets to the new type's default like any swap.
+        const existing = nodes.find((n) => n.type === 'trigger')
+        if (existing) {
+          const cur = existing.config as TriggerConfig
+          // Re-picking what is already there must not rotate tokens or reset config.
+          const same =
+            pick.kind === 'triggerType'
+              ? cur.triggerType === pick.triggerType
+              : cur.triggerType === 'connectorPoll' &&
+                cur.connectionId === pick.connectionId &&
+                cur.event === pick.event
+          if (same) return
+          const fresh = createTriggerNode(config)
+          setNodes(
+            nodes.map((n) =>
+              n.id === existing.id
+                ? { ...fresh, id: existing.id, position: existing.position, slug: existing.slug }
+                : n
+            )
+          )
+          setSelectedNodeId(existing.id)
+        } else {
+          const trigger = createTriggerNode(config)
+          // Re-adding a trigger reconnects the orphaned chain: every top-level
+          // node with no incoming edge becomes its successor.
+          const bodySet = loopBodyMembers(nodes)
+          const hasIncoming = new Set(edges.map((e) => e.target))
+          setNodes([...nodes, trigger])
+          setEdges([
+            ...edges,
+            ...nodes
+              .filter((n) => !hasIncoming.has(n.id) && !bodySet.has(n.id))
+              .map((n) => ({ id: crypto.randomUUID(), source: trigger.id, target: n.id }))
+          ])
+          setSelectedNodeId(trigger.id)
+        }
+        return
+      }
+      if (anchor.replaceNodeId) {
+        const target = nodes.find((n) => n.id === anchor.replaceNodeId)
+        if (!target) return
+        if (pick.kind !== 'type' && pick.kind !== 'connectorAction') return
+        if (pick.kind === 'type' && (pick.type === 'condition' || pick.type === 'loop')) return
+        const fresh =
+          pick.kind === 'connectorAction'
+            ? (() => {
+                const n = createNodeWithUniqueSlug('connectorAction', target.id)
+                return {
+                  ...n,
+                  config: {
+                    ...(n.config as CallConnectorActionConfig),
+                    connectionId: pick.connectionId,
+                    action: pick.action
+                  }
+                }
+              })()
+            : createNodeWithUniqueSlug(pick.type, target.id)
+        // Same swap the trigger uses: id, position, edges, and the slug survive,
+        // so downstream {{steps.<slug>.*}} references keep resolving.
+        setNodes(
+          nodes.map((n) =>
+            n.id === target.id
+              ? {
+                  ...fresh,
+                  id: target.id,
+                  position: target.position,
+                  slug: target.slug ?? fresh.slug
+                }
+              : n
+          )
+        )
+        setSelectedNodeId(target.id)
+        return
+      }
       // A delete or undo can outlive the anchor; inserting against a ghost writes dangling edges.
       if (!nodes.some((n) => n.id === anchor.afterNodeId)) return
       const before = anchor.beforeNodeId
@@ -785,7 +883,15 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, pick.type)
       }
     },
-    [pendingInsert, nodes, handleAddParallelBranch, handlePaletteInsert, handleInsertNode]
+    [
+      pendingInsert,
+      nodes,
+      edges,
+      createNodeWithUniqueSlug,
+      handleAddParallelBranch,
+      handlePaletteInsert,
+      handleInsertNode
+    ]
   )
 
   const handleNodeConfigChange = useCallback((nodeId: string, config: WorkflowNode['config']) => {
@@ -1016,11 +1122,15 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
               </Tooltip>
             </div>
           ) : (
-            <Tooltip label="Run workflow" position="bottom">
+            <Tooltip
+              label={hasTrigger ? 'Run workflow' : 'Add a trigger before running'}
+              position="bottom"
+            >
               <button
                 onClick={handleRun}
+                disabled={!hasTrigger}
                 aria-label="Run workflow"
-                className="text-gray-400 hover:text-white p-1.5 rounded-md hover:bg-white/[0.06] transition-colors"
+                className="text-gray-400 hover:text-white p-1.5 rounded-md hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:hover:text-gray-400 disabled:hover:bg-transparent"
               >
                 <Play size={15} />
               </button>
@@ -1122,6 +1232,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         <WorkflowCanvas
           nodes={nodes}
           edges={edges}
+          loadKey={editingId}
           onNodeClick={handleNodeClick}
           onOpenLibrary={handleOpenLibrary}
           libraryAnchor={pendingInsert}
@@ -1136,7 +1247,12 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
         {pendingInsert && (
           <StepLibrary
-            scope={{ bodyOnly: pendingInsert.bodyOnly, insideBranch: pendingInsert.insideBranch }}
+            scope={{
+              bodyOnly: pendingInsert.bodyOnly,
+              insideBranch: pendingInsert.insideBranch,
+              triggers: pendingInsert.afterNodeId === TRIGGER_ANCHOR_ID,
+              replacing: !!pendingInsert.replaceNodeId
+            }}
             onPick={handleLibraryPick}
             onClose={() => setPendingInsert(null)}
           />
@@ -1162,6 +1278,16 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         {selectedNode && !showRunHistory && !pendingInsert && (
           <NodeConfigPanel
             node={selectedNode}
+            onOpenTriggerLibrary={() => handleOpenLibrary(TRIGGER_ANCHOR)}
+            onOpenReplaceLibrary={(nodeId) =>
+              handleOpenLibrary({
+                afterNodeId: nodeId,
+                beforeNodeId: null,
+                insideBranch: false,
+                bodyOnly: false,
+                replaceNodeId: nodeId
+              })
+            }
             allNodes={nodes}
             onChange={handleNodeConfigChange}
             onLabelChange={handleNodeLabelChange}

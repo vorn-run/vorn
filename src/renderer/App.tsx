@@ -1,3 +1,4 @@
+import { schedulerExecutionContext } from './lib/workflow-helpers'
 import { useEffect, useState, Suspense, lazy } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AnimatePresence } from 'framer-motion'
@@ -359,7 +360,7 @@ export function App() {
           return
         }
 
-        const context = connectorItem || inputs ? { connectorItem, inputs } : undefined
+        const context = schedulerExecutionContext(connectorItem, inputs)
         try {
           const execution = await runWorkflow(workflow, context, { source: 'scheduler' })
           // A different run may be parked on an approval gate. It did not

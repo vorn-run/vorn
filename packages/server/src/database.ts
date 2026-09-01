@@ -2081,6 +2081,34 @@ export function dbCountActiveConnectorInboxLeases(now: string): number {
  * A crash can leave both absent or both present, never a cursor that points
  * beyond events which were only held in memory.
  */
+/** One webhook request becomes one durable inbox row. */
+export function dbEnqueueWebhookEvent(args: {
+  workflowId: string
+  eventId: string
+  receivedAt: string
+  item: ConnectorItemContext
+}): void {
+  const d = getDb()
+  // The inbox requires a connection row; webhook events share one internal one.
+  d.prepare(
+    `INSERT OR IGNORE INTO source_connections (id, connector_id, name, created_at)
+     VALUES ('webhook', 'webhook', 'Webhook', ?)`
+  ).run(args.receivedAt)
+  d.prepare(
+    `INSERT OR IGNORE INTO connector_inbox (
+      workflow_id, connection_id, connector_id, event_id, event_type,
+      event_timestamp, payload, status, attempts, available_at, created_at
+    ) VALUES (?, 'webhook', 'webhook', ?, 'webhook', ?, ?, 'pending', 0, ?, ?)`
+  ).run(
+    args.workflowId,
+    args.eventId,
+    args.receivedAt,
+    JSON.stringify(args.item),
+    args.receivedAt,
+    args.receivedAt
+  )
+}
+
 export function dbRecordConnectorPollPage(args: {
   workflowId: string
   connectionId: string
@@ -2232,6 +2260,9 @@ export function dbCompleteConnectorInbox(
   return result.changes === 1
 }
 
+/** Retries stop here: a row this old is failing for a reason a retry won't fix. */
+export const MAX_INBOX_ATTEMPTS = 8
+
 export function dbRetryConnectorInbox(args: {
   id: number
   leaseToken: string
@@ -2241,11 +2272,30 @@ export function dbRetryConnectorInbox(args: {
   const d = getDb()
   const row = d
     .prepare(
-      `SELECT attempts FROM connector_inbox
+      `SELECT attempts, workflow_id FROM connector_inbox
        WHERE id = ? AND status = 'leased' AND lease_token = ?`
     )
-    .get(args.id, args.leaseToken) as { attempts: number } | undefined
+    .get(args.id, args.leaseToken) as { attempts: number; workflow_id: string } | undefined
   if (!row) return false
+  // Attributed to the workflow, since webhook rows share one connection row.
+  const attributed = `Workflow ${row.workflow_id}: ${args.error}`
+  if (row.attempts >= MAX_INBOX_ATTEMPTS) {
+    const dead = d
+      .prepare(
+        `UPDATE connector_inbox
+         SET status = 'dead', lease_until = NULL, lease_token = NULL,
+             last_error = ?, processed_at = ?
+         WHERE id = ? AND status = 'leased' AND lease_token = ?`
+      )
+      .run(args.error, args.now, args.id, args.leaseToken)
+    if (dead.changes !== 1) return false
+    d.prepare(
+      `UPDATE source_connections
+       SET last_sync_error = ?
+       WHERE id = (SELECT connection_id FROM connector_inbox WHERE id = ?)`
+    ).run(`${attributed} (gave up after ${MAX_INBOX_ATTEMPTS} attempts)`, args.id)
+    return true
+  }
   const delayMs = Math.min(60_000 * 2 ** Math.max(0, row.attempts - 1), 60 * 60_000)
   const availableAt = new Date(Date.parse(args.now) + delayMs).toISOString()
   const result = d
@@ -2261,7 +2311,7 @@ export function dbRetryConnectorInbox(args: {
     `UPDATE source_connections
      SET last_sync_error = ?
      WHERE id = (SELECT connection_id FROM connector_inbox WHERE id = ?)`
-  ).run(args.error, args.id)
+  ).run(attributed, args.id)
   return true
 }
 

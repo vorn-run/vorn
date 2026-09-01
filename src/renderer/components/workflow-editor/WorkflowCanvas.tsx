@@ -14,6 +14,7 @@ import {
   applyNodeChanges,
   getBezierPath,
   useReactFlow,
+  useUpdateNodeInternals,
   type Connection,
   type Edge,
   type EdgeProps,
@@ -22,14 +23,18 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlignVerticalSpaceAround, Repeat, StepForward, Trash2 } from 'lucide-react'
+import { AlignVerticalSpaceAround, Repeat, Replace, StepForward, Trash2, Zap } from 'lucide-react'
 import { LoopConfig, NodeExecutionStatus, WorkflowEdge, WorkflowNode } from '../../../shared/types'
 import {
   AddStepNodeData,
   CanvasEdgeData,
   canConnect,
-  toCanvasElements
+  estimateNodeHeight,
+  toCanvasElements,
+  TRIGGER_ANCHOR,
+  TRIGGER_ANCHOR_ID
 } from '../../lib/workflow-canvas-layout'
+import { REPLACEABLE_NODE_TYPES } from '../../lib/workflow-helpers'
 import { NODE_GLYPH, NODE_SELECTED, NODE_UNSELECTED } from './node-visuals'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
@@ -42,6 +47,7 @@ export type AddableNodeType =
   | 'condition'
   | 'approval'
   | 'connectorAction'
+  | 'httpRequest'
   | 'loop'
 
 /** Where a pick from the step library lands, and what that spot allows. */
@@ -53,6 +59,8 @@ export interface InsertAnchor {
   bodyOnly: boolean
   /** Flow coordinates for picks that land where something was dropped. */
   position?: { x: number; y: number }
+  /** Set when the pick swaps this node in place instead of inserting. */
+  replaceNodeId?: string
 }
 
 function isAnchor(anchor: InsertAnchor | null, afterNodeId: string, beforeNodeId: string | null) {
@@ -71,7 +79,7 @@ interface Props {
   onConnectEdge: (sourceId: string, targetId: string) => void
   /** Dragged nodes settled; write the new positions into the definition. */
   onPositionsCommit: (positions: Record<string, { x: number; y: number }>) => void
-  /** Delete-key removal of the selected step (never the trigger). */
+  /** Delete-key removal of the selected step, trigger included. */
   onDeleteNode?: (nodeId: string) => void
   /** Hover-toolbar shortcut into the editor's run-to-step path. */
   onRunToStep?: (nodeId: string) => void
@@ -79,6 +87,8 @@ interface Props {
   selectedNodeId: string | null
   /** What each node is doing in live runs; absent when nothing is running. */
   nodeStatus?: Record<string, NodeExecutionStatus>
+  /** Changes when a different workflow loads; re-fits the view top-aligned. */
+  loadKey?: string | null
 }
 
 /** Kept in context so selection/status churn re-renders cards without rebuilding the node array. */
@@ -107,14 +117,17 @@ const TOOLBAR_BUTTON = `p-1.5 rounded-md bg-surface-overlay border border-white/
                         hover:text-white hover:border-white/[0.2] transition-colors`
 
 function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
-  const { onDeleteNode, onRunToStep } = useInteractions()
+  const { nodesById, onDeleteNode, onRunToStep, onOpenLibrary } = useInteractions()
+  const node = nodesById.get(nodeId)
   if (!onDeleteNode && !onRunToStep) return null
+  const isTrigger = node?.type === 'trigger'
+  const replaceable = !!node && REPLACEABLE_NODE_TYPES.has(node.type)
   return (
     <div
       className="absolute left-full top-1/2 -translate-y-1/2 ml-1.5 flex flex-col gap-1 opacity-0
                  group-hover:opacity-100 transition-opacity duration-100 z-10"
     >
-      {onRunToStep && (
+      {onRunToStep && !isTrigger && (
         <Tooltip label="Run to this step" position="right">
           <button
             aria-label="Run to this step"
@@ -125,6 +138,31 @@ function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
             className={TOOLBAR_BUTTON}
           >
             <StepForward size={12} />
+          </button>
+        </Tooltip>
+      )}
+      {(replaceable || isTrigger) && (
+        <Tooltip label="Replace step" position="right">
+          <button
+            aria-label="Replace step"
+            onClick={(e) => {
+              e.stopPropagation()
+              // The trigger swaps through its own library scope; both keep id and edges.
+              onOpenLibrary(
+                isTrigger
+                  ? TRIGGER_ANCHOR
+                  : {
+                      afterNodeId: nodeId,
+                      beforeNodeId: null,
+                      insideBranch: false,
+                      bodyOnly: false,
+                      replaceNodeId: nodeId
+                    }
+              )
+            }}
+            className={TOOLBAR_BUTTON}
+          >
+            <Replace size={12} />
           </button>
         </Tooltip>
       )}
@@ -149,19 +187,31 @@ function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
 const HANDLE_CLASS = '!w-[7px] !h-[7px] !bg-surface-base !border !border-white/[0.35] !rounded-full'
 
 /** A single step: the existing card, with ports above and below. */
-function StepNode({ data }: NodeProps) {
-  const { nodesById, selectedNodeId, nodeStatus, onNodeClick } = useInteractions()
+function StepNode({ data, id }: NodeProps) {
+  const { nodesById, allNodes, selectedNodeId, nodeStatus, onNodeClick } = useInteractions()
   const node = nodesById.get(data.nodeId as string)
+  const updateNodeInternals = useUpdateNodeInternals()
+  // A replace-in-place keeps the id, so React Flow would keep the old card's
+  // measured handle positions; re-measure when the rendered shape changes.
+  // Never on mount: that races the initial measure while fitView settles.
+  // Trigger kinds share a type and height, so the kind is part of the shape.
+  const kind = (node?.config as { triggerType?: string } | undefined)?.triggerType ?? ''
+  const shape = node ? `${node.type}:${kind}:${estimateNodeHeight(node, allNodes)}` : ''
+  const lastShape = useRef<string | null>(null)
+  useEffect(() => {
+    if (shape && lastShape.current !== null && lastShape.current !== shape) {
+      updateNodeInternals(id)
+    }
+    lastShape.current = shape || lastShape.current
+  }, [id, shape, updateNodeInternals])
   if (!node) return null
 
   return (
     <div className="relative group">
       {node.type !== 'trigger' && (
-        <>
-          <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
-          <NodeHoverToolbar nodeId={node.id} />
-        </>
+        <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
       )}
+      <NodeHoverToolbar nodeId={node.id} />
       <NodeCard
         node={node}
         selected={node.id === selectedNodeId}
@@ -174,7 +224,7 @@ function StepNode({ data }: NodeProps) {
 }
 
 /** A loop and its body as one enclosure; membership stays `bodyNodeIds`, not canvas geometry. */
-function LoopNode({ data }: NodeProps) {
+function LoopNode({ data, id }: NodeProps) {
   const {
     nodesById,
     allNodes,
@@ -185,6 +235,15 @@ function LoopNode({ data }: NodeProps) {
     libraryAnchor
   } = useInteractions()
   const node = nodesById.get(data.nodeId as string)
+  const updateNodeInternals = useUpdateNodeInternals()
+  const shape = node ? `${node.type}:${estimateNodeHeight(node, allNodes)}` : ''
+  const lastShape = useRef<string | null>(null)
+  useEffect(() => {
+    if (shape && lastShape.current !== null && lastShape.current !== shape) {
+      updateNodeInternals(id)
+    }
+    lastShape.current = shape || lastShape.current
+  }, [id, shape, updateNodeInternals])
   if (!node || node.type !== 'loop') return null
 
   const config = node.config as LoopConfig
@@ -303,6 +362,29 @@ function AddStepNode({ data }: NodeProps) {
   )
 }
 
+/** The dashed spot where a workflow's trigger goes; opens the library in trigger scope. */
+function AddTriggerNode() {
+  const { onOpenLibrary, libraryAnchor } = useInteractions()
+  const active = libraryAnchor?.afterNodeId === TRIGGER_ANCHOR_ID
+  return (
+    <div className="relative pointer-events-auto">
+      <button
+        onClick={() => onOpenLibrary(TRIGGER_ANCHOR)}
+        className={`w-[280px] h-[58px] flex items-center justify-center gap-2 rounded-lg border border-dashed
+                    text-[13px] transition-colors
+                    ${
+                      active
+                        ? 'border-white/40 text-white'
+                        : 'border-white/[0.15] text-gray-500 hover:text-gray-300 hover:border-white/[0.3]'
+                    }`}
+      >
+        <Zap size={14} strokeWidth={2} />
+        Add a trigger
+      </button>
+    </div>
+  )
+}
+
 /** The line, the branch pill, and a hover + whose delayed leave lets the mouse reach it. */
 function StepEdge({
   id,
@@ -395,7 +477,12 @@ function StepEdge({
   )
 }
 
-const NODE_TYPES = { step: StepNode, loop: LoopNode, addStep: AddStepNode }
+const NODE_TYPES = {
+  step: StepNode,
+  loop: LoopNode,
+  addStep: AddStepNode,
+  addTrigger: AddTriggerNode
+}
 const EDGE_TYPES = { step: StepEdge }
 
 function WorkflowCanvasInner({
@@ -410,9 +497,11 @@ function WorkflowCanvasInner({
   onRunToStep,
   onTidyUp,
   selectedNodeId,
-  nodeStatus
+  nodeStatus,
+  loadKey
 }: Props) {
-  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView } = useReactFlow()
+  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView, getViewport, setViewport } =
+    useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
 
   const elements = useMemo(() => toCanvasElements(nodes, edges), [nodes, edges])
@@ -425,6 +514,27 @@ function WorkflowCanvasInner({
     setRfNodes(elements.nodes)
   }
 
+  // The flow is vertical: on load, keep fitView's zoom and centering but pin
+  // the topmost node near the top instead of vertically centering the chain.
+  const elementsRef = useRef(elements)
+  useEffect(() => {
+    elementsRef.current = elements
+  }, [elements])
+  const alignTopView = useCallback(async () => {
+    const drawn = elementsRef.current.nodes
+    if (drawn.length === 0) return
+    await fitView({ padding: 0.2, maxZoom: 1 })
+    const { x, zoom } = getViewport()
+    const minY = Math.min(...drawn.map((n) => n.position.y))
+    setViewport({ x, y: 48 - minY * zoom, zoom })
+  }, [fitView, getViewport, setViewport])
+
+  const [rfReady, setRfReady] = useState(false)
+  useEffect(() => {
+    if (!rfReady) return
+    void alignTopView()
+  }, [rfReady, loadKey, alignTopView])
+
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     // The canvas owns position only; selection and structure stay the editor's.
     const positional = changes.filter((c) => c.type === 'position' || c.type === 'dimensions')
@@ -435,7 +545,7 @@ function WorkflowCanvasInner({
     // Committing every displayed position materializes the computed layout on first drag.
     const positions: Record<string, { x: number; y: number }> = {}
     for (const rfNode of rfNodes) {
-      if (rfNode.type === 'addStep') continue
+      if (rfNode.type === 'addStep' || rfNode.type === 'addTrigger') continue
       positions[rfNode.id] = { x: rfNode.position.x, y: rfNode.position.y }
     }
     onPositionsCommit(positions)
@@ -514,7 +624,7 @@ function WorkflowCanvasInner({
         void fitView({ padding: 0.2, maxZoom: 1 })
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
         const node = nodes.find((n) => n.id === selectedNodeId)
-        if (node && node.type !== 'trigger' && onDeleteNode) {
+        if (node && onDeleteNode) {
           e.preventDefault()
           onDeleteNode(selectedNodeId)
         }
@@ -577,8 +687,7 @@ function WorkflowCanvasInner({
           onConnectEnd={handleConnectEnd}
           isValidConnection={isValidConnection}
           onPaneClick={() => onNodeClick('')}
-          fitView
-          fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+          onInit={() => setRfReady(true)}
           minZoom={0.2}
           maxZoom={1.75}
           snapToGrid

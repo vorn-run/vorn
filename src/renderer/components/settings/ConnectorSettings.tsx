@@ -345,6 +345,7 @@ function AddConnectionForm({
         name = `${owner}/${repo}`
       } else {
         name =
+          auth.profileName?.trim() ||
           (filters.teamKey && `${connector.name}: ${filters.teamKey}`) ||
           `${connector.name}${selectedProject ? ` · ${selectedProject}` : ''}`
       }

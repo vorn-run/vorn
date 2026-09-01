@@ -187,12 +187,23 @@ export function ProjectItem({
   return (
     <div>
       <div className="group relative flex items-center">
-        <button
+        {/* A div with the button role: the row nests real buttons inside it. */}
+        <div
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            // Keys bubbling from a nested control are that control's, not the row's.
+            if (e.target !== e.currentTarget) return
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              e.currentTarget.click()
+            }
+          }}
           onClick={() => {
             setActiveProject(project.name)
             setFocusedTerminal(null)
           }}
-          className={`flex-1 text-left px-2 py-1.5 rounded-md text-[13px] transition-colors flex items-center gap-2 ${
+          className={`flex-1 cursor-pointer select-none text-left px-2 py-1.5 rounded-md text-[13px] transition-colors flex items-center gap-2 ${
             isActive
               ? 'bg-white/[0.08] text-white'
               : 'text-gray-300 hover:text-white hover:bg-white/[0.04]'
@@ -328,7 +339,7 @@ export function ProjectItem({
               </div>
             </>
           )}
-        </button>
+        </div>
         {!isCollapsed && openMenu && (
           <div className="relative">
             <ProjectContextMenu
@@ -362,13 +373,23 @@ export function ProjectItem({
               {mainWt && (
                 <>
                   <div className="group/main flex items-center">
-                    <button
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        // Keys bubbling from a nested control are that control's, not the row's.
+                        if (e.target !== e.currentTarget) return
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          e.currentTarget.click()
+                        }
+                      }}
                       onClick={() => {
                         setActiveProject(project.name)
                         setActiveWorktreePath(isMainActive ? null : MAIN_WORKTREE_SENTINEL)
                         setFocusedTerminal(null)
                       }}
-                      className={`flex-1 text-left px-2 py-1.5 rounded-md text-[13px] flex items-center gap-2 min-w-0 transition-colors ${
+                      className={`flex-1 cursor-pointer select-none text-left px-2 py-1.5 rounded-md text-[13px] flex items-center gap-2 min-w-0 transition-colors ${
                         isMainActive
                           ? 'bg-white/[0.08] text-white'
                           : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
@@ -461,7 +482,7 @@ export function ProjectItem({
                           </button>
                         </Tooltip>
                       </div>
-                    </button>
+                    </div>
                   </div>
                   {showSessions &&
                     !collapsedBranches.has('__main__') &&

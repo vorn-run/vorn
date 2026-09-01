@@ -128,6 +128,13 @@ import {
   backfillMcpConnection,
   preflightMcpConnection
 } from './connectors/mcp'
+import {
+  httpConnector,
+  httpProfileError,
+  lockedProfileError,
+  performHttpRequest
+} from './connectors/http'
+import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
@@ -1054,6 +1061,8 @@ export function registerAllMethods(): void {
     return reachableUrls(serverPort, tailscaleIps)
   })
 
+  registerMethod('webhook:info', () => ({ baseUrl: `http://127.0.0.1:${serverPort}` }))
+
   // Tailscale network access. Informational only now: it supplies an address and
   // a QR code, and no longer decides whether the server binds wide.
   registerMethod('tailscale:status', async () => {
@@ -1216,7 +1225,8 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('connection:list', ({ connectorId }) => {
-    return dbListSourceConnections(connectorId)
+    // The internal webhook row only satisfies the inbox's connection reference.
+    return dbListSourceConnections(connectorId).filter((c) => c.connectorId !== 'webhook')
   })
 
   registerMethod('connection:create', (params) => {
@@ -1322,6 +1332,12 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('workflow:runManual', ({ workflowId, inputs }) => {
+    const wf = dbGetWorkflow(workflowId)
+    if (!wf) throw new Error(`Workflow ${workflowId} not found`)
+    // Refuse a startless run here rather than burning a claim on a fake run.
+    if (!wf.nodes.some((n) => n.type === 'trigger')) {
+      throw new Error(`Workflow "${wf.name}" has no trigger; add one before running it`)
+    }
     scheduler.triggerWorkflow(workflowId, inputs)
   })
 
@@ -1361,6 +1377,18 @@ export function registerAllMethods(): void {
     clearDecryptedCreds(connectionId)
   })
 
+  registerMethod('http:request', async ({ profileConnectionId, method, url, headers, body }) => {
+    let profile: Record<string, unknown> = {}
+    if (profileConnectionId) {
+      const conn = dbGetSourceConnection(profileConnectionId)
+      if (!conn) return { success: false, error: `Connection ${profileConnectionId} not found` }
+      const problem = httpProfileError(conn, getDecryptedCreds(conn.id))
+      if (problem) return { success: false, error: problem }
+      profile = applyDecryptedCreds(conn)
+    }
+    return performHttpRequest(profile, { method, url, headers, body })
+  })
+
   registerMethod('connection:executeAction', async ({ connectionId, action, args }) => {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return { success: false, error: `Connection ${connectionId} not found` }
@@ -1378,6 +1406,10 @@ export function registerAllMethods(): void {
         success: false,
         error: `Connector ${conn.connectorId} does not support actions`
       }
+    }
+    if (conn.connectorId === 'http') {
+      const locked = lockedProfileError(conn.filters, getDecryptedCreds(conn.id))
+      if (locked) return { success: false, error: locked }
     }
     // Merge auth (from decrypted store) + connection filters + call-specific args.
     // Call args take precedence so users can override e.g. repo per-call.
@@ -1433,6 +1465,15 @@ export function registerAllMethods(): void {
     // under "nothing to check" — the one reading a user is most likely to take
     // as reassurance.
     if (!conn) throw new Error(`connection ${connectionId} not found`)
+    // An http profile's preflight is a real request through its injection.
+    if (conn.connectorId === 'http') {
+      const locked = lockedProfileError(conn.filters, getDecryptedCreds(conn.id))
+      if (locked) return { ok: false, message: locked }
+      const result = await httpConnector.execute!('test', applyDecryptedCreds(conn))
+      const status = (result.output as { status?: number } | undefined)?.status
+      if (!result.success) return { ok: false, message: result.error }
+      return { ok: (status ?? 500) < 400, message: `HTTP ${status}` }
+    }
     // A built-in connector genuinely declares no preflight, so this really is
     // "nothing to check".
     if (conn.connectorId !== MCP_CONNECTOR_ID) return { ok: null }

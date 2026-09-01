@@ -556,6 +556,11 @@ export interface WorkflowExecutionContext {
     type: TriggerConfig['triggerType']
     fromStatus?: TaskStatus
     toStatus?: TaskStatus
+    /** Webhook runs: the received request, for {{trigger.body.*}} / {{trigger.headers.*}}. */
+    body?: unknown
+    headers?: Record<string, string>
+    query?: Record<string, string>
+    method?: string
   }
   connectorItem?: ConnectorItemContext
   /**
@@ -578,6 +583,7 @@ export type WorkflowNodeType =
   | 'approval'
   | 'createTaskFromItem'
   | 'callConnectorAction'
+  | 'httpRequest'
   | 'loop'
 
 export interface WorkflowNodePosition {
@@ -671,6 +677,13 @@ export interface ConnectorPollTriggerConfig {
   cron: string
   timezone?: string
 }
+/** Fires when the server's localhost webhook route receives a matching request. */
+export interface WebhookTriggerConfig {
+  triggerType: 'webhook'
+  method: 'POST' | 'GET'
+  /** Per-trigger secret path segment; requests without it are rejected. */
+  token: string
+}
 export type TriggerConfig =
   | ManualTriggerConfig
   | OnceTriggerConfig
@@ -678,6 +691,7 @@ export type TriggerConfig =
   | TaskCreatedTriggerConfig
   | TaskStatusChangedTriggerConfig
   | ConnectorPollTriggerConfig
+  | WebhookTriggerConfig
 
 /**
  * Agent type as used in a launchAgent workflow node. A concrete AgentType runs
@@ -793,6 +807,19 @@ export interface CallConnectorActionConfig {
   args: Record<string, string>
 }
 
+export interface HttpRequestConfig {
+  nodeType: 'httpRequest'
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  /** Absolute, or a path resolved against the profile's base URL. */
+  url: string
+  /** Header names are literal; values support template placeholders. */
+  headers: Record<string, string>
+  /** Raw request body; empty sends none. Template placeholders allowed. */
+  body: string
+  /** An `http` connection whose auth injection is applied server-side. */
+  profileConnectionId?: string
+}
+
 export type WorkflowNodeConfig =
   | TriggerConfig
   | LaunchAgentConfig
@@ -801,6 +828,7 @@ export type WorkflowNodeConfig =
   | ApprovalConfig
   | CreateTaskFromItemConfig
   | CallConnectorActionConfig
+  | HttpRequestConfig
   | LoopConfig
 
 /**
@@ -1634,6 +1662,9 @@ export const IPC = {
   CREDENTIALS_CLEAR_DECRYPTED: 'credentials:clearDecrypted',
   CONNECTION_EXECUTE_ACTION: 'connection:executeAction',
   CONNECTION_LIST_ACTIONS: 'connection:listActions',
+  WEBHOOK_INFO: 'webhook:info',
+  HTTP_REQUEST: 'http:request',
+  CONNECTION_PREFLIGHT: 'connection:preflight',
   CONNECTION_LIST_MCP_TOOLS: 'connection:listMcpTools',
   CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
   CONNECTOR_PROBE_SDK: 'connector:probeSdk',

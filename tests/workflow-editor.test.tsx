@@ -199,12 +199,33 @@ describe('WorkflowEditor', () => {
     const { executeWorkflow } = await import('../src/renderer/lib/workflow-execution')
     vi.mocked(executeWorkflow).mockClear()
     mockState.setPendingWorkflowRun.mockClear()
+    mockState.editingWorkflowId = 'wf-plain' as unknown as null
+    mockState.config.workflows = [
+      {
+        id: 'wf-plain',
+        name: 'Plain',
+        enabled: true,
+        nodes: [
+          {
+            id: 'trigger',
+            type: 'trigger',
+            label: 'Trigger',
+            position: { x: 0, y: 0 },
+            config: { triggerType: 'manual' }
+          }
+        ],
+        edges: []
+      }
+    ] as unknown as never[]
 
     const { container } = render(<WorkflowEditor />)
     fireEvent.click(container.querySelector('button[aria-label="Run workflow"]')!)
 
     expect(executeWorkflow).toHaveBeenCalled()
     expect(mockState.setPendingWorkflowRun).not.toHaveBeenCalled()
+
+    mockState.editingWorkflowId = null
+    mockState.config.workflows = []
   })
 
   it('renders the back button which closes the editor', () => {
@@ -224,11 +245,13 @@ describe('WorkflowEditor', () => {
     mockState.editingWorkflowId = null
   })
 
-  it('triggers Run when the play button is clicked', () => {
+  it('keeps Run disabled on a new workflow until a trigger exists', () => {
+    mockState.addWorkflow.mockClear()
     const { container } = render(<WorkflowEditor />)
     const playButton = container.querySelector('svg.lucide-play')?.closest('button')
+    expect(playButton).toBeDisabled()
     if (playButton) fireEvent.click(playButton)
-    expect(mockState.addWorkflow).toHaveBeenCalled()
+    expect(mockState.addWorkflow).not.toHaveBeenCalled()
   })
 
   it('toggles the run history panel via the history toolbar button when editing', () => {
@@ -339,11 +362,28 @@ describe('the handlers the canvas drives', () => {
     }
   }
 
+  // A new workflow seeds no trigger, so these tests pick one from the library.
+  const seedManualTrigger = () => {
+    act(() =>
+      canvas().onOpenLibrary({
+        afterNodeId: '__TRIGGER__',
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false
+      })
+    )
+    act(() =>
+      (captured.libraryProps!.onPick as (p: unknown) => void)({
+        kind: 'triggerType',
+        triggerType: 'manual'
+      })
+    )
+  }
+
   it('writes a hand-drawn connection into the definition', () => {
     mockState.addWorkflow.mockClear()
     const { container } = render(<WorkflowEditor />)
-    const trigger = canvas().nodes?.[0] ?? { id: '' }
-    void trigger
+    seedManualTrigger()
     const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
     act(() => canvas().onConnectEdge(triggerId, 'ghost-target'))
     expect(save(container).edges.some((e) => e.target === 'ghost-target')).toBe(true)
@@ -352,6 +392,7 @@ describe('the handlers the canvas drives', () => {
   it('persists committed drag positions', () => {
     mockState.addWorkflow.mockClear()
     const { container } = render(<WorkflowEditor />)
+    seedManualTrigger()
     const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
     act(() => canvas().onPositionsCommit({ [triggerId]: { x: 48, y: 96 } }))
     expect(save(container).nodes[0].position).toEqual({ x: 48, y: 96 })
@@ -360,6 +401,7 @@ describe('the handlers the canvas drives', () => {
   it('tidy up writes the computed layout into the definition', () => {
     mockState.addWorkflow.mockClear()
     const { container } = render(<WorkflowEditor />)
+    seedManualTrigger()
     act(() => canvas().onTidyUp())
     expect(save(container).nodes[0].position.x).toBe(-140)
   })
@@ -370,6 +412,7 @@ describe('the handlers the canvas drives', () => {
   it('refuses a pick whose anchor no longer exists', () => {
     mockState.addWorkflow.mockClear()
     const { container, getByTestId } = render(<WorkflowEditor />)
+    seedManualTrigger()
     act(() =>
       canvas().onOpenLibrary({
         afterNodeId: 'ghost',
@@ -388,6 +431,7 @@ describe('the handlers the canvas drives', () => {
 
   it('closes the library when its anchor node is deleted', () => {
     const { getByTestId, queryByTestId } = render(<WorkflowEditor />)
+    seedManualTrigger()
     const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
     act(() =>
       canvas().onOpenLibrary({
@@ -409,6 +453,7 @@ describe('the handlers the canvas drives', () => {
   it('a library pick at a dropped position appends after its anchor there', () => {
     mockState.addWorkflow.mockClear()
     const { container, getByTestId } = render(<WorkflowEditor />)
+    seedManualTrigger()
     const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
     act(() =>
       canvas().onOpenLibrary({
@@ -430,6 +475,7 @@ describe('the handlers the canvas drives', () => {
   it('a connector pick lands preconfigured at its anchor', () => {
     mockState.addWorkflow.mockClear()
     const { container } = render(<WorkflowEditor />)
+    seedManualTrigger()
     const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
     act(() =>
       canvas().onOpenLibrary({
@@ -448,6 +494,7 @@ describe('the handlers the canvas drives', () => {
   it('a parallel pick forks from the anchor', () => {
     mockState.addWorkflow.mockClear()
     const { container } = render(<WorkflowEditor />)
+    seedManualTrigger()
     const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
     act(() =>
       canvas().onOpenLibrary({
@@ -466,6 +513,7 @@ describe('the handlers the canvas drives', () => {
     mockState.addWorkflow.mockClear()
     const winAdd = (window.addEventListener as ReturnType<typeof vi.fn>).mock
     const { container } = render(<WorkflowEditor />)
+    seedManualTrigger()
     const triggerId = (captured.canvasProps!.nodes as { id: string }[])[0].id
     act(() => canvas().onConnectEdge(triggerId, 'ghost-target'))
     const keydown = winAdd.calls.filter((c) => c[0] === 'keydown').at(-1)![1] as (

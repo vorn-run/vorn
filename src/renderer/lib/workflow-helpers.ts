@@ -203,7 +203,9 @@ export function createTriggerNode(config: TriggerConfig = { triggerType: 'manual
     once: 'Schedule (Once)',
     recurring: 'Schedule (Recurring)',
     taskCreated: 'When Task Created',
-    taskStatusChanged: 'When Task Status Changes'
+    taskStatusChanged: 'When Task Status Changes',
+    connectorPoll: 'Connector Poll',
+    webhook: 'Webhook'
   }
   return {
     id: crypto.randomUUID(),
@@ -388,6 +390,90 @@ export function createCallConnectorActionNode(
   }
 }
 
+/** The {{trigger.*}} namespace of a webhook run, rebuilt from the event's stored payload. */
+export function webhookTriggerFromItem(
+  connectorItem: import('../../shared/types').ConnectorItemContext | undefined
+): import('../../shared/types').WorkflowExecutionContext['trigger'] | undefined {
+  if (connectorItem?.connectorId !== 'webhook') return undefined
+  const raw = connectorItem.raw as {
+    body?: unknown
+    headers?: Record<string, string>
+    query?: Record<string, string>
+    method?: string
+  }
+  return {
+    type: 'webhook' as const,
+    body: raw.body,
+    headers: raw.headers,
+    query: raw.query,
+    method: raw.method
+  }
+}
+
+/**
+ * The run context for a scheduler-delivered event. A webhook event rides the
+ * connector pipe for durability, so its payload is lifted into the trigger
+ * namespace here while the connectorItem keeps the lease machinery working.
+ */
+export function schedulerExecutionContext(
+  connectorItem: import('../../shared/types').ConnectorItemContext | undefined,
+  inputs: Record<string, unknown> | undefined
+): import('../../shared/types').WorkflowExecutionContext | undefined {
+  if (!connectorItem && !inputs) return undefined
+  const trigger = webhookTriggerFromItem(connectorItem)
+  return { connectorItem, inputs, ...(trigger && { trigger }) }
+}
+
+/** Steps that can swap type in place; condition, loop, and trigger own structure or their own path. */
+export const REPLACEABLE_NODE_TYPES: ReadonlySet<string> = new Set([
+  'launchAgent',
+  'script',
+  'approval',
+  'createTaskFromItem',
+  'callConnectorAction',
+  'httpRequest'
+])
+
+/** The default config for each trigger type, used by the form and the library. */
+export function switchTriggerType(type: TriggerConfig['triggerType']): TriggerConfig {
+  switch (type) {
+    case 'manual':
+      return { triggerType: 'manual' }
+    case 'once':
+      return { triggerType: 'once', runAt: new Date().toISOString() }
+    case 'recurring':
+      return { triggerType: 'recurring', cron: '0 9 * * *' }
+    case 'taskCreated':
+      return { triggerType: 'taskCreated' }
+    case 'taskStatusChanged':
+      return { triggerType: 'taskStatusChanged' }
+    case 'connectorPoll':
+      return { triggerType: 'connectorPoll', connectionId: '', event: '', cron: '*/5 * * * *' }
+    case 'webhook':
+      return { triggerType: 'webhook', method: 'POST', token: crypto.randomUUID() }
+  }
+}
+
+export function createHttpRequestNode(
+  config: Partial<import('../../shared/types').HttpRequestConfig> = {}
+): WorkflowNode {
+  return {
+    id: crypto.randomUUID(),
+    type: 'httpRequest',
+    label: 'HTTP Request',
+    slug: slugify('HTTP Request'),
+    config: {
+      nodeType: 'httpRequest',
+      method: 'GET',
+      url: '',
+      headers: {},
+      body: '',
+      ...config
+    } as import('../../shared/types').HttpRequestConfig,
+    position: { x: 0, y: 0 }
+  }
+}
+
 export function createConditionNode(config: Partial<ConditionConfig> = {}): WorkflowNode {
   return {
     id: crypto.randomUUID(),
@@ -546,7 +632,9 @@ export function autoLayoutNodes(nodes: WorkflowNode[], edges: WorkflowEdge[]): W
   if (nodes.length === 0) return nodes
 
   const triggerNode = nodes.find((n) => n.type === 'trigger')
-  const ordered = triggerNode ? [triggerNode] : []
+  const hasIncoming = new Set(edges.map((e) => e.target))
+  // Without a trigger, seed from the roots so the walk still orders the chain.
+  const ordered = triggerNode ? [triggerNode] : nodes.filter((n) => !hasIncoming.has(n.id))
 
   const childrenMap = new Map<string, string[]>()
   for (const edge of edges) {
@@ -724,9 +812,18 @@ export function computeFlowLayout(nodes: WorkflowNode[], edges: WorkflowEdge[]):
   const successorsMap = buildSuccessorsMap(edges)
   const triggerNode = nodes.find((n) => n.type === 'trigger')
 
-  if (!triggerNode) return nodes.map((n) => ({ kind: 'node' as const, node: n }))
-
-  const rows = buildFlowFromNode(triggerNode.id, null, nodeMap, successorsMap)
+  // Without a trigger the walk seeds from every root, so the chain still
+  // draws as a chain rather than a flat column of disconnected rows.
+  const rows: FlowRow[] = []
+  if (triggerNode) {
+    rows.push(...buildFlowFromNode(triggerNode.id, null, nodeMap, successorsMap))
+  } else {
+    const hasIncoming = new Set(edges.map((e) => e.target))
+    const seen = new Set<string>()
+    for (const root of nodes.filter((n) => !hasIncoming.has(n.id))) {
+      rows.push(...buildFlowFromNode(root.id, null, nodeMap, successorsMap, seen))
+    }
+  }
 
   // Append orphan nodes not reachable from the trigger
   const visited = collectNodeIds(rows)

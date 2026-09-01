@@ -1,4 +1,15 @@
-import { Zap, Clock, RefreshCw, ListPlus, ArrowRightLeft, Plug } from 'lucide-react'
+import {
+  Zap,
+  Clock,
+  RefreshCw,
+  ListPlus,
+  ArrowRightLeft,
+  Plug,
+  Globe,
+  Copy,
+  Check
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from '../../../stores'
 import { TriggerConfig, TaskStatus } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
@@ -9,6 +20,8 @@ import { WorkflowInputsEditor } from './WorkflowInputsEditor'
 interface Props {
   config: TriggerConfig
   onChange: (config: TriggerConfig) => void
+  /** Open the step library in trigger scope to swap this trigger. */
+  onOpenLibrary?: () => void
 }
 
 const CRON_PRESETS = [
@@ -50,6 +63,12 @@ const TRIGGER_TYPES = [
     label: 'Connector Poll',
     icon: Plug,
     hint: 'Polls an external connector on cron and fires per new item'
+  },
+  {
+    type: 'webhook' as const,
+    label: 'Webhook',
+    icon: Globe,
+    hint: 'Fires when this machine receives an HTTP request at the workflow URL'
   }
 ]
 
@@ -62,45 +81,38 @@ const STATUS_PICKER_OPTIONS = [
   { value: 'cancelled', label: 'Cancelled' }
 ]
 
-function switchTriggerType(type: TriggerConfig['triggerType']): TriggerConfig {
-  switch (type) {
-    case 'manual':
-      return { triggerType: 'manual' }
-    case 'once':
-      return { triggerType: 'once', runAt: new Date().toISOString() }
-    case 'recurring':
-      return { triggerType: 'recurring', cron: '0 9 * * *' }
-    case 'taskCreated':
-      return { triggerType: 'taskCreated' }
-    case 'taskStatusChanged':
-      return { triggerType: 'taskStatusChanged' }
-    case 'connectorPoll':
-      return { triggerType: 'connectorPoll', connectionId: '', event: '', cron: '*/5 * * * *' }
-  }
-}
-
 const EMPTY_PROJECTS: import('../../../../shared/types').ProjectConfig[] = []
 
-export function TriggerConfigForm({ config, onChange }: Props) {
+export function TriggerConfigForm({ config, onChange, onOpenLibrary }: Props) {
   const projects = useAppStore((s) => s.config?.projects ?? EMPTY_PROJECTS)
 
   return (
     <div className="space-y-5">
       <div>
         <label className="text-[13px] text-gray-400 font-medium block mb-2">Trigger Type</label>
-        <SelectPicker
-          value={config.triggerType}
-          options={TRIGGER_TYPES.map(({ type, label, icon: Icon }) => ({
-            value: type,
-            label,
-            icon: <Icon size={12} className="text-gray-400" />
-          }))}
-          onChange={(v) => onChange(switchTriggerType(v as TriggerConfig['triggerType']))}
-          variant="form"
-        />
+        {(() => {
+          const current = TRIGGER_TYPES.find((t) => t.type === config.triggerType)
+          const Icon = current?.icon
+          return (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.02]">
+              {Icon && <Icon size={13} className="text-gray-400 shrink-0" />}
+              <span className="text-[13px] text-gray-200">
+                {current?.label ?? config.triggerType}
+              </span>
+            </div>
+          )
+        })()}
         <p className="text-[11px] text-gray-500 mt-1.5">
           {TRIGGER_TYPES.find((t) => t.type === config.triggerType)?.hint}
         </p>
+        {onOpenLibrary && (
+          <button
+            onClick={onOpenLibrary}
+            className="mt-2 text-[11px] text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors"
+          >
+            Change trigger from the library
+          </button>
+        )}
       </div>
 
       {config.triggerType === 'manual' &&
@@ -231,6 +243,10 @@ export function TriggerConfigForm({ config, onChange }: Props) {
         <ConnectorPollTriggerForm config={config} onChange={onChange} />
       )}
 
+      {config.triggerType === 'webhook' && (
+        <WebhookTriggerFields config={config} onChange={onChange} />
+      )}
+
       {config.triggerType === 'taskStatusChanged' && (
         <>
           <div>
@@ -272,5 +288,82 @@ export function TriggerConfigForm({ config, onChange }: Props) {
         </>
       )}
     </div>
+  )
+}
+
+function WebhookTriggerFields({
+  config,
+  onChange
+}: {
+  config: Extract<TriggerConfig, { triggerType: 'webhook' }>
+  onChange: (config: TriggerConfig) => void
+}) {
+  const [baseUrl, setBaseUrl] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api
+      .getWebhookInfo()
+      .then((info) => {
+        if (!cancelled) setBaseUrl(info.baseUrl)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const workflowId = useAppStore((s) => s.editingWorkflowId)
+  const url = baseUrl && workflowId ? `${baseUrl}/wf-hooks/${workflowId}/${config.token}` : null
+
+  return (
+    <>
+      <div>
+        <label className="text-[13px] text-gray-400 font-medium block mb-2">URL</label>
+        {url ? (
+          <div className="flex items-center gap-2">
+            <code className="flex-1 min-w-0 px-3 py-2 text-[11px] bg-white/[0.06] border border-white/[0.1] rounded-md text-gray-300 font-mono truncate">
+              {url}
+            </code>
+            <button
+              aria-label="Copy URL"
+              onClick={() => {
+                void navigator.clipboard.writeText(url)
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1500)
+              }}
+              className="p-2 rounded-md border border-white/[0.1] text-gray-400 hover:text-white hover:border-white/[0.2] transition-colors shrink-0"
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+            </button>
+          </div>
+        ) : (
+          <p className="text-[11px] text-gray-500">
+            Save the workflow first — the URL includes its id.
+          </p>
+        )}
+        <p className="text-[11px] text-gray-500 mt-1.5">
+          Local machine only, and only while the app is open. Exposing it is a deliberate, separate
+          step.
+        </p>
+      </div>
+      <div>
+        <label className="text-[13px] text-gray-400 font-medium block mb-2">Method</label>
+        <SelectPicker
+          value={config.method}
+          options={[
+            { value: 'POST', label: 'POST' },
+            { value: 'GET', label: 'GET' }
+          ]}
+          onChange={(v) => onChange({ ...config, method: v as 'POST' | 'GET' })}
+          variant="form"
+        />
+        <p className="text-[11px] text-gray-500 mt-1.5">
+          The request lands as {'{{trigger.body.*}}'}, {'{{trigger.headers.*}}'}, and{' '}
+          {'{{trigger.query.*}}'}.
+        </p>
+      </div>
+    </>
   )
 }

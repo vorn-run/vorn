@@ -263,6 +263,22 @@ describe('retrying a failed run', () => {
     expect(context?.connectorItem?.inboxLeaseToken).toBeUndefined()
     expect(context?.connectorItem?.externalId).toBe('1')
   })
+
+  it('rebuilds the webhook trigger namespace so a retry resolves {{trigger.*}}', () => {
+    const run = {
+      runId: 'r-hook',
+      workflowId: 'wf',
+      connectorItem: {
+        connectionId: 'webhook',
+        connectorId: 'webhook',
+        externalId: 'evt',
+        title: 'Webhook POST',
+        raw: { body: { pr: 9 }, headers: { 'x-event': 'pr' }, query: {}, method: 'POST' }
+      }
+    } as unknown as WorkflowExecution
+    const context = contextFromRun(run)
+    expect(context?.trigger).toMatchObject({ type: 'webhook', body: { pr: 9 } })
+  })
 })
 
 describe('what a retry adopts', () => {

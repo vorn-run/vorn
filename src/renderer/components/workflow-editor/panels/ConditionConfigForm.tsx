@@ -34,7 +34,14 @@ export function ConditionConfigForm({
       return triggerType === 'taskCreated' || triggerType === 'taskStatusChanged'
     }
     if (v.category === 'trigger') {
-      return triggerType === 'taskStatusChanged'
+      if (triggerType === 'webhook') {
+        return (
+          v.key.includes('trigger.body') ||
+          v.key.includes('trigger.headers') ||
+          v.key.includes('trigger.query')
+        )
+      }
+      return triggerType === 'taskStatusChanged' && v.key.includes('Status')
     }
     return false
   }).concat(inputVars)

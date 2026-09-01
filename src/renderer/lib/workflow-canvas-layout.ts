@@ -5,6 +5,16 @@ import { computeFlowLayout, FlowRow } from './workflow-helpers'
 
 // Projects a workflow definition into canvas elements; the definition stays the source of truth.
 
+/** The anchor id that opens the library in trigger scope. */
+export const TRIGGER_ANCHOR_ID = '__TRIGGER__'
+
+export const TRIGGER_ANCHOR = {
+  afterNodeId: TRIGGER_ANCHOR_ID,
+  beforeNodeId: null,
+  insideBranch: false,
+  bodyOnly: false
+}
+
 export const CARD_WIDTH = 280
 export const LOOP_WIDTH = 312
 /** Horizontal gap between fork branches. */
@@ -67,6 +77,9 @@ export function estimateNodeHeight(node: WorkflowNode, allNodes: WorkflowNode[])
     const cfg = node.config as { variable?: string }
     return cfg.variable ? 90 : 58
   }
+  // A trigger card draws one subtitle line for every kind; its stepPreview
+  // (cron/event) belongs to the run trace, not the card.
+  if (node.type === 'trigger') return 58
   return stepPreview(node) ? 90 : 58
 }
 
@@ -238,6 +251,31 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
       source: node.id,
       target: `add:${node.id}`,
       type: 'step',
+      selectable: false
+    })
+  }
+
+  // A workflow with no trigger yet shows the spot where one goes, sitting
+  // above the topmost drawn card and centered on it.
+  if (!nodes.some((n) => n.type === 'trigger')) {
+    const cards = rfNodes.filter((n) => n.type === 'step' || n.type === 'loop')
+    let position = { x: 0, y: 0 }
+    if (cards.length > 0) {
+      const top = cards.reduce((a, b) => (b.position.y < a.position.y ? b : a))
+      const topWidth = top.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH
+      position = {
+        x: top.position.x + topWidth / 2 - CARD_WIDTH / 2,
+        y: top.position.y - 58 - ROW_GAP
+      }
+    }
+    rfNodes.push({
+      id: 'add-trigger',
+      type: 'addTrigger',
+      position,
+      data: {},
+      width: CARD_WIDTH,
+      height: 58,
+      draggable: false,
       selectable: false
     })
   }

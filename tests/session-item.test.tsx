@@ -78,18 +78,37 @@ describe('SessionItem', () => {
     expect(setFocused).toHaveBeenCalledWith('sess-1')
   })
 
+  it('activates the row itself on Enter and Space', () => {
+    const setFocused = vi.fn()
+    useAppStore.setState({ setFocusedTerminal: setFocused })
+    const { container } = render(<SessionItem session={session} />)
+    const row = container.querySelector('[role="button"]') as HTMLElement
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(setFocused).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(setFocused).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores Enter bubbling from a nested control', () => {
+    const setFocused = vi.fn()
+    useAppStore.setState({ setFocusedTerminal: setFocused })
+    render(<SessionItem session={session} />)
+    fireEvent.keyDown(screen.getByLabelText(`Close session ${session.name}`), { key: 'Enter' })
+    expect(setFocused).not.toHaveBeenCalled()
+  })
+
   it('applies focused style when session is focused', () => {
     useAppStore.setState({ focusedTerminalId: 'sess-1' })
     const { container } = render(<SessionItem session={session} />)
-    const button = container.querySelector('button')
-    expect(button?.className).toContain('text-white')
+    const row = container.querySelector('[role="button"]')
+    expect(row?.className).toContain('text-white')
   })
 
   it('applies unfocused style when session is not focused', () => {
     useAppStore.setState({ focusedTerminalId: 'other' })
     const { container } = render(<SessionItem session={session} />)
-    const button = container.querySelector('button')
-    expect(button?.className).toContain('text-gray-400')
+    const row = container.querySelector('[role="button"]')
+    expect(row?.className).toContain('text-gray-400')
   })
 
   it('renders without branch when session has no branch', () => {
@@ -105,8 +124,8 @@ describe('SessionItem', () => {
       const { container } = render(<SessionItem session={s} />)
       expect(container.querySelector('[data-component="running-glyph"]')).toBeNull()
       // Identity svg should be rendered inside the icon wrapper, not matched globally
-      const sessionButton = screen.getByText('My Session').closest('button')
-      const iconWrapper = sessionButton?.querySelector('span')
+      const sessionRow = screen.getByText('My Session').closest('[role="button"]')
+      const iconWrapper = sessionRow?.querySelector('span')
       expect(iconWrapper?.querySelector('svg')).toBeInTheDocument()
     }
   )

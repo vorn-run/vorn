@@ -5,6 +5,7 @@ import { executeWorkflow } from './workflow-execution'
 import { isContextualWorkflow, needsRunPrompt } from './workflow-helpers'
 import type { ManualRunContext } from './workflow-helpers'
 import { useAppStore } from '../stores'
+import { toast } from '../components/Toast'
 import type { WorkflowDefinition } from '../../shared/types'
 
 export interface WorkflowMenuItem {
@@ -44,6 +45,11 @@ export function startManualRun(
   ctx?: ManualRunContext,
   options?: { targetNodeId?: string }
 ): void {
+  // Every manual surface funnels here; a startless workflow cannot run.
+  if (!workflow.nodes.some((n) => n.type === 'trigger')) {
+    toast.error(`"${workflow.name}" has no trigger — add one in the editor first`)
+    return
+  }
   if (needsRunPrompt(workflow, ctx)) {
     useAppStore.getState().setPendingWorkflowRun(workflow.id, ctx, options?.targetNodeId)
     return

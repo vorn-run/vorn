@@ -21,6 +21,7 @@ import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort } from './register-methods'
+import { registerWebhookRoute } from './webhook-trigger'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
@@ -144,8 +145,10 @@ export async function startServer(
   // Register built-in connectors
   const { connectorRegistry } = await import('./connectors')
   const { githubConnector } = await import('./connectors/github')
+  const { httpConnector } = await import('./connectors/http')
   const { mcpConnector } = await import('./connectors/mcp')
   connectorRegistry.register(githubConnector)
+  connectorRegistry.register(httpConnector)
   connectorRegistry.register(mcpConnector)
 
   // Load initial config and wire up managers
@@ -222,6 +225,8 @@ export async function startServer(
   )
 
   app.get('/health', async () => ({ status: 'ok' }))
+
+  registerWebhookRoute(app, () => scheduler.deliverPendingConnectorInbox())
 
   /**
    * Pairing, the phone's half.

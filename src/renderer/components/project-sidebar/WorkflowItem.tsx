@@ -97,14 +97,25 @@ export function WorkflowItem({
   }
 
   return (
-    <button
+    // A div with the button role: real buttons (Run, More) nest inside the row.
+    <div
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        // Keys bubbling from a nested control are that control's, not the row's.
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          e.currentTarget.click()
+        }
+      }}
       onClick={handleEdit}
       onContextMenu={(e) => {
         e.preventDefault()
         onContextMenu(e, workflow.id)
       }}
       title={isCollapsed ? workflow.name : undefined}
-      className={`group/wf relative w-full text-left px-2 py-1.5 rounded-md text-[13px] flex items-center gap-2 min-w-0 transition-colors ${
+      className={`group/wf relative w-full cursor-pointer select-none text-left px-2 py-1.5 rounded-md text-[13px] flex items-center gap-2 min-w-0 transition-colors ${
         isSelected ? 'text-white' : 'text-gray-300 hover:text-white hover:bg-white/[0.04]'
       } ${isDisabled ? 'opacity-40' : ''} ${isCollapsed ? 'justify-center px-0' : ''}`}
     >
@@ -153,6 +164,6 @@ export function WorkflowItem({
           </Tooltip>
         </>
       )}
-    </button>
+    </div>
   )
 }

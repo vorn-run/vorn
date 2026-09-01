@@ -20,6 +20,11 @@ vi.mock('../src/renderer/stores', () => {
   }
 })
 
+const mockToastError = vi.fn()
+vi.mock('../src/renderer/components/Toast', () => ({
+  toast: { error: (...args: unknown[]) => mockToastError(...args), success: vi.fn() }
+}))
+
 import { buildWorkflowMenuItems, startManualRun } from '../src/renderer/lib/workflow-menu-items'
 import type { TaskConfig, TerminalSession, WorkflowDefinition } from '../src/shared/types'
 
@@ -185,5 +190,24 @@ describe('workflows declaring run inputs', () => {
 
     expect(mockSetPending).not.toHaveBeenCalled()
     expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the trigger guard on manual runs', () => {
+  beforeEach(() => {
+    mockExecuteWorkflow.mockClear()
+    mockToastError.mockClear()
+  })
+
+  it('refuses a workflow with no trigger and says why', () => {
+    const wf = { ...makeWorkflow('startless', false), nodes: [] }
+    startManualRun(wf)
+    expect(mockExecuteWorkflow).not.toHaveBeenCalled()
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining('no trigger'))
+  })
+
+  it('runs a workflow that has one', () => {
+    startManualRun(makeWorkflow('ready', false))
+    expect(mockExecuteWorkflow).toHaveBeenCalled()
   })
 })

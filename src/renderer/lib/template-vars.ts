@@ -87,6 +87,9 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
   { key: '{{task.projectName}}', label: 'Project', category: 'task' },
   { key: '{{trigger.fromStatus}}', label: 'Previous Status', category: 'trigger' },
   { key: '{{trigger.toStatus}}', label: 'New Status', category: 'trigger' },
+  { key: '{{trigger.body}}', label: 'Request Body', category: 'trigger' },
+  { key: '{{trigger.headers}}', label: 'Request Headers', category: 'trigger' },
+  { key: '{{trigger.query}}', label: 'Query Parameters', category: 'trigger' },
   { key: '{{connectorItem.externalId}}', label: 'External ID', category: 'connectorItem' },
   { key: '{{connectorItem.title}}', label: 'Item Title', category: 'connectorItem' },
   { key: '{{connectorItem.externalUrl}}', label: 'Item URL', category: 'connectorItem' },
@@ -129,7 +132,14 @@ export function getAvailableContextVars(opts: {
   return TEMPLATE_VARIABLES.filter((v) => {
     if (isTaskTrigger && v.category === 'task') return true
     if (isTaskTrigger && v.category === 'trigger' && opts.triggerType === 'taskStatusChanged') {
-      return true
+      return v.key.includes('Status')
+    }
+    if (opts.triggerType === 'webhook' && v.category === 'trigger') {
+      return (
+        v.key.includes('trigger.body') ||
+        v.key.includes('trigger.headers') ||
+        v.key.includes('trigger.query')
+      )
     }
     if (opts.isContextualTrigger && v.category === 'context') return true
     return false
@@ -256,6 +266,13 @@ export function buildStepGroups(
             keys = [...schemaKeys, ...defaultKeys]
           }
         }
+      } else if (n.type === 'httpRequest') {
+        keys = [
+          { key: 'status', label: 'status', description: 'HTTP status code' },
+          { key: 'body', label: 'body', description: 'Response body, JSON-parsed when possible' },
+          { key: 'headers', label: 'headers', description: 'Response headers' },
+          ...defaultKeys
+        ]
       } else if (n.type === 'launchAgent') {
         // A headless launchAgent with a declared outputSchema surfaces its typed
         // fields the same way — `{{steps.<slug>.<field>}}` — populated at run
@@ -429,7 +446,8 @@ export function resolveTemplateVars(
   // `{{ ns.k1.k2.k3... }}` — identifier-first, then any number of dotted
   // segments. The resolver walks those segments into whichever namespace
   // matches (steps / task / trigger / connectorItem).
-  return template.replace(/\{\{\s*([a-zA-Z_][\w.]*)\s*\}\}/g, (match, path: string) => {
+  // Hyphens allowed so header names like content-type resolve as path segments.
+  return template.replace(/\{\{\s*([a-zA-Z_][\w.-]*)\s*\}\}/g, (match, path: string) => {
     const segments = path.split('.')
     const ns = segments[0]
     const rest = segments.slice(1)

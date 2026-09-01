@@ -257,6 +257,7 @@ export interface RequestMethods {
   /** Present a credential. The only method accepted before authenticating. */
   'auth:authenticate': { params: { token: string }; result: { ok: boolean } }
   'server:reachableUrls': { params: void; result: ReachableUrls }
+  'webhook:info': { params: void; result: { baseUrl: string } }
   // Device tokens. Namespaced `token:` rather than `device:`, which belongs
   // entirely to the simulator registry — thirteen methods of it.
   'token:list': { params: void; result: DeviceToken[] }
@@ -807,6 +808,18 @@ export interface RequestMethods {
   }
   /** Invoke a connector's action (createIssue, commentOnIssue, ...) via the
    *  connection's auth. Used by callConnectorAction workflow nodes. */
+  /** Execute one HTTP request server-side, applying an optional profile's
+   *  auth injection there so secrets never reach the renderer. */
+  'http:request': {
+    params: {
+      profileConnectionId?: string
+      method: string
+      url: string
+      headers?: Record<string, string>
+      body?: string
+    }
+    result: { success: boolean; output?: Record<string, unknown>; error?: string }
+  }
   'connection:executeAction': {
     params: {
       connectionId: string

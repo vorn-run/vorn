@@ -1,4 +1,4 @@
-import { Zap, Play, Terminal, GitFork, Hand, ListPlus, Repeat } from 'lucide-react'
+import { Zap, Play, Terminal, GitFork, Hand, ListPlus, Repeat, Globe } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { NodeExecutionState, WorkflowNode } from '../../../shared/types'
 
@@ -19,6 +19,7 @@ export const NODE_TYPE_ICON: Record<WorkflowNode['type'], LucideIcon> = {
   approval: Hand,
   createTaskFromItem: ListPlus,
   callConnectorAction: Zap,
+  httpRequest: Globe,
   loop: Repeat
 }
 
@@ -91,6 +92,8 @@ export function stepMeta(node: WorkflowNode | undefined, connectorId?: string): 
       return joinMeta(str('project'), str('initialStatus'))
     case 'callConnectorAction':
       return joinMeta(connectorId, str('action'))
+    case 'httpRequest':
+      return joinMeta(str('method'), str('url'))
     default:
       return undefined
   }
@@ -117,6 +120,8 @@ export function stepPreview(node: WorkflowNode | undefined): string | undefined 
       return configString(node, 'prompt')
     case 'approval':
       return configString(node, 'message')
+    case 'httpRequest':
+      return configString(node, 'body')
     case 'callConnectorAction': {
       const args = (node.config as { args?: Record<string, unknown> } | undefined)?.args
       const entries = args ? Object.entries(args) : []

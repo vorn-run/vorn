@@ -149,7 +149,7 @@ export const workflowInputsSchema = z.array(workflowInputDefSchema).superRefine(
   })
 })
 
-const triggerConfigSchema = z.union([
+export const triggerConfigSchema = z.union([
   z.object({
     triggerType: z.literal('manual'),
     contextual: z.boolean().optional(),
@@ -167,10 +167,22 @@ const triggerConfigSchema = z.union([
     projectFilter: V.name.optional(),
     fromStatus: z.enum(['todo', 'in_progress', 'in_review', 'done', 'cancelled']).optional(),
     toStatus: z.enum(['todo', 'in_progress', 'in_review', 'done', 'cancelled']).optional()
+  }),
+  z.object({
+    triggerType: z.literal('connectorPoll'),
+    connectionId: V.id,
+    event: V.shortText,
+    cron: V.shortText,
+    timezone: V.shortText.optional()
+  }),
+  z.object({
+    triggerType: z.literal('webhook'),
+    method: z.enum(['POST', 'GET']),
+    token: V.shortText
   })
 ])
 
-const nodeSchema = z
+export const nodeSchema = z
   .object({
     id: V.id,
     // Full node palette — parity with the editor. `config` is a passthrough so
@@ -183,6 +195,7 @@ const nodeSchema = z
       'approval',
       'createTaskFromItem',
       'callConnectorAction',
+      'httpRequest',
       'loop'
     ]),
     label: V.shortText,

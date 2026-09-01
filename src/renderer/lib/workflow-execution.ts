@@ -13,6 +13,7 @@ import {
   ApprovalConfig,
   CreateTaskFromItemConfig,
   CallConnectorActionConfig,
+  HttpRequestConfig,
   TaskConfig,
   ConnectorItemContext,
   getProjectRemoteHostId
@@ -23,7 +24,7 @@ import {
   resolveTemplateVars,
   StepOutputs
 } from './template-vars'
-import { getWorktreeMode } from './workflow-helpers'
+import { getWorktreeMode, webhookTriggerFromItem } from './workflow-helpers'
 import { buildTaskPrompt, buildWorkflowPrompt } from '../../shared/prompt-builder'
 import { extractStructuredOutput } from '../../shared/structured-output'
 import { useAppStore } from '../stores'
@@ -860,6 +861,43 @@ async function executeNode(
     return
   }
 
+  if (node.type === 'httpRequest') {
+    const cfg = node.config as HttpRequestConfig
+    const headers: Record<string, string> = {}
+    for (const [name, value] of Object.entries(cfg.headers ?? {})) {
+      if (name.trim()) headers[name.trim()] = resolveTemplateVars(value, context, stepOutputs)
+    }
+    try {
+      const result = await window.api.httpRequest({
+        profileConnectionId: cfg.profileConnectionId || undefined,
+        method: cfg.method,
+        url: resolveTemplateVars(cfg.url ?? '', context, stepOutputs),
+        headers,
+        body: cfg.body ? resolveTemplateVars(cfg.body, context, stepOutputs) : undefined
+      })
+      const status = (result.output as { status?: number } | undefined)?.status
+      // Same plain-object guard as connector actions, for the same reason.
+      const isPlainObject =
+        !!result.output && typeof result.output === 'object' && !Array.isArray(result.output)
+      updateNodeState(execution, node.id, {
+        status: result.success ? 'success' : 'error',
+        completedAt: new Date().toISOString(),
+        output: result.success ? `HTTP ${status}` : 'Request failed',
+        logs: JSON.stringify(result, null, 2),
+        ...(isPlainObject && { structuredOutput: result.output }),
+        ...(result.error && { error: result.error })
+      })
+    } catch (err) {
+      updateNodeState(execution, node.id, {
+        status: 'error',
+        completedAt: new Date().toISOString(),
+        error: err instanceof Error ? err.message : String(err)
+      })
+    }
+    persistExecution(execution)
+    return
+  }
+
   if (node.type === 'createTaskFromItem') {
     const config = node.config as CreateTaskFromItemConfig
     const item = context?.connectorItem
@@ -1522,7 +1560,8 @@ export function contextFromRun(run: WorkflowExecution): WorkflowExecutionContext
     ? { ...run.connectorItem, inboxId: undefined, inboxLeaseToken: undefined }
     : undefined
   if (!task && !connectorItem && !run.inputs) return undefined
-  return { task, connectorItem, inputs: run.inputs }
+  const trigger = webhookTriggerFromItem(connectorItem)
+  return { task, connectorItem, inputs: run.inputs, ...(trigger && { trigger }) }
 }
 
 /**
@@ -2058,7 +2097,13 @@ function rebuildContextForResume(
     ? (useAppStore.getState().config?.tasks || []).find((t) => t.id === execution.triggerTaskId)
     : undefined
   if (!task && !execution.connectorItem && !execution.inputs) return undefined
-  return { task, connectorItem: execution.connectorItem, inputs: execution.inputs }
+  const trigger = webhookTriggerFromItem(execution.connectorItem)
+  return {
+    task,
+    connectorItem: execution.connectorItem,
+    inputs: execution.inputs,
+    ...(trigger && { trigger })
+  }
 }
 
 export async function adoptConnectorInboxLease(

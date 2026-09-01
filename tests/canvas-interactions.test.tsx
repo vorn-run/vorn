@@ -124,13 +124,27 @@ describe('every + opens the library at its anchor', () => {
 })
 
 describe('the hover toolbar', () => {
-  it('deletes the hovered step, and never offers itself on the trigger', () => {
+  it('offers delete on every node, the trigger included', () => {
     const { onDeleteNode } = renderCanvas()
     const deletes = screen.getAllByRole('button', { name: 'Delete step' })
-    // One per non-trigger node: the trigger card carries none.
-    expect(deletes).toHaveLength(2)
+    expect(deletes).toHaveLength(3)
     fireEvent.click(deletes[0])
     expect(onDeleteNode).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers replace on every node, routing the trigger to its own scope', () => {
+    const { onOpenLibrary } = renderCanvas()
+    const replaces = screen.getAllByRole('button', { name: 'Replace step' })
+    expect(replaces).toHaveLength(3)
+    // The first card in the layout is the trigger; its replace opens trigger scope.
+    fireEvent.click(replaces[0])
+    expect(onOpenLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ afterNodeId: '__TRIGGER__' })
+    )
+    fireEvent.click(replaces[1])
+    expect(onOpenLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ replaceNodeId: 'a', afterNodeId: 'a' })
+    )
   })
 })
 
@@ -142,11 +156,75 @@ describe('the keyboard on the canvas', () => {
     expect(onDeleteNode).toHaveBeenCalledWith('b')
   })
 
-  it('never deletes the trigger', () => {
+  it('deletes the selected trigger too', () => {
     const { container, onDeleteNode } = renderCanvas({ selectedNodeId: 't' })
     const wrapper = container.querySelector('[tabindex="0"]') as HTMLElement
     fireEvent.keyDown(wrapper, { key: 'Delete' })
-    expect(onDeleteNode).not.toHaveBeenCalled()
+    expect(onDeleteNode).toHaveBeenCalledWith('t')
+  })
+})
+
+describe('the add-trigger placeholder card', () => {
+  it('opens the library in trigger scope when clicked', () => {
+    const { onOpenLibrary } = renderCanvas({
+      nodes: [nodes[1], nodes[2]],
+      edges: [{ id: 'e2', source: 'a', target: 'b' }]
+    })
+    const placeholder = screen.getByRole('button', { name: /Add a trigger/ })
+    fireEvent.click(placeholder)
+    expect(onOpenLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ afterNodeId: '__TRIGGER__' })
+    )
+  })
+
+  it('highlights while the library points at the trigger anchor', () => {
+    renderCanvas({
+      nodes: [nodes[1]],
+      edges: [],
+      libraryAnchor: {
+        afterNodeId: '__TRIGGER__',
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false
+      }
+    })
+    expect(screen.getByRole('button', { name: /Add a trigger/ }).className).toContain(
+      'border-white/40'
+    )
+  })
+})
+
+describe('the load fit', () => {
+  it('survives a workflow switch re-fitting the view', () => {
+    const { rerender } = render(
+      <WorkflowCanvas
+        nodes={nodes}
+        edges={edges}
+        selectedNodeId={null}
+        libraryAnchor={null}
+        loadKey="wf-a"
+        onNodeClick={vi.fn()}
+        onOpenLibrary={vi.fn()}
+        onConnectEdge={vi.fn()}
+        onPositionsCommit={vi.fn()}
+        onTidyUp={vi.fn()}
+      />
+    )
+    rerender(
+      <WorkflowCanvas
+        nodes={nodes}
+        edges={edges}
+        selectedNodeId={null}
+        libraryAnchor={null}
+        loadKey="wf-b"
+        onNodeClick={vi.fn()}
+        onOpenLibrary={vi.fn()}
+        onConnectEdge={vi.fn()}
+        onPositionsCommit={vi.fn()}
+        onTidyUp={vi.fn()}
+      />
+    )
+    expect(screen.getByText('First step')).toBeInTheDocument()
   })
 })
 
