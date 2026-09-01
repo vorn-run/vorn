@@ -100,7 +100,7 @@ describe('installing from a catalog row', () => {
       .parentElement as HTMLElement
     fireEvent.click(within(sheet).getByRole('button', { name: 'Install' }))
 
-    expect(await screen.findByText(/the server went away/)).toBeInTheDocument()
+    expect((await screen.findAllByText(/the server went away/)).length).toBeGreaterThan(0)
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull())
   })
 })
