@@ -29,7 +29,7 @@ function connection(filters: Record<string, unknown>): SourceConnection {
     filters,
     syncIntervalMinutes: 5,
     statusMapping: {},
-    createdAt: 0
+    createdAt: '2026-09-01T00:00:00Z'
   } as SourceConnection
 }
 
