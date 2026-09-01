@@ -9,6 +9,12 @@ import {
 } from 'react'
 import { Braces, ChevronDown, ChevronRight } from 'lucide-react'
 import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
+import { previewStepTokens } from '../../../lib/template-vars'
+import { NODE_TYPE_ICON } from '../node-visuals'
+import { WORKFLOW_STATUS_DOT } from '../../../lib/workflow-status'
+import { ConnectorIcon } from '../../ConnectorIcon'
+import { useConnectorIdFor, useConnectionIconFor } from '../../../lib/use-connections'
+import type { WorkflowNode } from '../../../../shared/types'
 
 interface Props {
   value: string
@@ -52,6 +58,33 @@ interface DropdownItem {
   description: string
   pattern: string
   disabled?: boolean
+  value?: string
+}
+
+/** The step's own glyph — its connector's brand mark when it has one. */
+function StepGroupIcon({ group }: { group: StepVariableGroup }) {
+  const connectorId = useConnectorIdFor(group.connectionId ?? null)
+  const icon = useConnectionIconFor(group.connectionId ?? null)
+  if (connectorId) {
+    return (
+      <ConnectorIcon
+        connectorId={connectorId}
+        icon={icon}
+        size={12}
+        className="text-ink-secondary shrink-0"
+      />
+    )
+  }
+  const Icon = NODE_TYPE_ICON[group.nodeType as WorkflowNode['type']]
+  return Icon ? <Icon size={12} className="text-ink-secondary shrink-0" strokeWidth={2} /> : null
+}
+
+function ranAtLabel(iso: string | undefined): string | undefined {
+  if (!iso) return undefined
+  const date = new Date(iso)
+  return isNaN(date.getTime())
+    ? undefined
+    : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
 export function VariableAutocomplete({
@@ -84,7 +117,8 @@ export function VariableAutocomplete({
           label: k.label,
           description: k.description,
           pattern: `{{steps.${group.slug}.${k.key}}}`,
-          disabled: group.disabled
+          disabled: group.disabled,
+          value: k.value
         })
       }
     }
@@ -261,6 +295,13 @@ export function VariableAutocomplete({
 
   const hasVariables = allItems.length > 0
 
+  const groupsBySlug = useMemo(() => new Map(stepGroups.map((g) => [g.slug, g])), [stepGroups])
+
+  const preview = useMemo(
+    () => (value.includes('{{') ? previewStepTokens(value, stepGroups) : undefined),
+    [value, stepGroups]
+  )
+
   return (
     <div className="relative">
       <div className="relative">
@@ -300,6 +341,18 @@ export function VariableAutocomplete({
         )}
       </div>
 
+      {preview?.broken && (
+        <p className="text-[10.5px] font-mono text-danger/90 mt-1 truncate">
+          {preview.broken.token} not found
+          {preview.broken.suggestion ? ` — did you mean ${preview.broken.suggestion}?` : ''}
+        </p>
+      )}
+      {preview?.resolved && (
+        <p className="text-[10.5px] font-mono text-ink-faint mt-1 truncate">
+          → {preview.resolved.replace(/\s+/g, ' ').slice(0, 160)}
+        </p>
+      )}
+
       {showDropdown && hasVariables && (
         <div
           ref={dropdownRef}
@@ -332,22 +385,49 @@ export function VariableAutocomplete({
               const isCollapsed = collapsedGroups.has(group.id)
               const Chevron = isCollapsed ? ChevronRight : ChevronDown
 
+              const stepGroup = groupsBySlug.get(group.id)
+              const ranAt = ranAtLabel(stepGroup?.runCompletedAt)
+
               return (
                 <div key={group.id}>
-                  <button
-                    onClick={() => toggleGroup(group.id)}
-                    className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold
-                               uppercase tracking-wider transition-colors
-                               ${group.disabled ? 'text-gray-600' : 'text-gray-500 hover:text-gray-400 hover:bg-white/[0.03]'}`}
-                  >
-                    <Chevron size={11} />
-                    {group.name}
-                    {group.disabled && (
-                      <span className="text-[9px] font-normal normal-case tracking-normal text-gray-600 ml-1">
-                        (no output)
+                  {stepGroup ? (
+                    <button
+                      onClick={() => toggleGroup(group.id)}
+                      className="w-full flex items-center gap-2 px-2.5 py-1.5 transition-colors
+                                 text-gray-400 hover:text-gray-300 hover:bg-white/[0.03]"
+                    >
+                      <Chevron size={11} className="shrink-0" />
+                      <StepGroupIcon group={stepGroup} />
+                      <span className="text-[11.5px] font-semibold text-ink-secondary truncate">
+                        {group.name}
                       </span>
-                    )}
-                  </button>
+                      {stepGroup.runStatus && WORKFLOW_STATUS_DOT[stepGroup.runStatus] && (
+                        <span
+                          className={`shrink-0 w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT[stepGroup.runStatus]}`}
+                        />
+                      )}
+                      {ranAt && (
+                        <span className="ml-auto text-[9.5px] font-mono text-gray-600 shrink-0">
+                          {ranAt}
+                        </span>
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => toggleGroup(group.id)}
+                      className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold
+                                 uppercase tracking-wider transition-colors
+                                 ${group.disabled ? 'text-gray-600' : 'text-gray-500 hover:text-gray-400 hover:bg-white/[0.03]'}`}
+                    >
+                      <Chevron size={11} />
+                      {group.name}
+                      {group.disabled && (
+                        <span className="text-[9px] font-normal normal-case tracking-normal text-gray-600 ml-1">
+                          (no output)
+                        </span>
+                      )}
+                    </button>
+                  )}
 
                   {!isCollapsed &&
                     group.items.map((item) => {
@@ -356,7 +436,7 @@ export function VariableAutocomplete({
 
                       return (
                         <button
-                          key={item.pattern}
+                          key={`${item.groupId}:${item.key}`}
                           onClick={() => !item.disabled && insertPattern(item.pattern)}
                           disabled={item.disabled}
                           className={`w-full flex items-center gap-2 px-3 pl-6 py-1.5 text-left transition-colors
@@ -366,10 +446,16 @@ export function VariableAutocomplete({
                           <span className="text-[12px] text-ink-secondary font-mono min-w-[50px]">
                             {item.key === item.pattern ? item.label : item.key}
                           </span>
-                          {item.description && (
-                            <span className="text-[11px] text-gray-600 truncate">
-                              {item.description}
+                          {item.value ? (
+                            <span className="ml-auto text-[10.5px] font-mono text-gray-500 truncate max-w-[45%]">
+                              {item.value}
                             </span>
+                          ) : (
+                            item.description && (
+                              <span className="text-[11px] text-gray-600 truncate">
+                                {item.description}
+                              </span>
+                            )
                           )}
                         </button>
                       )

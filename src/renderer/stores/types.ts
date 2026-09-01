@@ -333,6 +333,7 @@ export interface UISlice {
   pendingWorkflowRun: {
     workflowId: string
     context?: { task?: TaskConfig; source?: TerminalSession }
+    targetNodeId?: string
   } | null
   editingProject: ProjectConfig | null
   isCommandPaletteOpen: boolean
@@ -429,7 +430,8 @@ export interface UISlice {
   setWorkflowEditorOpen: (open: boolean) => void
   setPendingWorkflowRun: (
     workflowId: string | null,
-    context?: { task?: TaskConfig; source?: TerminalSession }
+    context?: { task?: TaskConfig; source?: TerminalSession },
+    targetNodeId?: string
   ) => void
   setEditingWorkflowId: (id: string | null) => void
   setEditingProject: (project: ProjectConfig | null) => void

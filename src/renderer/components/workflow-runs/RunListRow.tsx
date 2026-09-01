@@ -81,6 +81,11 @@ function RunListRowImpl({
         >
           {presentation.title}
         </span>
+        {run.partial && (
+          <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500 border border-white/[0.08] rounded px-1 shrink-0">
+            partial
+          </span>
+        )}
         {workflowDeleted && (
           <span className="text-[10px] uppercase tracking-wide text-gray-600 shrink-0">
             deleted

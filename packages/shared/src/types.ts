@@ -877,6 +877,8 @@ export type NodeExecutionStatus =
 export interface NodeExecutionState {
   nodeId: string
   status: NodeExecutionStatus
+  /** Why a skipped node was skipped: a condition branch or a partial run's target slice. */
+  skipReason?: 'branch' | 'target'
   startedAt?: string
   completedAt?: string
   sessionId?: string
@@ -984,6 +986,10 @@ export interface WorkflowExecution {
   connectorInboxLeaseToken?: string
   /** Durable terminal handling for restart recovery. */
   connectorInboxDisposition?: 'processed' | 'retry'
+  /** True when the run executed only a target step and its upstream slice. */
+  partial?: boolean
+  /** The failed run this one resumed, reusing its completed step outputs. */
+  retryOfRunId?: string
 }
 
 /** Stable identity for a run row, tolerating history written before `runId`. */

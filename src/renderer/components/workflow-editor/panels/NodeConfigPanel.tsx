@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, MoreHorizontal, Trash2 } from 'lucide-react'
+import { X, MoreHorizontal, Trash2, StepForward } from 'lucide-react'
 import {
   WorkflowNode,
   LoopConfig,
@@ -38,10 +38,13 @@ interface Props {
   /** Autocomplete entries for the workflow's declared manual-run inputs. */
   inputVars?: TemplateVariable[]
   stepGroups?: StepVariableGroup[]
+  /** Run only this step and its upstream slice; absent when the step is not a valid target. */
+  onRunToStep?: (nodeId: string) => void
 }
 
 export function NodeConfigPanel({
   node,
+  onRunToStep,
   allNodes,
   onChange,
   onLabelChange,
@@ -144,12 +147,6 @@ export function NodeConfigPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-5">
-        {node.slug && node.type !== 'trigger' && (
-          <p className="text-[10px] text-gray-600 font-mono -mt-2 mb-3">
-            Ref: {`{{steps.${node.slug}.output}}`}
-          </p>
-        )}
-
         {node.type === 'trigger' && (
           <TriggerConfigForm
             config={node.config as TriggerConfig}
@@ -252,6 +249,20 @@ export function NodeConfigPanel({
           </div>
         )}
       </div>
+
+      {onRunToStep && (
+        <div className="shrink-0 border-t border-white/[0.08] p-3">
+          <button
+            onClick={() => onRunToStep(node.id)}
+            className="w-full flex items-center justify-center gap-2 border border-white/[0.12] rounded-md
+                       px-3 py-1.5 text-[12px] text-gray-300 hover:text-white hover:border-white/[0.2]
+                       transition-colors"
+          >
+            <StepForward size={12} strokeWidth={2} />
+            Run to this step
+          </button>
+        </div>
+      )}
     </div>
   )
 }

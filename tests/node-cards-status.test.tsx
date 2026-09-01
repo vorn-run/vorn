@@ -68,3 +68,42 @@ describe('node cards — executionStatus dot', () => {
     expect(container.querySelector(`.${WORKFLOW_STATUS_DOT.success}`)).not.toBeInTheDocument()
   })
 })
+
+describe('node cards — running breath and failure border', () => {
+  it('breathes a border overlay while running', () => {
+    const { container } = render(
+      <ScriptNode
+        label="Script"
+        config={{ scriptType: 'bash', scriptContent: '' }}
+        selected={false}
+        onClick={() => {}}
+        executionStatus="running"
+      />
+    )
+    expect(container.querySelector('span.absolute.inset-0.animate-pulse')).toBeInTheDocument()
+  })
+
+  it('borders danger on the failed step, and only there', () => {
+    const failed = render(
+      <ScriptNode
+        label="Script"
+        config={{ scriptType: 'bash', scriptContent: '' }}
+        selected={false}
+        onClick={() => {}}
+        executionStatus="error"
+      />
+    )
+    expect((failed.container.firstChild as HTMLElement).className).toContain('border-danger')
+    expect(failed.container.querySelector('span.absolute.inset-0.animate-pulse')).toBeNull()
+
+    const idle = render(
+      <ScriptNode
+        label="Script"
+        config={{ scriptType: 'bash', scriptContent: '' }}
+        selected={false}
+        onClick={() => {}}
+      />
+    )
+    expect((idle.container.firstChild as HTMLElement).className).not.toContain('border-danger')
+  })
+})

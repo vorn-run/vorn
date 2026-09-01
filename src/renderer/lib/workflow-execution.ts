@@ -17,7 +17,12 @@ import {
   ConnectorItemContext,
   getProjectRemoteHostId
 } from '../../shared/types'
-import { resolveContextField, resolveTemplateVars, StepOutputs } from './template-vars'
+import {
+  getAncestorNodes,
+  resolveContextField,
+  resolveTemplateVars,
+  StepOutputs
+} from './template-vars'
 import { getWorktreeMode } from './workflow-helpers'
 import { buildTaskPrompt, buildWorkflowPrompt } from '../../shared/prompt-builder'
 import { extractStructuredOutput } from '../../shared/structured-output'
@@ -325,6 +330,8 @@ export function rescheduleWaitingGateTimers(
 
 export interface ExecuteWorkflowOptions {
   source?: 'scheduler' | 'manual'
+  /** Run only this node and its upstream slice; everything else is skipped. */
+  targetNodeId?: string
 }
 
 /**
@@ -450,7 +457,7 @@ function updateNodeState(
   }
 }
 
-function buildStepOutputsMap(
+export function buildStepOutputsMap(
   execution: WorkflowExecution,
   nodeMap: Map<string, WorkflowNode>
 ): StepOutputs {
@@ -1454,7 +1461,9 @@ export async function executeWorkflow(
 
   // Ask the core, not this window, whether we own this trigger. Every instance
   // hears the same scheduler tick; only the one granted the claim runs it.
-  const dedupeParams = dedupeFingerprint(context)
+  const dedupeParams = options?.targetNodeId
+    ? `${dedupeFingerprint(context)}:target:${options.targetNodeId}`
+    : dedupeFingerprint(context)
   const claim = await window.api.claimWorkflowRun({ workflowId: workflow.id, params: dedupeParams })
   if (!claim.granted) {
     console.warn(
@@ -1465,15 +1474,26 @@ export async function executeWorkflow(
     throw new Error(`Workflow "${workflow.name}" is already running for this trigger`)
   }
 
+  const targetSlice = options?.targetNodeId
+    ? new Set([
+        options.targetNodeId,
+        ...getAncestorNodes(workflow.nodes, workflow.edges, options.targetNodeId).map((n) => n.id)
+      ])
+    : null
+
   const execution: WorkflowExecution = {
     runId: claim.runId,
     workflowId: workflow.id,
     startedAt: new Date().toISOString(),
     status: 'running',
-    nodeStates: workflow.nodes.map((n) => ({
-      nodeId: n.id,
-      status: n.type === 'trigger' ? 'success' : 'pending'
-    })),
+    nodeStates: workflow.nodes.map((n) => {
+      if (n.type === 'trigger') return { nodeId: n.id, status: 'success' as const }
+      if (targetSlice && !targetSlice.has(n.id)) {
+        return { nodeId: n.id, status: 'skipped' as const, skipReason: 'target' as const }
+      }
+      return { nodeId: n.id, status: 'pending' as const }
+    }),
+    ...(targetSlice && { partial: true }),
     triggerTaskId: context?.task?.id,
     connectorItem: context?.connectorItem,
     connectorInboxId: context?.connectorItem?.inboxId,
@@ -1490,6 +1510,89 @@ export async function executeWorkflow(
   persistExecution(execution)
 
   return runExecution(workflow, execution, context, options)
+}
+
+/** Rebuild a run's launch context so a retry or re-run resolves the same templates. */
+export function contextFromRun(run: WorkflowExecution): WorkflowExecutionContext | undefined {
+  const task = run.triggerTaskId
+    ? useAppStore.getState().config?.tasks?.find((t) => t.id === run.triggerTaskId)
+    : undefined
+  // The inbox lease belongs to the original run; a re-run must not double-ack it.
+  const connectorItem = run.connectorItem
+    ? { ...run.connectorItem, inboxId: undefined, inboxLeaseToken: undefined }
+    : undefined
+  if (!task && !connectorItem && !run.inputs) return undefined
+  return { task, connectorItem, inputs: run.inputs }
+}
+
+/**
+ * The node states a retry starts from: successes adopted, deliberate skips
+ * (condition branches, a partial run's slice) preserved, everything else —
+ * failures, gate rejections, loop bodies — reset to pending.
+ */
+export function seedRetryStates(
+  workflow: WorkflowDefinition,
+  failedRun: WorkflowExecution
+): NodeExecutionState[] {
+  const priorById = new Map(failedRun.nodeStates.map((ns) => [ns.nodeId, ns]))
+  // Body steps chain by real edges but are driven only by their loop; adopting
+  // one as completed would let the wave loop race its successor with the loop.
+  const bodyIds = new Set<string>()
+  for (const n of workflow.nodes) {
+    if (n.type !== 'loop') continue
+    for (const id of (n.config as LoopConfig).bodyNodeIds ?? []) bodyIds.add(id)
+  }
+  return workflow.nodes.map((n) => {
+    const prior = priorById.get(n.id)
+    if (n.type === 'trigger') return { nodeId: n.id, status: 'success' }
+    if (bodyIds.has(n.id)) return { nodeId: n.id, status: 'pending' }
+    if (prior?.status === 'success') return { ...prior }
+    if (prior?.status === 'skipped' && prior.skipReason) return { ...prior }
+    return { nodeId: n.id, status: 'pending' }
+  })
+}
+
+/**
+ * Resume a failed run as a new one: completed steps keep their recorded
+ * outputs and are never re-executed; scheduling restarts at the failure.
+ */
+export async function retryRunFromFailure(
+  workflow: WorkflowDefinition,
+  failedRun: WorkflowExecution
+): Promise<WorkflowExecution> {
+  const context = contextFromRun(failedRun)
+  const params = `${failedRun.dedupeParams ?? 'manual'}:retry:${failedRun.runId}`
+  const claim = await window.api.claimWorkflowRun({ workflowId: workflow.id, params })
+  if (!claim.granted) {
+    const existing = useAppStore.getState().workflowExecutions.get(claim.runId)
+    if (existing) return existing
+    throw new Error(`A retry of this run is already in flight`)
+  }
+
+  const execution: WorkflowExecution = {
+    runId: claim.runId,
+    workflowId: workflow.id,
+    startedAt: new Date().toISOString(),
+    status: 'running',
+    nodeStates: seedRetryStates(workflow, failedRun),
+    partial: failedRun.partial,
+    retryOfRunId: failedRun.runId,
+    triggerTaskId: failedRun.triggerTaskId,
+    connectorItem: context?.connectorItem,
+    dedupeParams: params,
+    inputs: failedRun.inputs
+  }
+
+  persistExecution(execution)
+  return runExecution(workflow, execution, context)
+}
+
+/** Start a fresh run with the same launch context as an earlier one. */
+export async function rerunWorkflowRun(
+  workflow: WorkflowDefinition,
+  run: WorkflowExecution
+): Promise<WorkflowExecution> {
+  return executeWorkflow(workflow, contextFromRun(run), { source: 'manual' })
 }
 
 /** Live runs of one workflow, newest first. */
@@ -1785,6 +1888,7 @@ async function runExecution(
               for (const skippedId of skippedByCondition) {
                 updateNodeState(execution, skippedId, {
                   status: 'skipped',
+                  skipReason: 'branch',
                   completedAt: new Date().toISOString()
                 })
               }

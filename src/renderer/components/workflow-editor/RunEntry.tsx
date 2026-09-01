@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
-import { ChevronDown, ChevronRight, Maximize2, RotateCcw, Check, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw, Check, X } from 'lucide-react'
 import {
   WorkflowExecution,
   WorkflowNode,
@@ -93,6 +93,8 @@ interface RunStepsListProps {
   includeTrigger?: boolean
   onViewFullOutput?: (logs: string) => void
   onClickTask?: (taskId: string) => void
+  /** Auto-expand whichever step is running and keep it scrolled into view. */
+  followActive?: boolean
   onResumeSession?: (
     agentSessionId: string,
     agentType: AiAgentType,
@@ -121,9 +123,23 @@ export function RunStepsList({
   includeTrigger = false,
   onViewFullOutput,
   onClickTask,
+  followActive,
   onResumeSession
 }: RunStepsListProps) {
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
+  const activeNodeId = followActive
+    ? (execution.nodeStates.find((ns) => ns.status === 'running')?.nodeId ?? null)
+    : null
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (activeNodeId) setExpandedNodeId(activeNodeId)
+  }, [activeNodeId])
+  const expandedRowRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (followActive && expandedNodeId) {
+      expandedRowRef.current?.scrollIntoView?.({ block: 'nearest' })
+    }
+  }, [followActive, expandedNodeId])
   const connections = useConnections()
 
   const actionStates = includeTrigger
@@ -224,7 +240,7 @@ export function RunStepsList({
             node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
 
           return (
-            <div key={ns.nodeId}>
+            <div key={ns.nodeId} ref={isExpanded ? expandedRowRef : undefined}>
               {/* Line linking the previous step to this one so the cards read
                   as one continuous flow. Neutral on purpose: the status dots
                   carry the colour, and tinting the connectors too turns the
@@ -430,6 +446,12 @@ interface RunEntryProps {
   tasks?: TaskConfig[]
   onViewFullOutput?: (logs: string) => void
   onClickTask?: (taskId: string) => void
+  /** Start a fresh run with this run's launch context. */
+  onRerunRun?: (execution: WorkflowExecution) => void
+  /** Resume this failed run from its failed step, reusing completed outputs. */
+  onRetryRun?: (execution: WorkflowExecution) => void
+  /** Keep this run expanded and its active step in view while it streams. */
+  follow?: boolean
   onResumeSession?: (
     agentSessionId: string,
     agentType: AiAgentType,
@@ -447,15 +469,18 @@ export function RunEntry({
   tasks,
   onViewFullOutput,
   onClickTask,
+  onRerunRun,
+  onRetryRun,
+  follow,
   onResumeSession
 }: RunEntryProps) {
   const hasWaitingGate = execution.nodeStates.some((ns) => ns.status === 'waiting')
-  const [expanded, setExpanded] = useState(hasWaitingGate)
+  const [expanded, setExpanded] = useState(hasWaitingGate || !!follow)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (hasWaitingGate) setExpanded(true)
-  }, [hasWaitingGate])
+    if (hasWaitingGate || follow) setExpanded(true)
+  }, [hasWaitingGate, follow])
 
   const triggerTask =
     execution.triggerTaskId && tasks
@@ -493,10 +518,41 @@ export function RunEntry({
               {triggerTask.title}
             </span>
           )}
+          {execution.partial && (
+            <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500 border border-white/[0.08] rounded px-1 shrink-0">
+              partial
+            </span>
+          )}
           <span className="text-[11px] text-gray-500 shrink-0">
             {formatRunDuration(execution.startedAt, execution.completedAt)}
           </span>
         </button>
+        {execution.status === 'error' && onRetryRun && (
+          <span className="shrink-0">
+            <Tooltip label="Retry from failed step" position="top">
+              <button
+                aria-label="Retry from failed step"
+                onClick={() => onRetryRun(execution)}
+                className="p-1 rounded text-gray-500 hover:text-white transition-colors"
+              >
+                <RotateCcw size={12} strokeWidth={2} />
+              </button>
+            </Tooltip>
+          </span>
+        )}
+        {execution.status !== 'running' && onRerunRun && (
+          <span className="shrink-0">
+            <Tooltip label="Run again" position="top">
+              <button
+                aria-label="Run again"
+                onClick={() => onRerunRun(execution)}
+                className="p-1 rounded text-gray-500 hover:text-white transition-colors"
+              >
+                <Play size={12} strokeWidth={2} />
+              </button>
+            </Tooltip>
+          </span>
+        )}
         <span className="pr-2 shrink-0">
           <StopRunButton execution={execution} stopPropagation={false} />
         </span>
@@ -510,6 +566,7 @@ export function RunEntry({
           onViewFullOutput={onViewFullOutput}
           onClickTask={onClickTask}
           onResumeSession={onResumeSession}
+          followActive={follow}
         />
       )}
     </div>

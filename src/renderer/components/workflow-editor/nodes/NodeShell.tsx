@@ -58,10 +58,16 @@ export function NodeShell({
         onClick()
       }}
       className={`relative px-3 py-2.5 rounded-md border w-[280px] transition-all cursor-pointer
-                  ${selected ? NODE_SELECTED : NODE_UNSELECTED}
+                  ${selected ? NODE_SELECTED : executionStatus === 'error' ? 'border-danger/60' : NODE_UNSELECTED}
                   ${dashed ? 'border-dashed' : ''}
                   bg-surface-node hover:bg-white/[0.02]`}
     >
+      {executionStatus === 'running' && (
+        <span
+          aria-hidden
+          className="absolute inset-0 rounded-md border border-white/[0.35] animate-pulse pointer-events-none"
+        />
+      )}
       {executionStatus && WORKFLOW_STATUS_DOT_PULSE[executionStatus] && (
         <span
           className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[executionStatus]}`}

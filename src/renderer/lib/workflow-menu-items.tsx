@@ -39,12 +39,16 @@ export type WorkflowMenuContext = ManualRunContext
  * `executeWorkflow` itself stays unguarded because the scheduler, connector
  * triggers and missed-schedule recovery legitimately run without a user.
  */
-export function startManualRun(workflow: WorkflowDefinition, ctx?: ManualRunContext): void {
+export function startManualRun(
+  workflow: WorkflowDefinition,
+  ctx?: ManualRunContext,
+  options?: { targetNodeId?: string }
+): void {
   if (needsRunPrompt(workflow, ctx)) {
-    useAppStore.getState().setPendingWorkflowRun(workflow.id, ctx)
+    useAppStore.getState().setPendingWorkflowRun(workflow.id, ctx, options?.targetNodeId)
     return
   }
-  void executeWorkflow(workflow, ctx, { source: 'manual' })
+  void executeWorkflow(workflow, ctx, { source: 'manual', targetNodeId: options?.targetNodeId })
 }
 
 export function buildWorkflowMenuItems(

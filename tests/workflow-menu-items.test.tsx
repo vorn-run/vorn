@@ -123,7 +123,7 @@ describe('buildWorkflowMenuItems', () => {
 describe('startManualRun', () => {
   it('opens SourcePromptDialog for contextual workflows', () => {
     startManualRun(makeWorkflow('a', true))
-    expect(mockSetPending).toHaveBeenCalledWith('a', undefined)
+    expect(mockSetPending).toHaveBeenCalledWith('a', undefined, undefined)
     expect(mockExecuteWorkflow).not.toHaveBeenCalled()
   })
 
@@ -160,7 +160,7 @@ describe('workflows declaring run inputs', () => {
   it('prompts instead of launching from a global surface', () => {
     startManualRun(withInputs(makeWorkflow('wf-i', false)))
     expect(mockExecuteWorkflow).not.toHaveBeenCalled()
-    expect(mockSetPending).toHaveBeenCalledWith('wf-i', undefined)
+    expect(mockSetPending).toHaveBeenCalledWith('wf-i', undefined, undefined)
   })
 
   it('prompts from a card menu too, forwarding the card as context', () => {
@@ -170,7 +170,11 @@ describe('workflows declaring run inputs', () => {
     items[0].onClick()
 
     expect(mockExecuteWorkflow).not.toHaveBeenCalled()
-    expect(mockSetPending).toHaveBeenCalledWith('wf-i', { task: someTask, source: undefined })
+    expect(mockSetPending).toHaveBeenCalledWith(
+      'wf-i',
+      { task: someTask, source: undefined },
+      undefined
+    )
   })
 
   it('still launches straight away when no inputs are declared', () => {

@@ -63,6 +63,10 @@ export function estimateNodeHeight(node: WorkflowNode, allNodes: WorkflowNode[])
     // header + padding + body + line + add button + footer
     return 41 + 16 + bodyHeights + 18 + 22 + 40
   }
+  if (node.type === 'condition') {
+    const cfg = node.config as { variable?: string }
+    return cfg.variable ? 90 : 58
+  }
   return stepPreview(node) ? 90 : 58
 }
 
@@ -152,9 +156,10 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
       type: node.type === 'loop' ? 'loop' : 'step',
       position,
       data: { nodeId: node.id } satisfies CanvasNodeData,
-      // Explicit dimensions and handles let edges render without a DOM measure.
-      width,
-      height,
+      // Initial dimensions and handles anchor edges before (and without) a DOM
+      // measure; once mounted, measured card bounds take over.
+      initialWidth: width,
+      initialHeight: height,
       handles: [
         ...(node.type !== 'trigger'
           ? [{ type: 'target' as const, position: Position.Top, x: width / 2, y: 0 }]
@@ -220,8 +225,8 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
         afterNodeId: node.id,
         insideBranch: branchMembers.has(node.id)
       } satisfies AddStepNodeData,
-      width: 22,
-      height: 22,
+      initialWidth: 22,
+      initialHeight: 22,
       handles: [{ type: 'target' as const, position: Position.Top, x: 11, y: 0 }],
       draggable: false,
       selectable: false,
