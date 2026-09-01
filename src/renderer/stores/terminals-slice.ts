@@ -184,11 +184,12 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       const mapped = state.terminalOrder.map((id) => (id === previousId ? session.id : id))
       // Once, even when the session was already on the board: two slots under one
       // id draw the same pane twice and close together.
-      const order = mapped.filter((id, at) => mapped.indexOf(id) === at)
+      const seen = new Set<string>()
+      const order = mapped.filter((id) => !seen.has(id) && seen.add(id))
       window.api.notifyWidgetStatus()
       return {
         terminals: next,
-        terminalOrder: order.includes(session.id) ? order : [...order, session.id]
+        terminalOrder: seen.has(session.id) ? order : [...order, session.id]
       }
     }),
 

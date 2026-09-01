@@ -95,6 +95,19 @@ describe('a resume bound to a session this client has never drawn', () => {
   })
 })
 
+describe('replacing a pane with a session already on the board', () => {
+  it('leaves one slot, in the place the running session already had', () => {
+    const store = useAppStore.getState()
+    store.addTerminal(session({ id: 'first' }))
+    store.addTerminal(session({ id: 'running' }))
+    store.addTerminal(session({ id: 'cold' }), { reason: 'app-closed', at: 1, replayed: true })
+
+    useAppStore.getState().replaceTerminal('cold', session({ id: 'running' }))
+
+    expect(useAppStore.getState().terminalOrder).toEqual(['first', 'running'])
+  })
+})
+
 describe('an ordinary resume', () => {
   it('keeps replacing in place, with the same id', async () => {
     const store = useAppStore.getState()
