@@ -7,6 +7,7 @@ import {
   ApprovalConfig,
   CreateTaskFromItemConfig,
   CallConnectorActionConfig,
+  HttpRequestConfig,
   NodeExecutionStatus
 } from '../../../../shared/types'
 import { TriggerNode } from './TriggerNode'
@@ -16,6 +17,7 @@ import { ConditionNode } from './ConditionNode'
 import { ApprovalNode } from './ApprovalNode'
 import { CreateTaskFromItemNode } from './CreateTaskFromItemNode'
 import { CallConnectorActionNode } from './CallConnectorActionNode'
+import { HttpRequestNode } from './HttpRequestNode'
 
 /** The card for a single step, dispatched by type; loops render as composites, not cards. */
 export function NodeCard({
@@ -81,6 +83,18 @@ export function NodeCard({
       <CreateTaskFromItemNode
         label={node.label}
         config={node.config as CreateTaskFromItemConfig}
+        selected={selected}
+        onClick={onClick}
+        executionStatus={executionStatus}
+      />
+    )
+  }
+
+  if (node.type === 'httpRequest') {
+    return (
+      <HttpRequestNode
+        label={node.label}
+        config={node.config as HttpRequestConfig}
         selected={selected}
         onClick={onClick}
         executionStatus={executionStatus}

@@ -261,6 +261,13 @@ export function buildStepGroups(
             keys = [...schemaKeys, ...defaultKeys]
           }
         }
+      } else if (n.type === 'httpRequest') {
+        keys = [
+          { key: 'status', label: 'status', description: 'HTTP status code' },
+          { key: 'body', label: 'body', description: 'Response body, JSON-parsed when possible' },
+          { key: 'headers', label: 'headers', description: 'Response headers' },
+          ...defaultKeys
+        ]
       } else if (n.type === 'launchAgent') {
         // A headless launchAgent with a declared outputSchema surfaces its typed
         // fields the same way — `{{steps.<slug>.<field>}}` — populated at run

@@ -13,6 +13,7 @@ import {
   ApprovalConfig,
   CreateTaskFromItemConfig,
   CallConnectorActionConfig,
+  HttpRequestConfig,
   TaskConfig,
   ConnectorItemContext,
   getProjectRemoteHostId
@@ -845,6 +846,43 @@ async function executeNode(
         status: result.success ? 'success' : 'error',
         completedAt: new Date().toISOString(),
         output: result.success ? `${cfg.action} succeeded` : `${cfg.action} failed`,
+        logs: JSON.stringify(result, null, 2),
+        ...(isPlainObject && { structuredOutput: result.output }),
+        ...(result.error && { error: result.error })
+      })
+    } catch (err) {
+      updateNodeState(execution, node.id, {
+        status: 'error',
+        completedAt: new Date().toISOString(),
+        error: err instanceof Error ? err.message : String(err)
+      })
+    }
+    persistExecution(execution)
+    return
+  }
+
+  if (node.type === 'httpRequest') {
+    const cfg = node.config as HttpRequestConfig
+    const headers: Record<string, string> = {}
+    for (const [name, value] of Object.entries(cfg.headers ?? {})) {
+      if (name.trim()) headers[name] = resolveTemplateVars(value, context, stepOutputs)
+    }
+    try {
+      const result = await window.api.httpRequest({
+        profileConnectionId: cfg.profileConnectionId || undefined,
+        method: cfg.method,
+        url: resolveTemplateVars(cfg.url ?? '', context, stepOutputs),
+        headers,
+        body: cfg.body ? resolveTemplateVars(cfg.body, context, stepOutputs) : undefined
+      })
+      const status = (result.output as { status?: number } | undefined)?.status
+      // Same plain-object guard as connector actions, for the same reason.
+      const isPlainObject =
+        !!result.output && typeof result.output === 'object' && !Array.isArray(result.output)
+      updateNodeState(execution, node.id, {
+        status: result.success ? 'success' : 'error',
+        completedAt: new Date().toISOString(),
+        output: result.success ? `HTTP ${status}` : 'Request failed',
         logs: JSON.stringify(result, null, 2),
         ...(isPlainObject && { structuredOutput: result.output }),
         ...(result.error && { error: result.error })

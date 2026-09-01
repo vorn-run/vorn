@@ -49,6 +49,7 @@ import {
   positionsAreSeed,
   createScriptNode,
   createConditionNode,
+  createHttpRequestNode,
   createApprovalNode,
   createCallConnectorActionNode,
   appendNodeAfter,
@@ -580,6 +581,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         loop: () => createLoopNode(),
         script: () => createScriptNode(),
         connectorAction: () => createCallConnectorActionNode(),
+        httpRequest: () => createHttpRequestNode(),
         agent: () =>
           createLaunchAgentNode(
             firstProject ? { projectName: firstProject.name, projectPath: firstProject.path } : {}

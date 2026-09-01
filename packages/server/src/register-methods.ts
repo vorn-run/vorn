@@ -128,6 +128,7 @@ import {
   backfillMcpConnection,
   preflightMcpConnection
 } from './connectors/mcp'
+import { httpConnector, performHttpRequest } from './connectors/http'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
@@ -1363,6 +1364,16 @@ export function registerAllMethods(): void {
     clearDecryptedCreds(connectionId)
   })
 
+  registerMethod('http:request', async ({ profileConnectionId, method, url, headers, body }) => {
+    let profile: Record<string, unknown> = {}
+    if (profileConnectionId) {
+      const conn = dbGetSourceConnection(profileConnectionId)
+      if (!conn) return { success: false, error: `Connection ${profileConnectionId} not found` }
+      profile = applyDecryptedCreds(conn)
+    }
+    return performHttpRequest(profile, { method, url, headers, body })
+  })
+
   registerMethod('connection:executeAction', async ({ connectionId, action, args }) => {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return { success: false, error: `Connection ${connectionId} not found` }
@@ -1435,6 +1446,13 @@ export function registerAllMethods(): void {
     // under "nothing to check" — the one reading a user is most likely to take
     // as reassurance.
     if (!conn) throw new Error(`connection ${connectionId} not found`)
+    // An http profile's preflight is a real request through its injection.
+    if (conn.connectorId === 'http') {
+      const result = await httpConnector.execute!('test', applyDecryptedCreds(conn))
+      const status = (result.output as { status?: number } | undefined)?.status
+      if (!result.success) return { ok: false, message: result.error }
+      return { ok: (status ?? 500) < 400, message: `HTTP ${status}` }
+    }
     // A built-in connector genuinely declares no preflight, so this really is
     // "nothing to check".
     if (conn.connectorId !== MCP_CONNECTOR_ID) return { ok: null }

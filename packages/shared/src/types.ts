@@ -582,6 +582,7 @@ export type WorkflowNodeType =
   | 'approval'
   | 'createTaskFromItem'
   | 'callConnectorAction'
+  | 'httpRequest'
   | 'loop'
 
 export interface WorkflowNodePosition {
@@ -805,6 +806,19 @@ export interface CallConnectorActionConfig {
   args: Record<string, string>
 }
 
+export interface HttpRequestConfig {
+  nodeType: 'httpRequest'
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  /** Absolute, or a path resolved against the profile's base URL. */
+  url: string
+  /** Header names are literal; values support template placeholders. */
+  headers: Record<string, string>
+  /** Raw request body; empty sends none. Template placeholders allowed. */
+  body: string
+  /** An `http` connection whose auth injection is applied server-side. */
+  profileConnectionId?: string
+}
+
 export type WorkflowNodeConfig =
   | TriggerConfig
   | LaunchAgentConfig
@@ -813,6 +827,7 @@ export type WorkflowNodeConfig =
   | ApprovalConfig
   | CreateTaskFromItemConfig
   | CallConnectorActionConfig
+  | HttpRequestConfig
   | LoopConfig
 
 /**
@@ -1647,6 +1662,8 @@ export const IPC = {
   CONNECTION_EXECUTE_ACTION: 'connection:executeAction',
   CONNECTION_LIST_ACTIONS: 'connection:listActions',
   WEBHOOK_INFO: 'webhook:info',
+  HTTP_REQUEST: 'http:request',
+  CONNECTION_PREFLIGHT: 'connection:preflight',
   CONNECTION_LIST_MCP_TOOLS: 'connection:listMcpTools',
   CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
   CONNECTOR_PROBE_SDK: 'connector:probeSdk',

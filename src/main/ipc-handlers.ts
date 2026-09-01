@@ -346,6 +346,10 @@ export function registerIpcHandlers(): void {
     requireBridge().request(IPC.CONNECTION_EXECUTE_ACTION, params)
   )
   safeHandle(IPC.WEBHOOK_INFO, () => requireBridge().request(IPC.WEBHOOK_INFO, undefined))
+  safeHandle(IPC.HTTP_REQUEST, (_e, params) => requireBridge().request(IPC.HTTP_REQUEST, params))
+  safeHandle(IPC.CONNECTION_PREFLIGHT, (_e, connectionId) =>
+    requireBridge().request(IPC.CONNECTION_PREFLIGHT, connectionId)
+  )
   safeHandle(IPC.CONNECTION_LIST_ACTIONS, (_, connectionId) =>
     requireBridge().request(IPC.CONNECTION_LIST_ACTIONS, connectionId)
   )

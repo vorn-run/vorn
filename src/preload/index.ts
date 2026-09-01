@@ -850,6 +850,16 @@ const api = {
     ipcRenderer.invoke(IPC.CONNECTION_LIST_ACTIONS, connectionId),
 
   getWebhookInfo: (): Promise<{ baseUrl: string }> => ipcRenderer.invoke(IPC.WEBHOOK_INFO),
+  httpRequest: (params: {
+    profileConnectionId?: string
+    method: string
+    url: string
+    headers?: Record<string, string>
+    body?: string
+  }): Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }> =>
+    ipcRenderer.invoke(IPC.HTTP_REQUEST, params),
+  preflightConnection: (connectionId: string): Promise<{ ok: boolean | null; message?: string }> =>
+    ipcRenderer.invoke(IPC.CONNECTION_PREFLIGHT, connectionId),
 
   listMcpTools: (
     connectionId: string

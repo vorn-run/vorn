@@ -42,6 +42,7 @@ export type AddableNodeType =
   | 'condition'
   | 'approval'
   | 'connectorAction'
+  | 'httpRequest'
   | 'loop'
 
 /** Where a pick from the step library lands, and what that spot allows. */

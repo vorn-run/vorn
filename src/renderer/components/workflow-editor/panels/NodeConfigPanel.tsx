@@ -10,6 +10,7 @@ import {
   ApprovalConfig,
   CreateTaskFromItemConfig,
   CallConnectorActionConfig,
+  HttpRequestConfig,
   WorkflowNodeErrorPolicy
 } from '../../../../shared/types'
 import { ConnectorIcon } from '../../ConnectorIcon'
@@ -22,6 +23,7 @@ import { ApprovalConfigForm } from './ApprovalConfigForm'
 import { LoopConfigForm } from './LoopConfigForm'
 import { CreateTaskFromItemNodeForm } from './CreateTaskFromItemNodeForm'
 import { CallConnectorActionNodeForm } from './CallConnectorActionNodeForm'
+import { HttpRequestConfigForm } from './HttpRequestConfigForm'
 import { NODE_TYPE_ICON, NODE_GLYPH } from '../node-visuals'
 import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 
@@ -206,6 +208,17 @@ export function NodeConfigPanel({
           <CreateTaskFromItemNodeForm
             config={node.config as CreateTaskFromItemConfig}
             onChange={(config) => onChange(node.id, config)}
+          />
+        )}
+
+        {node.type === 'httpRequest' && (
+          <HttpRequestConfigForm
+            inputVars={inputVars}
+            config={node.config as HttpRequestConfig}
+            onChange={(config) => onChange(node.id, config)}
+            triggerType={triggerType}
+            isContextualTrigger={isContextualTrigger}
+            stepGroups={stepGroups}
           />
         )}
 

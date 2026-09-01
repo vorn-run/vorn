@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Play, Terminal, GitFork, Hand, Repeat, Split, Search, X, Zap } from 'lucide-react'
+import { Play, Terminal, GitFork, Hand, Repeat, Split, Search, X, Zap, Globe } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { ConnectorActionDef, SourceConnection } from '../../../../shared/types'
 import {
@@ -28,6 +28,7 @@ export interface LibraryScope {
 const STEP_ITEMS: { type: AddableNodeType; label: string; icon: LucideIcon }[] = [
   { type: 'agent', label: 'Agent', icon: Play },
   { type: 'script', label: 'Script', icon: Terminal },
+  { type: 'httpRequest', label: 'HTTP request', icon: Globe },
   { type: 'condition', label: 'Condition', icon: GitFork },
   { type: 'approval', label: 'Approval gate', icon: Hand },
   { type: 'loop', label: 'Loop', icon: Repeat }

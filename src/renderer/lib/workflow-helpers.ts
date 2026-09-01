@@ -388,6 +388,26 @@ export function createCallConnectorActionNode(
   }
 }
 
+export function createHttpRequestNode(
+  config: Partial<import('../../shared/types').HttpRequestConfig> = {}
+): WorkflowNode {
+  return {
+    id: crypto.randomUUID(),
+    type: 'httpRequest',
+    label: 'HTTP Request',
+    slug: slugify('HTTP Request'),
+    config: {
+      nodeType: 'httpRequest',
+      method: 'GET',
+      url: '',
+      headers: {},
+      body: '',
+      ...config
+    } as import('../../shared/types').HttpRequestConfig,
+    position: { x: 0, y: 0 }
+  }
+}
+
 export function createConditionNode(config: Partial<ConditionConfig> = {}): WorkflowNode {
   return {
     id: crypto.randomUUID(),

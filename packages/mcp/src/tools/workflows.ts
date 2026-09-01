@@ -195,6 +195,7 @@ const nodeSchema = z
       'approval',
       'createTaskFromItem',
       'callConnectorAction',
+      'httpRequest',
       'loop'
     ]),
     label: V.shortText,
