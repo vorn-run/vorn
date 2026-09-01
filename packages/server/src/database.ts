@@ -2081,6 +2081,30 @@ export function dbCountActiveConnectorInboxLeases(now: string): number {
  * A crash can leave both absent or both present, never a cursor that points
  * beyond events which were only held in memory.
  */
+/** One webhook request becomes one durable inbox row, deduped by event id. */
+export function dbEnqueueWebhookEvent(args: {
+  workflowId: string
+  eventId: string
+  receivedAt: string
+  item: ConnectorItemContext
+}): void {
+  const d = getDb()
+  d.prepare(
+    `INSERT OR IGNORE INTO connector_inbox (
+      workflow_id, connection_id, connector_id, event_id, event_type,
+      event_timestamp, payload, status, attempts, available_at, created_at
+    ) VALUES (?, ?, 'webhook', ?, 'webhook', ?, ?, 'pending', 0, ?, ?)`
+  ).run(
+    args.workflowId,
+    args.item.connectionId,
+    args.eventId,
+    args.receivedAt,
+    JSON.stringify(args.item),
+    args.receivedAt,
+    args.receivedAt
+  )
+}
+
 export function dbRecordConnectorPollPage(args: {
   workflowId: string
   connectionId: string

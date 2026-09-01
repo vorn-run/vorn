@@ -1054,6 +1054,8 @@ export function registerAllMethods(): void {
     return reachableUrls(serverPort, tailscaleIps)
   })
 
+  registerMethod('webhook:info', () => ({ baseUrl: `http://127.0.0.1:${serverPort}` }))
+
   // Tailscale network access. Informational only now: it supplies an address and
   // a QR code, and no longer decides whether the server binds wide.
   registerMethod('tailscale:status', async () => {

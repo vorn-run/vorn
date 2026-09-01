@@ -257,6 +257,7 @@ export interface RequestMethods {
   /** Present a credential. The only method accepted before authenticating. */
   'auth:authenticate': { params: { token: string }; result: { ok: boolean } }
   'server:reachableUrls': { params: void; result: ReachableUrls }
+  'webhook:info': { params: void; result: { baseUrl: string } }
   // Device tokens. Namespaced `token:` rather than `device:`, which belongs
   // entirely to the simulator registry — thirteen methods of it.
   'token:list': { params: void; result: DeviceToken[] }

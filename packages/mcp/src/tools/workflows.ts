@@ -167,6 +167,18 @@ const triggerConfigSchema = z.union([
     projectFilter: V.name.optional(),
     fromStatus: z.enum(['todo', 'in_progress', 'in_review', 'done', 'cancelled']).optional(),
     toStatus: z.enum(['todo', 'in_progress', 'in_review', 'done', 'cancelled']).optional()
+  }),
+  z.object({
+    triggerType: z.literal('connectorPoll'),
+    connectionId: V.id,
+    event: V.shortText,
+    cron: V.shortText,
+    timezone: V.shortText.optional()
+  }),
+  z.object({
+    triggerType: z.literal('webhook'),
+    method: z.enum(['POST', 'GET']),
+    token: V.shortText
   })
 ])
 

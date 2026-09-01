@@ -1,4 +1,15 @@
-import { Zap, Clock, RefreshCw, ListPlus, ArrowRightLeft, Plug } from 'lucide-react'
+import {
+  Zap,
+  Clock,
+  RefreshCw,
+  ListPlus,
+  ArrowRightLeft,
+  Plug,
+  Globe,
+  Copy,
+  Check
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from '../../../stores'
 import { TriggerConfig, TaskStatus } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
@@ -50,6 +61,12 @@ const TRIGGER_TYPES = [
     label: 'Connector Poll',
     icon: Plug,
     hint: 'Polls an external connector on cron and fires per new item'
+  },
+  {
+    type: 'webhook' as const,
+    label: 'Webhook',
+    icon: Globe,
+    hint: 'Fires when this machine receives an HTTP request at the workflow URL'
   }
 ]
 
@@ -76,6 +93,8 @@ function switchTriggerType(type: TriggerConfig['triggerType']): TriggerConfig {
       return { triggerType: 'taskStatusChanged' }
     case 'connectorPoll':
       return { triggerType: 'connectorPoll', connectionId: '', event: '', cron: '*/5 * * * *' }
+    case 'webhook':
+      return { triggerType: 'webhook', method: 'POST', token: crypto.randomUUID().slice(0, 13) }
   }
 }
 
@@ -231,6 +250,10 @@ export function TriggerConfigForm({ config, onChange }: Props) {
         <ConnectorPollTriggerForm config={config} onChange={onChange} />
       )}
 
+      {config.triggerType === 'webhook' && (
+        <WebhookTriggerFields config={config} onChange={onChange} />
+      )}
+
       {config.triggerType === 'taskStatusChanged' && (
         <>
           <div>
@@ -272,5 +295,81 @@ export function TriggerConfigForm({ config, onChange }: Props) {
         </>
       )}
     </div>
+  )
+}
+
+function WebhookTriggerFields({
+  config,
+  onChange
+}: {
+  config: Extract<TriggerConfig, { triggerType: 'webhook' }>
+  onChange: (config: TriggerConfig) => void
+}) {
+  const [baseUrl, setBaseUrl] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api
+      .getWebhookInfo()
+      .then((info) => {
+        if (!cancelled) setBaseUrl(info.baseUrl)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const workflowId = useAppStore((s) => s.editingWorkflowId)
+  const url = baseUrl && workflowId ? `${baseUrl}/wf-hooks/${workflowId}/${config.token}` : null
+
+  return (
+    <>
+      <div>
+        <label className="text-[13px] text-gray-400 font-medium block mb-2">URL</label>
+        {url ? (
+          <div className="flex items-center gap-2">
+            <code className="flex-1 min-w-0 px-3 py-2 text-[11px] bg-white/[0.06] border border-white/[0.1] rounded-md text-gray-300 font-mono truncate">
+              {url}
+            </code>
+            <button
+              aria-label="Copy URL"
+              onClick={() => {
+                void navigator.clipboard.writeText(url)
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1500)
+              }}
+              className="p-2 rounded-md border border-white/[0.1] text-gray-400 hover:text-white hover:border-white/[0.2] transition-colors shrink-0"
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+            </button>
+          </div>
+        ) : (
+          <p className="text-[11px] text-gray-500">
+            Save the workflow first — the URL includes its id.
+          </p>
+        )}
+        <p className="text-[11px] text-gray-500 mt-1.5">
+          Local machine only, and only while the app is open. Exposing it is a deliberate, separate
+          step.
+        </p>
+      </div>
+      <div>
+        <label className="text-[13px] text-gray-400 font-medium block mb-2">Method</label>
+        <SelectPicker
+          value={config.method}
+          options={[
+            { value: 'POST', label: 'POST' },
+            { value: 'GET', label: 'GET' }
+          ]}
+          onChange={(v) => onChange({ ...config, method: v as 'POST' | 'GET' })}
+          variant="form"
+        />
+        <p className="text-[11px] text-gray-500 mt-1.5">
+          The request lands as {'{{trigger.body.*}}'} and {'{{trigger.headers.*}}'}.
+        </p>
+      </div>
+    </>
   )
 }

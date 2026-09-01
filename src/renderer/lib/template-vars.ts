@@ -87,6 +87,8 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
   { key: '{{task.projectName}}', label: 'Project', category: 'task' },
   { key: '{{trigger.fromStatus}}', label: 'Previous Status', category: 'trigger' },
   { key: '{{trigger.toStatus}}', label: 'New Status', category: 'trigger' },
+  { key: '{{trigger.body}}', label: 'Request Body', category: 'trigger' },
+  { key: '{{trigger.headers}}', label: 'Request Headers', category: 'trigger' },
   { key: '{{connectorItem.externalId}}', label: 'External ID', category: 'connectorItem' },
   { key: '{{connectorItem.title}}', label: 'Item Title', category: 'connectorItem' },
   { key: '{{connectorItem.externalUrl}}', label: 'Item URL', category: 'connectorItem' },
@@ -129,7 +131,10 @@ export function getAvailableContextVars(opts: {
   return TEMPLATE_VARIABLES.filter((v) => {
     if (isTaskTrigger && v.category === 'task') return true
     if (isTaskTrigger && v.category === 'trigger' && opts.triggerType === 'taskStatusChanged') {
-      return true
+      return v.key.includes('Status')
+    }
+    if (opts.triggerType === 'webhook' && v.category === 'trigger') {
+      return v.key.includes('trigger.body') || v.key.includes('trigger.headers')
     }
     if (opts.isContextualTrigger && v.category === 'context') return true
     return false

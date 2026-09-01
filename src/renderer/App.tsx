@@ -359,7 +359,30 @@ export function App() {
           return
         }
 
-        const context = connectorItem || inputs ? { connectorItem, inputs } : undefined
+        // A webhook event rides the connector pipe; its payload feeds {{trigger.*}}.
+        const webhookRaw =
+          connectorItem?.connectorId === 'webhook'
+            ? (connectorItem.raw as {
+                body?: unknown
+                headers?: Record<string, string>
+                method?: string
+              })
+            : null
+        const context =
+          connectorItem || inputs
+            ? {
+                connectorItem,
+                inputs,
+                ...(webhookRaw && {
+                  trigger: {
+                    type: 'webhook' as const,
+                    body: webhookRaw.body,
+                    headers: webhookRaw.headers,
+                    method: webhookRaw.method
+                  }
+                })
+              }
+            : undefined
         try {
           const execution = await runWorkflow(workflow, context, { source: 'scheduler' })
           // A different run may be parked on an approval gate. It did not

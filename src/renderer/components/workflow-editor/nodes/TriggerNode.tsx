@@ -1,4 +1,13 @@
-import { Zap, Clock, Calendar, ListPlus, ArrowRightLeft, Plug, type LucideIcon } from 'lucide-react'
+import {
+  Zap,
+  Clock,
+  Calendar,
+  ListPlus,
+  ArrowRightLeft,
+  Plug,
+  Globe,
+  type LucideIcon
+} from 'lucide-react'
 import type {
   TriggerConfig,
   ConnectorPollTriggerConfig,
@@ -22,7 +31,8 @@ const TRIGGER_ICONS: Record<string, LucideIcon> = {
   recurring: Clock,
   taskCreated: ListPlus,
   taskStatusChanged: ArrowRightLeft,
-  connectorPoll: Plug
+  connectorPoll: Plug,
+  webhook: Globe
 }
 const DEFAULT_ICON = Zap
 
@@ -62,6 +72,8 @@ function getSubtitle(config: TriggerConfig): string {
     }
     case 'connectorPoll':
       return `${config.event} · ${config.cron}`
+    case 'webhook':
+      return `${config.method} · this machine`
   }
 }
 

@@ -556,6 +556,10 @@ export interface WorkflowExecutionContext {
     type: TriggerConfig['triggerType']
     fromStatus?: TaskStatus
     toStatus?: TaskStatus
+    /** Webhook runs: the received request, for {{trigger.body.*}} / {{trigger.headers.*}}. */
+    body?: unknown
+    headers?: Record<string, string>
+    method?: string
   }
   connectorItem?: ConnectorItemContext
   /**
@@ -671,6 +675,13 @@ export interface ConnectorPollTriggerConfig {
   cron: string
   timezone?: string
 }
+/** Fires when the server's localhost webhook route receives a matching request. */
+export interface WebhookTriggerConfig {
+  triggerType: 'webhook'
+  method: 'POST' | 'GET'
+  /** Per-trigger secret path segment; requests without it are rejected. */
+  token: string
+}
 export type TriggerConfig =
   | ManualTriggerConfig
   | OnceTriggerConfig
@@ -678,6 +689,7 @@ export type TriggerConfig =
   | TaskCreatedTriggerConfig
   | TaskStatusChangedTriggerConfig
   | ConnectorPollTriggerConfig
+  | WebhookTriggerConfig
 
 /**
  * Agent type as used in a launchAgent workflow node. A concrete AgentType runs
@@ -1634,6 +1646,7 @@ export const IPC = {
   CREDENTIALS_CLEAR_DECRYPTED: 'credentials:clearDecrypted',
   CONNECTION_EXECUTE_ACTION: 'connection:executeAction',
   CONNECTION_LIST_ACTIONS: 'connection:listActions',
+  WEBHOOK_INFO: 'webhook:info',
   CONNECTION_LIST_MCP_TOOLS: 'connection:listMcpTools',
   CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
   CONNECTOR_PROBE_SDK: 'connector:probeSdk',

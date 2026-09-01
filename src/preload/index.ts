@@ -849,6 +849,8 @@ const api = {
   listConnectionActions: (connectionId: string): Promise<ConnectorActionDef[]> =>
     ipcRenderer.invoke(IPC.CONNECTION_LIST_ACTIONS, connectionId),
 
+  getWebhookInfo: (): Promise<{ baseUrl: string }> => ipcRenderer.invoke(IPC.WEBHOOK_INFO),
+
   listMcpTools: (
     connectionId: string
   ): Promise<
