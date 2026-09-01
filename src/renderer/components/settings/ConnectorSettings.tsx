@@ -64,6 +64,9 @@ export function ConnectorSettings() {
   const [installProgress, setInstallProgress] = useState<Record<string, ConnectorInstallProgress>>(
     {}
   )
+  // A pack installed from a file has no row to fail on until its manifest is
+  // read, so its refusal is reported above the list instead.
+  const [fileInstallError, setFileInstallError] = useState<string | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [backfillingId, setBackfillingId] = useState<string | null>(null)
   const [backfillResult, setBackfillResult] = useState<
@@ -135,6 +138,16 @@ export function ConnectorSettings() {
           return next
         })
       }
+      await load()
+    },
+    [load]
+  )
+
+  const handleInstallFile = useCallback(
+    async (filePath: string) => {
+      setFileInstallError(null)
+      const result = await window.api.installConnectorPack({ kind: 'file', path: filePath })
+      if (!result.ok) setFileInstallError(result.error)
       await load()
     },
     [load]
@@ -274,6 +287,9 @@ export function ConnectorSettings() {
           onSelect={setSelected}
           onAdd={setAdding}
           onInstall={handleInstall}
+          onInstallFile={handleInstallFile}
+          onPickFile={() => window.api.openFileDialog()}
+          installError={fileInstallError}
         />
       )}
 

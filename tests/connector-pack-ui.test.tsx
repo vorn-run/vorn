@@ -8,7 +8,10 @@ import type {
   SourceConnection
 } from '../packages/shared/src/types'
 import { buildConnectorListings } from '../src/renderer/lib/connector-browse'
-import { ConnectorRow } from '../src/renderer/components/settings/ConnectorDirectory'
+import {
+  ConnectorDirectory,
+  ConnectorRow
+} from '../src/renderer/components/settings/ConnectorDirectory'
 import { ConnectorDetail } from '../src/renderer/components/settings/ConnectorDetail'
 
 const catalogEntry: ConnectorCatalogItem = {
@@ -236,5 +239,81 @@ describe('ConnectorDetail pack footer', () => {
     expect(onInstall).toHaveBeenCalled()
     expect(onRollback).toHaveBeenCalled()
     expect(onRemove).toHaveBeenCalled()
+  })
+})
+
+describe('installing a pack from a file', () => {
+  const setup = (props: Partial<Parameters<typeof ConnectorDirectory>[0]> = {}) =>
+    render(
+      <ConnectorDirectory
+        listings={buildConnectorListings([], [catalogEntry], [])}
+        builtIns={[]}
+        onSelect={() => {}}
+        onAdd={() => {}}
+        {...props}
+      />
+    )
+
+  const dropFiles = (target: Element, files: Array<{ path?: string }>): void => {
+    fireEvent.drop(target, { dataTransfer: { files } })
+  }
+
+  it('installs each dropped file by the path it came with', () => {
+    const onInstallFile = vi.fn()
+    const { container } = setup({ onInstallFile })
+    dropFiles(container.firstElementChild as Element, [
+      { path: '/tmp/acme-1.2.0.vorn.tgz' },
+      { path: '/tmp/other-2.0.0.vorn.tgz' }
+    ])
+    expect(onInstallFile).toHaveBeenCalledTimes(2)
+    expect(onInstallFile).toHaveBeenCalledWith('/tmp/acme-1.2.0.vorn.tgz')
+  })
+
+  it('ignores a drop carrying nothing with a path on disk', () => {
+    const onInstallFile = vi.fn()
+    const { container } = setup({ onInstallFile })
+    dropFiles(container.firstElementChild as Element, [{}])
+    expect(onInstallFile).not.toHaveBeenCalled()
+  })
+
+  it('marks the drop target while a file is over it, and clears it after', () => {
+    const { container } = setup({ onInstallFile: () => {} })
+    const target = container.firstElementChild as Element
+    fireEvent.dragOver(target)
+    expect(target).toHaveAttribute('data-drop-active', 'true')
+    fireEvent.drop(target, { dataTransfer: { files: [] } })
+    expect(target).not.toHaveAttribute('data-drop-active')
+  })
+
+  it('accepts no drop at all when installing from a file is not offered', () => {
+    const { container } = setup()
+    const target = container.firstElementChild as Element
+    fireEvent.dragOver(target)
+    expect(target).not.toHaveAttribute('data-drop-active')
+  })
+
+  it('installs what the file picker returns and skips a cancelled pick', async () => {
+    const onInstallFile = vi.fn()
+    const picked = setup({ onInstallFile, onPickFile: async () => '/tmp/acme-1.2.0.vorn.tgz' })
+    fireEvent.click(within(picked.container).getByText('Install from file'))
+    await vi.waitFor(() => expect(onInstallFile).toHaveBeenCalledWith('/tmp/acme-1.2.0.vorn.tgz'))
+
+    const cancelled = setup({ onInstallFile, onPickFile: async () => null })
+    fireEvent.click(within(cancelled.container).getByText('Install from file'))
+    await vi.waitFor(() => expect(onInstallFile).toHaveBeenCalledTimes(1))
+  })
+
+  it('hides the file button when there is no picker to open', () => {
+    const { container } = setup({ onInstallFile: () => {} })
+    expect(within(container).queryByText('Install from file')).not.toBeInTheDocument()
+  })
+
+  it('reports a refused file install above the list, where it has no row', () => {
+    const { container } = setup({
+      onInstallFile: () => {},
+      installError: 'The pack has no manifest.json'
+    })
+    const line = within(container).getByText('The pack has no manifest.json')
+    expect(line.className).toContain('text-danger')
   })
 })

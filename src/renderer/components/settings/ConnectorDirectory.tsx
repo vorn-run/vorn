@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Search, Plus, RefreshCw, ChevronRight, Download } from 'lucide-react'
+import { Search, Plus, RefreshCw, ChevronRight, Download, FolderOpen } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
 import type { ConnectorInstallProgress } from '../../../shared/types'
 import {
@@ -31,6 +31,9 @@ export function ConnectorDirectory({
   onSelect,
   onAdd,
   onInstall,
+  onInstallFile,
+  onPickFile,
+  installError,
   progress,
   fetchedAt,
   onRefresh
@@ -40,6 +43,12 @@ export function ConnectorDirectory({
   onSelect: (listing: ConnectorListing) => void
   onAdd: (listing: ConnectorListing) => void
   onInstall?: (listing: ConnectorListing) => void
+  /** A pack chosen from disk, by absolute path. */
+  onInstallFile?: (filePath: string) => void
+  /** Opens the file picker and answers with what was chosen. */
+  onPickFile?: () => Promise<string | null>
+  /** Why the last file install was refused, for the one that has no row yet. */
+  installError?: string | null
   /** Installs running right now, by connector id. */
   progress?: Record<string, ConnectorInstallProgress>
   /** When the published list was last read. Absent until one has been. */
@@ -49,6 +58,7 @@ export function ConnectorDirectory({
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
 
   const categories = useMemo(() => connectorCategories(listings), [listings])
   const visible = useMemo(
@@ -56,8 +66,37 @@ export function ConnectorDirectory({
     [listings, search, category]
   )
 
+  const handleDrop = (event: React.DragEvent): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    setDragOver(false)
+    if (!onInstallFile) return
+    for (const file of Array.from(event.dataTransfer?.files ?? [])) {
+      const filePath = (file as File & { path?: string }).path
+      if (filePath) onInstallFile(filePath)
+    }
+  }
+
   return (
-    <div>
+    <div
+      onDragOver={
+        onInstallFile
+          ? (event) => {
+              event.preventDefault()
+              setDragOver(true)
+            }
+          : undefined
+      }
+      onDragLeave={(event) => {
+        event.preventDefault()
+        setDragOver(false)
+      }}
+      onDrop={onInstallFile ? handleDrop : undefined}
+      className={
+        dragOver ? 'outline-dashed outline-1 outline-offset-4 outline-white/[0.25]' : undefined
+      }
+      data-drop-active={dragOver ? 'true' : undefined}
+    >
       <div className="flex items-center gap-2 mb-1">
         <div className="relative flex-1">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
@@ -69,6 +108,18 @@ export function ConnectorDirectory({
             className="w-full pl-7 pr-2 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-200 focus:border-white/[0.2] outline-none"
           />
         </div>
+        {onInstallFile && onPickFile && (
+          <button
+            onClick={async () => {
+              const filePath = await onPickFile()
+              if (filePath) onInstallFile(filePath)
+            }}
+            title="Install a .vorn.tgz you already have"
+            className="shrink-0 py-1.5 px-2 text-xs text-gray-300 hover:text-white border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+          >
+            <FolderOpen size={11} /> Install from file
+          </button>
+        )}
         {/* A dropdown rather than a row of chips, which wrapped to a second
             line and pushed the list down. */}
         {categories.length > 1 && (
@@ -87,6 +138,13 @@ export function ConnectorDirectory({
           </select>
         )}
       </div>
+
+      {installError && (
+        <p className={`flex items-start gap-1.5 text-[11px] mt-2 ${TONE_TEXT.broken}`}>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 ${TONE_DOT.broken}`} />
+          {installError}
+        </p>
+      )}
 
       <div>
         {visible.map((listing) => (
