@@ -33,8 +33,7 @@ export function PackInstallConfirm({
         />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] text-gray-200 font-medium">
-            {preview.name}{' '}
-            <span className="text-gray-500 font-normal">v{preview.version}</span>
+            {preview.name} <span className="text-gray-500 font-normal">v{preview.version}</span>
           </div>
           {preview.description && (
             <p className="text-[11px] text-gray-500 mt-0.5">{preview.description}</p>

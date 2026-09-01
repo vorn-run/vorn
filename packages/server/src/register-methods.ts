@@ -248,9 +248,7 @@ async function onPackChanged(connectorId: string): Promise<void> {
   await stopClientsForConnector(connectorId)
   await Promise.allSettled(
     ids.map((id) =>
-      runMcpDiscovery(id).catch((err) =>
-        log.warn(`[packs] rediscovery failed for ${id}: ${err}`)
-      )
+      runMcpDiscovery(id).catch((err) => log.warn(`[packs] rediscovery failed for ${id}: ${err}`))
     )
   )
 }

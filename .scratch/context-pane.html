@@ -1,0 +1,868 @@
+<script id="artifact" type="application/json">
+  {
+    "kind": "design",
+    "title": "Context pane",
+    "tweaks": {
+      "width": {
+        "type": "number",
+        "label": "Pane width",
+        "default": 360,
+        "unit": "px",
+        "min": 280,
+        "max": 460,
+        "step": 20
+      },
+      "pinned": { "type": "boolean", "label": "Pane open", "default": true }
+    }
+  }
+</script>
+
+<style>
+  /* Straight from src/renderer/theme.css -- not approximations. */
+  :root {
+    --color-surface-base: #0d0d0f;
+    --color-surface-sunken: #141416;
+    --color-surface-panel: #101012;
+    --color-surface-overlay: #1c1c20;
+    --color-ink: #faf9f7;
+    --color-ink-secondary: rgba(255, 255, 255, 0.55);
+    --color-ink-faint: rgba(255, 255, 255, 0.35);
+    --color-ink-ghost: rgba(255, 255, 255, 0.18);
+    --color-bronzo: #c9972a;
+    --color-danger: #d4623f;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  /* `display: flex` on .pane and .tab outranks the UA rule for [hidden], so
+     hiding either needs saying twice. */
+  [hidden] {
+    display: none !important;
+  }
+  body {
+    margin: 0;
+    background: var(--color-surface-base);
+    color: var(--color-ink);
+    font:
+      13px/1.5 -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      Roboto,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  /* TONE_DOT from lib/status-tone.ts. `live` is ink, not blue. `settled` is
+     faint, not green. Only `blocked` takes the accent. */
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    flex: none;
+  }
+  .dot.live {
+    background: var(--color-ink);
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  .dot.blocked {
+    background: var(--color-bronzo);
+  }
+  .dot.broken {
+    background: var(--color-danger);
+  }
+  .dot.settled {
+    background: var(--color-ink-faint);
+  }
+  .dot.idle {
+    background: var(--color-ink-ghost);
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  /* MainViewPills: icon-only lucide buttons in a segmented group. */
+  .titlebar {
+    height: 38px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    background: var(--color-surface-panel);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .pills {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .pill {
+    position: relative;
+    width: 28px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-ink-faint);
+    cursor: pointer;
+    padding: 0;
+  }
+  .pill:hover {
+    color: var(--color-ink-secondary);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .pill.on {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-ink);
+  }
+  .pill .badge {
+    position: absolute;
+    top: -2px;
+    right: -3px;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: var(--color-bronzo);
+    color: #191307;
+    font-size: 9px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid var(--color-surface-panel);
+  }
+  .spacer {
+    flex: 1;
+  }
+  .icobtn {
+    width: 26px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-ink-faint);
+    cursor: pointer;
+    padding: 0;
+  }
+  .icobtn:hover {
+    color: var(--color-ink);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .icobtn.on {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-ink);
+  }
+
+  .body {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+
+  /* ProjectSidebar */
+  .side {
+    width: 180px;
+    flex: none;
+    background: var(--color-surface-panel);
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 8px 0;
+    overflow: auto;
+  }
+  .side-h {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-ink-secondary);
+  }
+  .side-h .n {
+    font-size: 11px;
+    color: var(--color-ink-faint);
+  }
+  .side-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 1px 6px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--color-ink-secondary);
+    cursor: pointer;
+  }
+  .side-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .side-row.on {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--color-ink);
+  }
+
+  /* GridView card + terminal */
+  .stage {
+    flex: 1;
+    min-width: 0;
+    padding: 10px;
+    display: flex;
+  }
+  .card {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-surface-sunken);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .card-h {
+    height: 32px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 12px;
+  }
+  .card-h .t {
+    color: var(--color-ink);
+  }
+  .card-h .b {
+    color: var(--color-ink-faint);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+  }
+  .term {
+    flex: 1;
+    padding: 10px;
+    overflow: hidden;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--color-ink-secondary);
+  }
+  .term .p {
+    color: var(--color-ink-faint);
+  }
+
+  /* TaskDetailPanel: shrink-0 flex flex-col border-l border-white/[0.08] */
+  .pane {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--color-surface-panel);
+    position: relative;
+  }
+  .grip {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    cursor: col-resize;
+  }
+  .grip:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  /* px-4 py-3 border-b border-white/[0.06] */
+  .pane-h {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    flex: none;
+  }
+  .pane-h .top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pane-h h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-ink);
+    flex: 1;
+  }
+  .seg {
+    display: flex;
+    gap: 2px;
+    margin-top: 10px;
+  }
+  .seg button {
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 6px;
+    border: 0;
+    background: transparent;
+    color: var(--color-ink-faint);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .seg button:hover {
+    color: var(--color-ink-secondary);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .seg button.on {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-ink);
+  }
+
+  .pane-b {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  /* TaskListView section header: text-[13px] font-medium text-ink-secondary */
+  .sec {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-ink-secondary);
+  }
+  .sec .n {
+    font-size: 11px;
+    color: var(--color-ink-faint);
+  }
+
+  /* px-3 py-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] */
+  .row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 2px 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    cursor: pointer;
+  }
+  .row:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .row.on {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .row .dot {
+    margin-top: 4px;
+  }
+  .row .main {
+    min-width: 0;
+    flex: 1;
+  }
+  .row .t {
+    font-size: 12px;
+    color: var(--color-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row .m {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--color-ink-faint);
+    font-family: ui-monospace, Menlo, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* The agent holding it. AgentPicker's own chip shape. */
+  .agent {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 5px;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--color-ink-secondary);
+  }
+  .agent.here {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: transparent;
+    color: var(--color-ink);
+  }
+  .agent.none {
+    border-style: dashed;
+    color: var(--color-ink-faint);
+  }
+
+  /* The w-20 label column TaskDetailPanel already uses for Status/Project/Agent. */
+  .detail {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 12px 16px;
+    flex: none;
+  }
+  .f {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    margin-bottom: 10px;
+  }
+  .f:last-of-type {
+    margin-bottom: 0;
+  }
+  .f .k {
+    width: 80px;
+    flex: none;
+    color: var(--color-ink-faint);
+  }
+  .f .v {
+    color: var(--color-ink-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 7px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--color-ink);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .picker:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .foot {
+    flex: none;
+    padding: 9px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 11px;
+    color: var(--color-ink-faint);
+  }
+  kbd {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    padding: 1px 4px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+    color: var(--color-ink-secondary);
+  }
+  .tab {
+    width: 30px;
+    flex: none;
+    background: var(--color-surface-panel);
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    justify-content: center;
+    padding-top: 12px;
+    cursor: pointer;
+  }
+  .tab:hover {
+    background: var(--color-surface-sunken);
+  }
+  .tab span {
+    writing-mode: vertical-rl;
+    font-size: 11px;
+    color: var(--color-ink-faint);
+  }
+
+  @media (max-width: 860px) {
+    .side {
+      display: none;
+    }
+  }
+  @media (max-width: 620px) {
+    .stage {
+      display: none;
+    }
+    .pane {
+      flex: 1;
+    }
+  }
+</style>
+
+<div class="app">
+  <div class="titlebar">
+    <div class="pills">
+      <button class="pill on" title="Sessions">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <path d="M8 21h8m-4-4v4" />
+        </svg>
+      </button>
+      <button class="pill" data-pane="tasks" title="Tasks">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path d="M8 6h13M8 12h13M8 18h13M3 6l1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+        </svg>
+      </button>
+      <button class="pill" data-pane="workflows" title="Workflows">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <rect x="3" y="3" width="6" height="6" rx="1" />
+          <rect x="15" y="15" width="6" height="6" rx="1" />
+          <path d="M6 9v6a3 3 0 003 3h6" />
+        </svg>
+        <span class="badge">2</span>
+      </button>
+    </div>
+    <div class="spacer"></div>
+    <button class="icobtn" id="toggle" title="Context pane (⌘.)">
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M15 3v18" />
+      </svg>
+    </button>
+  </div>
+
+  <div class="body">
+    <div class="side">
+      <div class="side-h">vorn <span class="n">3</span></div>
+      <div class="side-row on"><span class="dot live"></span> fix/flaky</div>
+      <div class="side-row"><span class="dot blocked"></span> feat/pair</div>
+      <div class="side-row"><span class="dot idle"></span> main</div>
+      <div class="side-h" style="margin-top: 6px">vorn-mobile <span class="n">1</span></div>
+      <div class="side-row"><span class="dot idle"></span> main</div>
+    </div>
+
+    <div class="stage">
+      <div class="card">
+        <div class="card-h">
+          <span class="dot live"></span>
+          <span class="t">claude</span>
+          <span class="b">vorn · fix/flaky</span>
+        </div>
+        <div class="term">
+          <div><span class="p">›</span> running the failing spec</div>
+          <div class="p">PASS tests/pty-manager-recovery.test.ts</div>
+          <div class="p">PASS tests/ws-auth.test.ts</div>
+          <div class="p">237 files · 2856 tests</div>
+          <div style="margin-top: 6px">
+            <span class="p">›</span> the flake was a timer left armed between cases
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane" id="pane">
+      <div class="grip"></div>
+      <div id="paneInner"></div>
+    </div>
+    <div class="tab" id="tab" hidden><span id="tabtext">Tasks</span></div>
+  </div>
+</div>
+
+<script>
+  var state = { pane: 'tasks', scope: 'session', sel: 0 }
+
+  // TASK_STATUS_TONE from lib/task-status.ts
+  var TASK_TONE = {
+    todo: 'idle',
+    in_progress: 'live',
+    in_review: 'blocked',
+    done: 'settled',
+    cancelled: 'idle'
+  }
+  var TASK_LABEL = {
+    todo: 'Todo',
+    in_progress: 'In Progress',
+    in_review: 'In Review',
+    done: 'Done',
+    cancelled: 'Cancelled'
+  }
+  // WORKFLOW_STATUS_TONE from lib/workflow-status.ts
+  var RUN_TONE = {
+    waiting: 'blocked',
+    error: 'broken',
+    running: 'live',
+    success: 'settled',
+    pending: 'idle',
+    skipped: 'idle',
+    cancelled: 'idle'
+  }
+
+  var TASKS = [
+    {
+      t: 'Fix the flaky pty timer',
+      s: 'in_progress',
+      m: 'vorn · fix/flaky',
+      agent: 'claude',
+      here: true
+    },
+    {
+      t: 'Pair a phone by scanning',
+      s: 'in_review',
+      m: 'vorn · PR #484',
+      agent: 'copilot',
+      here: false
+    },
+    { t: 'Fix SSH prompt double-dispose', s: 'todo', m: 'vorn · high', agent: null, here: false },
+    {
+      t: 'Pause git diff polling when hidden',
+      s: 'todo',
+      m: 'vorn · medium',
+      agent: null,
+      here: false
+    },
+    { t: 'Fix server crash not surfaced', s: 'todo', m: 'vorn · medium', agent: null, here: false }
+  ]
+  var RUNS = [
+    {
+      t: 'Full review',
+      s: 'waiting',
+      m: 'step 3 of 4 · 2m ago',
+      agent: 'approval gate',
+      here: true
+    },
+    {
+      t: 'Issue → task',
+      s: 'running',
+      m: 'step 2 of 3 · now',
+      agent: 'claude · headless',
+      here: false
+    },
+    { t: 'Clean branches', s: 'success', m: 'succeeded · 18m ago', agent: null, here: false },
+    { t: 'Nightly deps', s: 'error', m: 'failed at step 1 · 6h ago', agent: null, here: false }
+  ]
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  }
+
+  window.__artifactRender = function () {
+    var tw = (window.__artifact && window.__artifact.tweaks) || {}
+    var open = tw.pinned !== false
+    var pane = document.getElementById('pane')
+    var tab = document.getElementById('tab')
+
+    pane.hidden = !open
+    tab.hidden = open
+    document.getElementById('toggle').className = 'icobtn' + (open ? ' on' : '')
+    document.getElementById('tabtext').textContent = state.pane === 'tasks' ? 'Tasks' : 'Runs'
+
+    var pills = document.querySelectorAll('.pill[data-pane]')
+    for (var i = 0; i < pills.length; i++) {
+      pills[i].className =
+        'pill' + (open && pills[i].getAttribute('data-pane') === state.pane ? ' on' : '')
+    }
+    if (!open) return
+
+    pane.style.width = (tw.width || 360) + 'px'
+
+    var tasks = state.pane === 'tasks'
+    var items = (tasks ? TASKS : RUNS).slice()
+    if (state.scope === 'session')
+      items = items.filter(function (i) {
+        return i.here || i.agent
+      })
+    else if (state.scope === 'project') items = items.slice(0, 4)
+
+    if (state.sel >= items.length) state.sel = 0
+    var cur = items[state.sel]
+
+    var rows = items
+      .map(function (i, n) {
+        var tone = tasks ? TASK_TONE[i.s] : RUN_TONE[i.s]
+        var chip = i.agent
+          ? '<span class="agent' +
+            (i.here ? ' here' : '') +
+            '">' +
+            esc(i.agent) +
+            (i.here ? ' · here' : '') +
+            '</span>'
+          : tasks
+            ? '<span class="agent none">unassigned</span>'
+            : ''
+        return (
+          '<div class="row' +
+          (n === state.sel ? ' on' : '') +
+          '" data-sel="' +
+          n +
+          '">' +
+          '<span class="dot ' +
+          tone +
+          '"></span><div class="main">' +
+          '<div class="t">' +
+          esc(i.t) +
+          '</div><div class="m">' +
+          esc(i.m) +
+          '</div>' +
+          chip +
+          '</div></div>'
+        )
+      })
+      .join('')
+
+    var scopes = [
+      ['session', 'This session'],
+      ['project', 'This project'],
+      ['all', 'Everything']
+    ]
+      .map(function (s) {
+        return (
+          '<button data-scope="' +
+          s[0] +
+          '"' +
+          (state.scope === s[0] ? ' class="on"' : '') +
+          '>' +
+          s[1] +
+          '</button>'
+        )
+      })
+      .join('')
+
+    // The same w-20 field rows TaskDetailPanel already draws, so the selected
+    // row is editable in place -- Agent is where you hand it to a session.
+    var detail = cur
+      ? tasks
+        ? '<div class="f"><span class="k">Status</span><span class="v">' +
+          '<span class="dot ' +
+          TASK_TONE[cur.s] +
+          '"></span>' +
+          TASK_LABEL[cur.s] +
+          '</span></div>' +
+          '<div class="f"><span class="k">Agent</span><span class="v">' +
+          '<span class="picker">' +
+          esc(cur.agent || 'Unassigned') +
+          ' ▾</span></span></div>' +
+          '<div class="f"><span class="k">Branch</span><span class="v mono" style="font-size:11px">' +
+          esc(cur.m.split(' · ')[1] || '—') +
+          '</span></div>'
+        : '<div class="f"><span class="k">Run</span><span class="v">' +
+          '<span class="dot ' +
+          RUN_TONE[cur.s] +
+          '"></span>' +
+          esc(cur.s) +
+          '</span></div>' +
+          '<div class="f"><span class="k">Step</span><span class="v mono" style="font-size:11px">' +
+          esc(cur.m) +
+          '</span></div>' +
+          (cur.s === 'waiting'
+            ? '<div class="f"><span class="k">Gate</span><span class="v">' +
+              '<span class="picker">Approve</span><span class="picker">Reject</span></span></div>'
+            : '')
+      : ''
+
+    document.getElementById('paneInner').innerHTML =
+      '<div class="pane-h"><div class="top"><h3>' +
+      (tasks ? 'Tasks' : 'Recent runs') +
+      '</h3>' +
+      '<span style="font-size:11px;color:var(--color-ink-faint)">' +
+      items.length +
+      '</span></div>' +
+      '<div class="seg">' +
+      scopes +
+      '</div></div>' +
+      '<div class="pane-b"><div class="sec">' +
+      (tasks ? (state.scope === 'session' ? 'Here' : 'Open') : 'Runs') +
+      ' <span class="n">' +
+      items.length +
+      '</span></div>' +
+      rows +
+      '</div>' +
+      (detail ? '<div class="detail">' + detail + '</div>' : '') +
+      '<div class="foot">Same panel in every view. <kbd>⌘.</kbd> toggles it.</div>'
+  }
+
+  function setTweak(k, v) {
+    window.__artifact = window.__artifact || {}
+    window.__artifact.tweaks = window.__artifact.tweaks || {}
+    window.__artifact.tweaks[k] = v
+    window.__artifactRender()
+  }
+
+  document.addEventListener('click', function (e) {
+    var p = e.target.closest('[data-pane]')
+    if (p) {
+      state.pane = p.getAttribute('data-pane')
+      state.sel = 0
+      setTweak('pinned', true)
+      return
+    }
+    var s = e.target.closest('[data-scope]')
+    if (s) {
+      state.scope = s.getAttribute('data-scope')
+      state.sel = 0
+      window.__artifactRender()
+      return
+    }
+    var r = e.target.closest('[data-sel]')
+    if (r) {
+      state.sel = +r.getAttribute('data-sel')
+      window.__artifactRender()
+      return
+    }
+    if (e.target.closest('#toggle')) {
+      var t = window.__artifact.tweaks || {}
+      setTweak('pinned', t.pinned === false)
+      return
+    }
+    if (e.target.closest('#tab')) {
+      setTweak('pinned', true)
+    }
+  })
+
+  document.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === '.') {
+      e.preventDefault()
+      var t = (window.__artifact && window.__artifact.tweaks) || {}
+      setTweak('pinned', t.pinned === false)
+    }
+  })
+
+  window.__artifactRender()
+</script>

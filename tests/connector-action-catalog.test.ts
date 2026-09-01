@@ -6,12 +6,10 @@ vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 
-const { mcpConnectionActions, mcpToolToConnectorAction } = await import(
-  '../packages/server/src/connectors/mcp'
-)
-const { isReservedSdkTool, MANIFEST_TOOL, PREFLIGHT_TOOL, pollToolName } = await import(
-  '../packages/server/src/connectors/sdk-tools'
-)
+const { mcpConnectionActions, mcpToolToConnectorAction } =
+  await import('../packages/server/src/connectors/mcp')
+const { isReservedSdkTool, MANIFEST_TOOL, PREFLIGHT_TOOL, pollToolName } =
+  await import('../packages/server/src/connectors/sdk-tools')
 
 /** The tools a packed SDK connector with one trigger and one action really serves. */
 const PACK_TOOLS = [
