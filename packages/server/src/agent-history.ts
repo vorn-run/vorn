@@ -45,9 +45,14 @@ function escapeSqlString(value: string): string {
   return value.replace(/'/g, "''")
 }
 
+/** One form for comparing a Vorn path against a path an agent recorded. */
+export function comparablePath(value: string): string {
+  return normalizePath(value).replace(/\\/g, '/').toLowerCase()
+}
+
 function buildPathWhereClause(column: string, scope: ProjectScope): string {
   const clauses = scope.rawPaths.map((projectPath) => {
-    const normalized = normalizePath(projectPath).replace(/\\/g, '/').toLowerCase()
+    const normalized = comparablePath(projectPath)
     return `lower(rtrim(replace(${column}, char(92), '/'), '/')) = '${escapeSqlString(normalized)}'`
   })
   return clauses.length === 1 ? clauses[0] : `(${clauses.join(' OR ')})`

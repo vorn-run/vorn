@@ -1,11 +1,4 @@
-/**
- * A transcript is spoken for while its process starts, before it reports its own id.
- *
- * codex and opencode cannot be told an id at launch, so `agentSessionId` only
- * arrives from the capture five seconds later. Until then a live session does not
- * know which conversation it is writing, and two resumes would both resolve to it.
- * Claims lapse rather than lock, so a spawn that dies never wedges the transcript.
- */
+// Held while a process starts, before it can report which conversation it took.
 
 const SPAWN_WINDOW_MS = 15_000
 

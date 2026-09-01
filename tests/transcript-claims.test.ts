@@ -6,15 +6,6 @@ import {
   resetTranscriptClaims
 } from '../packages/server/src/transcript-claims'
 
-/**
- * The window where a session has started but cannot yet say what it is writing.
- *
- * codex and opencode take no id at launch, so `agentSessionId` only arrives from
- * the capture seconds later. Resuming two cold panes in that gap is the case
- * this covers: the first spawn holds its transcript, so the second resolves to a
- * different one instead of starting a second agent on one conversation.
- */
-
 beforeEach(() => resetTranscriptClaims())
 afterEach(() => vi.useRealTimers())
 

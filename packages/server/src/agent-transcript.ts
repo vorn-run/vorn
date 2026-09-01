@@ -1,12 +1,7 @@
 import type { AiAgentType, RecentSession, TerminalSession } from '@vornrun/shared/types'
 import { supportsExactSessionResume } from '@vornrun/shared/types'
-import { getRecentSessionsFor } from './agent-history'
+import { comparablePath, getRecentSessionsFor } from './agent-history'
 import { claimSpawningTranscript, spawningTranscripts } from './transcript-claims'
-import { normalizePath } from './process-utils'
-
-function comparablePath(value: string): string {
-  return normalizePath(value).toLowerCase()
-}
 
 function preferredPaths(session: TerminalSession): string[] {
   return [session.worktreePath, session.projectPath]
@@ -14,17 +9,7 @@ function preferredPaths(session: TerminalSession): string[] {
     .map(comparablePath)
 }
 
-function read(sessions: () => RecentSession[]): RecentSession[] {
-  try {
-    return sessions()
-  } catch {
-    return []
-  }
-}
-
-/**
- * Which agent conversation a session continues, or undefined to let the agent choose.
- */
+/** Which agent conversation a session continues, or undefined to let the agent choose. */
 export function resolveTranscriptId(
   session: TerminalSession,
   held: ReadonlySet<string> = new Set()
@@ -50,15 +35,15 @@ export function resolveTranscriptId(
     return undefined
   }
 
-  const scoped = read(() => getRecentSessionsFor(agentType, session.projectPath))
+  const scoped = getRecentSessionsFor(agentType, session.projectPath)
   const scopedMatch = atPreferredPath(scoped) ?? scoped.find(available)
   if (scopedMatch) return scopedMatch.sessionId
 
   // Unscoped matches by path only: a loose match here would cross projects.
-  return atPreferredPath(read(() => getRecentSessionsFor(agentType)))?.sessionId
+  return atPreferredPath(getRecentSessionsFor(agentType))?.sessionId
 }
 
-/** The transcripts processes are writing right now. */
+/** The conversations processes are writing right now. */
 export function heldTranscripts(live: TerminalSession[]): Set<string> {
   const ids = live.map((session) => session.agentSessionId)
   return new Set(ids.filter((id): id is string => id !== undefined))
@@ -71,9 +56,7 @@ export function transcriptHolder(
   return live.find((session) => session.agentSessionId === transcriptId)
 }
 
-/**
- * The conversation a resume should continue, claimed against everything in flight.
- */
+/** The conversation a resume should continue, claimed against everything in flight. */
 export function claimTranscriptFor(
   session: TerminalSession,
   live: TerminalSession[],

@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { RecentSession, TerminalSession } from '../packages/shared/src/types'
 
 const getRecentSessionsFor = vi.fn()
-vi.mock('../packages/server/src/agent-history', () => ({
+vi.mock('../packages/server/src/agent-history', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../packages/server/src/agent-history')>()),
   getRecentSessionsFor: (...args: unknown[]) => getRecentSessionsFor(...args)
 }))
 
@@ -12,15 +13,10 @@ import {
   transcriptHolder,
   claimTranscriptFor
 } from '../packages/server/src/agent-transcript'
-import { resetTranscriptClaims } from '../packages/server/src/transcript-claims'
-
-/**
- * Which conversation a session continues.
- *
- * Moved here from the renderer: every input was already on this side, and the
- * renderer could only dedupe within one window's restore pass, which is why two
- * devices could take one transcript.
- */
+import {
+  resetTranscriptClaims,
+  releaseSpawningTranscript
+} from '../packages/server/src/transcript-claims'
 
 function session(overrides: Partial<TerminalSession> = {}): TerminalSession {
   return {
@@ -122,17 +118,9 @@ describe('resolving which conversation a session continues', () => {
   })
 
   it('leaves its own pinned conversation when that is the one being written', () => {
-    // Falls through to the scan rather than handing back an id already in use.
     getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'sess-2' })])
     const resumed = session({ agentSessionId: 'sess-1' })
     expect(resolveTranscriptId(resumed, new Set(['sess-1']))).toBe('sess-2')
-  })
-
-  it('survives an agent whose history cannot be read', () => {
-    getRecentSessionsFor.mockImplementation(() => {
-      throw new Error('database is locked')
-    })
-    expect(resolveTranscriptId(session())).toBeUndefined()
   })
 })
 
@@ -154,11 +142,6 @@ describe('who is writing a conversation right now', () => {
 })
 
 describe('two cold panes resumed one after the other', () => {
-  /**
-   * The case the whole change exists for. codex reports which conversation it
-   * took seconds after it starts, so the first resume is still nameless when the
-   * second asks -- and both would take the newest thread.
-   */
   it('take different conversations, because the first claims while it starts', () => {
     getRecentSessionsFor.mockReturnValue([
       recent({ sessionId: 'transcript-a', agentType: 'codex' }),
@@ -193,11 +176,6 @@ describe('two cold panes resumed one after the other', () => {
 })
 
 describe('a launch that names no conversation', () => {
-  /**
-   * A workflow step launches through `terminal:create` with no transcript, and
-   * keeps its own claim over the worktree in `workflow-run-claims`. The two stay
-   * separate on purpose; this pins that rather than leaving it implied.
-   */
   it('claims nothing, so a workflow step and a resume never contend', () => {
     getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'transcript-a' })])
     const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
@@ -210,5 +188,34 @@ describe('a launch that names no conversation', () => {
   it('does not treat a session with no reported conversation as holding one', () => {
     const live = [session({ id: 'one' }), session({ id: 'two' })]
     expect(heldTranscripts(live).size).toBe(0)
+  })
+})
+
+describe('a spawn that fails', () => {
+  it('can release exactly what it claimed, so a retry gets the same conversation', () => {
+    getRecentSessionsFor.mockReturnValue([
+      recent({ sessionId: 'transcript-a', agentType: 'codex' })
+    ])
+    const cold = session({ id: 'one', agentType: 'codex' })
+
+    const claimed = claimTranscriptFor(cold, [], 'one')
+    expect(claimed).toBe('transcript-a')
+
+    releaseSpawningTranscript(claimed!, 'one')
+
+    expect(claimTranscriptFor(cold, [], 'one')).toBe('transcript-a')
+  })
+
+  it('leaves the conversation unreachable when the claim is released under another key', () => {
+    getRecentSessionsFor.mockReturnValue([
+      recent({ sessionId: 'transcript-a', agentType: 'codex' }),
+      recent({ sessionId: 'transcript-b', agentType: 'codex' })
+    ])
+    const cold = session({ id: 'one', agentType: 'codex' })
+    claimTranscriptFor(cold, [], 'one')
+
+    releaseSpawningTranscript('', 'one')
+
+    expect(claimTranscriptFor(cold, [], 'one')).toBe('transcript-b')
   })
 })

@@ -9,7 +9,8 @@ import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import type { CreateTerminalPayload, TerminalSession } from '@vornrun/shared/types'
 
 const mockGetRecentSessions = vi.fn()
-vi.mock('../packages/server/src/agent-history', () => ({
+vi.mock('../packages/server/src/agent-history', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../packages/server/src/agent-history')>()),
   getRecentSessionsFor: (...args: unknown[]) => mockGetRecentSessions(...args)
 }))
 

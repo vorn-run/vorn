@@ -359,13 +359,6 @@ export function registerAllMethods(): void {
 
   // Terminal
   registerMethod('terminal:create', (payload) => {
-    // A conversation picked by hand -- the palette, a task -- may already be open.
-    const wanted = payload.resumeSessionId
-    if (wanted) {
-      const live = ptyManager.getActiveSessions().filter((s) => ptyManager.hasLivePty(s.id))
-      const holder = transcriptHolder(wanted, live)
-      if (holder) return holder
-    }
     return ptyManager.createPty(payload)
   })
   /**
@@ -709,7 +702,8 @@ export function registerAllMethods(): void {
     const previous = restored?.session ?? dead
     if (!previous) return { ok: false as const, reason: 'gone' as const }
 
-    const live = ptyManager.getActiveSessions().filter((s) => ptyManager.hasLivePty(s.id))
+    const live = ptyManager.getLiveSessions()
+    let transcriptId: string | undefined
     const pinned = previous.agentSessionId
     const holder = pinned ? transcriptHolder(pinned, live) : undefined
     if (holder) {
@@ -767,7 +761,7 @@ export function registerAllMethods(): void {
         return { ok: true as const, session }
       }
 
-      const transcriptId = claimTranscriptFor(previous, live, id)
+      transcriptId = claimTranscriptFor(previous, live, id)
 
       // Same id, same reasons as the shell branch above.
       const session = ptyManager.createPty(buildRestorePayload(previous, transcriptId), id)
@@ -782,7 +776,7 @@ export function registerAllMethods(): void {
       // one that ended during this run goes back to the pty manager it came from.
       if (restored) restoreHeld(restored)
       else if (dead) ptyManager.restoreReleased(dead)
-      releaseSpawningTranscript(previous.agentSessionId ?? '', id)
+      if (transcriptId) releaseSpawningTranscript(transcriptId, id)
       return {
         ok: false as const,
         reason: 'failed' as const,
