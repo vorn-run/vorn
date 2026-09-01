@@ -150,7 +150,10 @@ export function ConnectorSettings() {
         }))
         return
       }
-      setPendingPack({ source: { kind: 'staged', token: result.preview.token }, preview: result.preview })
+      setPendingPack({
+        source: { kind: 'staged', token: result.preview.token },
+        preview: result.preview
+      })
     },
     []
   )
