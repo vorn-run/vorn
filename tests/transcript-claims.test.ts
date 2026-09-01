@@ -60,4 +60,19 @@ describe('a transcript being started', () => {
     releaseSpawningTranscriptsFor('term-1')
     expect(spawningTranscripts()).toEqual(new Set(['transcript-b']))
   })
+
+  it('lets go by session, so a resume given an alternate conversation still clears', () => {
+    // A pane pinned to `transcript-a` whose resume resolved `transcript-b`
+    // instead: the release names the session, never the id it hoped for.
+    claimSpawningTranscript('transcript-b', 'term-1')
+    releaseSpawningTranscriptsFor('term-1')
+    expect(spawningTranscripts()).toEqual(new Set())
+    expect(claimSpawningTranscript('transcript-b', 'term-2')).toBeUndefined()
+  })
+
+  it('ignores a release naming a conversation the session never took', () => {
+    claimSpawningTranscript('transcript-b', 'term-1')
+    releaseSpawningTranscript('transcript-a', 'term-1')
+    expect(spawningTranscripts()).toEqual(new Set(['transcript-b']))
+  })
 })
