@@ -128,7 +128,8 @@ import {
   backfillMcpConnection,
   preflightMcpConnection
 } from './connectors/mcp'
-import { httpConnector, performHttpRequest } from './connectors/http'
+import { httpConnector, lockedProfileError, performHttpRequest } from './connectors/http'
+import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
@@ -1370,6 +1371,8 @@ export function registerAllMethods(): void {
     if (profileConnectionId) {
       const conn = dbGetSourceConnection(profileConnectionId)
       if (!conn) return { success: false, error: `Connection ${profileConnectionId} not found` }
+      const locked = lockedProfileError(conn.filters, getDecryptedCreds(conn.id))
+      if (locked) return { success: false, error: locked }
       profile = applyDecryptedCreds(conn)
     }
     return performHttpRequest(profile, { method, url, headers, body })
@@ -1392,6 +1395,10 @@ export function registerAllMethods(): void {
         success: false,
         error: `Connector ${conn.connectorId} does not support actions`
       }
+    }
+    if (conn.connectorId === 'http') {
+      const locked = lockedProfileError(conn.filters, getDecryptedCreds(conn.id))
+      if (locked) return { success: false, error: locked }
     }
     // Merge auth (from decrypted store) + connection filters + call-specific args.
     // Call args take precedence so users can override e.g. repo per-call.
@@ -1449,6 +1456,8 @@ export function registerAllMethods(): void {
     if (!conn) throw new Error(`connection ${connectionId} not found`)
     // An http profile's preflight is a real request through its injection.
     if (conn.connectorId === 'http') {
+      const locked = lockedProfileError(conn.filters, getDecryptedCreds(conn.id))
+      if (locked) return { ok: false, message: locked }
       const result = await httpConnector.execute!('test', applyDecryptedCreds(conn))
       const status = (result.output as { status?: number } | undefined)?.status
       if (!result.success) return { ok: false, message: result.error }

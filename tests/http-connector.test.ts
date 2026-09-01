@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { httpConnector, performHttpRequest } from '../packages/server/src/connectors/http'
+import {
+  httpConnector,
+  lockedProfileError,
+  performHttpRequest
+} from '../packages/server/src/connectors/http'
 
 type FetchCall = { url: URL; init: RequestInit }
 
@@ -24,7 +28,11 @@ describe('performHttpRequest', () => {
   it('injects the secret into the profile header and never echoes it back', async () => {
     const calls = stubFetch()
     const result = await performHttpRequest(
-      { authHeader: 'Authorization: Bearer {{secret}}', secret: 'top-secret' },
+      {
+        baseUrl: 'https://api.example.com',
+        authHeader: 'Authorization: Bearer {{secret}}',
+        secret: 'top-secret'
+      },
       { method: 'GET', url: 'https://api.example.com/me' }
     )
     const sent = calls[0].init.headers as Record<string, string>
@@ -36,7 +44,7 @@ describe('performHttpRequest', () => {
   it('injects the secret as a query parameter', async () => {
     const calls = stubFetch()
     await performHttpRequest(
-      { authQuery: 'api_key={{secret}}', secret: 's3' },
+      { baseUrl: 'https://api.example.com', authQuery: 'api_key={{secret}}', secret: 's3' },
       { method: 'GET', url: 'https://api.example.com/items?limit=2' }
     )
     expect(calls[0].url.searchParams.get('api_key')).toBe('s3')
@@ -46,7 +54,7 @@ describe('performHttpRequest', () => {
   it('merges the profile JSON into a JSON object body', async () => {
     const calls = stubFetch()
     await performHttpRequest(
-      { authBody: '{"token": "{{secret}}"}', secret: 's4' },
+      { baseUrl: 'https://api.example.com', authBody: '{"token": "{{secret}}"}', secret: 's4' },
       { method: 'POST', url: 'https://api.example.com/x', body: '{"name": "a"}' }
     )
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ name: 'a', token: 's4' })
@@ -55,7 +63,7 @@ describe('performHttpRequest', () => {
   it('leaves a non-JSON body untouched by body injection', async () => {
     const calls = stubFetch()
     await performHttpRequest(
-      { authBody: '{"token": "{{secret}}"}', secret: 's5' },
+      { baseUrl: 'https://api.example.com', authBody: '{"token": "{{secret}}"}', secret: 's5' },
       { method: 'POST', url: 'https://api.example.com/x', body: 'plain text' }
     )
     expect(calls[0].init.body).toBe('plain text')
@@ -88,6 +96,46 @@ describe('performHttpRequest', () => {
     expect(calls[0].init.body).toBeUndefined()
   })
 
+  it('refuses to sign a request whose origin is not the profile base URL', async () => {
+    const calls = stubFetch()
+    const result = await performHttpRequest(
+      {
+        baseUrl: 'https://api.example.com',
+        authHeader: 'Authorization: Bearer {{secret}}',
+        secret: 's'
+      },
+      { method: 'POST', url: 'https://evil.example.net/collect' }
+    )
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('only signs requests to https://api.example.com')
+    expect(calls).toHaveLength(0)
+  })
+
+  it('refuses injection entirely when the profile has no base URL', async () => {
+    const calls = stubFetch()
+    const result = await performHttpRequest(
+      { authHeader: 'X-Key: {{secret}}', secret: 's' },
+      { method: 'GET', url: 'https://anywhere.example.com/a' }
+    )
+    expect(result.success).toBe(false)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('rejects a missing or invalid method as a result, not a throw', async () => {
+    const calls = stubFetch()
+    const missing = await performHttpRequest({}, { method: '', url: 'https://x.test/a' })
+    const bogus = await performHttpRequest({}, { method: 'YEET', url: 'https://x.test/a' })
+    expect(missing).toMatchObject({ success: false })
+    expect(bogus).toMatchObject({ success: false })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('never follows redirects', async () => {
+    const calls = stubFetch()
+    await performHttpRequest({}, { method: 'GET', url: 'https://x.test/a' })
+    expect(calls[0].init.redirect).toBe('manual')
+  })
+
   it('reports an invalid URL without calling out', async () => {
     const calls = stubFetch()
     const result = await performHttpRequest({}, { method: 'GET', url: 'not a url' })
@@ -99,6 +147,20 @@ describe('performHttpRequest', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED')))
     const result = await performHttpRequest({}, { method: 'GET', url: 'https://x.test/a' })
     expect(result).toMatchObject({ success: false, error: 'connect ECONNREFUSED' })
+  })
+})
+
+describe('lockedProfileError', () => {
+  it('flags a stored secret with no decrypted counterpart', () => {
+    expect(lockedProfileError({ secret: 'AAECbase64blob' }, undefined)).toContain('locked')
+  })
+
+  it('passes once the decrypted store holds the secret', () => {
+    expect(lockedProfileError({ secret: 'blob' }, { secret: 'plain' })).toBeNull()
+  })
+
+  it('passes for a profile with no secret at all', () => {
+    expect(lockedProfileError({ baseUrl: 'https://x.test' }, undefined)).toBeNull()
   })
 })
 

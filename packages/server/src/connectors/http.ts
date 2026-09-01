@@ -24,6 +24,21 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+const ALLOWED_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
+
+/**
+ * A profile whose password fields never made it through decryption still holds
+ * ciphertext; sending that as a bearer token is a silent, confusing failure.
+ */
+export function lockedProfileError(
+  filters: Record<string, unknown>,
+  decrypted: Record<string, string> | undefined
+): string | null {
+  if (typeof filters.secret !== 'string' || !filters.secret) return null
+  if (decrypted?.secret !== undefined) return null
+  return "This profile's secret is locked - decryption is unavailable or has not synced yet."
+}
+
 /**
  * Execute one HTTP request with a profile's injection applied. This runs in
  * the server so the secret never crosses into the renderer and responses skip
@@ -33,12 +48,40 @@ export async function performHttpRequest(
   profile: HttpProfileFields,
   spec: HttpRequestSpec
 ): Promise<ActionResult> {
+  const method = asString(spec.method).toUpperCase()
+  if (!ALLOWED_METHODS.has(method)) {
+    return { success: false, error: `Invalid HTTP method: ${spec.method || '(none)'}` }
+  }
   const secret = asString(profile.secret)
   let url: URL
   try {
     url = new URL(spec.url, asString(profile.baseUrl) || undefined)
   } catch {
     return { success: false, error: `Invalid URL: ${spec.url}` }
+  }
+
+  // The URL is template-resolved, so an absolute URL can point anywhere; a
+  // profile's auth only ever travels to the origin the profile names.
+  const hasInjection = !!(
+    asString(profile.authHeader) ||
+    asString(profile.authQuery) ||
+    asString(profile.authBody).trim() ||
+    secret
+  )
+  if (hasInjection) {
+    let baseOrigin: string | null
+    try {
+      const base = asString(profile.baseUrl)
+      baseOrigin = base ? new URL(base).origin : null
+    } catch {
+      baseOrigin = null
+    }
+    if (!baseOrigin || url.origin !== baseOrigin) {
+      return {
+        success: false,
+        error: `This profile only signs requests to ${baseOrigin ?? 'its base URL (none set)'}; refusing ${url.origin}`
+      }
+    }
   }
 
   const headers: Record<string, string> = { ...(spec.headers ?? {}) }
@@ -79,13 +122,14 @@ export async function performHttpRequest(
     }
   }
 
-  const method = spec.method.toUpperCase()
   const sendBody = body && method !== 'GET' && method !== 'HEAD'
   try {
     const res = await fetch(url, {
       method,
       headers,
       ...(sendBody ? { body } : {}),
+      // A redirect could carry the auth to a different host; report it instead.
+      redirect: 'manual',
       signal: AbortSignal.timeout(30_000)
     })
     const text = await res.text()
