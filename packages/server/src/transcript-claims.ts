@@ -1,6 +1,9 @@
 // Held while a process starts, before it can report which conversation it took.
 
-const SPAWN_WINDOW_MS = 15_000
+// Longer than the capture ladder that sets `agentSessionId`, so a claim outlives
+// the reporting it waits for; still lapsing, so a spawn that dies never wedges a
+// transcript.
+const SPAWN_WINDOW_MS = 60_000
 
 interface Spawning {
   sessionId: string
@@ -30,6 +33,13 @@ export function claimSpawningTranscript(
 
 export function releaseSpawningTranscript(transcriptId: string, sessionId: string): void {
   if (spawning.get(transcriptId)?.sessionId === sessionId) spawning.delete(transcriptId)
+}
+
+/** Everything a session was holding, for when it reports its conversation or exits. */
+export function releaseSpawningTranscriptsFor(sessionId: string): void {
+  for (const [transcriptId, held] of spawning) {
+    if (held.sessionId === sessionId) spawning.delete(transcriptId)
+  }
 }
 
 export function spawningTranscripts(): Set<string> {

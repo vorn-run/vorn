@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import {
   claimSpawningTranscript,
   releaseSpawningTranscript,
+  releaseSpawningTranscriptsFor,
   spawningTranscripts,
   resetTranscriptClaims
 } from '../packages/server/src/transcript-claims'
@@ -40,15 +41,23 @@ describe('a transcript being started', () => {
   it('lapses rather than locks, so a spawn that died never wedges it', () => {
     vi.useFakeTimers()
     claimSpawningTranscript('transcript-a', 'term-1')
-    vi.advanceTimersByTime(15_001)
+    vi.advanceTimersByTime(60_001)
     expect(spawningTranscripts()).toEqual(new Set())
     expect(claimSpawningTranscript('transcript-a', 'term-2')).toBeUndefined()
   })
 
-  it('still holds inside the window', () => {
+  it('outlasts the capture that asks an agent which conversation it took', () => {
     vi.useFakeTimers()
     claimSpawningTranscript('transcript-a', 'term-1')
-    vi.advanceTimersByTime(14_000)
+    // The last attempt lands at forty seconds; a claim gone by then is the bug.
+    vi.advanceTimersByTime(40_000)
     expect(claimSpawningTranscript('transcript-a', 'term-2')).toBe('term-1')
+  })
+
+  it('lets go of everything one session was holding', () => {
+    claimSpawningTranscript('transcript-a', 'term-1')
+    claimSpawningTranscript('transcript-b', 'term-2')
+    releaseSpawningTranscriptsFor('term-1')
+    expect(spawningTranscripts()).toEqual(new Set(['transcript-b']))
   })
 })
