@@ -71,4 +71,31 @@ describe('StartFromPanel', () => {
     fireEvent.click(screen.getByText('Blank canvas'))
     expect(onPickBlank).toHaveBeenCalledTimes(1)
   })
+
+  it('offers what a connection already knows how to build, and names it', () => {
+    const onPickSuggestion = vi.fn()
+    const suggestion = {
+      key: 'c1:issueCreated',
+      connectionId: 'c1',
+      connectionName: 'workspace-eng',
+      event: 'issueCreated',
+      name: 'New issues to tasks'
+    }
+    render(
+      <StartFromPanel
+        templates={[]}
+        connections={[]}
+        suggestions={[suggestion]}
+        onPickBlank={vi.fn()}
+        onPickTemplate={vi.fn()}
+        onPickSuggestion={onPickSuggestion}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('From your connections')).toBeInTheDocument()
+    expect(screen.getByText('workspace-eng')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('New issues to tasks'))
+    expect(onPickSuggestion).toHaveBeenCalledWith(suggestion)
+  })
 })

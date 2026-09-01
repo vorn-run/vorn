@@ -29,6 +29,7 @@ import {
   WorkflowNodeErrorPolicy,
   WorkflowEdge,
   WorkflowTemplate,
+  ConnectorManifest,
   NodeExecutionStatus,
   WorkflowExecution,
   TriggerConfig,
@@ -82,7 +83,11 @@ import {
 import { toast } from '../Toast'
 import { useConnections } from '../../lib/use-connections'
 import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
-import { templateSeed } from '../../lib/template-requirements'
+import {
+  connectorSuggestions,
+  templateSeed,
+  type ConnectorSuggestion
+} from '../../lib/template-requirements'
 import { StartFromPanel } from './panels/StartFromPanel'
 import {
   slugify,
@@ -126,6 +131,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [showStartFrom, setShowStartFrom] = useState(true)
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
+  const [connectors, setConnectors] = useState<
+    Array<{ id: string; manifest: ConnectorManifest }>
+  >([])
   const [launchingSince, setLaunchingSince] = useState<number | null>(null)
   const [followRunId, setFollowRunId] = useState<string | null>(null)
   const followArmRef = useRef(false)
@@ -595,6 +603,37 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       .then((snapshot) => setTemplates(snapshot.templates ?? []))
       .catch(() => setTemplates([]))
   }, [editingId, templates.length])
+
+  useEffect(() => {
+    if (editingId) return
+    void window.api
+      .listConnectors()
+      .then(setConnectors)
+      .catch(() => setConnectors([]))
+  }, [editingId])
+
+  const suggestions = useMemo(
+    () => connectorSuggestions(connections, connectors),
+    [connections, connectors]
+  )
+
+  /** The server builds these from the connector's own manifest, and repeats are the same workflow. */
+  const handlePickSuggestion = useCallback(
+    async (suggestion: ConnectorSuggestion) => {
+      try {
+        const { workflowId } = await window.api.seedConnectorWorkflow(
+          suggestion.connectionId,
+          suggestion.event
+        )
+        setShowStartFrom(false)
+        setEditingId(workflowId)
+        toast.success(`Started "${suggestion.name}"`)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [setEditingId]
+  )
 
   const handlePickTemplate = useCallback(
     (template: WorkflowTemplate) => {
@@ -1333,8 +1372,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           <StartFromPanel
             templates={templates}
             connections={connections}
+            suggestions={suggestions}
             onPickBlank={() => setShowStartFrom(false)}
             onPickTemplate={handlePickTemplate}
+            onPickSuggestion={(suggestion) => void handlePickSuggestion(suggestion)}
             onClose={() => setShowStartFrom(false)}
           />
         )}

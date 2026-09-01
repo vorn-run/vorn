@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import {
+  connectorSuggestions,
   templateRequirements,
   templateIsReady,
   templateSeed
 } from '../src/renderer/lib/template-requirements'
 import { TEMPLATE_SEED } from '../packages/server/src/connectors/template-seed'
-import type { SourceConnection, WorkflowTemplate } from '../packages/shared/src/types'
+import type {
+  ConnectorManifest,
+  SourceConnection,
+  WorkflowTemplate
+} from '../packages/shared/src/types'
 
 function connection(overrides: Partial<SourceConnection> = {}): SourceConnection {
   return {
@@ -43,6 +48,55 @@ describe('what a template still needs', () => {
   it('calls a template with nothing to connect ready', () => {
     expect(templateRequirements(template('morning-digest'), [])).toEqual([])
     expect(templateIsReady(template('morning-digest'), [])).toBe(true)
+  })
+})
+
+describe('what a connection already knows how to build', () => {
+  function manifest(defaults?: ConnectorManifest['defaultWorkflows']): ConnectorManifest {
+    return { defaultWorkflows: defaults } as ConnectorManifest
+  }
+
+  const seeded = [{ name: 'New issues to tasks', event: 'issueCreated', defaultCronFromMinutes: 5 }]
+
+  it('offers one row per workflow the connector ships', () => {
+    const suggestions = connectorSuggestions(
+      [connection({ id: 'c1', name: 'workspace-eng', connectorId: 'github' })],
+      [{ id: 'github', manifest: manifest(seeded) }]
+    )
+    expect(suggestions).toEqual([
+      {
+        key: 'c1:issueCreated',
+        connectionId: 'c1',
+        connectionName: 'workspace-eng',
+        event: 'issueCreated',
+        name: 'New issues to tasks'
+      }
+    ])
+  })
+
+  it('finds a packaged connector by its manifest id rather than mcp', () => {
+    const packaged = connection({
+      id: 'c2',
+      connectorId: 'mcp',
+      filters: { sdkConnectorId: 'packdemo' }
+    })
+    const suggestions = connectorSuggestions(
+      [packaged],
+      [{ id: 'packdemo', manifest: manifest(seeded) }]
+    )
+    expect(suggestions.map((s) => s.connectionId)).toEqual(['c2'])
+  })
+
+  it('offers nothing for a connector that ships no workflow', () => {
+    expect(
+      connectorSuggestions([connection({ connectorId: 'github' })], [
+        { id: 'github', manifest: manifest() }
+      ])
+    ).toEqual([])
+  })
+
+  it('offers nothing for a connection whose connector is not installed', () => {
+    expect(connectorSuggestions([connection({ connectorId: 'github' })], [])).toEqual([])
   })
 })
 

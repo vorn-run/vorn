@@ -1,9 +1,11 @@
 import type {
+  ConnectorManifest,
   SourceConnection,
   WorkflowEdge,
   WorkflowNode,
   WorkflowTemplate
 } from '../../shared/types'
+import { connectionConnectorId } from '../../shared/types'
 import {
   fromPortable,
   resolveRequirement,
@@ -33,6 +35,39 @@ export interface TemplateSeed {
   edges: WorkflowEdge[]
   /** Steps that landed unbound, so the editor can say what is still wanted. */
   unresolved: PortableRequirement[]
+}
+
+/** A workflow a connected connector already knows how to build. */
+export interface ConnectorSuggestion {
+  key: string
+  connectionId: string
+  connectionName: string
+  event: string
+  name: string
+}
+
+/**
+ * The workflows this machine's connections ship with.
+ *
+ * These are not templates: the server builds them from the connector's own
+ * manifest against a connection that already exists, so they are offered
+ * beside the templates and taken by a different route.
+ */
+export function connectorSuggestions(
+  connections: SourceConnection[],
+  connectors: Array<{ id: string; manifest: ConnectorManifest }>
+): ConnectorSuggestion[] {
+  const manifests = new Map(connectors.map((connector) => [connector.id, connector.manifest]))
+  return connections.flatMap((connection) => {
+    const manifest = manifests.get(connectionConnectorId(connection))
+    return (manifest?.defaultWorkflows ?? []).map((seeded) => ({
+      key: `${connection.id}:${seeded.event}`,
+      connectionId: connection.id,
+      connectionName: connection.name,
+      event: seeded.event,
+      name: seeded.name
+    }))
+  })
 }
 
 export function templateRequirements(
