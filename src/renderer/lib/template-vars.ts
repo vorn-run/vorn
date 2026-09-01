@@ -89,6 +89,7 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
   { key: '{{trigger.toStatus}}', label: 'New Status', category: 'trigger' },
   { key: '{{trigger.body}}', label: 'Request Body', category: 'trigger' },
   { key: '{{trigger.headers}}', label: 'Request Headers', category: 'trigger' },
+  { key: '{{trigger.query}}', label: 'Query Parameters', category: 'trigger' },
   { key: '{{connectorItem.externalId}}', label: 'External ID', category: 'connectorItem' },
   { key: '{{connectorItem.title}}', label: 'Item Title', category: 'connectorItem' },
   { key: '{{connectorItem.externalUrl}}', label: 'Item URL', category: 'connectorItem' },
@@ -134,7 +135,11 @@ export function getAvailableContextVars(opts: {
       return v.key.includes('Status')
     }
     if (opts.triggerType === 'webhook' && v.category === 'trigger') {
-      return v.key.includes('trigger.body') || v.key.includes('trigger.headers')
+      return (
+        v.key.includes('trigger.body') ||
+        v.key.includes('trigger.headers') ||
+        v.key.includes('trigger.query')
+      )
     }
     if (opts.isContextualTrigger && v.category === 'context') return true
     return false

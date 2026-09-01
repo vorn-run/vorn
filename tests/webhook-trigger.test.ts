@@ -90,6 +90,27 @@ describe('the webhook route', () => {
     expect(JSON.stringify(item)).not.toContain('topsecret')
   })
 
+  it('drops every auth-bearing header, not just authorization', async () => {
+    dbInsertWorkflow(webhookWorkflow())
+    await app.inject({
+      method: 'POST',
+      url: '/wf-hooks/wf-hook/sekret-token',
+      headers: {
+        cookie: 'sid=1',
+        'x-api-key': 'k',
+        'proxy-authorization': 'p',
+        'x-event': 'deploy'
+      },
+      payload: {}
+    })
+    const [item] = claimAll()
+    const raw = item.connectorItem.raw as { headers: Record<string, string> }
+    expect(raw.headers.cookie).toBeUndefined()
+    expect(raw.headers['x-api-key']).toBeUndefined()
+    expect(raw.headers['proxy-authorization']).toBeUndefined()
+    expect(raw.headers['x-event']).toBe('deploy')
+  })
+
   it('answers 404 for a wrong token, an unknown workflow, and a disabled one alike', async () => {
     dbInsertWorkflow(webhookWorkflow())
     dbInsertWorkflow(webhookWorkflow({ id: 'wf-off', enabled: false }))
@@ -125,11 +146,45 @@ describe('the webhook route', () => {
     expect(res.statusCode).toBe(404)
   })
 
-  it('answers 405 when the method does not match the trigger', async () => {
+  it('answers the same 404 when only the method mismatches', async () => {
     dbInsertWorkflow(webhookWorkflow())
     const res = await app.inject({ method: 'GET', url: '/wf-hooks/wf-hook/sekret-token' })
-    expect(res.statusCode).toBe(405)
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ error: 'Not found' })
     expect(claimAll()).toHaveLength(0)
+  })
+
+  it('serves a GET trigger end to end with its query string captured', async () => {
+    dbInsertWorkflow(
+      webhookWorkflow({
+        id: 'wf-get',
+        nodes: [
+          {
+            id: 'trigger-1',
+            type: 'trigger',
+            label: 'Trigger',
+            config: { triggerType: 'webhook', method: 'GET', token: 'sekret-token' },
+            position: { x: 0, y: 0 }
+          }
+        ]
+      })
+    )
+    const res = await app.inject({
+      method: 'GET',
+      url: '/wf-hooks/wf-get/sekret-token?ref=deploy&sha=abc123',
+      headers: { 'x-github-event': 'push' }
+    })
+    expect(res.statusCode).toBe(202)
+    const [item] = claimAll()
+    const raw = item.connectorItem.raw as {
+      query: Record<string, string>
+      headers: Record<string, string>
+      method: string
+    }
+    expect(raw.method).toBe('GET')
+    expect(raw.query).toEqual({ ref: 'deploy', sha: 'abc123' })
+    // Real provider headers come through; only auth-bearing names are dropped.
+    expect(raw.headers['x-github-event']).toBe('push')
   })
 
   it('rejects requests that do not come from this machine', async () => {

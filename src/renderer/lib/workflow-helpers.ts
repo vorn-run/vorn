@@ -390,6 +390,26 @@ export function createCallConnectorActionNode(
   }
 }
 
+/** The {{trigger.*}} namespace of a webhook run, rebuilt from the event's stored payload. */
+export function webhookTriggerFromItem(
+  connectorItem: import('../../shared/types').ConnectorItemContext | undefined
+): import('../../shared/types').WorkflowExecutionContext['trigger'] | undefined {
+  if (connectorItem?.connectorId !== 'webhook') return undefined
+  const raw = connectorItem.raw as {
+    body?: unknown
+    headers?: Record<string, string>
+    query?: Record<string, string>
+    method?: string
+  }
+  return {
+    type: 'webhook' as const,
+    body: raw.body,
+    headers: raw.headers,
+    query: raw.query,
+    method: raw.method
+  }
+}
+
 /**
  * The run context for a scheduler-delivered event. A webhook event rides the
  * connector pipe for durability, so its payload is lifted into the trigger
@@ -400,22 +420,8 @@ export function schedulerExecutionContext(
   inputs: Record<string, unknown> | undefined
 ): import('../../shared/types').WorkflowExecutionContext | undefined {
   if (!connectorItem && !inputs) return undefined
-  const webhookRaw =
-    connectorItem?.connectorId === 'webhook'
-      ? (connectorItem.raw as { body?: unknown; headers?: Record<string, string>; method?: string })
-      : null
-  return {
-    connectorItem,
-    inputs,
-    ...(webhookRaw && {
-      trigger: {
-        type: 'webhook' as const,
-        body: webhookRaw.body,
-        headers: webhookRaw.headers,
-        method: webhookRaw.method
-      }
-    })
-  }
+  const trigger = webhookTriggerFromItem(connectorItem)
+  return { connectorItem, inputs, ...(trigger && { trigger }) }
 }
 
 /** Steps that can swap type in place; condition, loop, and trigger own structure or their own path. */
@@ -444,7 +450,7 @@ export function switchTriggerType(type: TriggerConfig['triggerType']): TriggerCo
     case 'connectorPoll':
       return { triggerType: 'connectorPoll', connectionId: '', event: '', cron: '*/5 * * * *' }
     case 'webhook':
-      return { triggerType: 'webhook', method: 'POST', token: crypto.randomUUID().slice(0, 13) }
+      return { triggerType: 'webhook', method: 'POST', token: crypto.randomUUID() }
   }
 }
 

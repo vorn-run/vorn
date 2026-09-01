@@ -6,8 +6,8 @@ import log from './logger'
 
 export const WEBHOOK_CONNECTOR_ID = 'webhook'
 
-/** Headers worth exposing to templates; auth-bearing ones stay out of run records. */
-const HEADER_ALLOWLIST = new Set(['content-type', 'user-agent', 'x-event', 'x-request-id'])
+/** Auth-bearing headers stay out of run records; everything else comes through. */
+const HEADER_DENYLIST = new Set(['authorization', 'cookie', 'proxy-authorization', 'x-api-key'])
 
 function isLoopback(ip: string | undefined): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
@@ -33,17 +33,27 @@ export function registerWebhookRoute(app: FastifyInstance, onEnqueued: () => voi
       const workflow = dbGetWorkflow(workflowId)
       const triggerNode = workflow?.nodes.find((n) => n.type === 'trigger')
       const trigger = webhookTrigger((triggerNode?.config as TriggerConfig) ?? null)
-      // One answer for every miss, so the route confirms nothing about ids or tokens.
-      if (!workflow || !workflow.enabled || !trigger || trigger.token !== token) {
+      // One answer for every miss - wrong method included - so the route
+      // confirms nothing about ids, tokens, or configuration.
+      if (
+        !workflow ||
+        !workflow.enabled ||
+        !trigger ||
+        trigger.token !== token ||
+        req.method !== trigger.method
+      ) {
         return reply.code(404).send({ error: 'Not found' })
-      }
-      if (req.method !== trigger.method) {
-        return reply.code(405).send({ error: `This webhook accepts ${trigger.method}` })
       }
 
       const headers: Record<string, string> = {}
       for (const [key, value] of Object.entries(req.headers)) {
-        if (HEADER_ALLOWLIST.has(key) && typeof value === 'string') headers[key] = value
+        if (!HEADER_DENYLIST.has(key.toLowerCase()) && typeof value === 'string') {
+          headers[key] = value
+        }
+      }
+      const query: Record<string, string> = {}
+      for (const [key, value] of Object.entries((req.query as Record<string, unknown>) ?? {})) {
+        if (typeof value === 'string') query[key] = value
       }
       const eventId = randomUUID()
       dbEnqueueWebhookEvent({
@@ -58,6 +68,7 @@ export function registerWebhookRoute(app: FastifyInstance, onEnqueued: () => voi
           raw: {
             body: req.body ?? null,
             headers,
+            query,
             method: req.method,
             receivedAt: new Date().toISOString()
           }

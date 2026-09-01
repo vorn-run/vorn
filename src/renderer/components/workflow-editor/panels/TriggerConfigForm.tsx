@@ -360,7 +360,8 @@ function WebhookTriggerFields({
           variant="form"
         />
         <p className="text-[11px] text-gray-500 mt-1.5">
-          The request lands as {'{{trigger.body.*}}'} and {'{{trigger.headers.*}}'}.
+          The request lands as {'{{trigger.body.*}}'}, {'{{trigger.headers.*}}'}, and{' '}
+          {'{{trigger.query.*}}'}.
         </p>
       </div>
     </>

@@ -35,7 +35,11 @@ export function ConditionConfigForm({
     }
     if (v.category === 'trigger') {
       if (triggerType === 'webhook') {
-        return v.key.includes('trigger.body') || v.key.includes('trigger.headers')
+        return (
+          v.key.includes('trigger.body') ||
+          v.key.includes('trigger.headers') ||
+          v.key.includes('trigger.query')
+        )
       }
       return triggerType === 'taskStatusChanged' && v.key.includes('Status')
     }

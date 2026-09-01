@@ -559,6 +559,7 @@ export interface WorkflowExecutionContext {
     /** Webhook runs: the received request, for {{trigger.body.*}} / {{trigger.headers.*}}. */
     body?: unknown
     headers?: Record<string, string>
+    query?: Record<string, string>
     method?: string
   }
   connectorItem?: ConnectorItemContext

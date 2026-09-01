@@ -24,7 +24,7 @@ import {
   resolveTemplateVars,
   StepOutputs
 } from './template-vars'
-import { getWorktreeMode } from './workflow-helpers'
+import { getWorktreeMode, webhookTriggerFromItem } from './workflow-helpers'
 import { buildTaskPrompt, buildWorkflowPrompt } from '../../shared/prompt-builder'
 import { extractStructuredOutput } from '../../shared/structured-output'
 import { useAppStore } from '../stores'
@@ -1560,7 +1560,8 @@ export function contextFromRun(run: WorkflowExecution): WorkflowExecutionContext
     ? { ...run.connectorItem, inboxId: undefined, inboxLeaseToken: undefined }
     : undefined
   if (!task && !connectorItem && !run.inputs) return undefined
-  return { task, connectorItem, inputs: run.inputs }
+  const trigger = webhookTriggerFromItem(connectorItem)
+  return { task, connectorItem, inputs: run.inputs, ...(trigger && { trigger }) }
 }
 
 /**
@@ -2096,7 +2097,13 @@ function rebuildContextForResume(
     ? (useAppStore.getState().config?.tasks || []).find((t) => t.id === execution.triggerTaskId)
     : undefined
   if (!task && !execution.connectorItem && !execution.inputs) return undefined
-  return { task, connectorItem: execution.connectorItem, inputs: execution.inputs }
+  const trigger = webhookTriggerFromItem(execution.connectorItem)
+  return {
+    task,
+    connectorItem: execution.connectorItem,
+    inputs: execution.inputs,
+    ...(trigger && { trigger })
+  }
 }
 
 export async function adoptConnectorInboxLease(
