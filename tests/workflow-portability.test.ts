@@ -367,4 +367,45 @@ describe('Windows paths', () => {
     const script = imported.nodes.find((n) => n.id === 'fetch-1')!.config as Record<string, unknown>
     expect(script.projectPath).toBe('/Users/other/novum')
   })
+
+  describe('a webhook hook secret', () => {
+    const hooked = () =>
+      workflow({
+        nodes: [
+          {
+            id: 'trigger-1',
+            type: 'trigger',
+            label: 'Webhook',
+            config: { triggerType: 'webhook', method: 'POST', token: 'live-secret-token' },
+            position: { x: 0, y: 0 }
+          }
+        ],
+        edges: []
+      })
+
+    it('never travels in the file', () => {
+      const p = toPortable(hooked(), PROJECT)
+      const config = p.nodes[0].config as Record<string, unknown>
+      expect(config.token).toBe('')
+      expect(JSON.stringify(p)).not.toContain('live-secret-token')
+    })
+
+    it('is minted fresh for the machine importing it', () => {
+      const p = toPortable(hooked(), PROJECT)
+      const project = { name: 'N', path: '/Users/other/novum' }
+      const first = fromPortable(p, 'novum', project, [], () => 'token-a')
+      const second = fromPortable(p, 'novum', project, [], () => 'token-b')
+
+      expect((first.nodes[0].config as Record<string, unknown>).token).toBe('token-a')
+      expect((second.nodes[0].config as Record<string, unknown>).token).toBe('token-b')
+    })
+
+    it('leaves other triggers alone', () => {
+      const imported = fromPortable(toPortable(workflow(), PROJECT), 'novum', {
+        name: 'N',
+        path: '/Users/other/novum'
+      })
+      expect((imported.nodes[0].config as Record<string, unknown>).token).toBeUndefined()
+    })
+  })
 })

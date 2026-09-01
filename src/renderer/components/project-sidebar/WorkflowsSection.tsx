@@ -151,6 +151,8 @@ export function WorkflowsSection({
   }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    // A dragged file is on its way to the list's own drop target, not between rows.
+    if (e.dataTransfer.types.includes('Files')) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     setDragOverIndex(index)

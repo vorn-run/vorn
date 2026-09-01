@@ -148,6 +148,10 @@ export function toPortable(
   const nodes = workflow.nodes.map((node) => {
     const config = { ...(node.config as Record<string, unknown>) }
 
+    // The token is the only thing guarding this install's hook route, so it
+    // does not belong in a file meant to be committed and shared.
+    if (node.type === 'trigger' && config.triggerType === 'webhook') config.token = ''
+
     if (node.type === 'launchAgent' || node.type === 'script') {
       for (const key of ['projectPath', 'cwd', 'existingWorktreePath']) {
         const value = config[key]
@@ -243,7 +247,8 @@ export function fromPortable(
   portable: PortableWorkflow,
   bundle: string,
   project: { name: string; path: string },
-  connections: PortableConnection[] = []
+  connections: PortableConnection[] = [],
+  mintToken: () => string = () => crypto.randomUUID()
 ): WorkflowDefinition {
   const bindings = new Map<string, PortableRequirement[]>()
   for (const requirement of portable.requires ?? []) {
@@ -269,6 +274,11 @@ export function fromPortable(
       if (resolved === undefined) continue
       if (requirement.kind === 'httpProfile') config.profileConnectionId = resolved
       else config.connectionId = resolved
+    }
+
+    // Export blanks it; this install gets a hook secret of its own.
+    if (node.type === 'trigger' && config.triggerType === 'webhook' && !config.token) {
+      config.token = mintToken()
     }
 
     return { ...node, config } as WorkflowNode

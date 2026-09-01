@@ -432,6 +432,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setSelectedNodeId(null)
       setPendingInsert(null)
       setShowRunHistory(false)
+      // Dismissing it answered the last workflow's question, not this one's.
+      setShowStartFrom(true)
       // Run feedback belongs to the workflow that launched it.
       setFollowRunId(null)
       setLaunchingSince(null)
