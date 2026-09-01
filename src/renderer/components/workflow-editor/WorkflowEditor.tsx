@@ -1202,6 +1202,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         <WorkflowCanvas
           nodes={nodes}
           edges={edges}
+          loadKey={editingId}
           onNodeClick={handleNodeClick}
           onOpenLibrary={handleOpenLibrary}
           libraryAnchor={pendingInsert}

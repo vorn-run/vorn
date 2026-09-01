@@ -87,6 +87,8 @@ interface Props {
   selectedNodeId: string | null
   /** What each node is doing in live runs; absent when nothing is running. */
   nodeStatus?: Record<string, NodeExecutionStatus>
+  /** Changes when a different workflow loads; re-fits the view top-aligned. */
+  loadKey?: string | null
 }
 
 /** Kept in context so selection/status churn re-renders cards without rebuilding the node array. */
@@ -190,10 +192,15 @@ function StepNode({ data, id }: NodeProps) {
   const node = nodesById.get(data.nodeId as string)
   const updateNodeInternals = useUpdateNodeInternals()
   // A replace-in-place keeps the id, so React Flow would keep the old card's
-  // measured handle positions; re-measure whenever the rendered shape changes.
+  // measured handle positions; re-measure when the rendered shape changes.
+  // Never on mount: that races the initial measure while fitView settles.
   const shape = node ? `${node.type}:${estimateNodeHeight(node, allNodes)}` : ''
+  const lastShape = useRef<string | null>(null)
   useEffect(() => {
-    if (shape) updateNodeInternals(id)
+    if (shape && lastShape.current !== null && lastShape.current !== shape) {
+      updateNodeInternals(id)
+    }
+    lastShape.current = shape || lastShape.current
   }, [id, shape, updateNodeInternals])
   if (!node) return null
 
@@ -228,8 +235,12 @@ function LoopNode({ data, id }: NodeProps) {
   const node = nodesById.get(data.nodeId as string)
   const updateNodeInternals = useUpdateNodeInternals()
   const shape = node ? `${node.type}:${estimateNodeHeight(node, allNodes)}` : ''
+  const lastShape = useRef<string | null>(null)
   useEffect(() => {
-    if (shape) updateNodeInternals(id)
+    if (shape && lastShape.current !== null && lastShape.current !== shape) {
+      updateNodeInternals(id)
+    }
+    lastShape.current = shape || lastShape.current
   }, [id, shape, updateNodeInternals])
   if (!node || node.type !== 'loop') return null
 
@@ -484,9 +495,11 @@ function WorkflowCanvasInner({
   onRunToStep,
   onTidyUp,
   selectedNodeId,
-  nodeStatus
+  nodeStatus,
+  loadKey
 }: Props) {
-  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView } = useReactFlow()
+  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView, getViewport, setViewport } =
+    useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
 
   const elements = useMemo(() => toCanvasElements(nodes, edges), [nodes, edges])
@@ -498,6 +511,27 @@ function WorkflowCanvasInner({
     setSyncedElements(elements)
     setRfNodes(elements.nodes)
   }
+
+  // The flow is vertical: on load, keep fitView's zoom and centering but pin
+  // the topmost node near the top instead of vertically centering the chain.
+  const elementsRef = useRef(elements)
+  useEffect(() => {
+    elementsRef.current = elements
+  }, [elements])
+  const alignTopView = useCallback(async () => {
+    const drawn = elementsRef.current.nodes
+    if (drawn.length === 0) return
+    await fitView({ padding: 0.2, maxZoom: 1 })
+    const { x, zoom } = getViewport()
+    const minY = Math.min(...drawn.map((n) => n.position.y))
+    setViewport({ x, y: 48 - minY * zoom, zoom })
+  }, [fitView, getViewport, setViewport])
+
+  const [rfReady, setRfReady] = useState(false)
+  useEffect(() => {
+    if (!rfReady) return
+    void alignTopView()
+  }, [rfReady, loadKey, alignTopView])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     // The canvas owns position only; selection and structure stay the editor's.
@@ -651,8 +685,7 @@ function WorkflowCanvasInner({
           onConnectEnd={handleConnectEnd}
           isValidConnection={isValidConnection}
           onPaneClick={() => onNodeClick('')}
-          fitView
-          fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+          onInit={() => setRfReady(true)}
           minZoom={0.2}
           maxZoom={1.75}
           snapToGrid

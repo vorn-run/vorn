@@ -111,9 +111,14 @@ describe('re-measuring after a replace-in-place', () => {
     expect(after.y).toBe(after.height)
   })
 
+  it("leaves the initial mount to React Flow's own measure", () => {
+    renderCanvas([trigger, script])
+    expect(internalsCalls.ids).toHaveLength(0)
+  })
+
   it('asks React Flow to re-measure the swapped node', () => {
     const { rerender } = renderCanvas([trigger, script])
-    internalsCalls.ids.length = 0
+    expect(internalsCalls.ids).toHaveLength(0)
 
     rerender(
       <WorkflowCanvas
