@@ -1,0 +1,1720 @@
+<title>Super Chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+/>
+
+<script id="artifact" type="application/json">
+  {
+    "kind": "design",
+    "title": "Super Chat",
+    "tweaks": {
+      "edgeInset": {
+        "type": "number",
+        "label": "Screen gutter",
+        "default": 0,
+        "unit": "pt",
+        "min": 0,
+        "max": 20,
+        "step": 2
+      },
+      "keyHeight": {
+        "type": "number",
+        "label": "Key height",
+        "default": 42,
+        "unit": "pt",
+        "min": 34,
+        "max": 54,
+        "step": 2
+      }
+    }
+  }
+</script>
+
+<style>
+  /* One visual world, committed: this page mocks a dark phone app, so it paints
+     its own ground rather than borrowing the host's. */
+  :root {
+    --page: #17171b;
+    --page-2: #1e1e23;
+    --rule: rgba(255, 255, 255, 0.09);
+    --rule-2: rgba(255, 255, 255, 0.16);
+    --text: #e8e6e2;
+    --text-2: rgba(232, 230, 226, 0.62);
+    --text-3: rgba(232, 230, 226, 0.38);
+    --accent: #c9972a;
+
+    /* The app's own tokens, copied from vorn-mobile/src/theme.ts. Anything
+       inside the phone is drawn with these and nothing else. */
+    --ink: #faf9f7;
+    --ink-2: rgba(255, 255, 255, 0.55);
+    --ink-faint: rgba(255, 255, 255, 0.35);
+    --ink-ghost: rgba(255, 255, 255, 0.18);
+    --base: #0d0d0f;
+    --panel: #101012;
+    --sunken: #141416;
+    --overlay: #1c1c20;
+    --hairline: rgba(255, 255, 255, 0.07);
+    --hairline-2: rgba(255, 255, 255, 0.12);
+    --bronzo: #c9972a;
+    --danger: #d4623f;
+    --sage: #7d9471;
+    --blue: #6f8faf;
+    --add: #7ea96a;
+    --remove: #c96f62;
+
+    --edge: 0px;
+    --keyh: 42px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+  }
+
+  /* ---- masthead ------------------------------------------------------- */
+
+  .eyebrow {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+    font-size: 17px;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+  h1 {
+    font-family: 'Newsreader', Georgia, serif;
+    font-weight: 400;
+    font-size: clamp(40px, 6vw, 62px);
+    line-height: 1.04;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0 0 14px;
+  }
+  .standfirst {
+    max-width: 62ch;
+    color: var(--text-2);
+    font-size: 16.5px;
+    margin: 0;
+  }
+  .masthead {
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 34px;
+    margin-bottom: 34px;
+  }
+
+  /* ---- two column ----------------------------------------------------- */
+
+  .cols {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 52px;
+    align-items: start;
+  }
+  @media (max-width: 940px) {
+    .cols {
+      grid-template-columns: 1fr;
+      gap: 40px;
+    }
+  }
+
+  .rail {
+    position: sticky;
+    top: 32px;
+  }
+  @media (max-width: 940px) {
+    .rail {
+      position: static;
+    }
+  }
+
+  /* ---- controls ------------------------------------------------------- */
+
+  .controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .ctl {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ctl > .ctl-label {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    width: 62px;
+    flex: none;
+  }
+  .seg {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: var(--page-2);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+  }
+  .seg button {
+    appearance: none;
+    border: 0;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 12.5px;
+    padding: 5px 11px;
+    border-radius: 3px;
+    transition:
+      background 120ms,
+      color 120ms;
+  }
+  .seg button:hover:not([aria-pressed='true']):not(:disabled) {
+    color: var(--text);
+  }
+  .seg button[aria-pressed='true'] {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text);
+  }
+  .seg button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  .seg button:focus-visible {
+    outline: 2px solid var(--text-2);
+    outline-offset: 1px;
+  }
+
+  /* ---- the phone ------------------------------------------------------ */
+
+  .phone {
+    width: 340px;
+    height: 716px;
+    background: var(--base);
+    border: 1px solid var(--rule-2);
+    border-radius: 34px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    font-family: -apple-system, 'IBM Plex Sans', sans-serif;
+    position: relative;
+  }
+  @media (max-width: 380px) {
+    .phone {
+      width: 100%;
+    }
+  }
+
+  .statusbar {
+    height: 40px;
+    flex: none;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 20px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .statusbar .glyphs {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    color: var(--ink-2);
+    font-size: 10px;
+  }
+
+  /* -- header: today -- */
+  .hdr-today {
+    padding: 4px 16px 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hdr-today .back {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--ink);
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .hdr-today .right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    min-width: 0;
+  }
+  .hdr-today .title {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+  .hdr-today .sub {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 2px;
+    font-size: 13px;
+  }
+
+  /* -- header: proposed -- */
+  .hdr-new {
+    height: 44px;
+    flex: none;
+    padding: 0 var(--edge) 0 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .hdr-new .title {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    min-width: 0;
+  }
+  .hdr-new .spacer {
+    flex: 1;
+  }
+
+  .chev {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    display: grid;
+    place-items: center;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    flex: none;
+  }
+  .dot.live {
+    background: var(--ink);
+    animation: pulse 1.9s ease-in-out infinite;
+  }
+  .dot.block {
+    background: var(--bronzo);
+  }
+  .dot.settle {
+    background: var(--ink-faint);
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dot.live {
+      animation: none;
+    }
+  }
+
+  .age {
+    font-size: 12px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* -- mode switch inside the phone header -- */
+  .modesw {
+    display: flex;
+    gap: 1px;
+    padding: 2px;
+    flex: none;
+    background: var(--sunken);
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+  }
+  .modesw button {
+    appearance: none;
+    border: 0;
+    cursor: pointer;
+    background: transparent;
+    color: var(--ink-faint);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 999px;
+  }
+  .modesw button[aria-pressed='true'] {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--ink);
+  }
+  .modesw button:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.5);
+    outline-offset: 1px;
+  }
+
+  /* -- body -- */
+  .body {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .term {
+    height: 100%;
+    overflow: hidden;
+    background: var(--sunken);
+    padding: 8px 8px 8px calc(8px + var(--edge));
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 9.4px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    white-space: pre;
+  }
+  .term .b {
+    color: var(--ink);
+  }
+  .term .g {
+    color: var(--add);
+  }
+  .term .r {
+    color: var(--remove);
+  }
+  .term .f {
+    color: var(--ink-faint);
+  }
+  .term .a {
+    color: var(--bronzo);
+  }
+
+  /* the left edge the swipe needs */
+  .edgehint {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 22px;
+    background: linear-gradient(90deg, rgba(201, 151, 42, 0.26), rgba(201, 151, 42, 0));
+    border-left: 1.5px solid var(--bronzo);
+    pointer-events: none;
+    display: none;
+  }
+  .phone[data-swipe='on'] .edgehint {
+    display: block;
+  }
+
+  /* -- chat -- */
+  .chat {
+    height: 100%;
+    overflow-y: auto;
+    background: var(--base);
+    padding: 12px calc(12px + var(--edge));
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .msg-user {
+    align-self: flex-end;
+    max-width: 84%;
+    background: var(--overlay);
+    border: 1px solid var(--hairline);
+    border-radius: 14px 14px 4px 14px;
+    padding: 8px 11px;
+    font-size: 13.5px;
+    color: var(--ink);
+    line-height: 1.45;
+  }
+  .msg-agent {
+    font-size: 13.5px;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+  .msg-agent strong {
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .tool {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    color: var(--ink-2);
+  }
+  .tool .name {
+    color: var(--ink);
+  }
+  .tool .meta {
+    margin-left: auto;
+    color: var(--ink-faint);
+    font-size: 10.5px;
+  }
+  .diffline {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .diffline .p {
+    color: var(--add);
+  }
+  .diffline .m {
+    color: var(--remove);
+  }
+  .waiting {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    border: 1px solid rgba(201, 151, 42, 0.35);
+    background: rgba(201, 151, 42, 0.08);
+    border-radius: 8px;
+    padding: 10px 11px;
+    font-size: 12.5px;
+    color: var(--ink);
+  }
+  .wrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .wopts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  /* Each option is a button because the answer is sent as its keystroke, never
+     as the label text. */
+  .wbtn {
+    border: 1px solid var(--hairline-2);
+    background: var(--sunken);
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 11.5px;
+    color: var(--ink);
+  }
+  .composer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-top: 1px solid var(--hairline);
+    background: var(--base);
+    padding: 8px calc(10px + var(--edge));
+  }
+  .composer .field {
+    flex: 1;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--hairline-2);
+    background: var(--sunken);
+    border-radius: 999px;
+    padding: 0 12px;
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+
+  /* -- keyboards -- */
+  .kb {
+    flex: none;
+    background: var(--panel);
+    border-top: 1px solid var(--hairline);
+  }
+
+  .keyrow-today {
+    display: flex;
+    gap: 7px;
+    padding: 8px 10px;
+    overflow: hidden;
+    background: var(--base);
+    border-top: 1px solid var(--hairline);
+    position: relative;
+  }
+  .keyrow-today::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    background: linear-gradient(90deg, rgba(13, 13, 15, 0), var(--base));
+    pointer-events: none;
+  }
+  .kt {
+    height: 36px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    padding: 0 14px;
+    border-radius: 8px;
+    border: 1px solid var(--hairline-2);
+    background: var(--sunken);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .syskb {
+    background: #1c1c1e;
+    padding: 6px 3px 4px;
+  }
+  .kgrid {
+    display: flex;
+    gap: 5px;
+    justify-content: center;
+    margin-bottom: 6px;
+  }
+  .k {
+    height: var(--keyh);
+    flex: 1;
+    display: grid;
+    place-items: center;
+    border-radius: 5px;
+    background: #4a4a4f;
+    color: var(--ink);
+    font-size: 15px;
+    font-weight: 400;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  }
+  .k.dark {
+    background: #2c2c30;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+  .k.wide {
+    flex: 1.6;
+  }
+  .k.space {
+    flex: 5;
+  }
+
+  /* The system keyboard, with our keys docked to it as a real accessory view.
+     Everything below the bar is Apple's and stays Apple's — QuickType, the
+     globe, the mic. */
+  .acckb {
+    background: #1c1c1e;
+  }
+  .accbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 6px;
+    background: var(--panel);
+    border-top: 1px solid var(--hairline);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.5);
+  }
+  .mk {
+    height: 30px;
+    flex: 1;
+    display: grid;
+    place-items: center;
+    border-radius: 5px;
+    background: var(--sunken);
+    border: 1px solid var(--hairline-2);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--ink);
+  }
+  .mk.latched {
+    background: rgba(255, 255, 255, 0.13);
+    border-color: rgba(255, 255, 255, 0.4);
+  }
+  .mk.arrow {
+    flex: 0.75;
+    font-family: -apple-system, sans-serif;
+    font-size: 13px;
+  }
+  .mk.hide {
+    flex: 0.75;
+    color: var(--ink-faint);
+  }
+  .modechip {
+    display: flex;
+    gap: 1px;
+    padding: 2px;
+    flex: none;
+    background: var(--sunken);
+    border: 1px solid var(--hairline-2);
+    border-radius: 6px;
+  }
+  .modechip span {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: var(--ink-faint);
+  }
+  .modechip span.on {
+    background: rgba(255, 255, 255, 0.13);
+    color: var(--ink);
+  }
+
+  /* Apple's predictive bar. Its presence is the whole point: it is what
+     autocorrect looks like when it is switched on. */
+  .quicktype {
+    display: flex;
+    align-items: center;
+    height: 40px;
+    background: #1c1c1e;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .quicktype span {
+    flex: 1;
+    text-align: center;
+    padding: 3px 0;
+  }
+  .quicktype span + span {
+    border-left: 1px solid rgba(255, 255, 255, 0.13);
+  }
+  .quicktype .qt-sel {
+    background: #48484c;
+    border-radius: 4px;
+    margin: 4px;
+  }
+  .k.mic {
+    font-size: 13px;
+  }
+
+  .kbnote {
+    padding: 7px 12px calc(7px + env(safe-area-inset-bottom, 0px));
+    font-size: 10.5px;
+    color: var(--ink-ghost);
+    text-align: center;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  .homebar {
+    height: 22px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    background: inherit;
+  }
+  .homebar i {
+    display: block;
+    width: 116px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.28);
+  }
+
+  /* ---- findings ------------------------------------------------------- */
+
+  .findings {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .finding {
+    display: block;
+    width: 100%;
+    text-align: left;
+    appearance: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    border: 0;
+    border-top: 1px solid var(--rule);
+    padding: 24px 4px 26px;
+    cursor: pointer;
+    transition: background 140ms;
+  }
+  .finding:hover {
+    background: rgba(255, 255, 255, 0.022);
+  }
+  .finding:focus-visible {
+    outline: 2px solid var(--text-2);
+    outline-offset: -2px;
+  }
+  .finding[aria-current='true'] {
+    background: rgba(201, 151, 42, 0.05);
+  }
+
+  .fhead {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+  .fnum {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--accent);
+    flex: none;
+    width: 22px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ftitle {
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 25px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    text-wrap: balance;
+    line-height: 1.2;
+  }
+  .fbody {
+    padding-left: 36px;
+  }
+  .fbody p {
+    margin: 0 0 11px;
+    max-width: 60ch;
+    color: var(--text-2);
+  }
+  .fbody p:last-child {
+    margin-bottom: 0;
+  }
+  .fbody strong {
+    color: var(--text);
+    font-weight: 500;
+  }
+  code {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.855em;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.055);
+    padding: 1.5px 5px;
+    border-radius: 3px;
+  }
+
+  .verdict {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    margin-bottom: 12px;
+  }
+  .verdict::before {
+    content: '';
+    width: 14px;
+    height: 1px;
+    background: var(--rule-2);
+  }
+
+  .opts {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .opts li {
+    display: flex;
+    gap: 11px;
+    max-width: 60ch;
+    color: var(--text-2);
+  }
+  .opts .tag {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    flex: none;
+    width: 58px;
+    padding-top: 4px;
+  }
+  .opts li.pick .tag {
+    color: var(--accent);
+  }
+  .opts li.pick {
+    color: var(--text);
+  }
+
+  .scroller {
+    overflow-x: auto;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 14px;
+    font-size: 13.5px;
+  }
+  th,
+  td {
+    text-align: left;
+    padding: 7px 14px 7px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    font-weight: 400;
+  }
+  td {
+    color: var(--text-2);
+  }
+  td:first-child {
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 26px;
+    border-top: 1px solid var(--rule);
+    color: var(--text-3);
+    font-size: 13px;
+    max-width: 64ch;
+  }
+
+  /* `display:flex` in the rules above outranks the UA sheet for [hidden],
+     so hiding these needs saying twice. */
+  [hidden] {
+    display: none !important;
+  }
+</style>
+
+<div class="wrap">
+  <div class="masthead">
+    <p class="eyebrow">vorn-mobile · next iteration</p>
+    <h1>Super Chat</h1>
+    <p class="standfirst">
+      Five things that make the phone worse than the desk when an agent is mid-turn. Every claim
+      below was read out of <code>vorn-mobile</code> before it was written down. The phone on the
+      left is live: pick a finding and it shows the state that proves it.
+    </p>
+  </div>
+
+  <div class="cols">
+    <!-- ================= rail ================= -->
+    <div class="rail">
+      <div class="controls">
+        <div class="ctl">
+          <span class="ctl-label">Build</span>
+          <div class="seg" id="seg-build">
+            <button data-v="today" aria-pressed="false">Today</button>
+            <button data-v="new" aria-pressed="true">Proposed</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <span class="ctl-label">View</span>
+          <div class="seg" id="seg-mode">
+            <button data-v="term" aria-pressed="true">Terminal</button>
+            <button data-v="chat" aria-pressed="false">Chat</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <span class="ctl-label">Keys</span>
+          <div class="seg" id="seg-kb">
+            <button data-v="super" aria-pressed="true">Docked</button>
+            <button data-v="system" aria-pressed="false">Floating bar</button>
+            <button data-v="none" aria-pressed="false">Hidden</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="phone" id="phone">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="glyphs">▪▪▪ ⌁ ▰</span>
+        </div>
+
+        <!-- header, today -->
+        <div class="hdr-today" id="hdr-today" hidden>
+          <span class="back">
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#faf9f7"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+            Sessions
+          </span>
+          <div class="right">
+            <span class="title">key row</span>
+            <span class="sub">
+              <span class="dot live"></span>
+              <span style="color: var(--ink)">Working</span>
+              <span style="color: var(--ink-faint)">· 12m</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- header, proposed -->
+        <div class="hdr-new" id="hdr-new">
+          <span class="chev">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#faf9f7"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </span>
+          <span class="title">key row</span>
+          <span class="spacer"></span>
+          <div class="modesw" id="phone-modesw">
+            <button data-v="term" aria-pressed="true">Terminal</button>
+            <button data-v="chat" aria-pressed="false">Chat</button>
+          </div>
+          <span class="dot live" style="margin: 0 8px 0 8px"></span>
+        </div>
+
+        <!-- body -->
+        <div class="body">
+          <div class="edgehint"></div>
+
+          <div class="term" id="view-term">
+            <span class="b">●</span> Read <span class="b">src/terminal/KeyRow.tsx</span>
+            <span class="f">(155 lines)</span>
+
+            <span class="b">●</span> The dismiss key is the fourteenth item in a horizontally
+            scrolling row. On a 390pt screen the row runs out at <span class="b">home</span>, so it
+            is never reached.
+
+            <span class="b">●</span> Edit <span class="b">src/terminal/KeyRow.tsx</span>
+            <span class="f">⎿</span> <span class="g">+7</span> <span class="r">-3</span>
+
+            <span class="f">123</span> <span class="r">- &lt;ScrollView horizontal&gt;</span>
+            <span class="f">124</span> <span class="g">+ &lt;View className="flex-row"&gt;</span>
+
+            <span class="b">●</span> Now the hide key sits outside the scroller, so it is on screen
+            at every width.
+
+            <span class="b">●</span> Bash <span class="f">yarn jest src/terminal</span>
+            <span class="f">⎿</span> <span class="g">14 passed</span>, 176 total
+            <span class="f">(1.1s)</span>
+
+            <span class="a">╭────────────────────────────────────────────╮</span>
+            <span class="a">│</span> <span class="b">&gt;</span> <span class="f">▊</span>
+            <span class="a">│</span>
+            <span class="a">╰────────────────────────────────────────────╯</span>
+            <span class="f">esc to interrupt · ⏵⏵ accept edits on</span>
+          </div>
+
+          <div class="chat" id="view-chat" hidden>
+            <div class="msg-user">the hide-keyboard key never shows up. fix it</div>
+
+            <div class="msg-agent">
+              The dismiss key is the fourteenth item in a horizontally scrolling row. On a 390pt
+              screen the row runs out at <strong>home</strong>, so it is never reached. Moving it
+              outside the scroller.
+            </div>
+
+            <div class="tool">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="rgba(255,255,255,0.55)"
+                stroke-width="2"
+                stroke-linecap="round"
+              >
+                <path d="M4 6h16M4 12h16M4 18h10" />
+              </svg>
+              <span class="name">Read</span>
+              <span>KeyRow.tsx</span>
+              <span class="meta">155 ln</span>
+            </div>
+
+            <div class="tool" style="flex-wrap: wrap">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="rgba(255,255,255,0.55)"
+                stroke-width="2"
+                stroke-linecap="round"
+              >
+                <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+              <span class="name">Edit</span>
+              <span>KeyRow.tsx</span>
+              <span class="meta"
+                ><span style="color: var(--add)">+7</span>
+                <span style="color: var(--remove)">-3</span></span
+              >
+              <div
+                style="
+                  flex-basis: 100%;
+                  margin-top: 6px;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 1px;
+                "
+              >
+                <span class="diffline"><span class="m">- &lt;ScrollView horizontal&gt;</span></span>
+                <span class="diffline"
+                  ><span class="p">+ &lt;View className="flex-row"&gt;</span></span
+                >
+              </div>
+            </div>
+
+            <div class="tool">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="rgba(255,255,255,0.55)"
+                stroke-width="2"
+                stroke-linecap="round"
+              >
+                <path d="m4 17 6-6-6-6M12 19h8" />
+              </svg>
+              <span class="name">Bash</span>
+              <span>yarn jest</span>
+              <span class="meta" style="color: var(--add)">14 passed</span>
+            </div>
+
+            <div class="msg-agent">
+              Fixed. The hide key is now pinned to the right of the row and the scroller keeps only
+              the keys that can overflow.
+            </div>
+
+            <div class="waiting">
+              <div class="wrow">
+                <span class="dot block"></span><span>Allow <strong>git commit</strong>?</span>
+              </div>
+              <div class="wopts">
+                <span class="wbtn">Yes</span>
+                <span class="wbtn">Yes, and don't ask again</span>
+                <span class="wbtn">No</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- composer, chat only -->
+        <div class="composer" id="composer" hidden>
+          <span class="field">Message</span>
+          <span
+            style="
+              width: 30px;
+              height: 30px;
+              border-radius: 999px;
+              background: var(--overlay);
+              display: grid;
+              place-items: center;
+              flex: none;
+            "
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#faf9f7"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M12 19V5M5 12l7-7 7 7" />
+            </svg>
+          </span>
+        </div>
+
+        <!-- key row, today -->
+        <div class="keyrow-today" id="kb-today" hidden>
+          <span class="kt">esc</span><span class="kt">tab</span><span class="kt">ctrl</span>
+          <span class="kt">^C</span><span class="kt">^D</span><span class="kt">^L</span>
+          <span class="kt">↑</span><span class="kt">↓</span>
+        </div>
+
+        <!-- system keyboard -->
+        <div class="kb syskb" id="kb-system" hidden>
+          <div class="kgrid">
+            <span class="k">q</span><span class="k">w</span><span class="k">e</span
+            ><span class="k">r</span><span class="k">t</span><span class="k">y</span
+            ><span class="k">u</span><span class="k">i</span><span class="k">o</span
+            ><span class="k">p</span>
+          </div>
+          <div class="kgrid" style="padding: 0 14px">
+            <span class="k">a</span><span class="k">s</span><span class="k">d</span
+            ><span class="k">f</span><span class="k">g</span><span class="k">h</span
+            ><span class="k">j</span><span class="k">k</span><span class="k">l</span>
+          </div>
+          <div class="kgrid">
+            <span class="k dark wide">⇧</span><span class="k">z</span><span class="k">x</span
+            ><span class="k">c</span><span class="k">v</span><span class="k">b</span
+            ><span class="k">n</span><span class="k">m</span><span class="k dark wide">⌫</span>
+          </div>
+          <div class="kgrid">
+            <span class="k dark wide">123</span><span class="k dark">🌐</span
+            ><span class="k space">space</span><span class="k dark wide">return</span>
+          </div>
+          <div class="kbnote">system keyboard · terminal keys live in the bar above</div>
+        </div>
+
+        <!-- system keyboard + docked accessory bar -->
+        <div class="kb acckb" id="kb-super" hidden>
+          <div class="accbar">
+            <span class="modechip"><span class="on">abc</span><span>raw</span></span>
+            <span class="mk">esc</span>
+            <span class="mk">tab</span>
+            <span class="mk latched">ctrl</span>
+            <span class="mk arrow">←</span>
+            <span class="mk arrow">↑</span>
+            <span class="mk arrow">↓</span>
+            <span class="mk arrow">→</span>
+            <span class="mk hide">⌄</span>
+          </div>
+          <div class="quicktype">
+            <span>"keybard"</span><span class="qt-sel">keyboard</span><span>keyboards</span>
+          </div>
+          <div style="padding: 0 3px 4px">
+            <div class="kgrid">
+              <span class="k">q</span><span class="k">w</span><span class="k">e</span
+              ><span class="k">r</span><span class="k">t</span><span class="k">y</span
+              ><span class="k">u</span><span class="k">i</span><span class="k">o</span
+              ><span class="k">p</span>
+            </div>
+            <div class="kgrid" style="padding: 0 14px">
+              <span class="k">a</span><span class="k">s</span><span class="k">d</span
+              ><span class="k">f</span><span class="k">g</span><span class="k">h</span
+              ><span class="k">j</span><span class="k">k</span><span class="k">l</span>
+            </div>
+            <div class="kgrid">
+              <span class="k dark wide">⇧</span><span class="k">z</span><span class="k">x</span
+              ><span class="k">c</span><span class="k">v</span><span class="k">b</span
+              ><span class="k">n</span><span class="k">m</span><span class="k dark wide">⌫</span>
+            </div>
+            <div class="kgrid">
+              <span class="k dark wide">123</span><span class="k dark">🌐</span
+              ><span class="k space">space</span><span class="k dark mic">🎤</span
+              ><span class="k dark wide">return</span>
+            </div>
+          </div>
+          <div class="kbnote">apple's keyboard, unchanged · our keys docked above it</div>
+        </div>
+
+        <div class="homebar"><i></i></div>
+      </div>
+    </div>
+
+    <!-- ================= findings ================= -->
+    <div class="findings">
+      <button class="finding" data-build="new" data-mode="term" data-kb="super" aria-current="true">
+        <div class="fhead">
+          <span class="fnum">01</span
+          ><span class="ftitle">Keep Apple's keyboard. Dock ours to it.</span>
+        </div>
+        <div class="fbody">
+          <p class="verdict">keeps dictation and autocorrect</p>
+          <p>
+            Drawing our own keyboard was the wrong answer and dictation is what rules it out. A
+            keyboard extension has no microphone key — dictation belongs to the system keyboard and
+            is not offered to third-party ones. Anything that replaces the keyboard loses the mic,
+            the predictive bar and every other alphabet with it.
+          </p>
+          <p>
+            So the keys have to arrive <em>beside</em> Apple's keyboard, not instead of it. Apple
+            has one mechanism for that on a phone, and React Native already wraps it:
+            <code>InputAccessoryView</code>, a view docked to the top of the keyboard that moves
+            with it. Unlimited custom keys, everything below the bar still Apple's.
+          </p>
+
+          <p class="verdict" style="margin-top: 20px">why autocorrect is dead today</p>
+          <p>
+            Not a setting anyone forgot. <code>@xterm/xterm</code> builds its own hidden textarea
+            and sets <code>autocorrect="off"</code> and <code>autocapitalize="off"</code> on it —
+            both are in the shipped bundle. Even switched on it would not help: xterm reads and
+            clears that textarea on every keystroke, and autocorrect works by replacing a word
+            <em>after</em> you finish it. There is nothing left in the field to replace.
+          </p>
+          <p>
+            Which means autocorrect can never work while each character goes straight to the PTY as
+            you press it. It is not a bug to fix, it is a property of passthrough. The fix is to
+            stop typing into the WebView at all and put a real <code>TextInput</code> under your
+            thumb.
+          </p>
+
+          <p class="verdict" style="margin-top: 20px">two input modes, one bar</p>
+          <ul class="opts">
+            <li class="pick">
+              <span class="tag">abc</span
+              ><span
+                >A native field with <code>autoCorrect</code>, <code>autoCapitalize</code> and the
+                mic. Type or dictate a whole line, iOS fixes it, Return sends the finished text with
+                <code>terminal:write</code>. This is talking to an agent.</span
+              >
+            </li>
+            <li>
+              <span class="tag">raw</span
+              ><span
+                >Every keystroke passes straight through, for menus, y/n and arrow selection.
+                Autocorrect off by definition. One tap away, on the same bar.</span
+              >
+            </li>
+          </ul>
+          <p style="margin-top: 14px">
+            The cost of <strong>abc</strong> is honest: the agent's own TUI does not see you typing,
+            so its slash-command menu and inline completion stay quiet until you send. That is what
+            <strong>raw</strong> is for, and why the switch sits on the bar rather than in settings.
+          </p>
+
+          <div class="scroller">
+            <table>
+              <thead>
+                <tr>
+                  <th>Approach</th>
+                  <th>Dictation</th>
+                  <th>Autocorrect</th>
+                  <th>Verdict</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Accessory view</td>
+                  <td>yes</td>
+                  <td>yes, in abc</td>
+                  <td style="color: var(--accent)">this one</td>
+                </tr>
+                <tr>
+                  <td>Keyboard extension</td>
+                  <td><strong style="color: var(--remove)">no mic key</strong></td>
+                  <td>yes</td>
+                  <td>separate target, Settings to enable</td>
+                </tr>
+                <tr>
+                  <td>Our own keyboard</td>
+                  <td><strong style="color: var(--remove)">no</strong></td>
+                  <td><strong style="color: var(--remove)">no</strong></td>
+                  <td>what I proposed first. Wrong.</td>
+                </tr>
+                <tr>
+                  <td>Shortcuts bar</td>
+                  <td>yes</td>
+                  <td>yes</td>
+                  <td>iPad only — not drawn on iPhone</td>
+                </tr>
+                <tr>
+                  <td>Floating strip (today)</td>
+                  <td>yes</td>
+                  <td><strong style="color: var(--remove)">no</strong></td>
+                  <td>where we are</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p style="margin-top: 16px">
+            Two things block it in the code as it stands.
+            <code>terminal-host.tsx:230</code> sets <code>hideKeyboardAccessoryView</code>, which
+            strips the bar outright; and an accessory view attaches to a React Native
+            <code>TextInput</code>, never to a WebView's own input. Both fall out once the field is
+            native.
+          </p>
+          <p>
+            The Expo question separately: this needs no new dependency —
+            <code>InputAccessoryView</code> ships with React Native and the app is already on a dev
+            build. <code>react-native-keyboard-controller</code>
+            is the alternative worth pricing later, for its keyboard-height animation, which would
+            also retire the
+            <code>KeyboardAvoidingView</code> on this screen.
+          </p>
+        </div>
+      </button>
+
+      <button class="finding" data-build="new" data-mode="term" data-kb="none">
+        <div class="fhead">
+          <span class="fnum">02</span
+          ><span class="ftitle">The hide key exists. You have never seen it.</span>
+        </div>
+        <div class="fbody">
+          <p class="verdict">a real bug, four lines to fix</p>
+          <p>
+            <code>KeyRow.tsx:123</code> draws a dismiss-keyboard button. It is the fourteenth child
+            of a horizontal <code>ScrollView</code>, after esc, tab, ctrl, three control codes, four
+            arrows, home and end. On a 390pt screen the row runs out around <strong>home</strong>.
+            The key is real, reachable only by scrolling a bar nobody thinks to scroll.
+          </p>
+          <p>
+            Pin it outside the scroller, hard right, always on screen. Then add the gesture everyone
+            already tries: a downward drag on the terminal dismisses the keyboard. The refit is free
+            — <code>setRect</code> already sends <code>fit</code> whenever the box changes, so the
+            grid grows into the space the moment the keyboard leaves.
+          </p>
+        </div>
+      </button>
+
+      <button class="finding" data-build="new" data-mode="term" data-kb="none" data-swipe="on">
+        <div class="fhead">
+          <span class="fnum">03</span
+          ><span class="ftitle">The swipe is being eaten by the terminal</span>
+        </div>
+        <div class="fbody">
+          <p class="verdict">found the cause</p>
+          <p>
+            This is not a missing feature. <code>terminal-host.tsx:196</code> renders the WebView as
+            <code>position: absolute</code> at the app root with <code>pointerEvents: 'auto'</code>,
+            covering the whole terminal area including the left edge. The native stack's back
+            gesture lives under it and never sees the touch. Every other screen in the app swipes
+            back fine, which is why this reads as arbitrary.
+          </p>
+          <ul class="opts">
+            <li>
+              <span class="tag">cheap</span
+              ><span
+                >Leave a 20pt gutter the overlay does not cover. Works today, costs two columns of
+                terminal on every screen forever.</span
+              >
+            </li>
+            <li class="pick">
+              <span class="tag">right</span
+              ><span
+                >Put a <code>Gesture.Pan</code> on the screen with <code>activeOffsetX</code> and an
+                edge <code>hitSlop</code>, running alongside the WebView rather than instead of it.
+                Full width terminal, real edge swipe, tracks your finger.</span
+              >
+            </li>
+            <li>
+              <span class="tag">no</span
+              ><span
+                >Move the WebView back inside the screen. Undoes the warm-surface work and puts two
+                to three seconds back on every session open.</span
+              >
+            </li>
+          </ul>
+        </div>
+      </button>
+
+      <button class="finding" data-build="today" data-mode="term" data-kb="system">
+        <div class="fhead">
+          <span class="fnum">04</span
+          ><span class="ftitle">Fifty-six points of chrome above someone else's output</span>
+        </div>
+        <div class="fbody">
+          <p class="verdict">measured, not felt</p>
+          <p>
+            Switch the phone to <strong>Today</strong> and the header takes two lines: a 17px title
+            stacked on a dot, the word <em>Working</em>, and an age —
+            <code>session/[id].tsx:126</code>, <code>px-4 pb-2 pt-1</code>. Under it the terminal is
+            inset again by its own padding.
+          </p>
+          <p>
+            The word is already redundant. The last iteration settled that a status is said once, by
+            the dot; the header says it a second time in prose. Drop the word, put the name and the
+            dot on one 44pt line, and take the horizontal padding to zero — a terminal's own cell
+            grid is the margin, and every point of gutter is a column of output that does not fit.
+          </p>
+          <p>
+            <strong>Screen gutter</strong> is a tweak on this page so you can settle it by looking
+            rather than by argument. It is set to 0 and I would ship 0.
+          </p>
+        </div>
+      </button>
+
+      <button class="finding" data-build="new" data-mode="chat" data-kb="none">
+        <div class="fhead">
+          <span class="fnum">05</span
+          ><span class="ftitle">A native chat, and where its data comes from</span>
+        </div>
+        <div class="fbody">
+          <p class="verdict">one source is not enough. three, ranked.</p>
+          <p>
+            Reading a redrawing TUI through a 9pt WebView on a phone is the worst part of using this
+            on the train. A native view is the fix, and what feeds it matters more than what it
+            looks like.
+          </p>
+          <p>
+            I said last time: tail the agent's transcript. That is right and it is not sufficient. A
+            transcript is only written when a turn <em>completes</em>, so a chat built on it alone
+            shows nothing at all for the thirty seconds an agent is actually working — which is
+            exactly when you are looking. So three sources, layered, higher rank winning when two
+            describe the same turn:
+          </p>
+          <ul class="opts">
+            <li class="pick">
+              <span class="tag">3 · file</span
+              ><span
+                >The agent's own transcript on disk. Authoritative, complete, structured: real
+                turns, real tool calls with arguments, real diffs. Arrives late.</span
+              >
+            </li>
+            <li class="pick">
+              <span class="tag">2 · hook</span
+              ><span
+                >Live events while the turn is in flight. This is what makes the reply build in
+                front of you instead of appearing whole.</span
+              >
+            </li>
+            <li>
+              <span class="tag">1 · scrape</span
+              ><span
+                >The scrollback, parsed. Degraded and wrong at the edges, but it means the view is
+                never blank — for a turn that happened before the hooks were installed, or an agent
+                whose format is not parsed yet.</span
+              >
+            </li>
+          </ul>
+          <p style="margin-top: 14px">
+            Dedup by a stable turn key, not by position. Then the in-flight bubble: show the hook's
+            latest assistant text as a synthetic message with a fixed id, and suppress it the moment
+            the real turn lands carrying the same text or more. Without that rule the reply either
+            duplicates or flickers as the file catches up with the hook.
+          </p>
+
+          <p class="verdict" style="margin-top: 20px">vorn already has two of the three</p>
+          <p>
+            This is much closer than I said. <code>hook-server.ts</code> already receives agent
+            events over HTTP, <code>hook-installer.ts</code> already installs the hooks, and
+            <code>hook-status-mapper.ts</code> already turns them into session status. The live
+            layer exists and is running.
+          </p>
+          <p>
+            And the pointer to the file layer is already arriving.
+            <code>packages/shared/src/types.ts:1725</code> declares <code>transcript_path</code> on
+            <code>HookEvent</code> — the exact file for the exact session, handed over on every
+            event. <strong>Nothing in the codebase reads it.</strong> It is declared once and never
+            referenced again. That removes the ugliest part of the job: no scanning a sessions
+            directory, no reconstructing a project slug, no guessing which file belongs to which
+            terminal.
+          </p>
+
+          <p class="verdict" style="margin-top: 20px">writing is the hard half</p>
+          <p>
+            Reading is a parser. Writing is a shared resource: the chat composer and the terminal
+            are two mouths on one PTY, and four things go wrong there.
+          </p>
+          <div class="scroller">
+            <table>
+              <thead>
+                <tr>
+                  <th>Trap</th>
+                  <th>What it does</th>
+                  <th>Handling</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Parked draft</td>
+                  <td>
+                    Whatever is sitting in the TUI's input line concatenates with your message
+                  </td>
+                  <td>
+                    Send <code>Ctrl+U</code> first. It clears one logical line — a multi-line draft
+                    needs more than one
+                  </td>
+                </tr>
+                <tr>
+                  <td>Interleaving</td>
+                  <td>Two composed sequences into one PTY weave their bytes together</td>
+                  <td>
+                    A lock per terminal. The second sender is refused up front, never merged in
+                  </td>
+                </tr>
+                <tr>
+                  <td>Lost ack</td>
+                  <td>The bytes went out, the acknowledgement did not come back</td>
+                  <td>
+                    Three outcomes, not two: accepted, rejected, <em>unknown</em>. Unknown must not
+                    be shown as failure
+                  </td>
+                </tr>
+                <tr>
+                  <td>Option cards</td>
+                  <td>
+                    A selector commits the <em>highlighted</em> option and ignores typed text, so
+                    sending the word "Blue" picks whatever was first
+                  </td>
+                  <td>
+                    Deliver the answer as per-option keystrokes, paced, on the same write budget
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="verdict" style="margin-top: 20px">what makes it read like a conversation</p>
+          <div class="scroller">
+            <table>
+              <thead>
+                <tr>
+                  <th>Element</th>
+                  <th>Rendered as</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Your turn</td>
+                  <td>Right-aligned bubble, overlay surface</td>
+                </tr>
+                <tr>
+                  <td>Agent prose</td>
+                  <td>Plain text, full width, no bubble — it is the page, not a reply</td>
+                </tr>
+                <tr>
+                  <td>Tool call</td>
+                  <td>
+                    One row: verb, target, cost. Consecutive tool-only turns fold into the assistant
+                    turn above them, or the thread becomes a log
+                  </td>
+                </tr>
+                <tr>
+                  <td>Edit</td>
+                  <td>The changed lines inline, in diff add and remove</td>
+                </tr>
+                <tr>
+                  <td>Harness turns</td>
+                  <td>
+                    Dropped. Injected user and system messages are transport machinery, not
+                    conversation
+                  </td>
+                </tr>
+                <tr>
+                  <td>Waiting on you</td>
+                  <td>The only bronzo on the screen, with the options on it as buttons</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p style="margin-top: 16px">
+            Support is a set, not a promise. An agent whose transcript format is parsed gets the
+            switch; every other agent keeps the terminal and the switch is simply absent — never a
+            chat that lies about what happened.
+          </p>
+          <p>
+            Chat and terminal stay two views of one session. The composer writes to the same PTY,
+            the switch keeps its place, and nothing is lost moving between them — which is the whole
+            reason it belongs in the header rather than being a mode you commit to.
+          </p>
+        </div>
+      </button>
+    </div>
+  </div>
+
+  <footer>
+    Colours, spacing and type sizes inside the phone are the app's own tokens from
+    <code>vorn-mobile/src/theme.ts</code>. Bronzo appears exactly once, on the turn that is waiting
+    for a person. Two things are adjustable up top; everything else on this page is a real control.
+  </footer>
+</div>
+
+<script>
+  var state = { build: 'new', mode: 'term', kb: 'super', swipe: 'off' }
+
+  function seg(id, key) {
+    var root = document.getElementById(id)
+    root.addEventListener('click', function (e) {
+      var b = e.target.closest('button')
+      if (!b || b.disabled) return
+      state[key] = b.dataset.v
+      render()
+    })
+  }
+  seg('seg-build', 'build')
+  seg('seg-mode', 'mode')
+  seg('seg-kb', 'kb')
+  seg('phone-modesw', 'mode')
+
+  var findings = Array.prototype.slice.call(document.querySelectorAll('.finding'))
+  findings.forEach(function (f) {
+    f.addEventListener('click', function () {
+      state.build = f.dataset.build || 'new'
+      state.mode = f.dataset.mode || 'term'
+      state.kb = f.dataset.kb || 'none'
+      state.swipe = f.dataset.swipe || 'off'
+      findings.forEach(function (o) {
+        o.setAttribute('aria-current', String(o === f))
+      })
+      render()
+    })
+  })
+
+  function pressed(id, key) {
+    var root = document.getElementById(id)
+    Array.prototype.forEach.call(root.querySelectorAll('button'), function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.v === state[key]))
+    })
+  }
+
+  function show(id, on) {
+    document.getElementById(id).hidden = !on
+  }
+
+  function render() {
+    var today = state.build === 'today'
+    // Chat does not exist in the build that is shipping now, and the terminal
+    // key row does not exist in the one being proposed.
+    if (today && state.mode === 'chat') state.mode = 'term'
+    if (today && state.kb === 'super') state.kb = 'system'
+
+    var chat = state.mode === 'chat'
+
+    show('hdr-today', today)
+    show('hdr-new', !today)
+    show('view-term', !chat)
+    show('view-chat', chat)
+    show('composer', chat && state.kb === 'none')
+    // "Floating bar" is today's arrangement: our strip pushed up by the screen,
+    // with Apple's keyboard under it and no connection between them.
+    show('kb-today', state.kb === 'system')
+    show('kb-system', state.kb === 'system')
+    show('kb-super', state.kb === 'super')
+
+    document.getElementById('phone').dataset.swipe = state.swipe
+
+    Array.prototype.forEach.call(
+      document.querySelectorAll('#seg-mode button, #seg-kb button'),
+      function (b) {
+        b.disabled = today && (b.dataset.v === 'chat' || b.dataset.v === 'super')
+      }
+    )
+
+    pressed('seg-build', 'build')
+    pressed('seg-mode', 'mode')
+    pressed('seg-kb', 'kb')
+    pressed('phone-modesw', 'mode')
+  }
+
+  window.__artifactRender = function () {
+    var t = (window.__artifact && window.__artifact.tweaks) || {}
+    var root = document.documentElement.style
+    root.setProperty('--edge', (t.edgeInset != null ? t.edgeInset : 0) + 'px')
+    root.setProperty('--keyh', (t.keyHeight != null ? t.keyHeight : 42) + 'px')
+  }
+
+  window.__artifactRender()
+  render()
+</script>

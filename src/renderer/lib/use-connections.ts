@@ -1,9 +1,5 @@
 import { useEffect, useState } from 'react'
-import type {
-  InstalledConnectorPack,
-  SdkConnectorIcon,
-  SourceConnection
-} from '../../shared/types'
+import type { InstalledConnectorPack, SdkConnectorIcon, SourceConnection } from '../../shared/types'
 import { connectionConnectorId } from '../../shared/types'
 import { connectionIcon } from './connection-icon'
 

@@ -6,14 +6,13 @@ import type { ConnectorCatalogItem, ConnectorPackSummary } from '../src/shared/t
 
 vi.mock('../src/renderer/stores', () => ({
   useAppStore: Object.assign(
-    (selector: (state: unknown) => unknown) => selector({ config: { workflows: [], projects: [] } }),
+    (selector: (state: unknown) => unknown) =>
+      selector({ config: { workflows: [], projects: [] } }),
     { getState: () => ({}) }
   )
 }))
 
-const { ConnectorSettings } = await import(
-  '../src/renderer/components/settings/ConnectorSettings'
-)
+const { ConnectorSettings } = await import('../src/renderer/components/settings/ConnectorSettings')
 
 const CATALOG: ConnectorCatalogItem = {
   id: 'acme',

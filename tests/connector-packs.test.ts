@@ -132,9 +132,7 @@ describe('verifyPackDir', () => {
     expect(() =>
       verifyPackDir(dirWith({ 'manifest.json': JSON.stringify(manifestFor('acme', '1.0.0')) }))
     ).toThrow(/no entry to run/)
-    expect(() => verifyPackDir(dirWith({ ...goodFiles(), 'other.js': '' }))).toThrow(
-      /nothing else/
-    )
+    expect(() => verifyPackDir(dirWith({ ...goodFiles(), 'other.js': '' }))).toThrow(/nothing else/)
   })
 
   it('refuses a package that would need an install step', () => {

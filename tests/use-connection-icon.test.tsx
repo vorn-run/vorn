@@ -21,13 +21,21 @@ beforeEach(() => {
     },
     { id: 'plain', connectorId: 'github', name: 'GitHub', filters: {} },
     // Made before the connector shipped a glyph; the installed pack has one now.
-    { id: 'iconless-pack', connectorId: 'mcp', name: 'Pack Demo', filters: { sdkConnectorId: 'packdemo' } }
+    {
+      id: 'iconless-pack',
+      connectorId: 'mcp',
+      name: 'Pack Demo',
+      filters: { sdkConnectorId: 'packdemo' }
+    }
   ])
-  listConnectorPacks
-    .mockReset()
-    .mockResolvedValue([
-      { id: 'packdemo', name: 'Pack Demo', version: '1.0.0', icon: { viewBox: '0 0 24 24', paths: ['M2 2h9v9z'] } }
-    ])
+  listConnectorPacks.mockReset().mockResolvedValue([
+    {
+      id: 'packdemo',
+      name: 'Pack Demo',
+      version: '1.0.0',
+      icon: { viewBox: '0 0 24 24', paths: ['M2 2h9v9z'] }
+    }
+  ])
   ;(window as unknown as { api: unknown }).api = {
     listConnections,
     listConnectorPacks,
