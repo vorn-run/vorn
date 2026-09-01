@@ -1,3 +1,6 @@
+// Type-only, so the portability module can keep importing values from here.
+import type { PortableWorkflow } from './workflow-portability'
+
 /** AI agents only. Use this for icon maps, install status, command configs, and
  *  anything else that applies exclusively to an AI CLI — not to plain shells. */
 export type AiAgentType = 'claude' | 'copilot' | 'codex' | 'opencode' | 'gemini'
@@ -1796,8 +1799,26 @@ export interface ConnectorCatalogItem extends ConnectorCatalogEntry {
  * every attempt so far has failed — so the UI can say that rather than showing
  * a timestamp for a list that may be missing everything published since.
  */
+/**
+ * A workflow someone can start from rather than an empty canvas.
+ *
+ * Published beside the connectors and carried in the same document, because a
+ * template goes stale for the same reasons a connector entry does and there is
+ * no reason to fetch, cache and repair two lists.
+ */
+export interface WorkflowTemplate {
+  id: string
+  name: string
+  description: string
+  /** The chain as a person reads it, e.g. ['Webhook', 'Condition', 'HTTP request']. */
+  steps: string[]
+  category?: string
+  portable: PortableWorkflow
+}
+
 export interface ConnectorCatalogSnapshot {
   items: ConnectorCatalogItem[]
+  templates: WorkflowTemplate[]
   fetchedAt?: number
 }
 
