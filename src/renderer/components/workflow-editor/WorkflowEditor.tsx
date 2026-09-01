@@ -595,20 +595,19 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     handleClose()
   }, [editingId, removeWorkflowFromStore, handleClose])
 
-  // Only fetched when there is an empty canvas to offer them for.
+  // Only fetched when there is an empty canvas to offer them for. Optional
+  // calls: a build without a catalog costs the offer, never the editor.
   useEffect(() => {
     if (editingId || templates.length > 0) return
-    void window.api
-      .listConnectorCatalog()
-      .then((snapshot) => setTemplates(snapshot.templates ?? []))
+    void Promise.resolve(window.api?.listConnectorCatalog?.())
+      .then((snapshot) => setTemplates(snapshot?.templates ?? []))
       .catch(() => setTemplates([]))
   }, [editingId, templates.length])
 
   useEffect(() => {
     if (editingId) return
-    void window.api
-      .listConnectors()
-      .then(setConnectors)
+    void Promise.resolve(window.api?.listConnectors?.())
+      .then((list) => setConnectors(list ?? []))
       .catch(() => setConnectors([]))
   }, [editingId])
 
@@ -661,7 +660,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     const projects = useAppStore.getState().config?.projects ?? []
     const project = projectForWorkflow(workflow, projects)
     const file = fileFromWorkflow(workflow, project?.path ?? '', connections)
-    const saved = await window.api.saveTextFile({
+    const saved = await window.api.saveTextFile?.({
       defaultName: file.name,
       contents: file.contents,
       title: 'Export workflow'

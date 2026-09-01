@@ -59,7 +59,7 @@ export function WorkflowsSection({
     async (workflow: WorkflowDefinition) => {
       const project = projectForWorkflow(workflow, projects ?? [])
       const file = fileFromWorkflow(workflow, project?.path ?? '', connections)
-      const saved = await window.api.saveTextFile({
+      const saved = await window.api.saveTextFile?.({
         defaultName: file.name,
         contents: file.contents,
         title: 'Export workflow'
