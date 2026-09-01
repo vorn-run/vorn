@@ -1347,8 +1347,7 @@ export function registerAllMethods(): void {
 
   registerMethod('connection:update', ({ id, updates }) => {
     dbUpdateSourceConnection(id, updates)
-    // A child started before this edit keeps running the old command, args and
-    // env for the life of the process, so it is stopped and respawned on next use.
+    // A child started before this edit keeps the old command until it is stopped.
     void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
     dbSignalChange()
     return dbGetSourceConnection(id)
@@ -1558,13 +1557,7 @@ export function registerAllMethods(): void {
     return catalogSnapshot()
   })
 
-  /**
-   * Install a connector as a file, so launching it later needs no registry.
-   *
-   * Progress is pushed rather than returned because verification of a download
-   * is the part worth watching, and a caller holding one promise for the whole
-   * install can show nothing until it is over.
-   */
+  /** Progress is pushed, not returned, so a caller can show the download as it runs. */
   registerMethod('connector:installPack', async (source: ConnectorPackSource) => {
     const result = await installPack(source, {
       onProgress: (progress) => clientRegistry.broadcast(IPC.CONNECTOR_INSTALL_PROGRESS, progress),

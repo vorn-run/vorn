@@ -1,17 +1,4 @@
-/**
- * Connector packs installed as files.
- *
- * A packaged connector used to be `npx -y <pkg>`, resolved the first time it
- * launched. That needs a reachable registry at the worst possible moment and
- * floats the version out from under a connection that was working yesterday. A
- * pack is the same connector as one file, verified once and copied into place,
- * so launching it later is a `node <path>` with nothing to resolve.
- *
- * Everything here treats the archive as hostile: it may have been downloaded,
- * dropped in from a chat, or produced by a package that never used the SDK. It
- * is extracted to a temporary directory, checked, and only then renamed into
- * place — a refusal leaves the connectors directory exactly as it was.
- */
+/** Connectors installed as verified files, so launching one resolves nothing. */
 import { createHash } from 'node:crypto'
 import {
   existsSync,
@@ -56,10 +43,7 @@ interface CurrentPack {
   installedAt: number
 }
 
-/**
- * Where the impure parts come from, so a unit test never writes to the real
- * data directory, reaches the network, or needs a websocket to observe progress.
- */
+/** The impure edges, defaulted for production and supplied by tests. */
 export interface PackOptions {
   root?: string
   fetchImpl?: typeof fetch
@@ -108,11 +92,7 @@ function isSafeId(id: string): boolean {
   return /^[a-z0-9][a-z0-9-]{0,63}$/i.test(id)
 }
 
-/**
- * A connector id is only ever taken from a manifest that has already been
- * validated, but it becomes a path segment here, so it is checked again rather
- * than trusted to be tame.
- */
+/** Checked again here because a manifest's id becomes a path segment. */
 function requireSafeId(id: string): void {
   if (!isSafeId(id)) throw new Error(`"${id}" is not a usable connector id`)
 }
@@ -141,14 +121,7 @@ function walk(dir: string, prefix = ''): string[] {
   return found
 }
 
-/**
- * Refuse anything that would need an install step, run code on the way in, or
- * unpack to more than a connector could plausibly be.
- *
- * The dependency and script rules are what make the npm fallback fail honestly:
- * an ordinary unbundled package trips them and says so, rather than installing
- * and then failing to launch on a machine with no registry.
- */
+/** Refuse anything needing an install step, running code, or unpacking too large. */
 export function verifyPackDir(dir: string): SdkConnectorManifest {
   const files = walk(dir)
   if (!files.includes(MANIFEST_FILE)) throw new Error('The pack has no manifest.json')
@@ -193,15 +166,7 @@ export function verifyPackDir(dir: string): SdkConnectorManifest {
   return readManifest(dir)
 }
 
-/**
- * Entries an archive is allowed to carry.
- *
- * tar already refuses absolute paths and `..` unless told otherwise, but the
- * cost of being wrong here is writing outside the data directory, so the rule
- * is stated rather than inherited. Links of either kind are rejected outright:
- * a pack has no use for one, and a symlink is the classic way an archive
- * reaches a path it was never extracted to.
- */
+/** Stated rather than inherited from tar: being wrong here writes outside the data dir. */
 export function isSafeArchiveEntry(path: string, type: string): boolean {
   if (type !== 'File' && type !== 'Directory') return false
   if (path.startsWith('/') || /^[a-z]:/i.test(path)) return false
@@ -241,9 +206,7 @@ async function readSource(
     if (received > MAX_PACK_BYTES) throw new Error(sizeMessage(received))
     chunks.push(chunk)
     if (total <= 0) continue
-    // The chunks arrive far faster than anything can render, and the rounded
-    // percent repeats across most of them; dropping the repeats keeps this to
-    // about a hundred pushes rather than thousands.
+    // Dropping repeats of a rounded percent keeps this to about a hundred pushes.
     const percent = Math.round((received / total) * 100)
     if (percent === lastPercent) continue
     lastPercent = percent
@@ -299,14 +262,7 @@ function describeSource(source: ConnectorPackSource): string {
   return source.kind === 'file' ? source.path : source.url
 }
 
-/**
- * Install a pack, replacing whatever version was there.
- *
- * The rename is the commit point: everything before it happens in a temporary
- * directory that is removed whether this succeeds or fails, so a refused or
- * interrupted install can never leave a half-written connector that Vorn would
- * later try to launch.
- */
+/** The rename is the commit point; everything before it is in a temporary directory. */
 export async function installPack(
   source: ConnectorPackSource,
   options: PackOptions = {}
@@ -354,8 +310,7 @@ export async function installPack(
     rmSync(target, { recursive: true, force: true })
     renameSync(contents, target)
 
-    // One version is kept behind the current one so a bad update is a click to
-    // undo; anything older is removed rather than accumulating on disk forever.
+    // One version is kept behind the current one, so a bad update is a click to undo.
     const previousVersion =
       current && current.version !== manifest.version ? current.version : current?.previousVersion
     const installedAt = Date.now()
@@ -410,8 +365,7 @@ export function describePack(
   try {
     manifest = readManifest(path)
   } catch {
-    // The directory survived but its manifest did not; treat it as not installed
-    // rather than reporting a pack nothing can describe.
+    // The directory outlived its manifest; nothing can describe it, so it is not installed.
     return undefined
   }
 

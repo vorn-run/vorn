@@ -231,8 +231,7 @@ export function registerConnectorTools(server: McpServer): void {
             'To install something not in the catalog, pass `package` instead.'
         )
       }
-      // Installed before probing, so the manifest read is the one from the
-      // files that will actually run rather than whatever a registry serves.
+      // Installed before probing, so the manifest read is the one that will run.
       let installed: InstalledConnectorPack | undefined
       if (args.pack_path) {
         const outcome = await rpcCall<ConnectorPackResult>('connector:installPack', {

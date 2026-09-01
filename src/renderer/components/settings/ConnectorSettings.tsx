@@ -59,13 +59,11 @@ export function ConnectorSettings() {
   // with, so the catalog opens instead of a second empty-state layout.
   const [view, setView] = useState<'connections' | 'browse'>('connections')
   const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
-  // Rejections live only here: nothing was written to disk, so the message
-  // belongs to the session that tried it and goes away on reload.
+  // Rejections live only here: nothing was written to disk, so they clear on reload.
   const [installProgress, setInstallProgress] = useState<Record<string, ConnectorInstallProgress>>(
     {}
   )
-  // A pack installed from a file has no row to fail on until its manifest is
-  // read, so its refusal is reported above the list instead.
+  // A file install has no row to fail on until its manifest is read.
   const [fileInstallError, setFileInstallError] = useState<string | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [backfillingId, setBackfillingId] = useState<string | null>(null)
@@ -110,9 +108,7 @@ export function ConnectorSettings() {
     void window.api.listConnectorCatalog().then(applyCatalog)
   }, [applyCatalog])
 
-  // Subscribing rather than polling: the server already pushes a rounded
-  // percent per step, and the unsubscribe is what keeps a reopened panel from
-  // stacking a second listener on the first.
+  // The unsubscribe is what keeps a reopened panel from stacking a second listener.
   useEffect(() => {
     return window.api.onConnectorInstallProgress((progress) => {
       setInstallProgress((current) => ({ ...current, [progress.id]: progress }))
@@ -308,8 +304,7 @@ export function ConnectorSettings() {
         />
       )}
 
-      {/* A side-loaded pack has no catalog entry, but it does have files to
-          probe, so it reaches the same form. */}
+      {/* A side-loaded pack has no catalog entry but does have files to probe. */}
       {(adding?.catalogItem || adding?.pack) && (
         <div className="p-4 bg-white/[0.03] border border-white/[0.08] rounded-sm">
           <h4 className="text-sm text-gray-200 font-medium mb-3">Add {adding.name} connection</h4>

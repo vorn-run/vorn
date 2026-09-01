@@ -22,13 +22,7 @@ export interface ConnectorListing {
   description?: string
   capabilities: string[]
   category: string
-  /**
-   * Where the row came from, which decides what "Add" can do.
-   *
-   * An `installed` row is a pack on disk the catalog does not carry — dropped
-   * in from a file, or published since the last fetch. It brings its own
-   * manifest, so it describes itself and can be connected to like any other.
-   */
+  /** `installed` is a pack the catalog does not carry; it brings its own manifest. */
   source: 'builtin' | 'catalog' | 'installed'
   /** Extra search terms, so a connector is findable by what it talks to. */
   keywords: string[]
@@ -87,8 +81,7 @@ export function listingDetails(
   listing: ConnectorListing,
   builtIns: BuiltInConnector[] = []
 ): ConnectorDetails {
-  // A pack on disk is the one source that cannot be stale: its manifest is the
-  // one the installed files serve, so it is preferred over the catalog's copy.
+  // A pack's manifest is what the installed files serve, so it beats the catalog's copy.
   if (listing.pack) {
     return {
       triggers: listing.pack.triggers.map((trigger) => ({
@@ -188,9 +181,7 @@ export function buildConnectorListings(
       catalogItem: entry,
       ...(packFor(entry.id) && { pack: packFor(entry.id) })
     })),
-    // A pack the catalog does not carry — side-loaded from a file, or published
-    // after the last catalog fetch. It describes itself, so unlike the rows this
-    // arm was written for it can be shown in full rather than as a bare id.
+    // Side-loaded, or published since the last fetch; it describes itself either way.
     ...packs
       .filter((pack) => !catalog.some((entry) => entry.id === pack.id))
       .map((pack) => ({

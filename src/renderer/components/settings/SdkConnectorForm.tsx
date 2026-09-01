@@ -52,11 +52,7 @@ export function SdkConnectorForm({
    * only the person can answer.
    */
   catalogEntry?: ConnectorCatalogItem
-  /**
-   * Set when this connector is installed as a pack. Probing the files on disk
-   * rather than the catalog's launch spec is what keeps the form describing the
-   * version that will actually run, and makes the probe work offline.
-   */
+  /** Set when installed as a pack, so the probe reads the files that will run. */
   pack?: InstalledConnectorPack
 }) {
   const projects = useAppStore((s) => s.config?.projects || [])
@@ -107,8 +103,7 @@ export function SdkConnectorForm({
   // installs race to fill the same form.
   const probedRef = useRef<string | null>(null)
   useEffect(() => {
-    // The installed pack wins: it is the code that will run, and reading it
-    // needs no registry, so the probe cannot fail on a blocked network.
+    // The installed pack wins: it is the code that will run, and needs no registry.
     const target = pack ? packLaunch(pack) : catalogEntry?.launch
     const key = pack ? `${pack.id}@${pack.version}` : catalogEntry?.packageName
     if (!target || !key || probedRef.current === key) return

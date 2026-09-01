@@ -6,12 +6,7 @@ import { IPC } from '@vornrun/shared/types'
 const ROOT = resolve(__dirname, '..')
 const read = (file: string): string => readFileSync(join(ROOT, file), 'utf8')
 
-/**
- * A pack method has to be wired in five places, and a half-wired one fails at
- * runtime rather than at build: the renderer calls a method the main process
- * never registered a handler for, and the call hangs. Checking each hop here
- * fails on the commit that forgets one.
- */
+/** A half-wired method hangs at runtime rather than failing at build. */
 describe('connector pack RPC wiring', () => {
   const channels = {
     CONNECTOR_INSTALL_PACK: 'connector:installPack',
@@ -68,8 +63,7 @@ describe('connector pack RPC wiring', () => {
     ]) {
       expect(preload).toContain(`${method}:`)
     }
-    // The push must hand back an unsubscribe, or a remounting panel leaks a
-    // listener per mount and every install renders several times over.
+    // Without an unsubscribe a remounting panel leaks a listener per mount.
     expect(preload).toContain(
       'ipcRenderer.removeListener(IPC.CONNECTOR_INSTALL_PROGRESS, listener)'
     )

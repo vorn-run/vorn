@@ -1809,13 +1809,7 @@ export interface SdkConnectorManifest {
   env: SdkEnvVar[]
 }
 
-/**
- * A connector pack installed on disk.
- *
- * The point of the format is that launching involves no registry: the files are
- * already there, so `path` is enough to start it offline and `version` is what
- * actually runs rather than what was asked for.
- */
+/** A connector installed on disk, where `version` is what runs rather than what was asked for. */
 export interface InstalledConnectorPack {
   id: string
   name: string
@@ -1843,13 +1837,7 @@ export type ConnectorPackResult =
   | { ok: true; pack: InstalledConnectorPack }
   | { ok: false; error: string }
 
-/**
- * How far an install has got, pushed while it runs.
- *
- * `id` is the connector's id once the manifest has been read and a label for
- * the source until then, so a row can follow its own install from the first
- * byte rather than only from the point the pack identifies itself.
- */
+/** `id` is the connector's once its manifest is read, and the source label until then. */
 export interface ConnectorInstallProgress {
   id: string
   phase: 'downloading' | 'verifying' | 'installing' | 'installed' | 'failed'

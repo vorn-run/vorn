@@ -256,8 +256,7 @@ export function ConnectorRow({
             </span>
           )}
 
-          {/* Colour is only spent here: a rejection, and the sage dot that says
-              a connector is on disk. Everything else on this page stays muted. */}
+          {/* The only colour on the row: a rejection, or the dot saying it is on disk. */}
           {state.kind !== 'absent' && (
             <span
               className={`flex items-center gap-1.5 text-[11px] mt-1.5 ${TONE_TEXT[status.tone]}`}
@@ -267,8 +266,7 @@ export function ConnectorRow({
             </span>
           )}
 
-          {/* Without this nothing says the row opens anything, and the button
-              next to it reads as the only thing that does. */}
+          {/* Without this nothing says the row opens anything. */}
           <span className="inline-flex items-center gap-0.5 text-[11px] text-gray-500 group-hover:text-gray-300 transition-colors mt-1.5">
             Details <ChevronRight size={11} />
           </span>
@@ -286,8 +284,7 @@ export function ConnectorRow({
             {status.label}
           </button>
         )}
-        {/* A pack has to be on disk before there is anything to connect to; a
-            built-in is already there. */}
+        {/* A pack must be on disk before there is anything to connect to. */}
         {canAddConnection(state, {
           source: listing.source,
           hasLegacyLaunch: Boolean(listing.catalogItem?.packageName)

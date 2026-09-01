@@ -139,11 +139,7 @@ export function packFileName(connector: Connector): string {
   return `${connector.id}-${connector.version}.vorn.tgz`
 }
 
-/**
- * Build the installable pack: a gzipped tar of the manifest and one bundled
- * stdio entry. The entry is generated rather than taken from the connector's
- * own bin so every pack launches the same way, whatever its author wrote.
- */
+/** The entry is generated, not the author's bin, so every pack launches alike. */
 export async function packConnector(
   connector: Connector,
   options: PackOptions

@@ -133,8 +133,7 @@ export function ConnectorDetail({
 
       {entry?.auth && <p className="text-[12.5px] text-gray-400 mt-4">{entry.auth}</p>}
 
-      {/* What is actually on disk, which is the question this page could not
-          answer while a connector was a package name resolved at launch. */}
+      {/* The question this page could not answer while a connector was a package name. */}
       {listing.pack && (
         <Section label="On this machine">
           <dl className="text-[12px] leading-relaxed">

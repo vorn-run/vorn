@@ -134,9 +134,7 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
     return undefined
   }
 
-  // Pulled out of the spread rather than merely re-set: a conditional spread
-  // cannot remove a key the raw entry already carries, so an empty packUrl
-  // would survive and be downloaded from.
+  // A conditional spread cannot remove a key the raw entry already carries.
   const { packUrl, sha256, ...rest } = entry
 
   return {

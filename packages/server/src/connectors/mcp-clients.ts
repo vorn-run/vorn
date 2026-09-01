@@ -69,15 +69,7 @@ function installedPackLaunch(id: string): { command: string; args: string[] } | 
   }
 }
 
-/**
- * Where this connection's child actually comes from.
- *
- * A local checkout wins so connector development is testable at all, then the
- * installed pack, which is the version the user chose and the only one that
- * launches with no registry. The stored `command`/`args` are last rather than
- * first: they are what every npx-era connection still carries, and honouring
- * them ahead of a pack would mean installing a version that never runs.
- */
+/** Checkout, then installed pack, then stored command; a pack must beat stale args. */
 export function resolveLaunch(conn: SourceConnection): { command: string; args: string[] } {
   const sdkId = String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
   if (sdkId) {
@@ -186,14 +178,7 @@ export function connectionIdsForConnector(connectorId: string): string[] {
     .map((conn) => conn.id)
 }
 
-/**
- * Stop the live children of every connection belonging to a connector.
- *
- * Installing, updating, rolling back or removing a pack changes which files a
- * connection launches, and a child started before the change keeps running the
- * old ones for the life of the process. Stopping them here is what makes the
- * new version take effect on the next call rather than the next restart.
- */
+/** A child started before a pack change keeps running the old files until stopped. */
 export async function stopClientsForConnector(connectorId: string): Promise<void> {
   await Promise.allSettled(connectionIdsForConnector(connectorId).map(stopClient))
 }
