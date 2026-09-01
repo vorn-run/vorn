@@ -255,12 +255,23 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
     })
   }
 
-  // A workflow with no trigger yet shows the spot where one goes.
+  // A workflow with no trigger yet shows the spot where one goes, sitting
+  // above the topmost drawn card and centered on it.
   if (!nodes.some((n) => n.type === 'trigger')) {
+    const cards = rfNodes.filter((n) => n.type === 'step' || n.type === 'loop')
+    let position = { x: 0, y: 0 }
+    if (cards.length > 0) {
+      const top = cards.reduce((a, b) => (b.position.y < a.position.y ? b : a))
+      const topWidth = top.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH
+      position = {
+        x: top.position.x + topWidth / 2 - CARD_WIDTH / 2,
+        y: top.position.y - 58 - ROW_GAP
+      }
+    }
     rfNodes.push({
       id: 'add-trigger',
       type: 'addTrigger',
-      position: { x: 0, y: 0 },
+      position,
       data: {},
       width: CARD_WIDTH,
       height: 58,

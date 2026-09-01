@@ -632,7 +632,9 @@ export function autoLayoutNodes(nodes: WorkflowNode[], edges: WorkflowEdge[]): W
   if (nodes.length === 0) return nodes
 
   const triggerNode = nodes.find((n) => n.type === 'trigger')
-  const ordered = triggerNode ? [triggerNode] : []
+  const hasIncoming = new Set(edges.map((e) => e.target))
+  // Without a trigger, seed from the roots so the walk still orders the chain.
+  const ordered = triggerNode ? [triggerNode] : nodes.filter((n) => !hasIncoming.has(n.id))
 
   const childrenMap = new Map<string, string[]>()
   for (const edge of edges) {
@@ -810,9 +812,18 @@ export function computeFlowLayout(nodes: WorkflowNode[], edges: WorkflowEdge[]):
   const successorsMap = buildSuccessorsMap(edges)
   const triggerNode = nodes.find((n) => n.type === 'trigger')
 
-  if (!triggerNode) return nodes.map((n) => ({ kind: 'node' as const, node: n }))
-
-  const rows = buildFlowFromNode(triggerNode.id, null, nodeMap, successorsMap)
+  // Without a trigger the walk seeds from every root, so the chain still
+  // draws as a chain rather than a flat column of disconnected rows.
+  const rows: FlowRow[] = []
+  if (triggerNode) {
+    rows.push(...buildFlowFromNode(triggerNode.id, null, nodeMap, successorsMap))
+  } else {
+    const hasIncoming = new Set(edges.map((e) => e.target))
+    const seen = new Set<string>()
+    for (const root of nodes.filter((n) => !hasIncoming.has(n.id))) {
+      rows.push(...buildFlowFromNode(root.id, null, nodeMap, successorsMap, seen))
+    }
+  }
 
   // Append orphan nodes not reachable from the trigger
   const visited = collectNodeIds(rows)
