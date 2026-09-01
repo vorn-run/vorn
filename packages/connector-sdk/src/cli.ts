@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import { checkConnector, formatFindings } from './check'
 import { resolveConfig } from './define'
+import { packConnector, type BundleOutput, type BundleRequest } from './pack'
 import { runPoll } from './runtime'
 import { connectionSetup, connectorManifest } from './setup'
 import { serveConnector } from './server'
@@ -14,18 +15,24 @@ Commands:
   manifest <module>             Print the connector manifest as JSON
   setup <module> [trigger]      Print the Vorn connection settings to paste
   check <module>                Verify the connector against Vorn's contract
+  pack <module>                 Build an installable .vorn.tgz pack
   poll <module> <trigger>       Run one poll against the current environment
   serve <module>                Serve the connector on stdio (what Vorn runs)
 
 Options:
   --since <iso>                 Lower bound passed to poll
   --limit <n>                   Maximum items to request
-  --live                        Let check poll for real using the environment`
+  --live                        Let check poll for real using the environment
+  --out <dir>                   Directory pack writes the archive to`
 
 export interface CliDeps {
   load(modulePath: string): Promise<unknown>
   write(line: string): void
   env?: NodeJS.ProcessEnv
+  /** Directory module paths resolve from; defaults to the working directory. */
+  cwd?: string
+  /** Replaced in tests so pack does not shell out to a bundler. */
+  bundle?(request: BundleRequest): Promise<BundleOutput>
 }
 
 /** Flags that stand alone; everything else must be followed by a value. */
@@ -128,6 +135,25 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
           : `\n${connector.id} passed with ${findings.length} warning(s)`
       )
       return errors.length > 0 ? 1 : 0
+    }
+
+    case 'pack': {
+      const result = await packConnector(connector, {
+        entry: modulePath,
+        ...(flags.out !== undefined && { outDir: flags.out }),
+        ...(deps.cwd !== undefined && { resolveDir: deps.cwd }),
+        ...(deps.bundle !== undefined && { bundle: deps.bundle })
+      })
+      if (result.findings.length > 0) deps.write(formatFindings(result.findings))
+      const errors = result.findings.filter((item) => item.level === 'error')
+      if (!result.file) {
+        deps.write(`\n${errors.length} error(s) — nothing was packed`)
+        return 1
+      }
+      deps.write(
+        `\nPacked ${connector.id} ${connector.version} to ${result.file} (${Math.max(1, Math.round((result.bytes ?? 0) / 1024))} KB)`
+      )
+      return 0
     }
 
     case 'poll': {

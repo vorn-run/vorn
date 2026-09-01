@@ -4669,6 +4669,8 @@ __metadata:
   resolution: "@vornrun/connector-sdk@workspace:packages/connector-sdk"
   dependencies:
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
+    esbuild: "npm:^0.28.2"
+    tar: "npm:^7.5.21"
     tsup: "npm:^8.5.1"
     typescript: "npm:^6.0.3"
     zod: "npm:^4.4.3"
@@ -4728,6 +4730,7 @@ __metadata:
     node-cron: "npm:^4.2.1"
     node-pty: "npm:1.2.0-beta.15"
     pino: "npm:^10.3.1"
+    tar: "npm:^7.5.21"
     tsup: "npm:^8.5.1"
     tsx: "npm:^4.23.1"
     typescript: "npm:^6.0.3"
@@ -6590,7 +6593,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"esbuild@npm:^0.28.1, esbuild@npm:~0.28.0":
+"esbuild@npm:^0.28.1, esbuild@npm:^0.28.2, esbuild@npm:~0.28.0":
   version: 0.28.2
   resolution: "esbuild@npm:0.28.2"
   dependencies:

@@ -257,6 +257,21 @@ hand:
 npx vorn-connector setup ./dist/index.js
 ```
 
+## Pack it as a file
+
+`vorn-connector pack` builds a single installable file: the manifest plus one
+bundled entry with every dependency inlined.
+
+```bash
+npx vorn-connector pack ./dist/index.js --out ./release
+# → release/acme-1.2.3.vorn.tgz
+```
+
+Packing runs `check` first, then two gates a pack must pass: the source package
+declares no install-time scripts, and nothing was left outside the bundle. A
+pack installs by copying files, so it works with no registry reachable — drop
+it on **Settings → Connectors** and Vorn launches it from disk.
+
 ### Ship an icon
 
 Without one, a connector shows the generic MCP glyph and is hard to pick out
@@ -290,8 +305,11 @@ vorn-connector manifest <module>          Print the manifest as JSON
 vorn-connector setup <module> [trigger]   Print the Vorn connection settings
 vorn-connector poll <module> <trigger>    Run one poll against the environment
 vorn-connector check <module>             Verify the connector against the contract
+vorn-connector pack <module>              Build an installable .vorn.tgz pack
 vorn-connector serve <module>             Serve on stdio (what Vorn runs)
 ```
+
+`pack` accepts `--out <dir>`.
 
 `poll` accepts `--since <iso>` and `--limit <n>`, and reads the connector's
 declared config from your shell environment — the fastest way to confirm
