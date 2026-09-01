@@ -48,7 +48,8 @@ vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPan
     return <div data-testid="properties-panel" />
   }
 }))
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
+vi.mock('../src/renderer/lib/workflow-execution', async (importActual) => ({
+  ...(await importActual<Record<string, unknown>>()),
   executeWorkflow: vi.fn().mockResolvedValue(undefined)
 }))
 
@@ -145,6 +146,7 @@ const CONNECTION = {
     }
   ]),
   listConnectorCatalog: vi.fn(),
+  listConnectionActions: vi.fn().mockResolvedValue([]),
   seedConnectorWorkflow,
   saveTextFile
 }
