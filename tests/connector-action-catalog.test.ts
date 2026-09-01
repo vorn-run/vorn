@@ -28,6 +28,7 @@ function connection(filters: Record<string, unknown>): SourceConnection {
     name: 'Pack Demo',
     filters,
     syncIntervalMinutes: 5,
+    statusMapping: {},
     createdAt: 0
   } as SourceConnection
 }
