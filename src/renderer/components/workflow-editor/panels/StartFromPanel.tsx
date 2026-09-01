@@ -1,9 +1,6 @@
 import { X, FilePlus2, Check, Plug } from 'lucide-react'
 import type { SourceConnection, WorkflowTemplate } from '../../../../shared/types'
-import {
-  templateRequirements,
-  type ConnectorSuggestion
-} from '../../../lib/template-requirements'
+import { templateRequirements, type ConnectorSuggestion } from '../../../lib/template-requirements'
 import { describeRequirement } from '../../../lib/workflow-files'
 
 /**

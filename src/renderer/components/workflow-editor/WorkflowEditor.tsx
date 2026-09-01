@@ -131,9 +131,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [showStartFrom, setShowStartFrom] = useState(true)
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
-  const [connectors, setConnectors] = useState<
-    Array<{ id: string; manifest: ConnectorManifest }>
-  >([])
+  const [connectors, setConnectors] = useState<Array<{ id: string; manifest: ConnectorManifest }>>(
+    []
+  )
   const [launchingSince, setLaunchingSince] = useState<number | null>(null)
   const [followRunId, setFollowRunId] = useState<string | null>(null)
   const followArmRef = useRef(false)

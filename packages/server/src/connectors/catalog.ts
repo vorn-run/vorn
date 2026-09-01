@@ -159,7 +159,9 @@ function normalizeMcpServer(raw: unknown): McpServerCatalogEntry | undefined {
 }
 
 function strings(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
 }
 
 /** A template is only usable if it carries a workflow this build can read. */
@@ -333,9 +335,7 @@ function writeCache(cachePath: string, document: Omit<CachedCatalog, 'fetchedAt'
   }
 }
 
-async function download(
-  get: typeof fetch
-): Promise<
+async function download(get: typeof fetch): Promise<
   | {
       connectors: ConnectorCatalogEntry[]
       templates: WorkflowTemplate[]

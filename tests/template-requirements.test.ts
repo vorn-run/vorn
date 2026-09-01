@@ -89,9 +89,10 @@ describe('what a connection already knows how to build', () => {
 
   it('offers nothing for a connector that ships no workflow', () => {
     expect(
-      connectorSuggestions([connection({ connectorId: 'github' })], [
-        { id: 'github', manifest: manifest() }
-      ])
+      connectorSuggestions(
+        [connection({ connectorId: 'github' })],
+        [{ id: 'github', manifest: manifest() }]
+      )
     ).toEqual([])
   })
 

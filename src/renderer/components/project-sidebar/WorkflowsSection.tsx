@@ -104,7 +104,15 @@ export function WorkflowsSection({
         `${existing ? 'Updated' : 'Imported'} "${placed.name}"${pending ? ` — still needs ${pending}` : ''}`
       )
     },
-    [projects, activeProject, activeWorkspace, allWorkflows, connections, addWorkflow, updateWorkflow]
+    [
+      projects,
+      activeProject,
+      activeWorkspace,
+      allWorkflows,
+      connections,
+      addWorkflow,
+      updateWorkflow
+    ]
   )
 
   const handleFileDrop = useCallback(
@@ -224,79 +232,81 @@ export function WorkflowsSection({
           </p>
         )}
         {!sectionCollapsed && (
-        <button
-          type="button"
-          onClick={() => {
-            setEditingWorkflowId(null)
-            setWorkflowEditorOpen(false)
-          }}
-          title={isCollapsed ? 'All runs' : undefined}
-          aria-label="All runs"
-          aria-pressed={allRunsSelected}
-          className={`group/all relative w-full text-left px-2 py-1.5 rounded-md text-[13px] flex items-center gap-2 min-w-0 transition-colors ${
-            allRunsSelected ? 'text-white' : 'text-gray-300 hover:text-white hover:bg-white/[0.04]'
-          } ${isCollapsed ? 'justify-center px-0' : ''}`}
-        >
-          {allRunsSelected && !isCollapsed && (
-            <span className="absolute left-0 top-1 bottom-1 w-px bg-white rounded-full" />
-          )}
-          <Activity size={iconSize} strokeWidth={1.5} className="text-gray-400 shrink-0" />
-          {!isCollapsed && (
-            <>
-              <span className="min-w-0 flex-1 truncate">All runs</span>
-              {waitingCount > 0 && (
-                <span className="font-mono text-[10px] text-bronzo tabular-nums">
-                  {waitingCount}
-                </span>
-              )}
-            </>
-          )}
-        </button>
-      )}
+          <button
+            type="button"
+            onClick={() => {
+              setEditingWorkflowId(null)
+              setWorkflowEditorOpen(false)
+            }}
+            title={isCollapsed ? 'All runs' : undefined}
+            aria-label="All runs"
+            aria-pressed={allRunsSelected}
+            className={`group/all relative w-full text-left px-2 py-1.5 rounded-md text-[13px] flex items-center gap-2 min-w-0 transition-colors ${
+              allRunsSelected
+                ? 'text-white'
+                : 'text-gray-300 hover:text-white hover:bg-white/[0.04]'
+            } ${isCollapsed ? 'justify-center px-0' : ''}`}
+          >
+            {allRunsSelected && !isCollapsed && (
+              <span className="absolute left-0 top-1 bottom-1 w-px bg-white rounded-full" />
+            )}
+            <Activity size={iconSize} strokeWidth={1.5} className="text-gray-400 shrink-0" />
+            {!isCollapsed && (
+              <>
+                <span className="min-w-0 flex-1 truncate">All runs</span>
+                {waitingCount > 0 && (
+                  <span className="font-mono text-[10px] text-bronzo tabular-nums">
+                    {waitingCount}
+                  </span>
+                )}
+              </>
+            )}
+          </button>
+        )}
 
-      {!isCollapsed && !sectionCollapsed && filteredWorkflows.length === 0 && (
-        <p className="text-[13px] text-gray-600 px-2.5 py-1">No workflows</p>
-      )}
+        {!isCollapsed && !sectionCollapsed && filteredWorkflows.length === 0 && (
+          <p className="text-[13px] text-gray-600 px-2.5 py-1">No workflows</p>
+        )}
 
-      {!isCollapsed &&
-        !sectionCollapsed &&
-        filteredWorkflows.map((wf) => {
-          const fullIndex = workspaceWorkflows.findIndex((w) => w.id === wf.id)
-          const canReorder = workflowFilter === 'all'
-          return (
-            <div
+        {!isCollapsed &&
+          !sectionCollapsed &&
+          filteredWorkflows.map((wf) => {
+            const fullIndex = workspaceWorkflows.findIndex((w) => w.id === wf.id)
+            const canReorder = workflowFilter === 'all'
+            return (
+              <div
+                key={wf.id}
+                draggable={canReorder && !isCollapsed}
+                onDragStart={canReorder ? (e) => handleDragStart(e, fullIndex) : undefined}
+                onDragOver={canReorder ? (e) => handleDragOver(e, fullIndex) : undefined}
+                onDrop={canReorder ? (e) => handleDrop(e, fullIndex) : undefined}
+                onDragEnd={canReorder ? handleDragEnd : undefined}
+                className={`${canReorder ? 'cursor-grab active:cursor-grabbing' : ''} ${
+                  dragOverIndex === fullIndex && dragSourceIndex !== fullIndex
+                    ? 'border-t border-white/40'
+                    : ''
+                }`}
+              >
+                <WorkflowItem
+                  workflow={wf}
+                  isCollapsed={isCollapsed}
+                  iconSize={iconSize}
+                  onContextMenu={handleContextMenu}
+                />
+              </div>
+            )
+          })}
+
+        {isCollapsed &&
+          filteredWorkflows.map((wf) => (
+            <WorkflowItem
               key={wf.id}
-              draggable={canReorder && !isCollapsed}
-              onDragStart={canReorder ? (e) => handleDragStart(e, fullIndex) : undefined}
-              onDragOver={canReorder ? (e) => handleDragOver(e, fullIndex) : undefined}
-              onDrop={canReorder ? (e) => handleDrop(e, fullIndex) : undefined}
-              onDragEnd={canReorder ? handleDragEnd : undefined}
-              className={`${canReorder ? 'cursor-grab active:cursor-grabbing' : ''} ${
-                dragOverIndex === fullIndex && dragSourceIndex !== fullIndex
-                  ? 'border-t border-white/40'
-                  : ''
-              }`}
-            >
-              <WorkflowItem
-                workflow={wf}
-                isCollapsed={isCollapsed}
-                iconSize={iconSize}
-                onContextMenu={handleContextMenu}
-              />
-            </div>
-          )
-        })}
-
-      {isCollapsed &&
-        filteredWorkflows.map((wf) => (
-          <WorkflowItem
-            key={wf.id}
-            workflow={wf}
-            isCollapsed={isCollapsed}
-            iconSize={iconSize}
-            onContextMenu={handleContextMenu}
-          />
-        ))}
+              workflow={wf}
+              isCollapsed={isCollapsed}
+              iconSize={iconSize}
+              onContextMenu={handleContextMenu}
+            />
+          ))}
       </div>
 
       {contextMenu && menuWorkflow && (

@@ -61,9 +61,7 @@ describe('StartFromPanel', () => {
     const onPickTemplate = vi.fn()
     panel([], onPickTemplate)
     fireEvent.click(screen.getByText('Morning digest'))
-    expect(onPickTemplate).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'morning-digest' })
-    )
+    expect(onPickTemplate).toHaveBeenCalledWith(expect.objectContaining({ id: 'morning-digest' }))
   })
 
   it('takes the blank canvas as an answer too', () => {
