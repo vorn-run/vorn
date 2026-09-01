@@ -98,7 +98,16 @@ export function SessionItem({
     // A fragment, because the cards this session popped out are listed beneath
     // it — and they cannot go inside the row, which is itself a button.
     <>
-      <button
+      {/* A div with the button role: the row nests real buttons inside it. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            e.currentTarget.click()
+          }
+        }}
         onClick={() => {
           if (hoverTimerRef.current) {
             clearTimeout(hoverTimerRef.current)
@@ -113,7 +122,7 @@ export function SessionItem({
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`group/session relative w-full text-left px-2 py-1 rounded-md text-[12px] flex items-center gap-2 min-w-0 transition-colors ${
+        className={`group/session relative w-full cursor-pointer text-left px-2 py-1 rounded-md text-[12px] flex items-center gap-2 min-w-0 transition-colors ${
           isSelected ? 'text-white' : 'text-gray-400 hover:text-white hover:bg-white/[0.04]'
         }`}
       >
@@ -247,7 +256,7 @@ export function SessionItem({
         >
           <X size={12} strokeWidth={2} />
         </button>
-      </button>
+      </div>
       {promotedCards.map((card) => (
         <PromotedCardItem key={card.id} card={card} />
       ))}

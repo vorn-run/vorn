@@ -81,15 +81,15 @@ describe('SessionItem', () => {
   it('applies focused style when session is focused', () => {
     useAppStore.setState({ focusedTerminalId: 'sess-1' })
     const { container } = render(<SessionItem session={session} />)
-    const button = container.querySelector('button')
-    expect(button?.className).toContain('text-white')
+    const row = container.querySelector('[role="button"]')
+    expect(row?.className).toContain('text-white')
   })
 
   it('applies unfocused style when session is not focused', () => {
     useAppStore.setState({ focusedTerminalId: 'other' })
     const { container } = render(<SessionItem session={session} />)
-    const button = container.querySelector('button')
-    expect(button?.className).toContain('text-gray-400')
+    const row = container.querySelector('[role="button"]')
+    expect(row?.className).toContain('text-gray-400')
   })
 
   it('renders without branch when session has no branch', () => {
@@ -105,8 +105,8 @@ describe('SessionItem', () => {
       const { container } = render(<SessionItem session={s} />)
       expect(container.querySelector('[data-component="running-glyph"]')).toBeNull()
       // Identity svg should be rendered inside the icon wrapper, not matched globally
-      const sessionButton = screen.getByText('My Session').closest('button')
-      const iconWrapper = sessionButton?.querySelector('span')
+      const sessionRow = screen.getByText('My Session').closest('[role="button"]')
+      const iconWrapper = sessionRow?.querySelector('span')
       expect(iconWrapper?.querySelector('svg')).toBeInTheDocument()
     }
   )

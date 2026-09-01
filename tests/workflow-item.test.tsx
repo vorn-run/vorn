@@ -195,7 +195,7 @@ describe('WorkflowItem', () => {
         onContextMenu={vi.fn()}
       />
     )
-    const row = container.querySelector('button.group\\/wf') as HTMLElement
+    const row = container.querySelector('.group\\/wf') as HTMLElement
     expect(row.className).toContain('text-white')
     expect(container.querySelector('span.absolute.left-0')).toBeInTheDocument()
     mockStore.editingWorkflowId = null
