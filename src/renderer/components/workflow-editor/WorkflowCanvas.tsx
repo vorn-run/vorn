@@ -14,6 +14,7 @@ import {
   applyNodeChanges,
   getBezierPath,
   useReactFlow,
+  useUpdateNodeInternals,
   type Connection,
   type Edge,
   type EdgeProps,
@@ -28,6 +29,7 @@ import {
   AddStepNodeData,
   CanvasEdgeData,
   canConnect,
+  estimateNodeHeight,
   toCanvasElements,
   TRIGGER_ANCHOR,
   TRIGGER_ANCHOR_ID
@@ -183,9 +185,16 @@ function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
 const HANDLE_CLASS = '!w-[7px] !h-[7px] !bg-surface-base !border !border-white/[0.35] !rounded-full'
 
 /** A single step: the existing card, with ports above and below. */
-function StepNode({ data }: NodeProps) {
-  const { nodesById, selectedNodeId, nodeStatus, onNodeClick } = useInteractions()
+function StepNode({ data, id }: NodeProps) {
+  const { nodesById, allNodes, selectedNodeId, nodeStatus, onNodeClick } = useInteractions()
   const node = nodesById.get(data.nodeId as string)
+  const updateNodeInternals = useUpdateNodeInternals()
+  // A replace-in-place keeps the id, so React Flow would keep the old card's
+  // measured handle positions; re-measure whenever the rendered shape changes.
+  const shape = node ? `${node.type}:${estimateNodeHeight(node, allNodes)}` : ''
+  useEffect(() => {
+    if (shape) updateNodeInternals(id)
+  }, [id, shape, updateNodeInternals])
   if (!node) return null
 
   return (
@@ -206,7 +215,7 @@ function StepNode({ data }: NodeProps) {
 }
 
 /** A loop and its body as one enclosure; membership stays `bodyNodeIds`, not canvas geometry. */
-function LoopNode({ data }: NodeProps) {
+function LoopNode({ data, id }: NodeProps) {
   const {
     nodesById,
     allNodes,
@@ -217,6 +226,11 @@ function LoopNode({ data }: NodeProps) {
     libraryAnchor
   } = useInteractions()
   const node = nodesById.get(data.nodeId as string)
+  const updateNodeInternals = useUpdateNodeInternals()
+  const shape = node ? `${node.type}:${estimateNodeHeight(node, allNodes)}` : ''
+  useEffect(() => {
+    if (shape) updateNodeInternals(id)
+  }, [id, shape, updateNodeInternals])
   if (!node || node.type !== 'loop') return null
 
   const config = node.config as LoopConfig
