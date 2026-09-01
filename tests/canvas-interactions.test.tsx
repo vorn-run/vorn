@@ -132,12 +132,16 @@ describe('the hover toolbar', () => {
     expect(onDeleteNode).toHaveBeenCalledTimes(1)
   })
 
-  it('offers replace only on swappable steps, never the trigger', () => {
+  it('offers replace on every node, routing the trigger to its own scope', () => {
     const { onOpenLibrary } = renderCanvas()
     const replaces = screen.getAllByRole('button', { name: 'Replace step' })
-    // The two scripts are swappable; the trigger has its own library path.
-    expect(replaces).toHaveLength(2)
+    expect(replaces).toHaveLength(3)
+    // The first card in the layout is the trigger; its replace opens trigger scope.
     fireEvent.click(replaces[0])
+    expect(onOpenLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ afterNodeId: '__TRIGGER__' })
+    )
+    fireEvent.click(replaces[1])
     expect(onOpenLibrary).toHaveBeenCalledWith(
       expect.objectContaining({ replaceNodeId: 'a', afterNodeId: 'a' })
     )

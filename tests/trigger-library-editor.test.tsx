@@ -206,6 +206,25 @@ describe('the editor without a trigger', () => {
     expect(edges.some((e) => e.source === triggerId || e.target === triggerId)).toBe(false)
   })
 
+  it('hover-replace on the trigger opens trigger scope and swaps in place', () => {
+    render(<WorkflowEditor />)
+    openTriggerLibrary()
+    pickFromLibrary({ kind: 'triggerType', triggerType: 'manual' })
+    const triggerId = canvasNodes().find((n) => n.type === 'trigger')!.id
+
+    // The toolbar's replace button sends the same anchor the placeholder does.
+    act(() => {
+      ;(captured.canvasProps!.onOpenLibrary as (a: unknown) => void)(TRIGGER_ANCHOR)
+    })
+    expect(captured.libraryProps?.scope).toMatchObject({ triggers: true })
+    pickFromLibrary({ kind: 'triggerType', triggerType: 'webhook' })
+
+    const triggers = canvasNodes().filter((n) => n.type === 'trigger')
+    expect(triggers).toHaveLength(1)
+    expect(triggers[0].id).toBe(triggerId)
+    expect(triggers[0].config).toMatchObject({ triggerType: 'webhook' })
+  })
+
   it('replaces the existing trigger in place on a second pick', () => {
     render(<WorkflowEditor />)
     openTriggerLibrary()

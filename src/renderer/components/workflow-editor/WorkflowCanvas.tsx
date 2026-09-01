@@ -137,19 +137,24 @@ function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
           </button>
         </Tooltip>
       )}
-      {replaceable && (
+      {(replaceable || isTrigger) && (
         <Tooltip label="Replace step" position="right">
           <button
             aria-label="Replace step"
             onClick={(e) => {
               e.stopPropagation()
-              onOpenLibrary({
-                afterNodeId: nodeId,
-                beforeNodeId: null,
-                insideBranch: false,
-                bodyOnly: false,
-                replaceNodeId: nodeId
-              })
+              // The trigger swaps through its own library scope; both keep id and edges.
+              onOpenLibrary(
+                isTrigger
+                  ? TRIGGER_ANCHOR
+                  : {
+                      afterNodeId: nodeId,
+                      beforeNodeId: null,
+                      insideBranch: false,
+                      bodyOnly: false,
+                      replaceNodeId: nodeId
+                    }
+              )
             }}
             className={TOOLBAR_BUTTON}
           >
