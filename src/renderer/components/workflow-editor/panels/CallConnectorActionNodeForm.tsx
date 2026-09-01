@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import type {
   CallConnectorActionConfig,
-  SourceConnection,
   ConnectorActionDef,
   TriggerConfig
 } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
 import { ConnectorIcon } from '../../ConnectorIcon'
-import { connectionIcon } from '../../../lib/connection-icon'
+import { useConnections, iconForConnection } from '../../../lib/use-connections'
 import { TEMPLATE_VARIABLES, StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 
@@ -26,12 +25,9 @@ export function CallConnectorActionNodeForm({
   inputVars = [],
   stepGroups = []
 }: Props) {
-  const [connections, setConnections] = useState<SourceConnection[]>([])
+  // The shared cache, so the glyphs here resolve the same way the cards' do.
+  const connections = useConnections()
   const [actions, setActions] = useState<ConnectorActionDef[]>([])
-
-  useEffect(() => {
-    window.api.listConnections().then(setConnections)
-  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -91,7 +87,7 @@ export function CallConnectorActionNodeForm({
             icon: (
               <ConnectorIcon
                 connectorId={c.connectorId}
-                icon={connectionIcon(c)}
+                icon={iconForConnection(c)}
                 size={14}
                 className="text-gray-400"
               />
