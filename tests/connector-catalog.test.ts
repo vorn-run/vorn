@@ -131,6 +131,24 @@ describe('parseCatalog', () => {
     expect(parseCatalog({ version: 1, connectors: [rich] })?.[0]).toEqual(rich)
   })
 
+  it('keeps a pack url and its checksum, which is what makes an install offline', () => {
+    const packed = {
+      ...entry,
+      packUrl: 'https://example.test/x-1.0.0.vorn.tgz',
+      sha256: 'abc123'
+    }
+    expect(parseCatalog({ version: 1, connectors: [packed] })?.[0]).toEqual(packed)
+  })
+
+  it('drops a pack url that is empty or the wrong kind of value', () => {
+    const broken = parseCatalog({
+      version: 1,
+      connectors: [{ ...entry, packUrl: '', sha256: 42 }]
+    })?.[0]
+    expect(broken).not.toHaveProperty('packUrl')
+    expect(broken).not.toHaveProperty('sha256')
+  })
+
   it('carries what a listing needs to answer "will this do what I need"', () => {
     const rich = {
       ...entry,

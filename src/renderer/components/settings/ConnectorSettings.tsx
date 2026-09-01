@@ -308,11 +308,14 @@ export function ConnectorSettings() {
         />
       )}
 
-      {adding?.catalogItem && (
+      {/* A side-loaded pack has no catalog entry, but it does have files to
+          probe, so it reaches the same form. */}
+      {(adding?.catalogItem || adding?.pack) && (
         <div className="p-4 bg-white/[0.03] border border-white/[0.08] rounded-sm">
           <h4 className="text-sm text-gray-200 font-medium mb-3">Add {adding.name} connection</h4>
           <SdkConnectorForm
-            catalogEntry={adding.catalogItem}
+            {...(adding.catalogItem && { catalogEntry: adding.catalogItem })}
+            {...(adding.pack && { pack: adding.pack })}
             onDone={() => {
               setAdding(null)
               setView('connections')

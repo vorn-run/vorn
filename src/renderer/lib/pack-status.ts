@@ -37,6 +37,11 @@ export interface PackStatusView {
   busy: boolean
 }
 
+/** An installed pack launches from its own files, with nothing to resolve. */
+export function packLaunch(pack: InstalledConnectorPack): { command: string; args: string[] } {
+  return { command: 'node', args: [`${pack.path}/index.js`] }
+}
+
 /**
  * Compare two versions the way a person reads them.
  *

@@ -20,6 +20,8 @@ import type {
   ConnectorCatalogSnapshot,
   ConnectorCatalogSummary,
   ConnectorManifest,
+  ConnectorPackResult,
+  InstalledConnectorPack,
   SdkProbeResult,
   SourceConnection
 } from '@vornrun/shared/types'
@@ -192,15 +194,21 @@ export function registerConnectorTools(server: McpServer): void {
 
   server.tool(
     'install_connector',
-    'Install a connector from the catalog or from an npm package, creating a connection ready ' +
-      'to poll. Call list_connectors for catalog ids and inspect_connector_package to see which ' +
-      'environment variables are needed. Secrets cannot be set this way — see the error it ' +
-      'returns if the connector requires one.',
+    'Install a connector from a pack file, from the catalog, or from an npm package, creating ' +
+      'a connection ready to poll. Call list_connectors for catalog ids and ' +
+      'inspect_connector_package to see which environment variables are needed. Secrets cannot ' +
+      'be set this way — see the error it returns if the connector requires one.',
     {
       connector_id: V.id
         .optional()
         .describe('Catalog connector id (from list_connectors). Use this or package.'),
       package: V.shortText.optional().describe('npm package name or launch command'),
+      pack_path: V.shortText
+        .optional()
+        .describe(
+          'Path to a .vorn.tgz pack to install first. It is verified and copied to disk, and ' +
+            'the connection then launches those files rather than resolving a package.'
+        ),
       name: V.title.optional().describe('Connection name (defaults to the connector name)'),
       project: V.name.optional().describe('Vorn project tasks should be created in'),
       trigger: V.shortText
@@ -223,8 +231,20 @@ export function registerConnectorTools(server: McpServer): void {
             'To install something not in the catalog, pass `package` instead.'
         )
       }
-      const target = entry ? entry.launch : args.package
-      if (!target) return failure('Provide either connector_id or package.')
+      // Installed before probing, so the manifest read is the one from the
+      // files that will actually run rather than whatever a registry serves.
+      let installed: InstalledConnectorPack | undefined
+      if (args.pack_path) {
+        const outcome = await rpcCall<ConnectorPackResult>('connector:installPack', {
+          kind: 'file',
+          path: args.pack_path
+        })
+        if (!outcome.ok) return failure(`The pack was refused: ${outcome.error}`)
+        installed = outcome.pack
+      }
+
+      const target = installed ? packLaunch(installed) : (entry?.launch ?? args.package)
+      if (!target) return failure('Provide either connector_id, package, or pack_path.')
 
       const result = await probe(target)
       if (!result.ok) return failure(result.error)
@@ -297,6 +317,7 @@ export function registerConnectorTools(server: McpServer): void {
         installed: manifest.name,
         connectionId: connection.id,
         trigger: trigger?.type,
+        ...(installed && { version: installed.version, path: installed.path }),
         note: 'Poll it now with backfill_connection, or reference it from a workflow.'
       })
     }
@@ -338,6 +359,11 @@ export function registerConnectorTools(server: McpServer): void {
       return json(result)
     }
   )
+}
+
+/** An installed pack launches from its own files, with nothing to resolve. */
+function packLaunch(pack: InstalledConnectorPack): { command: string; args: string[] } {
+  return { command: 'node', args: [`${pack.path}/index.js`] }
 }
 
 /** Read a connector by starting it, given a package name, command, or spec. */
