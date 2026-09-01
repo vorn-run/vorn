@@ -22,7 +22,7 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlignVerticalSpaceAround, Repeat, StepForward, Trash2, Zap } from 'lucide-react'
+import { AlignVerticalSpaceAround, Repeat, Replace, StepForward, Trash2, Zap } from 'lucide-react'
 import { LoopConfig, NodeExecutionStatus, WorkflowEdge, WorkflowNode } from '../../../shared/types'
 import {
   AddStepNodeData,
@@ -32,6 +32,7 @@ import {
   TRIGGER_ANCHOR,
   TRIGGER_ANCHOR_ID
 } from '../../lib/workflow-canvas-layout'
+import { REPLACEABLE_NODE_TYPES } from '../../lib/workflow-helpers'
 import { NODE_GLYPH, NODE_SELECTED, NODE_UNSELECTED } from './node-visuals'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
@@ -56,6 +57,8 @@ export interface InsertAnchor {
   bodyOnly: boolean
   /** Flow coordinates for picks that land where something was dropped. */
   position?: { x: number; y: number }
+  /** Set when the pick swaps this node in place instead of inserting. */
+  replaceNodeId?: string
 }
 
 function isAnchor(anchor: InsertAnchor | null, afterNodeId: string, beforeNodeId: string | null) {
@@ -74,7 +77,7 @@ interface Props {
   onConnectEdge: (sourceId: string, targetId: string) => void
   /** Dragged nodes settled; write the new positions into the definition. */
   onPositionsCommit: (positions: Record<string, { x: number; y: number }>) => void
-  /** Delete-key removal of the selected step (never the trigger). */
+  /** Delete-key removal of the selected step, trigger included. */
   onDeleteNode?: (nodeId: string) => void
   /** Hover-toolbar shortcut into the editor's run-to-step path. */
   onRunToStep?: (nodeId: string) => void
@@ -110,14 +113,17 @@ const TOOLBAR_BUTTON = `p-1.5 rounded-md bg-surface-overlay border border-white/
                         hover:text-white hover:border-white/[0.2] transition-colors`
 
 function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
-  const { onDeleteNode, onRunToStep } = useInteractions()
+  const { nodesById, onDeleteNode, onRunToStep, onOpenLibrary } = useInteractions()
+  const node = nodesById.get(nodeId)
   if (!onDeleteNode && !onRunToStep) return null
+  const isTrigger = node?.type === 'trigger'
+  const replaceable = !!node && REPLACEABLE_NODE_TYPES.has(node.type)
   return (
     <div
       className="absolute left-full top-1/2 -translate-y-1/2 ml-1.5 flex flex-col gap-1 opacity-0
                  group-hover:opacity-100 transition-opacity duration-100 z-10"
     >
-      {onRunToStep && (
+      {onRunToStep && !isTrigger && (
         <Tooltip label="Run to this step" position="right">
           <button
             aria-label="Run to this step"
@@ -128,6 +134,26 @@ function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
             className={TOOLBAR_BUTTON}
           >
             <StepForward size={12} />
+          </button>
+        </Tooltip>
+      )}
+      {replaceable && (
+        <Tooltip label="Replace step" position="right">
+          <button
+            aria-label="Replace step"
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenLibrary({
+                afterNodeId: nodeId,
+                beforeNodeId: null,
+                insideBranch: false,
+                bodyOnly: false,
+                replaceNodeId: nodeId
+              })
+            }}
+            className={TOOLBAR_BUTTON}
+          >
+            <Replace size={12} />
           </button>
         </Tooltip>
       )}
@@ -160,11 +186,9 @@ function StepNode({ data }: NodeProps) {
   return (
     <div className="relative group">
       {node.type !== 'trigger' && (
-        <>
-          <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
-          <NodeHoverToolbar nodeId={node.id} />
-        </>
+        <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
       )}
+      <NodeHoverToolbar nodeId={node.id} />
       <NodeCard
         node={node}
         selected={node.id === selectedNodeId}
@@ -545,7 +569,7 @@ function WorkflowCanvasInner({
         void fitView({ padding: 0.2, maxZoom: 1 })
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
         const node = nodes.find((n) => n.id === selectedNodeId)
-        if (node && node.type !== 'trigger' && onDeleteNode) {
+        if (node && onDeleteNode) {
           e.preventDefault()
           onDeleteNode(selectedNodeId)
         }

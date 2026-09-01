@@ -578,7 +578,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   }, [editingId, removeWorkflowFromStore, handleClose])
 
   const createNodeWithUniqueSlug = useCallback(
-    (type: AddableNodeType) => {
+    (type: AddableNodeType, excludeNodeId?: string) => {
       const projects = useAppStore.getState().config?.projects || []
       const firstProject = projects[0]
       const factories: Record<AddableNodeType, () => WorkflowNode> = {
@@ -595,7 +595,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       }
       const newNode = factories[type]()
       if (newNode.slug) {
-        const existingSlugs = new Set(nodes.filter((n) => n.slug).map((n) => n.slug!))
+        const existingSlugs = new Set(
+          nodes.filter((n) => n.slug && n.id !== excludeNodeId).map((n) => n.slug!)
+        )
         newNode.slug = ensureUniqueSlug(newNode.slug, existingSlugs)
       }
       return newNode
@@ -799,6 +801,34 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         }
         return
       }
+      if (anchor.replaceNodeId) {
+        const target = nodes.find((n) => n.id === anchor.replaceNodeId)
+        if (!target) return
+        if (pick.kind !== 'type' && pick.kind !== 'connectorAction') return
+        if (pick.kind === 'type' && (pick.type === 'condition' || pick.type === 'loop')) return
+        const fresh =
+          pick.kind === 'connectorAction'
+            ? (() => {
+                const n = createNodeWithUniqueSlug('connectorAction', target.id)
+                return {
+                  ...n,
+                  config: {
+                    ...(n.config as CallConnectorActionConfig),
+                    connectionId: pick.connectionId,
+                    action: pick.action
+                  }
+                }
+              })()
+            : createNodeWithUniqueSlug(pick.type, target.id)
+        // Same in-place swap the trigger uses: id, position, and edges survive.
+        setNodes(
+          nodes.map((n) =>
+            n.id === target.id ? { ...fresh, id: target.id, position: target.position } : n
+          )
+        )
+        setSelectedNodeId(target.id)
+        return
+      }
       // A delete or undo can outlive the anchor; inserting against a ghost writes dangling edges.
       if (!nodes.some((n) => n.id === anchor.afterNodeId)) return
       const before = anchor.beforeNodeId
@@ -818,7 +848,14 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, pick.type)
       }
     },
-    [pendingInsert, nodes, handleAddParallelBranch, handlePaletteInsert, handleInsertNode]
+    [
+      pendingInsert,
+      nodes,
+      createNodeWithUniqueSlug,
+      handleAddParallelBranch,
+      handlePaletteInsert,
+      handleInsertNode
+    ]
   )
 
   const handleNodeConfigChange = useCallback((nodeId: string, config: WorkflowNode['config']) => {
@@ -1176,7 +1213,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             scope={{
               bodyOnly: pendingInsert.bodyOnly,
               insideBranch: pendingInsert.insideBranch,
-              triggers: pendingInsert.afterNodeId === TRIGGER_ANCHOR_ID
+              triggers: pendingInsert.afterNodeId === TRIGGER_ANCHOR_ID,
+              replacing: !!pendingInsert.replaceNodeId
             }}
             onPick={handleLibraryPick}
             onClose={() => setPendingInsert(null)}
@@ -1204,6 +1242,15 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           <NodeConfigPanel
             node={selectedNode}
             onOpenTriggerLibrary={() => handleOpenLibrary(TRIGGER_ANCHOR)}
+            onOpenReplaceLibrary={(nodeId) =>
+              handleOpenLibrary({
+                afterNodeId: nodeId,
+                beforeNodeId: null,
+                insideBranch: false,
+                bodyOnly: false,
+                replaceNodeId: nodeId
+              })
+            }
             allNodes={nodes}
             onChange={handleNodeConfigChange}
             onLabelChange={handleNodeLabelChange}

@@ -124,13 +124,23 @@ describe('every + opens the library at its anchor', () => {
 })
 
 describe('the hover toolbar', () => {
-  it('deletes the hovered step, and never offers itself on the trigger', () => {
+  it('offers delete on every node, the trigger included', () => {
     const { onDeleteNode } = renderCanvas()
     const deletes = screen.getAllByRole('button', { name: 'Delete step' })
-    // One per non-trigger node: the trigger card carries none.
-    expect(deletes).toHaveLength(2)
+    expect(deletes).toHaveLength(3)
     fireEvent.click(deletes[0])
     expect(onDeleteNode).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers replace only on swappable steps, never the trigger', () => {
+    const { onOpenLibrary } = renderCanvas()
+    const replaces = screen.getAllByRole('button', { name: 'Replace step' })
+    // The two scripts are swappable; the trigger has its own library path.
+    expect(replaces).toHaveLength(2)
+    fireEvent.click(replaces[0])
+    expect(onOpenLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ replaceNodeId: 'a', afterNodeId: 'a' })
+    )
   })
 })
 
@@ -142,11 +152,11 @@ describe('the keyboard on the canvas', () => {
     expect(onDeleteNode).toHaveBeenCalledWith('b')
   })
 
-  it('never deletes the trigger', () => {
+  it('deletes the selected trigger too', () => {
     const { container, onDeleteNode } = renderCanvas({ selectedNodeId: 't' })
     const wrapper = container.querySelector('[tabindex="0"]') as HTMLElement
     fireEvent.keyDown(wrapper, { key: 'Delete' })
-    expect(onDeleteNode).not.toHaveBeenCalled()
+    expect(onDeleteNode).toHaveBeenCalledWith('t')
   })
 })
 

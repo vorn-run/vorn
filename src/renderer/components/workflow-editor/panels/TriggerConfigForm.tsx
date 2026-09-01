@@ -15,7 +15,6 @@ import { TriggerConfig, TaskStatus } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
 import { ProjectPicker } from '../../ProjectPicker'
 import { ConnectorPollTriggerForm } from './ConnectorPollTriggerForm'
-import { switchTriggerType } from '../../../lib/workflow-helpers'
 import { WorkflowInputsEditor } from './WorkflowInputsEditor'
 
 interface Props {
@@ -91,16 +90,18 @@ export function TriggerConfigForm({ config, onChange, onOpenLibrary }: Props) {
     <div className="space-y-5">
       <div>
         <label className="text-[13px] text-gray-400 font-medium block mb-2">Trigger Type</label>
-        <SelectPicker
-          value={config.triggerType}
-          options={TRIGGER_TYPES.map(({ type, label, icon: Icon }) => ({
-            value: type,
-            label,
-            icon: <Icon size={12} className="text-gray-400" />
-          }))}
-          onChange={(v) => onChange(switchTriggerType(v as TriggerConfig['triggerType']))}
-          variant="form"
-        />
+        {(() => {
+          const current = TRIGGER_TYPES.find((t) => t.type === config.triggerType)
+          const Icon = current?.icon
+          return (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.02]">
+              {Icon && <Icon size={13} className="text-gray-400 shrink-0" />}
+              <span className="text-[13px] text-gray-200">
+                {current?.label ?? config.triggerType}
+              </span>
+            </div>
+          )
+        })()}
         <p className="text-[11px] text-gray-500 mt-1.5">
           {TRIGGER_TYPES.find((t) => t.type === config.triggerType)?.hint}
         </p>
@@ -109,7 +110,7 @@ export function TriggerConfigForm({ config, onChange, onOpenLibrary }: Props) {
             onClick={onOpenLibrary}
             className="mt-2 text-[11px] text-gray-500 hover:text-gray-300 underline underline-offset-2 transition-colors"
           >
-            Choose from the library, including connector events
+            Change trigger from the library
           </button>
         )}
       </div>

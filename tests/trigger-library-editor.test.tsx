@@ -163,6 +163,49 @@ describe('the editor without a trigger', () => {
     })
   })
 
+  it('deleting the trigger brings the placeholder back and Run goes dark', () => {
+    const { container } = render(<WorkflowEditor />)
+    openTriggerLibrary()
+    pickFromLibrary({ kind: 'triggerType', triggerType: 'manual' })
+    const triggerId = canvasNodes().find((n) => n.type === 'trigger')!.id
+
+    act(() => {
+      ;(captured.canvasProps!.onDeleteNode as (id: string) => void)(triggerId)
+    })
+    expect(canvasNodes().some((n) => n.type === 'trigger')).toBe(false)
+    expect(container.querySelector('button[aria-label="Run workflow"]')).toBeDisabled()
+
+    openTriggerLibrary()
+    pickFromLibrary({ kind: 'triggerType', triggerType: 'recurring' })
+    expect(canvasNodes().some((n) => n.type === 'trigger')).toBe(true)
+    expect(container.querySelector('button[aria-label="Run workflow"]')).toBeEnabled()
+  })
+
+  it('deleting the trigger keeps downstream steps and drops its edges', () => {
+    render(<WorkflowEditor />)
+    openTriggerLibrary()
+    pickFromLibrary({ kind: 'triggerType', triggerType: 'manual' })
+    const triggerId = canvasNodes().find((n) => n.type === 'trigger')!.id
+
+    act(() => {
+      ;(captured.canvasProps!.onOpenLibrary as (a: unknown) => void)({
+        afterNodeId: triggerId,
+        beforeNodeId: null,
+        insideBranch: false,
+        bodyOnly: false
+      })
+    })
+    pickFromLibrary({ kind: 'type', type: 'script' })
+    const script = canvasNodes().find((n) => n.type === 'script')!
+
+    act(() => {
+      ;(captured.canvasProps!.onDeleteNode as (id: string) => void)(triggerId)
+    })
+    const edges = captured.canvasProps!.edges as { source: string; target: string }[]
+    expect(canvasNodes().some((n) => n.id === script.id)).toBe(true)
+    expect(edges.some((e) => e.source === triggerId || e.target === triggerId)).toBe(false)
+  })
+
   it('replaces the existing trigger in place on a second pick', () => {
     render(<WorkflowEditor />)
     openTriggerLibrary()

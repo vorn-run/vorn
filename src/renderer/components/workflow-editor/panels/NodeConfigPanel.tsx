@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, MoreHorizontal, Trash2, StepForward } from 'lucide-react'
+import { X, MoreHorizontal, Trash2, Replace, StepForward } from 'lucide-react'
 import {
   WorkflowNode,
   LoopConfig,
@@ -14,6 +14,7 @@ import {
   WorkflowNodeErrorPolicy
 } from '../../../../shared/types'
 import { ConnectorIcon } from '../../ConnectorIcon'
+import { REPLACEABLE_NODE_TYPES } from '../../../lib/workflow-helpers'
 import { useConnectorIdFor, useConnectionIconFor } from '../../../lib/use-connections'
 import { TriggerConfigForm } from './TriggerConfigForm'
 import { LaunchAgentConfigForm } from './LaunchAgentConfigForm'
@@ -30,6 +31,8 @@ import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-
 interface Props {
   /** Open the step library in trigger scope; shown on trigger nodes. */
   onOpenTriggerLibrary?: () => void
+  /** Open the step library to swap this step in place; shown on replaceable steps. */
+  onOpenReplaceLibrary?: (nodeId: string) => void
   node: WorkflowNode
   allNodes?: WorkflowNode[]
   onChange: (nodeId: string, config: WorkflowNode['config']) => void
@@ -48,6 +51,7 @@ interface Props {
 
 export function NodeConfigPanel({
   onOpenTriggerLibrary,
+  onOpenReplaceLibrary,
   node,
   onRunToStep,
   allNodes,
@@ -77,7 +81,6 @@ export function NodeConfigPanel({
 
   const tc = NODE_TYPE_ICON[node.type]
   const Icon = tc
-  const canDelete = node.type !== 'trigger'
 
   // For connector-action nodes the generic Zap is uninformative — show the
   // connector's own mark (GitHub / Linear / MCP / …) by looking the selected
@@ -109,38 +112,49 @@ export function NodeConfigPanel({
           placeholder="Label"
         />
         <div className="flex items-center gap-0.5 shrink-0">
-          {canDelete && (
-            <div className="relative">
-              <button
-                onClick={() => setShowMenu(!showMenu)}
-                aria-label="More node actions"
-                aria-haspopup="menu"
-                aria-expanded={showMenu}
-                className="text-gray-500 hover:text-white p-1 rounded-md transition-colors"
+          <div className="relative">
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              aria-label="More node actions"
+              aria-haspopup="menu"
+              aria-expanded={showMenu}
+              className="text-gray-500 hover:text-white p-1 rounded-md transition-colors"
+            >
+              <MoreHorizontal size={14} />
+            </button>
+            {showMenu && (
+              <div
+                ref={menuRef}
+                className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1 border border-white/[0.08] rounded-lg shadow-xl"
+                style={{ background: 'var(--color-surface-overlay)' }}
               >
-                <MoreHorizontal size={14} />
-              </button>
-              {showMenu && (
-                <div
-                  ref={menuRef}
-                  className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1 border border-white/[0.08] rounded-lg shadow-xl"
-                  style={{ background: 'var(--color-surface-overlay)' }}
-                >
+                {onOpenReplaceLibrary && REPLACEABLE_NODE_TYPES.has(node.type) && (
                   <button
                     onClick={() => {
                       setShowMenu(false)
-                      onDelete(node.id)
+                      onOpenReplaceLibrary(node.id)
                     }}
-                    className="w-full px-3 py-2 text-left text-[12px] text-danger/80 hover:text-danger
-                               hover:bg-white/[0.06] flex items-center gap-2 transition-colors"
+                    className="w-full px-3 py-2 text-left text-[12px] text-gray-300 hover:text-white
+                                 hover:bg-white/[0.06] flex items-center gap-2 transition-colors"
                   >
-                    <Trash2 size={12} strokeWidth={1.5} />
-                    Remove action
+                    <Replace size={12} strokeWidth={1.5} />
+                    Replace step
                   </button>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+                <button
+                  onClick={() => {
+                    setShowMenu(false)
+                    onDelete(node.id)
+                  }}
+                  className="w-full px-3 py-2 text-left text-[12px] text-danger/80 hover:text-danger
+                               hover:bg-white/[0.06] flex items-center gap-2 transition-colors"
+                >
+                  <Trash2 size={12} strokeWidth={1.5} />
+                  {node.type === 'trigger' ? 'Remove trigger' : 'Remove action'}
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={onClose}
             aria-label="Close node config"

@@ -53,6 +53,24 @@ function renderTriggerLibrary() {
   return { ...utils, onPick }
 }
 
+describe('the step library in replace scope', () => {
+  it('hides condition, loop, and parallel; header says Replace', () => {
+    render(
+      <StepLibrary
+        scope={{ bodyOnly: false, insideBranch: false, replacing: true }}
+        onPick={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+    expect(screen.getByText('Replace step')).toBeInTheDocument()
+    expect(screen.getByText('Agent')).toBeInTheDocument()
+    expect(screen.getByText('HTTP request')).toBeInTheDocument()
+    expect(screen.queryByText('Condition')).not.toBeInTheDocument()
+    expect(screen.queryByText('Loop')).not.toBeInTheDocument()
+    expect(screen.queryByText('Parallel branch')).not.toBeInTheDocument()
+  })
+})
+
 describe('the step library in trigger scope', () => {
   it('lists the built-in trigger types and no steps', async () => {
     renderTriggerLibrary()

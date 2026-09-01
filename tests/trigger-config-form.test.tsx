@@ -76,12 +76,19 @@ describe('TriggerConfigForm', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ triggerType: 'once' }))
   })
 
-  it('switches trigger type via the picker', () => {
-    const onChange = vi.fn()
-    render(<TriggerConfigForm config={{ triggerType: 'manual' }} onChange={onChange} />)
-    fireEvent.click(screen.getByText('Manual'))
-    fireEvent.mouseDown(screen.getByText('Recurring'))
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ triggerType: 'recurring' }))
+  it('shows the chosen type read-only, with the library as the only way out', () => {
+    const onOpenLibrary = vi.fn()
+    render(
+      <TriggerConfigForm
+        config={{ triggerType: 'manual' }}
+        onChange={vi.fn()}
+        onOpenLibrary={onOpenLibrary}
+      />
+    )
+    expect(screen.getByText('Manual')).toBeInTheDocument()
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Change trigger from the library'))
+    expect(onOpenLibrary).toHaveBeenCalled()
   })
 })
 

@@ -47,6 +47,8 @@ export interface LibraryScope {
   insideBranch: boolean
   /** The trigger spot takes only triggers: built-in types and connector events. */
   triggers?: boolean
+  /** Swapping a step in place: structural entries (condition, loop, parallel) stay out. */
+  replacing?: boolean
 }
 
 const TRIGGER_ITEMS: {
@@ -189,6 +191,7 @@ export function StepLibrary({
       (s) => !scope.bodyOnly || s.type === 'agent' || s.type === 'script'
     )
       .filter((s) => !(scope.insideBranch && s.type === 'loop'))
+      .filter((s) => !(scope.replacing && (s.type === 'condition' || s.type === 'loop')))
       .filter((s) => !q || s.label.toLowerCase().includes(q))
       .map((s) => ({
         key: `type:${s.type}`,
@@ -196,7 +199,12 @@ export function StepLibrary({
         icon: s.icon,
         pick: { kind: 'type', type: s.type }
       }))
-    if (!scope.bodyOnly && !scope.insideBranch && (!q || 'parallel branch'.includes(q))) {
+    if (
+      !scope.bodyOnly &&
+      !scope.insideBranch &&
+      !scope.replacing &&
+      (!q || 'parallel branch'.includes(q))
+    ) {
       steps.push({
         key: 'parallel',
         label: 'Parallel branch',
@@ -260,7 +268,7 @@ export function StepLibrary({
       <div className="px-4 py-3 border-b border-white/[0.08]">
         <div className="flex items-center justify-between mb-2.5">
           <span className="text-[13px] font-medium text-white">
-            {scope.triggers ? 'Add a trigger' : 'Add a step'}
+            {scope.triggers ? 'Add a trigger' : scope.replacing ? 'Replace step' : 'Add a step'}
           </span>
           <button
             aria-label="Close"

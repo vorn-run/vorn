@@ -416,6 +416,16 @@ export function schedulerExecutionContext(
   }
 }
 
+/** Steps that can swap type in place; condition, loop, and trigger own structure or their own path. */
+export const REPLACEABLE_NODE_TYPES: ReadonlySet<string> = new Set([
+  'launchAgent',
+  'script',
+  'approval',
+  'createTaskFromItem',
+  'callConnectorAction',
+  'httpRequest'
+])
+
 /** The default config for each trigger type, used by the form and the library. */
 export function switchTriggerType(type: TriggerConfig['triggerType']): TriggerConfig {
   switch (type) {
