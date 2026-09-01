@@ -79,6 +79,38 @@ describe('parseTemplates', () => {
     expect(parseTemplates({ templates: [empty] })).toEqual([])
   })
 
+  it('refuses to carry requirements that are not a list', () => {
+    // Everything downstream walks this; a string here took the editor down.
+    const hostile = published('hostile')
+    ;(hostile.portable as Record<string, unknown>).requires = 'soon'
+    const [template] = parseTemplates({ templates: [hostile] })
+    expect(template.portable.requires).toEqual([])
+  })
+
+  it('drops requirement entries nothing could act on', () => {
+    const hostile = published('hostile')
+    ;(hostile.portable as Record<string, unknown>).requires = [
+      'not an object',
+      null,
+      { kind: 'connection', nodeId: 'ok', connectorId: 'github', name: 'eng' },
+      { kind: 'connection', nodeId: 42, connectorId: 'github', name: 'eng' },
+      { kind: 'connection', nodeId: 'no-connector', name: 'eng' },
+      { kind: 'httpProfile', nodeId: 'profile', name: 'reporting' },
+      { kind: 'httpProfile', nodeId: 'nameless' },
+      { kind: 'invented', nodeId: 'x', connectorId: 'y', name: 'z' }
+    ]
+    const [template] = parseTemplates({ templates: [hostile] })
+    expect(template.portable.requires).toEqual([
+      { kind: 'connection', nodeId: 'ok', connectorId: 'github', name: 'eng' },
+      { kind: 'httpProfile', nodeId: 'profile', name: 'reporting' }
+    ])
+  })
+
+  it('leaves a template that names no requirements alone', () => {
+    const [template] = parseTemplates({ templates: [published('plain')] })
+    expect(template.portable.requires).toBeUndefined()
+  })
+
   it('repairs a template that is merely missing its blurb', () => {
     const bare = published('bare')
     delete (bare as Record<string, unknown>).description

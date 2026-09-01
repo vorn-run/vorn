@@ -29,6 +29,7 @@ import type {
 } from '@vornrun/shared/types'
 import {
   PORTABLE_FORMAT_VERSION,
+  type PortableRequirement,
   type PortableWorkflow
 } from '@vornrun/shared/workflow-portability'
 import { TEMPLATE_SEED } from './template-seed'
@@ -187,8 +188,34 @@ function normalizeTemplate(raw: unknown): WorkflowTemplate | undefined {
     steps: Array.isArray(template.steps)
       ? template.steps.filter((step): step is string => typeof step === 'string')
       : [],
-    portable
+    portable: { ...portable, ...requiresOf(portable) }
   } as WorkflowTemplate
+}
+
+/**
+ * The requirements a template can be trusted with.
+ *
+ * Everything downstream walks this list — the panel to say what a template
+ * wants, the binder to answer it — so a published string where a list belongs,
+ * or an entry missing the node it speaks for, takes the editor down rather than
+ * showing one bad template. Absent stays absent; unusable entries are dropped.
+ */
+function requiresOf(portable: PortableWorkflow): { requires?: PortableRequirement[] } {
+  if (portable.requires === undefined) return {}
+  if (!Array.isArray(portable.requires)) return { requires: [] }
+
+  const requires = portable.requires.filter((entry): entry is PortableRequirement => {
+    const requirement = entry as Record<string, unknown> | null
+    if (typeof requirement?.nodeId !== 'string') return false
+    if (requirement.kind === 'httpProfile') return typeof requirement.name === 'string'
+    return (
+      requirement.kind === 'connection' &&
+      typeof requirement.connectorId === 'string' &&
+      typeof requirement.name === 'string' &&
+      (requirement.event === undefined || typeof requirement.event === 'string')
+    )
+  })
+  return { requires }
 }
 
 /**

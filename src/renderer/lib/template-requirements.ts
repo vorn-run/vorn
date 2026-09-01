@@ -109,7 +109,9 @@ export function templateSeed(
 
   const nodes = definition.nodes.map((node) => {
     const config = node.config as Record<string, unknown>
-    if (config.triggerType !== 'webhook' || config.token) return node
+    if (config.triggerType !== 'webhook') return node
+    // Always this machine's own token: one the catalog carried would be a
+    // secret shared with everyone who ever used the template.
     return { ...node, config: { ...config, token: mintToken() } } as WorkflowNode
   })
 

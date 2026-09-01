@@ -133,6 +133,30 @@ describe('what a template puts on the canvas', () => {
     expect(tokenOf(second)).toBe('token-2')
   })
 
+  it('replaces a token the catalog carried rather than trusting it', () => {
+    // A published token would be one secret shared by every install that used
+    // the template, so what the file says is never what gets used.
+    const published = template('webhook-to-report')
+    const carried = {
+      ...published,
+      portable: {
+        ...published.portable,
+        nodes: published.portable.nodes.map((node) =>
+          node.id === 'trigger'
+            ? { ...node, config: { ...node.config, token: 'from-the-catalog' } }
+            : node
+        )
+      }
+    }
+
+    const seed = templateSeed(carried, PROJECT, [], () => 'mine')
+    const trigger = seed.nodes.find((node) => node.id === 'trigger')!.config as Record<
+      string,
+      unknown
+    >
+    expect(trigger.token).toBe('mine')
+  })
+
   it('binds the step when this machine can answer, and says so when it cannot', () => {
     const bound = templateSeed(template('webhook-to-report'), PROJECT, [connection()])
     const report = bound.nodes.find((n) => n.id === 'report')!.config as Record<string, unknown>
