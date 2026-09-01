@@ -91,4 +91,16 @@ describe('installing from a catalog row', () => {
     expect(await screen.findByText(/declares dependencies/)).toBeInTheDocument()
     expect(installConnectorPack).not.toHaveBeenCalled()
   })
+
+  it('closes the sheet and says so when the install call itself fails', async () => {
+    installConnectorPack.mockRejectedValue(new Error('the server went away'))
+
+    await pressInstall()
+    const sheet = (await screen.findByRole('button', { name: 'Cancel' }))
+      .parentElement as HTMLElement
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Install' }))
+
+    expect(await screen.findByText(/the server went away/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull())
+  })
 })

@@ -178,21 +178,32 @@ export function ConnectorSettings() {
     if (!pendingPack) return
     const id = pendingPack.preview.id
     setInstallingPending(true)
-    const result = await window.api.installConnectorPack(pendingPack.source)
-    setInstallingPending(false)
-    setPendingPack(null)
-    if (result.ok) {
-      setInstallProgress((current) => {
-        const next = { ...current }
-        delete next[id]
-        return next
-      })
-    } else {
+    try {
+      const result = await window.api.installConnectorPack(pendingPack.source)
+      if (result.ok) {
+        setInstallProgress((current) => {
+          const next = { ...current }
+          delete next[id]
+          return next
+        })
+      } else {
+        setInstallProgress((current) => ({
+          ...current,
+          [id]: { id, phase: 'failed', error: result.error }
+        }))
+        setFileInstallError(result.error)
+      }
+    } catch (error) {
+      // A transport failure lands where a refusal lands, or the sheet never closes.
+      const message = error instanceof Error ? error.message : 'The pack could not be installed'
       setInstallProgress((current) => ({
         ...current,
-        [id]: { id, phase: 'failed', error: result.error }
+        [id]: { id, phase: 'failed', error: message }
       }))
-      setFileInstallError(result.error)
+      setFileInstallError(message)
+    } finally {
+      setInstallingPending(false)
+      setPendingPack(null)
     }
     await load()
   }, [pendingPack, load])

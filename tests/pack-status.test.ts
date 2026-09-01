@@ -36,6 +36,19 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('1.3.0', '1.3.0-beta.1')).toBe(true)
     expect(isNewerVersion('1.3.0-beta.1', '1.3.0')).toBe(false)
     expect(isNewerVersion('1.3.0-beta.2', '1.3.0-beta.1')).toBe(true)
+    expect(isNewerVersion('1.3.0-rc.1', '1.3.0-beta.9')).toBe(true)
+  })
+
+  it('reads a missing segment as a zero', () => {
+    expect(isNewerVersion('1.0.0', '1.0')).toBe(false)
+    expect(isNewerVersion('1.0', '1.0.0')).toBe(false)
+    expect(isNewerVersion('1.0.1', '1.0')).toBe(true)
+  })
+
+  it('ignores build metadata, which carries no precedence', () => {
+    expect(isNewerVersion('1.0.0+build.7', '1.0.0')).toBe(false)
+    expect(isNewerVersion('1.0.0', '1.0.0+build.7')).toBe(false)
+    expect(isNewerVersion('1.0.1+build.7', '1.0.0')).toBe(true)
   })
 })
 

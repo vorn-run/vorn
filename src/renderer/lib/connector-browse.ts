@@ -171,16 +171,19 @@ export function buildConnectorListings(
       keywords: [],
       connectedCount: countFor(c.id)
     })),
-    ...catalog.map((entry) => ({
-      ...entry,
-      key: `catalog:${entry.id}`,
-      category: entry.category ?? UNCATEGORIZED,
-      source: 'catalog' as const,
-      keywords: entry.keywords ?? [],
-      connectedCount: countFor(entry.id),
-      catalogItem: entry,
-      ...(packFor(entry.id) && { pack: packFor(entry.id) })
-    })),
+    ...catalog.map((entry) => {
+      const pack = packFor(entry.id)
+      return {
+        ...entry,
+        key: `catalog:${entry.id}`,
+        category: entry.category ?? UNCATEGORIZED,
+        source: 'catalog' as const,
+        keywords: entry.keywords ?? [],
+        connectedCount: countFor(entry.id),
+        catalogItem: entry,
+        ...(pack && { pack })
+      }
+    }),
     // Side-loaded, or published since the last fetch; it describes itself either way.
     // A pack sharing a built-in's id is refused at install, and skipped here too
     // so an older one on disk cannot draw a second row beside the connector it shadows.

@@ -36,20 +36,41 @@ export function packLaunch(pack: InstalledConnectorPack): { command: string; arg
 
 /** Enough to answer "is there something newer", prereleases included. */
 export function isNewerVersion(candidate: string, current: string): boolean {
-  const parts = (version: string): Array<number | string> =>
-    version.split(/[.\-+]/).map((part) => (/^\d+$/.test(part) ? Number(part) : part))
+  // Build metadata carries no precedence, so it is dropped before anything is compared.
+  const split = (version: string): { release: number[]; pre: Array<number | string> } => {
+    const [release, ...pre] = version.split('+')[0].split('-')
+    return {
+      release: release.split('.').map((part) => (/^\d+$/.test(part) ? Number(part) : 0)),
+      pre: pre
+        .join('-')
+        .split('.')
+        .filter((part) => part !== '')
+        .map((part) => (/^\d+$/.test(part) ? Number(part) : part))
+    }
+  }
 
-  const left = parts(candidate)
-  const right = parts(current)
-  for (let index = 0; index < Math.max(left.length, right.length); index++) {
-    const a = left[index]
-    const b = right[index]
+  const left = split(candidate)
+  const right = split(current)
+  // A missing release segment is a zero, so 1.0 and 1.0.0 are the same version.
+  for (let index = 0; index < Math.max(left.release.length, right.release.length); index++) {
+    const a = left.release[index] ?? 0
+    const b = right.release[index] ?? 0
+    if (a !== b) return a > b
+  }
+  // Same release: a prerelease loses to it, and to a prerelease that sorts later.
+  if (left.pre.length === 0) return right.pre.length > 0
+  if (right.pre.length === 0) return false
+  for (let index = 0; index < Math.max(left.pre.length, right.pre.length); index++) {
+    const a = left.pre[index]
+    const b = right.pre[index]
     if (a === b) continue
-    // A missing segment is the release, which outranks any suffix: 1.3.0 beats 1.3.0-beta.1.
-    if (a === undefined) return typeof b === 'string'
-    if (b === undefined) return typeof a !== 'string'
+    if (a === undefined) return false
+    if (b === undefined) return true
     if (typeof a === 'number' && typeof b === 'number') return a > b
-    return String(a) > String(b)
+    // A numeric identifier ranks below an alphanumeric one.
+    if (typeof a === 'number') return false
+    if (typeof b === 'number') return true
+    return a > b
   }
   return false
 }
