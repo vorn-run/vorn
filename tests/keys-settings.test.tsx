@@ -138,4 +138,35 @@ describe('rotating a key', () => {
 
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
+
+  it('asks for the whole set when the field carries a set of variables', async () => {
+    render(<KeysSettings />)
+    fireEvent.click((await screen.findAllByRole('button', { name: /Rotate/ }))[1])
+
+    expect(screen.getByPlaceholderText('{"TOKEN": "…"}')).toBeInTheDocument()
+  })
+
+  it('leaves the key alone when the replacement is abandoned', async () => {
+    render(<KeysSettings />)
+    fireEvent.click((await screen.findAllByRole('button', { name: /Rotate/ }))[0])
+    fireEvent.change(screen.getByPlaceholderText('The replacement value'), {
+      target: { value: 'typed' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByPlaceholderText('The replacement value')).not.toBeInTheDocument()
+    expect(api.rotateConnectionSecret).not.toHaveBeenCalled()
+  })
+
+  it('reports a rejected call rather than looking like it saved', async () => {
+    api.rotateConnectionSecret.mockRejectedValue(new Error('the server went away'))
+    render(<KeysSettings />)
+    fireEvent.click((await screen.findAllByRole('button', { name: /Rotate/ }))[0])
+    fireEvent.change(screen.getByPlaceholderText('The replacement value'), {
+      target: { value: 'x' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('the server went away')).toBeInTheDocument()
+  })
 })
