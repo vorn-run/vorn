@@ -120,6 +120,16 @@ describe('a connector that borrows a login', () => {
     const { findByText } = setup()
     expect(await findByText(/glab auth login/)).toBeInTheDocument()
   })
+
+  it('offers a way to get the tool when it is the tool that is missing', async () => {
+    probeConnectorAuth.mockResolvedValue({
+      ok: false,
+      message: 'glab is not installed or not on PATH.',
+      installHint: 'Install with Homebrew: `brew install glab`'
+    })
+    const { findByText } = setup()
+    expect(await findByText(/brew install glab/)).toBeInTheDocument()
+  })
 })
 
 describe('a connector that asks for nothing', () => {
