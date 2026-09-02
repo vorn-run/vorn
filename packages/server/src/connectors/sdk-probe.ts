@@ -215,6 +215,20 @@ function toProbeArgs(raw: unknown): string[] | undefined {
  * The config panel maps over these to draw fields, so an input without a key
  * is dropped rather than drawn as a nameless box.
  */
+/** What an action says it returns, kept only where the key is usable. */
+function toActionOutputs(
+  value: unknown
+): Array<{ key: string; type?: string; description?: string }> {
+  return (Array.isArray(value) ? value : [])
+    .filter(isRecord)
+    .filter((entry) => typeof entry.key === 'string' && entry.key !== '')
+    .map((entry) => ({
+      key: entry.key as string,
+      ...(typeof entry.type === 'string' && { type: entry.type }),
+      ...(typeof entry.description === 'string' && { description: entry.description })
+    }))
+}
+
 function toActionInputs(value: unknown): SdkActionInput[] {
   return (Array.isArray(value) ? value : [])
     .filter(isRecord)
@@ -386,7 +400,8 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
       label: str(action.label, str(action.type)),
       ...(typeof action.description === 'string' && { description: action.description }),
       // Carried so a step can name its arguments without the connector running.
-      ...(action.inputs !== undefined && { inputs: toActionInputs(action.inputs) })
+      ...(action.inputs !== undefined && { inputs: toActionInputs(action.inputs) }),
+      ...(action.outputs !== undefined && { outputs: toActionOutputs(action.outputs) })
     }))
     .filter((action) => action.type !== '')
 

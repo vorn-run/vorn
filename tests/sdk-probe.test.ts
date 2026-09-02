@@ -538,3 +538,24 @@ describe('what a probed action takes', () => {
     expect((await probeInputs([{ key: 'v', options: 'high,low' }]))?.[0].options).toBeUndefined()
   })
 })
+
+describe('what a probed action returns', () => {
+  const probeOutputs = async (outputs: unknown) => {
+    const { probeSdkConnector } = await importProbe()
+    respond(manifest({ actions: [{ type: 'post', label: 'Post', outputs }] }))
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
+    if (!result.ok) throw new Error(result.error)
+    return result.manifest.actions[0].outputs
+  }
+
+  it('carries the fields a step can read back', async () => {
+    const outputs = [{ key: 'id', type: 'string', description: 'The new id' }]
+    expect(await probeOutputs(outputs)).toEqual(outputs)
+  })
+
+  it('drops an output with no key and keeps only string facts', async () => {
+    expect(await probeOutputs([{ type: 'string' }, 'id', { key: 'ok', type: 7 }])).toEqual([
+      { key: 'ok' }
+    ])
+  })
+})
