@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import type { HttpRequestConfig, SourceConnection, TriggerConfig } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
+import { HttpProfileForm } from '../../settings/HttpProfileForm'
 import {
   getAvailableContextVars,
   StepVariableGroup,
@@ -10,6 +11,9 @@ import {
 import { VariableAutocomplete } from './VariableAutocomplete'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => ({ value: m, label: m }))
+
+/** Not a connection id: the option that opens the form instead of binding one. */
+const NEW_PROFILE = '__new_profile__'
 
 interface Props {
   config: HttpRequestConfig
@@ -29,12 +33,17 @@ export function HttpRequestConfigForm({
   stepGroups = []
 }: Props) {
   const [profiles, setProfiles] = useState<SourceConnection[]>([])
+  const [makingProfile, setMakingProfile] = useState(false)
+
+  const reloadProfiles = useCallback(async () => {
+    const conns = await window.api.listConnections()
+    setProfiles(conns.filter((c) => c.connectorId === 'http'))
+  }, [])
 
   useEffect(() => {
-    window.api.listConnections().then((conns) => {
-      setProfiles(conns.filter((c) => c.connectorId === 'http'))
-    })
-  }, [])
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: loads the profiles from the main process on mount
+    void reloadProfiles()
+  }, [reloadProfiles])
 
   const contextVars = [
     ...getAvailableContextVars({ triggerType, isContextualTrigger }),
@@ -78,11 +87,34 @@ export function HttpRequestConfigForm({
           value={config.profileConnectionId ?? ''}
           options={[
             { value: '', label: 'None' },
-            ...profiles.map((p) => ({ value: p.id, label: p.name }))
+            ...profiles.map((p) => ({ value: p.id, label: p.name })),
+            { value: NEW_PROFILE, label: 'Create profile…' }
           ]}
-          onChange={(v) => onChange({ ...config, profileConnectionId: v || undefined })}
+          onChange={(v) => {
+            // Picking the offer opens the form rather than binding a value.
+            if (v === NEW_PROFILE) {
+              setMakingProfile(true)
+              return
+            }
+            onChange({ ...config, profileConnectionId: v || undefined })
+          }}
           variant="form"
         />
+        {makingProfile && (
+          <div className="mt-2">
+            <HttpProfileForm
+              name=""
+              onDone={(connectionId) => {
+                setMakingProfile(false)
+                // Bound here rather than left for a second trip through the
+                // dropdown: making one is how you say you want it.
+                onChange({ ...config, profileConnectionId: connectionId })
+                void reloadProfiles()
+              }}
+              onCancel={() => setMakingProfile(false)}
+            />
+          </div>
+        )}
         <p className="text-[11px] text-gray-600 mt-1.5">
           A profile adds its base URL and auth to the request on the server, so its secret never
           enters this workflow.

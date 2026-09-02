@@ -16,7 +16,7 @@ export function HttpProfileForm({
 }: {
   /** What the template called the profile, so the requirement rebinds to it. */
   name: string
-  onDone: () => void
+  onDone: (connectionId: string) => void
   onCancel: () => void
 }) {
   const [profileName, setProfileName] = useState(name)
@@ -26,6 +26,14 @@ export function HttpProfileForm({
   const [saving, setSaving] = useState(false)
   const [tested, setTested] = useState<{ ok: boolean | null; message?: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // What a first attempt made. A retry corrects that profile rather than
+  // leaving it behind and adding a second under the same name — two of those
+  // and a requirement can never tell which one it meant.
+  const [madeId, setMadeId] = useState<string | null>(null)
+
+  // Origin confinement refuses a profile with no base URL at run time, so
+  // there is nothing to be gained by writing one.
+  const ready = profileName.trim() !== '' && baseUrl.trim() !== ''
 
   const save = async (): Promise<void> => {
     setSaving(true)
@@ -36,18 +44,24 @@ export function HttpProfileForm({
       // Encrypted here rather than stored: the same treatment every password
       // field in the connector forms gets.
       if (secret) filters.secret = await window.api.encryptString(secret)
-      const connection = await window.api.createConnection({
-        connectorId: 'http',
-        name: profileName.trim() || name,
-        filters,
-        syncIntervalMinutes: 5,
-        statusMapping: {}
-      })
-      const result = await window.api.preflightConnection(connection.id)
+      const named = profileName.trim() || name
+      const connectionId = madeId
+        ? ((await window.api.updateConnection(madeId, { name: named, filters }))?.id ?? madeId)
+        : (
+            await window.api.createConnection({
+              connectorId: 'http',
+              name: named,
+              filters,
+              syncIntervalMinutes: 5,
+              statusMapping: {}
+            })
+          ).id
+      setMadeId(connectionId)
+      const result = await window.api.preflightConnection(connectionId)
       setTested(result)
       // A profile that answers is done with; one that does not stays open so
       // the base URL or the secret can be corrected against what it said.
-      if (result.ok !== false) onDone()
+      if (result.ok !== false) onDone(connectionId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The profile could not be saved')
     } finally {
@@ -95,7 +109,7 @@ export function HttpProfileForm({
         </button>
         <button
           onClick={() => void save()}
-          disabled={saving || profileName.trim() === ''}
+          disabled={saving || !ready}
           className="text-[11px] text-gray-200 hover:text-white px-2.5 py-1 border
                      border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors
                      disabled:opacity-50"
