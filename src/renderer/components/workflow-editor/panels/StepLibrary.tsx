@@ -19,6 +19,7 @@ import type { LucideIcon } from 'lucide-react'
 import type {
   ConnectorActionDef,
   ConnectorManifest,
+  SdkConnectorIcon,
   SourceConnection,
   TriggerConfig
 } from '../../../../shared/types'
@@ -27,6 +28,9 @@ import {
   useConnectorIdFor,
   useConnectionIconFor
 } from '../../../lib/use-connections'
+import { useConnectorCatalog } from '../../../lib/use-connector-catalog'
+import { connectionConnectorId } from '../../../lib/connection-icon'
+import { HTTP_PROFILE_CONNECTOR } from '../../../../shared/workflow-portability'
 import { ConnectorIcon } from '../../ConnectorIcon'
 import { NODE_GLYPH } from '../node-visuals'
 import type { AddableNodeType } from '../WorkflowCanvas'
@@ -38,6 +42,10 @@ export type LibraryPick =
   | { kind: 'connectorAction'; connectionId: string; action: string; actionLabel: string }
   | { kind: 'triggerType'; triggerType: TriggerConfig['triggerType'] }
   | { kind: 'connectorTrigger'; connectionId: string; event: string }
+  /** An action from a connector nobody has installed yet; it lands unbound. */
+  | { kind: 'catalogAction'; connectorId: string; action: string; actionLabel: string }
+  /** An HTTP request with one of the saved profiles already chosen. */
+  | { kind: 'httpProfile'; profileConnectionId: string; profileName: string }
 
 /** What the anchor that opened the library allows. */
 export interface LibraryScope {
@@ -79,14 +87,26 @@ interface Row {
   pick: LibraryPick
   icon?: LucideIcon
   connection?: SourceConnection
+  /** A connector's own mark, for a step that belongs to one nobody has installed. */
+  mark?: { connectorId: string; icon?: SdkConnectorIcon }
+  /** What picking it will also do, said where the eye ends up anyway. */
+  detail?: string
   header?: false
 }
 
+/**
+ * A heading over the rows beneath it.
+ *
+ * A connection's heading names the connection; the catalog's names itself,
+ * because the rows under it belong to no connection yet — which is the whole
+ * difference between what you have and what you could have.
+ */
 interface GroupHeader {
   key: string
   header: true
-  connection: SourceConnection
+  label: string
   count: number
+  connection?: SourceConnection
 }
 
 function ConnectionMark({ connection }: { connection: SourceConnection }) {
@@ -112,6 +132,7 @@ export function StepLibrary({
   const [highlight, setHighlight] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const connections = useConnections()
+  const catalog = useConnectorCatalog()
   const [actionsByConnection, setActionsByConnection] = useState<Map<string, ConnectorActionDef[]>>(
     () => new Map()
   )
@@ -172,6 +193,7 @@ export function StepLibrary({
         rows.push({
           key: `group:${conn.id}`,
           header: true,
+          label: conn.name,
           connection: conn,
           count: triggers.length
         })
@@ -212,6 +234,26 @@ export function StepLibrary({
         pick: { kind: 'parallel' }
       })
     }
+
+    // A saved profile is an HTTP request with the hard part already answered,
+    // so it sits directly beneath the request rather than inside a form field.
+    if (!scope.bodyOnly) {
+      const profiles: Row[] = connections
+        .filter((c) => c.connectorId === HTTP_PROFILE_CONNECTOR)
+        .map((profile) => ({
+          key: `profile:${profile.id}`,
+          label: `Call ${profile.name}`,
+          icon: Globe,
+          pick: {
+            kind: 'httpProfile' as const,
+            profileConnectionId: profile.id,
+            profileName: profile.name
+          }
+        }))
+        .filter((row) => !q || row.label.toLowerCase().includes(q))
+      const afterHttp = steps.findIndex((s) => s.key === 'type:httpRequest')
+      steps.splice(afterHttp >= 0 ? afterHttp + 1 : steps.length, 0, ...profiles)
+    }
     if (steps.length > 0) rows.push(...steps)
 
     if (!scope.bodyOnly) {
@@ -226,6 +268,7 @@ export function StepLibrary({
         rows.push({
           key: `group:${conn.id}`,
           header: true,
+          label: conn.name,
           connection: conn,
           count: actions.length
         })
@@ -245,8 +288,58 @@ export function StepLibrary({
       }
     }
 
+    // Steps from connectors nobody has installed. The catalog describes an
+    // action well enough to offer it, so search answers with the step you asked
+    // for rather than with silence and a trip to Settings.
+    if (!scope.bodyOnly) {
+      const connected = new Set(connections.map((conn) => connectionConnectorId(conn)))
+      const offers = catalog.items
+        .filter((entry) => !connected.has(entry.id) && (entry.actions?.length ?? 0) > 0)
+        .map((entry) => ({
+          entry,
+          actions: (entry.actions ?? []).filter(
+            (action) =>
+              !q ||
+              (action.label || action.type).toLowerCase().includes(q) ||
+              entry.name.toLowerCase().includes(q) ||
+              (entry.keywords ?? []).some((word) => word.toLowerCase().includes(q))
+          )
+        }))
+        .filter((offer) => offer.actions.length > 0)
+
+      const rowFor = (
+        entry: (typeof offers)[number]['entry'],
+        action: { type: string; label: string }
+      ) => ({
+        key: `catalog:${entry.id}:${action.type}`,
+        label: action.label || action.type,
+        mark: { connectorId: entry.id, ...(entry.icon && { icon: entry.icon }) },
+        detail: 'install on add',
+        pick: {
+          kind: 'catalogAction' as const,
+          connectorId: entry.id,
+          action: action.type,
+          actionLabel: action.label || action.type
+        }
+      })
+
+      // A connector the factory checked is offered as plainly as an installed
+      // one; the rest are worth finding, but not worth putting first.
+      for (const offer of offers.filter((o) => o.entry.verified)) {
+        rows.push(...offer.actions.map((action) => rowFor(offer.entry, action)))
+      }
+      const unvouched = offers.filter((o) => !o.entry.verified)
+      const count = unvouched.reduce((total, offer) => total + offer.actions.length, 0)
+      if (count > 0) {
+        rows.push({ key: 'group:catalog', header: true, label: 'More from the catalog', count })
+        for (const offer of unvouched) {
+          rows.push(...offer.actions.map((action) => rowFor(offer.entry, action)))
+        }
+      }
+    }
+
     return { rows, pickable: rows.filter((r): r is Row => !('header' in r && r.header)) }
-  }, [query, scope, connections, actionsByConnection, manifestsByConnector])
+  }, [query, scope, connections, actionsByConnection, manifestsByConnector, catalog])
 
   const clamped = Math.min(highlight, Math.max(0, pickable.length - 1))
 
@@ -313,9 +406,9 @@ export function StepLibrary({
             if ('header' in row && row.header) {
               return (
                 <div key={row.key} className="flex items-center gap-2 px-2 pt-3 pb-1">
-                  <ConnectionMark connection={row.connection} />
+                  {row.connection && <ConnectionMark connection={row.connection} />}
                   <span className="text-[12px] font-semibold text-ink-secondary truncate">
-                    {row.connection.name}
+                    {row.label}
                   </span>
                   <span className="ml-auto text-[10px] font-mono text-gray-600">{row.count}</span>
                 </div>
@@ -333,7 +426,18 @@ export function StepLibrary({
                           ${index === clamped ? 'bg-white/[0.06] text-white' : 'text-gray-300'}`}
               >
                 {Icon && <Icon size={14} className={`${NODE_GLYPH} shrink-0`} />}
+                {row.mark && (
+                  <ConnectorIcon
+                    connectorId={row.mark.connectorId}
+                    icon={row.mark.icon}
+                    size={14}
+                    className="text-ink shrink-0"
+                  />
+                )}
                 <span className="truncate">{row.label}</span>
+                {row.detail && (
+                  <span className="ml-auto shrink-0 text-[10px] text-gray-600">{row.detail}</span>
+                )}
               </button>
             )
           })
