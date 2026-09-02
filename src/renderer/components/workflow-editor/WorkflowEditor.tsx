@@ -38,6 +38,7 @@ import {
   TriggerConfig,
   AiAgentType,
   CallConnectorActionConfig,
+  HttpRequestConfig,
   ConnectorActionDef,
   supportsExactSessionResume,
   getProjectRemoteHostId
@@ -89,6 +90,8 @@ import { refreshConnections, useConnections } from '../../lib/use-connections'
 import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
 import {
   connectorSuggestions,
+  requirementsOfDefinition,
+  requirementsWithBindings,
   templateSeed,
   type ConnectorSuggestion,
   type RequirementAction
@@ -110,7 +113,6 @@ function connectorFor(
 }
 import { StartFromPanel } from './panels/StartFromPanel'
 import { RequirementRow } from './panels/RequirementRow'
-import { resolveRequirement } from '../../../shared/workflow-portability'
 import {
   slugify,
   ensureUniqueSlug,
@@ -708,15 +710,24 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     [install]
   )
 
-  const importedPending = useMemo(() => {
-    if (!imported || imported.workflowId !== editingId) return []
-    return imported.requirements
-      .map((requirement) => {
-        const connectionId = resolveRequirement(requirement, connections)
-        return connectionId === undefined ? { requirement } : { requirement, connectionId }
-      })
-      .filter((entry) => entry.connectionId === undefined)
-  }, [imported, editingId, connections])
+  /**
+   * Everything the canvas is still missing, however it got here.
+   *
+   * An import announces its needs; a step picked from a connector nobody has
+   * installed simply sits there unbound. Both are the same question, so they
+   * are answered by one list of rows — deduped by step, since an imported
+   * requirement and the unbound step it describes are the same gap named twice.
+   */
+  const stillNeeded = useMemo(() => {
+    const fromImport =
+      imported && imported.workflowId === editingId ? imported.requirements : ([] as const)
+    const derived = requirementsOfDefinition(nodes)
+    const seen = new Set(derived.map((requirement) => requirement.nodeId))
+    const all = [...derived, ...fromImport.filter((entry) => !seen.has(entry.nodeId))]
+    return requirementsWithBindings(all, connections).filter(
+      (entry) => entry.connectionId === undefined
+    )
+  }, [imported, editingId, connections, nodes])
 
   /** Nothing half-opened survives leaving the panel that opened it. */
   const closeStartFrom = useCallback(() => {
@@ -830,7 +841,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       afterNodeId: string,
       beforeNodeId: string | null,
       type: AddableNodeType,
-      preset?: Partial<CallConnectorActionConfig>
+      // A step can arrive already knowing part of its own configuration: which
+      // action it is, or which profile it calls.
+      preset?: Partial<CallConnectorActionConfig> | Partial<HttpRequestConfig>
     ) => {
       // Condition nodes use a special insertion that creates true/false branches
       if (type === 'condition') {
@@ -847,7 +860,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
       const created = createNodeWithUniqueSlug(type)
       const newNode = preset
-        ? { ...created, config: { ...(created.config as CallConnectorActionConfig), ...preset } }
+        ? ({
+            ...created,
+            config: { ...(created.config as Record<string, unknown>), ...preset }
+          } as WorkflowNode)
         : created
 
       let result: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
@@ -966,21 +982,32 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         return
       }
 
+      /** A step that arrives knowing something about itself, dropped where asked. */
+      const preset = (type: AddableNodeType, config: Record<string, unknown>): WorkflowNode => {
+        const n = createNodeWithUniqueSlug(type)
+        return {
+          ...n,
+          config: { ...(n.config as Record<string, unknown>), ...config }
+        } as WorkflowNode
+      }
+
       const newNode =
         pick.kind === 'connectorAction'
-          ? (() => {
-              const n = createNodeWithUniqueSlug('connectorAction')
-              return {
-                ...n,
-                config: {
-                  ...(n.config as CallConnectorActionConfig),
-                  connectionId: pick.connectionId,
-                  action: pick.action,
-                  actionLabel: pick.actionLabel
-                }
-              }
-            })()
-          : createNodeWithUniqueSlug(pick.type)
+          ? preset('connectorAction', {
+              connectionId: pick.connectionId,
+              action: pick.action,
+              actionLabel: pick.actionLabel
+            })
+          : pick.kind === 'catalogAction'
+            ? preset('connectorAction', {
+                connectionId: '',
+                connectorId: pick.connectorId,
+                action: pick.action,
+                actionLabel: pick.actionLabel
+              })
+            : pick.kind === 'httpProfile'
+              ? preset('httpRequest', { profileConnectionId: pick.profileConnectionId })
+              : createNodeWithUniqueSlug(pick.type)
 
       const result = appendNodeAfter(nodes, edges, afterNodeId, newNode)
       setNodes(placeAll(result.nodes, result.edges, newNode.id))
@@ -1100,6 +1127,19 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, 'connectorAction', {
           connectionId: pick.connectionId,
           action: pick.action
+        })
+      } else if (pick.kind === 'catalogAction') {
+        // Nothing to bind it to yet: it lands naming what it is, and the panel
+        // that lists what is still needed offers the install.
+        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, 'connectorAction', {
+          connectionId: '',
+          connectorId: pick.connectorId,
+          action: pick.action,
+          actionLabel: pick.actionLabel
+        })
+      } else if (pick.kind === 'httpProfile') {
+        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, 'httpRequest', {
+          profileConnectionId: pick.profileConnectionId
         })
       } else {
         handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, pick.type)
@@ -1551,7 +1591,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           </StartFromPanel>
         )}
 
-        {/* An imported workflow says what it could not bind, with the same
+        {/* Whatever the canvas cannot run yet — an import's leftovers, or a step
+            picked from a connector that is not installed — with the same
             actions the template rows offer. */}
         {/* One occupant of the slot, on the same terms as the rest: the panels
             that answer a selection or a run outrank an import's leftovers. */}
@@ -1559,7 +1600,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           !pendingInsert &&
           !showRunHistory &&
           !selectedNode &&
-          importedPending.length > 0 && (
+          stillNeeded.length > 0 && (
             <div className="w-[280px] border-l border-white/[0.08] bg-surface-node flex flex-col h-full overflow-y-auto titlebar-no-drag">
               <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
                 <span className="text-[13px] font-medium text-white">Still needs</span>
@@ -1615,7 +1656,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                 </div>
               )}
               <div className="py-2">
-                {importedPending.map((entry) => (
+                {stillNeeded.map((entry) => (
                   <RequirementRow
                     key={entry.requirement.nodeId + entry.requirement.kind}
                     requirement={entry}

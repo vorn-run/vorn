@@ -7,6 +7,7 @@ import type {
 } from '../../shared/types'
 import { connectionConnectorId } from '../../shared/types'
 import {
+  boundConnectionKey,
   fromPortable,
   resolveRequirement,
   unresolvedRequirements,
@@ -109,6 +110,49 @@ export function requirementAction(
   return canAddConnection(state, route)
     ? { kind: 'addConnection', listing }
     : { kind: 'install', listing }
+}
+
+/**
+ * What the workflow on the canvas is still missing.
+ *
+ * An imported file says what it needs in its own `requires` block, but a step
+ * picked from the library says it only by sitting there unbound — and both
+ * deserve the same row offering the same fix. Derived from the definition on
+ * every render rather than stored: answering a requirement is what makes it
+ * stop being one, and nothing should have to remember to clear it.
+ *
+ * Only a step that cannot run without a connection counts. An HTTP request with
+ * no profile is a request to a public URL, which is a legitimate step and not a
+ * question anyone needs to answer.
+ */
+export function requirementsOfDefinition(nodes: WorkflowNode[]): PortableRequirement[] {
+  const requirements: PortableRequirement[] = []
+  for (const node of nodes) {
+    const config = node.config as Record<string, unknown>
+    const key = boundConnectionKey(node, config)
+    if (key === null || key === 'profileConnectionId') continue
+    if (typeof config[key] === 'string' && config[key] !== '') continue
+    requirements.push({
+      kind: 'connection',
+      nodeId: node.id,
+      // Empty when nothing recorded which connector the step was picked from,
+      // which reads as "cannot be offered" rather than as some other connector.
+      connectorId: typeof config.connectorId === 'string' ? config.connectorId : '',
+      name: ''
+    })
+  }
+  return requirements
+}
+
+/** Pair each requirement with the connection this machine would bind to it. */
+export function requirementsWithBindings(
+  requirements: PortableRequirement[],
+  connections: SourceConnection[]
+): TemplateRequirement[] {
+  return requirements.map((requirement) => {
+    const connectionId = resolveRequirement(requirement, connections)
+    return connectionId === undefined ? { requirement } : { requirement, connectionId }
+  })
 }
 
 export function templateRequirements(
