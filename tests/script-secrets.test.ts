@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { secretEnvFor } from '../packages/server/src/script-runner'
-import { fromPortable, toPortable } from '../packages/shared/src/workflow-portability'
+import {
+  fromPortable,
+  toPortable,
+  type PortableWorkflow
+} from '../packages/shared/src/workflow-portability'
 import type { WorkflowDefinition } from '../packages/shared/src/types'
 
 describe('the environment a step borrows from a connection', () => {
@@ -83,7 +87,7 @@ describe('what a workflow file says about the keys it needs', () => {
       ],
       edges: []
     }
-    const definition = fromPortable(carried as never, 'bundle', {
+    const definition = fromPortable(carried as unknown as PortableWorkflow, 'bundle', {
       name: 'Novum',
       path: '/Users/someone/dev/novum'
     })
