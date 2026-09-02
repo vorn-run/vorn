@@ -45,6 +45,7 @@ import {
 import { WorkflowCanvas, AddableNodeType, InsertAnchor } from './WorkflowCanvas'
 import { StepLibrary, type LibraryPick } from './panels/StepLibrary'
 import {
+  alignedNodes,
   layoutPositions,
   loopBodyMembers,
   TRIGGER_ANCHOR,
@@ -504,7 +505,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       name,
       icon,
       iconColor,
-      nodes,
+      // The canvas already drew this workflow on the lattice; writing the same
+      // positions back is what stops the heal being redone on every open.
+      nodes: alignedNodes(nodes),
       edges,
       enabled,
       ...(staggerDelayMs && { staggerDelayMs }),

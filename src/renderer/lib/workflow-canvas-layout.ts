@@ -1,5 +1,5 @@
 import { getBezierPath, Position, type Edge, type Node } from '@xyflow/react'
-import { LoopConfig, WorkflowEdge, WorkflowNode } from '../../shared/types'
+import { LoopConfig, WorkflowEdge, WorkflowNode, WorkflowNodePosition } from '../../shared/types'
 import { stepPreview } from '../components/workflow-editor/node-visuals'
 import {
   CARD_WIDTH,
@@ -158,6 +158,35 @@ export function positionsAreSeed(nodes: WorkflowNode[]): boolean {
   return nodes.every((n) => !n.position || n.position.x === 0)
 }
 
+/**
+ * A stored position, brought onto the lattice.
+ *
+ * Workflows arranged before the layout used the grid sit half a step off it, so
+ * dragging one card snapped it 4px away from neighbours nobody touched and the
+ * chain kinked. Healing on the way in costs at most 4px of drift from where a
+ * card was left, and buys back a column that survives the next drag.
+ */
+export function latticePosition(node: WorkflowNode): WorkflowNodePosition {
+  return {
+    x: snapToLattice(node.position?.x ?? 0),
+    y: snapToLattice(node.position?.y ?? 0)
+  }
+}
+
+/** Stored positions that are already on the lattice, so a save can skip the write. */
+export function positionsAreAligned(nodes: WorkflowNode[]): boolean {
+  return nodes.every((node) => {
+    const lattice = latticePosition(node)
+    return lattice.x === (node.position?.x ?? 0) && lattice.y === (node.position?.y ?? 0)
+  })
+}
+
+/** Every node with its position healed onto the lattice, for the next save. */
+export function alignedNodes(nodes: WorkflowNode[]): WorkflowNode[] {
+  if (positionsAreSeed(nodes) || positionsAreAligned(nodes)) return nodes
+  return nodes.map((node) => ({ ...node, position: latticePosition(node) }))
+}
+
 export interface CanvasElements {
   nodes: Node[]
   edges: Edge[]
@@ -173,9 +202,7 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
   const rfNodes: Node[] = []
   for (const node of nodes) {
     if (bodySet.has(node.id)) continue
-    const position = useComputed
-      ? (computed.get(node.id) ?? { x: 0, y: 0 })
-      : { x: node.position?.x ?? 0, y: node.position?.y ?? 0 }
+    const position = useComputed ? (computed.get(node.id) ?? { x: 0, y: 0 }) : latticePosition(node)
     const width = node.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH
     const height = estimateNodeHeight(node, nodes)
     rfNodes.push({

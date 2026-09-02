@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { Position } from '@xyflow/react'
 import {
+  alignedNodes,
   canConnect,
   layoutPositions,
   loopBodyMembers,
@@ -126,7 +127,8 @@ describe('the definition projected onto the canvas', () => {
     )
     expect(positionsAreSeed(arranged)).toBe(false)
     const { nodes: rf } = toCanvasElements(arranged, chainEdges)
-    expect(rf.find((n) => n.id === 'a')!.position).toEqual({ x: 120, y: 300 })
+    // Where it was left, brought onto the lattice: 300 is not a step, 304 is.
+    expect(rf.find((n) => n.id === 'a')!.position).toEqual({ x: 120, y: 304 })
   })
 })
 
@@ -147,6 +149,51 @@ describe('layout edge shapes', () => {
     const { positions } = layoutPositions(halfFork, halfEdges)
     // The dangling false edge points at a missing node; the true branch still lays out.
     expect(positions.get('yes')).toBeDefined()
+  })
+})
+
+describe('a workflow arranged before the lattice existed', () => {
+  /** Positions a saved workflow carries from the old half-step layout. */
+  const stored = [
+    { ...chainNodes[0], position: { x: -140, y: 0 } },
+    { ...chainNodes[1], position: { x: -140, y: 58 } }
+  ]
+  const storedEdges: WorkflowEdge[] = [{ id: 'e1', source: 't', target: 'a' }]
+
+  it('draws the stored cards on the lattice instead of half a step off it', () => {
+    const { nodes: rf } = toCanvasElements(stored, storedEdges)
+    expect(rf.find((n) => n.id === 't')!.position).toEqual({ x: -136, y: 0 })
+    expect(rf.find((n) => n.id === 'a')!.position).toEqual({ x: -136, y: 56 })
+  })
+
+  it('keeps the column, so a drag no longer breaks it', () => {
+    const { nodes: rf } = toCanvasElements(stored, storedEdges)
+    const xs = ['t', 'a'].map((id) => rf.find((n) => n.id === id)!.position.x)
+    expect(new Set(xs).size).toBe(1)
+    expect(xs[0] % 8).toBe(0)
+  })
+
+  it('hands the healed positions to the next save, so the fix sticks', () => {
+    const saved = alignedNodes(stored)
+    expect(saved.map((n) => n.position)).toEqual([
+      { x: -136, y: 0 },
+      { x: -136, y: 56 }
+    ])
+  })
+
+  // Nothing to heal must mean nothing to write: a save that rewrote every
+  // workflow it opened would churn the config for no one.
+  it('leaves an already-aligned workflow untouched', () => {
+    const aligned = [
+      { ...chainNodes[0], position: { x: -136, y: 0 } },
+      { ...chainNodes[1], position: { x: -136, y: 56 } }
+    ]
+    expect(alignedNodes(aligned)).toBe(aligned)
+  })
+
+  it('leaves a workflow nobody has arranged to the layout walk', () => {
+    // All x = 0 is the seed, which the layout places rather than heals.
+    expect(alignedNodes(chainNodes)).toBe(chainNodes)
   })
 })
 
