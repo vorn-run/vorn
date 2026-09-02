@@ -64,6 +64,7 @@ const mockState = {
   addWorkflow: vi.fn(),
   updateWorkflow: vi.fn(),
   removeWorkflow: vi.fn(),
+  setImportedRequirements: vi.fn(),
   config: { workflows: [] as WorkflowDefinition[], tasks: [], projects: [], defaults: {} },
   setPendingWorkflowRun: vi.fn(),
   addTerminal: vi.fn(),

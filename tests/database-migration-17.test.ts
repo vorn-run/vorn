@@ -111,8 +111,8 @@ describe(`migration ${MIGRATION} — what a packaged connector's tasks came from
   it('leaves a built-in connector task exactly as it was', () => {
     query((d) => {
       d.prepare(
-        `INSERT INTO tasks (id, title, status, "order", created_at, updated_at, source_connector_id, source_external_id)
-         VALUES ('task-2', 'Issue 3', 'todo', 2, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', 'github', '3')`
+        `INSERT INTO tasks (id, title, status, "order", project_name, created_at, updated_at, source_connector_id, source_external_id)
+         VALUES ('task-2', 'Issue 3', 'todo', 2, 'Novum', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', 'github', '3')`
       ).run()
       d.prepare(
         `INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '16')`
