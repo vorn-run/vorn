@@ -434,3 +434,107 @@ describe('what the probe accepts from a package', () => {
     expect(trigger.defaultWorkflow).toBeUndefined()
   })
 })
+
+describe('how a probed connector says it signs in', () => {
+  const probeAuth = async (auth: unknown) => {
+    const { probeSdkConnector } = await importProbe()
+    respond(manifest({ auth }))
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
+    if (!result.ok) throw new Error(result.error)
+    return result.manifest.auth
+  }
+
+  const cli = { rung: 'cli', probe: { command: 'glab', args: ['auth', 'status'] } }
+
+  it('carries a rung this build can act on, whole', async () => {
+    expect(await probeAuth(cli)).toEqual(cli)
+    expect(await probeAuth({ rung: 'none' })).toEqual({ rung: 'none' })
+    expect(await probeAuth({ rung: 'key', keys: ['apiToken'] })).toEqual({
+      rung: 'key',
+      keys: ['apiToken']
+    })
+  })
+
+  it('carries what to borrow, since the token is fetched fresh at spawn', async () => {
+    const auth = { ...cli, borrow: { env: ['GITLAB_HOST'], tokenArgs: ['auth', 'token'] } }
+    expect(await probeAuth(auth)).toEqual(auth)
+  })
+
+  it('says nothing rather than name a rung it cannot describe', async () => {
+    expect(await probeAuth({ rung: 'sso' })).toBeUndefined()
+    expect(await probeAuth({ rung: 7 })).toBeUndefined()
+    expect(await probeAuth('cli')).toBeUndefined()
+    expect(await probeAuth(undefined)).toBeUndefined()
+  })
+
+  it('drops a borrowed login whose probe could not be run', async () => {
+    // The rung promises there is a command to ask who you are. Offering a
+    // sign-in backed by nothing runnable is worse than offering none.
+    expect(await probeAuth({ rung: 'cli' })).toBeUndefined()
+    expect(await probeAuth({ rung: 'cli', probe: { command: '   ' } })).toBeUndefined()
+    expect(await probeAuth({ rung: 'cli', probe: 'glab auth status' })).toBeUndefined()
+  })
+
+  it('refuses a probe command that is a path or carries shell syntax', async () => {
+    // The host resolves a bare name on PATH and runs it without a shell, so
+    // anything else was either a mistake or an attempt to run something else.
+    for (const command of ['/usr/bin/glab', './glab', '../glab', 'glab; rm -rf /', 'glab && x']) {
+      expect(await probeAuth({ rung: 'cli', probe: { command } })).toBeUndefined()
+    }
+  })
+
+  it('refuses probe arguments that are not all strings', async () => {
+    const stringy = { rung: 'cli', probe: { command: 'glab', args: 'status' } }
+    const mixed = { rung: 'cli', probe: { command: 'glab', args: ['auth', 7] } }
+    expect(await probeAuth(stringy)).toBeUndefined()
+    expect(await probeAuth(mixed)).toBeUndefined()
+  })
+
+  it('keeps a key rung whose probe was unusable, minus the probe', async () => {
+    // Only `cli` promises a runnable probe; a key rung still knows what it needs.
+    const keyed = { rung: 'key', keys: ['apiToken'], probe: { command: '/bin/x' } }
+    expect(await probeAuth(keyed)).toEqual({ rung: 'key', keys: ['apiToken'] })
+  })
+})
+
+describe('what a probed action takes', () => {
+  const probeInputs = async (inputs: unknown) => {
+    const { probeSdkConnector } = await importProbe()
+    respond(manifest({ actions: [{ type: 'post', label: 'Post', inputs }] }))
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
+    if (!result.ok) throw new Error(result.error)
+    return result.manifest.actions[0].inputs
+  }
+
+  it('carries the arguments a step will ask for', async () => {
+    const inputs = [{ key: 'text', label: 'Text', type: 'string', required: true }]
+    expect(await probeInputs(inputs)).toEqual(inputs)
+  })
+
+  it('carries a select whole, choices and options set alike', async () => {
+    const inputs = [
+      {
+        key: 'reason',
+        label: 'Reason',
+        type: 'select',
+        required: false,
+        options: [{ value: 'fixed' }, { value: 'wontfix', label: 'Will not fix' }],
+        loadOptions: 'reasons'
+      }
+    ]
+    expect(await probeInputs(inputs)).toEqual(inputs)
+  })
+
+  it('fills in what a terse connector left out', async () => {
+    expect(await probeInputs([{ key: 'text' }])).toEqual([
+      { key: 'text', label: 'text', type: 'string', required: false }
+    ])
+  })
+
+  it('drops an argument with no key, and a choice that selects nothing', async () => {
+    expect(await probeInputs([{ label: 'Nameless' }, 'text', []])).toEqual([])
+    const options = [{ label: 'Empty' }, 'high', { value: 'ok' }]
+    expect((await probeInputs([{ key: 'v', options }]))?.[0].options).toEqual([{ value: 'ok' }])
+    expect((await probeInputs([{ key: 'v', options: 'high,low' }]))?.[0].options).toBeUndefined()
+  })
+})
