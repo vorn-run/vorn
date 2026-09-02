@@ -180,6 +180,19 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
     if (!declared && loose.postReceive !== undefined) {
       throw new Error(`Action ${action.type} has postReceive but no request for it to reshape`)
     }
+    for (const input of action.inputs ?? []) {
+      // A field pointing at a set nobody serves draws an empty picker in the
+      // app, which reads as "this connection has none" rather than as a typo.
+      if (
+        input.loadOptions !== undefined &&
+        definition.options?.[input.loadOptions] === undefined
+      ) {
+        throw new Error(
+          `Action ${action.type} argument "${input.key}" loads options from ` +
+            `"${input.loadOptions}", which the connector does not serve`
+        )
+      }
+    }
   }
 
   assertUnique(

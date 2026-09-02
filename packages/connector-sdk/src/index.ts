@@ -3,7 +3,7 @@ export { checkConnector, formatFindings } from './check'
 export type { CheckFinding, CheckOptions } from './check'
 export { pollWithDedupe } from './dedupe'
 export { normalizeItem, normalizeItems } from './normalize'
-export { runPoll, drainPoll, runAction, MAX_POLL_PAGES } from './runtime'
+export { runPoll, drainPoll, runAction, runOptions, MAX_POLL_PAGES } from './runtime'
 export type { PollPage, RunPollOptions, RunActionOptions } from './runtime'
 export { applyPostReceive, valueAt } from './post-receive'
 export {
@@ -22,6 +22,7 @@ export {
   connectorManifest,
   pollToolName,
   MANIFEST_TOOL,
+  OPTIONS_TOOL,
   PREFLIGHT_TOOL
 } from './setup'
 export type { ConnectionSetup, ConnectorManifest } from './setup'
@@ -59,6 +60,8 @@ export type {
   DedupeStrategy,
   FetchContext,
   NormalizedItem,
+  OptionsContext,
+  OptionsLoader,
   PollContext,
   PollOutcome,
   PreflightResult,

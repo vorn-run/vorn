@@ -2,8 +2,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z, type ZodTypeAny } from 'zod'
 import { resolveConfig } from './define'
-import { runAction, runPoll } from './runtime'
-import { MANIFEST_TOOL, PREFLIGHT_TOOL, connectorManifest, pollToolName } from './setup'
+import { runAction, runOptions, runPoll } from './runtime'
+import {
+  MANIFEST_TOOL,
+  OPTIONS_TOOL,
+  PREFLIGHT_TOOL,
+  connectorManifest,
+  pollToolName
+} from './setup'
 import type { ActionInputField, ActionOutputField, Connector, ConnectorConfig } from './types'
 
 function json(value: Record<string, unknown>): {
@@ -29,12 +35,36 @@ function failure(error: unknown): {
   }
 }
 
+/**
+ * What the tool schema says a field is, in the words a caller reads.
+ *
+ * The manifest and the served schema describe the same `ActionInputField`, so
+ * they are generated from it together rather than drifting into two accounts
+ * of the same argument.
+ */
+function describeInput(input: ActionInputField): string {
+  const base = input.description ?? input.label
+  if (input.loadOptions !== undefined) {
+    return `${base}. Choices come from this connector's "${input.loadOptions}" list.`
+  }
+  if (input.type === 'json') return `${base}. Takes JSON.`
+  return base
+}
+
 function inputShape(inputs: ActionInputField[]): Record<string, ZodTypeAny> {
   const shape: Record<string, ZodTypeAny> = {}
   for (const input of inputs) {
+    const choices = (input.options ?? [])
+      .map((option) => option.value)
+      .filter((value) => typeof value === 'string' && value !== '')
     // Vorn renders action arguments from templates, so every value arrives as
-    // a string; the declared type is applied by `runAction` instead.
-    const base = z.string().describe(input.description ?? input.label)
+    // a string; the declared type is applied by `runAction` instead. Fixed
+    // choices are still stated, because a caller that knows them draws a
+    // picker instead of a text box.
+    const base =
+      choices.length > 0
+        ? z.enum(choices as [string, ...string[]]).describe(describeInput(input))
+        : z.string().describe(describeInput(input))
     shape[input.key] = input.required ? base : base.optional()
   }
   return shape
@@ -128,6 +158,38 @@ export function createConnectorServer(
             ok: false,
             message: error instanceof Error ? error.message : String(error)
           })
+        }
+      }
+    )
+  }
+
+  // Registered only when the connector serves a set, so its absence means
+  // "nothing here loads its choices" rather than "the list came back empty".
+  const optionSets = Object.keys(connector.options ?? {})
+  if (optionSets.length > 0) {
+    server.registerTool(
+      OPTIONS_TOOL,
+      {
+        description: `List what one of ${connector.name}'s fields can be set to`,
+        inputSchema: {
+          name: z.enum(optionSets as [string, ...string[]]).describe('Which options set to list')
+        },
+        outputSchema: z.looseObject({
+          options: z
+            .array(z.looseObject({ value: z.string(), label: z.string().optional() }))
+            .describe('The choices, each a value to send and words to show')
+        })
+      },
+      async (args) => {
+        try {
+          return json({
+            options: await runOptions(connector, args.name, {
+              config: config(),
+              ...(options.now && { now: options.now })
+            })
+          })
+        } catch (error) {
+          return failure(error)
         }
       }
     )

@@ -23,6 +23,12 @@ export const MANIFEST_TOOL = 'vorn_connector_manifest'
  */
 export const PREFLIGHT_TOOL = 'vorn_connector_preflight'
 
+/**
+ * Tool that lists the choices for one dynamic field. Present only when the
+ * connector serves an options set, for the same reason preflight is.
+ */
+export const OPTIONS_TOOL = 'vorn_connector_options'
+
 export interface ConnectionSetup {
   connectorId: string
   triggerType: string

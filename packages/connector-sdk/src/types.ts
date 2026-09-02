@@ -390,6 +390,24 @@ export interface ConnectorAuth {
   keys?: string[]
 }
 
+/** What an options set is given to work out its choices. */
+export interface OptionsContext {
+  config: ConnectorConfig
+  now(): string
+  /** Fetch with the SDK's retry and backoff applied. Listing choices is a read. */
+  fetch: typeof fetch
+}
+
+/**
+ * Answers the question "what can this field be?" against a live connection.
+ *
+ * A bare string is taken as a choice that shows itself; return the object form
+ * when the value a step should send and the words a person should read differ.
+ */
+export type OptionsLoader = (
+  context: OptionsContext
+) => Promise<Array<ActionInputOption | string>> | Array<ActionInputOption | string>
+
 export interface ConnectorDefinition {
   /** Stable connector id, e.g. `azure-devops`. */
   id: string
@@ -398,6 +416,12 @@ export interface ConnectorDefinition {
   description?: string
   icon?: ConnectorIcon
   config?: ConnectorConfigField[]
+  /**
+   * Named sets of choices an input can point at with `loadOptions`, for fields
+   * whose values only exist against a live connection — the channels in a
+   * workspace, the projects in an account.
+   */
+  options?: Record<string, OptionsLoader>
   /**
    * How this connector signs in. Absent means the app cannot say, which reads
    * as "a key, probably" — declare it rather than leave that to be guessed.

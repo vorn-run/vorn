@@ -2,7 +2,13 @@ import { pollWithDedupe } from './dedupe'
 import { normalizeItems } from './normalize'
 import { executeRequest } from './request'
 import { resilientFetch, type RetryPolicy } from './resilience'
-import type { Connector, ConnectorConfig, NormalizedItem, PollContext } from './types'
+import type {
+  ActionInputOption,
+  Connector,
+  ConnectorConfig,
+  NormalizedItem,
+  PollContext
+} from './types'
 
 export interface PollPage {
   items: NormalizedItem[]
@@ -114,6 +120,41 @@ export interface RunActionOptions {
 
 /** Methods that change nothing, so repeating one cannot do a thing twice. */
 const SAFE_METHODS = new Set(['GET', 'HEAD'])
+
+/**
+ * Ask a connector what one of its dynamic fields can be.
+ *
+ * Listing choices only reads, so it retries like a poll does. A bare string is
+ * taken as a choice that shows itself, which is the common case.
+ */
+export async function runOptions(
+  connector: Connector,
+  name: string,
+  options: RunActionOptions = {}
+): Promise<ActionInputOption[]> {
+  const loader = connector.options?.[name]
+  if (!loader) {
+    throw new Error(`Connector ${connector.id} serves no options set "${name}"`)
+  }
+
+  const loaded = await loader({
+    config: options.config ?? {},
+    now: options.now ?? (() => new Date().toISOString()),
+    fetch: resilientFetch({
+      fetchImpl: options.fetchImpl ?? globalThis.fetch,
+      retryable: true,
+      ...(options.retry !== undefined && { retry: options.retry }),
+      ...(options.sleep !== undefined && { sleep: options.sleep })
+    })
+  })
+
+  if (!Array.isArray(loaded)) {
+    throw new Error(`Options set "${name}" did not return an array`)
+  }
+  return loaded.map((entry) =>
+    typeof entry === 'string' ? { value: entry } : { ...entry, value: String(entry.value) }
+  )
+}
 
 function coerceArg(value: unknown, type: string | undefined): unknown {
   if (typeof value !== 'string') return value
