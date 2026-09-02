@@ -265,6 +265,43 @@ trigger and they are replayed through the real dedupe pipeline, so a connector
 can be checked before anyone has credentials for it; pass `--live` to poll the
 real source instead.
 
+`--mock` is the full gate, and the one to run in CI. It answers every HTTP
+request from routes instead of the network, runs each action on its own
+declared arguments, and asks the questions `pack` asks about the package —
+install-time scripts, and anything that would still need a registry at launch:
+
+```console
+$ npx vorn-connector check ./dist/index.js --mock --receipt verified.json
+Verified manifest, auth, secrets, actions, dedupe, no-lifecycle-scripts, keywords, no-runtime-deps, mock — wrote verified.json
+```
+
+`--receipt <file>` writes what was verified, for a catalog to carry:
+
+```json
+{ "schema": 1, "version": "1.2.0", "checkedAt": "…", "checks": ["manifest", "…"] }
+```
+
+A check that could not run is left out rather than listed as passed, and a
+connector with any error gets no receipt at all.
+
+`--live` additionally asks `preflight` whether the connector can sign in, then
+runs each action that declared `idempotent: true`. Actions that did not are
+never called: a smoke test must leave nothing behind.
+
+In a unit test the same stub is available directly, so an author can assert on
+what their connector sent:
+
+```ts
+const { result, calls } = await harness.withMockHttp(
+  [{ url: '/api/messages', method: 'POST', body: { id: 'm-1' } }],
+  () => harness.execute('post', { text: 'hi' })
+)
+expect(calls[0].url).toBe('https://acme.test/api/messages')
+```
+
+A request no route matches is refused rather than served, so a test says which
+call escaped instead of quietly reaching a real service.
+
 ```ts
 {
   type: 'newTicket',
@@ -384,5 +421,6 @@ vorn-connector serve <module>             Serve on stdio (what Vorn runs)
 declared config from your shell environment — the fastest way to confirm
 credentials and field mapping before wiring anything up.
 
-`check` runs against declared `sample` data by default and takes `--live` to
-poll the real source instead.
+`check` runs against declared `sample` data by default. `--mock` serves its
+HTTP and runs every action, `--live` polls the real source and runs the actions
+that are safe to repeat, and `--receipt <file>` writes down what was verified.
