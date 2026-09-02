@@ -22,8 +22,12 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import os from 'os'
 import type {
+  ConnectorAuthRung,
+  ConnectorCatalogAction,
+  ConnectorCatalogActionInput,
   ConnectorCatalogEntry,
   ConnectorCatalogItem,
+  ConnectorCatalogVerification,
   McpServerCatalogEntry,
   WorkflowTemplate
 } from '@vornrun/shared/types'
@@ -49,6 +53,9 @@ const MAX_AGE_MS = 6 * 60 * 60 * 1000
 const FETCH_TIMEOUT_MS = 5000
 
 const CACHE_PATH = join(os.homedir(), '.vorn', 'connector-catalog.json')
+
+/** Rungs this build knows how to describe; anything else is dropped on read. */
+const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
 
 /**
  * Enough to show a connector list on a first run with no network.
@@ -261,7 +268,11 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
   }
 
   // A conditional spread cannot remove a key the raw entry already carries.
-  const { packUrl, sha256, ...rest } = entry
+  const { packUrl, sha256, authRung, verified, ...rest } = entry
+  const rung = AUTH_RUNGS.includes(authRung as ConnectorAuthRung)
+    ? (authRung as ConnectorAuthRung)
+    : undefined
+  const receipt = normalizeVerification(verified)
 
   return {
     ...rest,
@@ -272,11 +283,57 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
     capabilities: list(entry.capabilities) as ConnectorCatalogEntry['capabilities'],
     ...(typeof packUrl === 'string' && packUrl !== '' && { packUrl }),
     ...(typeof sha256 === 'string' && sha256 !== '' && { sha256 }),
+    ...(rung !== undefined && { authRung: rung }),
+    ...(receipt !== undefined && { verified: receipt }),
     ...(entry.triggers !== undefined && { triggers: list(entry.triggers) }),
-    ...(entry.actions !== undefined && { actions: list(entry.actions) }),
+    ...(entry.actions !== undefined && { actions: normalizeActions(entry.actions) }),
     ...(entry.env !== undefined && { env: list(entry.env) }),
     ...(entry.keywords !== undefined && { keywords: list(entry.keywords) })
   } as ConnectorCatalogEntry
+}
+
+/**
+ * A receipt is shown as a claim about this connector, so a half-written one is
+ * worse than none: it would put a verified mark on a check nobody ran.
+ */
+function normalizeVerification(raw: unknown): ConnectorCatalogVerification | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const value = raw as Record<string, unknown>
+  const version = typeof value.version === 'string' ? value.version : ''
+  const checkedAt = typeof value.checkedAt === 'string' ? value.checkedAt : ''
+  if (version === '' || checkedAt === '') return undefined
+  const checks = list<unknown>(value.checks).filter(
+    (check): check is string => typeof check === 'string'
+  )
+  return { version, checkedAt, checks }
+}
+
+/**
+ * Actions carry the arguments a step will ask for, and the library maps over
+ * them before anything is installed — so an entry whose `inputs` is not a list
+ * of well-formed fields is repaired here rather than found at render time.
+ */
+function normalizeActions(raw: unknown): ConnectorCatalogAction[] {
+  return list<unknown>(raw)
+    .filter((action): action is Record<string, unknown> => !!action && typeof action === 'object')
+    .map((action) => ({
+      ...action,
+      type: typeof action.type === 'string' ? action.type : '',
+      label: typeof action.label === 'string' ? action.label : '',
+      ...(action.inputs !== undefined && { inputs: normalizeActionInputs(action.inputs) })
+    })) as ConnectorCatalogAction[]
+}
+
+function normalizeActionInputs(raw: unknown): ConnectorCatalogActionInput[] {
+  return list<unknown>(raw)
+    .filter((input): input is Record<string, unknown> => !!input && typeof input === 'object')
+    .filter((input) => typeof input.key === 'string' && input.key !== '')
+    .map((input) => ({
+      key: input.key as string,
+      label: typeof input.label === 'string' ? input.label : (input.key as string),
+      type: typeof input.type === 'string' ? input.type : 'string',
+      required: input.required === true
+    }))
 }
 
 function list<T>(value: unknown): T[] {

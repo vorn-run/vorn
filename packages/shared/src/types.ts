@@ -1753,6 +1753,38 @@ export interface ConnectorCatalogSummary {
   description?: string
 }
 
+/** An argument an action takes, carried so a step can be offered before install. */
+export interface ConnectorCatalogActionInput {
+  key: string
+  label: string
+  type: string
+  required: boolean
+}
+
+/**
+ * An action, described well enough to become a step in the library before the
+ * connector it belongs to is on disk.
+ */
+export interface ConnectorCatalogAction extends ConnectorCatalogSummary {
+  inputs?: ConnectorCatalogActionInput[]
+}
+
+/**
+ * What the factory checked, and when.
+ *
+ * "Verified" is a receipt rather than a word: the checks that ran, against
+ * which version, on which date. A catalog that says nothing here is not
+ * claiming a connector is bad — only that nothing vouched for it.
+ */
+export interface ConnectorCatalogVerification {
+  /** The version the checks ran against, which may trail the published one. */
+  version: string
+  /** ISO timestamp of the last run. */
+  checkedAt: string
+  /** Names of the checks that passed, e.g. `manifest`, `no-runtime-deps`. */
+  checks: string[]
+}
+
 export interface ConnectorCatalogEntry {
   id: string
   name: string
@@ -1768,6 +1800,14 @@ export interface ConnectorCatalogEntry {
   capabilities: Array<'tasks' | 'triggers' | 'actions'>
   /** One line on how it authenticates, shown before anyone commits to install. */
   auth?: string
+  /**
+   * Which rung that one line describes, so the list can be filtered by what
+   * setting a connector up will actually ask of you. Absent on an older
+   * catalog, which reads as unknown rather than as none.
+   */
+  authRung?: ConnectorAuthRung
+  /** What the factory checked, when a connector has been through it. */
+  verified?: ConnectorCatalogVerification
   icon?: SdkConnectorIcon
   /** Groups the connector in the list once there are too many to scan. */
   category?: string
@@ -1780,7 +1820,7 @@ export interface ConnectorCatalogEntry {
    * anything is downloaded. Absent on an older catalog.
    */
   triggers?: ConnectorCatalogSummary[]
-  actions?: ConnectorCatalogSummary[]
+  actions?: ConnectorCatalogAction[]
   env?: Array<{ name: string; required: boolean; description?: string }>
 }
 
