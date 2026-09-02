@@ -207,7 +207,14 @@ function StepNode({ data, id }: NodeProps) {
   if (!node) return null
 
   return (
-    <div className="relative group">
+    // The card's own width, stated rather than inherited from whatever is
+    // inside. A shrink-to-fit wrapper takes the width of its widest child, so
+    // any sibling — a handle, a toolbar, a glyph — that fell into flow would
+    // widen it, and a handle sitting at `left: 50%` of that wider box would
+    // pull both the card and its port off the column. A trigger has one handle
+    // and every other step has two, so the two would drift apart by half the
+    // difference. Fixed here, the port is 140 for every step node.
+    <div className="relative group w-[280px]">
       {node.type !== 'trigger' && (
         <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
       )}
@@ -259,7 +266,9 @@ function LoopNode({ data, id }: NodeProps) {
   const bodyAnchorAfter = lastBodyId ?? node.id
 
   return (
-    <div className="relative group">
+    // Stated for the same reason a step's is: the enclosure's own width, so a
+    // sibling can never move the rail or the ports centred on it.
+    <div className="relative group w-[312px]">
       <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
       <NodeHoverToolbar nodeId={node.id} />
       <div
