@@ -62,7 +62,7 @@ import type {
   ProjectConfig,
   WorktreeRetentionConfig
 } from '@vornrun/shared/types'
-import { DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
+import { connectionConnectorId, DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
 import { detectRepoSlug } from './git-utils'
 import {
@@ -358,7 +358,8 @@ function upsertExternalItem(
     order: maxOrder + 1,
     createdAt: now,
     updatedAt: now,
-    sourceConnectorId: conn.connectorId,
+    // The connector's own id, not the `mcp` every packaged one is stored under.
+    sourceConnectorId: connectionConnectorId(conn),
     sourceExternalId: item.externalId,
     ...(item.externalUrl && { sourceExternalUrl: item.externalUrl })
   })

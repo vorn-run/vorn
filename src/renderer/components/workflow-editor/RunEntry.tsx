@@ -17,7 +17,7 @@ import { Tooltip } from '../Tooltip'
 import { approveWorkflowGate, rejectWorkflowGate } from '../../lib/workflow-execution'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
 import { ConnectorIcon } from '../ConnectorIcon'
-import { useConnections } from '../../lib/use-connections'
+import { connectorLookFor, useConnections, type ConnectorLook } from '../../lib/use-connections'
 import {
   NODE_TYPE_ICON,
   TASK_CHIP,
@@ -66,13 +66,20 @@ export function NodeLabel({ nodeId, nodes }: { nodeId: string; nodes: WorkflowNo
  */
 function StepIcon({
   node,
-  connectorId
+  look
 }: {
   node: WorkflowNode | undefined
-  connectorId: string | undefined
+  look: ConnectorLook | undefined
 }) {
-  if (connectorId) {
-    return <ConnectorIcon connectorId={connectorId} size={12} className="text-gray-400 shrink-0" />
+  if (look) {
+    return (
+      <ConnectorIcon
+        connectorId={look.connectorId}
+        icon={look.icon}
+        size={12}
+        className="text-gray-400 shrink-0"
+      />
+    )
   }
   const visual = node ? NODE_TYPE_ICON[node.type] : undefined
   if (!visual) return null
@@ -220,11 +227,8 @@ export function RunStepsList({
               resumeUseWorktree
             )
 
-          const connectionId = nodeConnectionId(node)
-          const connectorId = connectionId
-            ? connections.find((c) => c.id === connectionId)?.connectorId
-            : undefined
-          const meta = stepMeta(node, connectorId)
+          const look = connectorLookFor(connections, nodeConnectionId(node))
+          const meta = stepMeta(node, look?.connectorId)
           // What the step said beats what it was told to do. A step with no
           // output yet (a trigger, a pending step) still shows its configured
           // body, so a card is never blank.
@@ -260,7 +264,7 @@ export function RunStepsList({
                   className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
                 >
                   <StatusDot status={ns.status} />
-                  <StepIcon node={node} connectorId={connectorId} />
+                  <StepIcon node={node} look={look} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] text-gray-500 font-mono">#{i + 1}</span>

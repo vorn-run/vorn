@@ -3,6 +3,7 @@ import { useAppStore } from '../stores'
 import { TaskStatusFilter } from '../stores/types'
 import { TaskViewMode } from '../../shared/types'
 import { TASK_STATUS_LABEL, TASK_STATUS_DOT, TASK_STATUS_ORDER } from '../lib/task-status'
+import { glyphForConnectorId, useConnections } from '../lib/use-connections'
 import { SlidersHorizontal, Archive } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { OptionRow } from './OptionRow'
@@ -61,6 +62,8 @@ export function TaskToolbar() {
   const config = useAppStore((s) => s.config)
   const setConfig = useAppStore((s) => s.setConfig)
   const taskViewMode = (config?.defaults?.taskViewMode ?? 'list') as TaskViewMode
+  // Subscribed so the filter glyphs redraw once the installed packs arrive.
+  useConnections()
 
   // Detect which connectors have tasks
   const connectorIds = new Set(
@@ -199,6 +202,7 @@ export function TaskToolbar() {
                   )}
                   <ConnectorIcon
                     connectorId={cid}
+                    icon={glyphForConnectorId(cid)}
                     size={10}
                     className={taskSourceFilter === cid ? 'text-white' : 'text-ink-faint'}
                   />

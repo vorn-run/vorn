@@ -86,16 +86,19 @@ export function ConnectorIcon({
 
 export function SourceBadge({
   connectorId,
+  icon,
   url,
   label
 }: {
   connectorId: string
+  /** A packaged connector's own glyph, resolved from the pack it was installed from. */
+  icon?: SdkConnectorIcon
   url?: string
   label?: string
 }) {
   const inner = (
     <>
-      <ConnectorIcon connectorId={connectorId} size={11} className="text-gray-500" />
+      <ConnectorIcon connectorId={connectorId} icon={icon} size={11} className="text-gray-500" />
       {label && <span className="text-[10px] text-gray-500">{label}</span>}
       {url && (
         <ExternalLink

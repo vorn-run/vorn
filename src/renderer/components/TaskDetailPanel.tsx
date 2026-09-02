@@ -21,6 +21,7 @@ import { StatusPicker } from './StatusPicker'
 import { ProjectPicker } from './ProjectPicker'
 import { toast } from './Toast'
 import { isWeb } from '../lib/platform'
+import { glyphForConnectorId } from '../lib/use-connections'
 import {
   X,
   Play,
@@ -779,6 +780,7 @@ export function TaskDetailPanel() {
             >
               <ConnectorIcon
                 connectorId={task.sourceConnectorId}
+                icon={glyphForConnectorId(task.sourceConnectorId)}
                 size={13}
                 className="text-ink-secondary"
               />

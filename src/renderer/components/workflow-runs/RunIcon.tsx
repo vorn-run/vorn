@@ -34,6 +34,7 @@ export function RunIcon({
     return (
       <ConnectorIcon
         connectorId={presentation.connectorId}
+        icon={presentation.connectorIcon}
         size={size}
         className={className ?? 'text-gray-400'}
       />

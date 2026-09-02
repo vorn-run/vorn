@@ -9,6 +9,7 @@ import {
   type RunWorkflowRef
 } from '../../lib/run-presentation'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
+import { useConnectorLook } from '../../lib/use-connections'
 import { RunIcon } from './RunIcon'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
 
@@ -52,7 +53,8 @@ function RunListRowImpl({
   onOpenWorkflow
 }: Props) {
   const nodes = workflow?.nodes ?? []
-  const presentation = describeRun(run, workflow)
+  const look = useConnectorLook(run.connectorItem?.connectionId)
+  const presentation = describeRun(run, workflow, look)
   const stages = runStages(run, nodes)
   const outcome = describeOutcome(run, nodes)
   const dotStatus = run.nodeStates.some((n) => n.status === 'waiting') ? 'waiting' : run.status

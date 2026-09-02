@@ -3,10 +3,12 @@ import type {
   ApprovalConfig,
   NodeExecutionState,
   NodeExecutionStatus,
+  SdkConnectorIcon,
   TriggerConfig,
   WorkflowExecution,
   WorkflowNode
 } from '../../shared/types'
+import type { ConnectorLook } from './use-connections'
 import { WORKFLOW_STATUS_DOT, type WorkflowStatusKey, type RunOutcomeTone } from './workflow-status'
 import type { RunBucket } from '../stores/types'
 import { formatRunDuration } from './format-time'
@@ -79,6 +81,8 @@ export interface RunPresentation {
   iconColor?: string
   /** Set for connector-triggered runs so the row can draw the brand glyph. */
   connectorId?: string
+  /** A packaged connector's own glyph, which the built-in lookup cannot supply. */
+  connectorIcon?: SdkConnectorIcon
   /** Used only when the workflow is gone or never picked an icon. */
   fallbackIcon: LucideIcon
 }
@@ -122,18 +126,20 @@ function sourceOf(
  * quietly stop matching the day GitHub ships as a package and every run would
  * read `mcp 123`.
  */
-function connectorTitle(execution: WorkflowExecution): string | undefined {
+function connectorTitle(execution: WorkflowExecution, connectorId: string): string | undefined {
   const item = execution.connectorItem
   if (!item) return undefined
   const url = item.externalUrl
   if (url?.includes('/pull/')) return `PR #${item.externalId}`
   if (url?.includes('/issues/')) return `Issue #${item.externalId}`
-  return item.externalId ? `${item.connectorId} ${item.externalId}` : undefined
+  return item.externalId ? `${connectorId} ${item.externalId}` : undefined
 }
 
 export function describeRun(
   execution: WorkflowExecution,
-  workflow?: RunWorkflowRef
+  workflow?: RunWorkflowRef,
+  /** Resolved from the run's connection, because the item only knows it as `mcp`. */
+  look?: ConnectorLook
 ): RunPresentation {
   const nodes = workflow?.nodes ?? []
   const triggerType = triggerTypeOf(nodes)
@@ -144,15 +150,17 @@ export function describeRun(
   const iconColor = workflow?.iconColor
 
   if (item) {
-    const title = connectorTitle(execution) ?? item.title
+    const connectorId = look?.connectorId ?? item.connectorId
+    const title = connectorTitle(execution, connectorId) ?? item.title
     return {
       title,
       subtitle: item.title !== title ? item.title : name,
       source: 'connector',
-      sourceLabel: item.connectorId,
+      sourceLabel: connectorId,
       iconName,
       iconColor,
-      connectorId: item.connectorId,
+      connectorId,
+      connectorIcon: look?.icon,
       fallbackIcon: SOURCE_ICONS.connector
     }
   }

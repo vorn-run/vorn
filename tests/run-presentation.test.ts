@@ -116,6 +116,27 @@ describe('describeRun', () => {
     expect(p.connectorId).toBe('linear')
   })
 
+  // A packaged connector's item only knows itself as `mcp`; the connection it
+  // came from is what says which connector really ran and what mark to draw.
+  it('takes the connector id and glyph from the connection when one is resolved', () => {
+    const icon = { viewBox: '0 0 24 24', paths: ['M2 2h9v9z'] }
+    const p = describeRun(
+      run({ connectorItem: githubItem({ connectorId: 'mcp', externalId: '7' }) }),
+      undefined,
+      { connectorId: 'packdemo', icon }
+    )
+    expect(p.connectorId).toBe('packdemo')
+    expect(p.sourceLabel).toBe('packdemo')
+    expect(p.connectorIcon).toBe(icon)
+    expect(p.title).toBe('packdemo 7')
+  })
+
+  it('keeps the item id when no connection resolves, so a deleted one still reads', () => {
+    const p = describeRun(run({ connectorItem: githubItem({ externalId: '7' }) }))
+    expect(p.connectorId).toBe('github')
+    expect(p.connectorIcon).toBeUndefined()
+  })
+
   it('labels a task-triggered run with the workflow name and a short task subtitle', () => {
     const p = describeRun(run({ triggerTaskId: 'fa369a1234' }), {
       name: 'Apply changes',

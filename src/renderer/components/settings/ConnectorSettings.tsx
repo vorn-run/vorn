@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { buildConnectorListings, type ConnectorListing } from '../../lib/connector-browse'
+import { glyphForConnectorId } from '../../lib/use-connections'
 import { SDK_FILTER_KEYS } from '../../../shared/types'
 import { ConnectorDirectory } from './ConnectorDirectory'
 import { ConnectorDetail } from './ConnectorDetail'
@@ -574,7 +575,12 @@ function AddConnectionForm({
   return (
     <div className="mb-6 px-4 py-3 bg-white/[0.03] border border-white/[0.08] rounded-sm">
       <div className="flex items-center gap-2 mb-3">
-        <ConnectorIcon connectorId={connector.id} size={14} className="text-gray-400" />
+        <ConnectorIcon
+          connectorId={connector.id}
+          icon={glyphForConnectorId(connector.id)}
+          size={14}
+          className="text-gray-400"
+        />
         <h3 className="text-sm font-medium text-gray-200">Connect {connector.name}</h3>
       </div>
 
