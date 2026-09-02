@@ -69,7 +69,7 @@ function renderCanvas(nodes: WorkflowNode[]) {
 
 /** The wrapper each step draws inside, which is what carries the ports. */
 function wrappers(container: HTMLElement): HTMLElement[] {
-  return [...container.querySelectorAll('.react-flow__node')].map(
+  return [...container.querySelectorAll('.react-flow__node-step, .react-flow__node-loop')].map(
     (n) => n.firstElementChild as HTMLElement
   )
 }

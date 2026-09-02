@@ -173,8 +173,8 @@ describe('a laid-out chain and the drag lattice', () => {
   it('writes every coordinate on the grid a drag snaps to', () => {
     const { positions } = layoutPositions(chain, chainEdges)
     for (const { x, y } of positions.values()) {
-      expect(x % 8).toBe(0)
-      expect(y % 8).toBe(0)
+      expect(Math.abs(x % 8)).toBe(0)
+      expect(Math.abs(y % 8)).toBe(0)
     }
   })
 
