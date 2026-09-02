@@ -280,6 +280,29 @@ export function buildConnectorListings(
   })
 }
 
+/** A heading and the connectors under it, for a list too long to scan flat. */
+export interface ListingSection {
+  category: string
+  listings: ConnectorListing[]
+}
+
+/**
+ * Cut the list into the sections it already sorts itself into.
+ *
+ * Categories appear in the order their first connector does, so the ordering
+ * the list was sorted by — what you can use right now, then by name — survives
+ * being grouped rather than being overruled by an alphabet.
+ */
+export function groupListingsByCategory(listings: ConnectorListing[]): ListingSection[] {
+  const sections = new Map<string, ConnectorListing[]>()
+  for (const listing of listings) {
+    const existing = sections.get(listing.category)
+    if (existing) existing.push(listing)
+    else sections.set(listing.category, [listing])
+  }
+  return [...sections].map(([category, entries]) => ({ category, listings: entries }))
+}
+
 /** A connector someone actually uses, with the connections they made to it. */
 export interface ConnectionGroup {
   connectorId: string

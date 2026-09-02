@@ -267,3 +267,116 @@ describe('the connector detail panel', () => {
     expect(getByText(/Nothing is on disk until you install it/)).toBeInTheDocument()
   })
 })
+
+describe('a list too long to scan flat', () => {
+  const SLACK: ConnectorCatalogItem = {
+    ...KUSTO,
+    id: 'slack',
+    name: 'Slack',
+    description: 'Messages and channels.',
+    packageName: '@vornrun/connector-slack',
+    category: 'Chat',
+    authRung: 'key',
+    verified: {
+      schema: 1,
+      version: '0.6.0',
+      checkedAt: '2026-09-02T00:00:00Z',
+      checks: ['manifest', 'no-runtime-deps']
+    },
+    launch: { command: 'npx', args: ['-y', '@vornrun/connector-slack'] }
+  }
+  const GITLAB: ConnectorCatalogItem = {
+    ...ADO,
+    id: 'gitlab',
+    name: 'GitLab',
+    packageName: '@vornrun/connector-gitlab',
+    category: 'Development',
+    authRung: 'cli',
+    launch: { command: 'npx', args: ['-y', '@vornrun/connector-gitlab'] }
+  }
+
+  const draw = () =>
+    render(
+      <ConnectorDirectory
+        listings={buildConnectorListings([], [ADO, SLACK, GITLAB], [])}
+        builtIns={[]}
+        onSelect={vi.fn()}
+        onAdd={vi.fn()}
+      />
+    )
+
+  it('heads each category once, in the order the list already sorted them', () => {
+    const { container } = draw()
+    const headings = [...container.querySelectorAll('h3')].map((h) => h.textContent)
+    expect(headings).toEqual(['Development', 'Chat'])
+  })
+
+  it('says on the row how a connector signs in, and that it was checked', () => {
+    const { getByText, getAllByText } = draw()
+    expect(getByText('CLI login')).toBeInTheDocument()
+    expect(getByText('key')).toBeInTheDocument()
+    expect(getAllByText('verified')).toHaveLength(1)
+  })
+
+  it('narrows to the connectors that ask the same thing of you', () => {
+    const { getByLabelText, queryByText, getByText } = draw()
+    fireEvent.change(getByLabelText('Filter by sign-in'), { target: { value: 'cli' } })
+
+    expect(getByText('GitLab')).toBeInTheDocument()
+    expect(queryByText('Slack')).not.toBeInTheDocument()
+    expect(queryByText('Azure DevOps')).not.toBeInTheDocument()
+  })
+
+  it('offers no sign-in filter when every connector answers it the same way', () => {
+    const { queryByLabelText } = render(
+      <ConnectorDirectory
+        listings={buildConnectorListings([], [ADO, KUSTO], [])}
+        builtIns={[]}
+        onSelect={vi.fn()}
+        onAdd={vi.fn()}
+      />
+    )
+    expect(queryByLabelText('Filter by sign-in')).not.toBeInTheDocument()
+  })
+})
+
+describe('a connector that signs in with nothing', () => {
+  const ECHO = {
+    id: 'echo',
+    name: 'Echo Bench',
+    version: '1.0.0',
+    path: '/packs/echo',
+    installedAt: 0,
+    bytes: 1,
+    auth: { rung: 'none' as const },
+    triggers: [],
+    actions: [{ type: 'echo', label: 'Echo' }],
+    env: []
+  }
+  const implicitConnection = {
+    id: 'implicit-1',
+    connectorId: 'mcp',
+    name: 'Echo Bench',
+    filters: { sdkConnectorId: 'echo', implicit: true },
+    syncIntervalMinutes: 5,
+    statusMapping: {},
+    createdAt: '2026-09-02T00:00:00Z'
+  }
+
+  it('asks nobody to add a connection it already made', () => {
+    const { queryByText, getByText } = render(
+      <ConnectorDirectory
+        listings={buildConnectorListings([], [], [implicitConnection as never], [ECHO])}
+        builtIns={[]}
+        onSelect={vi.fn()}
+        onAdd={vi.fn()}
+        onInstall={vi.fn()}
+      />
+    )
+
+    expect(queryByText('Add')).not.toBeInTheDocument()
+    expect(queryByText('Add another')).not.toBeInTheDocument()
+    expect(getByText('no sign-in')).toBeInTheDocument()
+    expect(getByText(/ready/)).toBeInTheDocument()
+  })
+})
