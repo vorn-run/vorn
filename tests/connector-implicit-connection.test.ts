@@ -38,21 +38,15 @@ function connection(filters: Record<string, unknown>): SourceConnection {
   } as unknown as SourceConnection
 }
 
-function deps(
-  pack: InstalledConnectorPack | undefined,
-  rows: SourceConnection[] = []
-): ImplicitConnectionDeps & {
-  create: ReturnType<typeof vi.fn>
-  remove: ReturnType<typeof vi.fn>
-  changed: ReturnType<typeof vi.fn>
-} {
+/** Typed to the hook's own signatures, so a drifting shape fails here first. */
+function deps(pack: InstalledConnectorPack | undefined, rows: SourceConnection[] = []) {
   return {
-    describe: () => pack,
-    list: () => rows,
-    create: vi.fn(),
-    remove: vi.fn(),
-    changed: vi.fn()
-  }
+    describe: (): InstalledConnectorPack | undefined => pack,
+    list: (): SourceConnection[] => rows,
+    create: vi.fn<ImplicitConnectionDeps['create']>(),
+    remove: vi.fn<ImplicitConnectionDeps['remove']>(),
+    changed: vi.fn<ImplicitConnectionDeps['changed']>()
+  } satisfies ImplicitConnectionDeps
 }
 
 describe('the connection a connector that needs no sign-in comes with', () => {
@@ -111,13 +105,13 @@ describe('the connection a connector that needs no sign-in comes with', () => {
 
   it('does nothing at all before there is anywhere to look', () => {
     const d: ImplicitConnectionDeps = {
-      describe: () => {
+      describe: (): InstalledConnectorPack | undefined => {
         throw new Error('Data directory not resolved. Call initDatabase() first.')
       },
-      list: () => [],
-      create: vi.fn(),
-      remove: vi.fn(),
-      changed: vi.fn()
+      list: (): SourceConnection[] => [],
+      create: vi.fn<ImplicitConnectionDeps['create']>(),
+      remove: vi.fn<ImplicitConnectionDeps['remove']>(),
+      changed: vi.fn<ImplicitConnectionDeps['changed']>()
     }
     expect(() => syncImplicitConnection('echo-bench', d)).not.toThrow()
   })

@@ -16,6 +16,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import {
   SDK_FILTER_KEYS,
   connectionConnectorId,
+  type SdkConnectorAuth,
   type SourceConnection
 } from '@vornrun/shared/types'
 import { dbListSourceConnections } from '../database'
@@ -82,39 +83,53 @@ export function resolveLaunch(conn: SourceConnection): { command: string; args: 
   return { command, args: parseJsonArray(conn.filters.args) }
 }
 
-/**
- * What a connector borrows from a tool that is already signed in.
- *
- * Read from the pack that will actually run, and fetched fresh on every spawn:
- * a borrowed token is never written to the connection, so rotating or signing
- * out of the tool takes effect the next time the child starts rather than
- * leaving a stale copy behind.
- */
-async function borrowedFor(conn: SourceConnection): Promise<Record<string, string>> {
-  const sdkId = String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
-  if (!sdkId) return {}
-  try {
-    return await borrowedSecrets(describePack(sdkId)?.auth)
-  } catch {
-    // No data directory yet, so nothing is installed to borrow from.
-    return {}
-  }
-}
-
-export async function buildSpawnConfig(conn: SourceConnection): Promise<{
+interface SpawnConfig {
   command: string
   args: string[]
   env: Record<string, string>
-}> {
+}
+
+/** Everything about a spawn that needs nothing asked of another tool. */
+function spawnBase(conn: SourceConnection): SpawnConfig {
   const { command, args } = resolveLaunch(conn)
   const env = parseJsonObject(conn.filters.env)
   // Decrypted secret env (pushed from main via safeStorage) overrides plain env.
   const decrypted = getDecryptedCreds(conn.id) ?? {}
   const secretEnv = parseJsonObject(decrypted.secretEnv)
-  // Borrowed lowest: a value someone entered by hand is a deliberate override
-  // of what the signed-in tool would have handed over.
-  const borrowed = await borrowedFor(conn)
-  return { command, args, env: { ...borrowed, ...env, ...secretEnv } }
+  return { command, args, env: { ...env, ...secretEnv } }
+}
+
+/**
+ * The login a packaged connector borrows, when it declared one.
+ *
+ * Answered synchronously so a connector that borrows nothing — which is every
+ * connection that predates rungs — reaches its spawn without suspending.
+ */
+function borrowFor(conn: SourceConnection): SdkConnectorAuth | undefined {
+  const sdkId = String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
+  if (!sdkId) return undefined
+  try {
+    const auth = describePack(sdkId)?.auth
+    return auth?.rung === 'cli' ? auth : undefined
+  } catch {
+    // No data directory yet, so nothing is installed to borrow from.
+    return undefined
+  }
+}
+
+/**
+ * What a connector's child is started with, including anything borrowed.
+ *
+ * A borrowed token is fetched fresh here rather than written to the connection,
+ * so signing out of the tool takes effect the next time the child starts. It
+ * sits lowest: a value someone entered by hand is a deliberate override of what
+ * the signed-in tool would have handed over.
+ */
+export async function buildSpawnConfig(conn: SourceConnection): Promise<SpawnConfig> {
+  const base = spawnBase(conn)
+  const auth = borrowFor(conn)
+  if (!auth) return base
+  return { ...base, env: { ...(await borrowedSecrets(auth)), ...base.env } }
 }
 
 export async function getOrStartClient(conn: SourceConnection): Promise<Client> {
@@ -123,6 +138,9 @@ export async function getOrStartClient(conn: SourceConnection): Promise<Client> 
   const inFlight = pending.get(conn.id)
   if (inFlight) return inFlight
 
+  // Recorded before anything can suspend, so a second caller in the same tick
+  // joins this startup rather than beginning a second one. Nothing may be
+  // awaited above this line.
   const startup = startClient(conn).finally(() => {
     pending.delete(conn.id)
   })
@@ -131,7 +149,11 @@ export async function getOrStartClient(conn: SourceConnection): Promise<Client> 
 }
 
 async function startClient(conn: SourceConnection): Promise<Client> {
-  const { command, args, env } = await buildSpawnConfig(conn)
+  // Only a connector that borrows a login waits on one: everything else is
+  // spawned in this tick, which is what keeps one child per connection when
+  // two callers arrive together. Both routes assemble through the same pair of
+  // helpers, so neither can drift from what a caller of buildSpawnConfig sees.
+  const { command, args, env } = borrowFor(conn) ? await buildSpawnConfig(conn) : spawnBase(conn)
   // Inherit PATH and friends from the parent via getSafeEnv() — same
   // sanitization the rest of the server uses for child processes — so
   // GH/Linear/NPM tokens etc. don't leak into arbitrary MCP servers
