@@ -66,7 +66,9 @@ describe('serving a connector its HTTP in-process', () => {
     }
     const harness = createConnectorHarness(connector([failing]))
     await expect(
-      harness.withMockHttp([{ url: '/api', status: 503 }], () => harness.execute('post', {}))
+      harness.withMockHttp([{ url: '/api', status: 503 }], () =>
+        harness.execute('post', { text: 'hi' })
+      )
     ).rejects.toThrow('Acme said 503')
   })
 
