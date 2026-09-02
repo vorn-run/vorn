@@ -270,6 +270,61 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
 }
 
 /**
+ * Ask the connector, against the real service, the questions only it can answer.
+ *
+ * Preflight first, because a connector that cannot sign in fails every later
+ * check for one uninteresting reason. Then each action that declared itself
+ * idempotent — and only those: a live run of `createIssue` would leave real
+ * issues behind, so a smoke test never calls one.
+ */
+async function liveFindings(connector: Connector, options: CheckOptions): Promise<CheckFinding[]> {
+  if (!options.live) return []
+  const found: CheckFinding[] = []
+
+  if (connector.preflight) {
+    try {
+      const result = await connector.preflight()
+      if (!result.ok) {
+        found.push(
+          finding(
+            'error',
+            'preflight-failed',
+            connector.id,
+            result.message ?? 'reported that it is not ready, without saying why'
+          )
+        )
+        // Nothing below can succeed if it cannot sign in, and each failure
+        // would repeat this one in a less useful sentence.
+        return found
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      found.push(finding('error', 'preflight-failed', connector.id, `threw: ${reason}`))
+      return found
+    }
+  }
+
+  for (const action of connector.actions.filter((entry) => entry.idempotent === true)) {
+    const args = Object.fromEntries(
+      (action.inputs ?? []).map((input) => [input.key, sampleArg(input)])
+    )
+    try {
+      await runAction(connector, action.type, args, {
+        config: options.config ?? {},
+        ...(options.now && { now: options.now })
+      })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      found.push(
+        finding('error', 'live-action-failed', `action ${action.type}`, `threw: ${reason}`)
+      )
+    }
+  }
+
+  return found
+}
+
+/**
  * Replay a trigger's declared `sample` through the real dedupe pipeline by
  * swapping in a fetch that serves the whole sample on every call. Serving it
  * again on the second poll is the point: a correct trigger recognizes its own
@@ -387,6 +442,7 @@ export async function checkConnector(
   found.push(...secretFindings(connector))
   found.push(...(await packageFindings(options)))
   found.push(...(await mockFindings(connector, options)))
+  found.push(...(await liveFindings(connector, options)))
 
   // Triggers share no state, so their checks run concurrently rather than
   // waiting on each other's polls.
