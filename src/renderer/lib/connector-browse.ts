@@ -1,5 +1,8 @@
 import type {
+  ConnectorAuthRung,
+  ConnectorCatalogActionInput,
   ConnectorCatalogItem,
+  ConnectorCatalogVerification,
   InstalledConnectorPack,
   McpServerCatalogEntry,
   SdkConnectorIcon,
@@ -36,6 +39,19 @@ export interface ConnectorListing {
   icon?: SdkConnectorIcon
   /** The pack on disk, when this connector has been installed as one. */
   pack?: InstalledConnectorPack
+  /**
+   * What setting this one up will ask of you. Read from the pack that is on
+   * disk before the catalog's claim about it, since the pack is what runs.
+   * Absent means unknown, which is not the same as `none`.
+   */
+  authRung?: ConnectorAuthRung
+  /** What the factory checked, when this connector has been through it. */
+  verified?: ConnectorCatalogVerification
+  /**
+   * Connected without anyone being asked to connect it — a connector that
+   * signs in with nothing is ready the moment it is installed.
+   */
+  implicitlyConnected: boolean
 }
 
 export interface BuiltInConnector {
@@ -59,7 +75,13 @@ export interface BuiltInConnector {
  */
 export interface ConnectorDetails {
   triggers: Array<{ type: string; label: string; description?: string }>
-  actions: Array<{ type: string; label: string; description?: string }>
+  /** Arguments ride along, so a step can be offered before anything is installed. */
+  actions: Array<{
+    type: string
+    label: string
+    description?: string
+    inputs?: ConnectorCatalogActionInput[]
+  }>
   settings: Array<{ name: string; required: boolean; description?: string }>
   /** Absent on a row nothing describes — an installed package with no manifest. */
   known: boolean
@@ -134,6 +156,16 @@ export function listingDetails(
 
 const UNCATEGORIZED = 'Other'
 
+/**
+ * A connection the app made for a connector that signs in with nothing.
+ *
+ * It exists so a step still binds to a connection id, and is deliberately not
+ * shown: nobody chose it, and nobody can usefully edit it.
+ */
+export function isImplicit(connection: SourceConnection): boolean {
+  return connection.filters?.implicit === true
+}
+
 /** What a pack offers, in the vocabulary the catalog uses for the same thing. */
 function packCapabilities(pack: InstalledConnectorPack): string[] {
   return [
@@ -160,8 +192,11 @@ export function buildConnectorListings(
   packs: InstalledConnectorPack[] = [],
   mcpServers: McpServerCatalogEntry[] = []
 ): ConnectorListing[] {
-  const countFor = (id: string) =>
-    connections.filter((conn) => connectionConnectorId(conn) === id).length
+  const mine = (id: string) => connections.filter((conn) => connectionConnectorId(conn) === id)
+  // Only the connections someone made: an implicit one was never asked for, so
+  // counting it would offer "Add another" for a connector nobody added once.
+  const countFor = (id: string) => mine(id).filter((conn) => !isImplicit(conn)).length
+  const implicitFor = (id: string) => mine(id).some(isImplicit)
   const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
   const listings: ConnectorListing[] = [
@@ -173,10 +208,14 @@ export function buildConnectorListings(
       category: 'Built in',
       source: 'builtin' as const,
       keywords: [],
-      connectedCount: countFor(c.id)
+      connectedCount: countFor(c.id),
+      implicitlyConnected: implicitFor(c.id)
     })),
     ...catalog.map((entry) => {
       const pack = packFor(entry.id)
+      // The installed files answer for themselves; the catalog only says what
+      // installing would ask for, which a newer pack on disk may have changed.
+      const rung = pack?.auth?.rung ?? entry.authRung
       return {
         ...entry,
         key: `catalog:${entry.id}`,
@@ -184,7 +223,10 @@ export function buildConnectorListings(
         source: 'catalog' as const,
         keywords: entry.keywords ?? [],
         connectedCount: countFor(entry.id),
+        implicitlyConnected: implicitFor(entry.id),
         catalogItem: entry,
+        ...(rung !== undefined && { authRung: rung }),
+        ...(entry.verified !== undefined && { verified: entry.verified }),
         ...(pack && { pack })
       }
     }),
@@ -207,6 +249,8 @@ export function buildConnectorListings(
         source: 'installed' as const,
         keywords: [],
         connectedCount: countFor(pack.id),
+        implicitlyConnected: implicitFor(pack.id),
+        ...(pack.auth?.rung !== undefined && { authRung: pack.auth.rung }),
         ...(pack.icon !== undefined && { icon: pack.icon }),
         pack
       })),
@@ -222,12 +266,16 @@ export function buildConnectorListings(
       source: 'mcp' as const,
       keywords: server.keywords ?? [],
       connectedCount: countFor(server.id),
+      implicitlyConnected: implicitFor(server.id),
       mcpServer: server
     }))
   ]
 
+  // Usable-now sorts first, whether that took a connection or nothing at all.
+  const ready = (listing: ConnectorListing) =>
+    listing.connectedCount > 0 || listing.implicitlyConnected
   return listings.sort((a, b) => {
-    if (a.connectedCount > 0 !== b.connectedCount > 0) return a.connectedCount > 0 ? -1 : 1
+    if (ready(a) !== ready(b)) return ready(a) ? -1 : 1
     return a.name.localeCompare(b.name)
   })
 }
@@ -335,6 +383,43 @@ export function connectorCategories(listings: ConnectorListing[]): string[] {
   }
   if (listings.some((listing) => listing.connectedCount > 0)) facets.push(CONNECTED_FILTER)
   return [...categories, ...facets]
+}
+
+/**
+ * What a rung will ask of you, said as the question people actually have.
+ *
+ * Phrased from the reader's side rather than the manifest's: "signs in with a
+ * tool you already use" is the fact that decides whether to click, where
+ * "cli" is a word only the person who wrote the connector knows.
+ */
+export const AUTH_RUNG_LABEL: Record<ConnectorAuthRung, string> = {
+  none: 'Needs no sign-in',
+  cli: 'Signs in with a CLI',
+  key: 'Needs a key',
+  oauth: 'Signs in through a browser'
+}
+
+/** The short form for a row, where the long one would crowd the facts line. */
+export const AUTH_RUNG_BADGE: Record<ConnectorAuthRung, string> = {
+  none: 'no sign-in',
+  cli: 'CLI login',
+  key: 'key',
+  oauth: 'OAuth'
+}
+
+/** The rungs actually present, so the filter never offers an empty answer. */
+export function connectorAuthRungs(listings: ConnectorListing[]): ConnectorAuthRung[] {
+  const order: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
+  return order.filter((rung) => listings.some((listing) => listing.authRung === rung))
+}
+
+/** Narrow to the connectors that sign in a particular way. */
+export function filterByAuthRung(
+  listings: ConnectorListing[],
+  rung: ConnectorAuthRung | undefined
+): ConnectorListing[] {
+  if (!rung) return listings
+  return listings.filter((listing) => listing.authRung === rung)
 }
 
 /** Narrow to one category, or to one of the two derived facets. */
