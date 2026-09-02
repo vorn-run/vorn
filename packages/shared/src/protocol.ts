@@ -22,6 +22,7 @@ import type {
   SessionEventType,
   SourceConnection,
   TaskSourceLink,
+  ConnectorKey,
   ConnectorManifest,
   ConnectorItemContext,
   TaskConfig,
@@ -806,6 +807,17 @@ export interface RequestMethods {
   'connection:preflight': {
     params: string
     result: { ok: boolean | null; message?: string }
+  }
+  /** Every connection holding a secret, described without disclosing one. */
+  'connection:listKeys': {
+    params: void
+    result: ConnectorKey[]
+  }
+  /** Replace one stored secret. `value` arrives already encrypted, because
+   *  only the desktop process holds the keychain that can encrypt it. */
+  'connection:rotateSecret': {
+    params: { connectionId: string; field: string; value: string }
+    result: { ok: boolean; error?: string }
   }
   /** Main→server push of decrypted credential fields. Called after main
    *  decrypts values (via Electron safeStorage) on boot and on config

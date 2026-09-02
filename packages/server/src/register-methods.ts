@@ -57,6 +57,7 @@ import type {
   SourceConnection,
   TaskConfig,
   TaskStatus,
+  ConnectorConfigField,
   ConnectorManifest,
   ExternalItem,
   ProjectConfig,
@@ -154,6 +155,7 @@ import {
   performHttpRequest
 } from './connectors/http'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
+import { listKeys, passwordFields } from './connectors/keys'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import type { ConnectorPackSource } from '@vornrun/shared/types'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
@@ -1493,6 +1495,44 @@ export function registerAllMethods(): void {
       profile = applyDecryptedCreds(conn)
     }
     return performHttpRequest(profile, { method, url, headers, body })
+  })
+
+  registerMethod('connection:listKeys', () => {
+    const auth = new Map(
+      connectorRegistry.list().map((c) => [c.id, c.describe().auth as ConnectorConfigField[]])
+    )
+    return listKeys(
+      dbListSourceConnections().filter((c) => c.connectorId !== 'webhook'),
+      auth,
+      dbListWorkflows(),
+      getDecryptedCreds
+    )
+  })
+
+  /**
+   * Replace one stored secret.
+   *
+   * The plaintext never reaches here: the desktop process encrypts with the
+   * keychain and hands over ciphertext. Forgetting the old plaintext and
+   * ending the child are both part of the write — a connector left running
+   * would keep serving the key that was just rotated away.
+   */
+  registerMethod('connection:rotateSecret', async ({ connectionId, field, value }) => {
+    const conn = dbGetSourceConnection(connectionId)
+    if (!conn) return { ok: false, error: `connection ${connectionId} not found` }
+    const connector = connectorRegistry.get(conn.connectorId)
+    const secret = passwordFields(connector?.describe().auth).some((f) => f.key === field)
+    if (!secret) return { ok: false, error: `${field} is not a secret on this connection` }
+
+    dbUpdateSourceConnection(connectionId, { filters: { ...conn.filters, [field]: value } })
+    clearDecryptedCreds(connectionId)
+    await stopMcpClient(connectionId).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
+    dbSignalChange()
+    // Notified, not just signalled: the decrypted store is repopulated by the
+    // desktop process on this broadcast, and until it lands the new secret
+    // exists only as ciphertext nothing can read.
+    configManager.notifyChanged()
+    return { ok: true }
   })
 
   registerMethod('connection:executeAction', async ({ connectionId, action, args }) => {

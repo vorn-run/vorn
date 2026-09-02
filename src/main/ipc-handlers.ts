@@ -351,6 +351,12 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.CONNECTION_PREFLIGHT, (_e, connectionId) =>
     requireBridge().request(IPC.CONNECTION_PREFLIGHT, connectionId)
   )
+  safeHandle(IPC.CONNECTION_LIST_KEYS, () =>
+    requireBridge().request(IPC.CONNECTION_LIST_KEYS, undefined)
+  )
+  safeHandle(IPC.CONNECTION_ROTATE_SECRET, (_e, params) =>
+    requireBridge().request(IPC.CONNECTION_ROTATE_SECRET, params)
+  )
   safeHandle(IPC.CONNECTION_LIST_ACTIONS, (_, connectionId) =>
     requireBridge().request(IPC.CONNECTION_LIST_ACTIONS, connectionId)
   )

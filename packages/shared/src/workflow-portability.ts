@@ -126,7 +126,10 @@ function connectorOf(connection: PortableConnection): string {
 }
 
 /** Whether this node runs against a connector connection. */
-function boundConnectionKey(node: WorkflowNode, config: Record<string, unknown>): string | null {
+export function boundConnectionKey(
+  node: WorkflowNode,
+  config: Record<string, unknown>
+): string | null {
   if (node.type === 'trigger' && config.triggerType === 'connectorPoll') return 'connectionId'
   if (node.type === 'callConnectorAction') return 'connectionId'
   if (node.type === 'httpRequest') return 'profileConnectionId'
