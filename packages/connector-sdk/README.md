@@ -84,6 +84,60 @@ await serveConnector(connector)
 
 Publish it like any other package (`"bin": { "acme-connector": "dist/bin.js" }`).
 
+`vorn-connector new acme` writes all of the above — package, entry, definition,
+a test that needs no network — already building, checking and packing.
+
+## Declare an action instead of writing one
+
+Most actions put arguments into a request and keep part of the answer. Say that
+and the SDK does the rest: `{{args.x}}` and `{{config.y}}` are filled in, an
+argument nobody supplied is left out, a failed status is raised with what the
+body said, and `postReceive` reshapes what came back.
+
+```ts
+{
+  type: 'createIssue',
+  label: 'Create issue',
+  idempotent: false,
+  inputs: [{ key: 'title', label: 'Title', required: true }],
+  request: {
+    method: 'POST',
+    url: '{{config.baseUrl}}/issues',
+    headers: { authorization: 'Bearer {{config.apiToken}}' },
+    body: { title: '{{args.title}}' }
+  },
+  // pick · rename · flatten · filter · map, applied left to right.
+  postReceive: [{ op: 'pick', keys: ['id', 'html_url'] }]
+}
+```
+
+Add `paginate` to follow every page rather than the first — `{ kind: 'cursor',
+cursorPath: 'next', param: 'cursor' }`, `{ kind: 'page', param: 'page' }` or
+`{ kind: 'link' }` — and the pages arrive concatenated.
+
+Retry, backoff and rate-limit handling are applied for you, to declared
+requests and to `context.fetch` alike. A read is always retried; a write only
+when the action declares `idempotent: true`, because repeating a create makes a
+second one. Prefer `context.fetch` over the global one in a hand-written action.
+
+## Offer a field the choices it has
+
+A `select` with fixed choices carries them; one whose choices only exist against
+a live connection names a set the connector serves.
+
+```ts
+options: { channels: async ({ config, fetch }) => ['general', 'random'] },
+actions: [{
+  type: 'post',
+  label: 'Post',
+  inputs: [{ key: 'channel', label: 'Channel', type: 'select', loadOptions: 'channels' }],
+  request: { method: 'POST', url: '{{config.baseUrl}}/post/{{args.channel}}' }
+}]
+```
+
+A `json` argument arrives parsed. `builderHint` on a field is a note for whoever
+writes the next connector, not for whoever runs this one.
+
 ## Poll a database instead of an API
 
 Nothing about a trigger is HTTP-specific — it just returns items. A SQL pull
@@ -301,6 +355,7 @@ text color instead of fighting the theme.
 ## CLI
 
 ```
+vorn-connector new <id>                   Scaffold a new connector, ready to build
 vorn-connector manifest <module>          Print the manifest as JSON
 vorn-connector setup <module> [trigger]   Print the Vorn connection settings
 vorn-connector poll <module> <trigger>    Run one poll against the environment
@@ -309,7 +364,8 @@ vorn-connector pack <module>              Build an installable .vorn.tgz pack
 vorn-connector serve <module>             Serve on stdio (what Vorn runs)
 ```
 
-`pack` accepts `--out <dir>`.
+`new` accepts `--out <dir>` and `--name "Display Name"`; `pack` accepts
+`--out <dir>`.
 
 `poll` accepts `--since <iso>` and `--limit <n>`, and reads the connector's
 declared config from your shell environment — the fastest way to confirm
