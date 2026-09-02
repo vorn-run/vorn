@@ -33,6 +33,7 @@ export function WorkflowsSection({
 }) {
   const setWorkflowEditorOpen = useAppStore((s) => s.setWorkflowEditorOpen)
   const setEditingWorkflowId = useAppStore((s) => s.setEditingWorkflowId)
+  const setImportedRequirements = useAppStore((s) => s.setImportedRequirements)
   const removeWorkflow = useAppStore((s) => s.removeWorkflow)
   const updateWorkflow = useAppStore((s) => s.updateWorkflow)
   const reorderWorkflows = useAppStore((s) => s.reorderWorkflows)
@@ -102,7 +103,24 @@ export function WorkflowsSection({
 
       const pending = result.unresolved.map(describeRequirement).join(', ')
       const note = pending ? ` — still needs ${pending}` : existing ? '' : ' — enable it when ready'
-      toast.success(`${existing ? 'Updated' : 'Imported'} "${placed.name}"${note}`)
+      toast.success(`${existing ? 'Updated' : 'Imported'} "${placed.name}"${note}`, {
+        // What it still needs is best answered where the steps are.
+        ...(result.unresolved.length > 0 && {
+          actions: [
+            {
+              label: 'Review',
+              onClick: () => {
+                setImportedRequirements({
+                  workflowId: placed.id,
+                  requirements: result.unresolved
+                })
+                setEditingWorkflowId(placed.id)
+                setWorkflowEditorOpen(true)
+              }
+            }
+          ]
+        })
+      })
     },
     [
       projects,
@@ -111,7 +129,10 @@ export function WorkflowsSection({
       allWorkflows,
       connections,
       addWorkflow,
-      updateWorkflow
+      updateWorkflow,
+      setImportedRequirements,
+      setEditingWorkflowId,
+      setWorkflowEditorOpen
     ]
   )
 

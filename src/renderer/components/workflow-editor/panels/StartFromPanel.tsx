@@ -1,14 +1,12 @@
 import { X, FilePlus2, Check, Plug } from 'lucide-react'
 import type { SourceConnection, WorkflowTemplate } from '../../../../shared/types'
 import {
-  requirementAction,
   templateRequirements,
   type ConnectorSuggestion,
-  type RequirementAction,
-  type TemplateRequirement
+  type RequirementAction
 } from '../../../lib/template-requirements'
 import type { ConnectorListing } from '../../../lib/connector-browse'
-import { describeRequirement } from '../../../lib/workflow-files'
+import { RequirementRow } from './RequirementRow'
 
 /**
  * What a new workflow can start from, before the canvas is anything.
@@ -171,44 +169,6 @@ function TemplateRow({
       ))}
     </div>
   )
-}
-
-/** What one unmet requirement says, and what can be done about it here. */
-function RequirementRow({
-  requirement,
-  listings,
-  onFix
-}: {
-  requirement: TemplateRequirement
-  listings: ConnectorListing[]
-  onFix?: (action: RequirementAction) => void
-}) {
-  const action = requirementAction(requirement, listings)
-  const label = ACTION_LABEL[action.kind]?.(action)
-
-  return (
-    <div className="pl-[38px] pr-2.5 pb-1.5 flex items-center gap-2">
-      <span className="min-w-0 flex-1 text-[11px] text-bronzo truncate">
-        Needs {describeRequirement(requirement.requirement)}
-      </span>
-      {label && onFix && (
-        <button
-          onClick={() => onFix(action)}
-          className="shrink-0 text-[11px] text-gray-300 hover:text-white px-2 py-0.5 border
-                     border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors"
-        >
-          {label}
-        </button>
-      )}
-    </div>
-  )
-}
-
-/** Each unmet requirement offers the one step that answers it. */
-const ACTION_LABEL: Partial<Record<RequirementAction['kind'], (a: RequirementAction) => string>> = {
-  install: (a) => `Install ${a.kind === 'install' ? a.listing.name : ''}`.trim(),
-  addConnection: () => 'Add connection',
-  createProfile: () => 'Create profile'
 }
 
 /** The shape of the flow, drawn rather than counted. */

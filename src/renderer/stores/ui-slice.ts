@@ -563,6 +563,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   isAddProjectDialogOpen: false,
   isWorkflowEditorOpen: false,
   editingWorkflowId: null,
+  importedRequirements: null,
   pendingWorkflowRun: null,
   editingProject: null,
   isCommandPaletteOpen: false,
@@ -653,6 +654,8 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     set({ pendingWorkflowRun: workflowId ? { workflowId, context, targetNodeId } : null }),
 
   setEditingWorkflowId: (id) => set({ editingWorkflowId: id }),
+
+  setImportedRequirements: (value) => set({ importedRequirements: value }),
 
   setEditingProject: (project) => set({ editingProject: project }),
 

@@ -11,7 +11,8 @@ import {
   Settings,
   Loader2,
   Square,
-  Upload
+  Upload,
+  X
 } from 'lucide-react'
 import { ICON_MAP } from '../project-sidebar/icon-map'
 import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../../lib/project-icons'
@@ -107,6 +108,8 @@ function connectorFor(
   return connectors.find((connector) => connector.id === listing.id)
 }
 import { StartFromPanel } from './panels/StartFromPanel'
+import { RequirementRow } from './panels/RequirementRow'
+import { resolveRequirement } from '../../../shared/workflow-portability'
 import {
   slugify,
   ensureUniqueSlug,
@@ -692,6 +695,20 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     },
     [install]
   )
+
+  // What an import could not bind, for the workflow now open. Re-resolved
+  // against this machine each render, so answering one clears its row.
+  const imported = useAppStore((s) => s.importedRequirements)
+  const setImportedRequirements = useAppStore((s) => s.setImportedRequirements)
+  const importedPending = useMemo(() => {
+    if (!imported || imported.workflowId !== editingId) return []
+    return imported.requirements
+      .map((requirement) => {
+        const connectionId = resolveRequirement(requirement, connections)
+        return connectionId === undefined ? { requirement } : { requirement, connectionId }
+      })
+      .filter((entry) => entry.connectionId === undefined)
+  }, [imported, editingId, connections])
 
   /** A finished connection or profile is what the rows were waiting on. */
   const handleConnected = useCallback(() => {
@@ -1511,6 +1528,76 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
               </div>
             )}
           </StartFromPanel>
+        )}
+
+        {/* An imported workflow says what it could not bind, with the same
+            actions the template rows offer. */}
+        {!startFromOpen && !pendingInsert && importedPending.length > 0 && (
+          <div className="w-[280px] border-l border-white/[0.08] bg-surface-node flex flex-col h-full overflow-y-auto titlebar-no-drag">
+            <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
+              <span className="text-[13px] font-medium text-white">Still needs</span>
+              <button
+                aria-label="Dismiss"
+                onClick={() => setImportedRequirements(null)}
+                className="p-1 rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            {install.error && (
+              <div className="px-4 py-2 border-b border-white/[0.08] text-[11px] text-danger">
+                {install.error}
+              </div>
+            )}
+            {install.pending && (
+              <div className="border-b border-white/[0.08] p-2">
+                <PackInstallConfirm
+                  preview={install.pending.preview}
+                  busy={install.installing}
+                  onConfirm={() => void install.confirm()}
+                  onCancel={install.cancel}
+                />
+              </div>
+            )}
+            {profileFor !== null && (
+              <div className="border-b border-white/[0.08] p-2">
+                <HttpProfileForm
+                  name={profileFor}
+                  onDone={handleConnected}
+                  onCancel={() => setProfileFor(null)}
+                />
+              </div>
+            )}
+            {connectFor && (
+              <div className="border-b border-white/[0.08] p-2">
+                {connectorFor(connectors, connectFor) ? (
+                  <AddConnectionForm
+                    connector={connectorFor(connectors, connectFor)!}
+                    onDone={handleConnected}
+                    onCancel={() => setConnectFor(null)}
+                  />
+                ) : (
+                  <SdkConnectorForm
+                    {...(connectFor.pack
+                      ? { pack: connectFor.pack }
+                      : { catalogEntry: connectFor.catalogItem })}
+                    onDone={handleConnected}
+                    onCancel={() => setConnectFor(null)}
+                  />
+                )}
+              </div>
+            )}
+            <div className="py-2">
+              {importedPending.map((entry) => (
+                <RequirementRow
+                  key={entry.requirement.nodeId + entry.requirement.kind}
+                  requirement={entry}
+                  listings={listings}
+                  onFix={handleFixRequirement}
+                />
+              ))}
+            </div>
+          </div>
         )}
 
         {showRunHistory && !pendingInsert && (
