@@ -173,6 +173,40 @@ describe('installing a pack from wherever it was asked for', () => {
     expect(screen.getByTestId('error')).toHaveTextContent('none')
   })
 
+  // Nothing was kept, so there is nothing for the caller to re-read.
+  it('does not announce an install that was refused', async () => {
+    installConnectorPack.mockResolvedValue({ ok: false, error: 'declares dependencies' })
+    const onInstalled = vi.fn()
+    render(<Probe onInstalled={onInstalled} />)
+    fireEvent.click(screen.getByText('inspect'))
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+
+    fireEvent.click(screen.getByText('confirm'))
+
+    await waitFor(() => expect(screen.getByTestId('error')).toHaveTextContent('declares'))
+    expect(onInstalled).not.toHaveBeenCalled()
+  })
+
+  // Both halves of the flow must speak to the row that started it, or a
+  // refusal at the second step lands on a key no row is watching.
+  it('reports a refused install on the row that asked, whatever it names itself', async () => {
+    inspectConnectorPack.mockResolvedValue({
+      ok: true,
+      // The pack calls itself something else than the listing did.
+      preview: { id: 'slack-connector', name: 'Slack', version: '1.2.0', token: 'tok-1' }
+    })
+    installConnectorPack.mockResolvedValue({ ok: false, error: 'declares dependencies' })
+    render(<Probe />)
+    fireEvent.click(screen.getByText('inspect'))
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+
+    fireEvent.click(screen.getByText('confirm'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('failed')).toHaveTextContent('declares dependencies')
+    )
+  })
+
   it('closes the sheet even when the install call itself fails', async () => {
     installConnectorPack.mockRejectedValue(new Error('the server went away'))
     render(<Probe />)

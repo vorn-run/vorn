@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
   ConnectorInstallProgress,
   ConnectorPackSource,
@@ -18,7 +18,12 @@ export interface PackInstall {
   /** Live install and rejection state, keyed by connector id. */
   progress: Record<string, ConnectorInstallProgress>
   /** The pack awaiting a yes, with everything the sheet shows. */
-  pending: { source: ConnectorPackSource; preview: ConnectorPackSummary } | null
+  pending: {
+    source: ConnectorPackSource
+    preview: ConnectorPackSummary
+    /** The row this began on, so both steps report their refusals to it. */
+    rowId: string
+  } | null
   /** A refusal with no row to land on, such as a dropped file's. */
   error: string | null
   installing: boolean
@@ -85,7 +90,8 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       }
       setPending({
         source: { kind: 'staged', token: result.preview.token },
-        preview: result.preview
+        preview: result.preview,
+        rowId: listing.id
       })
     },
     [forget]
@@ -99,20 +105,25 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       setError(result.error)
       return
     }
+    // A dropped file has no row; the pack names itself once it is read.
     setPending({
       source: { kind: 'staged', token: result.preview.token },
-      preview: result.preview
+      preview: result.preview,
+      rowId: result.preview.id
     })
   }, [])
 
   const confirm = useCallback(async () => {
     if (!pending) return
-    const id = pending.preview.id
+    // The row that asked, so a refusal at either step lands in the same place.
+    const id = pending.rowId
+    let installed = false
     setInstalling(true)
     try {
       const result = await window.api.installConnectorPack(pending.source)
       if (result.ok) {
         forget(id)
+        installed = true
       } else {
         setProgress((current) => ({
           ...current,
@@ -129,23 +140,40 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       setInstalling(false)
       setPending(null)
     }
-    await onInstalled?.()
+    // Only when something was actually kept: a refusal changed nothing to read.
+    if (installed) await onInstalled?.()
   }, [pending, forget, onInstalled])
 
   const cancel = useCallback(() => setPending(null), [])
   const clearError = useCallback(() => setError(null), [])
   const report = useCallback((message: string) => setError(message), [])
 
-  return {
-    progress,
-    pending,
-    error,
-    installing,
-    inspect,
-    inspectFile,
-    confirm,
-    cancel,
-    clearError,
-    report
-  }
+  // One object per change of what it holds, so a consumer can depend on it
+  // without re-running an effect on every render of its owner.
+  return useMemo(
+    () => ({
+      progress,
+      pending,
+      error,
+      installing,
+      inspect,
+      inspectFile,
+      confirm,
+      cancel,
+      clearError,
+      report
+    }),
+    [
+      progress,
+      pending,
+      error,
+      installing,
+      inspect,
+      inspectFile,
+      confirm,
+      cancel,
+      clearError,
+      report
+    ]
+  )
 }
