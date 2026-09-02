@@ -314,19 +314,18 @@ function normalizeVerification(raw: unknown): ConnectorCatalogVerification | und
  * of well-formed fields is repaired here rather than found at render time.
  */
 function normalizeActions(raw: unknown): ConnectorCatalogAction[] {
-  return list<unknown>(raw)
-    .filter((action): action is Record<string, unknown> => !!action && typeof action === 'object')
+  return records(raw)
+    .filter((action) => typeof action.type === 'string' && action.type !== '')
     .map((action) => ({
       ...action,
-      type: typeof action.type === 'string' ? action.type : '',
-      label: typeof action.label === 'string' ? action.label : '',
+      type: action.type as string,
+      label: typeof action.label === 'string' ? action.label : (action.type as string),
       ...(action.inputs !== undefined && { inputs: normalizeActionInputs(action.inputs) })
     })) as ConnectorCatalogAction[]
 }
 
 function normalizeActionInputs(raw: unknown): ConnectorCatalogActionInput[] {
-  return list<unknown>(raw)
-    .filter((input): input is Record<string, unknown> => !!input && typeof input === 'object')
+  return records(raw)
     .filter((input) => typeof input.key === 'string' && input.key !== '')
     .map((input) => ({
       key: input.key as string,
@@ -334,6 +333,14 @@ function normalizeActionInputs(raw: unknown): ConnectorCatalogActionInput[] {
       type: typeof input.type === 'string' ? input.type : 'string',
       required: input.required === true
     }))
+}
+
+/** The plain objects in a published list, ignoring whatever else it held. */
+function records(raw: unknown): Array<Record<string, unknown>> {
+  return list<unknown>(raw).filter(
+    (entry): entry is Record<string, unknown> =>
+      !!entry && typeof entry === 'object' && !Array.isArray(entry)
+  )
 }
 
 function list<T>(value: unknown): T[] {

@@ -71,4 +71,12 @@ describe('the arguments an action declares', () => {
     expect(withInputs(['message', { no: 'key' }])?.actions?.[0].inputs).toEqual([])
     expect(first({ actions: 'all of them' })?.actions).toEqual([])
   })
+
+  it('drops an action with nothing to call it by, rather than listing a blank step', () => {
+    expect(first({ actions: [{ label: 'Nameless' }, 'post', []] })?.actions).toEqual([])
+    // A label is what a person reads; falling back to the type beats an empty row.
+    expect(first({ actions: [{ type: 'post' }] })?.actions).toEqual([
+      { type: 'post', label: 'post' }
+    ])
+  })
 })
