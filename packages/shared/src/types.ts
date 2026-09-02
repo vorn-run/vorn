@@ -1753,6 +1753,54 @@ export interface ConnectorCatalogSummary {
   description?: string
 }
 
+/** One choice a `select` argument offers. */
+export interface ConnectorCatalogActionOption {
+  value: string
+  label?: string
+}
+
+/** An argument an action takes, carried so a step can be offered before install. */
+export interface ConnectorCatalogActionInput {
+  key: string
+  label: string
+  type: string
+  required: boolean
+  /** Fixed choices, so a `select` can be drawn before anything is installed. */
+  options?: ConnectorCatalogActionOption[]
+  /** An options set the connector serves, resolved against a live connection. */
+  loadOptions?: string
+}
+
+/**
+ * An action, described well enough to become a step in the library before the
+ * connector it belongs to is on disk.
+ */
+export interface ConnectorCatalogAction extends ConnectorCatalogSummary {
+  inputs?: ConnectorCatalogActionInput[]
+}
+
+/**
+ * What the factory checked, and when.
+ *
+ * "Verified" is a receipt rather than a word: the checks that ran, against
+ * which version, on which date. A catalog that says nothing here is not
+ * claiming a connector is bad — only that nothing vouched for it.
+ */
+export interface ConnectorCatalogVerification {
+  /**
+   * Which receipt format this is. A build reads only the shape it knows: what
+   * "verified" vouches for is exactly the checks that ran, so a later format
+   * meaning something else must not be shown under this build's badge.
+   */
+  schema: 1
+  /** The version the checks ran against, which may trail the published one. */
+  version: string
+  /** ISO timestamp of the last run. */
+  checkedAt: string
+  /** Names of the checks that passed, e.g. `manifest`, `no-runtime-deps`. */
+  checks: string[]
+}
+
 export interface ConnectorCatalogEntry {
   id: string
   name: string
@@ -1768,6 +1816,14 @@ export interface ConnectorCatalogEntry {
   capabilities: Array<'tasks' | 'triggers' | 'actions'>
   /** One line on how it authenticates, shown before anyone commits to install. */
   auth?: string
+  /**
+   * Which rung that one line describes, so the list can be filtered by what
+   * setting a connector up will actually ask of you. Absent on an older
+   * catalog, which reads as unknown rather than as none.
+   */
+  authRung?: ConnectorAuthRung
+  /** What the factory checked, when a connector has been through it. */
+  verified?: ConnectorCatalogVerification
   icon?: SdkConnectorIcon
   /** Groups the connector in the list once there are too many to scan. */
   category?: string
@@ -1780,7 +1836,7 @@ export interface ConnectorCatalogEntry {
    * anything is downloaded. Absent on an older catalog.
    */
   triggers?: ConnectorCatalogSummary[]
-  actions?: ConnectorCatalogSummary[]
+  actions?: ConnectorCatalogAction[]
   env?: Array<{ name: string; required: boolean; description?: string }>
 }
 
@@ -1842,14 +1898,56 @@ export interface ConnectorCatalogSnapshot {
   fetchedAt?: number
 }
 
+/**
+ * How a connector signs in, lowest rung first — mirrors the SDK's own
+ * declaration so the app can say how a connector authenticates before it is
+ * installed, and show an identity instead of a token field where one is
+ * already signed in.
+ */
+export type ConnectorAuthRung = 'none' | 'cli' | 'key' | 'oauth'
+
+export interface SdkConnectorAuth {
+  rung: ConnectorAuthRung
+  /** Asks the borrowed tool who you are. Present for `cli`. */
+  probe?: { command: string; args?: string[] }
+  /** What to take from the signed-in tool at spawn; never stored. */
+  borrow?: { env?: string[]; tokenArgs?: string[] }
+  /** Config field keys holding the credential. Present for `key`. */
+  keys?: string[]
+}
+
+/** An argument a packaged connector's action takes. */
+export interface SdkActionInput {
+  key: string
+  label: string
+  type: string
+  required: boolean
+  /** Fixed choices, when the action declared a `select` with known values. */
+  options?: Array<{ value: string; label?: string }>
+  /** An options set the connector serves, resolved against a live connection. */
+  loadOptions?: string
+}
+
+/** An action a packaged connector serves, as its manifest describes it. */
+export interface SdkAction {
+  type: string
+  label: string
+  description?: string
+  /** Absent on a manifest read before inputs were carried through. */
+  inputs?: SdkActionInput[]
+  outputs?: Array<{ key: string; type?: string; description?: string }>
+}
+
 export interface SdkConnectorManifest {
   id: string
   name: string
   version: string
   description?: string
   icon?: SdkConnectorIcon
+  /** Absent on a connector built before rungs existed, which reads as unknown. */
+  auth?: SdkConnectorAuth
   triggers: SdkTrigger[]
-  actions: Array<{ type: string; label: string; description?: string }>
+  actions: SdkAction[]
   /** Union of the environment variables the connector reads. */
   env: SdkEnvVar[]
 }
@@ -1861,6 +1959,8 @@ export interface InstalledConnectorPack {
   version: string
   description?: string
   icon?: SdkConnectorIcon
+  /** How this connector signs in, read from the manifest that was installed. */
+  auth?: SdkConnectorAuth
   /** Directory holding the running version's files. */
   path: string
   /** The one version kept behind the current one, when a rollback is possible. */
@@ -1868,7 +1968,7 @@ export interface InstalledConnectorPack {
   installedAt: number
   bytes: number
   triggers: SdkTrigger[]
-  actions: Array<{ type: string; label: string; description?: string }>
+  actions: SdkAction[]
   env: SdkEnvVar[]
 }
 
@@ -1890,8 +1990,10 @@ export interface ConnectorPackSummary {
   version: string
   description?: string
   icon?: SdkConnectorIcon
+  /** What signing in will ask for, said before any of this is kept. */
+  auth?: SdkConnectorAuth
   triggers: SdkTrigger[]
-  actions: Array<{ type: string; label: string; description?: string }>
+  actions: SdkAction[]
   env: SdkEnvVar[]
   /** The version already on disk, when this would replace one. */
   installedVersion?: string

@@ -16,6 +16,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type {
+  ConnectorAuthRung,
+  SdkActionInput,
+  SdkConnectorAuth,
   SdkConnectorIcon,
   SdkConnectorManifest,
   SdkEnvVar,
@@ -184,6 +187,116 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const str = (value: unknown, fallback = ''): string =>
   typeof value === 'string' ? value : fallback
 
+const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
+
+/**
+ * A bare executable name, which is all a probe command is allowed to be.
+ *
+ * The host resolves this on PATH and runs it without a shell, so a path or a
+ * shell metacharacter is never something this build would honour — it is
+ * either a mistake or an attempt to have the app run something else. Either
+ * way the answer is to refuse the declaration, not to sanitise it.
+ */
+const EXECUTABLE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+const strings = (raw: unknown): string[] =>
+  Array.isArray(raw) ? raw.filter((entry): entry is string => typeof entry === 'string') : []
+
+/** The declared probe arguments, or nothing when any of them is not a string. */
+function toProbeArgs(raw: unknown): string[] | undefined {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) return undefined
+  return raw.every((entry) => typeof entry === 'string') ? (raw as string[]) : undefined
+}
+
+/**
+ * Read the arguments an action declares.
+ *
+ * The config panel maps over these to draw fields, so an input without a key
+ * is dropped rather than drawn as a nameless box.
+ */
+/** What an action says it returns, kept only where the key is usable. */
+function toActionOutputs(
+  value: unknown
+): Array<{ key: string; type?: string; description?: string }> {
+  return (Array.isArray(value) ? value : [])
+    .filter(isRecord)
+    .filter((entry) => typeof entry.key === 'string' && entry.key !== '')
+    .map((entry) => ({
+      key: entry.key as string,
+      ...(typeof entry.type === 'string' && { type: entry.type }),
+      ...(typeof entry.description === 'string' && { description: entry.description })
+    }))
+}
+
+function toActionInputs(value: unknown): SdkActionInput[] {
+  return (Array.isArray(value) ? value : [])
+    .filter(isRecord)
+    .filter((input) => str(input.key) !== '')
+    .map((input) => {
+      const options = toActionOptions(input.options)
+      return {
+        key: str(input.key),
+        label: str(input.label, str(input.key)),
+        type: str(input.type, 'string'),
+        required: input.required === true,
+        // A select is undrawable without its choices, or without the name of
+        // the set that supplies them.
+        ...(options.length > 0 && { options }),
+        ...(str(input.loadOptions) !== '' && { loadOptions: str(input.loadOptions) })
+      }
+    })
+}
+
+/** The choices a `select` offers; one that selects nothing is not a choice. */
+function toActionOptions(value: unknown): Array<{ value: string; label?: string }> {
+  return (Array.isArray(value) ? value : [])
+    .filter(isRecord)
+    .filter((option) => str(option.value) !== '')
+    .map((option) => ({
+      value: str(option.value),
+      ...(typeof option.label === 'string' && { label: option.label })
+    }))
+}
+
+/**
+ * Read a declared auth block, or say nothing about how it signs in.
+ *
+ * An unknown rung is dropped rather than shown: the whole point of the field
+ * is to tell someone what setting this up will ask of them, and a rung this
+ * build cannot name answers that question wrongly.
+ */
+function toAuth(value: unknown): SdkConnectorAuth | undefined {
+  if (!isRecord(value)) return undefined
+  const rung = value.rung
+  if (typeof rung !== 'string' || !AUTH_RUNGS.includes(rung as ConnectorAuthRung)) return undefined
+
+  const probe = isRecord(value.probe) ? value.probe : undefined
+  const command = str(probe?.command).trim()
+  const args = toProbeArgs(probe?.args)
+  const usable = EXECUTABLE_NAME.test(command) && args !== undefined
+
+  // A rung is a promise about what setting this up will ask of you, and `cli`
+  // promises there is a command to ask who you are. One that cannot be run is
+  // the promise unbacked — better to say nothing than to offer a Sign in that
+  // could not work.
+  if (rung === 'cli' && !usable) return undefined
+
+  const borrow = isRecord(value.borrow) ? value.borrow : undefined
+  const env = strings(borrow?.env)
+  const tokenArgs = strings(borrow?.tokenArgs)
+  const keys = strings(value.keys)
+
+  return {
+    rung: rung as ConnectorAuthRung,
+    ...(usable && args !== undefined && { probe: { command, ...(args.length > 0 && { args }) } }),
+    ...((env.length > 0 || tokenArgs.length > 0) && {
+      borrow: { ...(env.length > 0 && { env }), ...(tokenArgs.length > 0 && { tokenArgs }) }
+    }),
+    ...(keys.length > 0 && { keys })
+  }
+}
+
 /**
  * Validate the manifest into the shape the UI relies on.
  *
@@ -285,7 +398,10 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
     .map((action) => ({
       type: str(action.type),
       label: str(action.label, str(action.type)),
-      ...(typeof action.description === 'string' && { description: action.description })
+      ...(typeof action.description === 'string' && { description: action.description }),
+      // Carried so a step can name its arguments without the connector running.
+      ...(action.inputs !== undefined && { inputs: toActionInputs(action.inputs) }),
+      ...(action.outputs !== undefined && { outputs: toActionOutputs(action.outputs) })
     }))
     .filter((action) => action.type !== '')
 
@@ -294,6 +410,7 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
   }
 
   const icon = toIcon(payload.icon)
+  const auth = toAuth(payload.auth)
 
   log.info(`[sdk-probe] ${id}@${str(payload.version, '0.0.0')}: ${triggers.length} trigger(s)`)
 
@@ -303,6 +420,7 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
     version: str(payload.version, '0.0.0'),
     ...(typeof payload.description === 'string' && { description: payload.description }),
     ...(icon && { icon }),
+    ...(auth && { auth }),
     triggers,
     actions,
     env: [...env.values()]

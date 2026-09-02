@@ -1,5 +1,12 @@
 import { envNameFor } from './define'
-import type { Connector, ConnectorIcon, DefaultWorkflow, StatusSuggestion } from './types'
+import type {
+  ActionInputOption,
+  Connector,
+  ConnectorAuth,
+  ConnectorIcon,
+  DefaultWorkflow,
+  StatusSuggestion
+} from './types'
 
 /** MCP tool name a trigger is served under. */
 export function pollToolName(triggerType: string): string {
@@ -76,6 +83,8 @@ export interface ConnectorManifest {
   version: string
   description?: string
   icon?: ConnectorIcon
+  /** How the connector signs in, so the app can say so before installing it. */
+  auth?: ConnectorAuth
   triggers: Array<{
     type: string
     label: string
@@ -90,7 +99,20 @@ export interface ConnectorManifest {
     type: string
     label: string
     description?: string
-    inputs: Array<{ key: string; label: string; type: string; required: boolean }>
+    inputs: Array<{
+      key: string
+      label: string
+      type: string
+      required: boolean
+      options?: ActionInputOption[]
+      /** An options set the connector serves, resolved against a live connection. */
+      loadOptions?: string
+    }>
+    /**
+     * Fields the action is known to return. Absent when the connector declared
+     * none, which is not the same as saying it returns nothing.
+     */
+    outputs?: Array<{ key: string; type?: string; description?: string }>
   }>
 }
 
@@ -102,6 +124,7 @@ export function connectorManifest(connector: Connector): ConnectorManifest {
     version: connector.version,
     ...(connector.description !== undefined && { description: connector.description }),
     ...(connector.icon !== undefined && { icon: connector.icon }),
+    ...(connector.auth !== undefined && { auth: connector.auth }),
     triggers: connector.triggers.map((trigger) => ({
       type: trigger.type,
       label: trigger.label,
@@ -121,8 +144,11 @@ export function connectorManifest(connector: Connector): ConnectorManifest {
         key: input.key,
         label: input.label,
         type: input.type ?? 'string',
-        required: input.required === true
-      }))
+        required: input.required === true,
+        ...(input.options !== undefined && { options: input.options }),
+        ...(input.loadOptions !== undefined && { loadOptions: input.loadOptions })
+      })),
+      ...(action.outputs !== undefined && { outputs: action.outputs })
     }))
   }
 }

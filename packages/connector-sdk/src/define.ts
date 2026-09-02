@@ -1,4 +1,10 @@
-import type { Connector, ConnectorConfig, ConnectorDefinition, DedupeStrategy } from './types'
+import type {
+  AuthRung,
+  Connector,
+  ConnectorConfig,
+  ConnectorDefinition,
+  DedupeStrategy
+} from './types'
 
 const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 
@@ -13,12 +19,60 @@ const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 const PATH_DATA_PATTERN = /^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$/
 const VIEW_BOX_PATTERN = /^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$/
 const DEDUPE_STRATEGIES: DedupeStrategy[] = ['timestamp', 'lastItem']
+const AUTH_RUNGS: AuthRung[] = ['none', 'cli', 'key', 'oauth']
 
 function assertUnique(kind: string, keys: string[]): void {
   const seen = new Set<string>()
   for (const key of keys) {
     if (seen.has(key)) throw new Error(`Duplicate ${kind} "${key}"`)
     seen.add(key)
+  }
+}
+
+/**
+ * Check that a declared auth block says enough for the host to act on it.
+ *
+ * Each rung promises the app something specific — that there is a command to
+ * ask who you are, that a named field holds the credential, that there is
+ * nothing to ask for at all. A rung whose promise is unbacked would be found
+ * out at connection time, in front of someone trying to sign in.
+ */
+function assertAuth(definition: ConnectorDefinition): void {
+  const auth = definition.auth
+  if (!auth) return
+  const id = definition.id
+
+  if (!AUTH_RUNGS.includes(auth.rung)) {
+    throw new Error(
+      `Connector ${id} declares unknown auth rung ${JSON.stringify(auth.rung)}; ` +
+        `expected ${AUTH_RUNGS.join(', ')}`
+    )
+  }
+
+  if (auth.rung === 'cli' && !auth.probe?.command?.trim()) {
+    throw new Error(`Connector ${id} borrows a CLI login but declares no probe command to ask it`)
+  }
+
+  if (auth.rung === 'key') {
+    const keys = auth.keys ?? []
+    if (keys.length === 0) {
+      throw new Error(`Connector ${id} signs in with a key but names no config field holding it`)
+    }
+    const declared = new Set((definition.config ?? []).map((field) => field.key))
+    for (const key of keys) {
+      if (!declared.has(key)) {
+        throw new Error(`Connector ${id} names auth key "${key}", which is not a config field`)
+      }
+    }
+  }
+
+  if (auth.rung === 'none') {
+    const secret = (definition.config ?? []).find((field) => field.secret === true)
+    if (secret) {
+      throw new Error(
+        `Connector ${id} claims it needs no sign-in but declares secret field "${secret.key}"`
+      )
+    }
   }
 }
 
@@ -123,6 +177,7 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
     'config field',
     (definition.config ?? []).map((field) => field.key)
   )
+  assertAuth(definition)
 
   return {
     ...definition,

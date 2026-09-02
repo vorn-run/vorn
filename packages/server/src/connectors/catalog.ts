@@ -22,8 +22,14 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import os from 'os'
 import type {
+  ConnectorAuthRung,
+  ConnectorCatalogAction,
+  ConnectorCatalogActionInput,
+  ConnectorCatalogActionOption,
   ConnectorCatalogEntry,
   ConnectorCatalogItem,
+  ConnectorCatalogSummary,
+  ConnectorCatalogVerification,
   McpServerCatalogEntry,
   WorkflowTemplate
 } from '@vornrun/shared/types'
@@ -49,6 +55,12 @@ const MAX_AGE_MS = 6 * 60 * 60 * 1000
 const FETCH_TIMEOUT_MS = 5000
 
 const CACHE_PATH = join(os.homedir(), '.vorn', 'connector-catalog.json')
+
+/** Rungs this build knows how to describe; anything else is dropped on read. */
+const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
+
+/** The one receipt format this build will show a verified mark for. */
+const VERIFICATION_SCHEMA = 1
 
 /**
  * Enough to show a connector list on a first run with no network.
@@ -261,7 +273,11 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
   }
 
   // A conditional spread cannot remove a key the raw entry already carries.
-  const { packUrl, sha256, ...rest } = entry
+  const { packUrl, sha256, authRung, verified, ...rest } = entry
+  const rung = AUTH_RUNGS.includes(authRung as ConnectorAuthRung)
+    ? (authRung as ConnectorAuthRung)
+    : undefined
+  const receipt = normalizeVerification(verified)
 
   return {
     ...rest,
@@ -272,11 +288,111 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
     capabilities: list(entry.capabilities) as ConnectorCatalogEntry['capabilities'],
     ...(typeof packUrl === 'string' && packUrl !== '' && { packUrl }),
     ...(typeof sha256 === 'string' && sha256 !== '' && { sha256 }),
-    ...(entry.triggers !== undefined && { triggers: list(entry.triggers) }),
-    ...(entry.actions !== undefined && { actions: list(entry.actions) }),
+    ...(rung !== undefined && { authRung: rung }),
+    ...(receipt !== undefined && { verified: receipt }),
+    ...(entry.triggers !== undefined && { triggers: normalizeSummaries(entry.triggers) }),
+    ...(entry.actions !== undefined && { actions: normalizeActions(entry.actions) }),
     ...(entry.env !== undefined && { env: list(entry.env) }),
     ...(entry.keywords !== undefined && { keywords: list(entry.keywords) })
   } as ConnectorCatalogEntry
+}
+
+/**
+ * A receipt is shown as a claim about this connector, so a half-written one is
+ * worse than none: it would put a verified mark on a check nobody ran.
+ */
+function normalizeVerification(raw: unknown): ConnectorCatalogVerification | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const value = raw as Record<string, unknown>
+  // A later format may vouch for something this build would misread; the mark
+  // has to mean what this build says it means or it should not be drawn.
+  if (value.schema !== VERIFICATION_SCHEMA) return undefined
+  const version = typeof value.version === 'string' ? value.version : ''
+  const checkedAt = typeof value.checkedAt === 'string' ? value.checkedAt : ''
+  if (version === '' || checkedAt === '') return undefined
+  const checks = list<unknown>(value.checks).filter(
+    (check): check is string => typeof check === 'string'
+  )
+  return { schema: VERIFICATION_SCHEMA, version, checkedAt, checks }
+}
+
+/**
+ * A trigger or an action, reduced to what a row can be drawn from.
+ *
+ * Both are rendered the same way — a type to call it by, a label to read, and
+ * prose beneath — so both are repaired the same way. An entry with no type
+ * names nothing callable and is dropped rather than listed blank.
+ */
+function normalizeSummaries(raw: unknown): ConnectorCatalogSummary[] {
+  return records(raw).filter(named).map(toSummary) as unknown as ConnectorCatalogSummary[]
+}
+
+function named(entry: Record<string, unknown>): boolean {
+  return typeof entry.type === 'string' && entry.type !== ''
+}
+
+function toSummary(entry: Record<string, unknown>): Record<string, unknown> {
+  // A conditional spread cannot remove a key the raw entry already carries.
+  const { description, ...rest } = entry
+  const type = entry.type as string
+  return {
+    ...rest,
+    type,
+    label: typeof entry.label === 'string' ? entry.label : type,
+    ...(typeof description === 'string' && { description })
+  }
+}
+
+/**
+ * Actions carry the arguments a step will ask for, and the library maps over
+ * them before anything is installed — so an entry whose `inputs` is not a list
+ * of well-formed fields is repaired here rather than found at render time.
+ */
+function normalizeActions(raw: unknown): ConnectorCatalogAction[] {
+  return records(raw)
+    .filter(named)
+    .map((action) => ({
+      ...toSummary(action),
+      ...(action.inputs !== undefined && { inputs: normalizeActionInputs(action.inputs) })
+    })) as ConnectorCatalogAction[]
+}
+
+function normalizeActionInputs(raw: unknown): ConnectorCatalogActionInput[] {
+  return records(raw)
+    .filter((input) => typeof input.key === 'string' && input.key !== '')
+    .map((input) => {
+      const options = normalizeActionOptions(input.options)
+      return {
+        key: input.key as string,
+        label: typeof input.label === 'string' ? input.label : (input.key as string),
+        type: typeof input.type === 'string' ? input.type : 'string',
+        required: input.required === true,
+        ...(options.length > 0 && { options }),
+        ...(typeof input.loadOptions === 'string' &&
+          input.loadOptions !== '' && { loadOptions: input.loadOptions })
+      }
+    })
+}
+
+/**
+ * The choices a `select` offers. A choice with no value cannot be picked, so
+ * it is dropped rather than drawn as an option that selects nothing.
+ */
+function normalizeActionOptions(raw: unknown): ConnectorCatalogActionOption[] {
+  return records(raw)
+    .filter((option) => typeof option.value === 'string' && option.value !== '')
+    .map((option) => ({
+      value: option.value as string,
+      ...(typeof option.label === 'string' && { label: option.label })
+    }))
+}
+
+/** The plain objects in a published list, ignoring whatever else it held. */
+function records(raw: unknown): Array<Record<string, unknown>> {
+  return list<unknown>(raw).filter(
+    (entry): entry is Record<string, unknown> =>
+      !!entry && typeof entry === 'object' && !Array.isArray(entry)
+  )
 }
 
 function list<T>(value: unknown): T[] {
