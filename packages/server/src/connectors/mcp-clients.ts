@@ -21,7 +21,8 @@ import {
 import { dbListSourceConnections } from '../database'
 import { getDecryptedCreds } from './decrypted-creds'
 import { localLaunchSpec } from './catalog'
-import { installedLaunch } from './packs'
+import { describePack, installedLaunch } from './packs'
+import { borrowedSecrets } from './auth-rung'
 import { getSafeEnv } from '../process-utils'
 import log from '../logger'
 
@@ -81,17 +82,39 @@ export function resolveLaunch(conn: SourceConnection): { command: string; args: 
   return { command, args: parseJsonArray(conn.filters.args) }
 }
 
-export function buildSpawnConfig(conn: SourceConnection): {
+/**
+ * What a connector borrows from a tool that is already signed in.
+ *
+ * Read from the pack that will actually run, and fetched fresh on every spawn:
+ * a borrowed token is never written to the connection, so rotating or signing
+ * out of the tool takes effect the next time the child starts rather than
+ * leaving a stale copy behind.
+ */
+async function borrowedFor(conn: SourceConnection): Promise<Record<string, string>> {
+  const sdkId = String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
+  if (!sdkId) return {}
+  try {
+    return await borrowedSecrets(describePack(sdkId)?.auth)
+  } catch {
+    // No data directory yet, so nothing is installed to borrow from.
+    return {}
+  }
+}
+
+export async function buildSpawnConfig(conn: SourceConnection): Promise<{
   command: string
   args: string[]
   env: Record<string, string>
-} {
+}> {
   const { command, args } = resolveLaunch(conn)
   const env = parseJsonObject(conn.filters.env)
   // Decrypted secret env (pushed from main via safeStorage) overrides plain env.
   const decrypted = getDecryptedCreds(conn.id) ?? {}
   const secretEnv = parseJsonObject(decrypted.secretEnv)
-  return { command, args, env: { ...env, ...secretEnv } }
+  // Borrowed lowest: a value someone entered by hand is a deliberate override
+  // of what the signed-in tool would have handed over.
+  const borrowed = await borrowedFor(conn)
+  return { command, args, env: { ...borrowed, ...env, ...secretEnv } }
 }
 
 export async function getOrStartClient(conn: SourceConnection): Promise<Client> {
@@ -108,7 +131,7 @@ export async function getOrStartClient(conn: SourceConnection): Promise<Client> 
 }
 
 async function startClient(conn: SourceConnection): Promise<Client> {
-  const { command, args, env } = buildSpawnConfig(conn)
+  const { command, args, env } = await buildSpawnConfig(conn)
   // Inherit PATH and friends from the parent via getSafeEnv() — same
   // sanitization the rest of the server uses for child processes — so
   // GH/Linear/NPM tokens etc. don't leak into arbitrary MCP servers
