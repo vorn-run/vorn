@@ -115,8 +115,8 @@ describe('the arguments an action declares', () => {
 
   it('drop a choice that would select nothing, and a nameless options set', () => {
     const withInput = (input: Record<string, unknown>) =>
-      first({ actions: [{ type: 'p', label: 'P', inputs: [{ key: 'v', ...input }] }] })?.actions?.[0]
-        .inputs?.[0]
+      first({ actions: [{ type: 'p', label: 'P', inputs: [{ key: 'v', ...input }] }] })
+        ?.actions?.[0].inputs?.[0]
     expect(withInput({ options: [{ label: 'Empty' }, 'high', { value: 'ok' }] })?.options).toEqual([
       { value: 'ok' }
     ])
