@@ -322,3 +322,24 @@ describe('placeImportedWorkflow', () => {
     expect(placeImportedWorkflow(workflow(), existing, 'team').workspaceId).toBe('personal')
   })
 })
+
+it('refuses a file that carries the same step twice', () => {
+  const dupe = {
+    version: 1,
+    name: 'Twice',
+    nodes: [
+      {
+        id: 'a',
+        type: 'trigger',
+        label: 'T',
+        config: { triggerType: 'manual' },
+        position: { x: 0, y: 0 }
+      },
+      { id: 'a', type: 'script', label: 'S', config: {}, position: { x: 0, y: 0 } }
+    ],
+    edges: []
+  }
+  const result = definitionFromFile(JSON.stringify(dupe), 'b', PROJECT, [])
+  expect(result.ok).toBe(false)
+  if (!result.ok) expect(result.error).toMatch(/same step twice/)
+})

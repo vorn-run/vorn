@@ -127,6 +127,7 @@ function graphComplaint(portable: PortableWorkflow): string | null {
     if (typeof candidate?.id !== 'string' || typeof candidate.type !== 'string') {
       return 'That file has a step this build cannot read'
     }
+    if (ids.has(candidate.id)) return 'That file carries the same step twice'
     ids.add(candidate.id)
   }
 

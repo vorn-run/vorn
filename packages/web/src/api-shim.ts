@@ -466,7 +466,8 @@ export function createApiShim(wsUrl: string) {
       document.body.appendChild(link)
       link.click()
       link.remove()
-      URL.revokeObjectURL(url)
+      // Revoking before the blob navigation settles can truncate the download.
+      setTimeout(() => URL.revokeObjectURL(url), 0)
       return params.defaultName
     },
     openImageDialog: async (): Promise<string[] | null> => {
