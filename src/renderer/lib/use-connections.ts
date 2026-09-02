@@ -74,6 +74,8 @@ export function useConnectorIdFor(connectionId: string | null | undefined): stri
 export interface ConnectorLook {
   connectorId: string
   icon?: SdkConnectorIcon
+  /** Stored as an `mcp` connection, so the plug is its honest fallback. */
+  packaged: boolean
 }
 
 /** The id and glyph behind a connection, for callers holding the connection list already. */
@@ -84,7 +86,12 @@ export function connectorLookFor(
   if (!connectionId) return undefined
   const connection = connections.find((c) => c.id === connectionId)
   if (!connection) return undefined
-  return { connectorId: connectionConnectorId(connection), icon: iconForConnection(connection) }
+  const connectorId = connectionConnectorId(connection)
+  return {
+    connectorId,
+    icon: iconForConnection(connection),
+    packaged: connectorId !== connection.connectorId
+  }
 }
 
 /** The same resolution as a hook, for surfaces that hold only a connection id. */

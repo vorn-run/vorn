@@ -83,6 +83,8 @@ export interface RunPresentation {
   connectorId?: string
   /** A packaged connector's own glyph, which the built-in lookup cannot supply. */
   connectorIcon?: SdkConnectorIcon
+  /** From a packaged connector, so a missing glyph falls back to the plug. */
+  connectorPackaged?: boolean
   /** Used only when the workflow is gone or never picked an icon. */
   fallbackIcon: LucideIcon
 }
@@ -161,6 +163,7 @@ export function describeRun(
       iconColor,
       connectorId,
       connectorIcon: look?.icon,
+      connectorPackaged: look?.packaged,
       fallbackIcon: SOURCE_ICONS.connector
     }
   }

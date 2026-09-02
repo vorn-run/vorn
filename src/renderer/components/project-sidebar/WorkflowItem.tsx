@@ -127,6 +127,7 @@ export function WorkflowItem({
           <ConnectorIcon
             connectorId={look.connectorId}
             icon={look.icon}
+            packaged={look.packaged}
             size={iconSize}
             className="text-gray-400"
           />

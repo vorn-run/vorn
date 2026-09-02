@@ -76,6 +76,7 @@ function StepIcon({
       <ConnectorIcon
         connectorId={look.connectorId}
         icon={look.icon}
+        packaged={look.packaged}
         size={12}
         className="text-gray-400 shrink-0"
       />
