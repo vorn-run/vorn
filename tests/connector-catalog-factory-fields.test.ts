@@ -49,6 +49,26 @@ describe('the receipt behind a verified mark', () => {
   })
 })
 
+describe('what a connector says it fires on', () => {
+  it('gets the same repair an action does, since the same row draws it', () => {
+    const triggers = [
+      { type: 'opened', label: 'Issue opened', description: 'Each new issue' },
+      { type: 'closed' },
+      { type: 'noisy', label: 7, description: { long: 'nope' } }
+    ]
+    expect(first({ triggers })?.triggers).toEqual([
+      { type: 'opened', label: 'Issue opened', description: 'Each new issue' },
+      { type: 'closed', label: 'closed' },
+      { type: 'noisy', label: 'noisy' }
+    ])
+  })
+
+  it('drops what cannot be named or is not an entry at all', () => {
+    expect(first({ triggers: [{ label: 'Nameless' }, 'opened', [], null] })?.triggers).toEqual([])
+    expect(first({ triggers: 'nope' })?.triggers).toEqual([])
+  })
+})
+
 describe('the arguments an action declares', () => {
   it('are carried, so a step can be offered before the connector is installed', () => {
     const inputs = [{ key: 'message', label: 'Message', type: 'string', required: true }]
@@ -70,6 +90,16 @@ describe('the arguments an action declares', () => {
     expect(withInputs('message')?.actions).toEqual([{ type: 'p', label: 'P', inputs: [] }])
     expect(withInputs(['message', { no: 'key' }])?.actions?.[0].inputs).toEqual([])
     expect(first({ actions: 'all of them' })?.actions).toEqual([])
+  })
+
+  it('keeps prose only when it is prose', () => {
+    // The row renders this straight into the DOM; an object would read as
+    // "[object Object]" under the action's name.
+    const actions = [{ type: 'post', label: 'Post', description: { long: 'nope' } }]
+    expect(first({ actions })?.actions).toEqual([{ type: 'post', label: 'Post' }])
+    expect(first({ actions: [{ type: 'post', label: 42 }] })?.actions).toEqual([
+      { type: 'post', label: 'post' }
+    ])
   })
 
   it('drops an action with nothing to call it by, rather than listing a blank step', () => {

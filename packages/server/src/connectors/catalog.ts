@@ -27,6 +27,7 @@ import type {
   ConnectorCatalogActionInput,
   ConnectorCatalogEntry,
   ConnectorCatalogItem,
+  ConnectorCatalogSummary,
   ConnectorCatalogVerification,
   McpServerCatalogEntry,
   WorkflowTemplate
@@ -285,7 +286,7 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
     ...(typeof sha256 === 'string' && sha256 !== '' && { sha256 }),
     ...(rung !== undefined && { authRung: rung }),
     ...(receipt !== undefined && { verified: receipt }),
-    ...(entry.triggers !== undefined && { triggers: list(entry.triggers) }),
+    ...(entry.triggers !== undefined && { triggers: normalizeSummaries(entry.triggers) }),
     ...(entry.actions !== undefined && { actions: normalizeActions(entry.actions) }),
     ...(entry.env !== undefined && { env: list(entry.env) }),
     ...(entry.keywords !== undefined && { keywords: list(entry.keywords) })
@@ -309,17 +310,42 @@ function normalizeVerification(raw: unknown): ConnectorCatalogVerification | und
 }
 
 /**
+ * A trigger or an action, reduced to what a row can be drawn from.
+ *
+ * Both are rendered the same way — a type to call it by, a label to read, and
+ * prose beneath — so both are repaired the same way. An entry with no type
+ * names nothing callable and is dropped rather than listed blank.
+ */
+function normalizeSummaries(raw: unknown): ConnectorCatalogSummary[] {
+  return records(raw).filter(named).map(toSummary) as ConnectorCatalogSummary[]
+}
+
+function named(entry: Record<string, unknown>): boolean {
+  return typeof entry.type === 'string' && entry.type !== ''
+}
+
+function toSummary(entry: Record<string, unknown>): Record<string, unknown> {
+  // A conditional spread cannot remove a key the raw entry already carries.
+  const { description, ...rest } = entry
+  const type = entry.type as string
+  return {
+    ...rest,
+    type,
+    label: typeof entry.label === 'string' ? entry.label : type,
+    ...(typeof description === 'string' && { description })
+  }
+}
+
+/**
  * Actions carry the arguments a step will ask for, and the library maps over
  * them before anything is installed — so an entry whose `inputs` is not a list
  * of well-formed fields is repaired here rather than found at render time.
  */
 function normalizeActions(raw: unknown): ConnectorCatalogAction[] {
   return records(raw)
-    .filter((action) => typeof action.type === 'string' && action.type !== '')
+    .filter(named)
     .map((action) => ({
-      ...action,
-      type: action.type as string,
-      label: typeof action.label === 'string' ? action.label : (action.type as string),
+      ...toSummary(action),
       ...(action.inputs !== undefined && { inputs: normalizeActionInputs(action.inputs) })
     })) as ConnectorCatalogAction[]
 }
