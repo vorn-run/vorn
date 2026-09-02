@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { buildConnectorListings, type ConnectorListing } from '../../lib/connector-browse'
+import { SDK_FILTER_KEYS } from '../../../shared/types'
 import { ConnectorDirectory } from './ConnectorDirectory'
 import { ConnectorDetail } from './ConnectorDetail'
 import { ConnectionGroups, type ConnectorStatus } from './ConnectionGroups'
@@ -419,22 +420,30 @@ export function ConnectorSettings() {
 
       {/* A generic server has no manifest to probe, so it goes to the manual
           form with its launch line already written. */}
-      {adding?.mcpServer && mcpConnector && (
-        <AddConnectionForm
-          connector={mcpConnector}
-          startManual
-          initialAuth={{
-            command: adding.mcpServer.command,
-            args: JSON.stringify(adding.mcpServer.args)
-          }}
-          onDone={() => {
-            setAdding(null)
-            setView('connections')
-            load()
-          }}
-          onCancel={() => setAdding(null)}
-        />
-      )}
+      {adding?.mcpServer &&
+        (mcpConnector ? (
+          <AddConnectionForm
+            connector={mcpConnector}
+            startManual
+            initialAuth={{
+              command: adding.mcpServer.command,
+              args: JSON.stringify(adding.mcpServer.args)
+            }}
+            // Names the server the connection belongs to, so its row counts it
+            // rather than lumping it in with every other stdio connection.
+            extraFilters={{ [SDK_FILTER_KEYS.connectorId]: adding.mcpServer.id }}
+            onDone={() => {
+              setAdding(null)
+              setView('connections')
+              load()
+            }}
+            onCancel={() => setAdding(null)}
+          />
+        ) : (
+          <p className="p-4 text-[12px] text-danger border border-white/[0.08] rounded-sm">
+            The MCP connector is not available in this build, so {adding.name} cannot be added here.
+          </p>
+        ))}
     </div>
   )
 }
@@ -442,6 +451,7 @@ export function ConnectorSettings() {
 function AddConnectionForm({
   connector,
   initialAuth,
+  extraFilters,
   startManual,
   onDone,
   onCancel
@@ -449,6 +459,8 @@ function AddConnectionForm({
   connector: ConnectorInfo
   /** Pre-filled fields, so a listed server arrives with its launch line written. */
   initialAuth?: Record<string, string>
+  /** Stamped onto the saved connection, whatever the form asked for. */
+  extraFilters?: Record<string, string>
   startManual?: boolean
   onDone: () => void
   onCancel: () => void
@@ -525,7 +537,11 @@ function AddConnectionForm({
         }
       }
 
-      const connectionFilters: Record<string, unknown> = { ...encryptedAuth, ...filters }
+      const connectionFilters: Record<string, unknown> = {
+        ...encryptedAuth,
+        ...filters,
+        ...extraFilters
+      }
       let name: string
       if (usesRepoDetect) {
         const owner = detectedRepo?.owner ?? manualRepo.owner.trim()

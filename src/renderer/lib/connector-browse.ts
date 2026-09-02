@@ -210,8 +210,8 @@ export function buildConnectorListings(
         ...(pack.icon !== undefined && { icon: pack.icon }),
         pack
       })),
-    // A server Vorn starts and speaks MCP to; its connections are stored as
-    // `mcp` ones, so they are counted against the server's own id, never shared.
+    // A server Vorn starts and speaks MCP to. Its connections are `mcp` rows
+    // stamped with the server's id, which is what this counts against.
     ...mcpServers.map((server) => ({
       key: `mcp:${server.id}`,
       id: server.id,
