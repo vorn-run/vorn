@@ -49,6 +49,40 @@ describe('placing the nodes a mutation creates', () => {
     expect(trueBranch.position).not.toEqual(falseBranch.position)
   })
 
+  // A card that hangs a few pixels off its parent draws a line with a lean in
+  // it, which reads as a fork nobody asked for.
+  it('hangs a new card on exactly its parent x', () => {
+    const newNode = createScriptNode()
+    const nextNodes = [...arrangedNodes, newNode]
+    const nextEdges = [...arrangedEdges, { id: 'e2', source: 'a', target: newNode.id }]
+    const placed = placeNewNodes(arrangedNodes, nextNodes, nextEdges)
+    const parent = placed.find((n) => n.id === 'a')!
+    expect(placed.find((n) => n.id === newNode.id)!.position.x).toBe(parent.position.x)
+  })
+
+  it('centres a card under a loop, which is the wider of the two', () => {
+    const loop = node(
+      'loop',
+      'loop',
+      'Repeat',
+      { x: -156, y: 0 },
+      {
+        nodeType: 'loop',
+        bodyNodeIds: [],
+        maxIterations: 2
+      }
+    )
+    const newNode = createScriptNode()
+    const placed = placeNewNodes(
+      [loop],
+      [loop, newNode],
+      [{ id: 'e1', source: 'loop', target: newNode.id }]
+    )
+    const child = placed.find((n) => n.id === newNode.id)!
+    // Centres agree: -156 + 312/2 is the same line as -140 + 280/2.
+    expect(child.position.x + 280 / 2).toBe(-156 + 312 / 2)
+  })
+
   it('leaves every pre-existing node exactly where it was', () => {
     const newNode = createScriptNode()
     const nextNodes = [...arrangedNodes, newNode]

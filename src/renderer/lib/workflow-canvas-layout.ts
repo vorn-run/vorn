@@ -1,7 +1,13 @@
 import { getBezierPath, Position, type Edge, type Node } from '@xyflow/react'
 import { LoopConfig, WorkflowEdge, WorkflowNode } from '../../shared/types'
 import { stepPreview } from '../components/workflow-editor/node-visuals'
-import { computeFlowLayout, FlowRow } from './workflow-helpers'
+import {
+  CARD_WIDTH,
+  computeFlowLayout,
+  FlowRow,
+  LOOP_WIDTH,
+  snapToLattice
+} from './workflow-helpers'
 
 // Projects a workflow definition into canvas elements; the definition stays the source of truth.
 
@@ -15,8 +21,7 @@ export const TRIGGER_ANCHOR = {
   bodyOnly: false
 }
 
-export const CARD_WIDTH = 280
-export const LOOP_WIDTH = 312
+export { CARD_WIDTH, LOOP_WIDTH } from './workflow-helpers'
 /** Horizontal gap between fork branches. */
 const BRANCH_GAP = 56
 /** Vertical gap between consecutive steps (room for the edge). */
@@ -111,11 +116,11 @@ export function layoutPositions(nodes: WorkflowNode[], edges: WorkflowEdge[]): P
       if (row.kind === 'node') {
         // Orphaned body members draw inside their loop, not on the trunk.
         if (bodySet.has(row.node.id)) continue
-        positions.set(row.node.id, { x: xCenter - CARD_WIDTH / 2, y: cursor })
+        positions.set(row.node.id, { x: snapToLattice(xCenter - CARD_WIDTH / 2), y: cursor })
         if (insideBranch) branchMembers.add(row.node.id)
         cursor += estimateNodeHeight(row.node, nodes) + ROW_GAP
       } else if (row.kind === 'loop') {
-        positions.set(row.loopNode.id, { x: xCenter - LOOP_WIDTH / 2, y: cursor })
+        positions.set(row.loopNode.id, { x: snapToLattice(xCenter - LOOP_WIDTH / 2), y: cursor })
         if (insideBranch) branchMembers.add(row.loopNode.id)
         cursor += estimateNodeHeight(row.loopNode, nodes) + ROW_GAP
       } else {

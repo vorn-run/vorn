@@ -150,6 +150,25 @@ describe('layout edge shapes', () => {
   })
 })
 
+describe('a laid-out chain and the drag lattice', () => {
+  it('puts every card of a column on the same x, and on the grid a drag snaps to', () => {
+    const chain = [
+      node('t', 'trigger', 'Manual', { triggerType: 'manual' }),
+      node('a', 'script', 'One', {}),
+      node('b', 'script', 'Two', {})
+    ]
+    const { positions } = layoutPositions(chain, [
+      { id: 'e1', source: 't', target: 'a' },
+      { id: 'e2', source: 'a', target: 'b' }
+    ])
+
+    const xs = ['t', 'a', 'b'].map((id) => positions.get(id)!.x)
+    expect(new Set(xs).size).toBe(1)
+    // Off the lattice, dragging any one card would shift it out of the column.
+    expect(xs[0] % 8).toBe(0)
+  })
+})
+
 describe('the line between two cards', () => {
   const down = { sourcePosition: Position.Bottom, targetPosition: Position.Top }
 
