@@ -6,6 +6,7 @@ import {
   unresolvedRequirements,
   residualAbsolutePaths,
   importedWorkflowId,
+  importedWorkflowIdFor,
   parseImportedWorkflowId,
   slugify,
   PROJECT_PATH_TOKEN,
@@ -269,6 +270,42 @@ describe('connections travel as requirements', () => {
     const p = toPortable(connectorWorkflow(), PROJECT, [connection()])
     const trimmed = { ...p, nodes: p.nodes.filter((n) => n.id !== 'act-1') }
     expect(unresolvedRequirements(trimmed, []).map((r) => r.nodeId)).toEqual(['trigger-1'])
+  })
+})
+
+describe('an imported workflow arrives switched off', () => {
+  it('does not start running because a file said it was', () => {
+    // A dropped cron workflow that arrived enabled would fire before anyone
+    // had read it.
+    const running = workflow({ enabled: true })
+    const imported = fromPortable(toPortable(running, PROJECT), 'novum', { name: 'N', path: '/n' })
+    expect(imported.enabled).toBe(false)
+  })
+})
+
+describe('two names that slugify alike', () => {
+  const existing = [{ id: 'import:novum:deploy', name: 'Deploy!' }]
+
+  it('updates in place when the same workflow comes back', () => {
+    expect(importedWorkflowIdFor('novum', 'deploy', 'Deploy!', existing)).toBe(
+      'import:novum:deploy'
+    )
+  })
+
+  it('steps aside rather than overwriting a different workflow', () => {
+    expect(importedWorkflowIdFor('novum', 'deploy', 'Deploy?', existing)).toBe(
+      'import:novum:deploy-2'
+    )
+  })
+
+  it('keeps stepping aside for a third', () => {
+    const two = [...existing, { id: 'import:novum:deploy-2', name: 'Deploy?' }]
+    expect(importedWorkflowIdFor('novum', 'deploy', 'Deploy…', two)).toBe('import:novum:deploy-3')
+    expect(importedWorkflowIdFor('novum', 'deploy', 'Deploy?', two)).toBe('import:novum:deploy-2')
+  })
+
+  it('takes the plain id when nothing holds it', () => {
+    expect(importedWorkflowIdFor('novum', 'deploy', 'Deploy!', [])).toBe('import:novum:deploy')
   })
 })
 

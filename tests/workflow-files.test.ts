@@ -6,6 +6,7 @@ import {
   placeImportedWorkflow,
   projectForWorkflow,
   workflowFileName,
+  MAX_WORKFLOW_FILE_BYTES,
   WORKFLOW_FILE_SUFFIX
 } from '../src/renderer/lib/workflow-files'
 import type { SourceConnection, WorkflowDefinition } from '../packages/shared/src/types'
@@ -71,6 +72,28 @@ describe('projectForWorkflow', () => {
 
   it('answers nothing when no registered project matches', () => {
     expect(projectForWorkflow(workflow(), [{ name: 'Other', path: '/o' }])).toBeUndefined()
+  })
+
+  it('falls back to the project in view when no step names one', () => {
+    // A script step carries a cwd without a projectName; without a project to
+    // be relative to, that path would travel as this machine's.
+    const nameless = workflow({
+      nodes: [
+        {
+          id: 'run-1',
+          type: 'script',
+          label: 'Build',
+          config: { scriptType: 'bash', scriptContent: 'make', cwd: `${PROJECT.path}/sub` },
+          position: { x: 0, y: 0 }
+        }
+      ]
+    })
+    expect(projectForWorkflow(nameless, [PROJECT], 'Novum')).toEqual(PROJECT)
+  })
+
+  it('prefers what the workflow names over what is in view', () => {
+    const other = { name: 'Other', path: '/o' }
+    expect(projectForWorkflow(workflow(), [PROJECT, other], 'Other')).toEqual(PROJECT)
   })
 })
 
@@ -186,6 +209,89 @@ describe('definitionFromFile', () => {
     >
     expect(action.connectionId).toBe('mine')
     expect(result.unresolved).toEqual([])
+  })
+})
+
+describe('refusing a file before it becomes a workflow', () => {
+  function exported(): string {
+    return fileFromWorkflow(workflow(), PROJECT.path, []).contents
+  }
+
+  it('refuses more text than a workflow could be', () => {
+    const huge = `${' '.repeat(MAX_WORKFLOW_FILE_BYTES)}${exported()}`
+    expect(definitionFromFile(huge, PROJECT, 'novum', [])).toEqual({
+      ok: false,
+      error: 'That file is too large to be a workflow'
+    })
+  })
+
+  it('refuses a step it cannot read, not merely a non-array', () => {
+    const gutted = JSON.stringify({ ...JSON.parse(exported()), nodes: ['oops'], edges: [] })
+    const result = definitionFromFile(gutted, PROJECT, 'novum', [])
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toContain('step this build cannot read')
+  })
+
+  it('refuses an edge that names a step the file does not carry', () => {
+    const parsed = JSON.parse(exported())
+    parsed.edges = [{ id: 'e9', source: 'trigger-1', target: 'ghost' }]
+    const result = definitionFromFile(JSON.stringify(parsed), PROJECT, 'novum', [])
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toContain('connects a step it does not carry')
+  })
+
+  it('refuses an edge with no endpoints at all', () => {
+    const parsed = JSON.parse(exported())
+    parsed.edges = [{ id: 'e9' }]
+    const result = definitionFromFile(JSON.stringify(parsed), PROJECT, 'novum', [])
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toContain('connection this build cannot read')
+  })
+
+  it('still accepts the file it wrote', () => {
+    expect(definitionFromFile(exported(), PROJECT, 'novum', []).ok).toBe(true)
+  })
+})
+
+describe('an import lands switched off', () => {
+  function exported(): string {
+    return fileFromWorkflow(workflow(), PROJECT.path, []).contents
+  }
+
+  it('arrives disabled, whatever the file was exported from', () => {
+    const result = definitionFromFile(exported(), PROJECT, 'novum', [])
+    expect(result.ok && result.definition.enabled).toBe(false)
+  })
+
+  it('leaves a workflow that was already running alone', () => {
+    const result = definitionFromFile(exported(), PROJECT, 'novum', [])
+    if (!result.ok) throw new Error('expected a definition')
+    const already = workflow({ id: result.definition.id, enabled: true, workspaceId: 'team' })
+
+    expect(placeImportedWorkflow(result.definition, already, 'personal').enabled).toBe(true)
+  })
+
+  it('leaves a workflow that was switched off switched off', () => {
+    const result = definitionFromFile(exported(), PROJECT, 'novum', [])
+    if (!result.ok) throw new Error('expected a definition')
+    const already = workflow({ id: result.definition.id, enabled: false })
+
+    expect(placeImportedWorkflow(result.definition, already, 'personal').enabled).toBe(false)
+  })
+
+  it('steps aside from a workflow of another name holding its id', () => {
+    const held = [{ id: 'import:novum:nightly-digest', name: 'Something else' }]
+    const result = definitionFromFile(exported(), PROJECT, 'novum', [], held)
+    expect(result.ok && result.definition.id).toBe('import:novum:nightly-digest-2')
+  })
+
+  it('updates in place when the name matches', () => {
+    const held = [{ id: 'import:novum:nightly-digest', name: 'Nightly digest' }]
+    const result = definitionFromFile(exported(), PROJECT, 'novum', [], held)
+    expect(result.ok && result.definition.id).toBe('import:novum:nightly-digest')
   })
 })
 

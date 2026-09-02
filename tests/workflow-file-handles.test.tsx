@@ -68,6 +68,53 @@ describe('asking for a file', () => {
     expect(await pickWorkflowFile()).toBeNull()
   })
 
+  it('settles on the window coming back, for pickers that never say cancel', async () => {
+    vi.useFakeTimers()
+    whenPickerOpens(() => {})
+
+    const pending = pickWorkflowFile()
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(400)
+
+    expect(await pending).toBeNull()
+    expect(document.querySelectorAll('input[type="file"]')).toHaveLength(0)
+    vi.useRealTimers()
+  })
+
+  it('does not settle on focus when a file was chosen', async () => {
+    vi.useFakeTimers()
+    whenPickerOpens((input) => {
+      Object.defineProperty(input, 'files', { value: [jsonFile()] })
+      input.dispatchEvent(new Event('change'))
+    })
+
+    const pending = pickWorkflowFile()
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(400)
+
+    expect(await pending).toMatchObject({ name: 'x.vorn-workflow.json' })
+    vi.useRealTimers()
+  })
+
+  it('refuses a file too large to be a workflow', async () => {
+    const huge = new File(['x'], 'huge.json', { type: 'application/json' })
+    Object.defineProperty(huge, 'size', { value: 600_000 })
+    whenPickerOpens((input) => {
+      Object.defineProperty(input, 'files', { value: [huge] })
+      input.dispatchEvent(new Event('change'))
+    })
+
+    await expect(pickWorkflowFile()).rejects.toThrow(/too large/)
+  })
+
+  it('refuses a dropped file too large to be a workflow', async () => {
+    const huge = new File(['x'], 'huge.json', { type: 'application/json' })
+    Object.defineProperty(huge, 'size', { value: 600_000 })
+    await expect(readDroppedWorkflowFile([huge] as unknown as FileList)).rejects.toThrow(
+      /too large/
+    )
+  })
+
   it('leaves no input behind in the document', async () => {
     whenPickerOpens((input) => {
       Object.defineProperty(input, 'files', { value: [jsonFile()] })

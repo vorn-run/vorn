@@ -677,8 +677,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   // Saves first, so the file is what the canvas shows rather than the last save.
   const handleExportFile = useCallback(async () => {
     const workflow = persistWorkflow()
-    const projects = useAppStore.getState().config?.projects ?? []
-    const project = projectForWorkflow(workflow, projects)
+    const state = useAppStore.getState()
+    const projects = state.config?.projects ?? []
+    const project = projectForWorkflow(workflow, projects, state.activeProject)
     const file = fileFromWorkflow(workflow, project?.path ?? '', connections)
     const saved = await window.api.saveTextFile?.({
       defaultName: file.name,

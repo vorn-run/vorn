@@ -26,6 +26,7 @@ import { rpcCall } from '../ws-client'
 import {
   toPortable,
   fromPortable,
+  importedWorkflowIdFor,
   unresolvedRequirements,
   residualAbsolutePaths,
   slugify,
@@ -980,7 +981,7 @@ export function registerWorkflowTools(server: McpServer): void {
       const bundle = args.bundle ?? slugify(project.name)
       const portable = { ...parsed, slug: parsed.slug ?? slugify(parsed.name) }
       const connections = await listPortableConnections()
-      const definition = fromPortable(
+      const resolved = fromPortable(
         portable,
         bundle,
         {
@@ -991,7 +992,13 @@ export function registerWorkflowTools(server: McpServer): void {
       )
       const unresolved = unresolvedRequirements(portable, connections)
 
-      const existing = (await dbListWorkflows()).find((w) => w.id === definition.id)
+      const known = await dbListWorkflows()
+      const id = importedWorkflowIdFor(bundle, portable.slug, portable.name, known)
+      const existing = known.find((w) => w.id === id)
+      // A file describes a workflow; whether it runs is this machine's answer,
+      // and one that was already running keeps running.
+      const definition = { ...resolved, id, enabled: existing ? existing.enabled : false }
+
       if (existing) {
         await dbUpdateWorkflow(definition.id, definition)
       } else {
@@ -1013,6 +1020,7 @@ export function registerWorkflowTools(server: McpServer): void {
             type: 'text',
             text:
               `${existing ? 'Updated' : 'Imported'} "${definition.name}" as ${definition.id}, resolved against ${project.path}` +
+              (existing || definition.enabled ? '' : '. It is disabled; enable it when ready') +
               (pending ? `\n\nStill to connect: ${pending}` : '')
           }
         ]

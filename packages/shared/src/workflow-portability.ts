@@ -78,6 +78,27 @@ export function importedWorkflowId(bundle: string, slug: string): string {
   return `import:${bundle}:${slug}`
 }
 
+/**
+ * The id an import should take, given what this machine already has.
+ *
+ * Deriving from the slug is what makes re-importing a file update the workflow
+ * it made last time. Two different names can slugify the same, though — "Deploy!"
+ * and "Deploy?" — and the second would silently replace the first. A derived id
+ * already held by a workflow of another name steps aside instead.
+ */
+export function importedWorkflowIdFor(
+  bundle: string,
+  slug: string,
+  name: string,
+  existing: Array<{ id: string; name: string }>
+): string {
+  for (let attempt = 1; ; attempt++) {
+    const id = importedWorkflowId(bundle, attempt === 1 ? slug : `${slug}-${attempt}`)
+    const held = existing.find((workflow) => workflow.id === id)
+    if (!held || held.name === name) return id
+  }
+}
+
 export function parseImportedWorkflowId(id: string): { bundle: string; slug: string } | null {
   if (!id.startsWith('import:')) return null
   const rest = id.slice('import:'.length)
@@ -289,7 +310,9 @@ export function fromPortable(
     name: portable.name,
     icon: portable.icon ?? 'Zap',
     iconColor: portable.iconColor ?? '#6366f1',
-    enabled: true,
+    // A file cannot ask to be running: a dropped cron workflow would start
+    // firing before anyone had read it. Callers restore what they had.
+    enabled: false,
     ...(portable.staggerDelayMs !== undefined && { staggerDelayMs: portable.staggerDelayMs }),
     nodes,
     edges: portable.edges

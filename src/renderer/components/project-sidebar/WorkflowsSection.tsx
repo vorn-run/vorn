@@ -57,7 +57,7 @@ export function WorkflowsSection({
 
   const handleExport = useCallback(
     async (workflow: WorkflowDefinition) => {
-      const project = projectForWorkflow(workflow, projects ?? [])
+      const project = projectForWorkflow(workflow, projects ?? [], activeProject)
       const file = fileFromWorkflow(workflow, project?.path ?? '', connections)
       const saved = await window.api.saveTextFile?.({
         defaultName: file.name,
@@ -71,7 +71,7 @@ export function WorkflowsSection({
         toast.success(`Exported "${workflow.name}"`)
       }
     },
-    [projects, connections]
+    [projects, activeProject, connections]
   )
 
   const handleImport = useCallback(
@@ -87,7 +87,8 @@ export function WorkflowsSection({
         picked.contents,
         project,
         slugify(project.name),
-        connections
+        connections,
+        allWorkflows ?? []
       )
       if (!result.ok) {
         toast.error(result.error)
@@ -100,9 +101,12 @@ export function WorkflowsSection({
       else addWorkflow(placed)
 
       const pending = result.unresolved.map(describeRequirement).join(', ')
-      toast.success(
-        `${existing ? 'Updated' : 'Imported'} "${placed.name}"${pending ? ` — still needs ${pending}` : ''}`
-      )
+      const note = pending
+        ? ` — still needs ${pending}`
+        : existing
+          ? ''
+          : ' — enable it when ready'
+      toast.success(`${existing ? 'Updated' : 'Imported'} "${placed.name}"${note}`)
     },
     [
       projects,
@@ -120,13 +124,16 @@ export function WorkflowsSection({
       setFileOver(false)
       if (!e.dataTransfer.files?.length) return
       e.preventDefault()
-      void readDroppedWorkflowFile(e.dataTransfer.files).then((picked) => {
-        if (!picked) {
-          toast.error('That is not a workflow file')
-          return
-        }
-        handleImport(picked)
-      })
+      void readDroppedWorkflowFile(e.dataTransfer.files).then(
+        (picked) => {
+          if (!picked) {
+            toast.error('That is not a workflow file')
+            return
+          }
+          handleImport(picked)
+        },
+        (err: unknown) => toast.error(err instanceof Error ? err.message : String(err))
+      )
     },
     [handleImport]
   )
@@ -191,7 +198,11 @@ export function WorkflowsSection({
             <WorkflowFilterToolbar />
             <Tooltip label="Import workflow file" position="bottom">
               <button
-                onClick={() => void pickWorkflowFile().then(handleImport)}
+                onClick={() =>
+                  void pickWorkflowFile().then(handleImport, (err: unknown) =>
+                    toast.error(err instanceof Error ? err.message : String(err))
+                  )
+                }
                 aria-label="Import workflow file"
                 className="p-0.5 rounded text-gray-600 hover:text-white hover:bg-white/[0.08] transition-colors"
               >
