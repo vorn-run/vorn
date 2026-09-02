@@ -379,8 +379,7 @@ describe('a requirement answered from the panel', () => {
     render(<WorkflowEditor />)
     fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
 
-    // The store forgets the import when the editor closes; the editor only closes.
-    expect(mockState.setWorkflowEditorOpen).toHaveBeenCalledWith(false)
+    expect(mockState.setImportedRequirements).toHaveBeenCalledWith(null)
   })
 
   it('says nothing for an import whose needs this machine already answers', async () => {
