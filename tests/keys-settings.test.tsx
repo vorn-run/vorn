@@ -10,7 +10,7 @@ const PROFILE: ConnectorKey = {
   name: 'reporting API',
   connectorId: 'http',
   usageCount: 2,
-  fields: [{ key: 'secret', label: 'secret', readable: true, hint: 'sk_live…' }]
+  fields: [{ key: 'secret', label: 'secret', readable: true, hint: 'sk_live_••••4242' }]
 }
 
 const PACKAGED: ConnectorKey = {
@@ -50,7 +50,7 @@ describe('the keys this machine holds', () => {
     render(<KeysSettings />)
 
     expect(await screen.findByText('reporting API')).toBeInTheDocument()
-    expect(screen.getByText(/sk_live… · used by 2 steps/)).toBeInTheDocument()
+    expect(screen.getByText(/sk_live_••••4242 · used by 2 steps/)).toBeInTheDocument()
     // A blob is named by the variables it carries, never by their values.
     expect(screen.getByText(/SLACK_BOT_TOKEN · unused/)).toBeInTheDocument()
   })

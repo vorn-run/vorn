@@ -57,16 +57,28 @@ describe('which fields are secrets', () => {
 })
 
 describe('how much of a secret travels', () => {
-  it('shows the opening a person recognizes it by', () => {
-    expect(maskSecret('sk_live_51abcdefghijkl')).toBe('sk_live…')
+  it('names the service and the mode, then the last four to tell keys apart', () => {
+    expect(maskSecret('sk_live_51abcdefgh4242')).toBe('sk_live_••••4242')
+    expect(maskSecret('xoxb-1111-2222-abcd')).toBe('xoxb-••••abcd')
   })
 
-  it('shows nothing at all of a short value, which is mostly opening', () => {
+  it('gives up no opening at all for a token it does not recognize', () => {
+    // A fixed slice of an unknown key is a slice of the secret.
+    expect(maskSecret('a1b2c3d4e5f6g7h8')).toBe('••••g7h8')
+  })
+
+  it('shows nothing of a short value, which a tail would mostly give away', () => {
     expect(maskSecret('short')).toBe('••••')
+    expect(maskSecret('sk_live_abc')).toBe('••••')
   })
 
   it('says nothing when there is nothing to read', () => {
     expect(maskSecret(undefined)).toBe('')
+  })
+
+  it('never carries the middle of a key, whatever the key looks like', () => {
+    const secret = 'sk_live_MIDDLEPARTffff'
+    expect(maskSecret(secret)).not.toContain('MIDDLEPART')
   })
 })
 
@@ -139,7 +151,7 @@ describe('the keys this machine holds', () => {
       [connection()],
       auth,
       [workflow('wf-1', [node('a', 'httpRequest', { profileConnectionId: 'conn-1' })])],
-      () => ({ secret: 'sk_live_51abcdefg' })
+      () => ({ secret: 'sk_live_51abcdefgh4242' })
     )
     expect(keys).toEqual([
       {
@@ -147,7 +159,7 @@ describe('the keys this machine holds', () => {
         name: 'reporting API',
         connectorId: 'http',
         usageCount: 1,
-        fields: [{ key: 'secret', label: 'secret', readable: true, hint: 'sk_live…' }]
+        fields: [{ key: 'secret', label: 'secret', readable: true, hint: 'sk_live_••••4242' }]
       }
     ])
   })
