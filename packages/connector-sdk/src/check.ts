@@ -6,9 +6,11 @@ import {
   type BundleOutput,
   type BundleRequest
 } from './packaging'
-import { runPoll, type PollPage } from './runtime'
+import { withMockHttp, type MockRoute } from './harness'
+import { runAction, runPoll, type PollPage } from './runtime'
 import type {
   ActionDefinition,
+  ActionInputField,
   Connector,
   ConnectorConfig,
   DedupeStrategy,
@@ -45,6 +47,13 @@ export interface CheckOptions {
   bundle?(request: BundleRequest): Promise<BundleOutput>
   /** Module specifier the bundle starts from; required by `bundle`. */
   entry?: string
+  /**
+   * Run every action against served HTTP rather than the network. Without
+   * routes each request is answered `{}`, which proves an action runs and
+   * escapes nowhere; with them, that it does the right thing.
+   */
+  mock?: boolean
+  mockRoutes?: MockRoute[]
 }
 
 /** What the host will run a probe by, so a check refuses what it would drop. */
@@ -204,6 +213,62 @@ async function packageFindings(options: CheckOptions): Promise<CheckFinding[]> {
   return found
 }
 
+/** A value of the declared type, so an action can be run without a person. */
+function sampleArg(input: ActionInputField): string {
+  if (input.type === 'number') return '1'
+  if (input.type === 'boolean') return 'false'
+  if (input.type === 'json') return '{}'
+  if (input.type === 'select') return input.options?.[0]?.value ?? 'check'
+  return 'check'
+}
+
+/**
+ * Run every action once with nothing but served HTTP behind it.
+ *
+ * Two things are being asked. That an action runs at all on its own declared
+ * arguments — until now no check ever called one — and that it reaches nothing
+ * the routes did not offer, which is what makes a conformance run hermetic.
+ *
+ * A failure is an error only when the caller supplied routes: they said what
+ * the service returns, so a throw is the connector's. Against the bare `{}`
+ * default it is a warning, because an empty object is not a real reply.
+ */
+async function mockFindings(connector: Connector, options: CheckOptions): Promise<CheckFinding[]> {
+  if (!options.mock) return []
+  const routes = options.mockRoutes ?? [{ url: /.*/ }]
+  const level = options.mockRoutes?.length ? 'error' : 'warn'
+  const found: CheckFinding[] = []
+
+  for (const action of connector.actions) {
+    const args = Object.fromEntries(
+      (action.inputs ?? []).map((input) => [input.key, sampleArg(input)])
+    )
+    try {
+      await withMockHttp(routes, () =>
+        runAction(connector, action.type, args, {
+          config: options.config ?? {},
+          ...(options.now && { now: options.now })
+        })
+      )
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      // Reaching for the network is a failure in either mode: a conformance
+      // run that touches a real service is not a conformance run.
+      const escaped = reason.startsWith('No mock route')
+      found.push(
+        finding(
+          escaped ? 'error' : level,
+          escaped ? 'mock-network-escape' : 'mock-action-failed',
+          `action ${action.type}`,
+          `did not run against served HTTP: ${reason}`
+        )
+      )
+    }
+  }
+
+  return found
+}
+
 /**
  * Replay a trigger's declared `sample` through the real dedupe pipeline by
  * swapping in a fetch that serves the whole sample on every call. Serving it
@@ -321,6 +386,7 @@ export async function checkConnector(
   found.push(...authFindings(connector))
   found.push(...secretFindings(connector))
   found.push(...(await packageFindings(options)))
+  found.push(...(await mockFindings(connector, options)))
 
   // Triggers share no state, so their checks run concurrently rather than
   // waiting on each other's polls.

@@ -4,7 +4,8 @@ import { dirname, join, resolve } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { checkConnector, formatFindings } from './check'
 import { resolveConfig } from './define'
-import { packConnector, type BundleOutput, type BundleRequest } from './pack'
+import { packConnector } from './pack'
+import { esbuildBundle, type BundleOutput, type BundleRequest } from './packaging'
 import { runPoll } from './runtime'
 import { scaffoldFiles } from './scaffold'
 import { connectionSetup, connectorManifest } from './setup'
@@ -26,6 +27,7 @@ Options:
   --since <iso>                 Lower bound passed to poll
   --limit <n>                   Maximum items to request
   --live                        Let check poll for real using the environment
+  --mock                        Run every action against served HTTP, not the network
   --out <dir>                   Directory new and pack write to
   --name <name>                 Display name for a new connector`
 
@@ -42,7 +44,7 @@ export interface CliDeps {
 }
 
 /** Flags that stand alone; everything else must be followed by a value. */
-const BOOLEAN_FLAGS = new Set(['live'])
+const BOOLEAN_FLAGS = new Set(['live', 'mock'])
 
 /**
  * Split arguments into flags and positionals in one pass, so a flag's value is
@@ -148,7 +150,19 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     }
 
     case 'check': {
+      // A mock run is the whole conformance gate, so it also asks what the
+      // connector ships as — the questions pack would ask, before packing.
+      const packaged =
+        flags.mock === 'true'
+          ? {
+              mock: true,
+              packageDir: deps.cwd ?? process.cwd(),
+              entry: modulePath,
+              bundle: deps.bundle ?? esbuildBundle
+            }
+          : {}
       const findings = await checkConnector(connector, {
+        ...packaged,
         ...(flags.live === 'true' && {
           live: true,
           config: resolveConfig(connector, deps.env ?? process.env)
