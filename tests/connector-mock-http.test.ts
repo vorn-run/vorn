@@ -66,7 +66,7 @@ describe('serving a connector its HTTP in-process', () => {
     }
     const harness = createConnectorHarness(connector([failing]))
     await expect(
-      harness.withMockHttp([{ url: '/api', status: 503 }], () =>
+      harness.withMockHttp([{ url: '/api/', status: 503 }], () =>
         harness.execute('post', { text: 'hi' })
       )
     ).rejects.toThrow('Acme said 503')
@@ -107,9 +107,32 @@ describe('serving a connector its HTTP in-process', () => {
     expect(calls).toHaveLength(1)
   })
 
-  it('matches a route by pattern as well as by substring', async () => {
-    const { calls } = await withMockHttp([{ url: /messages$/ }], () =>
-      fetch('https://acme.test/api/messages')
+  it('matches a path exactly, so a query string cannot claim a route', async () => {
+    const exact = await withMockHttp([{ url: '/api/messages' }], () =>
+      fetch('https://acme.test/api/messages?limit=1')
+    )
+    expect(exact.calls).toHaveLength(1)
+
+    await expect(
+      withMockHttp([{ url: '/admin' }], () => fetch('https://acme.test/api?next=/admin'))
+    ).rejects.toThrow(/No mock route/)
+  })
+
+  it('takes a trailing slash as everything underneath', async () => {
+    const { calls } = await withMockHttp([{ url: '/api/' }], () =>
+      fetch('https://acme.test/api/messages/42')
+    )
+    expect(calls).toHaveLength(1)
+
+    // The prefix is a path prefix, not a string one: /apiary is elsewhere.
+    await expect(
+      withMockHttp([{ url: '/api/' }], () => fetch('https://acme.test/apiary'))
+    ).rejects.toThrow(/No mock route/)
+  })
+
+  it('lets a pattern see the whole URL, for when the host is the difference', async () => {
+    const { calls } = await withMockHttp([{ url: /^https:\/\/auth\.acme\.test\// }], () =>
+      fetch('https://auth.acme.test/token')
     )
     expect(calls[0].method).toBe('GET')
   })
@@ -170,7 +193,7 @@ describe('a check that runs every action against served HTTP', () => {
     // connector's to answer for.
     const routed = await checkConnector(connector([strict]), {
       mock: true,
-      mockRoutes: [{ url: '/api', body: {} }]
+      mockRoutes: [{ url: '/api/', body: {} }]
     })
     expect(routed.find((item) => item.code === 'mock-action-failed')?.level).toBe('error')
   })

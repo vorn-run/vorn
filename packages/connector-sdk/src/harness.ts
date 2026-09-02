@@ -14,7 +14,12 @@ export interface HarnessOptions {
 
 /** One reply the stub will serve, matched in the order the routes were given. */
 export interface MockRoute {
-  /** A string matches when the URL contains it; a pattern is tested against it. */
+  /**
+   * A string names a path: `/api/messages` matches that path and nothing else,
+   * and a trailing slash makes it a prefix — `/api/` matches everything under
+   * it. A pattern is tested against the whole URL, for the times host or query
+   * is what tells two calls apart.
+   */
   url: string | RegExp
   /** Matched case-insensitively; absent matches any method. */
   method?: string
@@ -37,9 +42,26 @@ export interface MockRun<T> {
   calls: MockCall[]
 }
 
+/**
+ * Whether a route answers this call.
+ *
+ * A string is compared against the path rather than searched for in the whole
+ * URL: `/api` should not be answered by a route because the query string
+ * happened to mention it, and a connector's own host is not something a stub
+ * should match by accident.
+ */
 function matches(route: MockRoute, method: string, url: string): boolean {
   if (route.method && route.method.toUpperCase() !== method) return false
-  return typeof route.url === 'string' ? url.includes(route.url) : route.url.test(url)
+  if (route.url instanceof RegExp) return route.url.test(url)
+
+  let pathname: string
+  try {
+    pathname = new URL(url).pathname
+  } catch {
+    // Not a URL the platform can parse; nothing about it can be trusted.
+    return false
+  }
+  return route.url.endsWith('/') ? pathname.startsWith(route.url) : pathname === route.url
 }
 
 function reply(route: MockRoute): Response {
