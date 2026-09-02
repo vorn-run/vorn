@@ -485,6 +485,14 @@ describe('a connection nobody asked for', () => {
     expect(listing.connectedCount).toBe(1)
     expect(listing.implicitlyConnected).toBe(true)
   })
+
+  it('keeps it out of the connections someone can manage', () => {
+    expect(groupConnections([implicit], [])).toEqual([])
+
+    const groups = groupConnections([implicit, chosen], [])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].connections.map((c) => c.id)).toEqual(['mine'])
+  })
 })
 
 describe('an action carried before it is installed', () => {

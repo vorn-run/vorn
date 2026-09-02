@@ -327,6 +327,10 @@ export interface ConnectionGroup {
  * named after its connector id, with the icon the connection itself stored.
  * Groups keep the order the connections arrive in, which is the order the
  * server returns them.
+ *
+ * A connection the app made for a connector that signs in with nothing is left
+ * out: nobody chose it, there is nothing in it to edit, and deleting it would
+ * only break the connector it was made for.
  */
 export function groupConnections(
   connections: SourceConnection[],
@@ -334,7 +338,7 @@ export function groupConnections(
 ): ConnectionGroup[] {
   const byConnector = new Map<string, ConnectionGroup>()
 
-  for (const conn of connections) {
+  for (const conn of connections.filter((connection) => !isImplicit(connection))) {
     const id = connectionConnectorId(conn)
     const existing = byConnector.get(id)
     if (existing) {
