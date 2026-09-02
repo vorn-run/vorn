@@ -522,3 +522,17 @@ describe('exporting the workflow being edited', () => {
     expect(toasts.error).not.toHaveBeenCalled()
   })
 })
+
+describe('a catalog that lost the startup race', () => {
+  it('tries again when the editor opens instead of caching the failure', async () => {
+    api.listConnectorCatalog.mockRejectedValueOnce(new Error('not connected'))
+    mockState.isWorkflowEditorOpen = false
+    const { rerender } = render(<WorkflowEditor />)
+    await act(async () => {})
+
+    mockState.isWorkflowEditorOpen = true
+    rerender(<WorkflowEditor />)
+
+    expect(await screen.findByText('Webhook to report')).toBeInTheDocument()
+  })
+})

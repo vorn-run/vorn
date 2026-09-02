@@ -649,8 +649,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const needsConnectorData = !editingId || imported?.workflowId === editingId
 
   // Optional calls: a build without a catalog costs the offer, never the editor.
+  // Keyed on the editor opening: a fetch that lost the startup race against the
+  // server socket must try again the next time someone is actually looking.
   useEffect(() => {
-    if (!needsConnectorData || templates.length > 0) return
+    if (!isActive || !needsConnectorData || templates.length > 0) return
     void Promise.resolve(window.api?.listConnectorCatalog?.())
       .then((snapshot) => {
         setTemplates(snapshot?.templates ?? [])
@@ -659,22 +661,22 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         setCatalog(snapshot?.items ?? [])
         setMcpServers(snapshot?.mcpServers ?? [])
       })
-      .catch(() => setTemplates([]))
-  }, [needsConnectorData, templates.length])
+      .catch(() => {})
+  }, [isActive, needsConnectorData, templates.length])
 
   useEffect(() => {
-    if (!needsConnectorData) return
+    if (!isActive || !needsConnectorData) return
     void Promise.resolve(window.api?.listConnectorPacks?.())
       .then((list) => setPacks(list ?? []))
-      .catch(() => setPacks([]))
-  }, [needsConnectorData])
+      .catch(() => {})
+  }, [isActive, needsConnectorData])
 
   useEffect(() => {
-    if (!needsConnectorData) return
+    if (!isActive || !needsConnectorData) return
     void Promise.resolve(window.api?.listConnectors?.())
       .then((list) => setConnectors(list ?? []))
-      .catch(() => setConnectors([]))
-  }, [needsConnectorData])
+      .catch(() => {})
+  }, [isActive, needsConnectorData])
 
   const suggestions = useMemo(
     () => connectorSuggestions(connections, connectors),
