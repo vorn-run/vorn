@@ -26,15 +26,16 @@ export {
   PREFLIGHT_TOOL
 } from './setup'
 export type { ConnectionSetup, ConnectorManifest } from './setup'
+export { packConnector, packFileName } from './pack'
+export type { PackOptions, PackResult } from './pack'
 export {
-  packConnector,
-  packFileName,
   lifecycleScriptFindings,
   bundleDependencyFindings,
   readNearestPackageJson,
+  esbuildBundle,
   MAX_PACK_BYTES
-} from './pack'
-export type { PackOptions, PackResult, BundleRequest, BundleOutput } from './pack'
+} from './packaging'
+export type { BundleRequest, BundleOutput } from './packaging'
 export { createConnectorServer, serveConnector } from './server'
 export type { ConnectorServerOptions } from './server'
 export { scaffoldFiles, titleCase } from './scaffold'

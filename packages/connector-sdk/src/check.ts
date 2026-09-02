@@ -1,5 +1,19 @@
+import {
+  bundleDependencyFindings,
+  lifecycleScriptFindings,
+  packEntryContents,
+  readNearestPackageJson,
+  type BundleOutput,
+  type BundleRequest
+} from './packaging'
 import { runPoll, type PollPage } from './runtime'
-import type { Connector, ConnectorConfig, DedupeStrategy, TriggerDefinition } from './types'
+import type {
+  ActionDefinition,
+  Connector,
+  ConnectorConfig,
+  DedupeStrategy,
+  TriggerDefinition
+} from './types'
 
 export interface CheckFinding {
   /** `error` means the connector will misbehave in Vorn; `warn` is advisory. */
@@ -19,7 +33,27 @@ export interface CheckOptions {
   /** Credentials, required by `live`. */
   config?: ConnectorConfig
   now?: () => string
+  /**
+   * Directory whose nearest package.json says how the connector ships. Given,
+   * the checks that are about the package rather than the definition run too.
+   */
+  packageDir?: string
+  /**
+   * Bundles the connector so the check can see what would stay outside it.
+   * Given, a pack's no-install-step promise is verified before packing.
+   */
+  bundle?(request: BundleRequest): Promise<BundleOutput>
+  /** Module specifier the bundle starts from; required by `bundle`. */
+  entry?: string
 }
+
+/** What the host will run a probe by, so a check refuses what it would drop. */
+const EXECUTABLE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/** Config keys that name a credential, whatever the connector calls them. */
+const CREDENTIAL_NAME = /(secret|token|password|passphrase|api[-_]?key|credential)/i
+
+const INPUT_TYPES = new Set(['string', 'number', 'boolean', 'select', 'json'])
 
 function finding(
   level: CheckFinding['level'],
@@ -28,6 +62,146 @@ function finding(
   message: string
 ): CheckFinding {
   return { level, code, target, message }
+}
+
+/**
+ * How the connector says it signs in, checked against what the host will keep.
+ *
+ * `defineConnector` already refuses a rung it cannot back up, so what is left
+ * here is the gap between the two: an author-side probe that passes validation
+ * and is then dropped at the host for not being a bare executable name, which
+ * would silently turn a Sign in into a token field.
+ */
+function authFindings(connector: Connector): CheckFinding[] {
+  const auth = connector.auth
+  if (!auth) {
+    return [
+      finding(
+        'warn',
+        'auth-undeclared',
+        connector.id,
+        'does not say how it signs in, so the app cannot tell anyone before they install it'
+      )
+    ]
+  }
+
+  const found: CheckFinding[] = []
+  const command = auth.probe?.command?.trim() ?? ''
+  const args = auth.probe?.args ?? []
+  if (auth.rung === 'cli') {
+    if (!EXECUTABLE_NAME.test(command)) {
+      found.push(
+        finding(
+          'error',
+          'auth-probe-missing',
+          `${connector.id} auth`,
+          `probe command "${command}" is not a bare executable name, so the host drops it and the rung promises a sign-in it cannot ask for`
+        )
+      )
+    }
+    if (args.some((arg) => typeof arg !== 'string')) {
+      found.push(
+        finding(
+          'error',
+          'auth-probe-missing',
+          `${connector.id} auth`,
+          'probe arguments must all be strings, or the host drops the probe'
+        )
+      )
+    }
+  }
+
+  return found
+}
+
+/** A credential Vorn would store in the clear because nothing marked it secret. */
+function secretFindings(connector: Connector): CheckFinding[] {
+  const named = new Set(connector.auth?.keys ?? [])
+  return connector.config
+    .filter((field) => !field.secret)
+    .filter((field) => named.has(field.key) || CREDENTIAL_NAME.test(field.key))
+    .map((field) =>
+      finding(
+        named.has(field.key) ? 'error' : 'warn',
+        'secret-not-marked',
+        `config ${field.key}`,
+        'holds a credential but is not marked `secret`, so Vorn would store it unencrypted'
+      )
+    )
+}
+
+/** What an action takes and returns, as far as a step can see it before running. */
+function actionShapeFindings(action: ActionDefinition): CheckFinding[] {
+  const target = `action ${action.type}`
+  const found: CheckFinding[] = []
+
+  if (!action.outputs?.length) {
+    found.push(
+      finding(
+        'warn',
+        'action-no-outputs',
+        target,
+        'declares no outputs, so a later step has nothing to autocomplete from'
+      )
+    )
+  }
+
+  for (const input of action.inputs ?? []) {
+    if (input.type !== undefined && !INPUT_TYPES.has(input.type)) {
+      found.push(
+        finding(
+          'error',
+          'input-type-unsupported',
+          `${target} input ${input.key}`,
+          `declares type "${input.type}", which Vorn cannot draw a field for`
+        )
+      )
+    }
+    // A select is a promise of choices; one with neither list is a text box
+    // wearing a dropdown's clothes.
+    if (input.type === 'select' && !input.options?.length && !input.loadOptions) {
+      found.push(
+        finding(
+          'error',
+          'input-type-unsupported',
+          `${target} input ${input.key}`,
+          'is a select with neither fixed options nor a loadOptions set to draw from'
+        )
+      )
+    }
+  }
+
+  return found
+}
+
+/** What the package says about itself, when a check was pointed at one. */
+async function packageFindings(options: CheckOptions): Promise<CheckFinding[]> {
+  if (options.packageDir === undefined) return []
+  const pkg = readNearestPackageJson(options.packageDir)
+  const found = [...lifecycleScriptFindings(pkg)]
+
+  const vorn = (pkg as { vorn?: { keywords?: unknown } } | undefined)?.vorn
+  const keywords = Array.isArray(vorn?.keywords) ? vorn.keywords : []
+  if (keywords.length === 0) {
+    found.push(
+      finding(
+        'warn',
+        'keywords-missing',
+        'package.json',
+        'names no keywords, so the connector is findable only by its own name'
+      )
+    )
+  }
+
+  if (options.bundle && options.entry !== undefined) {
+    const built = await options.bundle({
+      contents: packEntryContents(options.entry),
+      resolveDir: options.packageDir
+    })
+    found.push(...bundleDependencyFindings(built.external))
+  }
+
+  return found
 }
 
 /**
@@ -144,6 +318,10 @@ export async function checkConnector(
     )
   }
 
+  found.push(...authFindings(connector))
+  found.push(...secretFindings(connector))
+  found.push(...(await packageFindings(options)))
+
   // Triggers share no state, so their checks run concurrently rather than
   // waiting on each other's polls.
   const perTrigger = await Promise.all(
@@ -201,6 +379,7 @@ export async function checkConnector(
         )
       )
     }
+    found.push(...actionShapeFindings(action))
     for (const input of action.inputs ?? []) {
       if (!input.description?.trim()) {
         found.push(
