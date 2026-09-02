@@ -12,6 +12,8 @@ import {
   unresolvedRequirements,
   type PortableRequirement
 } from '../../shared/workflow-portability'
+import type { ConnectorListing } from './connector-browse'
+import { canAddConnection, packStateFor } from './pack-status'
 
 /**
  * What a template needs before it will run here, and what it becomes when used.
@@ -68,6 +70,41 @@ export function connectorSuggestions(
       name: seeded.name
     }))
   })
+}
+
+/**
+ * What can be done about a requirement this machine cannot answer yet.
+ *
+ * A row that only names what is missing sends someone to Settings and back; the
+ * same row can carry the fix, and every one of these routes already exists.
+ */
+export type RequirementAction =
+  | { kind: 'install'; listing: ConnectorListing }
+  | { kind: 'addConnection'; listing: ConnectorListing }
+  | { kind: 'createProfile'; name: string }
+  | { kind: 'none' }
+
+export function requirementAction(
+  requirement: TemplateRequirement,
+  listings: ConnectorListing[]
+): RequirementAction {
+  if (requirement.connectionId !== undefined) return { kind: 'none' }
+  // The HTTP connector is built in, so a profile is always one form away.
+  if (requirement.requirement.kind === 'httpProfile') {
+    return { kind: 'createProfile', name: requirement.requirement.name }
+  }
+
+  const connectorId = requirement.requirement.connectorId
+  // An export whose connection was already gone names no connector to offer.
+  if (connectorId === '') return { kind: 'none' }
+  const listing = listings.find((candidate) => candidate.id === connectorId)
+  if (!listing) return { kind: 'none' }
+
+  const state = packStateFor({ installed: listing.pack })
+  const route = { source: listing.source, hasLegacyLaunch: !!listing.catalogItem?.packageName }
+  return canAddConnection(state, route)
+    ? { kind: 'addConnection', listing }
+    : { kind: 'install', listing }
 }
 
 export function templateRequirements(
