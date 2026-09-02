@@ -177,9 +177,8 @@ describe('rotating a key', () => {
     api.listConnectorKeys.mockResolvedValue([{ ...PROFILE, name: 'renamed API' }])
     // The connections cache subscribes too; which registered first is not the
     // point of this test.
-    for (const [callback] of api.onConfigChanged.mock.calls) {
-      ;(callback as () => void)()
-    }
+    const subscriptions = api.onConfigChanged.mock.calls as unknown as Array<[() => void]>
+    for (const [callback] of subscriptions) callback()
 
     expect(await screen.findByText('renamed API')).toBeInTheDocument()
   })
