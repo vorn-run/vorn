@@ -327,6 +327,18 @@ describe('a list too long to scan flat', () => {
     expect(queryByText('Azure DevOps')).not.toBeInTheDocument()
   })
 
+  it('shows the receipt behind the badge, not just the word', () => {
+    const listing = buildConnectorListings([], [SLACK], []).find((l) => l.id === 'slack')!
+    const { getByText } = render(
+      <ConnectorDetail listing={listing} builtIns={[]} onAdd={vi.fn()} onClose={vi.fn()} />
+    )
+
+    expect(getByText('manifest')).toBeInTheDocument()
+    expect(getByText('no-runtime-deps')).toBeInTheDocument()
+    expect(getByText(/checked .* against v0\.6\.0/)).toBeInTheDocument()
+    expect(getByText('Needs a key')).toBeInTheDocument()
+  })
+
   it('offers no sign-in filter when every connector answers it the same way', () => {
     const { queryByLabelText } = render(
       <ConnectorDirectory
@@ -362,6 +374,35 @@ describe('a connector that signs in with nothing', () => {
     statusMapping: {},
     createdAt: '2026-09-02T00:00:00Z'
   }
+
+  it('offers the workflow rather than a connection nobody needs', () => {
+    const [listing] = buildConnectorListings([], [], [implicitConnection as never], [ECHO])
+    const onUse = vi.fn()
+    const { getByText, queryByText } = render(
+      <ConnectorDetail
+        listing={listing}
+        builtIns={[]}
+        onAdd={vi.fn()}
+        onUse={onUse}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(queryByText('Add a connection')).not.toBeInTheDocument()
+    expect(getByText(/Nothing — ready as soon as it is installed/)).toBeInTheDocument()
+    fireEvent.click(getByText('Use in a workflow'))
+    expect(onUse).toHaveBeenCalled()
+  })
+
+  it('says so plainly rather than offering a button that goes nowhere', () => {
+    const [listing] = buildConnectorListings([], [], [implicitConnection as never], [ECHO])
+    const { getByText, queryByText } = render(
+      <ConnectorDetail listing={listing} builtIns={[]} onAdd={vi.fn()} onClose={vi.fn()} />
+    )
+
+    expect(queryByText('Use in a workflow')).not.toBeInTheDocument()
+    expect(getByText('Ready to use in a workflow.')).toBeInTheDocument()
+  })
 
   it('asks nobody to add a connection it already made', () => {
     const { queryByText, getByText } = render(

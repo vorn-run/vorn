@@ -1,8 +1,19 @@
-import { Plus, ArrowLeft, ExternalLink, Download, RefreshCw, Undo2, Trash2 } from 'lucide-react'
+import {
+  Plus,
+  ArrowLeft,
+  Check,
+  ExternalLink,
+  Download,
+  RefreshCw,
+  Undo2,
+  Trash2,
+  Workflow
+} from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
-import type { ConnectorInstallProgress } from '../../../shared/types'
+import type { ConnectorCatalogVerification, ConnectorInstallProgress } from '../../../shared/types'
 import {
   listingDetails,
+  AUTH_RUNG_LABEL,
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
@@ -30,6 +41,7 @@ export function ConnectorDetail({
   onInstall,
   onRollback,
   onRemove,
+  onUse,
   onClose
 }: {
   listing: ConnectorListing
@@ -40,6 +52,8 @@ export function ConnectorDetail({
   onInstall?: () => void
   onRollback?: () => void
   onRemove?: () => void
+  /** Where a connector that needs no connection is actually used. */
+  onUse?: () => void
   onClose: () => void
 }) {
   const details = listingDetails(listing, builtIns)
@@ -76,6 +90,8 @@ export function ConnectorDetail({
             {entry?.version && ` · v${entry.version}`}
             {listing.connectedCount > 0 && ` · ${count(listing.connectedCount, 'connection')}`}
           </div>
+          {/* A badge is a claim; this is the claim's receipt, said in full. */}
+          {listing.verified && <VerifiedStrip verification={listing.verified} />}
         </div>
       </div>
 
@@ -131,7 +147,22 @@ export function ConnectorDetail({
         </>
       )}
 
-      {entry?.auth && <p className="text-[12.5px] text-gray-400 mt-4">{entry.auth}</p>}
+      {/* The rung answers "what will this ask of me" in one word the list can
+          also filter by; the connector's own sentence says it in its own terms. */}
+      {(listing.authRung || entry?.auth) && (
+        <Section label="Signs in with">
+          {listing.authRung === 'none' ? (
+            <p className="text-[12.5px] text-gray-300">
+              Nothing — ready as soon as it is installed.
+            </p>
+          ) : (
+            listing.authRung && (
+              <p className="text-[12.5px] text-gray-300">{AUTH_RUNG_LABEL[listing.authRung]}</p>
+            )
+          )}
+          {entry?.auth && <p className="text-[12.5px] text-gray-500">{entry.auth}</p>}
+        </Section>
+      )}
 
       {/* The question this page could not answer while a connector was a package name. */}
       {listing.pack && (
@@ -152,16 +183,31 @@ export function ConnectorDetail({
       )}
 
       <div className="flex items-center gap-2 mt-6">
-        {canAddConnection(state, {
-          source: listing.source,
-          hasLegacyLaunch: Boolean(entry?.packageName)
-        }) && (
-          <button
-            onClick={onAdd}
-            className="text-xs text-gray-100 bg-white/[0.1] hover:bg-white/[0.16] px-3 py-1.5 rounded-sm transition-colors flex items-center gap-1"
-          >
-            <Plus size={12} /> Add a connection
-          </button>
+        {/* Nothing to connect: installing it was the whole setup, so the next
+            useful move is the one the connector exists for. */}
+        {listing.implicitlyConnected ? (
+          onUse ? (
+            <button
+              onClick={onUse}
+              className="text-xs text-gray-100 bg-white/[0.1] hover:bg-white/[0.16] px-3 py-1.5 rounded-sm transition-colors flex items-center gap-1"
+            >
+              <Workflow size={12} /> Use in a workflow
+            </button>
+          ) : (
+            <span className="text-[12px] text-gray-500">Ready to use in a workflow.</span>
+          )
+        ) : (
+          canAddConnection(state, {
+            source: listing.source,
+            hasLegacyLaunch: Boolean(entry?.packageName)
+          }) && (
+            <button
+              onClick={onAdd}
+              className="text-xs text-gray-100 bg-white/[0.1] hover:bg-white/[0.16] px-3 py-1.5 rounded-sm transition-colors flex items-center gap-1"
+            >
+              <Plus size={12} /> Add a connection
+            </button>
+          )
         )}
 
         {onInstall && status.action && (
@@ -219,6 +265,35 @@ export function ConnectorDetail({
       </div>
     </div>
   )
+}
+
+/**
+ * The receipt behind the badge: what ran, against which version, and when.
+ *
+ * Named checks rather than a score, because "verified" is only worth anything
+ * if it says what was verified — and a date, because a check that ran against
+ * a version three releases back vouches for less than it appears to.
+ */
+function VerifiedStrip({ verification }: { verification: ConnectorCatalogVerification }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[11px] text-gray-500">
+      {verification.checks.map((check) => (
+        <span key={check} className="inline-flex items-center gap-1">
+          <Check size={10} /> {check}
+        </span>
+      ))}
+      <span className="text-gray-600">
+        checked {formatDay(verification.checkedAt)} against v{verification.version}
+      </span>
+    </div>
+  )
+}
+
+/** A date said the way a person would, falling back to the raw stamp. */
+function formatDay(iso: string): string {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return iso
+  return at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function Fact({ term, value, mono }: { term: string; value: string; mono?: boolean }) {
