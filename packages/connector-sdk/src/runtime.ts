@@ -236,20 +236,24 @@ export async function runAction(
     ...(options.sleep !== undefined && { sleep: options.sleep })
   })
 
-  if (typeof action.run === 'function') {
-    const output = await action.run(coerced, {
-      config,
-      now: options.now ?? (() => new Date().toISOString()),
-      fetch: fetchImpl
-    })
-    return output ?? {}
+  if (action.request !== undefined) {
+    return executeRequest(
+      action.request,
+      action.postReceive,
+      { args: coerced, config },
+      { fetchImpl }
+    )
+  }
+  // `defineConnector` rules this out; a connector hand-built in plain JS and
+  // passed straight here has not been through it.
+  if (typeof action.run !== 'function') {
+    throw new Error(`Action ${actionType} has neither a run() implementation nor a request`)
   }
 
-  // Declared rather than written: `defineConnector` guarantees one or the other.
-  return executeRequest(
-    action.request,
-    action.postReceive,
-    { args: coerced, config },
-    { fetchImpl }
-  )
+  const output = await action.run(coerced, {
+    config,
+    now: options.now ?? (() => new Date().toISOString()),
+    fetch: fetchImpl
+  })
+  return output ?? {}
 }

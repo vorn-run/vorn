@@ -205,4 +205,21 @@ describe('what an action is allowed to be', () => {
     expect(() => build({ request: { url: '  ' } })).toThrow(/no URL/)
     expect(() => build({ run: () => ({}), postReceive: [] })).toThrow(/no request/)
   })
+
+  it('says so when one built in plain JS reaches the runtime as neither', async () => {
+    // `defineConnector` refuses this; a hand-built object passed straight to
+    // `runAction` has never been through it.
+    const handBuilt = {
+      id: 'acme',
+      name: 'Acme',
+      version: '0.0.0',
+      config: [],
+      triggers: [],
+      actions: [{ type: 'post', label: 'Post' }]
+    } as unknown as Parameters<typeof runAction>[0]
+
+    await expect(runAction(handBuilt, 'post', {})).rejects.toThrow(
+      /neither a run\(\) implementation nor a request/
+    )
+  })
 })
