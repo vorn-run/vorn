@@ -222,7 +222,9 @@ export function ConnectorRow({
     progress
   })
   const status = describePackStatus(state)
-  const installable = listing.source !== 'builtin' && onInstall !== undefined
+  // An MCP server is a command this machine runs, so there is no pack to install.
+  const installable =
+    listing.source !== 'builtin' && listing.source !== 'mcp' && onInstall !== undefined
 
   return (
     <div className="flex items-start gap-3 py-3 border-t border-white/[0.06]">
@@ -299,7 +301,12 @@ export function ConnectorRow({
             onClick={onAdd}
             className="text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
           >
-            <Plus size={11} /> {listing.connectedCount > 0 ? 'Add another' : 'Add'}
+            <Plus size={11} />{' '}
+            {listing.connectedCount > 0
+              ? 'Add another'
+              : listing.source === 'mcp'
+                ? 'Add server'
+                : 'Add'}
           </button>
         )}
       </div>

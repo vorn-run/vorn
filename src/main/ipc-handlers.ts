@@ -1,5 +1,6 @@
 import { app, dialog, BrowserWindow, session, shell } from 'electron'
 import { ipcMain } from 'electron'
+import { writeFile } from 'node:fs/promises'
 import { safeHandle } from './ipc-safe-handle'
 import { IPC, ResizePayload, browserPartition } from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
@@ -414,6 +415,23 @@ export function registerIpcHandlers(): void {
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
   })
+
+  safeHandle(
+    IPC.DIALOG_SAVE_TEXT_FILE,
+    async (event, params: { defaultName: string; contents: string; title?: string }) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return null
+      if (typeof params?.contents !== 'string') throw new Error('Nothing to save')
+      const result = await dialog.showSaveDialog(win, {
+        defaultPath: params.defaultName,
+        title: params.title ?? 'Save file',
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      })
+      if (result.canceled || !result.filePath) return null
+      await writeFile(result.filePath, params.contents, 'utf8')
+      return result.filePath
+    }
+  )
 
   safeHandle(IPC.DIALOG_OPEN_IMAGE, async () => {
     const win = BrowserWindow.getFocusedWindow()

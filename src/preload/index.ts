@@ -188,6 +188,12 @@ const api = {
 
   openFileDialog: (): Promise<string | null> => ipcRenderer.invoke(IPC.DIALOG_OPEN_FILE),
 
+  saveTextFile: (params: {
+    defaultName: string
+    contents: string
+    title?: string
+  }): Promise<string | null> => ipcRenderer.invoke(IPC.DIALOG_SAVE_TEXT_FILE, params),
+
   detectIDEs: (): Promise<{ id: string; name: string; command: string }[]> =>
     ipcRenderer.invoke(IPC.IDE_DETECT),
 

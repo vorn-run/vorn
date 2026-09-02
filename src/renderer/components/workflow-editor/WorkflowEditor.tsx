@@ -10,7 +10,8 @@ import {
   MoreHorizontal,
   Settings,
   Loader2,
-  Square
+  Square,
+  Upload
 } from 'lucide-react'
 import { ICON_MAP } from '../project-sidebar/icon-map'
 import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../../lib/project-icons'
@@ -27,6 +28,8 @@ import {
   WorkflowNode,
   WorkflowNodeErrorPolicy,
   WorkflowEdge,
+  WorkflowTemplate,
+  ConnectorManifest,
   NodeExecutionStatus,
   WorkflowExecution,
   TriggerConfig,
@@ -78,6 +81,14 @@ import {
   stopWorkflowRun
 } from '../../lib/workflow-execution'
 import { toast } from '../Toast'
+import { useConnections } from '../../lib/use-connections'
+import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
+import {
+  connectorSuggestions,
+  templateSeed,
+  type ConnectorSuggestion
+} from '../../lib/template-requirements'
+import { StartFromPanel } from './panels/StartFromPanel'
 import {
   slugify,
   ensureUniqueSlug,
@@ -96,6 +107,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const setOpen = useAppStore((s) => s.setWorkflowEditorOpen)
   const setEditingId = useAppStore((s) => s.setEditingWorkflowId)
   const addWorkflow = useAppStore((s) => s.addWorkflow)
+  const connections = useConnections()
   const updateWorkflow = useAppStore((s) => s.updateWorkflow)
   const removeWorkflowFromStore = useAppStore((s) => s.removeWorkflow)
   const existingWorkflow = useAppStore((s) =>
@@ -117,6 +129,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [pendingInsert, setPendingInsert] = useState<InsertAnchor | null>(null)
   const [showRunHistory, setShowRunHistory] = useState(false)
+  const [showStartFrom, setShowStartFrom] = useState(true)
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
+  const [connectors, setConnectors] = useState<Array<{ id: string; manifest: ConnectorManifest }>>(
+    []
+  )
   const [launchingSince, setLaunchingSince] = useState<number | null>(null)
   const [followRunId, setFollowRunId] = useState<string | null>(null)
   const followArmRef = useRef(false)
@@ -139,6 +156,20 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
   const triggerNode = useMemo(() => nodes.find((n) => n.type === 'trigger') ?? null, [nodes])
   const triggerConfig = triggerNode?.config as TriggerConfig | undefined
+
+  /**
+   * The right-hand slot holds one panel, and a workflow with nothing in it yet
+   * has one thing worth asking. Settings for a workflow that does not exist are
+   * not it, so start-from wins the empty canvas and yields to everything a
+   * person opened deliberately.
+   */
+  const startFromOpen =
+    !editingId &&
+    nodes.length === 0 &&
+    showStartFrom &&
+    !pendingInsert &&
+    !showRunHistory &&
+    !selectedNode
 
   const triggerType = triggerConfig?.triggerType
   const isContextualTrigger =
@@ -247,7 +278,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       loadedRunsForId.current = editingId
       window.api.listWorkflowRuns(editingId, 20).then(setExecutionHistory)
     }
-    if (!isActive) {
+    // A new workflow has no runs, and the last one's must not answer for it.
+    // Clearing the id too means returning to that workflow re-reads its runs.
+    if (!isActive || !editingId) {
       loadedRunsForId.current = null
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setExecutionHistory([])
@@ -381,7 +414,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setStaggerDelayMs(existingWorkflow.staggerDelayMs)
       setAutoCleanupWorktrees(existingWorkflow.autoCleanupWorktrees ?? false)
     } else if (!editingId) {
-      // New workflow — an empty canvas whose first pick is the trigger.
+      // New workflow — an empty canvas, offered a template before the first pick.
       setName('New Workflow')
       setIcon('Workflow')
       setIconColor('#3b82f6')
@@ -389,6 +422,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setEdges([])
       setEnabled(true)
       setStaggerDelayMs(undefined)
+      // Settings are the previous workflow's until they are put back too.
+      setAutoCleanupWorktrees(false)
+      setShowStartFrom(true)
     }
     // Saving hands back a new workflow object; only an actual switch resets the panels.
     if (loadedEditorIdRef.current !== editingId) {
@@ -396,6 +432,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setSelectedNodeId(null)
       setPendingInsert(null)
       setShowRunHistory(false)
+      // Dismissing it answered the last workflow's question, not this one's.
+      setShowStartFrom(true)
       // Run feedback belongs to the workflow that launched it.
       setFollowRunId(null)
       setLaunchingSince(null)
@@ -576,6 +614,85 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     }
     handleClose()
   }, [editingId, removeWorkflowFromStore, handleClose])
+
+  // Only fetched when there is an empty canvas to offer them for. Optional
+  // calls: a build without a catalog costs the offer, never the editor.
+  useEffect(() => {
+    if (editingId || templates.length > 0) return
+    void Promise.resolve(window.api?.listConnectorCatalog?.())
+      .then((snapshot) => setTemplates(snapshot?.templates ?? []))
+      .catch(() => setTemplates([]))
+  }, [editingId, templates.length])
+
+  useEffect(() => {
+    if (editingId) return
+    void Promise.resolve(window.api?.listConnectors?.())
+      .then((list) => setConnectors(list ?? []))
+      .catch(() => setConnectors([]))
+  }, [editingId])
+
+  const suggestions = useMemo(
+    () => connectorSuggestions(connections, connectors),
+    [connections, connectors]
+  )
+
+  /** The server builds these from the connector's own manifest, and repeats are the same workflow. */
+  const handlePickSuggestion = useCallback(
+    async (suggestion: ConnectorSuggestion) => {
+      try {
+        const { workflowId } = await window.api.seedConnectorWorkflow(
+          suggestion.connectionId,
+          suggestion.event
+        )
+        setShowStartFrom(false)
+        setEditingId(workflowId)
+        toast.success(`Started "${suggestion.name}"`)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [setEditingId]
+  )
+
+  const handlePickTemplate = useCallback(
+    (template: WorkflowTemplate) => {
+      const state = useAppStore.getState()
+      const projects = state.config?.projects ?? []
+      const project = projects.find((p) => p.name === state.activeProject) ?? projects[0]
+      const seed = templateSeed(template, project, connections)
+
+      setName(seed.name)
+      if (seed.icon) setIcon(seed.icon)
+      if (seed.iconColor) setIconColor(seed.iconColor)
+      setNodes(seed.nodes)
+      setEdges(seed.edges)
+      setShowStartFrom(false)
+
+      const pending = seed.unresolved.map(describeRequirement).join(', ')
+      if (pending) toast.warning(`Started from "${template.name}" — still needs ${pending}`)
+    },
+    [connections]
+  )
+
+  // Saves first, so the file is what the canvas shows rather than the last save.
+  const handleExportFile = useCallback(async () => {
+    const workflow = persistWorkflow()
+    const state = useAppStore.getState()
+    const projects = state.config?.projects ?? []
+    const project = projectForWorkflow(workflow, projects, state.activeProject)
+    const file = fileFromWorkflow(workflow, project?.path ?? '', connections)
+    const saved = await window.api.saveTextFile?.({
+      defaultName: file.name,
+      contents: file.contents,
+      title: 'Export workflow'
+    })
+    if (!saved) return
+    if (file.residual.length > 0) {
+      toast.error(`Exported, but these still name this machine: ${file.residual.join(', ')}`)
+    } else {
+      toast.success(`Exported "${workflow.name}"`)
+    }
+  }, [persistWorkflow, connections])
 
   const createNodeWithUniqueSlug = useCallback(
     (type: AddableNodeType, excludeNodeId?: string) => {
@@ -1198,6 +1315,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                   onClick={() => {
                     setSelectedNodeId(null)
                     setShowRunHistory(false)
+                    // Asking for settings answers what start-from was asking.
+                    setShowStartFrom(false)
                     setShowProperties(true)
                     setShowOverflowMenu(false)
                   }}
@@ -1209,6 +1328,17 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                 </button>
                 {editingId && (
                   <>
+                    <button
+                      onClick={() => {
+                        setShowOverflowMenu(false)
+                        void handleExportFile()
+                      }}
+                      className="w-full px-3 py-2 text-left text-[12px] text-gray-300 hover:text-white
+                                 hover:bg-white/[0.06] flex items-center gap-2 transition-colors"
+                    >
+                      <Upload size={12} strokeWidth={1.5} />
+                      Export as file…
+                    </button>
                     <div className="my-1 border-t border-white/[0.06]" />
                     <button
                       onClick={() => {
@@ -1260,6 +1390,18 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           />
         )}
 
+        {startFromOpen && (
+          <StartFromPanel
+            templates={templates}
+            connections={connections}
+            suggestions={suggestions}
+            onPickBlank={() => setShowStartFrom(false)}
+            onPickTemplate={handlePickTemplate}
+            onPickSuggestion={(suggestion) => void handlePickSuggestion(suggestion)}
+            onClose={() => setShowStartFrom(false)}
+          />
+        )}
+
         {showRunHistory && !pendingInsert && (
           <RunHistoryPanel
             executions={executionHistory}
@@ -1304,7 +1446,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           />
         )}
 
-        {!selectedNode && !showRunHistory && !pendingInsert && showProperties && (
+        {!selectedNode && !showRunHistory && !pendingInsert && !startFromOpen && showProperties && (
           <WorkflowPropertiesPanel
             enabled={enabled}
             onEnabledChange={setEnabled}

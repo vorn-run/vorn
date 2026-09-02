@@ -63,6 +63,39 @@ describe('WorkflowContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('offers export only when there is somewhere to send it', () => {
+    const { rerender } = render(
+      <WorkflowContextMenu onEdit={vi.fn()} onDelete={vi.fn()} onClose={vi.fn()} />
+    )
+    expect(screen.queryByText('Export as file…')).not.toBeInTheDocument()
+
+    rerender(
+      <WorkflowContextMenu
+        onEdit={vi.fn()}
+        onExport={vi.fn()}
+        onDelete={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+    expect(screen.getByText('Export as file…')).toBeInTheDocument()
+  })
+
+  it('calls onExport + onClose on export click', () => {
+    const onExport = vi.fn()
+    const onClose = vi.fn()
+    render(
+      <WorkflowContextMenu
+        onEdit={vi.fn()}
+        onExport={onExport}
+        onDelete={vi.fn()}
+        onClose={onClose}
+      />
+    )
+    fireEvent.click(screen.getByText('Export as file…'))
+    expect(onExport).toHaveBeenCalledTimes(1)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('calls onClose on click outside', () => {
     const onClose = vi.fn()
     render(

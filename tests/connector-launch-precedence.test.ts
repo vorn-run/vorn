@@ -78,11 +78,16 @@ describe('catalogLaunchSpec', () => {
 
 describe('resolveLaunch precedence', () => {
   const packsRoot = { current: '' }
+  const packsBehavior = { throwUnresolved: false }
 
   beforeEach(() => {
     packsRoot.current = tempDir()
+    packsBehavior.throwUnresolved = false
     vi.doMock('../packages/server/src/connectors/packs', () => ({
       installedLaunch: (id: string) => {
+        if (packsBehavior.throwUnresolved) {
+          throw new Error('Data directory not resolved. Call initDatabase() first.')
+        }
         if (id !== 'acme' || packsRoot.current === '') return undefined
         return { command: 'node', args: [join(packsRoot.current, 'acme', '2.0.0', 'index.js')] }
       }
@@ -136,12 +141,7 @@ describe('resolveLaunch precedence', () => {
   })
 
   it('treats an unresolved data directory as nothing installed', async () => {
-    vi.doMock('../packages/server/src/connectors/packs', () => ({
-      installedLaunch: () => {
-        throw new Error('Data directory not resolved. Call initDatabase() first.')
-      }
-    }))
-    vi.resetModules()
+    packsBehavior.throwUnresolved = true
     const { resolveLaunch } = await load()
     expect(
       resolveLaunch(connection({ sdkConnectorId: 'acme', command: 'npx', args: '[]' }))

@@ -454,6 +454,22 @@ export function createApiShim(wsUrl: string) {
       const path = window.prompt('Enter the file path on the server:')
       return path?.trim() || null
     },
+    // The browser has no save dialog, so the file lands wherever downloads go.
+    saveTextFile: async (params: {
+      defaultName: string
+      contents: string
+    }): Promise<string | null> => {
+      const url = URL.createObjectURL(new Blob([params.contents], { type: 'application/json' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = params.defaultName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      // Revoking before the blob navigation settles can truncate the download.
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+      return params.defaultName
+    },
     openImageDialog: async (): Promise<string[] | null> => {
       const files = await pickFiles('image/*', true)
       if (!files)

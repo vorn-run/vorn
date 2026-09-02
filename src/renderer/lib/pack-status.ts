@@ -173,6 +173,8 @@ export function canAddConnection(
   route: { source: string; hasLegacyLaunch?: boolean }
 ): boolean {
   if (route.source === 'builtin') return true
+  // An MCP server is a command, so there is nothing to install before connecting.
+  if (route.source === 'mcp') return true
   if (state.kind === 'installed') return true
   return route.hasLegacyLaunch === true
 }

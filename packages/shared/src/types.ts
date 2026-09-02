@@ -1,3 +1,6 @@
+// Type-only, so the portability module can keep importing values from here.
+import type { PortableWorkflow } from './workflow-portability'
+
 /** AI agents only. Use this for icon maps, install status, command configs, and
  *  anything else that applies exclusively to an AI CLI — not to plain shells. */
 export type AiAgentType = 'claude' | 'copilot' | 'codex' | 'opencode' | 'gemini'
@@ -1600,6 +1603,7 @@ export const IPC = {
   TASK_IMAGE_GET_PATH: 'task:imageGetPath',
   TASK_IMAGE_CLEANUP: 'task:imageCleanup',
   DIALOG_OPEN_IMAGE: 'dialog:openImage',
+  DIALOG_SAVE_TEXT_FILE: 'dialog:saveTextFile',
   HEADLESS_CREATE: 'headless:create',
   HEADLESS_KILL: 'headless:kill',
   HEADLESS_LIST: 'headless:list',
@@ -1795,8 +1799,46 @@ export interface ConnectorCatalogItem extends ConnectorCatalogEntry {
  * every attempt so far has failed — so the UI can say that rather than showing
  * a timestamp for a list that may be missing everything published since.
  */
+/**
+ * A workflow someone can start from rather than an empty canvas.
+ *
+ * Published beside the connectors and carried in the same document, because a
+ * template goes stale for the same reasons a connector entry does and there is
+ * no reason to fetch, cache and repair two lists.
+ */
+export interface WorkflowTemplate {
+  id: string
+  name: string
+  description: string
+  /** The chain as a person reads it, e.g. ['Webhook', 'Condition', 'HTTP request']. */
+  steps: string[]
+  category?: string
+  portable: PortableWorkflow
+}
+
+/**
+ * An MCP server worth knowing about, listed beside the connectors.
+ *
+ * It carries a command rather than a package because that is what a generic
+ * server is: something Vorn starts and speaks MCP to. There is no manifest to
+ * probe, so what a person needs is the launch line filled in for them.
+ */
+export interface McpServerCatalogEntry {
+  id: string
+  name: string
+  description?: string
+  command: string
+  args: string[]
+  category?: string
+  keywords?: string[]
+  /** Environment variables the server expects, named so the form can ask. */
+  env?: string[]
+}
+
 export interface ConnectorCatalogSnapshot {
   items: ConnectorCatalogItem[]
+  templates: WorkflowTemplate[]
+  mcpServers: McpServerCatalogEntry[]
   fetchedAt?: number
 }
 

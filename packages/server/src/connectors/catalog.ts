@@ -21,7 +21,18 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import os from 'os'
-import type { ConnectorCatalogEntry, ConnectorCatalogItem } from '@vornrun/shared/types'
+import type {
+  ConnectorCatalogEntry,
+  ConnectorCatalogItem,
+  McpServerCatalogEntry,
+  WorkflowTemplate
+} from '@vornrun/shared/types'
+import {
+  PORTABLE_FORMAT_VERSION,
+  type PortableRequirement,
+  type PortableWorkflow
+} from '@vornrun/shared/workflow-portability'
+import { TEMPLATE_SEED } from './template-seed'
 
 /**
  * Where the published catalog lives.
@@ -90,6 +101,121 @@ export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
 interface CachedCatalog {
   fetchedAt: number
   connectors: ConnectorCatalogEntry[]
+  /** Absent in a cache written before templates were published. */
+  templates?: WorkflowTemplate[]
+  mcpServers?: McpServerCatalogEntry[]
+}
+
+/**
+ * Read the templates a catalog document carries, if it carries any.
+ *
+ * Absence is not a failure: every document published so far has none, and a
+ * client that treated that as a broken catalog would throw away the connector
+ * list it came for. Individually unusable templates are dropped for the same
+ * reason a malformed connector entry is.
+ */
+export function parseTemplates(document: unknown): WorkflowTemplate[] {
+  const root = document as { templates?: unknown }
+  if (!Array.isArray(root?.templates)) return []
+  return root.templates
+    .map(normalizeTemplate)
+    .filter((template): template is WorkflowTemplate => template !== undefined)
+}
+
+/**
+ * Read the MCP servers a catalog document lists, if it lists any.
+ *
+ * Absent for the same reason templates are, and repaired the same way: an
+ * entry without a command is nothing anyone can start, but a missing blurb or
+ * a mistyped keyword list is not worth dropping a server over.
+ */
+export function parseMcpServers(document: unknown): McpServerCatalogEntry[] {
+  const root = document as { mcpServers?: unknown }
+  if (!Array.isArray(root?.mcpServers)) return []
+  return root.mcpServers
+    .map(normalizeMcpServer)
+    .filter((entry): entry is McpServerCatalogEntry => entry !== undefined)
+}
+
+function normalizeMcpServer(raw: unknown): McpServerCatalogEntry | undefined {
+  const entry = raw as Record<string, unknown> | null
+  if (
+    typeof entry?.id !== 'string' ||
+    typeof entry.name !== 'string' ||
+    typeof entry.command !== 'string' ||
+    entry.command.length === 0
+  ) {
+    return undefined
+  }
+
+  return {
+    ...entry,
+    id: entry.id,
+    name: entry.name,
+    command: entry.command,
+    args: strings(entry.args),
+    ...(entry.keywords !== undefined && { keywords: strings(entry.keywords) }),
+    ...(entry.env !== undefined && { env: strings(entry.env) })
+  } as McpServerCatalogEntry
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
+}
+
+/** A template is only usable if it carries a workflow this build can read. */
+function normalizeTemplate(raw: unknown): WorkflowTemplate | undefined {
+  const template = raw as Record<string, unknown> | null
+  const portable = template?.portable as PortableWorkflow | undefined
+  if (
+    typeof template?.id !== 'string' ||
+    typeof template.name !== 'string' ||
+    portable?.version !== PORTABLE_FORMAT_VERSION ||
+    !Array.isArray(portable.nodes) ||
+    portable.nodes.length === 0 ||
+    !Array.isArray(portable.edges)
+  ) {
+    return undefined
+  }
+
+  return {
+    ...template,
+    id: template.id,
+    name: template.name,
+    description: typeof template.description === 'string' ? template.description : '',
+    steps: Array.isArray(template.steps)
+      ? template.steps.filter((step): step is string => typeof step === 'string')
+      : [],
+    portable: { ...portable, ...requiresOf(portable) }
+  } as WorkflowTemplate
+}
+
+/**
+ * The requirements a template can be trusted with.
+ *
+ * Everything downstream walks this list — the panel to say what a template
+ * wants, the binder to answer it — so a published string where a list belongs,
+ * or an entry missing the node it speaks for, takes the editor down rather than
+ * showing one bad template. Absent stays absent; unusable entries are dropped.
+ */
+function requiresOf(portable: PortableWorkflow): { requires?: PortableRequirement[] } {
+  if (portable.requires === undefined) return {}
+  if (!Array.isArray(portable.requires)) return { requires: [] }
+
+  const requires = portable.requires.filter((entry): entry is PortableRequirement => {
+    const requirement = entry as Record<string, unknown> | null
+    if (typeof requirement?.nodeId !== 'string') return false
+    if (requirement.kind === 'httpProfile') return typeof requirement.name === 'string'
+    return (
+      requirement.kind === 'connection' &&
+      typeof requirement.connectorId === 'string' &&
+      typeof requirement.name === 'string' &&
+      (requirement.event === undefined || typeof requirement.event === 'string')
+    )
+  })
+  return { requires }
 }
 
 /**
@@ -214,27 +340,44 @@ function readCache(cachePath: string): CachedCatalog | undefined {
   try {
     const cached = JSON.parse(readFileSync(cachePath, 'utf8')) as CachedCatalog
     const connectors = parseCatalog({ version: 1, connectors: cached?.connectors })
-    return connectors ? { fetchedAt: Number(cached.fetchedAt) || 0, connectors } : undefined
+    if (!connectors) return undefined
+    return {
+      fetchedAt: Number(cached.fetchedAt) || 0,
+      connectors,
+      templates: parseTemplates(cached),
+      mcpServers: parseMcpServers(cached)
+    }
   } catch {
     // No cache yet, or one written by a version that shaped it differently.
     return undefined
   }
 }
 
-function writeCache(cachePath: string, connectors: ConnectorCatalogEntry[], now: number): void {
+function writeCache(cachePath: string, document: Omit<CachedCatalog, 'fetchedAt'>, now: number) {
   try {
     mkdirSync(dirname(cachePath), { recursive: true })
-    writeFileSync(cachePath, JSON.stringify({ fetchedAt: now, connectors }, null, 2))
+    writeFileSync(cachePath, JSON.stringify({ fetchedAt: now, ...document }, null, 2))
   } catch {
     // A read-only home directory costs a fetch per session, nothing more.
   }
 }
 
-async function download(get: typeof fetch): Promise<ConnectorCatalogEntry[] | undefined> {
+async function download(get: typeof fetch): Promise<
+  | {
+      connectors: ConnectorCatalogEntry[]
+      templates: WorkflowTemplate[]
+      mcpServers: McpServerCatalogEntry[]
+    }
+  | undefined
+> {
   try {
     const response = await get(CATALOG_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (!response.ok) return undefined
-    return parseCatalog(await response.json())
+    const document = await response.json()
+    const connectors = parseCatalog(document)
+    return connectors
+      ? { connectors, templates: parseTemplates(document), mcpServers: parseMcpServers(document) }
+      : undefined
   } catch {
     // Offline, blocked by a proxy, or serving something that is not the
     // catalog. All of them mean the same thing here: keep what we have.
@@ -243,6 +386,8 @@ async function download(get: typeof fetch): Promise<ConnectorCatalogEntry[] | un
 }
 
 let resolved: ConnectorCatalogItem[] | undefined
+let resolvedTemplates: WorkflowTemplate[] | undefined
+let resolvedMcpServers: McpServerCatalogEntry[] | undefined
 let resolvedAt: number | undefined
 
 /**
@@ -258,10 +403,26 @@ export function catalogItems(options: CatalogOptions = {}): ConnectorCatalogItem
     const now = options.now ?? Date.now()
     const cache = readCache(options.cachePath ?? CACHE_PATH)
     resolved = withLaunch(cache?.connectors ?? CONNECTOR_CATALOG)
+    // A cached document that predates templates falls back to the seed rather
+    // than to nothing, so the start-from list is never empty on an old cache.
+    resolvedTemplates = cache?.templates?.length ? cache.templates : TEMPLATE_SEED
+    resolvedMcpServers = cache?.mcpServers ?? []
     resolvedAt = cache?.fetchedAt
     if (!cache || now - cache.fetchedAt > MAX_AGE_MS) void refreshCatalog(options)
   }
   return resolved
+}
+
+/** The templates a new workflow can start from. */
+export function catalogTemplates(options: CatalogOptions = {}): WorkflowTemplate[] {
+  catalogItems(options)
+  return resolvedTemplates ?? TEMPLATE_SEED
+}
+
+/** The MCP servers the catalog lists. No bundled seed: there is nothing to fall back to. */
+export function catalogMcpServers(options: CatalogOptions = {}): McpServerCatalogEntry[] {
+  catalogItems(options)
+  return resolvedMcpServers ?? []
 }
 
 /**
@@ -274,19 +435,27 @@ export function catalogItems(options: CatalogOptions = {}): ConnectorCatalogItem
  */
 export function catalogSnapshot(options: CatalogOptions = {}): {
   items: ConnectorCatalogItem[]
+  templates: WorkflowTemplate[]
+  mcpServers: McpServerCatalogEntry[]
   fetchedAt?: number
 } {
   const items = catalogItems(options)
-  return resolvedAt === undefined ? { items } : { items, fetchedAt: resolvedAt }
+  const templates = catalogTemplates(options)
+  const mcpServers = catalogMcpServers(options)
+  return resolvedAt === undefined
+    ? { items, templates, mcpServers }
+    : { items, templates, mcpServers, fetchedAt: resolvedAt }
 }
 
 /** Fetch the published catalog and adopt it if it parses. Never throws. */
 export async function refreshCatalog(options: CatalogOptions = {}): Promise<boolean> {
-  const connectors = await download(options.fetchImpl ?? fetch)
-  if (!connectors) return false
+  const document = await download(options.fetchImpl ?? fetch)
+  if (!document) return false
   const now = options.now ?? Date.now()
-  writeCache(options.cachePath ?? CACHE_PATH, connectors, now)
-  resolved = withLaunch(connectors)
+  writeCache(options.cachePath ?? CACHE_PATH, document, now)
+  resolved = withLaunch(document.connectors)
+  resolvedTemplates = document.templates.length > 0 ? document.templates : TEMPLATE_SEED
+  resolvedMcpServers = document.mcpServers
   resolvedAt = now
   return true
 }
@@ -298,5 +467,7 @@ function withLaunch(entries: ConnectorCatalogEntry[]): ConnectorCatalogItem[] {
 /** Test seam: forget what has been resolved this process. */
 export function resetCatalogCache(): void {
   resolved = undefined
+  resolvedTemplates = undefined
+  resolvedMcpServers = undefined
   resolvedAt = undefined
 }
