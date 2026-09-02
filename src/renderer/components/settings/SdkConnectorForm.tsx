@@ -153,7 +153,11 @@ export function SdkConnectorForm({
   const identity = signedIn && signedIn.connectorId === manifest?.id ? signedIn.report : null
 
   const trigger = manifest?.triggers.find((entry) => entry.type === triggerType)
-  const fields = (manifest?.env ?? []).filter((entry) => !(borrowing && entry.secret))
+  // Nothing to fill in for a connector that asks for nothing, and no secret to
+  // ask for while its login is being borrowed.
+  const fields = (manifest?.env ?? []).filter(
+    (entry) => rung !== 'none' && !(borrowing && entry.secret)
+  )
   const missing = fields.filter((entry) => entry.required && !values[entry.name]?.trim())
 
   const handleSave = async () => {
@@ -354,7 +358,7 @@ export function SdkConnectorForm({
             </div>
           )}
 
-          {(rung === 'none' ? [] : fields).map((entry) => (
+          {fields.map((entry) => (
             <div key={entry.name}>
               <label className="text-xs text-gray-500 mb-1 flex items-center gap-1.5">
                 <span className="font-mono text-[11px]">{entry.name}</span>
