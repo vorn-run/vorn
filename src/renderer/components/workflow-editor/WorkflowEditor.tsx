@@ -29,7 +29,6 @@ import {
   WorkflowNodeErrorPolicy,
   WorkflowEdge,
   WorkflowTemplate,
-  ConnectorManifest,
   ConnectorCatalogItem,
   InstalledConnectorPack,
   McpServerCatalogEntry,
@@ -84,7 +83,7 @@ import {
   stopWorkflowRun
 } from '../../lib/workflow-execution'
 import { toast } from '../Toast'
-import { useConnections } from '../../lib/use-connections'
+import { refreshConnections, useConnections } from '../../lib/use-connections'
 import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
 import {
   connectorSuggestions,
@@ -92,9 +91,21 @@ import {
   type ConnectorSuggestion,
   type RequirementAction
 } from '../../lib/template-requirements'
-import { buildConnectorListings } from '../../lib/connector-browse'
+import { buildConnectorListings, type ConnectorListing } from '../../lib/connector-browse'
 import { usePackInstall } from '../../lib/use-pack-install'
 import { PackInstallConfirm } from '../settings/PackInstallConfirm'
+import { AddConnectionForm, type ConnectorInfo } from '../settings/AddConnectionForm'
+import { SdkConnectorForm } from '../settings/SdkConnectorForm'
+import { HttpProfileForm } from '../settings/HttpProfileForm'
+
+/** The built-in connector a listing names, when it is one. */
+function connectorFor(
+  connectors: ConnectorInfo[],
+  listing: ConnectorListing
+): ConnectorInfo | undefined {
+  if (listing.source !== 'builtin') return undefined
+  return connectors.find((connector) => connector.id === listing.id)
+}
 import { StartFromPanel } from './panels/StartFromPanel'
 import {
   slugify,
@@ -138,9 +149,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [showStartFrom, setShowStartFrom] = useState(true)
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
-  const [connectors, setConnectors] = useState<
-    Array<{ id: string; name: string; capabilities: string[]; manifest: ConnectorManifest }>
-  >([])
+  const [connectors, setConnectors] = useState<ConnectorInfo[]>([])
+  /** The connector a requirement asked to connect, and the profile it asked for. */
+  const [connectFor, setConnectFor] = useState<ConnectorListing | null>(null)
+  const [profileFor, setProfileFor] = useState<string | null>(null)
   const [catalog, setCatalog] = useState<ConnectorCatalogItem[]>([])
   const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
   const [mcpServers, setMcpServers] = useState<McpServerCatalogEntry[]>([])
@@ -675,9 +687,19 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const handleFixRequirement = useCallback(
     (action: RequirementAction) => {
       if (action.kind === 'install') void install.inspect(action.listing)
+      if (action.kind === 'addConnection') setConnectFor(action.listing)
+      if (action.kind === 'createProfile') setProfileFor(action.name)
     },
     [install]
   )
+
+  /** A finished connection or profile is what the rows were waiting on. */
+  const handleConnected = useCallback(() => {
+    setConnectFor(null)
+    setProfileFor(null)
+    void refreshConnections()
+    void refreshPacks()
+  }, [refreshPacks])
 
   /** The server builds these from the connector's own manifest, and repeats are the same workflow. */
   const handlePickSuggestion = useCallback(
@@ -1458,6 +1480,34 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                   onConfirm={() => void install.confirm()}
                   onCancel={install.cancel}
                 />
+              </div>
+            )}
+            {profileFor !== null && (
+              <div className="border-b border-white/[0.08] p-2">
+                <HttpProfileForm
+                  name={profileFor}
+                  onDone={handleConnected}
+                  onCancel={() => setProfileFor(null)}
+                />
+              </div>
+            )}
+            {connectFor && (
+              <div className="border-b border-white/[0.08] p-2 overflow-y-auto max-h-[60%]">
+                {connectorFor(connectors, connectFor) ? (
+                  <AddConnectionForm
+                    connector={connectorFor(connectors, connectFor)!}
+                    onDone={handleConnected}
+                    onCancel={() => setConnectFor(null)}
+                  />
+                ) : (
+                  <SdkConnectorForm
+                    {...(connectFor.pack
+                      ? { pack: connectFor.pack }
+                      : { catalogEntry: connectFor.catalogItem })}
+                    onDone={handleConnected}
+                    onCancel={() => setConnectFor(null)}
+                  />
+                )}
               </div>
             )}
           </StartFromPanel>

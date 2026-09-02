@@ -142,6 +142,11 @@ export function iconForConnection(
   return packCache.find((pack) => pack.id === connectorId)?.icon
 }
 
+/** Re-read connections and packs now, for a caller that just made one. */
+export async function refreshConnections(): Promise<void> {
+  await refresh().catch(() => {})
+}
+
 /** Test hook — drop cached state so unit tests can start clean. */
 export function __resetConnectionsCacheForTests(): void {
   cache = null
