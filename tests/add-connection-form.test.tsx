@@ -108,7 +108,8 @@ describe('connecting a connector', () => {
       />
     )
 
-    await waitFor(() => expect(screen.getByText(/vorn-run\/vorn/)).toBeInTheDocument())
+    // Detection is what makes the connection saveable at all.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Connect/ })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: /Connect/ }))
 
     await waitFor(() => expect(onDone).toHaveBeenCalled())
