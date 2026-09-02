@@ -79,7 +79,9 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       setError(null)
       setPending(null)
       forget(listing.id)
-      const result = await window.api.inspectConnectorPack(source ?? sourceFor(listing))
+      const result = await window.api
+        .inspectConnectorPack(source ?? sourceFor(listing))
+        .catch((e: unknown) => ({ ok: false as const, error: describeFailure(e) }))
       if (!result.ok) {
         // Keyed by the row that asked, which is the row that shows the refusal.
         setProgress((current) => ({
@@ -100,7 +102,9 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
   const inspectFile = useCallback(async (filePath: string) => {
     setError(null)
     setPending(null)
-    const result = await window.api.inspectConnectorPack({ kind: 'file', path: filePath })
+    const result = await window.api
+      .inspectConnectorPack({ kind: 'file', path: filePath })
+      .catch((e: unknown) => ({ ok: false as const, error: describeFailure(e) }))
     if (!result.ok) {
       setError(result.error)
       return
@@ -176,4 +180,9 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       report
     ]
   )
+}
+
+/** A rejected call, worded for the row or sheet that asked. */
+function describeFailure(error: unknown): string {
+  return error instanceof Error ? error.message : 'The pack could not be checked'
 }

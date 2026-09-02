@@ -494,9 +494,6 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     setEditingId(null)
     setSelectedNodeId(null)
     setShowRunHistory(false)
-    // What an import left unbound is about the workflow being left, and a
-    // deleted one cannot answer it at all. Deleting closes through here too.
-    useAppStore.getState().setImportedRequirements(null)
     setOpen(false)
   }, [setOpen, setEditingId])
 
