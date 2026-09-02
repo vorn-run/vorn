@@ -104,7 +104,12 @@ const mockState = {
   setFocusedTerminal: vi.fn(),
   setSelectedTaskId: vi.fn(),
   activeWorkspace: 'personal',
-  workflowExecutions: new Map<string, unknown>()
+  workflowExecutions: new Map<string, unknown>(),
+  importedRequirements: null as {
+    workflowId: string
+    requirements: Array<Record<string, unknown>>
+  } | null,
+  setImportedRequirements: vi.fn()
 }
 
 vi.mock('../src/renderer/stores', () => {
@@ -147,6 +152,12 @@ const CONNECTION = {
   ]),
   listConnectorCatalog: vi.fn(),
   listConnectionActions: vi.fn().mockResolvedValue([]),
+  inspectConnectorPack: vi.fn(),
+  installConnectorPack: vi.fn(),
+  onConnectorInstallProgress: vi.fn(() => () => {}),
+  detectRepo: vi.fn().mockResolvedValue(null),
+  encryptString: vi.fn().mockResolvedValue('cipher'),
+  createConnection: vi.fn().mockResolvedValue({ id: 'made-1' }),
   seedConnectorWorkflow,
   saveTextFile
 }
@@ -181,12 +192,147 @@ beforeEach(() => {
   ])
   seedConnectorWorkflow.mockResolvedValue({ workflowId: 'seeded-1', created: true })
   saveTextFile.mockResolvedValue('/tmp/nightly-digest.vorn-workflow.json')
+  api.inspectConnectorPack.mockResolvedValue({
+    ok: true,
+    preview: { id: 'slack', name: 'Slack', version: '1.2.0', token: 'tok-1' }
+  })
+  api.installConnectorPack.mockResolvedValue({ ok: true, pack: { id: 'slack' } })
+  api.onConnectorInstallProgress.mockReturnValue(() => {})
+  api.detectRepo.mockResolvedValue(null)
+  api.createConnection.mockResolvedValue({ id: 'made-1' })
 })
 
 afterEach(() => {
   mockState.editingWorkflowId = null
+  mockState.importedRequirements = null
   captured.canvasProps = null
   captured.propertiesProps = null
+})
+
+/** A published connector the machine has not installed, so a row can offer it. */
+const SLACK_CATALOG = {
+  id: 'slack',
+  name: 'Slack',
+  description: 'Messages and channels',
+  packageName: '@vornrun/connector-slack',
+  packUrl: 'https://packs.test/slack.vorn.tgz',
+  capabilities: ['actions'],
+  category: 'Chat',
+  launch: { command: 'node', args: [] }
+}
+
+describe('a requirement answered from the panel', () => {
+  it('opens the profile form where the template asked for one', async () => {
+    render(<WorkflowEditor />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create profile' }))
+
+    expect(await screen.findByText('HTTP profile')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('reporting API')).toBeInTheDocument()
+  })
+
+  it('closes the profile form again without making anything', async () => {
+    render(<WorkflowEditor />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Create profile' }))
+    await screen.findByText('HTTP profile')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByText('HTTP profile')).toBeNull())
+  })
+
+  it('inspects a published pack before keeping any of it', async () => {
+    api.listConnectorCatalog.mockResolvedValue({
+      items: [SLACK_CATALOG],
+      templates: TEMPLATE_SEED,
+      mcpServers: []
+    })
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [
+        { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: 'workspace-eng' }
+      ]
+    }
+    render(<WorkflowEditor />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Install Slack' }))
+
+    await waitFor(() =>
+      expect(api.inspectConnectorPack).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'url', url: SLACK_CATALOG.packUrl })
+      )
+    )
+    // Verified and described, but nothing kept until it is confirmed.
+    expect(await screen.findByText(/Slack/)).toBeInTheDocument()
+    expect(api.installConnectorPack).not.toHaveBeenCalled()
+  })
+
+  it('offers to connect a built-in that needs no install', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [
+        { kind: 'connection', nodeId: 'n1', connectorId: 'github', name: 'vorn-run/vorn' }
+      ]
+    }
+    render(<WorkflowEditor />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add connection' }))
+
+    expect(await screen.findByText('Connect GitHub')).toBeInTheDocument()
+  })
+
+  it('says what an import could not bind, on the workflow it imported', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+
+    expect(await screen.findByText('Still needs')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create profile' })).toBeInTheDocument()
+  })
+
+  it('drops the still-needs list when it is dismissed', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
+
+    expect(mockState.setImportedRequirements).toHaveBeenCalledWith(null)
+  })
+
+  it('says nothing for an import whose needs this machine already answers', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    api.listConnections.mockResolvedValue([
+      { ...CONNECTION, id: 'http-1', name: 'reporting API', connectorId: 'http' }
+    ])
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+
+    await waitFor(() => expect(api.listConnections).toHaveBeenCalled())
+    expect(screen.queryByText('Still needs')).toBeNull()
+  })
+
+  it('leaves the import of a different workflow alone', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'someone-else',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+
+    await waitFor(() => expect(api.listWorkflowRuns).toHaveBeenCalled())
+    expect(screen.queryByText('Still needs')).toBeNull()
+  })
 })
 
 describe('the one panel a new workflow opens with', () => {

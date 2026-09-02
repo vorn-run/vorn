@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { useAppStore } from '../src/renderer/stores'
 import { WorkflowsSection } from '../src/renderer/components/project-sidebar/WorkflowsSection'
+import { ToastContainer } from '../src/renderer/components/Toast'
 import { __resetConnectionsCacheForTests } from '../src/renderer/lib/use-connections'
 import { fileFromWorkflow } from '../src/renderer/lib/workflow-files'
 import type { AppConfig, WorkflowDefinition } from '../packages/shared/src/types'
@@ -165,6 +166,73 @@ describe('bringing a workflow file in', () => {
     })
 
     await waitFor(() => expect(addWorkflow).not.toHaveBeenCalled())
+  })
+})
+
+describe('an import that could not bind everything', () => {
+  /** Toasts render into their own container, so the harness mounts one. */
+  const renderWithToasts = (): void => {
+    render(
+      <>
+        <WorkflowsSection isCollapsed={false} workspaceWorkflows={[workflow()]} />
+        <ToastContainer />
+      </>
+    )
+  }
+
+  /** A file whose HTTP step names a profile this machine does not have. */
+  const NEEDY = JSON.stringify({
+    version: 1,
+    name: 'Webhook to report',
+    slug: 'webhook-to-report',
+    nodes: [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        label: 'Webhook',
+        config: { triggerType: 'webhook', method: 'POST', token: '' },
+        position: { x: 0, y: 0 }
+      },
+      {
+        id: 'report',
+        type: 'httpRequest',
+        label: 'Report',
+        config: { method: 'POST', url: '/report', profileConnectionId: '' },
+        position: { x: 0, y: 0 }
+      }
+    ],
+    edges: [{ id: 'e1', source: 'trigger-1', target: 'report' }],
+    requires: [{ kind: 'httpProfile', nodeId: 'report', name: 'reporting API' }]
+  })
+
+  it('offers to review what is still missing', async () => {
+    renderWithToasts()
+
+    dropFile(NEEDY)
+
+    expect(await screen.findByText('Review')).toBeInTheDocument()
+    expect(screen.getByText(/still needs/)).toBeInTheDocument()
+  })
+
+  it('opens the workflow with its unmet needs in hand', async () => {
+    renderWithToasts()
+    dropFile(NEEDY)
+
+    fireEvent.click(await screen.findByText('Review'))
+
+    const state = useAppStore.getState()
+    expect(state.importedRequirements?.requirements).toHaveLength(1)
+    expect(state.importedRequirements?.workflowId).toBe(state.editingWorkflowId)
+    expect(state.isWorkflowEditorOpen).toBe(true)
+  })
+
+  it('says nothing to review when everything bound', async () => {
+    renderWithToasts()
+
+    dropFile(fileFromWorkflow(workflow(), PROJECT.path, []).contents)
+
+    await waitFor(() => expect(addWorkflow).toHaveBeenCalled())
+    expect(screen.queryByText('Review')).toBeNull()
   })
 })
 

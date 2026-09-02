@@ -4,8 +4,21 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { StartFromPanel } from '../src/renderer/components/workflow-editor/panels/StartFromPanel'
 import { TEMPLATE_SEED } from '../packages/server/src/connectors/template-seed'
+import { RequirementRow } from '../src/renderer/components/workflow-editor/panels/RequirementRow'
 import type { ConnectorListing } from '../src/renderer/lib/connector-browse'
 import type { RequirementAction } from '../src/renderer/lib/template-requirements'
+
+/** A published connector this machine has not installed. */
+const LISTING: ConnectorListing = {
+  key: 'catalog:slack',
+  id: 'slack',
+  name: 'Slack',
+  capabilities: ['actions'],
+  category: 'Chat',
+  source: 'catalog',
+  keywords: [],
+  connectedCount: 0
+}
 
 /** The template that wants an HTTP profile nobody here has. */
 const NEEDY = TEMPLATE_SEED.filter((t) => t.id === 'webhook-to-report')
@@ -64,6 +77,35 @@ describe('a requirement that carries its own fix', () => {
     expect(pick).not.toBeNull()
     expect(fix.tagName).toBe('BUTTON')
     expect(pick!.contains(fix)).toBe(false)
+  })
+
+  it('names the connector it would install', () => {
+    render(
+      <RequirementRow
+        requirement={{
+          requirement: { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: 'eng' }
+        }}
+        listings={[LISTING]}
+        onFix={vi.fn()}
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Install Slack' })).toBeInTheDocument()
+  })
+
+  it('offers the connection instead once the pack is on disk', () => {
+    const onFix = vi.fn()
+    const installed = { ...LISTING, pack: { id: 'slack', name: 'Slack', version: '1.2.0' } }
+    render(
+      <RequirementRow
+        requirement={{
+          requirement: { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: 'eng' }
+        }}
+        listings={[installed as ConnectorListing]}
+        onFix={onFix}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }))
+    expect(onFix).toHaveBeenCalledWith(expect.objectContaining({ kind: 'addConnection' }))
   })
 
   it('says nothing to do when no catalog here knows the connector', () => {

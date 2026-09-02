@@ -46,7 +46,11 @@ function Probe({ onInstalled }: { onInstalled?: () => void }) {
   return (
     <div>
       <button onClick={() => void install.inspect(LISTING)}>inspect</button>
+      <button onClick={() => void install.inspectFile('/tmp/pack.vorn.tgz')}>inspect file</button>
       <button onClick={() => void install.confirm()}>confirm</button>
+      <button onClick={install.cancel}>cancel</button>
+      <button onClick={install.clearError}>clear</button>
+      <button onClick={() => install.report('two connections stopped')}>report</button>
       <span data-testid="pending">{install.pending?.preview.version ?? 'none'}</span>
       <span data-testid="error">{install.error ?? 'none'}</span>
       <span data-testid="failed">{install.progress.slack?.error ?? 'none'}</span>
@@ -89,6 +93,47 @@ describe('installing a pack from wherever it was asked for', () => {
       expect(screen.getByTestId('failed')).toHaveTextContent('declares dependencies')
     )
     expect(screen.getByTestId('pending')).toHaveTextContent('none')
+  })
+
+  it('asks the same question of a pack already on this disk', async () => {
+    render(<Probe />)
+    fireEvent.click(screen.getByText('inspect file'))
+
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+    expect(inspectConnectorPack).toHaveBeenCalledWith({
+      kind: 'file',
+      path: '/tmp/pack.vorn.tgz'
+    })
+  })
+
+  // A dropped file has no row to fail on, so its refusal is said outright.
+  it('says why a file was refused, since no row can say it', async () => {
+    inspectConnectorPack.mockResolvedValue({ ok: false, error: 'that is not a pack' })
+    render(<Probe />)
+    fireEvent.click(screen.getByText('inspect file'))
+
+    await waitFor(() => expect(screen.getByTestId('error')).toHaveTextContent('that is not a pack'))
+    expect(screen.getByTestId('pending')).toHaveTextContent('none')
+  })
+
+  it('drops the pending pack when the question is declined', async () => {
+    render(<Probe />)
+    fireEvent.click(screen.getByText('inspect'))
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+
+    fireEvent.click(screen.getByText('cancel'))
+
+    expect(screen.getByTestId('pending')).toHaveTextContent('none')
+    expect(installConnectorPack).not.toHaveBeenCalled()
+  })
+
+  it('says what a removal cost, and forgets it when asked', async () => {
+    render(<Probe />)
+    fireEvent.click(screen.getByText('report'))
+    expect(screen.getByTestId('error')).toHaveTextContent('two connections stopped')
+
+    fireEvent.click(screen.getByText('clear'))
+    expect(screen.getByTestId('error')).toHaveTextContent('none')
   })
 
   it('closes the sheet even when the install call itself fails', async () => {
