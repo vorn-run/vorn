@@ -40,6 +40,11 @@ export interface PackResult {
   bytes?: number
 }
 
+/** A gate pack refuses on; the package-level ones say this for themselves. */
+function finding(code: string, target: string, message: string): CheckFinding {
+  return { level: 'error', code, target, message }
+}
+
 /** File name Vorn recognizes as a connector pack. */
 export function packFileName(connector: Connector): string {
   return `${connector.id}-${connector.version}.vorn.tgz`

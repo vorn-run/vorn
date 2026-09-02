@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { defineConnector, runCli, runConformance } from '../packages/connector-sdk/src/index'
-import type { CliDeps } from '../packages/connector-sdk/src/cli'
+import { defineConnector, runConformance } from '../packages/connector-sdk/src/index'
+import { runCli, type CliDeps } from '../packages/connector-sdk/src/cli'
 import type { ConnectorDefinition } from '../packages/connector-sdk/src/types'
 
 const at = () => '2026-09-02T12:00:00.000Z'
