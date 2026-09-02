@@ -1,6 +1,7 @@
 import { TaskConfig, isTerminalTaskStatus } from '../../../shared/types'
 import { AgentIcon } from '../AgentIcon'
 import { SourceBadge } from '../ConnectorIcon'
+import { useConnectorGlyph } from '../../lib/use-connections'
 import {
   TASK_STATUS_ICON,
   TASK_STATUS_TEXT,
@@ -55,6 +56,7 @@ export function TaskCard({
   const StatusIcon = TASK_STATUS_ICON[task.status]
   const iconColor = TASK_STATUS_TEXT[task.status]
   const shortId = getTaskShortId(task)
+  const sourceGlyph = useConnectorGlyph(task.sourceConnectorId)
   const isArchived = !!task.archivedAt
   const dimmed = task.status === 'cancelled' || isArchived
 
@@ -81,6 +83,7 @@ export function TaskCard({
                   <span className="text-[10px] text-ink-faint">·</span>
                   <SourceBadge
                     connectorId={task.sourceConnectorId}
+                    icon={sourceGlyph}
                     url={task.sourceExternalUrl}
                     label={`#${task.sourceExternalId}`}
                   />
@@ -169,6 +172,7 @@ export function TaskCard({
         {task.sourceConnectorId && task.sourceExternalId && (
           <SourceBadge
             connectorId={task.sourceConnectorId}
+            icon={sourceGlyph}
             url={task.sourceExternalUrl}
             label={`#${task.sourceExternalId}`}
           />

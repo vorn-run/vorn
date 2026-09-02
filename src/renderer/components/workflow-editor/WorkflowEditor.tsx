@@ -11,7 +11,8 @@ import {
   Settings,
   Loader2,
   Square,
-  Upload
+  Upload,
+  X
 } from 'lucide-react'
 import { ICON_MAP } from '../project-sidebar/icon-map'
 import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../../lib/project-icons'
@@ -29,7 +30,9 @@ import {
   WorkflowNodeErrorPolicy,
   WorkflowEdge,
   WorkflowTemplate,
-  ConnectorManifest,
+  ConnectorCatalogItem,
+  InstalledConnectorPack,
+  McpServerCatalogEntry,
   NodeExecutionStatus,
   WorkflowExecution,
   TriggerConfig,
@@ -42,6 +45,7 @@ import {
 import { WorkflowCanvas, AddableNodeType, InsertAnchor } from './WorkflowCanvas'
 import { StepLibrary, type LibraryPick } from './panels/StepLibrary'
 import {
+  alignedNodes,
   layoutPositions,
   loopBodyMembers,
   TRIGGER_ANCHOR,
@@ -81,14 +85,32 @@ import {
   stopWorkflowRun
 } from '../../lib/workflow-execution'
 import { toast } from '../Toast'
-import { useConnections } from '../../lib/use-connections'
+import { refreshConnections, useConnections } from '../../lib/use-connections'
 import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
 import {
   connectorSuggestions,
   templateSeed,
-  type ConnectorSuggestion
+  type ConnectorSuggestion,
+  type RequirementAction
 } from '../../lib/template-requirements'
+import { buildConnectorListings, type ConnectorListing } from '../../lib/connector-browse'
+import { usePackInstall } from '../../lib/use-pack-install'
+import { PackInstallConfirm } from '../settings/PackInstallConfirm'
+import { AddConnectionForm, type ConnectorInfo } from '../settings/AddConnectionForm'
+import { SdkConnectorForm } from '../settings/SdkConnectorForm'
+import { HttpProfileForm } from '../settings/HttpProfileForm'
+
+/** The built-in connector a listing names, when it is one. */
+function connectorFor(
+  connectors: ConnectorInfo[],
+  listing: ConnectorListing
+): ConnectorInfo | undefined {
+  if (listing.source !== 'builtin') return undefined
+  return connectors.find((connector) => connector.id === listing.id)
+}
 import { StartFromPanel } from './panels/StartFromPanel'
+import { RequirementRow } from './panels/RequirementRow'
+import { resolveRequirement } from '../../../shared/workflow-portability'
 import {
   slugify,
   ensureUniqueSlug,
@@ -131,9 +153,13 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [showStartFrom, setShowStartFrom] = useState(true)
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
-  const [connectors, setConnectors] = useState<Array<{ id: string; manifest: ConnectorManifest }>>(
-    []
-  )
+  const [connectors, setConnectors] = useState<ConnectorInfo[]>([])
+  /** The connector a requirement asked to connect, and the profile it asked for. */
+  const [connectFor, setConnectFor] = useState<ConnectorListing | null>(null)
+  const [profileFor, setProfileFor] = useState<string | null>(null)
+  const [catalog, setCatalog] = useState<ConnectorCatalogItem[]>([])
+  const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
+  const [mcpServers, setMcpServers] = useState<McpServerCatalogEntry[]>([])
   const [launchingSince, setLaunchingSince] = useState<number | null>(null)
   const [followRunId, setFollowRunId] = useState<string | null>(null)
   const followArmRef = useRef(false)
@@ -479,7 +505,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       name,
       icon,
       iconColor,
-      nodes,
+      // The canvas already drew this workflow on the lattice; writing the same
+      // positions back is what stops the heal being redone on every open.
+      nodes: alignedNodes(nodes),
       edges,
       enabled,
       ...(staggerDelayMs && { staggerDelayMs }),
@@ -615,26 +643,101 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     handleClose()
   }, [editingId, removeWorkflowFromStore, handleClose])
 
-  // Only fetched when there is an empty canvas to offer them for. Optional
-  // calls: a build without a catalog costs the offer, never the editor.
+  // What an import could not bind, for the workflow now open. Re-resolved
+  // against this machine each render, so answering one clears its row.
+  const imported = useAppStore((s) => s.importedRequirements)
+  const setImportedRequirements = useAppStore((s) => s.setImportedRequirements)
+  // The start-from list needs the catalog, and so does a workflow whose import
+  // left needs — without it a row could name a connector but never offer it.
+  const needsConnectorData = !editingId || imported?.workflowId === editingId
+
+  // Optional calls: a build without a catalog costs the offer, never the editor.
+  // Keyed on the editor opening: a fetch that lost the startup race against the
+  // server socket must try again the next time someone is actually looking.
   useEffect(() => {
-    if (editingId || templates.length > 0) return
+    if (!isActive || !needsConnectorData || templates.length > 0) return
     void Promise.resolve(window.api?.listConnectorCatalog?.())
-      .then((snapshot) => setTemplates(snapshot?.templates ?? []))
-      .catch(() => setTemplates([]))
-  }, [editingId, templates.length])
+      .then((snapshot) => {
+        setTemplates(snapshot?.templates ?? [])
+        // Kept as well as the templates: what a requirement can offer to do
+        // about itself is a question about the catalog.
+        setCatalog(snapshot?.items ?? [])
+        setMcpServers(snapshot?.mcpServers ?? [])
+      })
+      .catch(() => {})
+  }, [isActive, needsConnectorData, templates.length])
 
   useEffect(() => {
-    if (editingId) return
+    if (!isActive || !needsConnectorData) return
+    void Promise.resolve(window.api?.listConnectorPacks?.())
+      .then((list) => setPacks(list ?? []))
+      .catch(() => {})
+  }, [isActive, needsConnectorData])
+
+  useEffect(() => {
+    if (!isActive || !needsConnectorData) return
     void Promise.resolve(window.api?.listConnectors?.())
       .then((list) => setConnectors(list ?? []))
-      .catch(() => setConnectors([]))
-  }, [editingId])
+      .catch(() => {})
+  }, [isActive, needsConnectorData])
 
   const suggestions = useMemo(
     () => connectorSuggestions(connections, connectors),
     [connections, connectors]
   )
+
+  /** Every connector this machine could reach, so a requirement can name its own fix. */
+  const listings = useMemo(
+    () => buildConnectorListings(connectors, catalog, connections, packs, mcpServers),
+    [connectors, catalog, connections, packs, mcpServers]
+  )
+
+  // The same inspect-then-confirm the directory uses, run from the panel.
+  const refreshPacks = useCallback(async () => {
+    const list = await window.api.listConnectorPacks?.().catch(() => [])
+    setPacks(list ?? [])
+  }, [])
+  const install = usePackInstall(refreshPacks)
+
+  const handleFixRequirement = useCallback(
+    (action: RequirementAction) => {
+      if (action.kind === 'install') void install.inspect(action.listing)
+      if (action.kind === 'addConnection') setConnectFor(action.listing)
+      if (action.kind === 'createProfile') setProfileFor(action.name)
+    },
+    [install]
+  )
+
+  const importedPending = useMemo(() => {
+    if (!imported || imported.workflowId !== editingId) return []
+    return imported.requirements
+      .map((requirement) => {
+        const connectionId = resolveRequirement(requirement, connections)
+        return connectionId === undefined ? { requirement } : { requirement, connectionId }
+      })
+      .filter((entry) => entry.connectionId === undefined)
+  }, [imported, editingId, connections])
+
+  /** Nothing half-opened survives leaving the panel that opened it. */
+  const closeStartFrom = useCallback(() => {
+    setShowStartFrom(false)
+    setConnectFor(null)
+    setProfileFor(null)
+    // A forgotten sheet is one click from installing something nobody asked
+    // for the next time this slot draws.
+    install.cancel()
+    install.clearError()
+  }, [install])
+
+  /** A finished connection or profile is what the rows were waiting on. */
+  const handleConnected = useCallback(() => {
+    setConnectFor(null)
+    setProfileFor(null)
+    // The shared cache is what every glyph and picker reads; refreshing it here
+    // means a new connection shows up without waiting for a config round trip.
+    void refreshConnections()
+    void refreshPacks()
+  }, [refreshPacks])
 
   /** The server builds these from the connector's own manifest, and repeats are the same workflow. */
   const handlePickSuggestion = useCallback(
@@ -666,12 +769,12 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       if (seed.iconColor) setIconColor(seed.iconColor)
       setNodes(seed.nodes)
       setEdges(seed.edges)
-      setShowStartFrom(false)
+      closeStartFrom()
 
       const pending = seed.unresolved.map(describeRequirement).join(', ')
       if (pending) toast.warning(`Started from "${template.name}" — still needs ${pending}`)
     },
-    [connections]
+    [connections, closeStartFrom]
   )
 
   // Saves first, so the file is what the canvas shows rather than the last save.
@@ -1394,13 +1497,135 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           <StartFromPanel
             templates={templates}
             connections={connections}
+            listings={listings}
             suggestions={suggestions}
-            onPickBlank={() => setShowStartFrom(false)}
+            onPickBlank={closeStartFrom}
             onPickTemplate={handlePickTemplate}
             onPickSuggestion={(suggestion) => void handlePickSuggestion(suggestion)}
-            onClose={() => setShowStartFrom(false)}
-          />
+            onFixRequirement={handleFixRequirement}
+            onClose={closeStartFrom}
+          >
+            {install.error && (
+              <div className="px-4 py-2 border-b border-white/[0.08] text-[11px] text-danger">
+                {install.error}
+              </div>
+            )}
+            {install.pending && (
+              <div className="border-b border-white/[0.08] p-2">
+                <PackInstallConfirm
+                  preview={install.pending.preview}
+                  busy={install.installing}
+                  onConfirm={() => void install.confirm()}
+                  onCancel={install.cancel}
+                />
+              </div>
+            )}
+            {profileFor !== null && (
+              <div className="border-b border-white/[0.08] p-2">
+                <HttpProfileForm
+                  name={profileFor}
+                  onDone={handleConnected}
+                  onCancel={() => setProfileFor(null)}
+                />
+              </div>
+            )}
+            {connectFor && (
+              <div className="border-b border-white/[0.08] p-2 overflow-y-auto max-h-[60%]">
+                {connectorFor(connectors, connectFor) ? (
+                  <AddConnectionForm
+                    connector={connectorFor(connectors, connectFor)!}
+                    onDone={handleConnected}
+                    onCancel={() => setConnectFor(null)}
+                  />
+                ) : (
+                  <SdkConnectorForm
+                    {...(connectFor.pack
+                      ? { pack: connectFor.pack }
+                      : { catalogEntry: connectFor.catalogItem })}
+                    onDone={handleConnected}
+                    onCancel={() => setConnectFor(null)}
+                  />
+                )}
+              </div>
+            )}
+          </StartFromPanel>
         )}
+
+        {/* An imported workflow says what it could not bind, with the same
+            actions the template rows offer. */}
+        {/* One occupant of the slot, on the same terms as the rest: the panels
+            that answer a selection or a run outrank an import's leftovers. */}
+        {!startFromOpen &&
+          !pendingInsert &&
+          !showRunHistory &&
+          !selectedNode &&
+          importedPending.length > 0 && (
+            <div className="w-[280px] border-l border-white/[0.08] bg-surface-node flex flex-col h-full overflow-y-auto titlebar-no-drag">
+              <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
+                <span className="text-[13px] font-medium text-white">Still needs</span>
+                <button
+                  aria-label="Dismiss"
+                  onClick={() => setImportedRequirements(null)}
+                  className="p-1 rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              {install.error && (
+                <div className="px-4 py-2 border-b border-white/[0.08] text-[11px] text-danger">
+                  {install.error}
+                </div>
+              )}
+              {install.pending && (
+                <div className="border-b border-white/[0.08] p-2">
+                  <PackInstallConfirm
+                    preview={install.pending.preview}
+                    busy={install.installing}
+                    onConfirm={() => void install.confirm()}
+                    onCancel={install.cancel}
+                  />
+                </div>
+              )}
+              {profileFor !== null && (
+                <div className="border-b border-white/[0.08] p-2">
+                  <HttpProfileForm
+                    name={profileFor}
+                    onDone={handleConnected}
+                    onCancel={() => setProfileFor(null)}
+                  />
+                </div>
+              )}
+              {connectFor && (
+                <div className="border-b border-white/[0.08] p-2">
+                  {connectorFor(connectors, connectFor) ? (
+                    <AddConnectionForm
+                      connector={connectorFor(connectors, connectFor)!}
+                      onDone={handleConnected}
+                      onCancel={() => setConnectFor(null)}
+                    />
+                  ) : (
+                    <SdkConnectorForm
+                      {...(connectFor.pack
+                        ? { pack: connectFor.pack }
+                        : { catalogEntry: connectFor.catalogItem })}
+                      onDone={handleConnected}
+                      onCancel={() => setConnectFor(null)}
+                    />
+                  )}
+                </div>
+              )}
+              <div className="py-2">
+                {importedPending.map((entry) => (
+                  <RequirementRow
+                    key={entry.requirement.nodeId + entry.requirement.kind}
+                    requirement={entry}
+                    listings={listings}
+                    onFix={handleFixRequirement}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
         {showRunHistory && !pendingInsert && (
           <RunHistoryPanel

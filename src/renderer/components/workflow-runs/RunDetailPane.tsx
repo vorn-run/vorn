@@ -20,6 +20,7 @@ import {
 } from '../../lib/workflow-execution'
 import { RunStepsList, StatusDot } from '../workflow-editor/RunEntry'
 import { RunIcon } from './RunIcon'
+import { useConnectorLook } from '../../lib/use-connections'
 import { StopRunButton } from './StopRunButton'
 import { workflowRunId, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
@@ -63,7 +64,8 @@ export function RunDetailPane({
   const onLaunchError = (err: unknown): void => {
     toast.error(err instanceof Error ? err.message : String(err))
   }
-  const presentation = describeRun(run, workflow)
+  const look = useConnectorLook(run.connectorItem?.connectionId)
+  const presentation = describeRun(run, workflow, look)
   const outcome = describeOutcome(run, nodes)
   const stages = runStages(run, nodes)
   const done = completedStageCount(stages)

@@ -122,16 +122,21 @@ export function stepPreview(node: WorkflowNode | undefined): string | undefined 
       return configString(node, 'message')
     case 'httpRequest':
       return configString(node, 'body')
-    case 'callConnectorAction': {
-      const args = (node.config as { args?: Record<string, unknown> } | undefined)?.args
-      const entries = args ? Object.entries(args) : []
-      return entries.length > 0
-        ? entries.map(([k, v]) => `${k}: ${String(v)}`).join('  ')
-        : undefined
-    }
+    case 'callConnectorAction':
+      return connectorArgsPreview(
+        (node.config as { args?: Record<string, unknown> } | undefined)?.args
+      )
     default:
       return undefined
   }
+}
+
+/** The one line a connector step's arguments make; the card and the layout share it. */
+export function connectorArgsPreview(
+  args: Record<string, unknown> | undefined
+): string | undefined {
+  const entries = args ? Object.entries(args) : []
+  return entries.length > 0 ? entries.map(([k, v]) => `${k}: ${String(v)}`).join('  ') : undefined
 }
 
 /**

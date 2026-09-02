@@ -563,6 +563,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   isAddProjectDialogOpen: false,
   isWorkflowEditorOpen: false,
   editingWorkflowId: null,
+  importedRequirements: null,
   pendingWorkflowRun: null,
   editingProject: null,
   isCommandPaletteOpen: false,
@@ -647,12 +648,20 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 
   setAddProjectDialogOpen: (open) => set({ isAddProjectDialogOpen: open }),
 
-  setWorkflowEditorOpen: (open) => set({ isWorkflowEditorOpen: open }),
+  // Closing forgets what an import left unbound: it was about the workflow being left.
+  setWorkflowEditorOpen: (open) =>
+    set(
+      open
+        ? { isWorkflowEditorOpen: true }
+        : { isWorkflowEditorOpen: false, importedRequirements: null }
+    ),
 
   setPendingWorkflowRun: (workflowId, context, targetNodeId) =>
     set({ pendingWorkflowRun: workflowId ? { workflowId, context, targetNodeId } : null }),
 
   setEditingWorkflowId: (id) => set({ editingWorkflowId: id }),
+
+  setImportedRequirements: (value) => set({ importedRequirements: value }),
 
   setEditingProject: (project) => set({ editingProject: project }),
 

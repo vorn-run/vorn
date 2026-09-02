@@ -104,7 +104,12 @@ const mockState = {
   setFocusedTerminal: vi.fn(),
   setSelectedTaskId: vi.fn(),
   activeWorkspace: 'personal',
-  workflowExecutions: new Map<string, unknown>()
+  workflowExecutions: new Map<string, unknown>(),
+  importedRequirements: null as {
+    workflowId: string
+    requirements: Array<Record<string, unknown>>
+  } | null,
+  setImportedRequirements: vi.fn()
 }
 
 vi.mock('../src/renderer/stores', () => {
@@ -147,12 +152,20 @@ const CONNECTION = {
   ]),
   listConnectorCatalog: vi.fn(),
   listConnectionActions: vi.fn().mockResolvedValue([]),
+  inspectConnectorPack: vi.fn(),
+  installConnectorPack: vi.fn(),
+  probeSdkConnector: vi.fn(),
+  onConnectorInstallProgress: vi.fn(() => () => {}),
+  detectRepo: vi.fn().mockResolvedValue(null),
+  encryptString: vi.fn().mockResolvedValue('cipher'),
+  createConnection: vi.fn().mockResolvedValue({ id: 'made-1' }),
   seedConnectorWorkflow,
   saveTextFile
 }
 
 const { TEMPLATE_SEED } = await import('../packages/server/src/connectors/template-seed')
-const { __resetConnectionsCacheForTests } = await import('../src/renderer/lib/use-connections')
+const { __resetConnectionsCacheForTests, refreshConnections } =
+  await import('../src/renderer/lib/use-connections')
 const { WorkflowEditor } = await import('../src/renderer/components/workflow-editor/WorkflowEditor')
 
 const api = (window as unknown as { api: Record<string, ReturnType<typeof vi.fn>> }).api
@@ -181,12 +194,251 @@ beforeEach(() => {
   ])
   seedConnectorWorkflow.mockResolvedValue({ workflowId: 'seeded-1', created: true })
   saveTextFile.mockResolvedValue('/tmp/nightly-digest.vorn-workflow.json')
+  api.inspectConnectorPack.mockResolvedValue({
+    ok: true,
+    preview: {
+      id: 'slack',
+      name: 'Slack',
+      version: '1.2.0',
+      token: 'tok-1',
+      env: [],
+      triggers: [],
+      actions: []
+    }
+  })
+  api.installConnectorPack.mockResolvedValue({ ok: true, pack: { id: 'slack' } })
+  api.probeSdkConnector.mockResolvedValue({
+    ok: true,
+    manifest: {
+      id: 'slack',
+      name: 'Slack',
+      version: '1.2.0',
+      description: 'Messages and channels',
+      env: [],
+      triggers: [],
+      actions: []
+    }
+  })
+  api.onConnectorInstallProgress.mockReturnValue(() => {})
+  api.detectRepo.mockResolvedValue(null)
+  api.createConnection.mockResolvedValue({ id: 'made-1' })
 })
 
 afterEach(() => {
   mockState.editingWorkflowId = null
+  mockState.importedRequirements = null
   captured.canvasProps = null
   captured.propertiesProps = null
+})
+
+/**
+ * A published connector that ships only as a pack.
+ *
+ * No `packageName`: an entry that still has one launches by name, so it can be
+ * connected without installing anything and would never offer an install.
+ */
+const SLACK_CATALOG = {
+  id: 'slack',
+  name: 'Slack',
+  description: 'Messages and channels',
+  packUrl: 'https://packs.test/slack.vorn.tgz',
+  capabilities: ['actions'],
+  category: 'Chat',
+  launch: { command: 'node', args: [] }
+}
+
+describe('a requirement answered from the panel', () => {
+  it('opens the profile form where the template asked for one', async () => {
+    render(<WorkflowEditor />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create profile' }))
+
+    expect(await screen.findByText('HTTP profile')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('reporting API')).toBeInTheDocument()
+  })
+
+  it('closes the profile form again without making anything', async () => {
+    render(<WorkflowEditor />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Create profile' }))
+    await screen.findByText('HTTP profile')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByText('HTTP profile')).toBeNull())
+  })
+
+  it('inspects a published pack before keeping any of it', async () => {
+    api.listConnectorCatalog.mockResolvedValue({
+      items: [SLACK_CATALOG],
+      templates: TEMPLATE_SEED,
+      mcpServers: []
+    })
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [
+        { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: 'workspace-eng' }
+      ]
+    }
+    render(<WorkflowEditor />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Install Slack' }))
+
+    await waitFor(() =>
+      expect(api.inspectConnectorPack).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'url', url: SLACK_CATALOG.packUrl })
+      )
+    )
+    // Verified and described, but nothing kept until it is confirmed.
+    expect((await screen.findAllByText(/Slack/)).length).toBeGreaterThan(0)
+    expect(api.installConnectorPack).not.toHaveBeenCalled()
+  })
+
+  // The whole point of the phase, in one pass: a requirement that named a
+  // connector this machine did not have ends up answered without leaving.
+  it('carries a requirement from install to connected', async () => {
+    api.listConnectorCatalog.mockResolvedValue({
+      items: [SLACK_CATALOG],
+      templates: TEMPLATE_SEED,
+      mcpServers: []
+    })
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [
+        { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: 'workspace-eng' }
+      ]
+    }
+    render(<WorkflowEditor />)
+
+    // Install: inspected, shown, and kept only once confirmed.
+    fireEvent.click(await screen.findByRole('button', { name: 'Install Slack' }))
+    await waitFor(() => expect(api.inspectConnectorPack).toHaveBeenCalled())
+    api.listConnectorPacks.mockResolvedValue([
+      { id: 'slack', name: 'Slack', version: '1.2.0', path: '/p', bytes: 1 }
+    ])
+    fireEvent.click(await screen.findByRole('button', { name: 'Install' }))
+    await waitFor(() => expect(api.installConnectorPack).toHaveBeenCalled())
+
+    // Connect: the row now offers the step that was impossible a moment ago.
+    fireEvent.click(await screen.findByRole('button', { name: 'Add connection' }))
+    await screen.findByText(/Slack/)
+
+    // Connected: the requirement resolves, so the row it lived on is gone.
+    api.listConnections.mockResolvedValue([
+      {
+        ...CONNECTION,
+        id: 'slack-1',
+        name: 'workspace-eng',
+        connectorId: 'mcp',
+        filters: { sdkConnectorId: 'slack' }
+      }
+    ])
+    await act(async () => {
+      await refreshConnections()
+    })
+
+    await waitFor(() => expect(screen.queryByText('Still needs')).toBeNull())
+  })
+
+  it('offers to connect a built-in that needs no install', async () => {
+    // With a github connection on hand the requirement would just auto-bind.
+    api.listConnections.mockResolvedValue([])
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [
+        { kind: 'connection', nodeId: 'n1', connectorId: 'github', name: 'vorn-run/vorn' }
+      ]
+    }
+    render(<WorkflowEditor />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add connection' }))
+
+    expect(await screen.findByText('Connect GitHub')).toBeInTheDocument()
+  })
+
+  it('says what an import could not bind, on the workflow it imported', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+
+    expect(await screen.findByText('Still needs')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create profile' })).toBeInTheDocument()
+  })
+
+  it('drops the still-needs list when it is dismissed', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
+
+    expect(mockState.setImportedRequirements).toHaveBeenCalledWith(null)
+  })
+
+  it('says nothing for an import whose needs this machine already answers', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    api.listConnections.mockResolvedValue([
+      { ...CONNECTION, id: 'http-1', name: 'reporting API', connectorId: 'http' }
+    ])
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+
+    await waitFor(() => expect(api.listConnections).toHaveBeenCalled())
+    expect(screen.queryByText('Still needs')).toBeNull()
+  })
+
+  // The slot holds one panel. A selection is an answer to a question just
+  // asked; leftovers from an import are not.
+  it('yields the slot to a selected node', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+    await screen.findByText('Still needs')
+
+    act(() => {
+      const onNodeClick = captured.canvasProps?.onNodeClick as (id: string) => void
+      onNodeClick('trigger-1')
+    })
+
+    await waitFor(() => expect(screen.queryByText('Still needs')).toBeNull())
+    expect(screen.getByTestId('node-config')).toBeInTheDocument()
+  })
+
+  it('forgets a half-opened form when the panel closes', async () => {
+    render(<WorkflowEditor />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Create profile' }))
+    await screen.findByText('HTTP profile')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    // Reopening must not resurface the form the last visit abandoned.
+    await waitFor(() => expect(screen.queryByText('HTTP profile')).toBeNull())
+  })
+
+  it('leaves the import of a different workflow alone', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'someone-else',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+
+    await waitFor(() => expect(api.listWorkflowRuns).toHaveBeenCalled())
+    expect(screen.queryByText('Still needs')).toBeNull()
+  })
 })
 
 describe('the one panel a new workflow opens with', () => {
@@ -360,5 +612,30 @@ describe('exporting the workflow being edited', () => {
     await waitFor(() => expect(saveTextFile).toHaveBeenCalledTimes(1))
     expect(toasts.success).not.toHaveBeenCalled()
     expect(toasts.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('a catalog that lost the startup race', () => {
+  it('leaves the catalog alone while nobody is looking', async () => {
+    mockState.isWorkflowEditorOpen = false
+    render(<WorkflowEditor />)
+    await act(async () => {})
+
+    expect(api.listConnectorCatalog).not.toHaveBeenCalled()
+    mockState.isWorkflowEditorOpen = true
+  })
+
+  it('tries again on the next open instead of caching the failure', async () => {
+    api.listConnectorCatalog.mockRejectedValueOnce(new Error('not connected'))
+    const { rerender } = render(<WorkflowEditor />)
+    await act(async () => {})
+
+    mockState.isWorkflowEditorOpen = false
+    rerender(<WorkflowEditor />)
+    await act(async () => {})
+    mockState.isWorkflowEditorOpen = true
+    rerender(<WorkflowEditor />)
+
+    expect(await screen.findByText('Webhook to report')).toBeInTheDocument()
   })
 })

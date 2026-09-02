@@ -309,13 +309,13 @@ describe('createApprovalNode', () => {
 // --- DAG Manipulation ---
 
 describe('autoLayoutNodes', () => {
-  it('positions nodes with 140px gap', () => {
+  it('positions nodes a lattice-aligned row apart', () => {
     const t = makeTriggerNode()
     const a = makeActionNode('a')
     const edges = [makeEdge('trigger-1', 'a')]
     const result = autoLayoutNodes([t, a], edges)
     expect(result[0].position.y).toBe(0)
-    expect(result[1].position.y).toBe(140)
+    expect(result[1].position.y).toBe(144)
   })
 
   it('returns empty array for empty input', () => {

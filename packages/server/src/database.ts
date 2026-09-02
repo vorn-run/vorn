@@ -985,6 +985,45 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 16 (shell working directory)')
   }
+
+  if (version < 17) {
+    // Tasks from a packaged connector recorded `mcp`, the connection's storage
+    // type, rather than the connector that actually produced them. The board
+    // then filtered them into their own chip and drew the generic mark. The
+    // real id is on the connection the task's source link points at; a row
+    // whose connection is gone has nothing to derive from and is left alone.
+    d.transaction(() => {
+      const derived = `(
+        SELECT json_extract(sc.filters, '$.sdkConnectorId')
+          FROM task_source_links tsl
+          JOIN source_connections sc ON sc.id = tsl.connection_id
+         WHERE tsl.task_id = tasks.id
+      )`
+      d.exec(`
+        UPDATE tasks
+           SET source_connector_id = ${derived}
+         WHERE source_connector_id = 'mcp' AND ${derived} IS NOT NULL
+      `)
+      d.exec(`
+        UPDATE task_source_links
+           SET connector_id = (
+             SELECT json_extract(sc.filters, '$.sdkConnectorId')
+               FROM source_connections sc
+              WHERE sc.id = task_source_links.connection_id
+           )
+         WHERE connector_id = 'mcp'
+           AND (
+             SELECT json_extract(sc.filters, '$.sdkConnectorId')
+               FROM source_connections sc
+              WHERE sc.id = task_source_links.connection_id
+           ) IS NOT NULL
+      `)
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '17')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 17 (packaged connector task ids)')
+  }
 }
 
 /** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */

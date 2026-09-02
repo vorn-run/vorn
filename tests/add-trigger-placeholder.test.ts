@@ -28,10 +28,12 @@ describe('the add-trigger placeholder', () => {
   })
 
   it('sits centered above the topmost drawn card', () => {
-    const script = { ...createScriptNode(), position: { x: 12, y: 120 } }
+    // On the lattice, so the card is drawn where it was stored and the
+    // placeholder above it can be checked against that exact x.
+    const script = { ...createScriptNode(), position: { x: 16, y: 120 } }
     const { nodes } = toCanvasElements([script], [])
     const placeholder = nodes.find((n) => n.type === 'addTrigger')!
-    expect(placeholder.position).toEqual({ x: 12, y: 120 - 58 - 56 })
+    expect(placeholder.position).toEqual({ x: 16, y: 120 - 58 - 56 })
   })
 })
 

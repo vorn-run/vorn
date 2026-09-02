@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { render, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import {
+  refreshConnections,
   useConnectionIconFor,
+  useConnectorGlyph,
+  useConnectorIdFor,
+  useConnectorLook,
   __resetConnectionsCacheForTests
 } from '../src/renderer/lib/use-connections'
 
@@ -89,5 +93,94 @@ describe('useConnectionIconFor', () => {
     const { getByTestId } = render(<Probe connectionId="packaged" />)
 
     await waitFor(() => expect(getByTestId('out')).toHaveTextContent('M1 1h4v4z'))
+  })
+})
+
+function IdProbe({ connectionId }: { connectionId: string | null }) {
+  return <span data-testid="out">{useConnectorIdFor(connectionId) ?? 'none'}</span>
+}
+
+function LookProbe({ connectionId }: { connectionId: string | null }) {
+  const look = useConnectorLook(connectionId)
+  const text = look ? `${look.connectorId}:${look.icon?.paths.join('|')}` : 'none'
+  return <span data-testid="out">{text}</span>
+}
+
+function GlyphProbe({ connectorId }: { connectorId: string }) {
+  const icon = useConnectorGlyph(connectorId)
+  return <span data-testid="out">{icon ? icon.paths.join('|') : 'none'}</span>
+}
+
+describe('useConnectorIdFor', () => {
+  it('names the connector a packaged connection really is, not the mcp it is stored as', async () => {
+    const { getByTestId } = render(<IdProbe connectionId="iconless-pack" />)
+
+    await waitFor(() => expect(getByTestId('out')).toHaveTextContent('packdemo'))
+  })
+
+  it('leaves a built-in connection alone', async () => {
+    const { getByTestId } = render(<IdProbe connectionId="plain" />)
+
+    await waitFor(() => expect(getByTestId('out')).toHaveTextContent('github'))
+  })
+})
+
+describe('useConnectorLook', () => {
+  it('answers with the real id and the glyph together', async () => {
+    const { getByTestId } = render(<LookProbe connectionId="iconless-pack" />)
+
+    await waitFor(() => expect(getByTestId('out')).toHaveTextContent('packdemo:M2 2h9v9z'))
+  })
+
+  it('reports nothing for a connection that was deleted', async () => {
+    const { getByTestId } = render(<LookProbe connectionId="gone" />)
+
+    await waitFor(() => expect(listConnections).toHaveBeenCalled())
+    expect(getByTestId('out')).toHaveTextContent('none')
+  })
+})
+
+describe('refreshConnections', () => {
+  it('re-reads for a caller that just made a connection', async () => {
+    const { getByTestId } = render(<Probe connectionId="new-one" />)
+    await waitFor(() => expect(listConnections).toHaveBeenCalledTimes(1))
+    expect(getByTestId('out')).toHaveTextContent('none')
+
+    listConnections.mockResolvedValue([
+      {
+        id: 'new-one',
+        connectorId: 'mcp',
+        name: 'Fresh',
+        filters: { sdkIcon: JSON.stringify({ viewBox: '0 0 16 16', paths: ['M9 9h1v1z'] }) }
+      }
+    ])
+    await act(async () => {
+      await refreshConnections()
+    })
+
+    expect(getByTestId('out')).toHaveTextContent('M9 9h1v1z')
+  })
+
+  it('survives a re-read the preload refuses', async () => {
+    render(<Probe connectionId="packaged" />)
+    await waitFor(() => expect(listConnections).toHaveBeenCalled())
+    listConnections.mockRejectedValue(new Error('gone'))
+
+    await expect(refreshConnections()).resolves.toBeUndefined()
+  })
+})
+
+describe('useConnectorGlyph', () => {
+  it('finds a glyph by connector id, for rows that never held a connection', async () => {
+    const { getByTestId } = render(<GlyphProbe connectorId="packdemo" />)
+
+    await waitFor(() => expect(getByTestId('out')).toHaveTextContent('M2 2h9v9z'))
+  })
+
+  it('reports nothing for a connector with no pack installed', async () => {
+    const { getByTestId } = render(<GlyphProbe connectorId="github" />)
+
+    await waitFor(() => expect(listConnections).toHaveBeenCalled())
+    expect(getByTestId('out')).toHaveTextContent('none')
   })
 })

@@ -5,7 +5,7 @@ import { ICON_MAP } from './icon-map'
 import { useAppStore } from '../../stores'
 import { isScheduledWorkflow } from '../../lib/workflow-helpers'
 import { startManualRun } from '../../lib/workflow-menu-items'
-import { useConnectorIdFor } from '../../lib/use-connections'
+import { useConnectorLook } from '../../lib/use-connections'
 import { Workflow, Play, MoreHorizontal } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
 import { ConnectorIcon } from '../ConnectorIcon'
@@ -62,7 +62,7 @@ export function WorkflowItem({
   // in the workflow row itself; it comes from the shared connections cache
   // so we don't fire N IPC calls across many sidebar items.
   const connectorWf = useMemo(() => parseConnectorWorkflowId(workflow.id), [workflow.id])
-  const connectorId = useConnectorIdFor(connectorWf?.connectionId)
+  const look = useConnectorLook(connectorWf?.connectionId)
 
   const WfIcon = ICON_MAP[workflow.icon] || Workflow
   const isScheduled = isScheduledWorkflow(workflow)
@@ -123,8 +123,14 @@ export function WorkflowItem({
         <span className="absolute left-0 top-1 bottom-1 w-px bg-white rounded-full" />
       )}
       <span className="relative shrink-0">
-        {connectorId ? (
-          <ConnectorIcon connectorId={connectorId} size={iconSize} className="text-gray-400" />
+        {look ? (
+          <ConnectorIcon
+            connectorId={look.connectorId}
+            icon={look.icon}
+            packaged={look.packaged}
+            size={iconSize}
+            className="text-gray-400"
+          />
         ) : (
           <WfIcon size={iconSize} color={workflow.iconColor || '#6b7280'} strokeWidth={1.5} />
         )}

@@ -70,32 +70,40 @@ function CustomIcon({
 export function ConnectorIcon({
   connectorId,
   icon,
+  packaged,
   size = 12,
   className = 'text-gray-500'
 }: {
   connectorId: string
   /** A packaged connector's own glyph, which wins over the built-in lookup. */
   icon?: SdkConnectorIcon
+  /** Installed as a pack, so the plug is a better miss than the generic mark. */
+  packaged?: boolean
   size?: number
   className?: string
 }) {
   if (icon) return <CustomIcon icon={icon} size={size} className={className} />
-  const Icon = CONNECTOR_ICONS[connectorId] || DEFAULT_ICON
+  // A packaged connector with no glyph of its own keeps the plug it drew before
+  // its real id was known, rather than falling through to the generic link.
+  const Icon = CONNECTOR_ICONS[connectorId] || (packaged ? CONNECTOR_ICONS.mcp : DEFAULT_ICON)
   return <Icon size={size} className={className} />
 }
 
 export function SourceBadge({
   connectorId,
+  icon,
   url,
   label
 }: {
   connectorId: string
+  /** A packaged connector's own glyph, resolved from the pack it was installed from. */
+  icon?: SdkConnectorIcon
   url?: string
   label?: string
 }) {
   const inner = (
     <>
-      <ConnectorIcon connectorId={connectorId} size={11} className="text-gray-500" />
+      <ConnectorIcon connectorId={connectorId} icon={icon} size={11} className="text-gray-500" />
       {label && <span className="text-[10px] text-gray-500">{label}</span>}
       {url && (
         <ExternalLink

@@ -65,7 +65,61 @@ export function useConnections(): SourceConnection[] {
 export function useConnectorIdFor(connectionId: string | null | undefined): string | null {
   const connections = useConnections()
   if (!connectionId) return null
-  return connections.find((c) => c.id === connectionId)?.connectorId ?? null
+  const connection = connections.find((c) => c.id === connectionId)
+  // The real id, not the `mcp` every packaged connector is stored under.
+  return connection ? connectionConnectorId(connection) : null
+}
+
+/** How a connector is drawn: the id behind an `mcp` row, and the glyph it ships. */
+export interface ConnectorLook {
+  connectorId: string
+  icon?: SdkConnectorIcon
+  /** Stored as an `mcp` connection, so the plug is its honest fallback. */
+  packaged: boolean
+}
+
+/** The id and glyph behind a connection, for callers holding the connection list already. */
+export function connectorLookFor(
+  connections: SourceConnection[],
+  connectionId: string | null | undefined
+): ConnectorLook | undefined {
+  if (!connectionId) return undefined
+  const connection = connections.find((c) => c.id === connectionId)
+  if (!connection) return undefined
+  const connectorId = connectionConnectorId(connection)
+  return {
+    connectorId,
+    icon: iconForConnection(connection),
+    packaged: connectorId !== connection.connectorId
+  }
+}
+
+/** The same resolution as a hook, for surfaces that hold only a connection id. */
+export function useConnectorLook(
+  connectionId: string | null | undefined
+): ConnectorLook | undefined {
+  return connectorLookFor(useConnections(), connectionId)
+}
+
+/**
+ * The glyph a connector ships, found by its id rather than a connection.
+ *
+ * A task records which connector it came from but not which connection, so the
+ * installed pack is the only place its mark can come from.
+ */
+export function glyphForConnectorId(
+  connectorId: string | null | undefined
+): SdkConnectorIcon | undefined {
+  if (!connectorId) return undefined
+  return packCache.find((pack) => pack.id === connectorId)?.icon
+}
+
+/** `glyphForConnectorId` as a hook, so a row redraws once the packs load. */
+export function useConnectorGlyph(
+  connectorId: string | null | undefined
+): SdkConnectorIcon | undefined {
+  useConnections()
+  return glyphForConnectorId(connectorId)
 }
 
 /**
@@ -93,6 +147,11 @@ export function iconForConnection(
   if (stored) return stored
   const connectorId = connectionConnectorId(connection)
   return packCache.find((pack) => pack.id === connectorId)?.icon
+}
+
+/** Re-read connections and packs now, for a caller that just made one. */
+export async function refreshConnections(): Promise<void> {
+  await refresh().catch(() => {})
 }
 
 /** Test hook — drop cached state so unit tests can start clean. */

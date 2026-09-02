@@ -567,6 +567,36 @@ export function positionsAreSeed(nodes: WorkflowNode[]): boolean {
 }
 
 /** Seed definitions reflow into the legacy column; arranged ones keep their positions and only new nodes are placed. */
+export const CARD_WIDTH = 280
+/** A loop draws its body inside itself, so it is wider than a plain card. */
+export const LOOP_WIDTH = 312
+
+/** The canvas snaps a drag to this, so laid-out cards sit on it too. */
+export const GRID = 8
+
+export function nodeWidth(node: WorkflowNode | undefined): number {
+  return node?.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH
+}
+
+/**
+ * A coordinate on the drag lattice.
+ *
+ * Cards are 280 wide, so a column centred on zero sits at -140 — half a step
+ * off the 8px grid the canvas snaps drags to. Dragging any card in such a
+ * column moved it 4px and left the chain permanently crooked, and tidying up
+ * could not cure it because the next drag broke it again.
+ *
+ * Every half-width in play is an odd multiple of four (140 for a card, 156 for
+ * a loop), so they all round the same direction and a card under a loop keeps
+ * sharing its centre line.
+ */
+export function snapToLattice(value: number): number {
+  return Math.round(value / GRID) * GRID || 0
+}
+
+/** One step down the trunk, kept on the lattice so a placed card lands on it. */
+export const PLACEMENT_PITCH = 144
+
 export function placeNewNodes(
   prevNodes: WorkflowNode[],
   nextNodes: WorkflowNode[],
@@ -593,7 +623,15 @@ export function placeNewNodes(
     const base = (incoming && placed.get(incoming.source)) ?? { x: 0, y: 0 }
     const sibling = incoming ? (siblingCount.get(incoming.source) ?? 0) : 0
     if (incoming) siblingCount.set(incoming.source, sibling + 1)
-    let candidate = { x: base.x + sibling * 320, y: base.y + 140 }
+    // Centred under the parent rather than left-aligned with it: two cards of
+    // the same width then share an x exactly, and the chain reads as one
+    // column instead of a stack with a lean.
+    const parent = incoming ? nextNodes.find((n) => n.id === incoming.source) : undefined
+    const centering = (nodeWidth(parent) - nodeWidth(node)) / 2
+    // Every offset here is a whole number of lattice steps, so a card lands on
+    // the grid whenever its parent is on it — and stays exactly under a parent
+    // that a saved workflow left off it.
+    let candidate = { x: base.x + centering + sibling * 320, y: base.y + PLACEMENT_PITCH }
     // Probe downward until the spot is free, ignoring this node's own
     // downstream — those get shifted out of the way below.
     const downstream = reachableFrom(node.id, edges)
@@ -602,7 +640,7 @@ export function placeNewNodes(
         ([id, o]) => !downstream.has(id) && Math.abs(o.x - p.x) < 300 && Math.abs(o.y - p.y) < 120
       )
     for (let tries = 0; occupied(candidate) && tries < 50; tries++) {
-      candidate = { x: candidate.x, y: candidate.y + 140 }
+      candidate = { x: candidate.x, y: candidate.y + PLACEMENT_PITCH }
     }
     placed.set(node.id, candidate)
   }
@@ -623,7 +661,7 @@ export function placeNewNodes(
   return nextNodes.map((node) => {
     if (newIds.has(node.id)) return { ...node, position: placed.get(node.id)! }
     if (shifted.has(node.id))
-      return { ...node, position: { x: node.position.x, y: node.position.y + 140 } }
+      return { ...node, position: { x: node.position.x, y: node.position.y + PLACEMENT_PITCH } }
     return node
   })
 }
@@ -666,11 +704,11 @@ export function autoLayoutNodes(nodes: WorkflowNode[], edges: WorkflowEdge[]): W
     }
   }
 
-  const NODE_GAP = 80
-
   return ordered.map((node, index) => ({
     ...node,
-    position: { x: 0, y: index * (60 + NODE_GAP) } as WorkflowNodePosition
+    // On the lattice, so the first drag of a seeded workflow does not shift a
+    // card out of the column it was laid out in.
+    position: { x: 0, y: index * PLACEMENT_PITCH } as WorkflowNodePosition
   }))
 }
 

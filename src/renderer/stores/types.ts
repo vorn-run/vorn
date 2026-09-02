@@ -15,6 +15,7 @@ import {
   MobileProject,
   UpdateStatus
 } from '../../shared/types'
+import type { PortableRequirement } from '../../shared/workflow-portability'
 
 export interface WorktreeInfo {
   path: string
@@ -317,6 +318,8 @@ export interface UISlice {
   isAddProjectDialogOpen: boolean
   isWorkflowEditorOpen: boolean
   editingWorkflowId: string | null
+  /** What an import left unbound, kept until the editor has shown it. */
+  importedRequirements: { workflowId: string; requirements: PortableRequirement[] } | null
   /**
    * A workflow whose manual run is waiting on the user. Set when the run was
    * triggered from a surface that can't supply everything the workflow needs —
@@ -434,6 +437,9 @@ export interface UISlice {
     targetNodeId?: string
   ) => void
   setEditingWorkflowId: (id: string | null) => void
+  setImportedRequirements: (
+    value: { workflowId: string; requirements: PortableRequirement[] } | null
+  ) => void
   setEditingProject: (project: ProjectConfig | null) => void
   setCommandPaletteOpen: (open: boolean) => void
   setShortcutsPanelOpen: (open: boolean) => void

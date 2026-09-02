@@ -20,7 +20,7 @@ export function PackInstallConfirm({
   onCancel: () => void
 }) {
   const replacing = preview.installedVersion && preview.installedVersion !== preview.version
-  const required = preview.env.filter((entry) => entry.required)
+  const required = (preview.env ?? []).filter((entry) => entry.required)
 
   return (
     <div className="border border-white/[0.1] rounded-sm bg-white/[0.02] p-3">

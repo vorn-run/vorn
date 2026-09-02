@@ -44,6 +44,26 @@ describe('ConnectorIcon', () => {
     expect(container.querySelector('svg')).toBeInTheDocument()
   })
 
+  // Knowing a connector's real id must not cost it the mark it already drew:
+  // before the id was resolved these rendered as `mcp` and got the plug.
+  it('keeps the plug for a packaged connector that ships no glyph', () => {
+    const { container } = render(<ConnectorIcon connectorId="packdemo" packaged />)
+    const svg = container.querySelector('svg')!
+    expect(svg.getAttribute('viewBox')).toBe('0 0 24 24')
+    expect(container.querySelectorAll('path')).toHaveLength(2)
+  })
+
+  it('still prefers a packaged connector own glyph when it has one', () => {
+    const { container } = render(
+      <ConnectorIcon
+        connectorId="packdemo"
+        packaged
+        icon={{ viewBox: '0 0 24 24', paths: ['M2 2h9v9z'] }}
+      />
+    )
+    expect(container.querySelector('path[d="M2 2h9v9z"]')).not.toBeNull()
+  })
+
   it('honors the size and className props', () => {
     const { container } = render(
       <ConnectorIcon connectorId="github" size={24} className="text-red-500" />

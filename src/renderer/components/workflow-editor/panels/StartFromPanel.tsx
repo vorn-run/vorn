@@ -1,7 +1,12 @@
 import { X, FilePlus2, Check, Plug } from 'lucide-react'
 import type { SourceConnection, WorkflowTemplate } from '../../../../shared/types'
-import { templateRequirements, type ConnectorSuggestion } from '../../../lib/template-requirements'
-import { describeRequirement } from '../../../lib/workflow-files'
+import {
+  templateRequirements,
+  type ConnectorSuggestion,
+  type RequirementAction
+} from '../../../lib/template-requirements'
+import type { ConnectorListing } from '../../../lib/connector-browse'
+import { RequirementRow } from './RequirementRow'
 
 /**
  * What a new workflow can start from, before the canvas is anything.
@@ -13,19 +18,27 @@ import { describeRequirement } from '../../../lib/workflow-files'
 export function StartFromPanel({
   templates,
   connections,
+  listings = [],
   suggestions = [],
   onPickBlank,
   onPickTemplate,
   onPickSuggestion,
-  onClose
+  onFixRequirement,
+  onClose,
+  children
 }: {
   templates: WorkflowTemplate[]
   connections: SourceConnection[]
+  /** Every connector this machine could reach, so a requirement can offer its own fix. */
+  listings?: ConnectorListing[]
   suggestions?: ConnectorSuggestion[]
   onPickBlank: () => void
   onPickTemplate: (template: WorkflowTemplate) => void
   onPickSuggestion?: (suggestion: ConnectorSuggestion) => void
+  onFixRequirement?: (action: RequirementAction) => void
   onClose: () => void
+  /** The sheet or form a requirement's action opened, shown over the list. */
+  children?: React.ReactNode
 }) {
   return (
     <div
@@ -47,6 +60,8 @@ export function StartFromPanel({
           <X size={14} />
         </button>
       </div>
+
+      {children}
 
       <div className="flex-1 overflow-y-auto p-2">
         <button
@@ -72,7 +87,9 @@ export function StartFromPanel({
             key={template.id}
             template={template}
             connections={connections}
+            listings={listings}
             onPick={() => onPickTemplate(template)}
+            onFix={onFixRequirement}
           />
         ))}
 
@@ -106,41 +123,51 @@ export function StartFromPanel({
 function TemplateRow({
   template,
   connections,
-  onPick
+  listings,
+  onPick,
+  onFix
 }: {
   template: WorkflowTemplate
   connections: SourceConnection[]
+  listings: ConnectorListing[]
   onPick: () => void
+  onFix?: (action: RequirementAction) => void
 }) {
   const requirements = templateRequirements(template, connections)
   const pending = requirements.filter((entry) => entry.connectionId === undefined)
 
   return (
-    <button
-      onClick={onPick}
-      className="w-full text-left px-2.5 py-2 rounded-md flex items-start gap-2.5
-                 text-gray-300 hover:text-white hover:bg-white/[0.06] transition-colors"
-    >
-      <StepStrip count={template.portable.nodes.length} />
-      <span className="min-w-0 flex-1">
-        <span className="block text-[12px] font-medium truncate">{template.name}</span>
-        <span className="block text-[11px] text-gray-500 truncate">
-          {template.steps.join(' · ')}
-        </span>
-        {pending.length > 0 ? (
-          <span className="block text-[11px] text-bronzo truncate">
-            Needs {pending.map((entry) => describeRequirement(entry.requirement)).join(', ')}
+    // A row, not a button: what a requirement wants doing is its own control,
+    // and one cannot sit inside the other.
+    <div className="rounded-md hover:bg-white/[0.06] transition-colors">
+      <button
+        onClick={onPick}
+        className="w-full text-left px-2.5 py-2 flex items-start gap-2.5 text-gray-300 hover:text-white"
+      >
+        <StepStrip count={template.portable.nodes.length} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[12px] font-medium truncate">{template.name}</span>
+          <span className="block text-[11px] text-gray-500 truncate">
+            {template.steps.join(' · ')}
           </span>
-        ) : (
-          requirements.length > 0 && (
+          {pending.length === 0 && requirements.length > 0 && (
             <span className="flex items-center gap-1 text-[11px] text-status-sage">
               <Check size={10} strokeWidth={2} />
               Connected
             </span>
-          )
-        )}
-      </span>
-    </button>
+          )}
+        </span>
+      </button>
+
+      {pending.map((entry) => (
+        <RequirementRow
+          key={entry.requirement.nodeId + entry.requirement.kind}
+          requirement={entry}
+          listings={listings}
+          onFix={onFix}
+        />
+      ))}
+    </div>
   )
 }
 

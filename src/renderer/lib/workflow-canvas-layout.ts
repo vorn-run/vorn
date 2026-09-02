@@ -1,7 +1,13 @@
-import { Position, type Edge, type Node } from '@xyflow/react'
-import { LoopConfig, WorkflowEdge, WorkflowNode } from '../../shared/types'
+import { getBezierPath, Position, type Edge, type Node } from '@xyflow/react'
+import { LoopConfig, WorkflowEdge, WorkflowNode, WorkflowNodePosition } from '../../shared/types'
 import { stepPreview } from '../components/workflow-editor/node-visuals'
-import { computeFlowLayout, FlowRow } from './workflow-helpers'
+import {
+  CARD_WIDTH,
+  computeFlowLayout,
+  FlowRow,
+  LOOP_WIDTH,
+  snapToLattice
+} from './workflow-helpers'
 
 // Projects a workflow definition into canvas elements; the definition stays the source of truth.
 
@@ -15,8 +21,10 @@ export const TRIGGER_ANCHOR = {
   bodyOnly: false
 }
 
-export const CARD_WIDTH = 280
-export const LOOP_WIDTH = 312
+// Defined beside the placement that also uses them; re-exported here because
+// this is where the canvas reaches for its geometry. The other direction would
+// be a cycle: the layout walk itself comes from the helpers.
+export { CARD_WIDTH, GRID, LOOP_WIDTH, snapToLattice } from './workflow-helpers'
 /** Horizontal gap between fork branches. */
 const BRANCH_GAP = 56
 /** Vertical gap between consecutive steps (room for the edge). */
@@ -111,11 +119,17 @@ export function layoutPositions(nodes: WorkflowNode[], edges: WorkflowEdge[]): P
       if (row.kind === 'node') {
         // Orphaned body members draw inside their loop, not on the trunk.
         if (bodySet.has(row.node.id)) continue
-        positions.set(row.node.id, { x: xCenter - CARD_WIDTH / 2, y: cursor })
+        positions.set(row.node.id, {
+          x: snapToLattice(xCenter - CARD_WIDTH / 2),
+          y: snapToLattice(cursor)
+        })
         if (insideBranch) branchMembers.add(row.node.id)
         cursor += estimateNodeHeight(row.node, nodes) + ROW_GAP
       } else if (row.kind === 'loop') {
-        positions.set(row.loopNode.id, { x: xCenter - LOOP_WIDTH / 2, y: cursor })
+        positions.set(row.loopNode.id, {
+          x: snapToLattice(xCenter - LOOP_WIDTH / 2),
+          y: snapToLattice(cursor)
+        })
         if (insideBranch) branchMembers.add(row.loopNode.id)
         cursor += estimateNodeHeight(row.loopNode, nodes) + ROW_GAP
       } else {
@@ -144,6 +158,35 @@ export function positionsAreSeed(nodes: WorkflowNode[]): boolean {
   return nodes.every((n) => !n.position || n.position.x === 0)
 }
 
+/**
+ * A stored position, brought onto the lattice.
+ *
+ * Workflows arranged before the layout used the grid sit half a step off it, so
+ * dragging one card snapped it 4px away from neighbours nobody touched and the
+ * chain kinked. Healing on the way in costs at most 4px of drift from where a
+ * card was left, and buys back a column that survives the next drag.
+ */
+export function latticePosition(node: WorkflowNode): WorkflowNodePosition {
+  return {
+    x: snapToLattice(node.position?.x ?? 0),
+    y: snapToLattice(node.position?.y ?? 0)
+  }
+}
+
+/** Stored positions that are already on the lattice, so a save can skip the write. */
+export function positionsAreAligned(nodes: WorkflowNode[]): boolean {
+  return nodes.every((node) => {
+    const lattice = latticePosition(node)
+    return lattice.x === (node.position?.x ?? 0) && lattice.y === (node.position?.y ?? 0)
+  })
+}
+
+/** Every node with its position healed onto the lattice, for the next save. */
+export function alignedNodes(nodes: WorkflowNode[]): WorkflowNode[] {
+  if (positionsAreSeed(nodes) || positionsAreAligned(nodes)) return nodes
+  return nodes.map((node) => ({ ...node, position: latticePosition(node) }))
+}
+
 export interface CanvasElements {
   nodes: Node[]
   edges: Edge[]
@@ -159,9 +202,7 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
   const rfNodes: Node[] = []
   for (const node of nodes) {
     if (bodySet.has(node.id)) continue
-    const position = useComputed
-      ? (computed.get(node.id) ?? { x: 0, y: 0 })
-      : { x: node.position?.x ?? 0, y: node.position?.y ?? 0 }
+    const position = useComputed ? (computed.get(node.id) ?? { x: 0, y: 0 }) : latticePosition(node)
     const width = node.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH
     const height = estimateNodeHeight(node, nodes)
     rfNodes.push({
@@ -227,6 +268,9 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
     const anchor = rfNodes.find((n) => n.id === node.id)
     if (!anchor) continue
     const width = node.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH
+    // Deliberately off the lattice: this one is centred on the card rather than
+    // snapped to it. Nobody can drag it, so nothing will knock it off, and its
+    // port lands exactly under the card's — which a 4px rounding would lean.
     rfNodes.push({
       id: `add:${node.id}`,
       type: 'addStep',
@@ -281,6 +325,38 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
   }
 
   return { nodes: rfNodes, edges: rfEdges, branchMembers }
+}
+
+/**
+ * Below this, two cards are meant to be in one column and a curve is a kink.
+ *
+ * A drag snaps to the 8px lattice, so a card can land a step off its parent
+ * without anyone aiming for that. A bezier answers even a single step with an
+ * S-bend, which reads as deliberate; a straight run reads as the near-miss it is.
+ */
+export const STRAIGHT_EDGE_TOLERANCE = 16
+
+/** The path an edge draws: straight down a column, curved only for a real fork. */
+export function stepEdgePath(params: {
+  sourceX: number
+  sourceY: number
+  targetX: number
+  targetY: number
+  sourcePosition: Position
+  targetPosition: Position
+}): [string, number, number] {
+  const { sourceX, sourceY, targetX, targetY } = params
+  if (Math.abs(sourceX - targetX) < STRAIGHT_EDGE_TOLERANCE) {
+    // Drawn between the ports themselves rather than down a shared centre, so
+    // a slightly offset card keeps its line attached at both ends.
+    return [
+      `M ${sourceX},${sourceY} L ${targetX},${targetY}`,
+      (sourceX + targetX) / 2,
+      (sourceY + targetY) / 2
+    ]
+  }
+  const [path, labelX, labelY] = getBezierPath(params)
+  return [path, labelX, labelY]
 }
 
 /** Whether a hand-drawn source → target edge keeps the graph a DAG the engine understands. */

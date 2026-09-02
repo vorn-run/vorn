@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   connectorSuggestions,
+  requirementAction,
   templateRequirements,
   templateIsReady,
-  templateSeed
+  templateSeed,
+  type TemplateRequirement
 } from '../src/renderer/lib/template-requirements'
+import type { ConnectorListing } from '../src/renderer/lib/connector-browse'
 import { TEMPLATE_SEED } from '../packages/server/src/connectors/template-seed'
 import type {
   ConnectorManifest,
@@ -105,6 +108,68 @@ describe('what a connection already knows how to build', () => {
 
   it('offers nothing for a connection whose connector is not installed', () => {
     expect(connectorSuggestions([connection({ connectorId: 'github' })], [])).toEqual([])
+  })
+})
+
+describe('what a requirement can do about itself', () => {
+  const listing = (over: Partial<ConnectorListing> = {}): ConnectorListing => ({
+    key: 'catalog:slack',
+    id: 'slack',
+    name: 'Slack',
+    capabilities: ['actions'],
+    category: 'Chat',
+    source: 'catalog',
+    keywords: [],
+    connectedCount: 0,
+    ...over
+  })
+
+  const needs = (connectorId: string): TemplateRequirement => ({
+    requirement: { kind: 'connection', nodeId: 'n1', connectorId, name: 'workspace' }
+  })
+
+  it('offers the install when the connector is published but not on disk', () => {
+    expect(requirementAction(needs('slack'), [listing()])).toMatchObject({ kind: 'install' })
+  })
+
+  it('offers the connection once the pack is installed', () => {
+    const pack = { id: 'slack', name: 'Slack', version: '1.2.0' } as ConnectorListing['pack']
+    expect(requirementAction(needs('slack'), [listing({ pack })])).toMatchObject({
+      kind: 'addConnection'
+    })
+  })
+
+  it('offers the connection straight away for a built-in', () => {
+    const builtIn = listing({ key: 'github', id: 'github', name: 'GitHub', source: 'builtin' })
+    expect(requirementAction(needs('github'), [builtIn])).toMatchObject({ kind: 'addConnection' })
+  })
+
+  it('offers a profile form for an HTTP profile, which needs no install', () => {
+    const action = requirementAction(
+      { requirement: { kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' } },
+      []
+    )
+    expect(action).toEqual({ kind: 'createProfile', name: 'reporting API' })
+  })
+
+  it('offers nothing for a requirement this machine already answers', () => {
+    const met = { ...needs('slack'), connectionId: 'conn-9' }
+    expect(requirementAction(met, [listing()])).toEqual({ kind: 'none' })
+  })
+
+  it('offers nothing when the file could not name the connector', () => {
+    expect(requirementAction(needs(''), [listing()])).toEqual({ kind: 'none' })
+  })
+
+  it('offers nothing for a connector no catalog here has heard of', () => {
+    expect(requirementAction(needs('obscure'), [listing()])).toEqual({ kind: 'none' })
+  })
+
+  // A listed server is a command rather than a package: the form the panel
+  // would open has no manifest to probe and no pack to install.
+  it('offers nothing for an MCP server, which is wired up by hand', () => {
+    const server = listing({ key: 'mcp:playwright', id: 'playwright', source: 'mcp' })
+    expect(requirementAction(needs('playwright'), [server])).toEqual({ kind: 'none' })
   })
 })
 
