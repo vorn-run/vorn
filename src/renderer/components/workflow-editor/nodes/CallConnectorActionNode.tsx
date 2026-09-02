@@ -2,8 +2,8 @@ import { Zap } from 'lucide-react'
 import type { CallConnectorActionConfig, NodeExecutionStatus } from '../../../../shared/types'
 import { ConnectorIcon } from '../../ConnectorIcon'
 import { useConnectorIdFor, useConnectionIconFor } from '../../../lib/use-connections'
-import { NODE_GLYPH } from '../node-visuals'
-import { NodeShell } from './NodeShell'
+import { connectorArgsPreview, NODE_GLYPH, truncate } from '../node-visuals'
+import { NodeFooter, NodeShell } from './NodeShell'
 
 interface Props {
   label: string
@@ -23,6 +23,8 @@ export function CallConnectorActionNode({
   // Uses the shared connections cache — no IPC call per node render.
   const connectorId = useConnectorIdFor(config.connectionId)
   const icon = useConnectionIconFor(config.connectionId)
+  // Drawn exactly when the height estimate charges for it, or the edge below detaches.
+  const preview = connectorArgsPreview(config.args)
 
   return (
     <NodeShell
@@ -44,6 +46,8 @@ export function CallConnectorActionNode({
       selected={selected}
       executionStatus={executionStatus}
       onClick={onClick}
-    />
+    >
+      {preview && <NodeFooter mono>{truncate(preview, 50)}</NodeFooter>}
+    </NodeShell>
   )
 }
