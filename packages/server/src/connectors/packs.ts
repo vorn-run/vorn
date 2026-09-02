@@ -419,6 +419,8 @@ export async function inspectPack(
         version: manifest.version,
         ...(manifest.description !== undefined && { description: manifest.description }),
         ...(manifest.icon !== undefined && { icon: manifest.icon }),
+        // What this will ask of you belongs on the sheet that asks to keep it.
+        ...(manifest.auth !== undefined && { auth: manifest.auth }),
         triggers: manifest.triggers,
         actions: manifest.actions,
         env: manifest.env,
@@ -542,6 +544,7 @@ export function describePack(
     version: current.version,
     ...(manifest.description !== undefined && { description: manifest.description }),
     ...(manifest.icon !== undefined && { icon: manifest.icon }),
+    ...(manifest.auth !== undefined && { auth: manifest.auth }),
     path,
     ...(current.previousVersion !== undefined && { previousVersion: current.previousVersion }),
     installedAt: current.installedAt,

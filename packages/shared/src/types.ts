@@ -1953,6 +1953,8 @@ export interface InstalledConnectorPack {
   version: string
   description?: string
   icon?: SdkConnectorIcon
+  /** How this connector signs in, read from the manifest that was installed. */
+  auth?: SdkConnectorAuth
   /** Directory holding the running version's files. */
   path: string
   /** The one version kept behind the current one, when a rollback is possible. */
@@ -1982,8 +1984,10 @@ export interface ConnectorPackSummary {
   version: string
   description?: string
   icon?: SdkConnectorIcon
+  /** What signing in will ask for, said before any of this is kept. */
+  auth?: SdkConnectorAuth
   triggers: SdkTrigger[]
-  actions: Array<{ type: string; label: string; description?: string }>
+  actions: SdkAction[]
   env: SdkEnvVar[]
   /** The version already on disk, when this would replace one. */
   installedVersion?: string
