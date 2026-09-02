@@ -5,6 +5,9 @@ export { pollWithDedupe } from './dedupe'
 export { normalizeItem, normalizeItems } from './normalize'
 export { runPoll, drainPoll, runAction, MAX_POLL_PAGES } from './runtime'
 export type { PollPage, RunPollOptions, RunActionOptions } from './runtime'
+export { applyPostReceive, valueAt } from './post-receive'
+export { resolveRequest, resolveTemplates, executeRequest, asOutput } from './request'
+export type { RequestScope, ResolvedRequest } from './request'
 export {
   connectionSetup,
   connectorManifest,
@@ -33,7 +36,10 @@ export type {
   ActionInputOption,
   ActionInputType,
   ActionOutputField,
+  ActionRequest,
   AuthRung,
+  PaginationStrategy,
+  PostReceiveOp,
   Connector,
   ConnectorAuth,
   ConnectorConfig,

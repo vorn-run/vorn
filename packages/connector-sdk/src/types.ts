@@ -229,9 +229,63 @@ export interface ActionOutputField {
 export interface ActionContext {
   config: ConnectorConfig
   now(): string
+  /**
+   * Fetch, with the SDK's retry, backoff and rate-limit handling already
+   * applied. Prefer it over the global one: a hand-written action gets the
+   * same resilience a declared request does, and tests can replace it.
+   */
+  fetch: typeof fetch
 }
 
-export interface ActionDefinition {
+/**
+ * One step of reshaping a response.
+ *
+ * Each op reads the whole value, or just what lives at its dotted `path`, and
+ * leaves the rest alone. They compose left to right, which is enough to turn
+ * most envelopes into the record a workflow step wants.
+ */
+export type PostReceiveOp =
+  /** Keep only these keys, of the object or of every object in the list. */
+  | { op: 'pick'; keys: string[]; path?: string }
+  /** Give a key a better name, of the object or of every object in the list. */
+  | { op: 'rename'; from: string; to: string; path?: string }
+  /** Replace the whole value with what is at this path — unwrap the envelope. */
+  | { op: 'flatten'; path: string }
+  /** Keep the list entries whose `key` equals this value. */
+  | { op: 'filter'; key: string; equals: unknown; path?: string }
+  /** Run these ops against every entry of the list. */
+  | { op: 'map'; ops: PostReceiveOp[]; path?: string }
+
+/**
+ * How to ask for the page after this one.
+ *
+ * Declared rather than written because every source does the same three things
+ * — hand back a cursor, count pages, or put a link in a header — and following
+ * them by hand is where "only the first 100 items ever arrive" comes from.
+ */
+export type PaginationStrategy =
+  /** The response carries a cursor at `cursorPath`; send it back as `param`. */
+  | { kind: 'cursor'; cursorPath: string; param: string; itemsPath?: string }
+  /** Ask for page 1, 2, 3 … under `param`, until a page comes back short. */
+  | { kind: 'page'; param: string; startPage?: number; itemsPath?: string }
+  /** Follow the `Link` header's `rel="next"`, as paged HTTP APIs do. */
+  | { kind: 'link'; itemsPath?: string }
+
+/** An HTTP call an action makes, with `{{args.x}}` and `{{config.y}}` filled in. */
+export interface ActionRequest {
+  /** Defaults to GET. */
+  method?: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  url: string
+  headers?: Record<string, string>
+  /** Query parameters. An argument that resolves to nothing is left out. */
+  query?: Record<string, string>
+  /** Sent as JSON unless it is already a string, or a content type says otherwise. */
+  body?: unknown
+  /** Follow every page rather than returning only the first. */
+  paginate?: PaginationStrategy
+}
+
+interface ActionBase {
   /** Action key, e.g. `closeWorkItem`. Becomes an MCP tool of the same name. */
   type: string
   label: string
@@ -239,16 +293,37 @@ export interface ActionDefinition {
   /**
    * Whether repeating the call with the same arguments is safe. Surfaced in
    * the MCP tool description, because an agent retrying a failed step has no
-   * other way to know whether it is about to create a second issue.
+   * other way to know whether it is about to create a second issue — and it is
+   * what decides whether the SDK may retry the call itself.
    */
   idempotent?: boolean
   inputs?: ActionInputField[]
   outputs?: ActionOutputField[]
-  run(
-    args: Record<string, unknown>,
-    context: ActionContext
-  ): Promise<Record<string, unknown> | void> | Record<string, unknown> | void
 }
+
+/**
+ * An action is either declared or hand-written, never both — the same union
+ * shape triggers use, so the invalid combination is a type error while the
+ * connector is being written rather than a throw once it is installed.
+ */
+export type ActionDefinition = ActionBase &
+  (
+    | {
+        run(
+          args: Record<string, unknown>,
+          context: ActionContext
+        ): Promise<Record<string, unknown> | void> | Record<string, unknown> | void
+        request?: never
+        postReceive?: never
+      }
+    | {
+        /** The call to make. The SDK sends it and keeps the response. */
+        request: ActionRequest
+        /** How to reshape what came back, before the step sees it. */
+        postReceive?: PostReceiveOp[]
+        run?: never
+      }
+  )
 
 /**
  * A connector's own glyph, so an installed connector is recognizable in a list

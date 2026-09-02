@@ -1,5 +1,6 @@
 import { pollWithDedupe } from './dedupe'
 import { normalizeItems } from './normalize'
+import { executeRequest } from './request'
 import type { Connector, ConnectorConfig, NormalizedItem, PollContext } from './types'
 
 export interface PollPage {
@@ -91,6 +92,8 @@ export async function drainPoll(
 export interface RunActionOptions {
   config?: ConnectorConfig
   now?: () => string
+  /** Replaced by the harness and by tests; defaults to the global fetch. */
+  fetchImpl?: typeof fetch
 }
 
 function coerceArg(value: unknown, type: string | undefined): unknown {
@@ -144,9 +147,23 @@ export async function runAction(
     }
   }
 
-  const output = await action.run(coerced, {
-    config: options.config ?? {},
-    now: options.now ?? (() => new Date().toISOString())
-  })
-  return output ?? {}
+  const config = options.config ?? {}
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch
+
+  if (typeof action.run === 'function') {
+    const output = await action.run(coerced, {
+      config,
+      now: options.now ?? (() => new Date().toISOString()),
+      fetch: fetchImpl
+    })
+    return output ?? {}
+  }
+
+  // Declared rather than written: `defineConnector` guarantees one or the other.
+  return executeRequest(
+    action.request,
+    action.postReceive,
+    { args: coerced, config },
+    { fetchImpl }
+  )
 }

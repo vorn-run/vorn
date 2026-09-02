@@ -160,8 +160,25 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
     if (!KEY_PATTERN.test(action.type ?? '')) {
       throw new Error(`Action type "${action.type}" must start with a letter and be url-safe`)
     }
-    if (typeof action.run !== 'function') {
-      throw new Error(`Action ${action.type} is missing a run() implementation`)
+    // As with triggers, the union already rules these out for TypeScript
+    // authors; the checks stay for plain-JS connectors, where it buys nothing.
+    const loose = action as { run?: unknown; request?: unknown; postReceive?: unknown }
+    const written = typeof loose.run === 'function'
+    const declared = loose.request !== undefined
+    if (written && declared) {
+      throw new Error(`Action ${action.type} declares both run() and a request; pick one`)
+    }
+    if (!written && !declared) {
+      throw new Error(`Action ${action.type} is missing a run() implementation or a request`)
+    }
+    if (declared) {
+      const request = loose.request as { url?: unknown }
+      if (typeof request?.url !== 'string' || request.url.trim() === '') {
+        throw new Error(`Action ${action.type} declares a request with no URL`)
+      }
+    }
+    if (!declared && loose.postReceive !== undefined) {
+      throw new Error(`Action ${action.type} has postReceive but no request for it to reshape`)
     }
   }
 
