@@ -413,7 +413,8 @@ describe('the handlers the canvas drives', () => {
     const { container } = render(<WorkflowEditor />)
     seedManualTrigger()
     act(() => canvas().onTidyUp())
-    expect(save(container).nodes[0].position.x).toBe(-140)
+    // Half a card is 140; the lattice a drag snaps to rounds it to 136.
+    expect(save(container).nodes[0].position.x).toBe(-136)
   })
 
   const pickFromLibrary = (pick: Record<string, unknown>) =>
