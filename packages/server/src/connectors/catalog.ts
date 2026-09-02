@@ -324,7 +324,7 @@ function normalizeVerification(raw: unknown): ConnectorCatalogVerification | und
  * names nothing callable and is dropped rather than listed blank.
  */
 function normalizeSummaries(raw: unknown): ConnectorCatalogSummary[] {
-  return records(raw).filter(named).map(toSummary) as ConnectorCatalogSummary[]
+  return records(raw).filter(named).map(toSummary) as unknown as ConnectorCatalogSummary[]
 }
 
 function named(entry: Record<string, unknown>): boolean {
