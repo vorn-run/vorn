@@ -99,6 +99,10 @@ export function requirementAction(
   if (connectorId === '') return { kind: 'none' }
   const listing = listings.find((candidate) => candidate.id === connectorId)
   if (!listing) return { kind: 'none' }
+  // A listed MCP server is a launch line, not a package: there is no manifest
+  // to probe and no pack to install, so the form here would have nothing to
+  // ask about. Settings is where a server gets wired up by hand.
+  if (listing.source === 'mcp') return { kind: 'none' }
 
   const state = packStateFor({ installed: listing.pack })
   const route = { source: listing.source, hasLegacyLaunch: !!listing.catalogItem?.packageName }

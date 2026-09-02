@@ -163,7 +163,8 @@ const CONNECTION = {
 }
 
 const { TEMPLATE_SEED } = await import('../packages/server/src/connectors/template-seed')
-const { __resetConnectionsCacheForTests } = await import('../src/renderer/lib/use-connections')
+const { __resetConnectionsCacheForTests, refreshConnections } =
+  await import('../src/renderer/lib/use-connections')
 const { WorkflowEditor } = await import('../src/renderer/components/workflow-editor/WorkflowEditor')
 
 const api = (window as unknown as { api: Record<string, ReturnType<typeof vi.fn>> }).api
@@ -280,6 +281,53 @@ describe('a requirement answered from the panel', () => {
     expect(api.installConnectorPack).not.toHaveBeenCalled()
   })
 
+  // The whole point of the phase, in one pass: a requirement that named a
+  // connector this machine did not have ends up answered without leaving.
+  it('carries a requirement from install to connected', async () => {
+    api.listConnectorCatalog.mockResolvedValue({
+      items: [SLACK_CATALOG],
+      templates: TEMPLATE_SEED,
+      mcpServers: []
+    })
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [
+        { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: 'workspace-eng' }
+      ]
+    }
+    render(<WorkflowEditor />)
+
+    // Install: inspected, shown, and kept only once confirmed.
+    fireEvent.click(await screen.findByRole('button', { name: 'Install Slack' }))
+    await waitFor(() => expect(api.inspectConnectorPack).toHaveBeenCalled())
+    api.listConnectorPacks.mockResolvedValue([
+      { id: 'slack', name: 'Slack', version: '1.2.0', path: '/p', bytes: 1 }
+    ])
+    fireEvent.click(await screen.findByRole('button', { name: 'Install' }))
+    await waitFor(() => expect(api.installConnectorPack).toHaveBeenCalled())
+
+    // Connect: the row now offers the step that was impossible a moment ago.
+    fireEvent.click(await screen.findByRole('button', { name: 'Add connection' }))
+    await screen.findByText(/Slack/)
+
+    // Connected: the requirement resolves, so the row it lived on is gone.
+    api.listConnections.mockResolvedValue([
+      {
+        ...CONNECTION,
+        id: 'slack-1',
+        name: 'workspace-eng',
+        connectorId: 'mcp',
+        filters: { sdkConnectorId: 'slack' }
+      }
+    ])
+    await act(async () => {
+      await refreshConnections()
+    })
+
+    await waitFor(() => expect(screen.queryByText('Still needs')).toBeNull())
+  })
+
   it('offers to connect a built-in that needs no install', async () => {
     // With a github connection on hand the requirement would just auto-bind.
     api.listConnections.mockResolvedValue([])
@@ -334,6 +382,37 @@ describe('a requirement answered from the panel', () => {
 
     await waitFor(() => expect(api.listConnections).toHaveBeenCalled())
     expect(screen.queryByText('Still needs')).toBeNull()
+  })
+
+  // The slot holds one panel. A selection is an answer to a question just
+  // asked; leftovers from an import are not.
+  it('yields the slot to a selected node', async () => {
+    mockState.editingWorkflowId = 'wf-1'
+    mockState.importedRequirements = {
+      workflowId: 'wf-1',
+      requirements: [{ kind: 'httpProfile', nodeId: 'n1', name: 'reporting API' }]
+    }
+    render(<WorkflowEditor />)
+    await screen.findByText('Still needs')
+
+    act(() => {
+      const onNodeClick = captured.canvasProps?.onNodeClick as (id: string) => void
+      onNodeClick('trigger-1')
+    })
+
+    await waitFor(() => expect(screen.queryByText('Still needs')).toBeNull())
+    expect(screen.getByTestId('node-config')).toBeInTheDocument()
+  })
+
+  it('forgets a half-opened form when the panel closes', async () => {
+    render(<WorkflowEditor />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Create profile' }))
+    await screen.findByText('HTTP profile')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    // Reopening must not resurface the form the last visit abandoned.
+    await waitFor(() => expect(screen.queryByText('HTTP profile')).toBeNull())
   })
 
   it('leaves the import of a different workflow alone', async () => {

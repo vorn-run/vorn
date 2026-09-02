@@ -494,6 +494,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     setEditingId(null)
     setSelectedNodeId(null)
     setShowRunHistory(false)
+    // What an import left unbound is about the workflow being left, and a
+    // deleted one cannot answer it at all. Deleting closes through here too.
+    useAppStore.getState().setImportedRequirements(null)
     setOpen(false)
   }, [setOpen, setEditingId])
 
@@ -718,10 +721,23 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       .filter((entry) => entry.connectionId === undefined)
   }, [imported, editingId, connections])
 
+  /** Nothing half-opened survives leaving the panel that opened it. */
+  const closeStartFrom = useCallback(() => {
+    setShowStartFrom(false)
+    setConnectFor(null)
+    setProfileFor(null)
+    // A forgotten sheet is one click from installing something nobody asked
+    // for the next time this slot draws.
+    install.cancel()
+    install.clearError()
+  }, [install])
+
   /** A finished connection or profile is what the rows were waiting on. */
   const handleConnected = useCallback(() => {
     setConnectFor(null)
     setProfileFor(null)
+    // The shared cache is what every glyph and picker reads; refreshing it here
+    // means a new connection shows up without waiting for a config round trip.
     void refreshConnections()
     void refreshPacks()
   }, [refreshPacks])
@@ -756,12 +772,12 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       if (seed.iconColor) setIconColor(seed.iconColor)
       setNodes(seed.nodes)
       setEdges(seed.edges)
-      setShowStartFrom(false)
+      closeStartFrom()
 
       const pending = seed.unresolved.map(describeRequirement).join(', ')
       if (pending) toast.warning(`Started from "${template.name}" — still needs ${pending}`)
     },
-    [connections]
+    [connections, closeStartFrom]
   )
 
   // Saves first, so the file is what the canvas shows rather than the last save.
@@ -1486,11 +1502,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             connections={connections}
             listings={listings}
             suggestions={suggestions}
-            onPickBlank={() => setShowStartFrom(false)}
+            onPickBlank={closeStartFrom}
             onPickTemplate={handlePickTemplate}
             onPickSuggestion={(suggestion) => void handlePickSuggestion(suggestion)}
             onFixRequirement={handleFixRequirement}
-            onClose={() => setShowStartFrom(false)}
+            onClose={closeStartFrom}
           >
             {install.error && (
               <div className="px-4 py-2 border-b border-white/[0.08] text-[11px] text-danger">
@@ -1540,73 +1556,79 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
         {/* An imported workflow says what it could not bind, with the same
             actions the template rows offer. */}
-        {!startFromOpen && !pendingInsert && importedPending.length > 0 && (
-          <div className="w-[280px] border-l border-white/[0.08] bg-surface-node flex flex-col h-full overflow-y-auto titlebar-no-drag">
-            <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
-              <span className="text-[13px] font-medium text-white">Still needs</span>
-              <button
-                aria-label="Dismiss"
-                onClick={() => setImportedRequirements(null)}
-                className="p-1 rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            {install.error && (
-              <div className="px-4 py-2 border-b border-white/[0.08] text-[11px] text-danger">
-                {install.error}
+        {/* One occupant of the slot, on the same terms as the rest: the panels
+            that answer a selection or a run outrank an import's leftovers. */}
+        {!startFromOpen &&
+          !pendingInsert &&
+          !showRunHistory &&
+          !selectedNode &&
+          importedPending.length > 0 && (
+            <div className="w-[280px] border-l border-white/[0.08] bg-surface-node flex flex-col h-full overflow-y-auto titlebar-no-drag">
+              <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
+                <span className="text-[13px] font-medium text-white">Still needs</span>
+                <button
+                  aria-label="Dismiss"
+                  onClick={() => setImportedRequirements(null)}
+                  className="p-1 rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+                >
+                  <X size={14} />
+                </button>
               </div>
-            )}
-            {install.pending && (
-              <div className="border-b border-white/[0.08] p-2">
-                <PackInstallConfirm
-                  preview={install.pending.preview}
-                  busy={install.installing}
-                  onConfirm={() => void install.confirm()}
-                  onCancel={install.cancel}
-                />
-              </div>
-            )}
-            {profileFor !== null && (
-              <div className="border-b border-white/[0.08] p-2">
-                <HttpProfileForm
-                  name={profileFor}
-                  onDone={handleConnected}
-                  onCancel={() => setProfileFor(null)}
-                />
-              </div>
-            )}
-            {connectFor && (
-              <div className="border-b border-white/[0.08] p-2">
-                {connectorFor(connectors, connectFor) ? (
-                  <AddConnectionForm
-                    connector={connectorFor(connectors, connectFor)!}
-                    onDone={handleConnected}
-                    onCancel={() => setConnectFor(null)}
+              {install.error && (
+                <div className="px-4 py-2 border-b border-white/[0.08] text-[11px] text-danger">
+                  {install.error}
+                </div>
+              )}
+              {install.pending && (
+                <div className="border-b border-white/[0.08] p-2">
+                  <PackInstallConfirm
+                    preview={install.pending.preview}
+                    busy={install.installing}
+                    onConfirm={() => void install.confirm()}
+                    onCancel={install.cancel}
                   />
-                ) : (
-                  <SdkConnectorForm
-                    {...(connectFor.pack
-                      ? { pack: connectFor.pack }
-                      : { catalogEntry: connectFor.catalogItem })}
+                </div>
+              )}
+              {profileFor !== null && (
+                <div className="border-b border-white/[0.08] p-2">
+                  <HttpProfileForm
+                    name={profileFor}
                     onDone={handleConnected}
-                    onCancel={() => setConnectFor(null)}
+                    onCancel={() => setProfileFor(null)}
                   />
-                )}
+                </div>
+              )}
+              {connectFor && (
+                <div className="border-b border-white/[0.08] p-2">
+                  {connectorFor(connectors, connectFor) ? (
+                    <AddConnectionForm
+                      connector={connectorFor(connectors, connectFor)!}
+                      onDone={handleConnected}
+                      onCancel={() => setConnectFor(null)}
+                    />
+                  ) : (
+                    <SdkConnectorForm
+                      {...(connectFor.pack
+                        ? { pack: connectFor.pack }
+                        : { catalogEntry: connectFor.catalogItem })}
+                      onDone={handleConnected}
+                      onCancel={() => setConnectFor(null)}
+                    />
+                  )}
+                </div>
+              )}
+              <div className="py-2">
+                {importedPending.map((entry) => (
+                  <RequirementRow
+                    key={entry.requirement.nodeId + entry.requirement.kind}
+                    requirement={entry}
+                    listings={listings}
+                    onFix={handleFixRequirement}
+                  />
+                ))}
               </div>
-            )}
-            <div className="py-2">
-              {importedPending.map((entry) => (
-                <RequirementRow
-                  key={entry.requirement.nodeId + entry.requirement.kind}
-                  requirement={entry}
-                  listings={listings}
-                  onFix={handleFixRequirement}
-                />
-              ))}
             </div>
-          </div>
-        )}
+          )}
 
         {showRunHistory && !pendingInsert && (
           <RunHistoryPanel

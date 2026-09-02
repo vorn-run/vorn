@@ -164,6 +164,13 @@ describe('what a requirement can do about itself', () => {
   it('offers nothing for a connector no catalog here has heard of', () => {
     expect(requirementAction(needs('obscure'), [listing()])).toEqual({ kind: 'none' })
   })
+
+  // A listed server is a command rather than a package: the form the panel
+  // would open has no manifest to probe and no pack to install.
+  it('offers nothing for an MCP server, which is wired up by hand', () => {
+    const server = listing({ key: 'mcp:playwright', id: 'playwright', source: 'mcp' })
+    expect(requirementAction(needs('playwright'), [server])).toEqual({ kind: 'none' })
+  })
 })
 
 describe('what a template puts on the canvas', () => {
