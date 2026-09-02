@@ -13,6 +13,9 @@ export const MANIFEST_TOOL = 'vorn_connector_manifest'
 /** Tool a packaged connector registers when it can report its own readiness. */
 export const PREFLIGHT_TOOL = 'vorn_connector_preflight'
 
+/** Tool a packaged connector registers when a field's choices need looking up. */
+export const OPTIONS_TOOL = 'vorn_connector_options'
+
 /** MCP tool name a trigger is served under. */
 export function pollToolName(triggerType: string): string {
   return `poll_${triggerType}`
@@ -26,7 +29,7 @@ export function pollToolName(triggerType: string): string {
  * is the fallback for callers that cannot say what the triggers are.
  */
 export function isReservedSdkTool(name: string, triggerTypes?: readonly string[]): boolean {
-  if (name === MANIFEST_TOOL || name === PREFLIGHT_TOOL) return true
+  if (name === MANIFEST_TOOL || name === PREFLIGHT_TOOL || name === OPTIONS_TOOL) return true
   return triggerTypes
     ? triggerTypes.some((type) => name === pollToolName(type))
     : name.startsWith(pollToolName(''))

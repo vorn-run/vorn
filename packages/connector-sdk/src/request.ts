@@ -96,7 +96,8 @@ export function resolveRequest(request: ActionRequest, scope: RequestScope): Res
       resolved.body = typeof body === 'string' ? body : JSON.stringify(body)
       // Only defaulted: an author sending form-encoded or XML said so already.
       if (!Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
-        headers['content-type'] = typeof body === 'string' ? 'text/plain' : 'application/json'
+        resolved.headers['content-type'] =
+          typeof body === 'string' ? 'text/plain' : 'application/json'
       }
     }
   }

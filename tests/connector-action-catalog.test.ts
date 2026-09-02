@@ -8,13 +8,14 @@ vi.mock('../packages/server/src/logger', () => ({
 
 const { mcpConnectionActions, mcpToolToConnectorAction } =
   await import('../packages/server/src/connectors/mcp')
-const { isReservedSdkTool, MANIFEST_TOOL, PREFLIGHT_TOOL, pollToolName } =
+const { isReservedSdkTool, MANIFEST_TOOL, OPTIONS_TOOL, PREFLIGHT_TOOL, pollToolName } =
   await import('../packages/server/src/connectors/sdk-tools')
 
 /** The tools a packed SDK connector with one trigger and one action really serves. */
 const PACK_TOOLS = [
   { name: MANIFEST_TOOL, description: 'Describe this connector' },
   { name: PREFLIGHT_TOOL, description: 'Report readiness' },
+  { name: OPTIONS_TOOL, description: 'List what a field can be set to' },
   { name: pollToolName('tick'), description: 'Poll Pack Demo for Tick' },
   { name: 'echo', title: 'Echo', description: 'Return the given message.' }
 ]
@@ -40,9 +41,12 @@ describe('reserved SDK tool names', () => {
     expect(isReservedSdkTool(MANIFEST_TOOL, ['tick'])).toBe(true)
   })
 
-  it('knows the three kinds of plumbing a connector serves', () => {
+  it('knows every kind of plumbing a connector serves', () => {
     expect(isReservedSdkTool(MANIFEST_TOOL)).toBe(true)
     expect(isReservedSdkTool(PREFLIGHT_TOOL)).toBe(true)
+    // Serves a field's choices, so it is Vorn's to call and never a step's.
+    expect(isReservedSdkTool(OPTIONS_TOOL)).toBe(true)
+    expect(isReservedSdkTool(OPTIONS_TOOL, ['tick'])).toBe(true)
     expect(isReservedSdkTool(pollToolName('tick'))).toBe(true)
     expect(isReservedSdkTool(pollToolName('issueCreated'))).toBe(true)
   })
@@ -74,6 +78,7 @@ describe('actions offered for a connection', () => {
     expect(actions.map((a) => a.type)).toEqual([
       MANIFEST_TOOL,
       PREFLIGHT_TOOL,
+      OPTIONS_TOOL,
       pollToolName('tick'),
       'echo'
     ])
