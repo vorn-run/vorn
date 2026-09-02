@@ -49,9 +49,10 @@ export interface ConnectorListing {
   verified?: ConnectorCatalogVerification
   /**
    * Connected without anyone being asked to connect it — a connector that
-   * signs in with nothing is ready the moment it is installed.
+   * signs in with nothing is ready the moment it is installed. Absent reads as
+   * false, so a listing built by hand says only what it means to say.
    */
-  implicitlyConnected: boolean
+  implicitlyConnected?: boolean
 }
 
 export interface BuiltInConnector {
@@ -272,8 +273,8 @@ export function buildConnectorListings(
   ]
 
   // Usable-now sorts first, whether that took a connection or nothing at all.
-  const ready = (listing: ConnectorListing) =>
-    listing.connectedCount > 0 || listing.implicitlyConnected
+  const ready = (listing: ConnectorListing): boolean =>
+    listing.connectedCount > 0 || listing.implicitlyConnected === true
   return listings.sort((a, b) => {
     if (ready(a) !== ready(b)) return ready(a) ? -1 : 1
     return a.name.localeCompare(b.name)

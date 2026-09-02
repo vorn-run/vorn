@@ -293,7 +293,9 @@ describe('what the canvas itself is still missing', () => {
       action: 'post',
       args: {}
     })
-    expect(requirementsOfDefinition([anonymous])[0].connectorId).toBe('')
+    const [requirement] = requirementsOfDefinition([anonymous])
+    if (requirement.kind !== 'connection') throw new Error('expected a connection requirement')
+    expect(requirement.connectorId).toBe('')
   })
 
   it('binds a requirement the moment this machine has one answer for it', () => {
