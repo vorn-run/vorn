@@ -39,8 +39,8 @@ function seedPackagedTask(options: { withConnection?: boolean } = {}): void {
       ).run(JSON.stringify({ sdkConnectorId: 'packdemo' }))
     }
     d.prepare(
-      `INSERT INTO tasks (id, title, status, "order", created_at, updated_at, source_connector_id, source_external_id)
-       VALUES ('task-1', 'Tick 7', 'todo', 1, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', 'mcp', '7')`
+      `INSERT INTO tasks (id, title, status, "order", project_name, created_at, updated_at, source_connector_id, source_external_id)
+       VALUES ('task-1', 'Tick 7', 'todo', 1, 'Novum', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', 'mcp', '7')`
     ).run()
     if (withConnection) {
       d.prepare(

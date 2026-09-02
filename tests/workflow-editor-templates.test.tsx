@@ -154,6 +154,7 @@ const CONNECTION = {
   listConnectionActions: vi.fn().mockResolvedValue([]),
   inspectConnectorPack: vi.fn(),
   installConnectorPack: vi.fn(),
+  probeSdkConnector: vi.fn(),
   onConnectorInstallProgress: vi.fn(() => () => {}),
   detectRepo: vi.fn().mockResolvedValue(null),
   encryptString: vi.fn().mockResolvedValue('cipher'),
@@ -206,6 +207,18 @@ beforeEach(() => {
     }
   })
   api.installConnectorPack.mockResolvedValue({ ok: true, pack: { id: 'slack' } })
+  api.probeSdkConnector.mockResolvedValue({
+    ok: true,
+    manifest: {
+      id: 'slack',
+      name: 'Slack',
+      version: '1.2.0',
+      description: 'Messages and channels',
+      env: [],
+      triggers: [],
+      actions: []
+    }
+  })
   api.onConnectorInstallProgress.mockReturnValue(() => {})
   api.detectRepo.mockResolvedValue(null)
   api.createConnection.mockResolvedValue({ id: 'made-1' })

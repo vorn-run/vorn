@@ -47,6 +47,7 @@ describe('finding the task a packaged connector already made', () => {
       description: '',
       status: 'todo',
       order: 1,
+      projectName: 'Novum',
       createdAt: '2026-09-01T00:00:00Z',
       updatedAt: '2026-09-01T00:00:00Z',
       sourceConnectorId: connectionConnectorId(packaged),

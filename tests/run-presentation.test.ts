@@ -123,7 +123,7 @@ describe('describeRun', () => {
     const p = describeRun(
       run({ connectorItem: githubItem({ connectorId: 'mcp', externalId: '7' }) }),
       undefined,
-      { connectorId: 'packdemo', icon }
+      { connectorId: 'packdemo', icon, packaged: true }
     )
     expect(p.connectorId).toBe('packdemo')
     expect(p.sourceLabel).toBe('packdemo')
