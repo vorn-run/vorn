@@ -6,8 +6,17 @@ export { normalizeItem, normalizeItems } from './normalize'
 export { runPoll, drainPoll, runAction, MAX_POLL_PAGES } from './runtime'
 export type { PollPage, RunPollOptions, RunActionOptions } from './runtime'
 export { applyPostReceive, valueAt } from './post-receive'
-export { resolveRequest, resolveTemplates, executeRequest, asOutput } from './request'
+export {
+  resolveRequest,
+  resolveTemplates,
+  executeRequest,
+  asOutput,
+  nextLink,
+  MAX_REQUEST_PAGES
+} from './request'
 export type { RequestScope, ResolvedRequest } from './request'
+export { resilientFetch, retryAfterMs, backoffMs } from './resilience'
+export type { RetryPolicy, ResilientFetchOptions } from './resilience'
 export {
   connectionSetup,
   connectorManifest,

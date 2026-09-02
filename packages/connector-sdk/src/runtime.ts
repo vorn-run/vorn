@@ -1,6 +1,7 @@
 import { pollWithDedupe } from './dedupe'
 import { normalizeItems } from './normalize'
 import { executeRequest } from './request'
+import { resilientFetch, type RetryPolicy } from './resilience'
 import type { Connector, ConnectorConfig, NormalizedItem, PollContext } from './types'
 
 export interface PollPage {
@@ -15,6 +16,11 @@ export interface RunPollOptions {
   cursor?: string
   limit?: number
   now?: () => string
+  /** Replaced by the harness and by tests; defaults to the global fetch. */
+  fetchImpl?: typeof fetch
+  retry?: RetryPolicy
+  /** Replaced in tests so backoff costs no real time. */
+  sleep?: (ms: number) => Promise<void>
 }
 
 /** Longest chain of pages `drainPoll` will follow before calling it a bug. */
@@ -41,7 +47,14 @@ export async function runPoll(
     ...(options.since !== undefined && { since: options.since }),
     ...(options.cursor !== undefined && { cursor: options.cursor }),
     ...(options.limit !== undefined && { limit: options.limit }),
-    now
+    now,
+    // A poll only reads, so every failure it meets is worth trying again.
+    fetch: resilientFetch({
+      fetchImpl: options.fetchImpl ?? globalThis.fetch,
+      retryable: true,
+      ...(options.retry !== undefined && { retry: options.retry }),
+      ...(options.sleep !== undefined && { sleep: options.sleep })
+    })
   }
 
   const outcome =
@@ -94,7 +107,13 @@ export interface RunActionOptions {
   now?: () => string
   /** Replaced by the harness and by tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch
+  retry?: RetryPolicy
+  /** Replaced in tests so backoff costs no real time. */
+  sleep?: (ms: number) => Promise<void>
 }
+
+/** Methods that change nothing, so repeating one cannot do a thing twice. */
+const SAFE_METHODS = new Set(['GET', 'HEAD'])
 
 function coerceArg(value: unknown, type: string | undefined): unknown {
   if (typeof value !== 'string') return value
@@ -148,7 +167,17 @@ export async function runAction(
   }
 
   const config = options.config ?? {}
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch
+  // Repeating a write invents a second one, so a retry needs the action's word
+  // that it is safe — except for a declared read, which says so by its method.
+  const method = (action.request?.method ?? 'GET').toUpperCase()
+  const retryable =
+    action.idempotent === true || (action.request !== undefined && SAFE_METHODS.has(method))
+  const fetchImpl = resilientFetch({
+    fetchImpl: options.fetchImpl ?? globalThis.fetch,
+    retryable,
+    ...(options.retry !== undefined && { retry: options.retry }),
+    ...(options.sleep !== undefined && { sleep: options.sleep })
+  })
 
   if (typeof action.run === 'function') {
     const output = await action.run(coerced, {

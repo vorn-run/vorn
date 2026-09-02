@@ -6,6 +6,10 @@ export interface HarnessOptions {
   config?: ConnectorConfig
   /** Fixed clock, so `updatedAt` defaults and cursors are deterministic. */
   now?: () => string
+  /** Answer the connector's calls from the test rather than the network. */
+  fetchImpl?: typeof fetch
+  /** Fake clock for backoff, so a retry test costs no real time. */
+  sleep?: (ms: number) => Promise<void>
 }
 
 export interface ConnectorHarness {
@@ -33,6 +37,8 @@ export function createConnectorHarness(
   const defaults = (options: RunPollOptions = {}): RunPollOptions => ({
     ...(harnessOptions.config && { config: harnessOptions.config }),
     ...(harnessOptions.now && { now: harnessOptions.now }),
+    ...(harnessOptions.fetchImpl && { fetchImpl: harnessOptions.fetchImpl }),
+    ...(harnessOptions.sleep && { sleep: harnessOptions.sleep }),
     ...options
   })
 
@@ -42,7 +48,9 @@ export function createConnectorHarness(
     execute: (actionType, args = {}) =>
       runAction(connector, actionType, args, {
         ...(harnessOptions.config && { config: harnessOptions.config }),
-        ...(harnessOptions.now && { now: harnessOptions.now })
+        ...(harnessOptions.now && { now: harnessOptions.now }),
+        ...(harnessOptions.fetchImpl && { fetchImpl: harnessOptions.fetchImpl }),
+        ...(harnessOptions.sleep && { sleep: harnessOptions.sleep })
       }),
     manifest: () => connectorManifest(connector),
     async pollTwice(triggerType, options) {

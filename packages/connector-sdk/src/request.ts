@@ -1,5 +1,5 @@
 import { applyPostReceive, valueAt } from './post-receive'
-import type { ActionRequest, ConnectorConfig, PostReceiveOp } from './types'
+import type { ActionRequest, ConnectorConfig, PaginationStrategy, PostReceiveOp } from './types'
 
 /**
  * Turning a declared request into a real one.
@@ -157,13 +157,97 @@ export function asOutput(value: unknown): Record<string, unknown> {
   return value === undefined ? {} : { result: value }
 }
 
-/** Run a declared request end to end: resolve, send, reshape. */
+/** Longest chain of pages a declared request will follow before calling it a bug. */
+export const MAX_REQUEST_PAGES = 100
+
+const LINK_NEXT = /<([^>]+)>\s*;[^,]*\brel\s*=\s*"?next"?/i
+
+/** The URL of the next page, as a paged HTTP API states it in its `Link` header. */
+export function nextLink(header: string | null): string | undefined {
+  const match = header === null ? null : LINK_NEXT.exec(header)
+  return match ? match[1] : undefined
+}
+
+/** The list a page carries, at `itemsPath` or as the whole body. */
+function pageItems(body: unknown, itemsPath: string | undefined): unknown[] | undefined {
+  const value = itemsPath === undefined ? body : valueAt(body, itemsPath)
+  return Array.isArray(value) ? value : undefined
+}
+
+/**
+ * Follow a declared request to the end of its pages.
+ *
+ * Stops when the source runs out, when it stops moving — a cursor that repeats
+ * would otherwise loop forever — or at a bound, so a paging bug shows up as an
+ * error rather than as a step that never finishes.
+ */
+async function collectPages(
+  request: ActionRequest,
+  strategy: PaginationStrategy,
+  scope: RequestScope,
+  options: SendOptions
+): Promise<unknown[]> {
+  const collected: unknown[] = []
+  const seen = new Set<string>()
+  let page = strategy.kind === 'page' ? (strategy.startPage ?? 1) : 0
+  let cursor: string | undefined
+  let nextUrl: string | undefined
+
+  for (let index = 0; index < MAX_REQUEST_PAGES; index++) {
+    const resolved = resolveRequest(request, scope)
+    if (nextUrl !== undefined) resolved.url = nextUrl
+    if (strategy.kind === 'cursor' && cursor !== undefined) {
+      const url = new URL(resolved.url)
+      url.searchParams.set(strategy.param, cursor)
+      resolved.url = url.toString()
+    }
+    if (strategy.kind === 'page') {
+      const url = new URL(resolved.url)
+      url.searchParams.set(strategy.param, String(page))
+      resolved.url = url.toString()
+    }
+
+    if (seen.has(resolved.url)) {
+      throw new Error(`Request for ${request.url} asked for the same page twice`)
+    }
+    seen.add(resolved.url)
+
+    const { response, body } = await sendRequest(resolved, options)
+    const items = pageItems(body, strategy.itemsPath)
+    // A page that is not a list ends the walk: a source that answered with an
+    // object has nothing left to concatenate.
+    if (items === undefined) return collected
+    collected.push(...items)
+    if (items.length === 0) return collected
+
+    if (strategy.kind === 'cursor') {
+      const next = valueAt(body, strategy.cursorPath)
+      if (next === undefined || next === null || next === '') return collected
+      cursor = String(next)
+      continue
+    }
+    if (strategy.kind === 'link') {
+      nextUrl = nextLink(response.headers.get('link'))
+      if (nextUrl === undefined) return collected
+      continue
+    }
+    page += 1
+  }
+
+  throw new Error(`Request for ${request.url} exceeded ${MAX_REQUEST_PAGES} pages`)
+}
+
+/** Run a declared request end to end: resolve, send, follow its pages, reshape. */
 export async function executeRequest(
   request: ActionRequest,
   postReceive: PostReceiveOp[] | undefined,
   scope: RequestScope,
   options: SendOptions
 ): Promise<Record<string, unknown>> {
+  if (request.paginate) {
+    const items = await collectPages(request, request.paginate, scope, options)
+    return asOutput(applyPostReceive(items, postReceive))
+  }
   const { body } = await sendRequest(resolveRequest(request, scope), options)
   return asOutput(applyPostReceive(body, postReceive))
 }

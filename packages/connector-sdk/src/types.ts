@@ -69,6 +69,8 @@ export interface PollContext {
   limit?: number
   /** Injectable clock so tests are deterministic. */
   now(): string
+  /** Fetch with the SDK's retry and backoff applied. A poll is always a read. */
+  fetch: typeof fetch
 }
 
 export interface PollOutcome {
@@ -111,6 +113,8 @@ export interface FetchContext {
   limit?: number
   /** Injectable clock so tests are deterministic. */
   now(): string
+  /** Fetch with the SDK's retry and backoff applied. A fetch is always a read. */
+  fetch: typeof fetch
 }
 
 /**
