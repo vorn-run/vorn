@@ -276,11 +276,13 @@ describe('a requirement answered from the panel', () => {
       )
     )
     // Verified and described, but nothing kept until it is confirmed.
-    expect(await screen.findByText(/Slack/)).toBeInTheDocument()
+    expect((await screen.findAllByText(/Slack/)).length).toBeGreaterThan(0)
     expect(api.installConnectorPack).not.toHaveBeenCalled()
   })
 
   it('offers to connect a built-in that needs no install', async () => {
+    // With a github connection on hand the requirement would just auto-bind.
+    api.listConnections.mockResolvedValue([])
     mockState.editingWorkflowId = 'wf-1'
     mockState.importedRequirements = {
       workflowId: 'wf-1',
