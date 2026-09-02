@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { KeyRound, RefreshCw } from 'lucide-react'
 import type { ConnectorKey, ConnectorKeyField } from '../../../shared/types'
 import { ConnectorIcon } from '../ConnectorIcon'
+import { useConnectorLook } from '../../lib/use-connections'
 
 /** What a key's stored value can be said to be, without saying what it is. */
 function describeField(field: ConnectorKeyField): string {
@@ -18,7 +19,22 @@ function describeUsage(count: number): string {
   return count === 1 ? 'used by 1 step' : `used by ${count} steps`
 }
 
-function KeyRow({ entry, onRotated }: { entry: ConnectorKey; onRotated: () => void }) {
+function KeyRow({
+  entry,
+  canSeal,
+  onRotated
+}: {
+  entry: ConnectorKey
+  /** The keychain can seal a replacement, so rotating is worth offering. */
+  canSeal: boolean
+  onRotated: () => void
+}) {
+  // The same resolution the run surfaces use, so a packaged connector shows
+  // its own mark here rather than the generic one.
+  const look = useConnectorLook(entry.connectionId)
+  // Only an HTTP profile answers a preflight today; Lane B adds the SDK branch
+  // that lets a packaged connection answer one too.
+  const canTest = entry.connectorId === 'http'
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<{ ok: boolean | null; message?: string } | null>(null)
   const [rotating, setRotating] = useState<string | null>(null)
@@ -71,7 +87,13 @@ function KeyRow({ entry, onRotated }: { entry: ConnectorKey; onRotated: () => vo
   return (
     <div className="px-4 py-2.5 bg-white/[0.03] border border-white/[0.06] rounded-sm">
       <div className="flex items-center gap-3">
-        <ConnectorIcon connectorId={entry.connectorId} size={14} className="text-gray-400" />
+        <ConnectorIcon
+          connectorId={look?.connectorId ?? entry.connectorId}
+          {...(look?.icon && { icon: look.icon })}
+          packaged={look?.packaged ?? false}
+          size={14}
+          className="text-gray-400"
+        />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] text-gray-200 truncate">{entry.name}</div>
           <div className="text-[11px] text-gray-500 truncate">
@@ -86,18 +108,22 @@ function KeyRow({ entry, onRotated }: { entry: ConnectorKey; onRotated: () => vo
             }`}
           />
         )}
-        <button
-          onClick={runTest}
-          disabled={testing}
-          className="text-[11px] text-gray-400 hover:text-gray-200 px-2 py-1 border border-white/[0.1] rounded-sm disabled:opacity-50"
-        >
-          {testing ? 'Testing…' : 'Test'}
-        </button>
+        {canTest && (
+          <button
+            onClick={runTest}
+            disabled={testing}
+            className="text-[11px] text-gray-400 hover:text-gray-200 px-2 py-1 border border-white/[0.1] rounded-sm disabled:opacity-50"
+          >
+            {testing ? 'Testing…' : 'Test'}
+          </button>
+        )}
         {entry.fields.map((field) => (
           <button
             key={field.key}
             onClick={() => setRotating(rotating === field.key ? null : field.key)}
-            className="text-[11px] text-gray-400 hover:text-gray-200 px-2 py-1 border border-white/[0.1] rounded-sm flex items-center gap-1"
+            disabled={!canSeal}
+            title={canSeal ? undefined : 'The keychain cannot seal a replacement on this system'}
+            className="text-[11px] text-gray-400 hover:text-gray-200 px-2 py-1 border border-white/[0.1] rounded-sm flex items-center gap-1 disabled:opacity-50"
           >
             <RefreshCw size={11} />
             {entry.fields.length > 1 ? `Rotate ${field.label}` : 'Rotate'}
@@ -131,7 +157,7 @@ function KeyRow({ entry, onRotated }: { entry: ConnectorKey; onRotated: () => vo
           />
           <button
             onClick={() => save(rotating)}
-            disabled={saving || value === ''}
+            disabled={saving || value === '' || !canSeal}
             className="text-[11px] text-gray-200 px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
@@ -208,7 +234,12 @@ export function KeysSettings() {
 
       <div className="space-y-2">
         {keys.map((entry) => (
-          <KeyRow key={entry.connectionId} entry={entry} onRotated={load} />
+          <KeyRow
+            key={entry.connectionId}
+            entry={entry}
+            canSeal={safeStorageAvailable}
+            onRotated={load}
+          />
         ))}
       </div>
 

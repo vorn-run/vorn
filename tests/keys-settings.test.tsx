@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ConnectorKey } from '../src/shared/types'
 import { KeysSettings } from '../src/renderer/components/settings/KeysSettings'
+import { __resetConnectionsCacheForTests } from '../src/renderer/lib/use-connections'
 
 const PROFILE: ConnectorKey = {
   connectionId: 'conn-1',
@@ -34,6 +35,7 @@ const api = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  __resetConnectionsCacheForTests()
   api.listConnectorKeys.mockResolvedValue([PROFILE, PACKAGED])
   api.isSafeStorageAvailable.mockResolvedValue(true)
   api.preflightConnection.mockResolvedValue({ ok: true, message: 'HTTP 200' })
@@ -76,6 +78,47 @@ describe('the keys this machine holds', () => {
     render(<KeysSettings />)
 
     expect(await screen.findByText(/Keychain encryption is not available/)).toBeInTheDocument()
+  })
+
+  it('offers no rotation it could not carry out, rather than failing at Save', async () => {
+    api.isSafeStorageAvailable.mockResolvedValue(false)
+    render(<KeysSettings />)
+
+    await screen.findByText(/Keychain encryption is not available/)
+    for (const button of screen.getAllByRole('button', { name: /Rotate/ })) {
+      expect(button).toBeDisabled()
+    }
+  })
+
+  it('draws a packaged connector with the mark it ships', async () => {
+    api.listConnections.mockResolvedValue([
+      {
+        id: 'conn-2',
+        connectorId: 'mcp',
+        name: 'Slack',
+        filters: {
+          sdkConnectorId: 'slack',
+          sdkIcon: '{"viewBox":"0 0 24 24","paths":["M2 2h9v9z"]}'
+        },
+        syncIntervalMinutes: 5,
+        statusMapping: {},
+        createdAt: '2026-09-02T00:00:00Z'
+      }
+    ])
+    const { container } = render(<KeysSettings />)
+
+    await screen.findByText('Slack')
+    await waitFor(() => expect(container.querySelector('path[d="M2 2h9v9z"]')).not.toBeNull())
+  })
+})
+
+describe('what a key can be asked', () => {
+  it('offers Test where a preflight exists', async () => {
+    render(<KeysSettings />)
+    await screen.findByText('reporting API')
+
+    // One profile, one packaged connection: only the profile answers today.
+    expect(screen.getAllByRole('button', { name: 'Test' })).toHaveLength(1)
   })
 })
 
