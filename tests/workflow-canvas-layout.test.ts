@@ -151,21 +151,63 @@ describe('layout edge shapes', () => {
 })
 
 describe('a laid-out chain and the drag lattice', () => {
-  it('puts every card of a column on the same x, and on the grid a drag snaps to', () => {
-    const chain = [
-      node('t', 'trigger', 'Manual', { triggerType: 'manual' }),
-      node('a', 'script', 'One', {}),
-      node('b', 'script', 'Two', {})
-    ]
-    const { positions } = layoutPositions(chain, [
-      { id: 'e1', source: 't', target: 'a' },
-      { id: 'e2', source: 'a', target: 'b' }
-    ])
+  /** What the canvas does to a position when someone drags a card. */
+  const asDragged = (v: number): number => Math.round(v / 8) * 8
 
+  const chain = [
+    node('t', 'trigger', 'Manual', { triggerType: 'manual' }),
+    node('a', 'script', 'One', {}),
+    node('b', 'script', 'Two', {})
+  ]
+  const chainEdges = [
+    { id: 'e1', source: 't', target: 'a' },
+    { id: 'e2', source: 'a', target: 'b' }
+  ]
+
+  it('puts every card of a column on the same x', () => {
+    const { positions } = layoutPositions(chain, chainEdges)
     const xs = ['t', 'a', 'b'].map((id) => positions.get(id)!.x)
     expect(new Set(xs).size).toBe(1)
-    // Off the lattice, dragging any one card would shift it out of the column.
-    expect(xs[0] % 8).toBe(0)
+  })
+
+  it('writes every coordinate on the grid a drag snaps to', () => {
+    const { positions } = layoutPositions(chain, chainEdges)
+    for (const { x, y } of positions.values()) {
+      expect(x % 8).toBe(0)
+      expect(y % 8).toBe(0)
+    }
+  })
+
+  // The whole bug: a card picked up and put back landed 4px off the neighbours
+  // that never moved, and tidying up could not cure what the next drag redid.
+  it('leaves a dragged card exactly where the layout put it', () => {
+    const { positions } = layoutPositions(chain, chainEdges)
+    const laid = positions.get('a')!
+    const dragged = { x: asDragged(laid.x), y: asDragged(laid.y) }
+
+    expect(dragged).toEqual(laid)
+    expect(dragged.x).toBe(positions.get('t')!.x)
+  })
+
+  it('keeps a fork even on both sides of its parent', () => {
+    const { positions } = layoutPositions(forkNodes, forkEdges)
+    const parent = positions.get('c')!.x + 280 / 2
+    const left = positions.get('yes')!.x + 280 / 2
+    const right = positions.get('no')!.x + 280 / 2
+
+    expect(parent - left).toBe(right - parent)
+  })
+
+  it('keeps a card under a loop on the same centre line', () => {
+    const withLoop = [
+      node('loop', 'loop', 'Repeat', { nodeType: 'loop', bodyNodeIds: [], maxIterations: 2 }),
+      node('after', 'script', 'After', {})
+    ]
+    const { positions } = layoutPositions(withLoop, [{ id: 'e1', source: 'loop', target: 'after' }])
+
+    const loopCentre = positions.get('loop')!.x + 312 / 2
+    const cardCentre = positions.get('after')!.x + 280 / 2
+    expect(Math.abs(loopCentre - cardCentre)).toBeLessThanOrEqual(4)
   })
 })
 

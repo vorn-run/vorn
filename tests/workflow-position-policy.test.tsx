@@ -90,7 +90,9 @@ describe('placing the nodes a mutation creates', () => {
     const placed = placeNewNodes(arrangedNodes, nextNodes, nextEdges)
     expect(placed.find((n) => n.id === 't')!.position).toEqual({ x: -140, y: 0 })
     expect(placed.find((n) => n.id === 'a')!.position).toEqual({ x: -140, y: 200 })
-    expect(placed.find((n) => n.id === newNode.id)!.position).toEqual({ x: -140, y: 340 })
+    // One lattice-aligned pitch below its parent, and on its parent's x — a
+    // workflow saved off the grid keeps its column rather than gaining a step.
+    expect(placed.find((n) => n.id === newNode.id)!.position).toEqual({ x: -140, y: 344 })
   })
 })
 

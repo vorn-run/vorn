@@ -21,7 +21,10 @@ export const TRIGGER_ANCHOR = {
   bodyOnly: false
 }
 
-export { CARD_WIDTH, LOOP_WIDTH } from './workflow-helpers'
+// Defined beside the placement that also uses them; re-exported here because
+// this is where the canvas reaches for its geometry. The other direction would
+// be a cycle: the layout walk itself comes from the helpers.
+export { CARD_WIDTH, GRID, LOOP_WIDTH, snapToLattice } from './workflow-helpers'
 /** Horizontal gap between fork branches. */
 const BRANCH_GAP = 56
 /** Vertical gap between consecutive steps (room for the edge). */
@@ -116,11 +119,17 @@ export function layoutPositions(nodes: WorkflowNode[], edges: WorkflowEdge[]): P
       if (row.kind === 'node') {
         // Orphaned body members draw inside their loop, not on the trunk.
         if (bodySet.has(row.node.id)) continue
-        positions.set(row.node.id, { x: snapToLattice(xCenter - CARD_WIDTH / 2), y: cursor })
+        positions.set(row.node.id, {
+          x: snapToLattice(xCenter - CARD_WIDTH / 2),
+          y: snapToLattice(cursor)
+        })
         if (insideBranch) branchMembers.add(row.node.id)
         cursor += estimateNodeHeight(row.node, nodes) + ROW_GAP
       } else if (row.kind === 'loop') {
-        positions.set(row.loopNode.id, { x: snapToLattice(xCenter - LOOP_WIDTH / 2), y: cursor })
+        positions.set(row.loopNode.id, {
+          x: snapToLattice(xCenter - LOOP_WIDTH / 2),
+          y: snapToLattice(cursor)
+        })
         if (insideBranch) branchMembers.add(row.loopNode.id)
         cursor += estimateNodeHeight(row.loopNode, nodes) + ROW_GAP
       } else {
@@ -232,6 +241,9 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
     const anchor = rfNodes.find((n) => n.id === node.id)
     if (!anchor) continue
     const width = node.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH
+    // Deliberately off the lattice: this one is centred on the card rather than
+    // snapped to it. Nobody can drag it, so nothing will knock it off, and its
+    // port lands exactly under the card's — which a 4px rounding would lean.
     rfNodes.push({
       id: `add:${node.id}`,
       type: 'addStep',
