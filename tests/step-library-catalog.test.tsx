@@ -9,8 +9,11 @@ const connections = [
   { id: 'c1', name: 'Pack Demo', connectorId: 'mcp', filters: { sdkConnectorId: 'packdemo' } }
 ]
 
+const packs: Array<{ id: string }> = []
+
 vi.mock('../src/renderer/lib/use-connections', () => ({
   useConnections: () => connections,
+  useInstalledPacks: () => packs,
   useConnectorIdFor: () => null,
   useConnectionIconFor: () => undefined
 }))
@@ -69,11 +72,13 @@ const listConnectorCatalog = vi.fn(async () => ({
 
 const { StepLibrary } =
   await import('../src/renderer/components/workflow-editor/panels/StepLibrary')
+type LibraryScope = Parameters<typeof StepLibrary>[0]['scope']
 const { __resetCatalogCacheForTests } = await import('../src/renderer/lib/use-connector-catalog')
 
 beforeEach(() => {
   __resetCatalogCacheForTests()
   vi.clearAllMocks()
+  packs.length = 0
   listConnectorCatalog.mockResolvedValue({
     items: [SLACK, DISCORD, PACKDEMO],
     templates: [],
@@ -82,7 +87,7 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-const draw = (scope = { bodyOnly: false, insideBranch: false }) => {
+const draw = (scope: LibraryScope = { bodyOnly: false, insideBranch: false }) => {
   const onPick = vi.fn()
   const utils = render(<StepLibrary scope={scope} onPick={onPick} onClose={vi.fn()} />)
   return { ...utils, onPick }
@@ -135,6 +140,25 @@ describe('steps from connectors nobody has installed', () => {
     await Promise.resolve()
     expect(screen.queryByText('Post message')).toBeNull()
     expect(screen.queryByText('More from the catalog')).toBeNull()
+  })
+
+  it('promises a connection rather than an install once the files are on disk', async () => {
+    packs.push({ id: 'slack' })
+    draw()
+    await screen.findAllByText('Post message')
+
+    expect(screen.getAllByText('add connection').length).toBeGreaterThan(0)
+    // Discord is still only in the catalog, so its row still promises the install.
+    expect(screen.getAllByText('install on add')).toHaveLength(1)
+  })
+
+  it('offers none of this when a step is being swapped in place', async () => {
+    draw({ bodyOnly: false, insideBranch: false, replacing: true })
+    await Promise.resolve()
+
+    expect(screen.queryByText('Post message')).toBeNull()
+    expect(screen.queryByText('More from the catalog')).toBeNull()
+    expect(screen.queryByText('Call reporting API')).toBeNull()
   })
 })
 

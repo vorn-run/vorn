@@ -26,7 +26,8 @@ import type {
 import {
   useConnections,
   useConnectorIdFor,
-  useConnectionIconFor
+  useConnectionIconFor,
+  useInstalledPacks
 } from '../../../lib/use-connections'
 import { useConnectorCatalog } from '../../../lib/use-connector-catalog'
 import { connectionConnectorId } from '../../../lib/connection-icon'
@@ -132,6 +133,7 @@ export function StepLibrary({
   const [highlight, setHighlight] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const connections = useConnections()
+  const packs = useInstalledPacks()
   const catalog = useConnectorCatalog()
   const [actionsByConnection, setActionsByConnection] = useState<Map<string, ConnectorActionDef[]>>(
     () => new Map()
@@ -237,7 +239,7 @@ export function StepLibrary({
 
     // A saved profile is an HTTP request with the hard part already answered,
     // so it sits directly beneath the request rather than inside a form field.
-    if (!scope.bodyOnly) {
+    if (!scope.bodyOnly && !scope.replacing) {
       const profiles: Row[] = connections
         .filter((c) => c.connectorId === HTTP_PROFILE_CONNECTOR)
         .map((profile) => ({
@@ -288,11 +290,15 @@ export function StepLibrary({
       }
     }
 
-    // Steps from connectors nobody has installed. The catalog describes an
+    // Steps from connectors nobody has connected. The catalog describes an
     // action well enough to offer it, so search answers with the step you asked
     // for rather than with silence and a trip to Settings.
-    if (!scope.bodyOnly) {
+    //
+    // Not while replacing: swapping a step in place takes the pick apart and
+    // rebuilds the node, and neither of these picks survives that.
+    if (!scope.bodyOnly && !scope.replacing) {
       const connected = new Set(connections.map((conn) => connectionConnectorId(conn)))
+      const installed = new Set(packs.map((pack) => pack.id))
       const offers = catalog.items
         .filter((entry) => !connected.has(entry.id) && (entry.actions?.length ?? 0) > 0)
         .map((entry) => ({
@@ -314,7 +320,13 @@ export function StepLibrary({
         key: `catalog:${entry.id}:${action.type}`,
         label: action.label || action.type,
         mark: { connectorId: entry.id, ...(entry.icon && { icon: entry.icon }) },
-        detail: 'install on add',
+        // Say the step someone is actually about to take: a connector already
+        // on disk only wants connecting, and promising an install would be a
+        // small lie repeated on every row.
+        detail:
+          !installed.has(entry.id) && (entry.packUrl || entry.packageName)
+            ? 'install on add'
+            : 'add connection',
         pick: {
           kind: 'catalogAction' as const,
           connectorId: entry.id,
@@ -339,7 +351,7 @@ export function StepLibrary({
     }
 
     return { rows, pickable: rows.filter((r): r is Row => !('header' in r && r.header)) }
-  }, [query, scope, connections, actionsByConnection, manifestsByConnector, catalog])
+  }, [query, scope, connections, packs, actionsByConnection, manifestsByConnector, catalog])
 
   const clamped = Math.min(highlight, Math.max(0, pickable.length - 1))
 
