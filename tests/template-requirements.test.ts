@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   connectorSuggestions,
+  mergeRequirements,
   requirementAction,
   requirementsOfDefinition,
   requirementsWithBindings,
@@ -296,6 +297,31 @@ describe('what the canvas itself is still missing', () => {
     const [requirement] = requirementsOfDefinition([anonymous])
     if (requirement.kind !== 'connection') throw new Error('expected a connection requirement')
     expect(requirement.connectorId).toBe('')
+  })
+
+  it('keeps what only the file knew about a step the canvas also names', () => {
+    const fromFile = {
+      kind: 'connection' as const,
+      nodeId: 'n1',
+      connectorId: 'slack',
+      name: 'workspace-eng',
+      event: 'message'
+    }
+    const merged = mergeRequirements(requirementsOfDefinition([unbound]), [fromFile])
+
+    expect(merged).toEqual([fromFile])
+  })
+
+  it('falls back to the canvas for a field the file left empty', () => {
+    const vague = { kind: 'connection' as const, nodeId: 'n1', connectorId: '', name: '' }
+    const [merged] = mergeRequirements(requirementsOfDefinition([unbound]), [vague])
+
+    expect(merged.kind === 'connection' && merged.connectorId).toBe('slack')
+  })
+
+  it('keeps a requirement for a step the canvas says nothing about', () => {
+    const orphan = { kind: 'httpProfile' as const, nodeId: 'gone', name: 'reporting API' }
+    expect(mergeRequirements([], [orphan])).toEqual([orphan])
   })
 
   it('binds a requirement the moment this machine has one answer for it', () => {

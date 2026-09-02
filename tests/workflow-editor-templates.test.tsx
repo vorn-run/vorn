@@ -84,6 +84,34 @@ const EXPORTABLE: WorkflowDefinition = {
   edges: []
 }
 
+/**
+ * A workflow as an import leaves it: the step is on the canvas with its
+ * connection blanked, and nothing in the node itself says which connector it
+ * came from — only the `requires` block the file carried does.
+ */
+const IMPORTED: WorkflowDefinition = {
+  ...EXPORTABLE,
+  id: 'wf-imported',
+  name: 'Announce a release',
+  nodes: [
+    ...EXPORTABLE.nodes,
+    {
+      id: 'n1',
+      type: 'callConnectorAction',
+      label: 'Post message',
+      config: {
+        nodeType: 'callConnectorAction',
+        connectionId: '',
+        action: 'post',
+        actionLabel: 'Post message',
+        args: {}
+      },
+      position: { x: 0, y: 120 }
+    }
+  ] as WorkflowDefinition['nodes'],
+  edges: []
+}
+
 const mockState = {
   isWorkflowEditorOpen: true,
   editingWorkflowId: null as string | null,
@@ -93,7 +121,7 @@ const mockState = {
   updateWorkflow: vi.fn(),
   removeWorkflow: vi.fn(),
   config: {
-    workflows: [EXPORTABLE],
+    workflows: [EXPORTABLE, IMPORTED],
     tasks: [],
     projects: [{ name: 'Novum', path: '/Users/someone/dev/novum', preferredAgents: [] }],
     defaults: {}
@@ -292,6 +320,27 @@ describe('a requirement answered from the panel', () => {
     // Verified and described, but nothing kept until it is confirmed.
     expect((await screen.findAllByText(/Slack/)).length).toBeGreaterThan(0)
     expect(api.installConnectorPack).not.toHaveBeenCalled()
+  })
+
+  // What the file knew must survive meeting the step it describes: the canvas
+  // can only see that the field is empty, and a row that forgets the connector
+  // is a row with nothing to offer.
+  it('keeps the connector an import named, on the step the canvas also sees', async () => {
+    api.listConnectorCatalog.mockResolvedValue({
+      items: [SLACK_CATALOG],
+      templates: TEMPLATE_SEED,
+      mcpServers: []
+    })
+    mockState.editingWorkflowId = 'wf-imported'
+    mockState.importedRequirements = {
+      workflowId: 'wf-imported',
+      requirements: [
+        { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: 'workspace-eng' }
+      ]
+    }
+    render(<WorkflowEditor />)
+
+    expect(await screen.findByRole('button', { name: 'Install Slack' })).toBeInTheDocument()
   })
 
   // The whole point of the phase, in one pass: a requirement that named a

@@ -90,6 +90,7 @@ import { refreshConnections, useConnections } from '../../lib/use-connections'
 import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
 import {
   connectorSuggestions,
+  mergeRequirements,
   requirementsOfDefinition,
   requirementsWithBindings,
   templateSeed,
@@ -715,14 +716,12 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
    *
    * An import announces its needs; a step picked from a connector nobody has
    * installed simply sits there unbound. Both are the same question, so they
-   * are answered by one list of rows — deduped by step, since an imported
-   * requirement and the unbound step it describes are the same gap named twice.
+   * are answered by one list of rows, merged per step so the import keeps what
+   * only it knows — which connector, and which account it was pointed at.
    */
   const stillNeeded = useMemo(() => {
     const fromImport = imported && imported.workflowId === editingId ? imported.requirements : []
-    const derived = requirementsOfDefinition(nodes)
-    const seen = new Set(derived.map((requirement) => requirement.nodeId))
-    const all = [...derived, ...fromImport.filter((entry) => !seen.has(entry.nodeId))]
+    const all = mergeRequirements(requirementsOfDefinition(nodes), fromImport)
     return requirementsWithBindings(all, connections).filter(
       (entry) => entry.connectionId === undefined
     )

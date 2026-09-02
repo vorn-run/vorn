@@ -144,6 +144,35 @@ export function requirementsOfDefinition(nodes: WorkflowNode[]): PortableRequire
   return requirements
 }
 
+/**
+ * One list of gaps from the two that describe them.
+ *
+ * A step can be named twice: once by the file that imported it, which knows the
+ * connector, the account it was pointed at and the event it fired on, and once
+ * by the canvas, which knows only that the field is empty. They are the same
+ * gap, so they become one row — and the import wins every field it filled,
+ * because a row that forgets the connector is a row with nothing to offer.
+ */
+export function mergeRequirements(
+  derived: PortableRequirement[],
+  imported: PortableRequirement[]
+): PortableRequirement[] {
+  const byNode = new Map(imported.map((requirement) => [requirement.nodeId, requirement]))
+  const merged = derived.map((fromCanvas) => {
+    const fromFile = byNode.get(fromCanvas.nodeId)
+    byNode.delete(fromCanvas.nodeId)
+    if (!fromFile) return fromCanvas
+    if (fromFile.kind !== 'connection' || fromCanvas.kind !== 'connection') return fromFile
+    return {
+      ...fromFile,
+      connectorId: fromFile.connectorId || fromCanvas.connectorId,
+      name: fromFile.name || fromCanvas.name
+    }
+  })
+  // An import can also name a step the canvas has nothing to say about.
+  return [...merged, ...byNode.values()]
+}
+
 /** Pair each requirement with the connection this machine would bind to it. */
 export function requirementsWithBindings(
   requirements: PortableRequirement[],
