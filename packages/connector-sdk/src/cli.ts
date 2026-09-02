@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url'
-import { resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { checkConnector, formatFindings } from './check'
 import { resolveConfig } from './define'
 import { packConnector, type BundleOutput, type BundleRequest } from './pack'
 import { runPoll } from './runtime'
+import { scaffoldFiles } from './scaffold'
 import { connectionSetup, connectorManifest } from './setup'
 import { serveConnector } from './server'
 import type { Connector } from './types'
@@ -12,6 +14,7 @@ import type { Connector } from './types'
 const USAGE = `vorn-connector <command> <module> [options]
 
 Commands:
+  new <id>                      Scaffold a new connector, ready to build
   manifest <module>             Print the connector manifest as JSON
   setup <module> [trigger]      Print the Vorn connection settings to paste
   check <module>                Verify the connector against Vorn's contract
@@ -23,7 +26,8 @@ Options:
   --since <iso>                 Lower bound passed to poll
   --limit <n>                   Maximum items to request
   --live                        Let check poll for real using the environment
-  --out <dir>                   Directory pack writes the archive to`
+  --out <dir>                   Directory new and pack write to
+  --name <name>                 Display name for a new connector`
 
 export interface CliDeps {
   load(modulePath: string): Promise<unknown>
@@ -33,6 +37,8 @@ export interface CliDeps {
   cwd?: string
   /** Replaced in tests so pack does not shell out to a bundler. */
   bundle?(request: BundleRequest): Promise<BundleOutput>
+  /** Replaced in tests so scaffolding writes nowhere. */
+  writeFile?(path: string, contents: string): Promise<void>
 }
 
 /** Flags that stand alone; everything else must be followed by a value. */
@@ -91,6 +97,27 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   if (!modulePath) {
     deps.write(`Missing <module> argument\n\n${USAGE}`)
     return 1
+  }
+
+  // Handled before the module is loaded: there is nothing to load yet.
+  if (command === 'new') {
+    const { flags } = parseArgs(rest)
+    if (!deps.writeFile) {
+      deps.write('This build cannot write files')
+      return 1
+    }
+    const files = scaffoldFiles({
+      id: modulePath,
+      ...(flags.name !== undefined && { name: flags.name })
+    })
+    const root = join(flags.out ?? deps.cwd ?? '.', modulePath)
+    for (const file of files) {
+      await deps.writeFile(join(root, file.path), file.contents)
+    }
+    deps.write(`Created ${modulePath} in ${root}`)
+    for (const file of files) deps.write(`  ${file.path}`)
+    deps.write(`\nNext: cd ${root} && yarn install && yarn check`)
+    return 0
   }
 
   const connector = pickConnector(await deps.load(modulePath), modulePath)
@@ -198,7 +225,11 @@ if (invokedDirectly) {
           ? pathToFileURL(resolve(modulePath)).href
           : modulePath
       ),
-    write: (line) => process.stdout.write(`${line}\n`)
+    write: (line) => process.stdout.write(`${line}\n`),
+    writeFile: async (path, contents) => {
+      await mkdir(dirname(path), { recursive: true })
+      await writeFile(path, contents, { flag: 'wx' })
+    }
   })
     .then((code) => {
       process.exitCode = code

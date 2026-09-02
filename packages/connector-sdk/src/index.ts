@@ -37,6 +37,8 @@ export {
 export type { PackOptions, PackResult, BundleRequest, BundleOutput } from './pack'
 export { createConnectorServer, serveConnector } from './server'
 export type { ConnectorServerOptions } from './server'
+export { scaffoldFiles, titleCase } from './scaffold'
+export type { ScaffoldOptions, ScaffoldFile } from './scaffold'
 export { createConnectorHarness } from './harness'
 export type { ConnectorHarness, HarnessOptions } from './harness'
 export type {
