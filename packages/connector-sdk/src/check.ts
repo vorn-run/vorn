@@ -229,6 +229,10 @@ function sampleArg(input: ActionInputField): string {
  * arguments — until now no check ever called one — and that it reaches nothing
  * the routes did not offer, which is what makes a conformance run hermetic.
  *
+ * Hermetic as far as `fetch` goes, which is the honest scope: a connector that
+ * shells out or opens its own socket is not intercepted, so an action the stub
+ * never heard from is reported as unobserved rather than counted as checked.
+ *
  * A failure is an error only when the caller supplied routes: they said what
  * the service returns, so a throw is the connector's. Against the bare `{}`
  * default it is a warning, because an empty object is not a real reply.
@@ -243,15 +247,21 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
     const args = Object.fromEntries(
       (action.inputs ?? []).map((input) => [input.key, sampleArg(input)])
     )
-    try {
-      await withMockHttp(routes, () =>
-        runAction(connector, action.type, args, {
+    // Caught inside, so the calls are readable even when the action threw.
+    const { result: thrown, calls } = await withMockHttp(routes, async () => {
+      try {
+        await runAction(connector, action.type, args, {
           config: options.config ?? {},
           ...(options.now && { now: options.now })
         })
-      )
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
+        return undefined
+      } catch (error) {
+        return error
+      }
+    })
+
+    if (thrown !== undefined) {
+      const reason = thrown instanceof Error ? thrown.message : String(thrown)
       // Reaching for the network is a failure in either mode: a conformance
       // run that touches a real service is not a conformance run.
       const escaped = reason.startsWith('No mock route')
@@ -261,6 +271,21 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
           escaped ? 'mock-network-escape' : 'mock-action-failed',
           `action ${action.type}`,
           `did not run against served HTTP: ${reason}`
+        )
+      )
+      continue
+    }
+
+    // Nothing was intercepted, so nothing was proved. The stub only sees
+    // `fetch`: an action that shells out or opens its own socket runs for
+    // real here, and saying `mock` of it would be a claim nobody checked.
+    if (calls.length === 0) {
+      found.push(
+        finding(
+          'warn',
+          'mock-not-observed',
+          `action ${action.type}`,
+          'made no request the stub could see, so this run vouches for nothing it did'
         )
       )
     }
@@ -557,6 +582,7 @@ const CHECK_OWNERS: Record<string, string> = {
   'runtime-dependencies': 'no-runtime-deps',
   'mock-action-failed': 'mock',
   'mock-network-escape': 'mock',
+  'mock-not-observed': 'mock',
   'preflight-failed': 'live',
   'live-action-failed': 'live'
 }

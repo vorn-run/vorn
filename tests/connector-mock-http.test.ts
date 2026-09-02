@@ -174,6 +174,36 @@ describe('a check that runs every action against served HTTP', () => {
     expect(codes(findings)).not.toContain('mock-action-failed')
   })
 
+  it('says so when the stub heard nothing, because it only replaces fetch', async () => {
+    const elsewhere: ActionDefinition = {
+      ...post,
+      // Stands in for a connector that shells out or opens its own socket:
+      // whatever it did, the stub did not see it.
+      run: () => ({ id: 'from-a-subprocess' })
+    }
+    const findings = await checkConnector(connector([elsewhere]), { mock: true })
+    const unobserved = findings.find((item) => item.code === 'mock-not-observed')
+    expect(unobserved?.level).toBe('warn')
+    expect(unobserved?.target).toBe('action post')
+  })
+
+  it('says nothing of the sort when a call was intercepted', async () => {
+    const findings = await checkConnector(connector(), {
+      mock: true,
+      mockRoutes: [{ url: '/api/messages', body: { id: 'm-1' } }]
+    })
+    expect(codes(findings)).not.toContain('mock-not-observed')
+  })
+
+  it('reports the escape, not the silence, when an action reached past its routes', async () => {
+    const findings = await checkConnector(connector(), {
+      mock: true,
+      mockRoutes: [{ url: '/somewhere-else' }]
+    })
+    expect(codes(findings)).toContain('mock-network-escape')
+    expect(codes(findings)).not.toContain('mock-not-observed')
+  })
+
   it('only warns when an empty reply was all the action had to go on', async () => {
     const strict: ActionDefinition = {
       ...post,

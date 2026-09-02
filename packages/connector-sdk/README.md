@@ -302,6 +302,11 @@ expect(calls[0].url).toBe('https://acme.test/api/messages')
 A request no route matches is refused rather than served, so a test says which
 call escaped instead of quietly reaching a real service.
 
+The stub replaces `fetch`, and only `fetch`. A connector that shells out to a
+CLI or opens its own socket is not intercepted by it, so `--mock` reports any
+action the stub never heard from as `mock-not-observed` and leaves `mock` out
+of the receipt rather than vouching for a run it did not see.
+
 ```ts
 {
   type: 'newTicket',
