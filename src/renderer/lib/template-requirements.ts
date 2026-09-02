@@ -121,25 +121,33 @@ export function requirementAction(
  * every render rather than stored: answering a requirement is what makes it
  * stop being one, and nothing should have to remember to clear it.
  *
- * Only a step that cannot run without a connection counts. An HTTP request with
- * no profile is a request to a public URL, which is a legitimate step and not a
- * question anyone needs to answer.
+ * Only a step that cannot run without a connection counts, and only one this
+ * panel can do something about: a row that names no connector has no button to
+ * offer, and the step's own config panel is where it gets pointed at one.
  */
 export function requirementsOfDefinition(nodes: WorkflowNode[]): PortableRequirement[] {
   const requirements: PortableRequirement[] = []
   for (const node of nodes) {
     const config = node.config as Record<string, unknown>
     const key = boundConnectionKey(node, config)
-    if (key === null || key === 'profileConnectionId') continue
-    if (typeof config[key] === 'string' && config[key] !== '') continue
-    requirements.push({
-      kind: 'connection',
-      nodeId: node.id,
-      // Empty when nothing recorded which connector the step was picked from,
-      // which reads as "cannot be offered" rather than as some other connector.
-      connectorId: typeof config.connectorId === 'string' ? config.connectorId : '',
-      name: ''
-    })
+    if (key === null) continue
+    const bound = config[key]
+    if (typeof bound === 'string' && bound !== '') continue
+
+    if (key === 'profileConnectionId') {
+      // A request with no profile field at all is a request to a public URL —
+      // a finished step, not a question. One whose profile was chosen and then
+      // cleared is the opposite, and the field left behind is what says so.
+      if (!(key in config)) continue
+      requirements.push({ kind: 'httpProfile', nodeId: node.id, name: '' })
+      continue
+    }
+
+    // Nothing recorded which connector this came from, so no row could offer to
+    // install or connect one; the config panel is where it gets chosen.
+    const connectorId = typeof config.connectorId === 'string' ? config.connectorId : ''
+    if (connectorId === '') continue
+    requirements.push({ kind: 'connection', nodeId: node.id, connectorId, name: '' })
   }
   return requirements
 }

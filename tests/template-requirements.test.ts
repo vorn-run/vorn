@@ -276,7 +276,7 @@ describe('what the canvas itself is still missing', () => {
     expect(requirementsOfDefinition([bound])).toEqual([])
   })
 
-  it('leaves a request to a public URL alone, profile or no profile', () => {
+  it('leaves a request to a public URL alone', () => {
     const request = node('n3', 'httpRequest', {
       nodeType: 'httpRequest',
       method: 'GET',
@@ -287,16 +287,35 @@ describe('what the canvas itself is still missing', () => {
     expect(requirementsOfDefinition([request])).toEqual([])
   })
 
-  it('names no connector when nothing recorded which one it was', () => {
+  it('asks about a profile that was chosen and then cleared', () => {
+    const emptied = node('n5', 'httpRequest', {
+      nodeType: 'httpRequest',
+      method: 'GET',
+      url: '/report',
+      headers: {},
+      body: '',
+      profileConnectionId: ''
+    })
+    expect(requirementsOfDefinition([emptied])).toEqual([
+      { kind: 'httpProfile', nodeId: 'n5', name: '' }
+    ])
+  })
+
+  it('says nothing it could not offer a fix for', () => {
     const anonymous = node('n4', 'callConnectorAction', {
       nodeType: 'callConnectorAction',
       connectionId: '',
       action: 'post',
       args: {}
     })
-    const [requirement] = requirementsOfDefinition([anonymous])
-    if (requirement.kind !== 'connection') throw new Error('expected a connection requirement')
-    expect(requirement.connectorId).toBe('')
+    const strippedTrigger = node('n6', 'trigger', {
+      triggerType: 'connectorPoll',
+      connectionId: '',
+      event: 'issueCreated'
+    })
+    // Both are fixed in the step's own panel, where the connector is chosen;
+    // a row here would be amber forever with no button on it.
+    expect(requirementsOfDefinition([anonymous, strippedTrigger])).toEqual([])
   })
 
   it('keeps what only the file knew about a step the canvas also names', () => {
