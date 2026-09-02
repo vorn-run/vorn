@@ -209,12 +209,16 @@ afterEach(() => {
   captured.propertiesProps = null
 })
 
-/** A published connector the machine has not installed, so a row can offer it. */
+/**
+ * A published connector that ships only as a pack.
+ *
+ * No `packageName`: an entry that still has one launches by name, so it can be
+ * connected without installing anything and would never offer an install.
+ */
 const SLACK_CATALOG = {
   id: 'slack',
   name: 'Slack',
   description: 'Messages and channels',
-  packageName: '@vornrun/connector-slack',
   packUrl: 'https://packs.test/slack.vorn.tgz',
   capabilities: ['actions'],
   category: 'Chat',

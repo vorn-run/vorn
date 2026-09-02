@@ -4,10 +4,43 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { useAppStore } from '../src/renderer/stores'
 import { WorkflowsSection } from '../src/renderer/components/project-sidebar/WorkflowsSection'
-import { ToastContainer } from '../src/renderer/components/Toast'
 import { __resetConnectionsCacheForTests } from '../src/renderer/lib/use-connections'
 import { fileFromWorkflow } from '../src/renderer/lib/workflow-files'
 import type { AppConfig, WorkflowDefinition } from '../packages/shared/src/types'
+
+/**
+ * The toasts, captured rather than rendered.
+ *
+ * The real container reads `matchMedia`, which jsdom does not implement, and an
+ * action is a callback rather than something to read off the screen anyway.
+ */
+const toasts = vi.hoisted(() => ({
+  messages: [] as string[],
+  actions: [] as Array<{ label: string; onClick: (id: string) => void }>,
+  dismissed: [] as string[]
+}))
+
+vi.mock('../src/renderer/components/Toast', () => {
+  const record = (message: string, opts?: { actions?: typeof toasts.actions }): string => {
+    toasts.messages.push(message)
+    if (opts?.actions) toasts.actions.push(...opts.actions)
+    return 'toast-1'
+  }
+  const toast = Object.assign(
+    (message: string, _type?: string, opts?: { actions?: typeof toasts.actions }) =>
+      record(message, opts),
+    {
+      success: (message: string) => record(message),
+      error: (message: string) => record(message),
+      warning: (message: string) => record(message),
+      info: (message: string) => record(message),
+      loading: (message: string) => record(message),
+      dismiss: (id: string) => toasts.dismissed.push(id),
+      update: vi.fn()
+    }
+  )
+  return { toast, ToastContainer: () => null }
+})
 
 const PROJECT = { name: 'Novum', path: '/Users/someone/dev/novum' }
 
@@ -40,6 +73,9 @@ beforeEach(() => {
   __resetConnectionsCacheForTests()
   addWorkflow.mockClear()
   updateWorkflow.mockClear()
+  toasts.messages.length = 0
+  toasts.actions.length = 0
+  toasts.dismissed.length = 0
   ;(window as unknown as { api: unknown }).api = {
     listConnections: vi.fn().mockResolvedValue([]),
     onConfigChanged: vi.fn().mockReturnValue(() => {}),
@@ -170,15 +206,13 @@ describe('bringing a workflow file in', () => {
 })
 
 describe('an import that could not bind everything', () => {
-  /** Toasts render into their own container, so the harness mounts one. */
   const renderWithToasts = (): void => {
-    render(
-      <>
-        <WorkflowsSection isCollapsed={false} workspaceWorkflows={[workflow()]} />
-        <ToastContainer />
-      </>
-    )
+    render(<WorkflowsSection isCollapsed={false} workspaceWorkflows={[workflow()]} />)
   }
+
+  /** The Review the toast offered, if it offered one. */
+  const review = (): { label: string; onClick: (id: string) => void } | undefined =>
+    toasts.actions.find((a) => a.label === 'Review')
 
   /** A file whose HTTP step names a profile this machine does not have. */
   const NEEDY = JSON.stringify({
@@ -210,20 +244,23 @@ describe('an import that could not bind everything', () => {
 
     dropFile(NEEDY)
 
-    expect(await screen.findByText('Review')).toBeInTheDocument()
-    expect(screen.getByText(/still needs/)).toBeInTheDocument()
+    await waitFor(() => expect(review()).toBeDefined())
+    expect(toasts.messages.join(' ')).toMatch(/still needs/)
   })
 
   it('opens the workflow with its unmet needs in hand', async () => {
     renderWithToasts()
     dropFile(NEEDY)
+    await waitFor(() => expect(review()).toBeDefined())
 
-    fireEvent.click(await screen.findByText('Review'))
+    act(() => review()!.onClick('toast-1'))
 
     const state = useAppStore.getState()
     expect(state.importedRequirements?.requirements).toHaveLength(1)
     expect(state.importedRequirements?.workflowId).toBe(state.editingWorkflowId)
     expect(state.isWorkflowEditorOpen).toBe(true)
+    // The offer is spent once taken.
+    expect(toasts.dismissed).toContain('toast-1')
   })
 
   it('says nothing to review when everything bound', async () => {
@@ -232,7 +269,7 @@ describe('an import that could not bind everything', () => {
     dropFile(fileFromWorkflow(workflow(), PROJECT.path, []).contents)
 
     await waitFor(() => expect(addWorkflow).toHaveBeenCalled())
-    expect(screen.queryByText('Review')).toBeNull()
+    expect(review()).toBeUndefined()
   })
 })
 

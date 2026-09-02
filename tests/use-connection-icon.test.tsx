@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { render, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import {
+  refreshConnections,
   useConnectionIconFor,
   useConnectorGlyph,
   useConnectorIdFor,
@@ -136,6 +137,36 @@ describe('useConnectorLook', () => {
 
     await waitFor(() => expect(listConnections).toHaveBeenCalled())
     expect(getByTestId('out')).toHaveTextContent('none')
+  })
+})
+
+describe('refreshConnections', () => {
+  it('re-reads for a caller that just made a connection', async () => {
+    const { getByTestId } = render(<Probe connectionId="new-one" />)
+    await waitFor(() => expect(listConnections).toHaveBeenCalledTimes(1))
+    expect(getByTestId('out')).toHaveTextContent('none')
+
+    listConnections.mockResolvedValue([
+      {
+        id: 'new-one',
+        connectorId: 'mcp',
+        name: 'Fresh',
+        filters: { sdkIcon: JSON.stringify({ viewBox: '0 0 16 16', paths: ['M9 9h1v1z'] }) }
+      }
+    ])
+    await act(async () => {
+      await refreshConnections()
+    })
+
+    expect(getByTestId('out')).toHaveTextContent('M9 9h1v1z')
+  })
+
+  it('survives a re-read the preload refuses', async () => {
+    render(<Probe connectionId="packaged" />)
+    await waitFor(() => expect(listConnections).toHaveBeenCalled())
+    listConnections.mockRejectedValue(new Error('gone'))
+
+    await expect(refreshConnections()).resolves.toBeUndefined()
   })
 })
 

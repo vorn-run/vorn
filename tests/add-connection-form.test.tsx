@@ -96,6 +96,46 @@ describe('connecting a connector', () => {
     expect(onDone).not.toHaveBeenCalled()
   })
 
+  // GitHub is the one connector that names itself from the repo it detects.
+  it('names a GitHub connection after the repository it found', async () => {
+    detectRepo.mockResolvedValue({ owner: 'vorn-run', repo: 'vorn' })
+    const onDone = vi.fn()
+    render(
+      <AddConnectionForm
+        connector={{ ...CONNECTOR, id: 'github', name: 'GitHub' }}
+        onDone={onDone}
+        onCancel={vi.fn()}
+      />
+    )
+
+    await waitFor(() => expect(screen.getByText(/vorn-run\/vorn/)).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Connect/ }))
+
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const params = createConnection.mock.calls[0][0]
+    expect(params.name).toBe('vorn-run/vorn')
+    expect(params.filters.owner).toBe('vorn-run')
+    expect(params.filters.repo).toBe('vorn')
+  })
+
+  it('stamps the extra filters a listed server arrives with', async () => {
+    const onDone = vi.fn()
+    render(
+      <AddConnectionForm
+        connector={CONNECTOR}
+        initialAuth={{ profileName: 'preset' }}
+        extraFilters={{ command: 'npx' }}
+        onDone={onDone}
+        onCancel={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Connect/ }))
+
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    expect(createConnection.mock.calls[0][0].filters.command).toBe('npx')
+  })
+
   it('reports a save the server refused', async () => {
     createConnection.mockRejectedValue(new Error('that name is taken'))
     const { onDone } = form()

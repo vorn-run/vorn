@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { usePackInstall } from '../src/renderer/lib/use-pack-install'
 import type { ConnectorListing } from '../src/renderer/lib/connector-browse'
@@ -41,11 +41,17 @@ beforeEach(() => {
   }
 })
 
-function Probe({ onInstalled }: { onInstalled?: () => void }) {
+function Probe({
+  onInstalled,
+  listing = LISTING
+}: {
+  onInstalled?: () => void
+  listing?: ConnectorListing
+}) {
   const install = usePackInstall(onInstalled)
   return (
     <div>
-      <button onClick={() => void install.inspect(LISTING)}>inspect</button>
+      <button onClick={() => void install.inspect(listing)}>inspect</button>
       <button onClick={() => void install.inspectFile('/tmp/pack.vorn.tgz')}>inspect file</button>
       <button onClick={() => void install.confirm()}>confirm</button>
       <button onClick={install.cancel}>cancel</button>
@@ -54,6 +60,7 @@ function Probe({ onInstalled }: { onInstalled?: () => void }) {
       <span data-testid="pending">{install.pending?.preview.version ?? 'none'}</span>
       <span data-testid="error">{install.error ?? 'none'}</span>
       <span data-testid="failed">{install.progress.slack?.error ?? 'none'}</span>
+      <span data-testid="phase">{install.progress.slack?.phase ?? 'none'}</span>
     </div>
   )
 }
@@ -93,6 +100,36 @@ describe('installing a pack from wherever it was asked for', () => {
       expect(screen.getByTestId('failed')).toHaveTextContent('declares dependencies')
     )
     expect(screen.getByTestId('pending')).toHaveTextContent('none')
+  })
+
+  it('falls back to the package a catalog entry was built from', async () => {
+    const byName = { ...LISTING, catalogItem: { ...LISTING.catalogItem, packUrl: undefined } }
+    render(<Probe listing={byName as ConnectorListing} />)
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() =>
+      expect(inspectConnectorPack).toHaveBeenCalledWith({
+        kind: 'npm',
+        packageName: '@vornrun/connector-slack'
+      })
+    )
+  })
+
+  it('follows an install the server is reporting on', async () => {
+    let push: ((p: { id: string; phase: string; percent?: number }) => void) | undefined
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      inspectConnectorPack,
+      installConnectorPack,
+      onConnectorInstallProgress: (cb: typeof push) => {
+        push = cb
+        return () => {}
+      }
+    }
+    render(<Probe />)
+
+    act(() => push?.({ id: 'slack', phase: 'downloading', percent: 40 }))
+
+    expect(screen.getByTestId('phase')).toHaveTextContent('downloading')
   })
 
   it('asks the same question of a pack already on this disk', async () => {

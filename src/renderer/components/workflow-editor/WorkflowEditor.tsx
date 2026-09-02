@@ -640,10 +640,17 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     handleClose()
   }, [editingId, removeWorkflowFromStore, handleClose])
 
-  // Only fetched when there is an empty canvas to offer them for. Optional
-  // calls: a build without a catalog costs the offer, never the editor.
+  // What an import could not bind, for the workflow now open. Re-resolved
+  // against this machine each render, so answering one clears its row.
+  const imported = useAppStore((s) => s.importedRequirements)
+  const setImportedRequirements = useAppStore((s) => s.setImportedRequirements)
+  // The start-from list needs the catalog, and so does a workflow whose import
+  // left needs — without it a row could name a connector but never offer it.
+  const needsConnectorData = !editingId || imported?.workflowId === editingId
+
+  // Optional calls: a build without a catalog costs the offer, never the editor.
   useEffect(() => {
-    if (editingId || templates.length > 0) return
+    if (!needsConnectorData || templates.length > 0) return
     void Promise.resolve(window.api?.listConnectorCatalog?.())
       .then((snapshot) => {
         setTemplates(snapshot?.templates ?? [])
@@ -653,21 +660,21 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         setMcpServers(snapshot?.mcpServers ?? [])
       })
       .catch(() => setTemplates([]))
-  }, [editingId, templates.length])
+  }, [needsConnectorData, templates.length])
 
   useEffect(() => {
-    if (editingId) return
+    if (!needsConnectorData) return
     void Promise.resolve(window.api?.listConnectorPacks?.())
       .then((list) => setPacks(list ?? []))
       .catch(() => setPacks([]))
-  }, [editingId])
+  }, [needsConnectorData])
 
   useEffect(() => {
-    if (editingId) return
+    if (!needsConnectorData) return
     void Promise.resolve(window.api?.listConnectors?.())
       .then((list) => setConnectors(list ?? []))
       .catch(() => setConnectors([]))
-  }, [editingId])
+  }, [needsConnectorData])
 
   const suggestions = useMemo(
     () => connectorSuggestions(connections, connectors),
@@ -696,10 +703,6 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     [install]
   )
 
-  // What an import could not bind, for the workflow now open. Re-resolved
-  // against this machine each render, so answering one clears its row.
-  const imported = useAppStore((s) => s.importedRequirements)
-  const setImportedRequirements = useAppStore((s) => s.setImportedRequirements)
   const importedPending = useMemo(() => {
     if (!imported || imported.workflowId !== editingId) return []
     return imported.requirements
