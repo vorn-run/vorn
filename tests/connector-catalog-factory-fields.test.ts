@@ -28,24 +28,38 @@ describe('the rung a catalog entry declares', () => {
 })
 
 describe('the receipt behind a verified mark', () => {
-  const verified = { version: '1.2.0', checkedAt: '2026-09-02T00:00:00Z', checks: ['manifest'] }
+  const verified = {
+    schema: 1,
+    version: '1.2.0',
+    checkedAt: '2026-09-02T00:00:00Z',
+    checks: ['manifest']
+  }
 
   it('is carried whole when it says what ran and when', () => {
     expect(first({ verified })?.verified).toEqual(verified)
   })
 
   it('survives a missing check list, because the version and date are the claim', () => {
-    const checkless = { version: verified.version, checkedAt: verified.checkedAt }
+    const checkless = { schema: 1, version: verified.version, checkedAt: verified.checkedAt }
     expect(first({ verified: checkless })?.verified).toEqual({ ...checkless, checks: [] })
     expect(first({ verified: { ...verified, checks: 'all' } })?.verified?.checks).toEqual([])
   })
 
   it('is refused when half-written, rather than vouching for nothing', () => {
     // A mark on a check nobody ran is worse than no mark at all.
-    expect(first({ verified: { version: '1.2.0' } })?.verified).toBeUndefined()
-    expect(first({ verified: { checkedAt: '2026-09-02T00:00:00Z' } })?.verified).toBeUndefined()
+    expect(first({ verified: { schema: 1, version: '1.2.0' } })?.verified).toBeUndefined()
+    expect(first({ verified: { schema: 1, checkedAt: '2026-09-02Z' } })?.verified).toBeUndefined()
     expect(first({ verified: 'yes' })?.verified).toBeUndefined()
     expect(first({ verified: [] })?.verified).toBeUndefined()
+  })
+
+  it('is refused from a format this build does not read', () => {
+    // A later receipt may vouch for something else entirely; showing it under
+    // this build's badge would put our word behind a claim we cannot read.
+    expect(first({ verified: { ...verified, schema: 2 } })?.verified).toBeUndefined()
+    expect(first({ verified: { ...verified, schema: '1' } })?.verified).toBeUndefined()
+    // A receipt from before the format was numbered says nothing this build trusts.
+    expect(first({ verified: { ...verified, schema: undefined } })?.verified).toBeUndefined()
   })
 })
 

@@ -1787,6 +1787,12 @@ export interface ConnectorCatalogAction extends ConnectorCatalogSummary {
  * claiming a connector is bad — only that nothing vouched for it.
  */
 export interface ConnectorCatalogVerification {
+  /**
+   * Which receipt format this is. A build reads only the shape it knows: what
+   * "verified" vouches for is exactly the checks that ran, so a later format
+   * meaning something else must not be shown under this build's badge.
+   */
+  schema: 1
   /** The version the checks ran against, which may trail the published one. */
   version: string
   /** ISO timestamp of the last run. */

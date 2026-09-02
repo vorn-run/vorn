@@ -59,6 +59,9 @@ const CACHE_PATH = join(os.homedir(), '.vorn', 'connector-catalog.json')
 /** Rungs this build knows how to describe; anything else is dropped on read. */
 const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
 
+/** The one receipt format this build will show a verified mark for. */
+const VERIFICATION_SCHEMA = 1
+
 /**
  * Enough to show a connector list on a first run with no network.
  *
@@ -301,13 +304,16 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
 function normalizeVerification(raw: unknown): ConnectorCatalogVerification | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
   const value = raw as Record<string, unknown>
+  // A later format may vouch for something this build would misread; the mark
+  // has to mean what this build says it means or it should not be drawn.
+  if (value.schema !== VERIFICATION_SCHEMA) return undefined
   const version = typeof value.version === 'string' ? value.version : ''
   const checkedAt = typeof value.checkedAt === 'string' ? value.checkedAt : ''
   if (version === '' || checkedAt === '') return undefined
   const checks = list<unknown>(value.checks).filter(
     (check): check is string => typeof check === 'string'
   )
-  return { version, checkedAt, checks }
+  return { schema: VERIFICATION_SCHEMA, version, checkedAt, checks }
 }
 
 /**
