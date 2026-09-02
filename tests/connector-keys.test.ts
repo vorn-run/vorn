@@ -109,6 +109,23 @@ describe('what rotating a key would touch', () => {
     const counts = usageCounts([workflow('wf-3', [node('a', 'callConnectorAction', {})])])
     expect(counts.size).toBe(0)
   })
+
+  it('counts a script that borrows a key, which is a use like any other', () => {
+    const counts = usageCounts([
+      workflow('wf-4', [
+        node('smoke', 'script', { scriptContent: '', secretsFrom: 'conn-1' }),
+        node('plain', 'script', { scriptContent: '' })
+      ])
+    ])
+    expect(counts.get('conn-1')).toBe(1)
+  })
+
+  it('counts a step that both runs against a connection and borrows another', () => {
+    const counts = usageCounts([
+      workflow('wf-5', [node('a', 'script', { scriptContent: '', secretsFrom: 'conn-2' })])
+    ])
+    expect(counts.get('conn-2')).toBe(1)
+  })
 })
 
 describe('the keys this machine holds', () => {

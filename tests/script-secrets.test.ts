@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { secretEnvFor } from '../packages/server/src/script-runner'
-import { toPortable } from '../packages/shared/src/workflow-portability'
+import { fromPortable, toPortable } from '../packages/shared/src/workflow-portability'
 import type { WorkflowDefinition } from '../packages/shared/src/types'
 
 describe('the environment a step borrows from a connection', () => {
@@ -65,5 +65,28 @@ describe('what a workflow file says about the keys it needs', () => {
     expect(config.secretsFrom).toBeUndefined()
     // The script itself still travels; only the binding is local.
     expect(config.scriptContent).toBe('echo "$SLACK_BOT_TOKEN"')
+  })
+
+  it('refuses one a file carries anyway, rather than binding to a stranger', () => {
+    const carried = {
+      version: 1,
+      name: 'Live smoke',
+      slug: 'live-smoke',
+      nodes: [
+        {
+          id: 'run',
+          type: 'script',
+          label: 'Smoke',
+          config: { scriptType: 'bash', scriptContent: 'x', secretsFrom: 'conn-elsewhere' },
+          position: { x: 0, y: 0 }
+        }
+      ],
+      edges: []
+    }
+    const definition = fromPortable(carried as never, 'bundle', {
+      name: 'Novum',
+      path: '/Users/someone/dev/novum'
+    })
+    expect((definition.nodes[0].config as Record<string, unknown>).secretsFrom).toBeUndefined()
   })
 })

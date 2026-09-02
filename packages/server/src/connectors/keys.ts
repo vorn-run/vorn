@@ -13,7 +13,8 @@ import type {
   ConnectorKey,
   ConnectorKeyField,
   SourceConnection,
-  WorkflowDefinition
+  WorkflowDefinition,
+  WorkflowNode
 } from '@vornrun/shared/types'
 import { connectionConnectorId } from '@vornrun/shared/types'
 import { boundConnectionKey } from '@vornrun/shared/workflow-portability'
@@ -51,6 +52,23 @@ export function envNamesOf(blob: string | undefined): string[] {
 }
 
 /**
+ * Every connection a step names, whether it runs against it or borrows from it.
+ *
+ * `boundConnectionKey` answers a narrower question — which connection a step
+ * cannot run without — and a script's `secretsFrom` is deliberately not that:
+ * it is optional, so a script missing one is not an unmet requirement. It is
+ * still a real use of the key, and this page is asked what rotating one would
+ * touch, so it is counted here rather than widened there.
+ */
+function boundConnectionIds(node: WorkflowNode, config: Record<string, unknown>): string[] {
+  const ids: string[] = []
+  const required = boundConnectionKey(node, config)
+  if (required !== null) ids.push(String(config[required] ?? ''))
+  if (node.type === 'script') ids.push(String(config.secretsFrom ?? ''))
+  return ids.filter((id) => id !== '')
+}
+
+/**
  * How many workflow steps run against a connection.
  *
  * Counted per step rather than per workflow: "used by 3 steps" is what tells
@@ -61,11 +79,9 @@ export function usageCounts(workflows: WorkflowDefinition[]): Map<string, number
   for (const workflow of workflows) {
     for (const node of workflow.nodes) {
       const config = (node.config ?? {}) as Record<string, unknown>
-      const key = boundConnectionKey(node, config)
-      if (key === null) continue
-      const bound = config[key]
-      if (typeof bound !== 'string' || bound === '') continue
-      counts.set(bound, (counts.get(bound) ?? 0) + 1)
+      for (const id of boundConnectionIds(node, config)) {
+        counts.set(id, (counts.get(id) ?? 0) + 1)
+      }
     }
   }
   return counts

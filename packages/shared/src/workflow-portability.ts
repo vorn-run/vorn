@@ -286,6 +286,12 @@ export function fromPortable(
   const nodes = portable.nodes.map((node) => {
     const config = { ...(node.config as Record<string, unknown>) }
 
+    // Export strips this, so a file carrying one was hand-written or came from
+    // a build that did not. Either way the id names a row in the writer's
+    // table, and honouring it here would hand a step whichever key happens to
+    // hold that id on this machine.
+    delete config.secretsFrom
+
     for (const [key, value] of Object.entries(config)) {
       if (typeof value !== 'string') continue
       config[key] = value
