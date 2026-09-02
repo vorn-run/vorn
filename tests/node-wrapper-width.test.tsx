@@ -105,9 +105,11 @@ describe('what a step node occupies', () => {
     for (const wrapper of wrappers(container)) {
       for (const child of wrapper.children) {
         const isCard = child.className.includes('w-[280px]')
+        // The library's own stylesheet positions its handles absolutely.
+        const isHandle = child.className.includes('react-flow__handle')
         // Anything that is not the card must be positioned, or it would widen
         // the wrapper and take the card off the column with it.
-        if (!isCard) expect(child.className).toMatch(/absolute/)
+        if (!isCard && !isHandle) expect(child.className).toMatch(/absolute/)
       }
     }
   })

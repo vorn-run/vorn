@@ -591,7 +591,7 @@ export function nodeWidth(node: WorkflowNode | undefined): number {
  * sharing its centre line.
  */
 export function snapToLattice(value: number): number {
-  return Math.round(value / GRID) * GRID
+  return Math.round(value / GRID) * GRID || 0
 }
 
 /** One step down the trunk, kept on the lattice so a placed card lands on it. */

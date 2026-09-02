@@ -328,7 +328,8 @@ export function stepEdgePath(params: {
       (sourceY + targetY) / 2
     ]
   }
-  return getBezierPath(params)
+  const [path, labelX, labelY] = getBezierPath(params)
+  return [path, labelX, labelY]
 }
 
 /** Whether a hand-drawn source → target edge keeps the graph a DAG the engine understands. */
