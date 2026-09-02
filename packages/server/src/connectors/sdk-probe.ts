@@ -190,6 +190,26 @@ const str = (value: unknown, fallback = ''): string =>
 const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
 
 /**
+ * A bare executable name, which is all a probe command is allowed to be.
+ *
+ * The host resolves this on PATH and runs it without a shell, so a path or a
+ * shell metacharacter is never something this build would honour — it is
+ * either a mistake or an attempt to have the app run something else. Either
+ * way the answer is to refuse the declaration, not to sanitise it.
+ */
+const EXECUTABLE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+const strings = (raw: unknown): string[] =>
+  Array.isArray(raw) ? raw.filter((entry): entry is string => typeof entry === 'string') : []
+
+/** The declared probe arguments, or nothing when any of them is not a string. */
+function toProbeArgs(raw: unknown): string[] | undefined {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) return undefined
+  return raw.every((entry) => typeof entry === 'string') ? (raw as string[]) : undefined
+}
+
+/**
  * Read the arguments an action declares.
  *
  * The config panel maps over these to draw fields, so an input without a key
@@ -239,17 +259,23 @@ function toAuth(value: unknown): SdkConnectorAuth | undefined {
 
   const probe = isRecord(value.probe) ? value.probe : undefined
   const command = str(probe?.command).trim()
+  const args = toProbeArgs(probe?.args)
+  const usable = EXECUTABLE_NAME.test(command) && args !== undefined
+
+  // A rung is a promise about what setting this up will ask of you, and `cli`
+  // promises there is a command to ask who you are. One that cannot be run is
+  // the promise unbacked — better to say nothing than to offer a Sign in that
+  // could not work.
+  if (rung === 'cli' && !usable) return undefined
+
   const borrow = isRecord(value.borrow) ? value.borrow : undefined
-  const strings = (raw: unknown): string[] =>
-    Array.isArray(raw) ? raw.filter((entry): entry is string => typeof entry === 'string') : []
-  const args = strings(probe?.args)
   const env = strings(borrow?.env)
   const tokenArgs = strings(borrow?.tokenArgs)
   const keys = strings(value.keys)
 
   return {
     rung: rung as ConnectorAuthRung,
-    ...(command !== '' && { probe: { command, ...(args.length > 0 && { args }) } }),
+    ...(usable && args !== undefined && { probe: { command, ...(args.length > 0 && { args }) } }),
     ...((env.length > 0 || tokenArgs.length > 0) && {
       borrow: { ...(env.length > 0 && { env }), ...(tokenArgs.length > 0 && { tokenArgs }) }
     }),
