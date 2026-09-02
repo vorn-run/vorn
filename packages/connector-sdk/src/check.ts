@@ -519,6 +519,99 @@ export async function checkConnector(
   return found
 }
 
+/**
+ * What the factory checked, and when.
+ *
+ * Mirrors the receipt the catalog carries. "Verified" is not a word here but a
+ * list: the checks that ran and came back with nothing to say. A check that
+ * could not run — no sample to replay, no credentials to go live with — is
+ * absent rather than passed, because absent is the true answer.
+ */
+export interface ConnectorVerification {
+  /** Which receipt format this is, so a later one is not read as this one. */
+  schema: 1
+  version: string
+  checkedAt: string
+  checks: string[]
+}
+
+/** Which named check each finding belongs to, so one failure clears one name. */
+const CHECK_OWNERS: Record<string, string> = {
+  'missing-description': 'manifest',
+  'auth-undeclared': 'auth',
+  'auth-probe-missing': 'auth',
+  'secret-not-marked': 'secrets',
+  'action-no-outputs': 'actions',
+  'input-type-unsupported': 'actions',
+  'missing-idempotent': 'actions',
+  'poll-failed': 'dedupe',
+  'no-items': 'dedupe',
+  'no-cursor': 'dedupe',
+  'cursor-rejected': 'dedupe',
+  'redelivers-items': 'dedupe',
+  'stuck-cursor': 'dedupe',
+  unverifiable: 'dedupe',
+  'sample-unusable': 'dedupe',
+  'lifecycle-scripts': 'no-lifecycle-scripts',
+  'keywords-missing': 'keywords',
+  'runtime-dependencies': 'no-runtime-deps',
+  'mock-action-failed': 'mock',
+  'mock-network-escape': 'mock',
+  'preflight-failed': 'live',
+  'live-action-failed': 'live'
+}
+
+/** The checks a run of these options actually performs. */
+function checksRun(options: CheckOptions): string[] {
+  const names = ['manifest', 'auth', 'secrets', 'actions', 'dedupe']
+  if (options.packageDir !== undefined) names.push('no-lifecycle-scripts', 'keywords')
+  if (options.bundle && options.entry !== undefined) names.push('no-runtime-deps')
+  if (options.mock) names.push('mock')
+  if (options.live) names.push('live')
+  return names
+}
+
+export interface ConformanceRun {
+  findings: CheckFinding[]
+  /** Named checks that ran and had nothing to say. */
+  passed: string[]
+  /**
+   * The receipt to publish, or nothing when an error means there is no claim
+   * to make. Warnings do not void it — they are advice, not a failure.
+   */
+  receipt?: ConnectorVerification
+}
+
+/**
+ * Check a connector and say what can be vouched for.
+ *
+ * `checkConnector` answers "what is wrong"; this answers the catalog's
+ * question, "what did you check", which is what a verified badge shows.
+ */
+export async function runConformance(
+  connector: Connector,
+  options: CheckOptions = {}
+): Promise<ConformanceRun> {
+  const findings = await checkConnector(connector, options)
+  const spoiled = new Set(findings.map((item) => CHECK_OWNERS[item.code]).filter(Boolean))
+  const passed = checksRun(options).filter((name) => !spoiled.has(name))
+  const failed = findings.some((item) => item.level === 'error')
+  const now = options.now ?? (() => new Date().toISOString())
+
+  return {
+    findings,
+    passed,
+    ...(!failed && {
+      receipt: {
+        schema: 1 as const,
+        version: connector.version,
+        checkedAt: now(),
+        checks: passed
+      }
+    })
+  }
+}
+
 /** Render findings for a terminal. Returns an empty string when all clear. */
 export function formatFindings(findings: CheckFinding[]): string {
   return findings

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url'
+import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { checkConnector, formatFindings } from './check'
+import { formatFindings, runConformance } from './check'
 import { resolveConfig } from './define'
 import { packConnector } from './pack'
 import { esbuildBundle, type BundleOutput, type BundleRequest } from './packaging'
@@ -28,6 +29,7 @@ Options:
   --limit <n>                   Maximum items to request
   --live                        Let check poll for real using the environment
   --mock                        Run every action against served HTTP, not the network
+  --receipt <file>              Where check writes what it verified, as JSON
   --out <dir>                   Directory new and pack write to
   --name <name>                 Display name for a new connector`
 
@@ -39,8 +41,10 @@ export interface CliDeps {
   cwd?: string
   /** Replaced in tests so pack does not shell out to a bundler. */
   bundle?(request: BundleRequest): Promise<BundleOutput>
-  /** Replaced in tests so scaffolding writes nowhere. */
+  /** Writes a scaffold file or a receipt; replaced in tests so nothing touches disk. */
   writeFile?(path: string, contents: string): Promise<void>
+  /** Replaced in tests beside writeFile. */
+  exists?(path: string): boolean
 }
 
 /** Flags that stand alone; everything else must be followed by a value. */
@@ -113,6 +117,10 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       ...(flags.name !== undefined && { name: flags.name })
     })
     const root = join(flags.out ?? deps.cwd ?? '.', modulePath)
+    if ((deps.exists ?? existsSync)(root)) {
+      deps.write(`${root} already exists; a scaffold never overwrites`)
+      return 1
+    }
     for (const file of files) {
       await deps.writeFile(join(root, file.path), file.contents)
     }
@@ -161,15 +169,21 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
               bundle: deps.bundle ?? esbuildBundle
             }
           : {}
-      const findings = await checkConnector(connector, {
+      const run = await runConformance(connector, {
         ...packaged,
         ...(flags.live === 'true' && {
           live: true,
           config: resolveConfig(connector, deps.env ?? process.env)
         })
       })
+      const { findings } = run
       const errors = findings.filter((item) => item.level === 'error')
       if (findings.length > 0) deps.write(formatFindings(findings))
+      if (flags.receipt !== undefined && run.receipt) {
+        const write = deps.writeFile ?? ((path, contents) => writeFile(path, contents))
+        await write(flags.receipt, `${JSON.stringify(run.receipt, null, 2)}\n`)
+        deps.write(`Verified ${run.receipt.checks.join(', ')} — wrote ${flags.receipt}`)
+      }
       deps.write(
         errors.length > 0
           ? `\n${errors.length} error(s), ${findings.length - errors.length} warning(s)`
@@ -242,7 +256,7 @@ if (invokedDirectly) {
     write: (line) => process.stdout.write(`${line}\n`),
     writeFile: async (path, contents) => {
       await mkdir(dirname(path), { recursive: true })
-      await writeFile(path, contents, { flag: 'wx' })
+      await writeFile(path, contents)
     }
   })
     .then((code) => {

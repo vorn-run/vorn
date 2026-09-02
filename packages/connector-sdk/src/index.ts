@@ -1,6 +1,6 @@
 export { defineConnector, resolveConfig, envNameFor } from './define'
-export { checkConnector, formatFindings } from './check'
-export type { CheckFinding, CheckOptions } from './check'
+export { checkConnector, formatFindings, runConformance } from './check'
+export type { CheckFinding, CheckOptions, ConformanceRun, ConnectorVerification } from './check'
 export { pollWithDedupe } from './dedupe'
 export { normalizeItem, normalizeItems } from './normalize'
 export { runPoll, drainPoll, runAction, runOptions, MAX_POLL_PAGES } from './runtime'
