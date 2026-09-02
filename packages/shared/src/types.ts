@@ -1691,6 +1691,7 @@ export const IPC = {
   CONNECTOR_DETECT_REPO: 'connector:detectRepo',
   CONNECTOR_SEED_WORKFLOW: 'connector:seedWorkflow',
   CONNECTOR_STATUS: 'connector:status',
+  CONNECTOR_PROBE_AUTH: 'connector:probeAuth',
   CONNECTION_UPSERT_FROM_ITEM: 'connection:upsertFromItem',
   CONNECTOR_INBOX_COMPLETE: 'connector:inboxComplete',
   CONNECTOR_INBOX_RENEW: 'connector:inboxRenew',

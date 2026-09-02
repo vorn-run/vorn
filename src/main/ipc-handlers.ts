@@ -397,6 +397,9 @@ export function registerIpcHandlers(): void {
     requireBridge().request(IPC.CONNECTOR_SEED_WORKFLOW, params)
   )
   safeHandle(IPC.CONNECTOR_STATUS, () => requireBridge().request(IPC.CONNECTOR_STATUS))
+  safeHandle(IPC.CONNECTOR_PROBE_AUTH, (_, connectorId: string) =>
+    requireBridge().request(IPC.CONNECTOR_PROBE_AUTH, connectorId)
+  )
 
   // ─── Electron-only handlers (stay local) ───────────────────────
 

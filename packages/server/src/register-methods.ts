@@ -156,8 +156,11 @@ import {
 } from './connectors/http'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { listKeys, passwordFields } from './connectors/keys'
+import { describePack } from './connectors/packs'
+import { GH_AUTH } from './connectors/gh-cli'
+import { probeAuth } from './connectors/auth-rung'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
-import type { ConnectorPackSource } from '@vornrun/shared/types'
+import type { ConnectorPackSource, SdkConnectorAuth } from '@vornrun/shared/types'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
@@ -235,6 +238,24 @@ function unusableSource(source: ConnectorPackSource): string {
     }
     default:
       return 'That is not a pack to install'
+  }
+}
+
+/**
+ * How a connector says it signs in, wherever it said so.
+ *
+ * A packaged connector declares it on the manifest that was installed; the
+ * built-in GitHub one predates rungs and declares it beside its client. Both
+ * answer the same shape, so the probe has one input rather than a branch.
+ */
+function authForConnector(connectorId: string): SdkConnectorAuth | undefined {
+  if (connectorId === 'github') return GH_AUTH
+  try {
+    return describePack(connectorId)?.auth
+  } catch {
+    // Before the data directory resolves there is nowhere to look, which is
+    // the same answer as a connector that never declared anything.
+    return undefined
   }
 }
 
@@ -1820,44 +1841,26 @@ export function registerAllMethods(): void {
   registerMethod('connector:status', async () => {
     const results: Array<{ connectorId: string; authed: boolean; message?: string }> = []
     for (const c of connectorRegistry.list()) {
-      if (c.id === 'github') {
-        const { resolveGhPath, ghInstallHint, getGhEnv } = await import('./connectors/gh-cli')
-        const ghPath = resolveGhPath()
-        if (!ghPath) {
-          results.push({
-            connectorId: c.id,
-            authed: false,
-            message: `GitHub CLI (gh) is not installed or not on PATH.\n${ghInstallHint()}\nAfter installing, run: \`gh auth login\``
-          })
-          continue
-        }
-        try {
-          const { execFile } = await import('node:child_process')
-          const { promisify } = await import('node:util')
-          const execFileAsync = promisify(execFile)
-          await execFileAsync(ghPath, ['auth', 'status'], {
-            timeout: 5_000,
-            env: getGhEnv()
-          })
-          results.push({ connectorId: c.id, authed: true })
-        } catch (err) {
-          // gh is installed but the status probe failed. The common case is
-          // "not signed in"; anything else we surface in logs so it's not
-          // silently lost.
-          const msg = err instanceof Error ? err.message : String(err)
-          log.warn(`[connector:status] gh auth status failed: ${msg}`)
-          results.push({
-            connectorId: c.id,
-            authed: false,
-            message: 'Sign in by running `gh auth login` in your terminal.'
-          })
-        }
-      } else {
-        results.push({ connectorId: c.id, authed: true })
-      }
+      const report = await probeAuth(authForConnector(c.id))
+      // `null` is "nothing this probe can answer" — a key rung is checked
+      // against the service by preflight, not reported here as signed out.
+      const authed = report.ok !== false
+      const message = [report.message, report.installHint].filter(Boolean).join('\n')
+      results.push({ connectorId: c.id, authed, ...(!authed && message && { message }) })
     }
     return results
   })
+
+  /**
+   * Ask the tool a connector borrows whether it is signed in, and as whom.
+   *
+   * This is what lets a `cli` connector's form show an identity instead of a
+   * token field, so the answer carries who you are rather than only whether
+   * the check passed.
+   */
+  registerMethod('connector:probeAuth', async (connectorId: string) =>
+    probeAuth(authForConnector(connectorId))
+  )
 
   // ─── Browser pane (relayed to Electron main) ──────────────────
   //

@@ -969,7 +969,16 @@ const api = {
 
   getConnectorStatus: (): Promise<
     Array<{ connectorId: string; authed: boolean; message?: string }>
-  > => ipcRenderer.invoke(IPC.CONNECTOR_STATUS)
+  > => ipcRenderer.invoke(IPC.CONNECTOR_STATUS),
+
+  probeConnectorAuth: (
+    connectorId: string
+  ): Promise<{
+    ok: boolean | null
+    identity?: string
+    message?: string
+    installHint?: string
+  }> => ipcRenderer.invoke(IPC.CONNECTOR_PROBE_AUTH, connectorId)
 }
 
 contextBridge.exposeInMainWorld('api', api)

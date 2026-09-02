@@ -1,5 +1,19 @@
+import type { SdkConnectorAuth } from '@vornrun/shared/types'
 import { resolveExecutable } from '../resolve-executable'
-import { getSafeEnv } from '../process-utils'
+import { borrowedEnv, installHintFor } from './auth-rung'
+
+/**
+ * How the built-in GitHub connector signs in, said the way a packaged one says
+ * it. The built-in predates rungs and answers through its own client rather
+ * than a manifest, so its declaration lives here — but it is the same shape
+ * the probe and the borrow read for every other connector, which is what keeps
+ * one implementation rather than a special case for `gh`.
+ */
+export const GH_AUTH: SdkConnectorAuth = {
+  rung: 'cli',
+  probe: { command: 'gh', args: ['auth', 'status'] },
+  borrow: { env: ['GH_TOKEN', 'GITHUB_TOKEN'], tokenArgs: ['auth', 'token'] }
+}
 
 export function resolveGhPath(): string | null {
   return resolveExecutable('gh')
@@ -12,23 +26,11 @@ export function resolveGhPath(): string | null {
  * default as a general precaution.
  */
 export function getGhEnv(): Record<string, string> {
-  const env = getSafeEnv()
-  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN']) {
-    const val = process.env[key]
-    if (val) env[key] = val
-  }
-  return env
+  return borrowedEnv(GH_AUTH)
 }
 
 export function ghInstallHint(): string {
-  switch (process.platform) {
-    case 'darwin':
-      return 'Install with Homebrew: `brew install gh`'
-    case 'win32':
-      return 'Install with winget: `winget install --id GitHub.cli` (or download from https://cli.github.com)'
-    default:
-      return 'Install from https://cli.github.com (Debian/Ubuntu: `sudo apt install gh`)'
-  }
+  return installHintFor('gh')
 }
 
 export class GhNotFoundError extends Error {
