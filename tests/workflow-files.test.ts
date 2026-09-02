@@ -339,7 +339,7 @@ it('refuses a file that carries the same step twice', () => {
     ],
     edges: []
   }
-  const result = definitionFromFile(JSON.stringify(dupe), 'b', PROJECT, [])
+  const result = definitionFromFile(JSON.stringify(dupe), PROJECT, 'b', [])
   expect(result.ok).toBe(false)
   if (!result.ok) expect(result.error).toMatch(/same step twice/)
 })
