@@ -782,6 +782,15 @@ export interface ScriptConfig {
    *  When set, the runner emits SCRIPT_DATA/SCRIPT_EXIT with this id so the
    *  renderer can show output live in Run History. */
   runId?: string
+  /**
+   * A connection whose secrets this step runs with, named rather than carried.
+   *
+   * The id is all the definition holds; the values are read from the server's
+   * decrypted store at spawn time and reach this one child's environment only.
+   * A workflow that needs a key to talk to a service therefore stays a file
+   * anyone can read.
+   */
+  secretsFrom?: string
 }
 
 export type ConditionOperator =

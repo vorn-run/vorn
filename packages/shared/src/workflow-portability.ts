@@ -190,6 +190,10 @@ export function toPortable(
       // id means nothing elsewhere, so the import runs locally rather than
       // against a host the importer never configured.
       delete config.remoteHostId
+      // Names a connection in this install's own table. Elsewhere it would
+      // bind a step to whatever happened to take that id, so the import asks
+      // for a key rather than inheriting one.
+      delete config.secretsFrom
     }
 
     const key = boundConnectionKey(node, config)

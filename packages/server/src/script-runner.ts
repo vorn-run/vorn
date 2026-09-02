@@ -2,7 +2,48 @@ import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { ScriptConfig, IPC } from '@vornrun/shared/types'
 import { getLaunchEnv } from './process-utils'
+import { getDecryptedCreds } from './connectors/decrypted-creds'
+import { SECRET_ENV_FIELD } from './connectors/keys'
 import log from './logger'
+
+/** `apiKey` names the variable `API_KEY`, the way a connector's own env does. */
+function envNameFor(key: string): string {
+  return key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase()
+}
+
+/**
+ * The environment a step's named connection contributes.
+ *
+ * A connector's env blob already speaks in variable names, so it is spread as
+ * written; a single-value field is named after itself. Nothing is read unless
+ * a step asked for it by connection id.
+ */
+export function secretEnvFor(
+  connectionId: string | undefined,
+  lookup: (id: string) => Record<string, string> | undefined = getDecryptedCreds
+): Record<string, string> {
+  if (!connectionId) return {}
+  const decrypted = lookup(connectionId)
+  if (!decrypted) return {}
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(decrypted)) {
+    if (key !== SECRET_ENV_FIELD) {
+      env[envNameFor(key)] = value
+      continue
+    }
+    try {
+      const parsed: unknown = JSON.parse(value)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+      for (const [name, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === 'string') env[name] = v
+      }
+    } catch {
+      // A blob this build cannot read contributes nothing, and the step runs
+      // without it rather than failing on a value nobody can see.
+    }
+  }
+  return env
+}
 
 export interface ScriptExecutionResult {
   success: boolean
@@ -60,7 +101,9 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
     const child = spawn(command, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: getLaunchEnv(),
+      // Only this child sees them: the secrets are read here rather than held
+      // anywhere the definition, a run record or an export could reach.
+      env: { ...getLaunchEnv(), ...secretEnvFor(config.secretsFrom) },
       windowsHide: true
     })
 
