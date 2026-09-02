@@ -101,11 +101,7 @@ export function WorkflowsSection({
       else addWorkflow(placed)
 
       const pending = result.unresolved.map(describeRequirement).join(', ')
-      const note = pending
-        ? ` — still needs ${pending}`
-        : existing
-          ? ''
-          : ' — enable it when ready'
+      const note = pending ? ` — still needs ${pending}` : existing ? '' : ' — enable it when ready'
       toast.success(`${existing ? 'Updated' : 'Imported'} "${placed.name}"${note}`)
     },
     [
