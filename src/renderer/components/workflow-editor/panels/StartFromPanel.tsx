@@ -1,6 +1,13 @@
 import { X, FilePlus2, Check, Plug } from 'lucide-react'
 import type { SourceConnection, WorkflowTemplate } from '../../../../shared/types'
-import { templateRequirements, type ConnectorSuggestion } from '../../../lib/template-requirements'
+import {
+  requirementAction,
+  templateRequirements,
+  type ConnectorSuggestion,
+  type RequirementAction,
+  type TemplateRequirement
+} from '../../../lib/template-requirements'
+import type { ConnectorListing } from '../../../lib/connector-browse'
 import { describeRequirement } from '../../../lib/workflow-files'
 
 /**
@@ -13,19 +20,27 @@ import { describeRequirement } from '../../../lib/workflow-files'
 export function StartFromPanel({
   templates,
   connections,
+  listings = [],
   suggestions = [],
   onPickBlank,
   onPickTemplate,
   onPickSuggestion,
-  onClose
+  onFixRequirement,
+  onClose,
+  children
 }: {
   templates: WorkflowTemplate[]
   connections: SourceConnection[]
+  /** Every connector this machine could reach, so a requirement can offer its own fix. */
+  listings?: ConnectorListing[]
   suggestions?: ConnectorSuggestion[]
   onPickBlank: () => void
   onPickTemplate: (template: WorkflowTemplate) => void
   onPickSuggestion?: (suggestion: ConnectorSuggestion) => void
+  onFixRequirement?: (action: RequirementAction) => void
   onClose: () => void
+  /** The sheet or form a requirement's action opened, shown over the list. */
+  children?: React.ReactNode
 }) {
   return (
     <div
@@ -47,6 +62,8 @@ export function StartFromPanel({
           <X size={14} />
         </button>
       </div>
+
+      {children}
 
       <div className="flex-1 overflow-y-auto p-2">
         <button
@@ -72,7 +89,9 @@ export function StartFromPanel({
             key={template.id}
             template={template}
             connections={connections}
+            listings={listings}
             onPick={() => onPickTemplate(template)}
+            onFix={onFixRequirement}
           />
         ))}
 
@@ -106,42 +125,90 @@ export function StartFromPanel({
 function TemplateRow({
   template,
   connections,
-  onPick
+  listings,
+  onPick,
+  onFix
 }: {
   template: WorkflowTemplate
   connections: SourceConnection[]
+  listings: ConnectorListing[]
   onPick: () => void
+  onFix?: (action: RequirementAction) => void
 }) {
   const requirements = templateRequirements(template, connections)
   const pending = requirements.filter((entry) => entry.connectionId === undefined)
 
   return (
-    <button
-      onClick={onPick}
-      className="w-full text-left px-2.5 py-2 rounded-md flex items-start gap-2.5
-                 text-gray-300 hover:text-white hover:bg-white/[0.06] transition-colors"
-    >
-      <StepStrip count={template.portable.nodes.length} />
-      <span className="min-w-0 flex-1">
-        <span className="block text-[12px] font-medium truncate">{template.name}</span>
-        <span className="block text-[11px] text-gray-500 truncate">
-          {template.steps.join(' · ')}
-        </span>
-        {pending.length > 0 ? (
-          <span className="block text-[11px] text-bronzo truncate">
-            Needs {pending.map((entry) => describeRequirement(entry.requirement)).join(', ')}
+    // A row, not a button: what a requirement wants doing is its own control,
+    // and one cannot sit inside the other.
+    <div className="rounded-md hover:bg-white/[0.06] transition-colors">
+      <button
+        onClick={onPick}
+        className="w-full text-left px-2.5 py-2 flex items-start gap-2.5 text-gray-300 hover:text-white"
+      >
+        <StepStrip count={template.portable.nodes.length} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[12px] font-medium truncate">{template.name}</span>
+          <span className="block text-[11px] text-gray-500 truncate">
+            {template.steps.join(' · ')}
           </span>
-        ) : (
-          requirements.length > 0 && (
+          {pending.length === 0 && requirements.length > 0 && (
             <span className="flex items-center gap-1 text-[11px] text-status-sage">
               <Check size={10} strokeWidth={2} />
               Connected
             </span>
-          )
-        )}
-      </span>
-    </button>
+          )}
+        </span>
+      </button>
+
+      {pending.map((entry) => (
+        <RequirementRow
+          key={entry.requirement.nodeId + entry.requirement.kind}
+          requirement={entry}
+          listings={listings}
+          onFix={onFix}
+        />
+      ))}
+    </div>
   )
+}
+
+/** What one unmet requirement says, and what can be done about it here. */
+function RequirementRow({
+  requirement,
+  listings,
+  onFix
+}: {
+  requirement: TemplateRequirement
+  listings: ConnectorListing[]
+  onFix?: (action: RequirementAction) => void
+}) {
+  const action = requirementAction(requirement, listings)
+  const label = ACTION_LABEL[action.kind]?.(action)
+
+  return (
+    <div className="pl-[38px] pr-2.5 pb-1.5 flex items-center gap-2">
+      <span className="min-w-0 flex-1 text-[11px] text-bronzo truncate">
+        Needs {describeRequirement(requirement.requirement)}
+      </span>
+      {label && onFix && (
+        <button
+          onClick={() => onFix(action)}
+          className="shrink-0 text-[11px] text-gray-300 hover:text-white px-2 py-0.5 border
+                     border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors"
+        >
+          {label}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Each unmet requirement offers the one step that answers it. */
+const ACTION_LABEL: Partial<Record<RequirementAction['kind'], (a: RequirementAction) => string>> = {
+  install: (a) => `Install ${a.kind === 'install' ? a.listing.name : ''}`.trim(),
+  addConnection: () => 'Add connection',
+  createProfile: () => 'Create profile'
 }
 
 /** The shape of the flow, drawn rather than counted. */

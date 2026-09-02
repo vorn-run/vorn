@@ -30,6 +30,9 @@ import {
   WorkflowEdge,
   WorkflowTemplate,
   ConnectorManifest,
+  ConnectorCatalogItem,
+  InstalledConnectorPack,
+  McpServerCatalogEntry,
   NodeExecutionStatus,
   WorkflowExecution,
   TriggerConfig,
@@ -86,8 +89,12 @@ import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../..
 import {
   connectorSuggestions,
   templateSeed,
-  type ConnectorSuggestion
+  type ConnectorSuggestion,
+  type RequirementAction
 } from '../../lib/template-requirements'
+import { buildConnectorListings } from '../../lib/connector-browse'
+import { usePackInstall } from '../../lib/use-pack-install'
+import { PackInstallConfirm } from '../settings/PackInstallConfirm'
 import { StartFromPanel } from './panels/StartFromPanel'
 import {
   slugify,
@@ -131,9 +138,12 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [showStartFrom, setShowStartFrom] = useState(true)
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
-  const [connectors, setConnectors] = useState<Array<{ id: string; manifest: ConnectorManifest }>>(
-    []
-  )
+  const [connectors, setConnectors] = useState<
+    Array<{ id: string; name: string; capabilities: string[]; manifest: ConnectorManifest }>
+  >([])
+  const [catalog, setCatalog] = useState<ConnectorCatalogItem[]>([])
+  const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
+  const [mcpServers, setMcpServers] = useState<McpServerCatalogEntry[]>([])
   const [launchingSince, setLaunchingSince] = useState<number | null>(null)
   const [followRunId, setFollowRunId] = useState<string | null>(null)
   const followArmRef = useRef(false)
@@ -620,9 +630,22 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   useEffect(() => {
     if (editingId || templates.length > 0) return
     void Promise.resolve(window.api?.listConnectorCatalog?.())
-      .then((snapshot) => setTemplates(snapshot?.templates ?? []))
+      .then((snapshot) => {
+        setTemplates(snapshot?.templates ?? [])
+        // Kept as well as the templates: what a requirement can offer to do
+        // about itself is a question about the catalog.
+        setCatalog(snapshot?.items ?? [])
+        setMcpServers(snapshot?.mcpServers ?? [])
+      })
       .catch(() => setTemplates([]))
   }, [editingId, templates.length])
+
+  useEffect(() => {
+    if (editingId) return
+    void Promise.resolve(window.api?.listConnectorPacks?.())
+      .then((list) => setPacks(list ?? []))
+      .catch(() => setPacks([]))
+  }, [editingId])
 
   useEffect(() => {
     if (editingId) return
@@ -634,6 +657,26 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const suggestions = useMemo(
     () => connectorSuggestions(connections, connectors),
     [connections, connectors]
+  )
+
+  /** Every connector this machine could reach, so a requirement can name its own fix. */
+  const listings = useMemo(
+    () => buildConnectorListings(connectors, catalog, connections, packs, mcpServers),
+    [connectors, catalog, connections, packs, mcpServers]
+  )
+
+  // The same inspect-then-confirm the directory uses, run from the panel.
+  const refreshPacks = useCallback(async () => {
+    const list = await window.api.listConnectorPacks?.().catch(() => [])
+    setPacks(list ?? [])
+  }, [])
+  const install = usePackInstall(refreshPacks)
+
+  const handleFixRequirement = useCallback(
+    (action: RequirementAction) => {
+      if (action.kind === 'install') void install.inspect(action.listing)
+    },
+    [install]
   )
 
   /** The server builds these from the connector's own manifest, and repeats are the same workflow. */
@@ -1394,12 +1437,30 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           <StartFromPanel
             templates={templates}
             connections={connections}
+            listings={listings}
             suggestions={suggestions}
             onPickBlank={() => setShowStartFrom(false)}
             onPickTemplate={handlePickTemplate}
             onPickSuggestion={(suggestion) => void handlePickSuggestion(suggestion)}
+            onFixRequirement={handleFixRequirement}
             onClose={() => setShowStartFrom(false)}
-          />
+          >
+            {install.error && (
+              <div className="px-4 py-2 border-b border-white/[0.08] text-[11px] text-danger">
+                {install.error}
+              </div>
+            )}
+            {install.pending && (
+              <div className="border-b border-white/[0.08] p-2">
+                <PackInstallConfirm
+                  preview={install.pending.preview}
+                  busy={install.installing}
+                  onConfirm={() => void install.confirm()}
+                  onCancel={install.cancel}
+                />
+              </div>
+            )}
+          </StartFromPanel>
         )}
 
         {showRunHistory && !pendingInsert && (
