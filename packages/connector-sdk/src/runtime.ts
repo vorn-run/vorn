@@ -156,18 +156,34 @@ export async function runOptions(
   )
 }
 
+/** How much of a bad value to quote back, so an error names it without a wall of text. */
+const MAX_QUOTED_VALUE = 80
+
+function quote(value: string): string {
+  return value.length > MAX_QUOTED_VALUE ? `${value.slice(0, MAX_QUOTED_VALUE)}…` : value
+}
+
 function coerceArg(value: unknown, type: string | undefined): unknown {
   if (typeof value !== 'string') return value
   if (type === 'number') {
     const parsed = Number(value)
-    if (Number.isNaN(parsed)) throw new Error(`Expected a number, got "${value}"`)
+    if (Number.isNaN(parsed)) throw new Error(`Expected a number, got "${quote(value)}"`)
     return parsed
   }
   if (type === 'boolean') {
     if (value === 'true') return true
     if (value === 'false') return false
-    throw new Error(`Expected a boolean, got "${value}"`)
+    throw new Error(`Expected a boolean, got "${quote(value)}"`)
   }
+  if (type === 'json') {
+    try {
+      return JSON.parse(value)
+    } catch {
+      throw new Error(`Expected JSON, got "${quote(value)}"`)
+    }
+  }
+  // `select` and `string` are both strings here: a select's value is one of
+  // its choices, which the served schema already states.
   return value
 }
 

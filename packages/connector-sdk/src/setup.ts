@@ -44,7 +44,14 @@ export interface ConnectionSetup {
     cursorPath: 'nextCursor'
   }
   /** Environment variable names the connector reads. */
-  env: Array<{ name: string; required: boolean; secret: boolean; description?: string }>
+  env: Array<{
+    name: string
+    required: boolean
+    secret: boolean
+    description?: string
+    /** For whoever is building a connector like this one, not for whoever runs it. */
+    builderHint?: string
+  }>
 }
 
 /**
@@ -78,7 +85,8 @@ export function connectionSetup(connector: Connector, triggerType: string): Conn
       name: envNameFor(field.key, field.env),
       required: field.required === true,
       secret: field.secret === true,
-      ...(field.description !== undefined && { description: field.description })
+      ...(field.description !== undefined && { description: field.description }),
+      ...(field.builderHint !== undefined && { builderHint: field.builderHint })
     }))
   }
 }
@@ -113,6 +121,8 @@ export interface ConnectorManifest {
       options?: ActionInputOption[]
       /** An options set the connector serves, resolved against a live connection. */
       loadOptions?: string
+      /** For whoever is building a connector like this one, not for whoever runs it. */
+      builderHint?: string
     }>
     /**
      * Fields the action is known to return. Absent when the connector declared
@@ -152,7 +162,8 @@ export function connectorManifest(connector: Connector): ConnectorManifest {
         type: input.type ?? 'string',
         required: input.required === true,
         ...(input.options !== undefined && { options: input.options }),
-        ...(input.loadOptions !== undefined && { loadOptions: input.loadOptions })
+        ...(input.loadOptions !== undefined && { loadOptions: input.loadOptions }),
+        ...(input.builderHint !== undefined && { builderHint: input.builderHint })
       })),
       ...(action.outputs !== undefined && { outputs: action.outputs })
     }))

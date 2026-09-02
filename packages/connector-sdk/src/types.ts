@@ -51,6 +51,13 @@ export interface ConnectorConfigField {
   secret?: boolean
   description?: string
   default?: string
+  /**
+   * A note for whoever is building this connector rather than using it: where
+   * the value is found, what a good one looks like. The factory's agent reads
+   * these, so a field that is easy to get wrong can say so once here instead of
+   * being got wrong in every connector that copies it.
+   */
+  builderHint?: string
 }
 
 export type ConnectorConfig = Record<string, string | undefined>
@@ -217,6 +224,8 @@ export interface ActionInputField {
    * the projects in an account.
    */
   loadOptions?: string
+  /** A note for whoever is building the connector, not for whoever runs it. */
+  builderHint?: string
 }
 
 /**
