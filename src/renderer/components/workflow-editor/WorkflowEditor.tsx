@@ -719,8 +719,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
    * requirement and the unbound step it describes are the same gap named twice.
    */
   const stillNeeded = useMemo(() => {
-    const fromImport =
-      imported && imported.workflowId === editingId ? imported.requirements : ([] as const)
+    const fromImport = imported && imported.workflowId === editingId ? imported.requirements : []
     const derived = requirementsOfDefinition(nodes)
     const seen = new Set(derived.map((requirement) => requirement.nodeId))
     const all = [...derived, ...fromImport.filter((entry) => !seen.has(entry.nodeId))]
