@@ -25,6 +25,7 @@ import type {
   ConnectorAuthRung,
   ConnectorCatalogAction,
   ConnectorCatalogActionInput,
+  ConnectorCatalogActionOption,
   ConnectorCatalogEntry,
   ConnectorCatalogItem,
   ConnectorCatalogSummary,
@@ -353,11 +354,30 @@ function normalizeActions(raw: unknown): ConnectorCatalogAction[] {
 function normalizeActionInputs(raw: unknown): ConnectorCatalogActionInput[] {
   return records(raw)
     .filter((input) => typeof input.key === 'string' && input.key !== '')
-    .map((input) => ({
-      key: input.key as string,
-      label: typeof input.label === 'string' ? input.label : (input.key as string),
-      type: typeof input.type === 'string' ? input.type : 'string',
-      required: input.required === true
+    .map((input) => {
+      const options = normalizeActionOptions(input.options)
+      return {
+        key: input.key as string,
+        label: typeof input.label === 'string' ? input.label : (input.key as string),
+        type: typeof input.type === 'string' ? input.type : 'string',
+        required: input.required === true,
+        ...(options.length > 0 && { options }),
+        ...(typeof input.loadOptions === 'string' &&
+          input.loadOptions !== '' && { loadOptions: input.loadOptions })
+      }
+    })
+}
+
+/**
+ * The choices a `select` offers. A choice with no value cannot be picked, so
+ * it is dropped rather than drawn as an option that selects nothing.
+ */
+function normalizeActionOptions(raw: unknown): ConnectorCatalogActionOption[] {
+  return records(raw)
+    .filter((option) => typeof option.value === 'string' && option.value !== '')
+    .map((option) => ({
+      value: option.value as string,
+      ...(typeof option.label === 'string' && { label: option.label })
     }))
 }
 

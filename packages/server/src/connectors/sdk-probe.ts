@@ -199,11 +199,29 @@ function toActionInputs(value: unknown): SdkActionInput[] {
   return (Array.isArray(value) ? value : [])
     .filter(isRecord)
     .filter((input) => str(input.key) !== '')
-    .map((input) => ({
-      key: str(input.key),
-      label: str(input.label, str(input.key)),
-      type: str(input.type, 'string'),
-      required: input.required === true
+    .map((input) => {
+      const options = toActionOptions(input.options)
+      return {
+        key: str(input.key),
+        label: str(input.label, str(input.key)),
+        type: str(input.type, 'string'),
+        required: input.required === true,
+        // A select is undrawable without its choices, or without the name of
+        // the set that supplies them.
+        ...(options.length > 0 && { options }),
+        ...(str(input.loadOptions) !== '' && { loadOptions: str(input.loadOptions) })
+      }
+    })
+}
+
+/** The choices a `select` offers; one that selects nothing is not a choice. */
+function toActionOptions(value: unknown): Array<{ value: string; label?: string }> {
+  return (Array.isArray(value) ? value : [])
+    .filter(isRecord)
+    .filter((option) => str(option.value) !== '')
+    .map((option) => ({
+      value: str(option.value),
+      ...(typeof option.label === 'string' && { label: option.label })
     }))
 }
 

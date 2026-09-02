@@ -83,6 +83,34 @@ describe('the arguments an action declares', () => {
     ])
   })
 
+  it('carry the choices a select needs to be drawn before install', () => {
+    const inputs = [
+      {
+        key: 'level',
+        label: 'Level',
+        type: 'select',
+        required: false,
+        options: [{ value: 'high' }, { value: 'low', label: 'Low priority' }]
+      },
+      { key: 'channel', label: 'Channel', type: 'select', required: true, loadOptions: 'channels' }
+    ]
+    expect(first({ actions: [{ type: 'p', label: 'P', inputs }] })?.actions?.[0].inputs).toEqual(
+      inputs
+    )
+  })
+
+  it('drop a choice that would select nothing, and a nameless options set', () => {
+    const withInput = (input: Record<string, unknown>) =>
+      first({ actions: [{ type: 'p', label: 'P', inputs: [{ key: 'v', ...input }] }] })?.actions?.[0]
+        .inputs?.[0]
+    expect(withInput({ options: [{ label: 'Empty' }, 'high', { value: 'ok' }] })?.options).toEqual([
+      { value: 'ok' }
+    ])
+    expect(withInput({ options: 'high,low' })?.options).toBeUndefined()
+    expect(withInput({ loadOptions: '' })?.loadOptions).toBeUndefined()
+    expect(withInput({ loadOptions: 12 })?.loadOptions).toBeUndefined()
+  })
+
   it('are repaired rather than handed to the library to map over', () => {
     // The library maps over these to build steps; a string where a list
     // belongs would take the step list down with a TypeError.

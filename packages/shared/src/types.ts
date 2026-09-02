@@ -1753,12 +1753,22 @@ export interface ConnectorCatalogSummary {
   description?: string
 }
 
+/** One choice a `select` argument offers. */
+export interface ConnectorCatalogActionOption {
+  value: string
+  label?: string
+}
+
 /** An argument an action takes, carried so a step can be offered before install. */
 export interface ConnectorCatalogActionInput {
   key: string
   label: string
   type: string
   required: boolean
+  /** Fixed choices, so a `select` can be drawn before anything is installed. */
+  options?: ConnectorCatalogActionOption[]
+  /** An options set the connector serves, resolved against a live connection. */
+  loadOptions?: string
 }
 
 /**
