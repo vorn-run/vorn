@@ -48,7 +48,10 @@ function KeyRow({ entry, onRotated }: { entry: ConnectorKey; onRotated: () => vo
       const outcome = await window.api.rotateConnectionSecret({
         connectionId: entry.connectionId,
         field,
-        value: sealed
+        value: sealed,
+        // Handed over as well as sealed, so the key works the moment it is
+        // stored rather than once the keychain has been read back.
+        plaintext: value
       })
       if (!outcome.ok) {
         setError(outcome.error ?? 'The key could not be replaced')
@@ -174,8 +177,15 @@ export function KeysSettings() {
         if (!cancelled) setSafeStorageAvailable(available)
       })
       .catch(() => {})
+    // A key can change from outside this page — a connection added, a secret
+    // rotated in another window — and a list read once would keep describing
+    // what used to be held.
+    const unsubscribe = window.api.onConfigChanged?.(() => {
+      void load()
+    })
     return () => {
       cancelled = true
+      unsubscribe?.()
     }
   }, [load])
 

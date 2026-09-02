@@ -26,7 +26,10 @@ const api = {
   isSafeStorageAvailable: vi.fn(),
   preflightConnection: vi.fn(),
   encryptString: vi.fn(),
-  rotateConnectionSecret: vi.fn()
+  rotateConnectionSecret: vi.fn(),
+  onConfigChanged: vi.fn(() => () => {}),
+  listConnections: vi.fn(),
+  listConnectorPacks: vi.fn()
 }
 
 beforeEach(() => {
@@ -36,6 +39,9 @@ beforeEach(() => {
   api.preflightConnection.mockResolvedValue({ ok: true, message: 'HTTP 200' })
   api.encryptString.mockResolvedValue('sealed')
   api.rotateConnectionSecret.mockResolvedValue({ ok: true })
+  api.onConfigChanged.mockReturnValue(() => {})
+  api.listConnections.mockResolvedValue([])
+  api.listConnectorPacks.mockResolvedValue([])
   ;(window as unknown as { api: unknown }).api = api
 })
 
@@ -110,13 +116,36 @@ describe('rotating a key', () => {
 
     await waitFor(() => expect(api.rotateConnectionSecret).toHaveBeenCalled())
     expect(api.encryptString).toHaveBeenCalledWith('sk_live_new')
-    // Ciphertext, never the value the person typed.
+    // Ciphertext to store, and the value itself so the key works at once.
     expect(api.rotateConnectionSecret).toHaveBeenCalledWith({
       connectionId: 'conn-1',
       field: 'secret',
-      value: 'sealed'
+      value: 'sealed',
+      plaintext: 'sk_live_new'
     })
     await waitFor(() => expect(api.listConnectorKeys).toHaveBeenCalledTimes(2))
+  })
+
+  it('re-lists what is held when a key changes somewhere else', async () => {
+    render(<KeysSettings />)
+    await screen.findByText('reporting API')
+    expect(api.onConfigChanged).toHaveBeenCalled()
+
+    api.listConnectorKeys.mockResolvedValue([{ ...PROFILE, name: 'renamed API' }])
+    const notify = api.onConfigChanged.mock.calls[0][0] as () => void
+    notify()
+
+    expect(await screen.findByText('renamed API')).toBeInTheDocument()
+  })
+
+  it('stops listening when the page goes away', async () => {
+    const unsubscribe = vi.fn()
+    api.onConfigChanged.mockReturnValue(unsubscribe)
+    const { unmount } = render(<KeysSettings />)
+    await screen.findByText('reporting API')
+
+    unmount()
+    expect(unsubscribe).toHaveBeenCalled()
   })
 
   it('keeps the field open and says why when the server refuses', async () => {

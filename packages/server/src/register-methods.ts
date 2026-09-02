@@ -1512,25 +1512,33 @@ export function registerAllMethods(): void {
   /**
    * Replace one stored secret.
    *
-   * The plaintext never reaches here: the desktop process encrypts with the
-   * keychain and hands over ciphertext. Forgetting the old plaintext and
-   * ending the child are both part of the write — a connector left running
-   * would keep serving the key that was just rotated away.
+   * The ciphertext is what persists; the plaintext is adopted in the same call
+   * rather than waited for. Clearing and letting the desktop process push the
+   * new value back left a window — brief, but long enough for a poll or an
+   * action to run against a connection whose key had become unreadable.
+   * Ending the child is part of the write too: one left running would keep
+   * serving the key that was just rotated away.
    */
-  registerMethod('connection:rotateSecret', async ({ connectionId, field, value }) => {
+  registerMethod('connection:rotateSecret', async ({ connectionId, field, value, plaintext }) => {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return { ok: false, error: `connection ${connectionId} not found` }
     const connector = connectorRegistry.get(conn.connectorId)
     const secret = passwordFields(connector?.describe().auth).some((f) => f.key === field)
     if (!secret) return { ok: false, error: `${field} is not a secret on this connection` }
+    // A blank replacement is a mistake rather than an intent to unset: it would
+    // leave every workflow bound to this key failing with nothing said.
+    if (value === '' || plaintext.trim() === '') {
+      return { ok: false, error: 'A replacement value is required' }
+    }
 
     dbUpdateSourceConnection(connectionId, { filters: { ...conn.filters, [field]: value } })
-    clearDecryptedCreds(connectionId)
+    // Merged, not replaced: a connection can hold more than one secret, and the
+    // others are still live.
+    setDecryptedCreds(connectionId, { ...getDecryptedCreds(connectionId), [field]: plaintext })
     await stopMcpClient(connectionId).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
     dbSignalChange()
-    // Notified, not just signalled: the decrypted store is repopulated by the
-    // desktop process on this broadcast, and until it lands the new secret
-    // exists only as ciphertext nothing can read.
+    // The desktop process re-derives the same value from the keychain on this
+    // broadcast, which is a confirmation rather than the thing being waited on.
     configManager.notifyChanged()
     return { ok: true }
   })

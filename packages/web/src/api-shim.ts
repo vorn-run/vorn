@@ -732,8 +732,12 @@ export function createApiShim(wsUrl: string) {
     }) => rpc.invoke('http:request', params),
     preflightConnection: (connectionId: string) => rpc.invoke('connection:preflight', connectionId),
     listConnectorKeys: () => rpc.invoke('connection:listKeys', undefined),
-    rotateConnectionSecret: (params: { connectionId: string; field: string; value: string }) =>
-      rpc.invoke('connection:rotateSecret', params),
+    rotateConnectionSecret: (params: {
+      connectionId: string
+      field: string
+      value: string
+      plaintext: string
+    }) => rpc.invoke('connection:rotateSecret', params),
     executeConnectorAction: (params: {
       connectionId: string
       action: string

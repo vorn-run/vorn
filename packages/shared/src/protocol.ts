@@ -813,10 +813,13 @@ export interface RequestMethods {
     params: void
     result: ConnectorKey[]
   }
-  /** Replace one stored secret. `value` arrives already encrypted, because
-   *  only the desktop process holds the keychain that can encrypt it. */
+  /** Replace one stored secret. `value` is the ciphertext to persist, sealed
+   *  by the desktop process because only it holds the keychain. `plaintext` is
+   *  the same secret in the clear, handed over so the running server can serve
+   *  it immediately rather than leaving a window in which the key is stored
+   *  but unusable — the same trust boundary `credentials:setDecrypted` uses. */
   'connection:rotateSecret': {
-    params: { connectionId: string; field: string; value: string }
+    params: { connectionId: string; field: string; value: string; plaintext: string }
     result: { ok: boolean; error?: string }
   }
   /** Main→server push of decrypted credential fields. Called after main
