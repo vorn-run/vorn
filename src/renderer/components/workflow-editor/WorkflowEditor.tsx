@@ -30,9 +30,7 @@ import {
   WorkflowNodeErrorPolicy,
   WorkflowEdge,
   WorkflowTemplate,
-  ConnectorCatalogItem,
   InstalledConnectorPack,
-  McpServerCatalogEntry,
   NodeExecutionStatus,
   WorkflowExecution,
   TriggerConfig,
@@ -87,6 +85,7 @@ import {
 } from '../../lib/workflow-execution'
 import { toast } from '../Toast'
 import { refreshConnections, useConnections } from '../../lib/use-connections'
+import { useConnectorCatalog } from '../../lib/use-connector-catalog'
 import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
 import {
   connectorSuggestions,
@@ -155,14 +154,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [pendingInsert, setPendingInsert] = useState<InsertAnchor | null>(null)
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [showStartFrom, setShowStartFrom] = useState(true)
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([])
   /** The connector a requirement asked to connect, and the profile it asked for. */
   const [connectFor, setConnectFor] = useState<ConnectorListing | null>(null)
   const [profileFor, setProfileFor] = useState<string | null>(null)
-  const [catalog, setCatalog] = useState<ConnectorCatalogItem[]>([])
   const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
-  const [mcpServers, setMcpServers] = useState<McpServerCatalogEntry[]>([])
   const [launchingSince, setLaunchingSince] = useState<number | null>(null)
   const [followRunId, setFollowRunId] = useState<string | null>(null)
   const followArmRef = useRef(false)
@@ -654,21 +650,14 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   // left needs — without it a row could name a connector but never offer it.
   const needsConnectorData = !editingId || imported?.workflowId === editingId
 
-  // Optional calls: a build without a catalog costs the offer, never the editor.
-  // Keyed on the editor opening: a fetch that lost the startup race against the
-  // server socket must try again the next time someone is actually looking.
-  useEffect(() => {
-    if (!isActive || !needsConnectorData || templates.length > 0) return
-    void Promise.resolve(window.api?.listConnectorCatalog?.())
-      .then((snapshot) => {
-        setTemplates(snapshot?.templates ?? [])
-        // Kept as well as the templates: what a requirement can offer to do
-        // about itself is a question about the catalog.
-        setCatalog(snapshot?.items ?? [])
-        setMcpServers(snapshot?.mcpServers ?? [])
-      })
-      .catch(() => {})
-  }, [isActive, needsConnectorData, templates.length])
+  // The one catalog the settings list also reads, asked for only while someone
+  // is looking: a fetch that lost the startup race against the server socket
+  // caches nothing, so opening the editor again asks again.
+  const {
+    items: catalog,
+    templates,
+    mcpServers
+  } = useConnectorCatalog(isActive && needsConnectorData)
 
   useEffect(() => {
     if (!isActive || !needsConnectorData) return
@@ -699,6 +688,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const refreshPacks = useCallback(async () => {
     const list = await window.api.listConnectorPacks?.().catch(() => [])
     setPacks(list ?? [])
+    // What is on disk is also what the library reads to decide whether a step
+    // would install or only connect, so the shared cache is told too.
+    await refreshConnections()
   }, [])
   const install = usePackInstall(refreshPacks)
 

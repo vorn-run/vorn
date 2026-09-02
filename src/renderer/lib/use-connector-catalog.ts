@@ -55,11 +55,18 @@ async function load(): Promise<CatalogSnapshot> {
   return inFlight
 }
 
-/** What the catalog says right now, fetching it the first time anyone asks. */
-export function useConnectorCatalog(): CatalogSnapshot {
+/**
+ * What the catalog says right now, fetching it the first time anyone asks.
+ *
+ * `enabled` is how a surface says nobody is looking yet — a panel that is
+ * closed should not send the request, and one that opens after a failed
+ * attempt should send it again rather than inherit the silence.
+ */
+export function useConnectorCatalog(enabled: boolean = true): CatalogSnapshot {
   const [snapshot, setSnapshot] = useState<CatalogSnapshot>(() => cache ?? EMPTY)
 
   useEffect(() => {
+    if (!enabled) return
     let live = true
     listeners.add(setSnapshot)
     void load().then((next) => {
@@ -69,15 +76,32 @@ export function useConnectorCatalog(): CatalogSnapshot {
       live = false
       listeners.delete(setSnapshot)
     }
-  }, [])
+  }, [enabled])
 
   return snapshot
 }
 
-/** Read it again after something that changes what is published or installed. */
-export async function refreshConnectorCatalog(): Promise<void> {
+/**
+ * Go and ask the publisher again, and tell everyone what came back.
+ *
+ * This is what "Check now" means: not re-reading the copy this process already
+ * has, which is what makes the button feel like it did nothing.
+ */
+export async function refreshConnectorCatalog(): Promise<CatalogSnapshot> {
   cache = undefined
-  await load()
+  const fetched = await Promise.resolve(window.api?.refreshConnectorCatalog?.()).catch(
+    () => undefined
+  )
+  if (!fetched) return load()
+  const next: CatalogSnapshot = {
+    items: fetched.items ?? [],
+    templates: fetched.templates ?? [],
+    mcpServers: fetched.mcpServers ?? [],
+    ...(fetched.fetchedAt !== undefined && { fetchedAt: fetched.fetchedAt })
+  }
+  cache = next
+  for (const listener of listeners) listener(next)
+  return next
 }
 
 /** Test seam: forget what this process has read. */
