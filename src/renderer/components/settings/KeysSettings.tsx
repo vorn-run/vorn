@@ -58,15 +58,12 @@ function KeyRow({
     setSaving(true)
     setError(null)
     try {
-      // Encrypted here: the keychain that can seal it lives in this process,
-      // and the server is only ever handed ciphertext.
+      // Sealed here because the keychain lives in this process; the plaintext rides along for immediate use.
       const sealed = await window.api.encryptString(value)
       const outcome = await window.api.rotateConnectionSecret({
         connectionId: entry.connectionId,
         field,
         value: sealed,
-        // Handed over as well as sealed, so the key works the moment it is
-        // stored rather than once the keychain has been read back.
         plaintext: value
       })
       if (!outcome.ok) {
@@ -120,7 +117,11 @@ function KeyRow({
         {entry.fields.map((field) => (
           <button
             key={field.key}
-            onClick={() => setRotating(rotating === field.key ? null : field.key)}
+            onClick={() => {
+              setRotating(rotating === field.key ? null : field.key)
+              setValue('')
+              setError(null)
+            }}
             disabled={!canSeal}
             title={canSeal ? undefined : 'The keychain cannot seal a replacement on this system'}
             className="text-[11px] text-gray-400 hover:text-gray-200 px-2 py-1 border border-white/[0.1] rounded-sm flex items-center gap-1 disabled:opacity-50"
@@ -157,7 +158,7 @@ function KeyRow({
           />
           <button
             onClick={() => save(rotating)}
-            disabled={saving || value === '' || !canSeal}
+            disabled={saving || value.trim() === '' || !canSeal}
             className="text-[11px] text-gray-200 px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
@@ -195,7 +196,7 @@ export function KeysSettings() {
   }, [])
 
   useEffect(() => {
-    void load()
+    void Promise.resolve().then(load)
     let cancelled = false
     window.api
       .isSafeStorageAvailable?.()
@@ -203,9 +204,7 @@ export function KeysSettings() {
         if (!cancelled) setSafeStorageAvailable(available)
       })
       .catch(() => {})
-    // A key can change from outside this page — a connection added, a secret
-    // rotated in another window — and a list read once would keep describing
-    // what used to be held.
+    // A key can change from another window; a list read once would go stale.
     const unsubscribe = window.api.onConfigChanged?.(() => {
       void load()
     })

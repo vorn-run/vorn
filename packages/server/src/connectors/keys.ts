@@ -27,14 +27,7 @@ export function passwordFields(auth: ConnectorConfigField[] | undefined): Connec
   return (auth ?? []).filter((field) => field.type === 'password')
 }
 
-/**
- * The markers a key announces itself with.
- *
- * Published, documented openings rather than key material — showing one says
- * which service and which mode a value belongs to, which is the question this
- * page is asked. Anything not on this list is treated as key material and
- * hidden, because a fixed slice of an unknown token is a slice of the secret.
- */
+// Published key prefixes: naming one says which service a value belongs to without giving up the secret.
 const VENDOR_MARKERS = [
   'sk_live_',
   'sk_test_',
@@ -59,14 +52,7 @@ const VENDOR_MARKERS = [
   'ASIA'
 ]
 
-/**
- * Enough of a value to recognize it by, never enough to use it.
- *
- * The last four digits are how a person tells one key from another, the way a
- * card is quoted; the middle is never shown at any length. A known vendor
- * marker rides in front because it says which service and which mode the key
- * is for without giving up a character of the secret itself.
- */
+// A known marker plus the last four characters, the way a card is quoted; the middle is never shown.
 export function maskSecret(value: string | undefined): string {
   if (!value) return ''
   // Too short for a tail to be a hint rather than most of the value.

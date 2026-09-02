@@ -211,6 +211,31 @@ describe('rotating a key', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: /Rotate/ }))[0])
 
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    fireEvent.change(screen.getByPlaceholderText('The replacement value'), {
+      target: { value: '   ' }
+    })
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
+  it('forgets what was typed for one field when another field is picked', async () => {
+    api.listConnectorKeys.mockResolvedValue([
+      {
+        ...PROFILE,
+        fields: [
+          { key: 'secret', label: 'secret', readable: true },
+          { key: 'other', label: 'other', readable: true }
+        ]
+      }
+    ])
+    render(<KeysSettings />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Rotate secret' }))
+    fireEvent.change(screen.getByPlaceholderText('The replacement value'), {
+      target: { value: 'meant for secret' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Rotate other' }))
+
+    expect(screen.getByPlaceholderText('The replacement value')).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
   it('asks for the whole set when the field carries a set of variables', async () => {
