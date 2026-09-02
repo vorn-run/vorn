@@ -157,6 +157,10 @@ import {
 import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { listKeys, passwordFields } from './connectors/keys'
 import { describePack } from './connectors/packs'
+import {
+  syncImplicitConnection,
+  type ImplicitConnectionDeps
+} from './connectors/implicit-connection'
 import { GH_AUTH } from './connectors/gh-cli'
 import { probeAuth } from './connectors/auth-rung'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
@@ -260,6 +264,107 @@ function authForConnector(connectorId: string): SdkConnectorAuth | undefined {
 }
 
 /**
+ * Make a connection and everything that comes with one.
+ *
+ * Extracted from `connection:create` because a connector that needs no sign-in
+ * is connected by installing it — the app makes that connection itself rather
+ * than asking someone to fill in a form with no questions on it.
+ */
+function createConnectionRecord(
+  params: Omit<
+    SourceConnection,
+    'id' | 'createdAt' | 'lastSyncAt' | 'lastSyncError' | 'syncCursor'
+  > & {
+    seedWorkflow?: { name: string; defaultCronFromMinutes: number }
+  }
+): SourceConnection {
+  const id = crypto.randomUUID()
+  const conn: SourceConnection = {
+    id,
+    connectorId: params.connectorId,
+    name: params.name,
+    filters: params.filters,
+    syncIntervalMinutes: params.syncIntervalMinutes,
+    statusMapping: params.statusMapping,
+    ...(params.executionProject && { executionProject: params.executionProject }),
+    createdAt: new Date().toISOString()
+  }
+  dbInsertSourceConnection(conn)
+
+  // Seed visible + editable default workflows. A built-in declares them on
+  // its manifest; a packaged connector cannot, because the connector the
+  // registry resolves for it is the generic MCP one — so the caller passes
+  // through what the probe read from the package.
+  const connector = connectorRegistry.get(conn.connectorId)
+  const manifest = connector?.describe()
+  const seeded: Array<NonNullable<ConnectorManifest['defaultWorkflows']>[number]> = [
+    ...(manifest?.defaultWorkflows ?? []),
+    // Only for MCP: the event seeded is MCP_POLL_EVENT, which no other
+    // connector emits — seeding it for one would leave a workflow polling on
+    // a schedule for something that never fires.
+    ...(params.seedWorkflow && params.connectorId === MCP_CONNECTOR_ID
+      ? [
+          {
+            name: params.seedWorkflow.name,
+            event: MCP_POLL_EVENT,
+            defaultCronFromMinutes: params.seedWorkflow.defaultCronFromMinutes,
+            downstream: 'createTaskFromItem' as const
+          }
+        ]
+      : [])
+  ]
+  if (manifest) {
+    for (const event of seeded) {
+      const wfId = connectorSeededWorkflowId(conn.id, event.event)
+      if (dbGetWorkflow(wfId)) continue
+      // The connection's own mapping beats the connector's suggestion: it is
+      // what the person setting it up actually chose.
+      const withMapping: ConnectorManifest = {
+        ...manifest,
+        statusMapping: Object.entries(conn.statusMapping ?? {}).map(([upstream, local]) => ({
+          upstream,
+          suggestedLocal: local
+        }))
+      }
+      const wf = buildConnectorSeededWorkflow(conn, withMapping, event)
+      dbInsertWorkflow(wf)
+      log.info(`[connector] seeded workflow ${wfId} for connection ${conn.id}`)
+    }
+  }
+
+  dbSignalChange()
+  configManager.notifyChanged()
+
+  // For MCP connections, kick off tool discovery in the background. We
+  // delay briefly so the main process has time to decrypt + push secretEnv
+  // via the credential-sync path (triggered by notifyChanged above).
+  if (conn.connectorId === MCP_CONNECTOR_ID) {
+    setTimeout(() => {
+      void runMcpDiscovery(conn.id).catch((err) =>
+        log.warn(`[mcp] initial discovery failed for ${conn.id}: ${err}`)
+      )
+    }, 1500)
+  }
+
+  return conn
+}
+
+/** The edges the implicit-connection rule acts through, wired to this server. */
+const implicitConnectionDeps: ImplicitConnectionDeps = {
+  describe: (connectorId) => describePack(connectorId),
+  list: () => dbListSourceConnections(),
+  create: (params) => createConnectionRecord({ ...params, statusMapping: {} }),
+  remove: (connectionId) => {
+    dbDeleteSourceConnection(connectionId)
+    log.info(`[packs] withdrew the implicit connection ${connectionId}`)
+  },
+  changed: () => {
+    dbSignalChange()
+    configManager.notifyChanged()
+  }
+}
+
+/**
  * Settle every connection of a connector whose files just changed.
  *
  * Stopping the child is only half of it: the tools a step can call were
@@ -267,10 +372,12 @@ function authForConnector(connectorId: string): SdkConnectorAuth | undefined {
  * action would keep being offered until someone refreshed the row by hand.
  */
 async function onPackChanged(connectorId: string): Promise<void> {
-  const ids = connectionIdsForConnector(connectorId)
   await stopClientsForConnector(connectorId)
+  // Before the ids are read: a connector that just connected itself has tools
+  // to discover too, and one that just left has none worth asking for.
+  syncImplicitConnection(connectorId, implicitConnectionDeps, MCP_CONNECTOR_ID)
   await Promise.allSettled(
-    ids.map((id) =>
+    connectionIdsForConnector(connectorId).map((id) =>
       runMcpDiscovery(id).catch((err) => log.warn(`[packs] rediscovery failed for ${id}: ${err}`))
     )
   )
@@ -1355,77 +1462,7 @@ export function registerAllMethods(): void {
     return dbListSourceConnections(connectorId).filter((c) => c.connectorId !== 'webhook')
   })
 
-  registerMethod('connection:create', (params) => {
-    const id = crypto.randomUUID()
-    const conn: SourceConnection = {
-      id,
-      connectorId: params.connectorId,
-      name: params.name,
-      filters: params.filters,
-      syncIntervalMinutes: params.syncIntervalMinutes,
-      statusMapping: params.statusMapping,
-      ...(params.executionProject && { executionProject: params.executionProject }),
-      createdAt: new Date().toISOString()
-    }
-    dbInsertSourceConnection(conn)
-
-    // Seed visible + editable default workflows. A built-in declares them on
-    // its manifest; a packaged connector cannot, because the connector the
-    // registry resolves for it is the generic MCP one — so the caller passes
-    // through what the probe read from the package.
-    const connector = connectorRegistry.get(conn.connectorId)
-    const manifest = connector?.describe()
-    const seeded: Array<NonNullable<ConnectorManifest['defaultWorkflows']>[number]> = [
-      ...(manifest?.defaultWorkflows ?? []),
-      // Only for MCP: the event seeded is MCP_POLL_EVENT, which no other
-      // connector emits — seeding it for one would leave a workflow polling on
-      // a schedule for something that never fires.
-      ...(params.seedWorkflow && params.connectorId === MCP_CONNECTOR_ID
-        ? [
-            {
-              name: params.seedWorkflow.name,
-              event: MCP_POLL_EVENT,
-              defaultCronFromMinutes: params.seedWorkflow.defaultCronFromMinutes,
-              downstream: 'createTaskFromItem' as const
-            }
-          ]
-        : [])
-    ]
-    if (manifest) {
-      for (const event of seeded) {
-        const wfId = connectorSeededWorkflowId(conn.id, event.event)
-        if (dbGetWorkflow(wfId)) continue
-        // The connection's own mapping beats the connector's suggestion: it is
-        // what the person setting it up actually chose.
-        const withMapping: ConnectorManifest = {
-          ...manifest,
-          statusMapping: Object.entries(conn.statusMapping ?? {}).map(([upstream, local]) => ({
-            upstream,
-            suggestedLocal: local
-          }))
-        }
-        const wf = buildConnectorSeededWorkflow(conn, withMapping, event)
-        dbInsertWorkflow(wf)
-        log.info(`[connector] seeded workflow ${wfId} for connection ${conn.id}`)
-      }
-    }
-
-    dbSignalChange()
-    configManager.notifyChanged()
-
-    // For MCP connections, kick off tool discovery in the background. We
-    // delay briefly so the main process has time to decrypt + push secretEnv
-    // via the credential-sync path (triggered by notifyChanged above).
-    if (conn.connectorId === MCP_CONNECTOR_ID) {
-      setTimeout(() => {
-        void runMcpDiscovery(conn.id).catch((err) =>
-          log.warn(`[mcp] initial discovery failed for ${conn.id}: ${err}`)
-        )
-      }, 1500)
-    }
-
-    return conn
-  })
+  registerMethod('connection:create', (params) => createConnectionRecord(params))
 
   registerMethod('connection:update', async ({ id, updates }) => {
     dbUpdateSourceConnection(id, updates)
