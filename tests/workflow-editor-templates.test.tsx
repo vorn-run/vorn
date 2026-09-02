@@ -524,12 +524,23 @@ describe('exporting the workflow being edited', () => {
 })
 
 describe('a catalog that lost the startup race', () => {
-  it('tries again when the editor opens instead of caching the failure', async () => {
-    api.listConnectorCatalog.mockRejectedValueOnce(new Error('not connected'))
+  it('leaves the catalog alone while nobody is looking', async () => {
     mockState.isWorkflowEditorOpen = false
+    render(<WorkflowEditor />)
+    await act(async () => {})
+
+    expect(api.listConnectorCatalog).not.toHaveBeenCalled()
+    mockState.isWorkflowEditorOpen = true
+  })
+
+  it('tries again on the next open instead of caching the failure', async () => {
+    api.listConnectorCatalog.mockRejectedValueOnce(new Error('not connected'))
     const { rerender } = render(<WorkflowEditor />)
     await act(async () => {})
 
+    mockState.isWorkflowEditorOpen = false
+    rerender(<WorkflowEditor />)
+    await act(async () => {})
     mockState.isWorkflowEditorOpen = true
     rerender(<WorkflowEditor />)
 
