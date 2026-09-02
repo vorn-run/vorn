@@ -194,7 +194,15 @@ beforeEach(() => {
   saveTextFile.mockResolvedValue('/tmp/nightly-digest.vorn-workflow.json')
   api.inspectConnectorPack.mockResolvedValue({
     ok: true,
-    preview: { id: 'slack', name: 'Slack', version: '1.2.0', token: 'tok-1' }
+    preview: {
+      id: 'slack',
+      name: 'Slack',
+      version: '1.2.0',
+      token: 'tok-1',
+      env: [],
+      triggers: [],
+      actions: []
+    }
   })
   api.installConnectorPack.mockResolvedValue({ ok: true, pack: { id: 'slack' } })
   api.onConnectorInstallProgress.mockReturnValue(() => {})
