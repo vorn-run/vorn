@@ -82,6 +82,31 @@ describe('serving a connector its HTTP in-process', () => {
     expect(globalThis.fetch).toBe(original)
   })
 
+  it('refuses a second stub rather than letting one orphan the other', async () => {
+    const original = globalThis.fetch
+    const settled = await Promise.allSettled([
+      withMockHttp([{ url: '/api', body: { n: 1 } }], async () => {
+        await fetch('https://acme.test/api')
+        // Long enough that the second install would overlap this one.
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        return 'first'
+      }),
+      withMockHttp([{ url: '/api', body: { n: 2 } }], () => 'second')
+    ])
+
+    expect(settled.map((entry) => entry.status)).toEqual(['fulfilled', 'rejected'])
+    const refused = settled[1] as PromiseRejectedResult
+    expect(String(refused.reason)).toContain('already serving')
+    // The real fetch is back: a dead stub would have been left installed.
+    expect(globalThis.fetch).toBe(original)
+  })
+
+  it('serves again once the first call is done', async () => {
+    await withMockHttp([{ url: '/api' }], () => fetch('https://acme.test/api'))
+    const { calls } = await withMockHttp([{ url: '/api' }], () => fetch('https://acme.test/api'))
+    expect(calls).toHaveLength(1)
+  })
+
   it('matches a route by pattern as well as by substring', async () => {
     const { calls } = await withMockHttp([{ url: /messages$/ }], () =>
       fetch('https://acme.test/api/messages')

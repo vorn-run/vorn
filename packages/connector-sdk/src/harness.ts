@@ -70,17 +70,31 @@ export interface ConnectorHarness {
   withMockHttp<T>(routes: MockRoute[], body: () => Promise<T> | T): Promise<MockRun<T>>
 }
 
+/** Whether a stub is already installed, so a second one cannot orphan the first. */
+let serving = false
+
 /**
  * Serve a connector's HTTP from a list of replies, in-process.
  *
  * Swapping `fetch` rather than opening a socket keeps a conformance run
  * hermetic: no port, no ordering between tests, and the same code path the
  * connector uses against the real service.
+ *
+ * One at a time, deliberately. Two overlapping installs share one global: the
+ * first to finish restores the real `fetch` under the second — whose calls
+ * then reach the network — and the second restores the first's dead stub
+ * permanently. Refusing is the only outcome that cannot corrupt the process.
  */
 export async function withMockHttp<T>(
   routes: MockRoute[],
   body: () => Promise<T> | T
 ): Promise<MockRun<T>> {
+  if (serving) {
+    throw new Error(
+      'withMockHttp is already serving; give one call every route it needs rather than installing a second stub'
+    )
+  }
+  serving = true
   const calls: MockCall[] = []
   const original = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -100,6 +114,7 @@ export async function withMockHttp<T>(
     return { result: await body(), calls }
   } finally {
     globalThis.fetch = original
+    serving = false
   }
 }
 
