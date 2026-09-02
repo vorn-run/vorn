@@ -321,7 +321,9 @@ function upsertExternalItem(
     return { taskId: existing.taskId, created: false }
   }
 
-  const orphan = dbFindTaskByConnectorExternalId(conn.connectorId, item.externalId)
+  // The same id the task was written under, or a re-added packaged connection
+  // adopts nothing and its items arrive a second time.
+  const orphan = dbFindTaskByConnectorExternalId(connectionConnectorId(conn), item.externalId)
   if (orphan) {
     dbUpdateTask(orphan.id, {
       title: item.title,
