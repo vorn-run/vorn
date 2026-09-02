@@ -103,23 +103,27 @@ export function WorkflowsSection({
 
       const pending = result.unresolved.map(describeRequirement).join(', ')
       const note = pending ? ` — still needs ${pending}` : existing ? '' : ' — enable it when ready'
-      toast.success(`${existing ? 'Updated' : 'Imported'} "${placed.name}"${note}`, {
-        // What it still needs is best answered where the steps are.
-        ...(result.unresolved.length > 0 && {
-          actions: [
-            {
-              label: 'Review',
-              onClick: () => {
-                setImportedRequirements({
-                  workflowId: placed.id,
-                  requirements: result.unresolved
-                })
-                setEditingWorkflowId(placed.id)
-                setWorkflowEditorOpen(true)
-              }
+      const headline = `${existing ? 'Updated' : 'Imported'} "${placed.name}"${note}`
+      if (result.unresolved.length === 0) {
+        toast.success(headline)
+        return
+      }
+      // What it still needs is best answered where the steps are.
+      toast(headline, 'success', {
+        actions: [
+          {
+            label: 'Review',
+            onClick: (toastId) => {
+              toast.dismiss(toastId)
+              setImportedRequirements({
+                workflowId: placed.id,
+                requirements: result.unresolved
+              })
+              setEditingWorkflowId(placed.id)
+              setWorkflowEditorOpen(true)
             }
-          ]
-        })
+          }
+        ]
       })
     },
     [

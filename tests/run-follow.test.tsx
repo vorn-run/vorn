@@ -6,7 +6,9 @@ import '@testing-library/jest-dom/vitest'
 vi.mock('../src/renderer/lib/use-connections', () => ({
   useConnections: () => [],
   useConnectorIdFor: () => null,
-  useConnectionIconFor: () => undefined
+  useConnectionIconFor: () => undefined,
+  // A step with no connection draws its node-type glyph instead.
+  connectorLookFor: () => undefined
 }))
 vi.mock('../src/renderer/lib/workflow-execution', () => ({
   isRunStoppable: () => false,
