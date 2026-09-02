@@ -183,12 +183,36 @@ export type TriggerDefinition = TriggerBase &
       }
   )
 
+/**
+ * What kind of value an action argument takes.
+ *
+ * Every argument still arrives as a string — Vorn renders them from templates —
+ * so this says how to read one, and how to draw its field. `select` is a
+ * string with known choices; `json` is a string holding a structured value.
+ */
+export type ActionInputType = 'string' | 'number' | 'boolean' | 'select' | 'json'
+
+/** One choice a `select` argument offers. */
+export interface ActionInputOption {
+  value: string
+  /** Shown instead of the value where the raw value would not read well. */
+  label?: string
+}
+
 export interface ActionInputField {
   key: string
   label: string
-  type?: 'string' | 'number' | 'boolean'
+  type?: ActionInputType
   required?: boolean
   description?: string
+  /** Fixed choices, for a `select` whose options are known when it is written. */
+  options?: ActionInputOption[]
+  /**
+   * Names an options set the connector serves, for a `select` whose choices
+   * are only knowable against a live connection — the channels in a workspace,
+   * the projects in an account.
+   */
+  loadOptions?: string
 }
 
 /**

@@ -1900,11 +1900,26 @@ export interface SdkConnectorAuth {
   keys?: string[]
 }
 
+/** An argument a packaged connector's action takes. */
+export interface SdkActionInput {
+  key: string
+  label: string
+  type: string
+  required: boolean
+  /** Fixed choices, when the action declared a `select` with known values. */
+  options?: Array<{ value: string; label?: string }>
+  /** An options set the connector serves, resolved against a live connection. */
+  loadOptions?: string
+}
+
 /** An action a packaged connector serves, as its manifest describes it. */
 export interface SdkAction {
   type: string
   label: string
   description?: string
+  /** Absent on a manifest read before inputs were carried through. */
+  inputs?: SdkActionInput[]
+  outputs?: Array<{ key: string; type?: string; description?: string }>
 }
 
 export interface SdkConnectorManifest {

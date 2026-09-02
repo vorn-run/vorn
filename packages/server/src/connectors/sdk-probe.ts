@@ -17,6 +17,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type {
   ConnectorAuthRung,
+  SdkActionInput,
   SdkConnectorAuth,
   SdkConnectorIcon,
   SdkConnectorManifest,
@@ -189,6 +190,24 @@ const str = (value: unknown, fallback = ''): string =>
 const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
 
 /**
+ * Read the arguments an action declares.
+ *
+ * The config panel maps over these to draw fields, so an input without a key
+ * is dropped rather than drawn as a nameless box.
+ */
+function toActionInputs(value: unknown): SdkActionInput[] {
+  return (Array.isArray(value) ? value : [])
+    .filter(isRecord)
+    .filter((input) => str(input.key) !== '')
+    .map((input) => ({
+      key: str(input.key),
+      label: str(input.label, str(input.key)),
+      type: str(input.type, 'string'),
+      required: input.required === true
+    }))
+}
+
+/**
  * Read a declared auth block, or say nothing about how it signs in.
  *
  * An unknown rung is dropped rather than shown: the whole point of the field
@@ -321,7 +340,9 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
     .map((action) => ({
       type: str(action.type),
       label: str(action.label, str(action.type)),
-      ...(typeof action.description === 'string' && { description: action.description })
+      ...(typeof action.description === 'string' && { description: action.description }),
+      // Carried so a step can name its arguments without the connector running.
+      ...(action.inputs !== undefined && { inputs: toActionInputs(action.inputs) })
     }))
     .filter((action) => action.type !== '')
 
