@@ -1,0 +1,141 @@
+// @vitest-environment jsdom
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
+import type { ConnectorKey } from '../src/shared/types'
+import { KeysSettings } from '../src/renderer/components/settings/KeysSettings'
+
+const PROFILE: ConnectorKey = {
+  connectionId: 'conn-1',
+  name: 'reporting API',
+  connectorId: 'http',
+  usageCount: 2,
+  fields: [{ key: 'secret', label: 'secret', readable: true, hint: 'sk_live…' }]
+}
+
+const PACKAGED: ConnectorKey = {
+  connectionId: 'conn-2',
+  name: 'Slack',
+  connectorId: 'slack',
+  usageCount: 0,
+  fields: [{ key: 'secretEnv', label: 'secretEnv', readable: true, envNames: ['SLACK_BOT_TOKEN'] }]
+}
+
+const api = {
+  listConnectorKeys: vi.fn(),
+  isSafeStorageAvailable: vi.fn(),
+  preflightConnection: vi.fn(),
+  encryptString: vi.fn(),
+  rotateConnectionSecret: vi.fn()
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  api.listConnectorKeys.mockResolvedValue([PROFILE, PACKAGED])
+  api.isSafeStorageAvailable.mockResolvedValue(true)
+  api.preflightConnection.mockResolvedValue({ ok: true, message: 'HTTP 200' })
+  api.encryptString.mockResolvedValue('sealed')
+  api.rotateConnectionSecret.mockResolvedValue({ ok: true })
+  ;(window as unknown as { api: unknown }).api = api
+})
+
+describe('the keys this machine holds', () => {
+  it('says what each key is and what rotating it would touch', async () => {
+    render(<KeysSettings />)
+
+    expect(await screen.findByText('reporting API')).toBeInTheDocument()
+    expect(screen.getByText(/sk_live… · used by 2 steps/)).toBeInTheDocument()
+    // A blob is named by the variables it carries, never by their values.
+    expect(screen.getByText(/SLACK_BOT_TOKEN · unused/)).toBeInTheDocument()
+  })
+
+  it('offers nothing to do when no connection holds a secret', async () => {
+    api.listConnectorKeys.mockResolvedValue([])
+    render(<KeysSettings />)
+
+    expect(await screen.findByText('No keys yet')).toBeInTheDocument()
+  })
+
+  it('says a locked key is still there, rather than showing it as empty', async () => {
+    api.listConnectorKeys.mockResolvedValue([
+      { ...PROFILE, fields: [{ key: 'secret', label: 'secret', readable: false }] }
+    ])
+    render(<KeysSettings />)
+
+    expect(await screen.findByText(/Locked — this machine cannot read it/)).toBeInTheDocument()
+  })
+
+  it('warns when the keychain cannot seal a replacement', async () => {
+    api.isSafeStorageAvailable.mockResolvedValue(false)
+    render(<KeysSettings />)
+
+    expect(await screen.findByText(/Keychain encryption is not available/)).toBeInTheDocument()
+  })
+})
+
+describe('testing a key', () => {
+  it('reports what the connection answered', async () => {
+    render(<KeysSettings />)
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Test' }))[0])
+
+    expect(await screen.findByText('HTTP 200')).toBeInTheDocument()
+    expect(api.preflightConnection).toHaveBeenCalledWith('conn-1')
+  })
+
+  it('says so when the connector has nothing to check', async () => {
+    api.preflightConnection.mockResolvedValue({ ok: null })
+    render(<KeysSettings />)
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Test' }))[0])
+
+    expect(await screen.findByText('This connector has nothing to check')).toBeInTheDocument()
+  })
+
+  it('reports a rejected call rather than leaving the row silent', async () => {
+    api.preflightConnection.mockRejectedValue(new Error('the server went away'))
+    render(<KeysSettings />)
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Test' }))[0])
+
+    expect(await screen.findByText('the server went away')).toBeInTheDocument()
+  })
+})
+
+describe('rotating a key', () => {
+  it('seals the new value before it leaves, and reloads what is held', async () => {
+    render(<KeysSettings />)
+    fireEvent.click((await screen.findAllByRole('button', { name: /Rotate/ }))[0])
+    fireEvent.change(screen.getByPlaceholderText('The replacement value'), {
+      target: { value: 'sk_live_new' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.rotateConnectionSecret).toHaveBeenCalled())
+    expect(api.encryptString).toHaveBeenCalledWith('sk_live_new')
+    // Ciphertext, never the value the person typed.
+    expect(api.rotateConnectionSecret).toHaveBeenCalledWith({
+      connectionId: 'conn-1',
+      field: 'secret',
+      value: 'sealed'
+    })
+    await waitFor(() => expect(api.listConnectorKeys).toHaveBeenCalledTimes(2))
+  })
+
+  it('keeps the field open and says why when the server refuses', async () => {
+    api.rotateConnectionSecret.mockResolvedValue({ ok: false, error: 'not a secret here' })
+    render(<KeysSettings />)
+    fireEvent.click((await screen.findAllByRole('button', { name: /Rotate/ }))[0])
+    fireEvent.change(screen.getByPlaceholderText('The replacement value'), {
+      target: { value: 'x' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('not a secret here')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('The replacement value')).toBeInTheDocument()
+  })
+
+  it('will not send an empty replacement', async () => {
+    render(<KeysSettings />)
+    fireEvent.click((await screen.findAllByRole('button', { name: /Rotate/ }))[0])
+
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+})

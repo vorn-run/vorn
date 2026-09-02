@@ -12,6 +12,7 @@ import { AgentSettings } from './settings/AgentSettings'
 import { SSHSettings } from './settings/SSHSettings'
 import { McpSettings } from './settings/McpSettings'
 import { ConnectorSettings } from './settings/ConnectorSettings'
+import { KeysSettings } from './settings/KeysSettings'
 import { NetworkSettings } from './settings/NetworkSettings'
 import { AboutSettings } from './settings/AboutSettings'
 
@@ -189,6 +190,24 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
         )
       },
       {
+        key: 'keys',
+        label: 'Keys',
+        icon: (
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <circle cx="8" cy="12" r="4" />
+            <line x1="12" y1="12" x2="21" y2="12" />
+            <line x1="18" y1="12" x2="18" y2="16" />
+          </svg>
+        )
+      },
+      {
         key: 'network',
         label: 'Remote Access',
         icon: (
@@ -325,6 +344,7 @@ export function SettingsPage() {
           {settingsCategory === 'ssh' && <SSHSettings />}
           {settingsCategory === 'mcp' && <McpSettings />}
           {settingsCategory === 'connectors' && <ConnectorSettings />}
+          {settingsCategory === 'keys' && <KeysSettings />}
           {settingsCategory === 'network' && <NetworkSettings />}
           {settingsCategory === 'about' && <AboutSettings />}
         </div>
