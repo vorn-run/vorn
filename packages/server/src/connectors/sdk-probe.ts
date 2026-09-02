@@ -16,6 +16,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type {
+  ConnectorAuthRung,
+  SdkConnectorAuth,
   SdkConnectorIcon,
   SdkConnectorManifest,
   SdkEnvVar,
@@ -184,6 +186,40 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const str = (value: unknown, fallback = ''): string =>
   typeof value === 'string' ? value : fallback
 
+const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
+
+/**
+ * Read a declared auth block, or say nothing about how it signs in.
+ *
+ * An unknown rung is dropped rather than shown: the whole point of the field
+ * is to tell someone what setting this up will ask of them, and a rung this
+ * build cannot name answers that question wrongly.
+ */
+function toAuth(value: unknown): SdkConnectorAuth | undefined {
+  if (!isRecord(value)) return undefined
+  const rung = value.rung
+  if (typeof rung !== 'string' || !AUTH_RUNGS.includes(rung as ConnectorAuthRung)) return undefined
+
+  const probe = isRecord(value.probe) ? value.probe : undefined
+  const command = str(probe?.command).trim()
+  const borrow = isRecord(value.borrow) ? value.borrow : undefined
+  const strings = (raw: unknown): string[] =>
+    Array.isArray(raw) ? raw.filter((entry): entry is string => typeof entry === 'string') : []
+  const args = strings(probe?.args)
+  const env = strings(borrow?.env)
+  const tokenArgs = strings(borrow?.tokenArgs)
+  const keys = strings(value.keys)
+
+  return {
+    rung: rung as ConnectorAuthRung,
+    ...(command !== '' && { probe: { command, ...(args.length > 0 && { args }) } }),
+    ...((env.length > 0 || tokenArgs.length > 0) && {
+      borrow: { ...(env.length > 0 && { env }), ...(tokenArgs.length > 0 && { tokenArgs }) }
+    }),
+    ...(keys.length > 0 && { keys })
+  }
+}
+
 /**
  * Validate the manifest into the shape the UI relies on.
  *
@@ -294,6 +330,7 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
   }
 
   const icon = toIcon(payload.icon)
+  const auth = toAuth(payload.auth)
 
   log.info(`[sdk-probe] ${id}@${str(payload.version, '0.0.0')}: ${triggers.length} trigger(s)`)
 
@@ -303,6 +340,7 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
     version: str(payload.version, '0.0.0'),
     ...(typeof payload.description === 'string' && { description: payload.description }),
     ...(icon && { icon }),
+    ...(auth && { auth }),
     triggers,
     actions,
     env: [...env.values()]

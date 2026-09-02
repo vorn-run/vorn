@@ -1,5 +1,11 @@
 import { envNameFor } from './define'
-import type { Connector, ConnectorIcon, DefaultWorkflow, StatusSuggestion } from './types'
+import type {
+  Connector,
+  ConnectorAuth,
+  ConnectorIcon,
+  DefaultWorkflow,
+  StatusSuggestion
+} from './types'
 
 /** MCP tool name a trigger is served under. */
 export function pollToolName(triggerType: string): string {
@@ -76,6 +82,8 @@ export interface ConnectorManifest {
   version: string
   description?: string
   icon?: ConnectorIcon
+  /** How the connector signs in, so the app can say so before installing it. */
+  auth?: ConnectorAuth
   triggers: Array<{
     type: string
     label: string
@@ -102,6 +110,7 @@ export function connectorManifest(connector: Connector): ConnectorManifest {
     version: connector.version,
     ...(connector.description !== undefined && { description: connector.description }),
     ...(connector.icon !== undefined && { icon: connector.icon }),
+    ...(connector.auth !== undefined && { auth: connector.auth }),
     triggers: connector.triggers.map((trigger) => ({
       type: trigger.type,
       label: trigger.label,

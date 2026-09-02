@@ -1842,14 +1842,41 @@ export interface ConnectorCatalogSnapshot {
   fetchedAt?: number
 }
 
+/**
+ * How a connector signs in, lowest rung first — mirrors the SDK's own
+ * declaration so the app can say how a connector authenticates before it is
+ * installed, and show an identity instead of a token field where one is
+ * already signed in.
+ */
+export type ConnectorAuthRung = 'none' | 'cli' | 'key' | 'oauth'
+
+export interface SdkConnectorAuth {
+  rung: ConnectorAuthRung
+  /** Asks the borrowed tool who you are. Present for `cli`. */
+  probe?: { command: string; args?: string[] }
+  /** What to take from the signed-in tool at spawn; never stored. */
+  borrow?: { env?: string[]; tokenArgs?: string[] }
+  /** Config field keys holding the credential. Present for `key`. */
+  keys?: string[]
+}
+
+/** An action a packaged connector serves, as its manifest describes it. */
+export interface SdkAction {
+  type: string
+  label: string
+  description?: string
+}
+
 export interface SdkConnectorManifest {
   id: string
   name: string
   version: string
   description?: string
   icon?: SdkConnectorIcon
+  /** Absent on a connector built before rungs existed, which reads as unknown. */
+  auth?: SdkConnectorAuth
   triggers: SdkTrigger[]
-  actions: Array<{ type: string; label: string; description?: string }>
+  actions: SdkAction[]
   /** Union of the environment variables the connector reads. */
   env: SdkEnvVar[]
 }
@@ -1868,7 +1895,7 @@ export interface InstalledConnectorPack {
   installedAt: number
   bytes: number
   triggers: SdkTrigger[]
-  actions: Array<{ type: string; label: string; description?: string }>
+  actions: SdkAction[]
   env: SdkEnvVar[]
 }
 

@@ -252,6 +252,41 @@ export interface PreflightResult {
   message?: string
 }
 
+/**
+ * How a connector signs in, lowest rung first.
+ *
+ * `none` needs nothing — installing it is the whole setup. `cli` borrows a
+ * login that already works on the machine, which is the rung to prefer
+ * whenever a mature tool is signed in anyway. `key` asks for a credential.
+ * `oauth` is declared but not yet carried by the host.
+ */
+export type AuthRung = 'none' | 'cli' | 'key' | 'oauth'
+
+/**
+ * What a connector needs before it can talk to anything.
+ *
+ * Declaring this is what lets the app say how a connector signs in *before*
+ * anyone installs it, and lets a `cli` connector show who you already are
+ * instead of a token field. The credential itself is never described here —
+ * only where it comes from.
+ */
+export interface ConnectorAuth {
+  rung: AuthRung
+  /**
+   * Asks the borrowed tool whether it is signed in, e.g. `glab auth status`.
+   * Required for `cli`: without it the app has nothing to ask.
+   */
+  probe?: { command: string; args?: string[] }
+  /**
+   * What to take from the signed-in tool. `env` names variables to pass
+   * through; `tokenArgs` is a command that prints a token, run fresh at spawn
+   * so nothing is ever stored.
+   */
+  borrow?: { env?: string[]; tokenArgs?: string[] }
+  /** Config field keys holding the credential. Required for `key`. */
+  keys?: string[]
+}
+
 export interface ConnectorDefinition {
   /** Stable connector id, e.g. `azure-devops`. */
   id: string
@@ -260,6 +295,11 @@ export interface ConnectorDefinition {
   description?: string
   icon?: ConnectorIcon
   config?: ConnectorConfigField[]
+  /**
+   * How this connector signs in. Absent means the app cannot say, which reads
+   * as "a key, probably" — declare it rather than leave that to be guessed.
+   */
+  auth?: ConnectorAuth
   triggers?: TriggerDefinition[]
   actions?: ActionDefinition[]
   /**
