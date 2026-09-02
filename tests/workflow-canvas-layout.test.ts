@@ -170,7 +170,7 @@ describe('a workflow arranged before the lattice existed', () => {
     const { nodes: rf } = toCanvasElements(stored, storedEdges)
     const xs = ['t', 'a'].map((id) => rf.find((n) => n.id === id)!.position.x)
     expect(new Set(xs).size).toBe(1)
-    expect(xs[0] % 8).toBe(0)
+    expect(Math.abs(xs[0] % 8)).toBe(0)
   })
 
   it('hands the healed positions to the next save, so the fix sticks', () => {
