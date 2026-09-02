@@ -1498,8 +1498,8 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('connection:listKeys', () => {
-    const auth = new Map(
-      connectorRegistry.list().map((c) => [c.id, c.describe().auth as ConnectorConfigField[]])
+    const auth = new Map<string, ConnectorConfigField[] | undefined>(
+      connectorRegistry.list().map((c) => [c.id, c.describe().auth])
     )
     return listKeys(
       dbListSourceConnections().filter((c) => c.connectorId !== 'webhook'),
