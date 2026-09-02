@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
+import { Position } from '@xyflow/react'
 import {
   canConnect,
   layoutPositions,
   loopBodyMembers,
   positionsAreSeed,
+  stepEdgePath,
   toCanvasElements
 } from '../src/renderer/lib/workflow-canvas-layout'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
@@ -145,6 +147,40 @@ describe('layout edge shapes', () => {
     const { positions } = layoutPositions(halfFork, halfEdges)
     // The dangling false edge points at a missing node; the true branch still lays out.
     expect(positions.get('yes')).toBeDefined()
+  })
+})
+
+describe('the line between two cards', () => {
+  const down = { sourcePosition: Position.Bottom, targetPosition: Position.Top }
+
+  it('runs straight down a column', () => {
+    const [path] = stepEdgePath({ sourceX: 100, sourceY: 0, targetX: 100, targetY: 60, ...down })
+    expect(path).toBe('M 100,0 L 100,60')
+  })
+
+  // A drag snaps to the lattice, so a card lands a step off without anyone
+  // meaning it. One step is a near miss, not a fork.
+  it('stays straight through a snap-sized offset', () => {
+    const [path] = stepEdgePath({ sourceX: 100, sourceY: 0, targetX: 108, targetY: 60, ...down })
+    expect(path).toBe('M 100,0 L 108,60')
+    expect(path).not.toContain('C')
+  })
+
+  it('keeps the curve for a branch that really is beside its parent', () => {
+    const [path] = stepEdgePath({ sourceX: 100, sourceY: 0, targetX: 320, targetY: 60, ...down })
+    expect(path).toContain('C')
+  })
+
+  it('hangs the label between the two ports', () => {
+    const [, labelX, labelY] = stepEdgePath({
+      sourceX: 100,
+      sourceY: 0,
+      targetX: 108,
+      targetY: 60,
+      ...down
+    })
+    expect(labelX).toBe(104)
+    expect(labelY).toBe(30)
   })
 })
 

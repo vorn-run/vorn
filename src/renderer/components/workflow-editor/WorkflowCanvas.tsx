@@ -12,7 +12,6 @@ import {
   ReactFlow,
   ReactFlowProvider,
   applyNodeChanges,
-  getBezierPath,
   useReactFlow,
   useUpdateNodeInternals,
   type Connection,
@@ -30,6 +29,7 @@ import {
   CanvasEdgeData,
   canConnect,
   estimateNodeHeight,
+  stepEdgePath,
   toCanvasElements,
   TRIGGER_ANCHOR,
   TRIGGER_ANCHOR_ID
@@ -408,7 +408,7 @@ function StepEdge({
     }
   }, [])
 
-  const [path, labelX, labelY] = getBezierPath({
+  const [path, labelX, labelY] = stepEdgePath({
     sourceX,
     sourceY,
     targetX,

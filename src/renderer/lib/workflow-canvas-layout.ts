@@ -1,4 +1,4 @@
-import { Position, type Edge, type Node } from '@xyflow/react'
+import { getBezierPath, Position, type Edge, type Node } from '@xyflow/react'
 import { LoopConfig, WorkflowEdge, WorkflowNode } from '../../shared/types'
 import { stepPreview } from '../components/workflow-editor/node-visuals'
 import { computeFlowLayout, FlowRow } from './workflow-helpers'
@@ -281,6 +281,37 @@ export function toCanvasElements(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
   }
 
   return { nodes: rfNodes, edges: rfEdges, branchMembers }
+}
+
+/**
+ * Below this, two cards are meant to be in one column and a curve is a kink.
+ *
+ * A drag snaps to the 8px lattice, so a card can land a step off its parent
+ * without anyone aiming for that. A bezier answers even a single step with an
+ * S-bend, which reads as deliberate; a straight run reads as the near-miss it is.
+ */
+export const STRAIGHT_EDGE_TOLERANCE = 16
+
+/** The path an edge draws: straight down a column, curved only for a real fork. */
+export function stepEdgePath(params: {
+  sourceX: number
+  sourceY: number
+  targetX: number
+  targetY: number
+  sourcePosition: Position
+  targetPosition: Position
+}): [string, number, number] {
+  const { sourceX, sourceY, targetX, targetY } = params
+  if (Math.abs(sourceX - targetX) < STRAIGHT_EDGE_TOLERANCE) {
+    // Drawn between the ports themselves rather than down a shared centre, so
+    // a slightly offset card keeps its line attached at both ends.
+    return [
+      `M ${sourceX},${sourceY} L ${targetX},${targetY}`,
+      (sourceX + targetX) / 2,
+      (sourceY + targetY) / 2
+    ]
+  }
+  return getBezierPath(params)
 }
 
 /** Whether a hand-drawn source → target edge keeps the graph a DAG the engine understands. */
