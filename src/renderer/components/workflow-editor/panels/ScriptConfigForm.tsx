@@ -59,7 +59,7 @@ export function ScriptConfigForm({
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: loads the keys from the main process on mount
-    void Promise.resolve(window.api.listConnectorKeys?.())
+    void Promise.resolve(window.api?.listConnectorKeys?.())
       .then((held) => setKeys(held ?? []))
       .catch(() => setKeys([]))
   }, [])
