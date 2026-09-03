@@ -270,3 +270,43 @@ describe('a stamp that comes back late', () => {
     await waitFor(() => expect(writeFileContent).toHaveBeenCalled())
   })
 })
+
+describe('a stamp slower than the first keystroke', () => {
+  it('reaches the draft that was already written down', async () => {
+    // The stamp is a round trip -- seconds of one for a file on a remote host --
+    // and the draft is written 400ms after typing stops. Whichever order they
+    // land in, the record has to end up carrying the base: a draft persisted
+    // without one restores with the guard unarmed, and the next save goes over a
+    // file that changed underneath without asking.
+    let settle: (s: FileStamp) => void = () => {}
+    fileStamp.mockReturnValue(
+      new Promise<FileStamp>((resolve) => {
+        settle = resolve
+      })
+    )
+    await open()
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Edit'))
+    })
+    fireEvent.change(editor(), { target: { value: 'typed before the stamp landed' } })
+
+    // The draft lands first, with nothing to compare against yet.
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeDefined(), {
+      timeout: 2000
+    })
+    expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE].base).toBeNull()
+
+    await act(async () => {
+      settle(STAMP)
+    })
+
+    await waitFor(
+      () => expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE].base).toEqual(STAMP),
+      { timeout: 2000 }
+    )
+    // And the text it was typed with is still the text.
+    expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE].text).toBe(
+      'typed before the stamp landed'
+    )
+  })
+})

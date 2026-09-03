@@ -668,8 +668,18 @@ function FilePanel({
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  /** What the file was when this edit started; the save compares against it. */
-  const baseRef = useRef<FileStamp | null>(null)
+  /**
+   * What the file was when this edit started; the save compares against it.
+   *
+   * State rather than a ref, because it decides what gets written down. The
+   * stamp arrives over a round trip -- seconds of it, for a file on a remote
+   * host -- and a ref changing does not re-run the effect that persists the
+   * draft. So a draft saved before the stamp landed kept `base: null` for good,
+   * and a relaunch restored it with the guard unarmed: the next save would go
+   * over a file that had changed underneath, without asking. That is the one
+   * outcome all of this exists to prevent.
+   */
+  const [base, setBase] = useState<FileStamp | null>(null)
   /** The file on screen right now, for answers that arrive after it changed. */
   const pathRef = useRef(filePath)
   /** Set when the file moved under the draft. Cleared by whichever way out is taken. */
@@ -689,7 +699,7 @@ function FilePanel({
     setDraft('')
     setSaveError(null)
     setConflict(false)
-    baseRef.current = null
+    setBase(null)
     setFindOpen(false)
     setFindQuery('')
     setFindIdx(0)
@@ -715,10 +725,11 @@ function FilePanel({
       forgetDraft(draftKey)
       return
     }
-    baseRef.current = draft.base
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: the draft is external state, read in once the file it belongs to has loaded
+    /* eslint-disable react-hooks/set-state-in-effect -- intentional: the draft is external state, read in once the file it belongs to has loaded */
+    setBase(draft.base)
     setDraft(draft.text)
     setEditing(true)
+    /* eslint-enable react-hooks/set-state-in-effect */
     // Guarded on the way back: this resolves after a round trip to the server,
     // by which time the pane can have been given another file or closed, and
     // the answer would then be about neither. A stamp that cannot be taken
@@ -770,7 +781,7 @@ function FilePanel({
     // What this edit is based on, asked for now rather than at save time: by
     // then the file may already have moved, and stamping it there would record
     // somebody else's version as the one being edited.
-    baseRef.current = null
+    setBase(null)
     // Against the path this edit started on, because the answer can arrive after
     // the pane has moved to another file -- and recording that file's stamp as
     // this edit's base is worse than having none, since the guard would then be
@@ -780,7 +791,7 @@ function FilePanel({
     window.api
       .fileStamp?.(filePath, remoteHostId)
       .then((stamp) => {
-        if (pathRef.current === editing) baseRef.current = stamp ?? null
+        if (pathRef.current === editing) setBase(stamp ?? null)
       })
       .catch(() => {})
   }
@@ -792,7 +803,7 @@ function FilePanel({
     setDraft('')
     setSaveError(null)
     setConflict(false)
-    baseRef.current = null
+    setBase(null)
   }
 
   /**
@@ -808,11 +819,13 @@ function FilePanel({
       return
     }
     const timer = setTimeout(
-      () => writeDraft(draftKey, { filePath, text: draft, base: baseRef.current }),
+      () => writeDraft(draftKey, { filePath, text: draft, base }),
       DRAFT_SETTLE_MS
     )
     return () => clearTimeout(timer)
-  }, [draftKey, editing, draft, content, filePath])
+    // `base` included on purpose: a stamp that lands after the first write has
+    // to reach the record, or the draft outlives the window with no base.
+  }, [draftKey, editing, draft, content, filePath, base])
 
   /**
    * Write the draft to disk.
@@ -831,7 +844,7 @@ function FilePanel({
       try {
         if (!force) {
           const current = (await window.api.fileStamp?.(filePath, remoteHostId)) ?? null
-          if (hasMoved(baseRef.current, current)) {
+          if (hasMoved(base, current)) {
             setConflict(true)
             return
           }
@@ -845,14 +858,14 @@ function FilePanel({
         onContentSaved(draft)
         setEditing(false)
         setConflict(false)
-        baseRef.current = null
+        setBase(null)
       } catch (err) {
         setSaveError(err instanceof Error ? err.message : String(err))
       } finally {
         setSaving(false)
       }
     },
-    [filePath, editing, draft, remoteHostId, onContentSaved, draftKey]
+    [filePath, editing, draft, remoteHostId, onContentSaved, draftKey, base]
   )
 
   /** Throw the draft away and take what is on disk. */
@@ -867,7 +880,7 @@ function FilePanel({
     setDraft(next)
     setConflict(false)
     setEditing(false)
-    baseRef.current = null
+    setBase(null)
   }, [filePath, remoteHostId, onContentSaved, draftKey])
 
   const handleToggleFind = (): void => {
