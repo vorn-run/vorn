@@ -112,8 +112,33 @@ describe('what a conformance run vouches for', () => {
   })
 
   it('grows the list with the checks the caller asked for', async () => {
-    const run = await runConformance(clean(), { now: at, mock: true })
+    const fetching = clean({
+      actions: [
+        {
+          type: 'read',
+          label: 'Read',
+          description: 'Read something back',
+          idempotent: true,
+          outputs: [{ key: 'ok', type: 'boolean' }],
+          run: async () => {
+            await fetch('https://acme.test/api/things')
+            return { ok: true }
+          }
+        }
+      ]
+    })
+    const run = await runConformance(fetching, {
+      now: at,
+      mock: true,
+      mockRoutes: [{ url: '/api/things', body: {} }]
+    })
     expect(run.receipt?.checks).toContain('mock')
+  })
+
+  it('will not claim mock for an action the stub never heard from', async () => {
+    // `clean`'s action makes no request, so the run saw nothing to vouch for.
+    const run = await runConformance(clean(), { now: at, mock: true })
+    expect(run.receipt?.checks).not.toContain('mock')
   })
 
   it('does not claim a check nobody ran', async () => {
