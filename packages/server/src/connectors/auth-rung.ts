@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { AuthProbeReport, SdkConnectorAuth } from '@vornrun/shared/types'
-import { declaredBorrows } from '@vornrun/shared/types'
+import { borrowableFromManifest, declaredBorrows } from '@vornrun/shared/types'
 import { resolveExecutable } from '../resolve-executable'
-import { getSafeEnv, isAbsolutelyStrippedEnvName, isSensitiveEnvName } from '../process-utils'
+import { getSafeEnv, isAbsolutelyStrippedEnvName } from '../process-utils'
 import { stripAnsi } from '../ansi-strip'
 import log from '../logger'
 
@@ -75,25 +75,20 @@ export interface BorrowSource {
 
 // Held to three things a manifest cannot talk past: declared, not stripped for everyone, not a credential name.
 export function borrowableNames(source: BorrowSource): string[] {
-  const allowed: string[] = []
   const declared = source.declared.map((name) => ({ name }))
   const honoured = declaredBorrows(source.auth, declared)
-  const passthrough: ReadonlySet<string> = new Set()
+  // A trusted source is the app's own writing; a pack answers to the same rule the install sheet shows.
+  const allowed = source.trusted
+    ? honoured.filter((name) => !isAbsolutelyStrippedEnvName(name))
+    : borrowableFromManifest(source.auth, declared).filter(
+        (name) => !isAbsolutelyStrippedEnvName(name)
+      )
   for (const asked of source.auth?.borrow?.env ?? []) {
-    const name = honoured.find((entry) => entry.toUpperCase() === asked.toUpperCase())
-    if (name === undefined) {
-      log.warn(`[auth] refused to borrow ${asked}: the connector does not declare reading it`)
-      continue
+    if (!allowed.some((name) => name.toUpperCase() === asked.toUpperCase())) {
+      log.warn(
+        `[auth] refused to borrow ${asked}: undeclared, stripped for everyone, or a credential by name`
+      )
     }
-    if (isAbsolutelyStrippedEnvName(name)) {
-      log.warn(`[auth] refused to borrow ${name}: it is stripped from every environment`)
-      continue
-    }
-    if (!source.trusted && isSensitiveEnvName(name, passthrough)) {
-      log.warn(`[auth] refused to borrow ${name}: a connector may not ask for a credential by name`)
-      continue
-    }
-    allowed.push(name)
   }
   return allowed
 }

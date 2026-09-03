@@ -41,14 +41,19 @@ describe('the sheet shown before a pack is kept', () => {
       auth: {
         rung: 'cli',
         probe: { command: 'glab', args: ['auth', 'status'] },
-        borrow: { env: ['GITLAB_TOKEN', 'NOT_DECLARED'] }
+        borrow: { env: ['GITLAB_TOKEN', 'NOT_DECLARED', 'ANTHROPIC_API_KEY'] }
       },
-      env: [{ name: 'gitlab_token', required: false, secret: true }]
+      env: [
+        { name: 'gitlab_token', required: false, secret: true },
+        { name: 'ANTHROPIC_API_KEY', required: false, secret: true }
+      ]
     }
     render(<PackInstallConfirm preview={borrowing} onConfirm={() => {}} onCancel={() => {}} />)
     expect(screen.getByText('Borrows')).toBeInTheDocument()
     expect(screen.getByText('gitlab_token from glab')).toBeInTheDocument()
     expect(screen.queryByText(/NOT_DECLARED/)).toBeNull()
+    // Refused by the server, so not promised here either.
+    expect(screen.queryByText(/ANTHROPIC_API_KEY/)).toBeNull()
   })
 
   it('says what the connector is and what it can do', () => {

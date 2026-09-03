@@ -5,6 +5,7 @@ import type { RemoteHost } from '@vornrun/shared/types'
 // Constants only — this module is on the PTY spawn path, so it must not pull in
 // anything that reaches the database.
 import { BOOTSTRAP_ENV_VAR } from '@vornrun/shared/protocol'
+import { NEVER_BORROWED_ENV, SENSITIVE_ENV_PREFIXES } from '@vornrun/shared/types'
 
 function getUserShellEnv(): Record<string, string> {
   if (process.platform === 'win32') return { ...process.env } as Record<string, string>
@@ -114,22 +115,7 @@ export function getShellArgs(): string[] {
   return process.platform === 'win32' ? [] : ['-l']
 }
 
-export const SENSITIVE_ENV_PREFIXES = [
-  'AWS_SECRET',
-  'AWS_SESSION',
-  'GITHUB_TOKEN',
-  'GH_TOKEN',
-  'OPENAI_API',
-  'ANTHROPIC_API',
-  'GOOGLE_API',
-  'STRIPE_',
-  'DATABASE_URL',
-  'DB_PASSWORD',
-  'SECRET_',
-  'PRIVATE_KEY',
-  'NPM_TOKEN',
-  'NODE_AUTH_TOKEN'
-]
+export { SENSITIVE_ENV_PREFIXES }
 
 /**
  * Markers an agent CLI leaves in the environment to describe the session it is
@@ -147,7 +133,7 @@ export const SENSITIVE_ENV_PREFIXES = [
  * this list has been wrong once already: CLAUDECODE alone was stripped while
  * five siblings went through untouched.
  */
-export const STRIP_ENV_KEYS = ['CLAUDECODE']
+export const STRIP_ENV_KEYS = NEVER_BORROWED_ENV.keys
 
 /**
  * Stripped unconditionally, with no `envPassthrough` override.
@@ -162,7 +148,7 @@ export const STRIP_ENV_KEYS = ['CLAUDECODE']
  * `process.env` once read, so nothing can inherit it regardless of how it is
  * spawned. This list only matters for the window before that happens.
  */
-const STRIP_ENV_PREFIXES = ['CLAUDE_CODE_', BOOTSTRAP_ENV_VAR]
+const STRIP_ENV_PREFIXES = [...NEVER_BORROWED_ENV.prefixes, BOOTSTRAP_ENV_VAR]
 
 // Compared uppercased. Windows environment variable names are case-insensitive
 // and Node hands back whatever casing it enumerated, so a literal match would

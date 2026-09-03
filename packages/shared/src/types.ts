@@ -524,6 +524,48 @@ export function isImplicitConnection(connection: {
   return connection.filters?.[SDK_FILTER_KEYS.implicit] === true
 }
 
+// Credential-shaped names no third-party process is handed, and the agent markers stripped for everyone.
+export const SENSITIVE_ENV_PREFIXES = [
+  'AWS_SECRET',
+  'AWS_SESSION',
+  'GITHUB_TOKEN',
+  'GH_TOKEN',
+  'OPENAI_API',
+  'ANTHROPIC_API',
+  'GOOGLE_API',
+  'STRIPE_',
+  'DATABASE_URL',
+  'DB_PASSWORD',
+  'SECRET_',
+  'PRIVATE_KEY',
+  'NPM_TOKEN',
+  'NODE_AUTH_TOKEN'
+]
+export const NEVER_BORROWED_ENV = { keys: ['CLAUDECODE'], prefixes: ['CLAUDE_CODE_'] }
+
+export function isNeverBorrowedEnvName(name: string): boolean {
+  const upper = name.toUpperCase()
+  return (
+    NEVER_BORROWED_ENV.keys.includes(upper) ||
+    NEVER_BORROWED_ENV.prefixes.some((p) => upper.startsWith(p))
+  )
+}
+
+export function isCredentialEnvName(name: string): boolean {
+  const upper = name.toUpperCase()
+  return SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))
+}
+
+/** What a pack will actually be handed: declared, never stripped, never a credential by name. */
+export function borrowableFromManifest(
+  auth: SdkConnectorAuth | undefined,
+  env: ReadonlyArray<{ name: string }>
+): string[] {
+  return declaredBorrows(auth, env).filter(
+    (name) => !isNeverBorrowedEnvName(name) && !isCredentialEnvName(name)
+  )
+}
+
 /** The borrow names a manifest can honour, in the casing it declared them: what it reads is what it gets. */
 export function declaredBorrows(
   auth: SdkConnectorAuth | undefined,

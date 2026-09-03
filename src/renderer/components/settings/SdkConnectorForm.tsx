@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
 import {
-  declaredBorrows,
+  borrowableFromManifest,
   type AuthProbeReport,
   type ConnectorCatalogItem,
   type InstalledConnectorPack,
@@ -141,7 +141,7 @@ export function SdkConnectorForm({
     (entry) => rung !== 'none' && !(borrowing && entry.secret)
   )
   const missing = fields.filter((entry) => entry.required && !values[entry.name]?.trim())
-  const borrowed = borrowing && manifest ? declaredBorrows(manifest.auth, manifest.env) : []
+  const borrowed = borrowing && manifest ? borrowableFromManifest(manifest.auth, manifest.env) : []
 
   const handleSave = async () => {
     if (!manifest || !launch) return
