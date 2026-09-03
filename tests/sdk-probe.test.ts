@@ -460,6 +460,20 @@ describe('how a probed connector says it signs in', () => {
     expect(await probeAuth(auth)).toEqual(auth)
   })
 
+  it('names the token variable by the case it was declared in, however it was asked for', async () => {
+    const auth = {
+      ...cli,
+      borrow: {
+        env: ['GITLAB_TOKEN', 'GITLAB_HOST'],
+        tokenArgs: ['auth', 'token'],
+        tokenEnv: ' gitlab_token '
+      }
+    }
+    expect((await probeAuth(auth))?.borrow?.tokenEnv).toBe('GITLAB_TOKEN')
+    const stranger = { ...auth, borrow: { ...auth.borrow, tokenEnv: 'OTHER' } }
+    expect((await probeAuth(stranger))?.borrow?.tokenEnv).toBeUndefined()
+  })
+
   it('says nothing rather than name a rung it cannot describe', async () => {
     expect(await probeAuth({ rung: 'sso' })).toBeUndefined()
     expect(await probeAuth({ rung: 7 })).toBeUndefined()

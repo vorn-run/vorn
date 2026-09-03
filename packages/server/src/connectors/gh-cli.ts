@@ -1,34 +1,31 @@
+import type { SdkConnectorAuth } from '@vornrun/shared/types'
 import { resolveExecutable } from '../resolve-executable'
-import { getSafeEnv } from '../process-utils'
+import { borrowedEnv, installHintFor, type BorrowSource } from './auth-rung'
+
+// The built-in predates rungs, so its declaration lives here in the shape every packaged connector uses.
+export const GH_AUTH: SdkConnectorAuth = {
+  rung: 'cli',
+  probe: { command: 'gh', args: ['auth', 'status'] },
+  borrow: { env: ['GH_TOKEN', 'GITHUB_TOKEN'], tokenArgs: ['auth', 'token'], tokenEnv: 'GH_TOKEN' }
+}
+
+// Written by the app, so it may name a credential; what it borrows is what it declares.
+export const GH_SOURCE: BorrowSource = {
+  auth: GH_AUTH,
+  declared: GH_AUTH.borrow?.env ?? [],
+  trusted: true
+}
 
 export function resolveGhPath(): string | null {
   return resolveExecutable('gh')
 }
 
-/**
- * Env for invoking `gh`. Starts from `getSafeEnv()` for the login-shell PATH
- * but re-adds `GH_TOKEN` / `GITHUB_TOKEN` from the raw process env — `gh`
- * supports non-interactive auth via those, and `getSafeEnv()` strips them by
- * default as a general precaution.
- */
 export function getGhEnv(): Record<string, string> {
-  const env = getSafeEnv()
-  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN']) {
-    const val = process.env[key]
-    if (val) env[key] = val
-  }
-  return env
+  return borrowedEnv(GH_SOURCE)
 }
 
 export function ghInstallHint(): string {
-  switch (process.platform) {
-    case 'darwin':
-      return 'Install with Homebrew: `brew install gh`'
-    case 'win32':
-      return 'Install with winget: `winget install --id GitHub.cli` (or download from https://cli.github.com)'
-    default:
-      return 'Install from https://cli.github.com (Debian/Ubuntu: `sudo apt install gh`)'
-  }
+  return installHintFor('gh')
 }
 
 export class GhNotFoundError extends Error {

@@ -12,7 +12,8 @@ export {
   stopClient as stopMcpClient,
   stopAllClients as stopAllMcpClients,
   stopClientsForConnector,
-  connectionIdsForConnector
+  connectionIdsForConnector,
+  connectionsForConnector
 } from './mcp-clients'
 export {
   inspectPack,

@@ -513,8 +513,75 @@ export interface ConnectorKey {
 export const SDK_FILTER_KEYS = {
   connectorId: 'sdkConnectorId',
   version: 'sdkVersion',
-  icon: 'sdkIcon'
+  icon: 'sdkIcon',
+  implicit: 'implicit'
 } as const
+
+/** Whether the app made this connection itself for a connector that asks for nothing. */
+export function isImplicitConnection(connection: {
+  filters: SourceConnection['filters']
+}): boolean {
+  return connection.filters?.[SDK_FILTER_KEYS.implicit] === true
+}
+
+// Credential-shaped names no third-party process is handed, and the agent markers stripped for everyone.
+export const SENSITIVE_ENV_PREFIXES = [
+  'AWS_SECRET',
+  'AWS_SESSION',
+  'GITHUB_TOKEN',
+  'GH_TOKEN',
+  'OPENAI_API',
+  'ANTHROPIC_API',
+  'GOOGLE_API',
+  'STRIPE_',
+  'DATABASE_URL',
+  'DB_PASSWORD',
+  'SECRET_',
+  'PRIVATE_KEY',
+  'NPM_TOKEN',
+  'NODE_AUTH_TOKEN'
+]
+export const NEVER_BORROWED_ENV = { keys: ['CLAUDECODE'], prefixes: ['CLAUDE_CODE_'] }
+
+export function isNeverBorrowedEnvName(name: string): boolean {
+  const upper = name.toUpperCase()
+  return (
+    NEVER_BORROWED_ENV.keys.includes(upper) ||
+    NEVER_BORROWED_ENV.prefixes.some((p) => upper.startsWith(p))
+  )
+}
+
+export function isCredentialEnvName(name: string): boolean {
+  const upper = name.toUpperCase()
+  return SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))
+}
+
+/** What a pack will actually be handed: declared, never stripped, never a credential by name. */
+export function borrowableFromManifest(
+  auth: SdkConnectorAuth | undefined,
+  env: ReadonlyArray<{ name: string }>
+): string[] {
+  return declaredBorrows(auth, env).filter(
+    (name) => !isNeverBorrowedEnvName(name) && !isCredentialEnvName(name)
+  )
+}
+
+/** The borrow names a manifest can honour, in the casing it declared them: what it reads is what it gets. */
+export function declaredBorrows(
+  auth: SdkConnectorAuth | undefined,
+  env: ReadonlyArray<{ name: string }>
+): string[] {
+  const declared = new Map(env.map((entry) => [entry.name.toUpperCase(), entry.name]))
+  return (auth?.borrow?.env ?? []).flatMap((name) => declared.get(name.toUpperCase()) ?? [])
+}
+
+/** What asking a borrowed tool answered; `ok: null` is "nothing to ask". */
+export interface AuthProbeReport {
+  ok: boolean | null
+  identity?: string
+  message?: string
+  installHint?: string
+}
 
 /** The connector a connection belongs to, which for a package is not `mcp`. */
 export function connectionConnectorId(connection: {
@@ -1691,6 +1758,7 @@ export const IPC = {
   CONNECTOR_DETECT_REPO: 'connector:detectRepo',
   CONNECTOR_SEED_WORKFLOW: 'connector:seedWorkflow',
   CONNECTOR_STATUS: 'connector:status',
+  CONNECTOR_PROBE_AUTH: 'connector:probeAuth',
   CONNECTION_UPSERT_FROM_ITEM: 'connection:upsertFromItem',
   CONNECTOR_INBOX_COMPLETE: 'connector:inboxComplete',
   CONNECTOR_INBOX_RENEW: 'connector:inboxRenew',
@@ -1944,8 +2012,8 @@ export interface SdkConnectorAuth {
   rung: ConnectorAuthRung
   /** Asks the borrowed tool who you are. Present for `cli`. */
   probe?: { command: string; args?: string[] }
-  /** What to take from the signed-in tool at spawn; never stored. */
-  borrow?: { env?: string[]; tokenArgs?: string[] }
+  // What to take from the signed-in tool at spawn; never stored.
+  borrow?: { env?: string[]; tokenArgs?: string[]; tokenEnv?: string }
   /** Config field keys holding the credential. Present for `key`. */
   keys?: string[]
 }

@@ -136,6 +136,7 @@ import {
   stopMcpClient,
   stopClientsForConnector,
   connectionIdsForConnector,
+  connectionsForConnector,
   inspectPack,
   installPack,
   removePack,
@@ -156,8 +157,16 @@ import {
 } from './connectors/http'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { listKeys, passwordFields } from './connectors/keys'
+import { installedPack } from './connectors/packs'
+import {
+  syncImplicitConnection,
+  type ImplicitConnectionDeps
+} from './connectors/implicit-connection'
+import { GH_SOURCE } from './connectors/gh-cli'
+import { probeAuth, type BorrowSource } from './connectors/auth-rung'
+import { resolveConnectorAuth } from './connectors/connector-auth'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
-import type { ConnectorPackSource } from '@vornrun/shared/types'
+import { isImplicitConnection, type ConnectorPackSource } from '@vornrun/shared/types'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
@@ -238,6 +247,134 @@ function unusableSource(source: ConnectorPackSource): string {
   }
 }
 
+// The built-in GitHub connector predates rungs and declares its auth beside its client.
+async function authForConnector(connectorId: string): Promise<BorrowSource> {
+  if (connectorId === 'github') return GH_SOURCE
+  return (await resolveConnectorAuth(connectorId)) ?? { auth: undefined, declared: [] }
+}
+
+// Make a connection and everything that comes with one.
+function createConnectionRecord(
+  params: Omit<
+    SourceConnection,
+    'id' | 'createdAt' | 'lastSyncAt' | 'lastSyncError' | 'syncCursor'
+  > & {
+    seedWorkflow?: { name: string; defaultCronFromMinutes: number }
+  },
+  options: { discover?: boolean } = {}
+): SourceConnection {
+  const id = crypto.randomUUID()
+  const conn: SourceConnection = {
+    id,
+    connectorId: params.connectorId,
+    name: params.name,
+    filters: params.filters,
+    syncIntervalMinutes: params.syncIntervalMinutes,
+    statusMapping: params.statusMapping,
+    ...(params.executionProject && { executionProject: params.executionProject }),
+    createdAt: new Date().toISOString()
+  }
+  dbInsertSourceConnection(conn)
+
+  // Seed visible + editable default workflows.
+  const connector = connectorRegistry.get(conn.connectorId)
+  const manifest = connector?.describe()
+  const seeded: Array<NonNullable<ConnectorManifest['defaultWorkflows']>[number]> = [
+    ...(manifest?.defaultWorkflows ?? []),
+    // Only for MCP: no other connector emits MCP_POLL_EVENT.
+    ...(params.seedWorkflow && params.connectorId === MCP_CONNECTOR_ID
+      ? [
+          {
+            name: params.seedWorkflow.name,
+            event: MCP_POLL_EVENT,
+            defaultCronFromMinutes: params.seedWorkflow.defaultCronFromMinutes,
+            downstream: 'createTaskFromItem' as const
+          }
+        ]
+      : [])
+  ]
+  if (manifest) {
+    for (const event of seeded) {
+      const wfId = connectorSeededWorkflowId(conn.id, event.event)
+      if (dbGetWorkflow(wfId)) continue
+      // The connection's own mapping beats the connector's suggestion: it is what the person setting it up actually chose.
+      const withMapping: ConnectorManifest = {
+        ...manifest,
+        statusMapping: Object.entries(conn.statusMapping ?? {}).map(([upstream, local]) => ({
+          upstream,
+          suggestedLocal: local
+        }))
+      }
+      const wf = buildConnectorSeededWorkflow(conn, withMapping, event)
+      dbInsertWorkflow(wf)
+      log.info(`[connector] seeded workflow ${wfId} for connection ${conn.id}`)
+    }
+  }
+
+  dbSignalChange()
+  configManager.notifyChanged()
+
+  // For MCP connections, kick off tool discovery in the background.
+  if (conn.connectorId === MCP_CONNECTOR_ID && options.discover !== false) {
+    setTimeout(() => {
+      void runMcpDiscovery(conn.id).catch((err) =>
+        log.warn(`[mcp] initial discovery failed for ${conn.id}: ${err}`)
+      )
+    }, 1500)
+  }
+
+  return conn
+}
+
+// Take a connection out, with everything that only existed for it.
+function deleteConnectionRecord(id: string): void {
+  // Delete any seeded workflows tied to this connection.
+  const prefix = connectorSeededWorkflowIdPrefix(id)
+  for (const wf of dbListWorkflows()) {
+    if (wf.id.startsWith(prefix)) {
+      dbDeleteWorkflow(wf.id)
+    }
+  }
+  // task_source_links cascade via FK.
+  dbDeleteSourceConnection(id)
+  // Forget any decrypted plaintext for this connection.
+  clearDecryptedCreds(id)
+  // Terminate any live MCP stdio child for this connection.
+  void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
+  dbSignalChange()
+  configManager.notifyChanged()
+}
+
+/** The edges the implicit-connection rule acts through, wired to this server. */
+const implicitConnectionDeps: ImplicitConnectionDeps = {
+  list: () => dbListSourceConnections(),
+  // The caller runs discovery once the connection exists.
+  create: (params) => createConnectionRecord({ ...params, statusMapping: {} }, { discover: false }),
+  remove: (connectionId) => {
+    deleteConnectionRecord(connectionId)
+    log.info(`[packs] withdrew the implicit connection ${connectionId}`)
+  },
+  changed: () => {
+    dbSignalChange()
+    configManager.notifyChanged()
+  }
+}
+
+// The install-time rule, applied once at startup to packs installed before it existed.
+export function reconcileImplicitConnections(): void {
+  try {
+    for (const pack of listInstalledPacks()) {
+      const made = syncImplicitConnection(pack.id, pack, implicitConnectionDeps, MCP_CONNECTOR_ID)
+      if (!made) continue
+      void runMcpDiscovery(made.id).catch((err) =>
+        log.warn(`[packs] discovery failed for ${made.id}: ${err}`)
+      )
+    }
+  } catch (err) {
+    log.warn(`[packs] could not reconcile implicit connections: ${err}`)
+  }
+}
+
 /**
  * Settle every connection of a connector whose files just changed.
  *
@@ -246,10 +383,16 @@ function unusableSource(source: ConnectorPackSource): string {
  * action would keep being offered until someone refreshed the row by hand.
  */
 async function onPackChanged(connectorId: string): Promise<void> {
-  const ids = connectionIdsForConnector(connectorId)
   await stopClientsForConnector(connectorId)
+  // Before the ids are read, so a connector that just connected itself is discovered too.
+  syncImplicitConnection(
+    connectorId,
+    installedPack(connectorId),
+    implicitConnectionDeps,
+    MCP_CONNECTOR_ID
+  )
   await Promise.allSettled(
-    ids.map((id) =>
+    connectionIdsForConnector(connectorId).map((id) =>
       runMcpDiscovery(id).catch((err) => log.warn(`[packs] rediscovery failed for ${id}: ${err}`))
     )
   )
@@ -1334,77 +1477,7 @@ export function registerAllMethods(): void {
     return dbListSourceConnections(connectorId).filter((c) => c.connectorId !== 'webhook')
   })
 
-  registerMethod('connection:create', (params) => {
-    const id = crypto.randomUUID()
-    const conn: SourceConnection = {
-      id,
-      connectorId: params.connectorId,
-      name: params.name,
-      filters: params.filters,
-      syncIntervalMinutes: params.syncIntervalMinutes,
-      statusMapping: params.statusMapping,
-      ...(params.executionProject && { executionProject: params.executionProject }),
-      createdAt: new Date().toISOString()
-    }
-    dbInsertSourceConnection(conn)
-
-    // Seed visible + editable default workflows. A built-in declares them on
-    // its manifest; a packaged connector cannot, because the connector the
-    // registry resolves for it is the generic MCP one — so the caller passes
-    // through what the probe read from the package.
-    const connector = connectorRegistry.get(conn.connectorId)
-    const manifest = connector?.describe()
-    const seeded: Array<NonNullable<ConnectorManifest['defaultWorkflows']>[number]> = [
-      ...(manifest?.defaultWorkflows ?? []),
-      // Only for MCP: the event seeded is MCP_POLL_EVENT, which no other
-      // connector emits — seeding it for one would leave a workflow polling on
-      // a schedule for something that never fires.
-      ...(params.seedWorkflow && params.connectorId === MCP_CONNECTOR_ID
-        ? [
-            {
-              name: params.seedWorkflow.name,
-              event: MCP_POLL_EVENT,
-              defaultCronFromMinutes: params.seedWorkflow.defaultCronFromMinutes,
-              downstream: 'createTaskFromItem' as const
-            }
-          ]
-        : [])
-    ]
-    if (manifest) {
-      for (const event of seeded) {
-        const wfId = connectorSeededWorkflowId(conn.id, event.event)
-        if (dbGetWorkflow(wfId)) continue
-        // The connection's own mapping beats the connector's suggestion: it is
-        // what the person setting it up actually chose.
-        const withMapping: ConnectorManifest = {
-          ...manifest,
-          statusMapping: Object.entries(conn.statusMapping ?? {}).map(([upstream, local]) => ({
-            upstream,
-            suggestedLocal: local
-          }))
-        }
-        const wf = buildConnectorSeededWorkflow(conn, withMapping, event)
-        dbInsertWorkflow(wf)
-        log.info(`[connector] seeded workflow ${wfId} for connection ${conn.id}`)
-      }
-    }
-
-    dbSignalChange()
-    configManager.notifyChanged()
-
-    // For MCP connections, kick off tool discovery in the background. We
-    // delay briefly so the main process has time to decrypt + push secretEnv
-    // via the credential-sync path (triggered by notifyChanged above).
-    if (conn.connectorId === MCP_CONNECTOR_ID) {
-      setTimeout(() => {
-        void runMcpDiscovery(conn.id).catch((err) =>
-          log.warn(`[mcp] initial discovery failed for ${conn.id}: ${err}`)
-        )
-      }, 1500)
-    }
-
-    return conn
-  })
+  registerMethod('connection:create', (params) => createConnectionRecord(params))
 
   registerMethod('connection:update', async ({ id, updates }) => {
     dbUpdateSourceConnection(id, updates)
@@ -1416,27 +1489,12 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('connection:delete', (id) => {
-    // Delete any seeded workflows tied to this connection. User-created
-    // workflows that reference this connection stay — deleting a connection
-    // should never silently remove a workflow the user built by hand.
-    const prefix = connectorSeededWorkflowIdPrefix(id)
-    for (const wf of dbListWorkflows()) {
-      if (wf.id.startsWith(prefix)) {
-        dbDeleteWorkflow(wf.id)
-      }
+    const conn = dbGetSourceConnection(id)
+    // It would come straight back on the next pack change; the pack is the thing to remove.
+    if (conn && isImplicitConnection(conn)) {
+      throw new Error(`${conn.name} came with its connector. Remove the pack instead.`)
     }
-    // task_source_links cascade via FK. Tasks themselves stay and retain
-    // their source_connector_id / source_external_id metadata — so a later
-    // connection add + backfill can re-adopt them via the orphan dedup path
-    // in upsertExternalItem instead of creating duplicates.
-    dbDeleteSourceConnection(id)
-    // Forget any decrypted plaintext for this connection.
-    clearDecryptedCreds(id)
-    // Terminate any live MCP stdio child for this connection. Fire-and-forget
-    // because delete is synchronous and the child may take a moment to exit.
-    void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
-    dbSignalChange()
-    configManager.notifyChanged()
+    deleteConnectionRecord(id)
   })
 
   registerMethod('workflow:runManual', ({ workflowId, inputs }) => {
@@ -1684,8 +1742,10 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('connector:removePack', async (id: string) => {
-    // Counted before the files go, so the answer can name what stops working.
-    const connections = connectionIdsForConnector(id).length
+    // Counted before the files go; the app's own connection goes with the pack, so it is not one.
+    const connections = connectionsForConnector(id).filter(
+      (conn) => !isImplicitConnection(conn)
+    ).length
     const result = await removePack(id, { onChanged: onPackChanged })
     if (result.ok) dbSignalChange()
     return { ...result, connections }
@@ -1819,45 +1879,24 @@ export function registerAllMethods(): void {
 
   registerMethod('connector:status', async () => {
     const results: Array<{ connectorId: string; authed: boolean; message?: string }> = []
-    for (const c of connectorRegistry.list()) {
-      if (c.id === 'github') {
-        const { resolveGhPath, ghInstallHint, getGhEnv } = await import('./connectors/gh-cli')
-        const ghPath = resolveGhPath()
-        if (!ghPath) {
-          results.push({
-            connectorId: c.id,
-            authed: false,
-            message: `GitHub CLI (gh) is not installed or not on PATH.\n${ghInstallHint()}\nAfter installing, run: \`gh auth login\``
-          })
-          continue
-        }
-        try {
-          const { execFile } = await import('node:child_process')
-          const { promisify } = await import('node:util')
-          const execFileAsync = promisify(execFile)
-          await execFileAsync(ghPath, ['auth', 'status'], {
-            timeout: 5_000,
-            env: getGhEnv()
-          })
-          results.push({ connectorId: c.id, authed: true })
-        } catch (err) {
-          // gh is installed but the status probe failed. The common case is
-          // "not signed in"; anything else we surface in logs so it's not
-          // silently lost.
-          const msg = err instanceof Error ? err.message : String(err)
-          log.warn(`[connector:status] gh auth status failed: ${msg}`)
-          results.push({
-            connectorId: c.id,
-            authed: false,
-            message: 'Sign in by running `gh auth login` in your terminal.'
-          })
-        }
-      } else {
-        results.push({ connectorId: c.id, authed: true })
-      }
+    const reports = await Promise.all(
+      connectorRegistry
+        .list()
+        .map(async (c) => ({ c, report: await probeAuth(await authForConnector(c.id)) }))
+    )
+    for (const { c, report } of reports) {
+      // null is "nothing this probe can answer", never reported as signed out.
+      const authed = report.ok !== false
+      const message = [report.message, report.installHint].filter(Boolean).join('\n')
+      results.push({ connectorId: c.id, authed, ...(!authed && message && { message }) })
     }
     return results
   })
+
+  // What lets a cli connector's form show an identity instead of a token field.
+  registerMethod('connector:probeAuth', async (connectorId: string) =>
+    probeAuth(await authForConnector(connectorId))
+  )
 
   // ─── Browser pane (relayed to Electron main) ──────────────────
   //

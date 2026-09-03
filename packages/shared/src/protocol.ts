@@ -1,4 +1,5 @@
 import type {
+  AuthProbeReport,
   CreateTerminalPayload,
   RestoredSession,
   TerminalSession,
@@ -908,6 +909,11 @@ export interface RequestMethods {
   'connector:status': {
     params: void
     result: Array<{ connectorId: string; authed: boolean; message?: string }>
+  }
+  // Ask the tool a connector borrows whether it is signed in, and as whom.
+  'connector:probeAuth': {
+    params: string
+    result: AuthProbeReport
   }
 
   // ─── Agent-controllable browser pane ──────────────────────────

@@ -5,7 +5,12 @@ import { ConnectorIcon } from '../ConnectorIcon'
 import { connectionIcon } from '../../lib/connection-icon'
 import { McpToolsPanel } from './McpToolsPanel'
 import { humanCron } from '../../lib/cron-text'
-import type { ConnectorManifest, SourceConnection, WorkflowDefinition } from '../../../shared/types'
+import {
+  isImplicitConnection,
+  type ConnectorManifest,
+  type SourceConnection,
+  type WorkflowDefinition
+} from '../../../shared/types'
 
 /**
  * One configured connection: what it polls, when it last ran, and what can be
@@ -46,6 +51,7 @@ export function ConnectionRow({
   onOpenWorkflow: (workflowId: string) => void
   onRefresh: () => void
 }) {
+  const implicit = isImplicitConnection(conn)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean | null; message?: string } | null>(
     null
@@ -98,10 +104,17 @@ export function ConnectionRow({
               </button>
             </Tooltip>
           )}
-          <Tooltip label="Remove this connection (seeded workflows are also deleted)">
+          <Tooltip
+            label={
+              implicit
+                ? 'This connection came with its connector. Remove the pack instead.'
+                : 'Remove this connection (seeded workflows are also deleted)'
+            }
+          >
             <button
               onClick={() => onDelete(conn.id)}
-              className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors"
+              disabled={implicit}
+              className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors disabled:opacity-40 disabled:hover:text-gray-500"
             >
               <Trash2 size={13} />
             </button>

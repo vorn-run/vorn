@@ -286,12 +286,19 @@ function toAuth(value: unknown): SdkConnectorAuth | undefined {
   const env = strings(borrow?.env)
   const tokenArgs = strings(borrow?.tokenArgs)
   const keys = strings(value.keys)
+  // The token lands in one variable, matched the way env names are read: without regard to case.
+  const asked = str(borrow?.tokenEnv).trim().toUpperCase()
+  const tokenEnv = env.find((name) => name.toUpperCase() === asked)
 
   return {
     rung: rung as ConnectorAuthRung,
     ...(usable && args !== undefined && { probe: { command, ...(args.length > 0 && { args }) } }),
     ...((env.length > 0 || tokenArgs.length > 0) && {
-      borrow: { ...(env.length > 0 && { env }), ...(tokenArgs.length > 0 && { tokenArgs }) }
+      borrow: {
+        ...(env.length > 0 && { env }),
+        ...(tokenArgs.length > 0 && { tokenArgs }),
+        ...(tokenEnv !== undefined && { tokenEnv })
+      }
     }),
     ...(keys.length > 0 && { keys })
   }

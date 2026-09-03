@@ -22,6 +22,8 @@ import { dbListSourceConnections } from '../database'
 import { getDecryptedCreds } from './decrypted-creds'
 import { localLaunchSpec } from './catalog'
 import { installedLaunch } from './packs'
+import { borrowedSecrets } from './auth-rung'
+import { resolveConnectorAuth } from './connector-auth'
 import { getSafeEnv } from '../process-utils'
 import log from '../logger'
 
@@ -69,9 +71,14 @@ function installedPackLaunch(id: string): { command: string; args: string[] } | 
   }
 }
 
+/** The connector a connection runs, when it names a packaged one. */
+function sdkIdOf(conn: SourceConnection): string {
+  return String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
+}
+
 /** Checkout, then installed pack, then stored command; a pack must beat stale args. */
 export function resolveLaunch(conn: SourceConnection): { command: string; args: string[] } {
-  const sdkId = String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
+  const sdkId = sdkIdOf(conn)
   if (sdkId) {
     const resolved = localLaunchSpec(sdkId) ?? installedPackLaunch(sdkId)
     if (resolved) return resolved
@@ -81,17 +88,22 @@ export function resolveLaunch(conn: SourceConnection): { command: string; args: 
   return { command, args: parseJsonArray(conn.filters.args) }
 }
 
-export function buildSpawnConfig(conn: SourceConnection): {
+interface SpawnConfig {
   command: string
   args: string[]
   env: Record<string, string>
-} {
+}
+
+// A borrowed token is fetched fresh at spawn, never stored, and sits under anything entered by hand.
+export async function buildSpawnConfig(conn: SourceConnection): Promise<SpawnConfig> {
   const { command, args } = resolveLaunch(conn)
   const env = parseJsonObject(conn.filters.env)
   // Decrypted secret env (pushed from main via safeStorage) overrides plain env.
   const decrypted = getDecryptedCreds(conn.id) ?? {}
   const secretEnv = parseJsonObject(decrypted.secretEnv)
-  return { command, args, env: { ...env, ...secretEnv } }
+  const source = await resolveConnectorAuth(sdkIdOf(conn))
+  const borrowed = source ? await borrowedSecrets(source) : {}
+  return { command, args, env: { ...borrowed, ...env, ...secretEnv } }
 }
 
 export async function getOrStartClient(conn: SourceConnection): Promise<Client> {
@@ -100,6 +112,7 @@ export async function getOrStartClient(conn: SourceConnection): Promise<Client> 
   const inFlight = pending.get(conn.id)
   if (inFlight) return inFlight
 
+  // Recorded before anything can suspend, so a second caller joins this startup; nothing is awaited above.
   const startup = startClient(conn).finally(() => {
     pending.delete(conn.id)
   })
@@ -108,7 +121,7 @@ export async function getOrStartClient(conn: SourceConnection): Promise<Client> 
 }
 
 async function startClient(conn: SourceConnection): Promise<Client> {
-  const { command, args, env } = buildSpawnConfig(conn)
+  const { command, args, env } = await buildSpawnConfig(conn)
   // Inherit PATH and friends from the parent via getSafeEnv() — same
   // sanitization the rest of the server uses for child processes — so
   // GH/Linear/NPM tokens etc. don't leak into arbitrary MCP servers
@@ -172,10 +185,12 @@ export function hasClient(connectionId: string): boolean {
 }
 
 /** Which connections a pack change affects, which for a package is not by `connectorId`. */
+export function connectionsForConnector(connectorId: string): SourceConnection[] {
+  return dbListSourceConnections().filter((conn) => connectionConnectorId(conn) === connectorId)
+}
+
 export function connectionIdsForConnector(connectorId: string): string[] {
-  return dbListSourceConnections()
-    .filter((conn) => connectionConnectorId(conn) === connectorId)
-    .map((conn) => conn.id)
+  return connectionsForConnector(connectorId).map((conn) => conn.id)
 }
 
 /** A child started before a pack change keeps running the old files until stopped. */

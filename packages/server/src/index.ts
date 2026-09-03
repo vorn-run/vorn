@@ -20,7 +20,7 @@ import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
 import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
-import { registerAllMethods, setServerPort } from './register-methods'
+import { reconcileImplicitConnections, registerAllMethods, setServerPort } from './register-methods'
 import { registerWebhookRoute } from './webhook-trigger'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
@@ -350,6 +350,8 @@ export async function startServer(
 
   // Register all RPC methods
   registerAllMethods()
+  // Connects the rung-none packs installed before installing meant connecting.
+  reconcileImplicitConnections()
   scheduler.startInboxWorker()
 
   // Server shutdown method (callable from clients)

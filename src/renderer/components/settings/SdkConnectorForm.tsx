@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
-import type {
-  ConnectorCatalogItem,
-  InstalledConnectorPack,
-  SdkConnectorManifest,
-  SdkTrigger,
-  TaskStatus
+import {
+  borrowableFromManifest,
+  type AuthProbeReport,
+  type ConnectorCatalogItem,
+  type InstalledConnectorPack,
+  type SdkConnectorManifest,
+  type SdkTrigger,
+  type TaskStatus
 } from '../../../shared/types'
 import { useAppStore } from '../../stores'
 import { parseLaunchSpec } from './parse-launch-spec'
@@ -66,6 +68,9 @@ export function SdkConnectorForm({
   const [selectedProject, setSelectedProject] = useState(projects[0]?.name || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [identity, setIdentity] = useState<AuthProbeReport | null>(null)
+  // A token stays one click away for the machine where the CLI is not the answer.
+  const [useToken, setUseToken] = useState(false)
 
   /**
    * Read a connector by starting it.
@@ -111,10 +116,33 @@ export function SdkConnectorForm({
     void probe(target)
   }, [catalogEntry, pack, probe])
 
+  const rung = manifest?.auth?.rung
+  // Borrowing covers the credential, so its fields are hidden and cannot hold the form shut.
+  const borrowing = rung === 'cli' && !useToken
+
+  // Ask the tool who you are, once the manifest says there is a tool to ask.
+  useEffect(() => {
+    if (manifest?.auth?.rung !== 'cli') return
+    let live = true
+    void Promise.resolve().then(() => setIdentity(null))
+    // A build that cannot ask has answered too; an identity is a courtesy, the connect still happens.
+    void Promise.resolve(window.api.probeConnectorAuth?.(manifest.id)).then(
+      (report) => live && setIdentity(report ?? { ok: null }),
+      () => live && setIdentity({ ok: null })
+    )
+    return () => {
+      live = false
+    }
+  }, [manifest])
+
   const trigger = manifest?.triggers.find((entry) => entry.type === triggerType)
-  const missing = (manifest?.env ?? []).filter(
-    (entry) => entry.required && !values[entry.name]?.trim()
+  const borrowed = borrowing && manifest ? borrowableFromManifest(manifest.auth, manifest.env) : []
+  const covered = new Set(borrowed.map((name) => name.toUpperCase()))
+  // Nothing to fill in for a connector that asks for nothing; a secret the borrow covers is not asked for either.
+  const fields = (manifest?.env ?? []).filter(
+    (entry) => rung !== 'none' && !(entry.secret && covered.has(entry.name.toUpperCase()))
   )
+  const missing = fields.filter((entry) => entry.required && !values[entry.name]?.trim())
 
   const handleSave = async () => {
     if (!manifest || !launch) return
@@ -123,7 +151,8 @@ export function SdkConnectorForm({
     try {
       const plain: Record<string, string> = {}
       const secret: Record<string, string> = {}
-      for (const entry of manifest.env) {
+      // Only what the form actually asked for.
+      for (const entry of fields) {
         const value = values[entry.name]?.trim()
         if (!value) continue
         ;(entry.secret ? secret : plain)[entry.name] = value
@@ -240,7 +269,14 @@ export function SdkConnectorForm({
             )}
           </div>
 
-          {manifest.triggers.length > 0 && (
+          {rung === 'none' && (
+            <p className="text-[11px] text-gray-500">
+              This connector asks for no sign-in — installing it was the whole setup, and its
+              actions are ready to use in a workflow.
+            </p>
+          )}
+
+          {manifest.triggers.length > 0 && rung !== 'none' && (
             <div>
               <label className="block text-xs text-gray-500 mb-1">Trigger</label>
               <select
@@ -260,22 +296,79 @@ export function SdkConnectorForm({
             </div>
           )}
 
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Project</label>
-            <select
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              className={INPUT_CLASS}
-            >
-              {projects.map((project) => (
-                <option key={project.name} value={project.name}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {rung !== 'none' && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Project</label>
+              <select
+                value={selectedProject}
+                onChange={(e) => setSelectedProject(e.target.value)}
+                className={INPUT_CLASS}
+              >
+                {projects.map((project) => (
+                  <option key={project.name} value={project.name}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-          {manifest.env.map((entry) => (
+          {rung === 'cli' && (
+            <div className="px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-sm">
+              {identity?.ok ? (
+                <div className="flex items-center gap-1.5 text-sm text-gray-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-status-sage shrink-0" />
+                  <span>Signed in{identity.identity ? ` as ${identity.identity}` : ''}</span>
+                  {manifest.auth?.probe && (
+                    <span className="text-[11px] text-gray-500 font-mono">
+                      · from {manifest.auth.probe.command}{' '}
+                      {(manifest.auth.probe.args ?? []).join(' ')}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="text-[11px] text-gray-400">
+                  {identity === null
+                    ? 'Checking whether the tool it borrows is signed in…'
+                    : // `ok: null` is an answer — this build cannot ask — and
+                      // leaving the in-flight line up would read as a hang.
+                      (identity.message ?? 'Nothing to check for this connector.')}
+                  {identity?.installHint && (
+                    <span className="block text-gray-600 mt-1">{identity.installHint}</span>
+                  )}
+                </div>
+              )}
+              {borrowed.length > 0 && (
+                <p className="text-[11px] text-gray-600 mt-1">
+                  Hands over {borrowed.join(', ')} from {manifest.auth?.probe?.command}.
+                </p>
+              )}
+              <button
+                onClick={() => {
+                  // Whatever was typed into a field that is about to be hidden goes with it, so nothing invisible is carried into the save.
+                  setValues((prev) => {
+                    const kept = { ...prev }
+                    const hidden = new Set(
+                      borrowableFromManifest(manifest.auth, manifest.env).map((n) =>
+                        n.toUpperCase()
+                      )
+                    )
+                    for (const entry of manifest.env) {
+                      if (entry.secret && hidden.has(entry.name.toUpperCase()))
+                        delete kept[entry.name]
+                    }
+                    return kept
+                  })
+                  setUseToken((prev) => !prev)
+                }}
+                className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors mt-1.5"
+              >
+                {useToken ? 'Borrow the signed-in tool instead' : 'Use a token instead'}
+              </button>
+            </div>
+          )}
+
+          {fields.map((entry) => (
             <div key={entry.name}>
               <label className="text-xs text-gray-500 mb-1 flex items-center gap-1.5">
                 <span className="font-mono text-[11px]">{entry.name}</span>
@@ -309,11 +402,12 @@ export function SdkConnectorForm({
 
       <div className="flex gap-2 pt-1">
         <button
-          onClick={() => void handleSave()}
-          disabled={!manifest || saving || missing.length > 0}
+          // A connector that asks for nothing was connected when it was installed; offering Connect again would make a second one.
+          onClick={() => (rung === 'none' ? onDone() : void handleSave())}
+          disabled={!manifest || saving || (rung !== 'none' && missing.length > 0)}
           className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50"
         >
-          {saving ? 'Connecting…' : 'Connect'}
+          {rung === 'none' ? 'Done' : saving ? 'Connecting…' : 'Connect'}
         </button>
         <button
           onClick={onCancel}

@@ -751,6 +751,7 @@ export function createApiShim(wsUrl: string) {
     listConnectors: () => rpc.invoke('connector:list'),
     getConnector: (id: string) => rpc.invoke('connector:get', id),
     getConnectorStatus: () => rpc.invoke('connector:status'),
+    probeConnectorAuth: (connectorId: string) => rpc.invoke('connector:probeAuth', connectorId),
     listConnectorCatalog: () => rpc.invoke('connector:catalog'),
     refreshConnectorCatalog: () => rpc.invoke('connector:catalogRefresh'),
     probeSdkConnector: (request: unknown) => rpc.invoke('connector:probeSdk', request),
