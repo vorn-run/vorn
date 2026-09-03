@@ -294,13 +294,36 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
   return found
 }
 
+/** A refusal to let the connector in at all, as opposed to any other failure. */
+const AUTH_FAILURE = /\b(401|403|unauthor|unauthenticat|forbidden|invalid[- ]?(token|credential))/i
+
+/**
+ * Whether a live run can call this action honestly.
+ *
+ * Only the ones that are safe to repeat, and only where the arguments are real:
+ * either the author named a `sample` set, or the action needs nothing required.
+ * Inventing an identifier just teaches the service to say "no such thing",
+ * which says nothing about the connector.
+ */
+function liveRunnable(action: ActionDefinition): boolean {
+  if (action.idempotent !== true) return false
+  if (action.sample !== undefined) return true
+  return !(action.inputs ?? []).some((input) => input.required === true)
+}
+
+/** Whether a live run has anything at all to ask, so a receipt can say it ran. */
+export function liveExamines(connector: Connector): boolean {
+  return connector.preflight !== undefined || connector.actions.some(liveRunnable)
+}
+
 /**
  * Ask the connector, against the real service, the questions only it can answer.
  *
  * Preflight first, because a connector that cannot sign in fails every later
- * check for one uninteresting reason. Then each action that declared itself
- * idempotent — and only those: a live run of `createIssue` would leave real
- * issues behind, so a smoke test never calls one.
+ * check for one uninteresting reason. Then each action that is both safe to
+ * repeat and callable with real arguments — a live run of `createIssue` would
+ * leave real issues behind, and one of `closeIssue('check')` would only prove
+ * that no such issue exists.
  */
 async function liveFindings(connector: Connector, options: CheckOptions): Promise<CheckFinding[]> {
   if (!options.live) return []
@@ -329,19 +352,24 @@ async function liveFindings(connector: Connector, options: CheckOptions): Promis
     }
   }
 
-  for (const action of connector.actions.filter((entry) => entry.idempotent === true)) {
-    const args = Object.fromEntries(
-      (action.inputs ?? []).map((input) => [input.key, sampleArg(input)])
-    )
+  for (const action of connector.actions.filter(liveRunnable)) {
     try {
-      await runAction(connector, action.type, args, {
+      await runAction(connector, action.type, action.sample ?? {}, {
         config: options.config ?? {},
         ...(options.now && { now: options.now })
       })
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
+      // A service can refuse for reasons that are not the connector's fault —
+      // an empty sandbox, a rate limit — so only a refusal to let it in at all
+      // is graded as broken.
       found.push(
-        finding('error', 'live-action-failed', `action ${action.type}`, `threw: ${reason}`)
+        finding(
+          AUTH_FAILURE.test(reason) ? 'error' : 'warn',
+          'live-action-failed',
+          `action ${action.type}`,
+          `threw: ${reason}`
+        )
       )
     }
   }

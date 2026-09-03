@@ -312,6 +312,8 @@ interface ActionBase {
   idempotent?: boolean
   inputs?: ActionInputField[]
   outputs?: ActionOutputField[]
+  // Arguments a live check may call this action with: real identifiers in the sandbox, never placeholders.
+  sample?: Record<string, string>
 }
 
 /**

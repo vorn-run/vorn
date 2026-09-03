@@ -119,6 +119,81 @@ describe('what a live check does to a real service', () => {
     expect(failure?.message).toContain('403 from Acme')
   })
 
+  it('skips an action whose arguments it would have to invent', async () => {
+    const run = vi.fn(() => ({ ok: true }))
+    const byId: ActionDefinition = {
+      ...read,
+      inputs: [{ key: 'id', label: 'Id', description: 'Which one', required: true }],
+      run
+    }
+    const findings = await live({ actions: [byId] })
+
+    // Calling it with a made-up id would only prove the id does not exist.
+    expect(run).not.toHaveBeenCalled()
+    expect(findings.map((item) => item.code)).not.toContain('live-action-failed')
+  })
+
+  it('runs it with the arguments the author named, exactly', async () => {
+    const run = vi.fn(() => ({ ok: true }))
+    const byId: ActionDefinition = {
+      ...read,
+      inputs: [{ key: 'id', label: 'Id', description: 'Which one', required: true }],
+      sample: { id: 'ticket-42' },
+      run
+    }
+    await live({ actions: [byId] })
+
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls[0][0]).toEqual({ id: 'ticket-42' })
+  })
+
+  it('runs one whose arguments are all optional, with none of them', async () => {
+    const run = vi.fn(() => ({ ok: true }))
+    const listing: ActionDefinition = {
+      ...read,
+      inputs: [{ key: 'limit', label: 'Limit', description: 'How many', type: 'number' }],
+      run
+    }
+    await live({ actions: [listing] })
+
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls[0][0]).toEqual({})
+  })
+})
+
+describe('how a live failure is graded', () => {
+  const failing = (message: string) =>
+    live({
+      actions: [
+        {
+          ...read,
+          run: () => {
+            throw new Error(message)
+          }
+        }
+      ]
+    })
+
+  it('calls a refusal to let the connector in broken', async () => {
+    for (const message of [
+      '401 Unauthorized',
+      'HTTP 403',
+      'unauthenticated request',
+      'Forbidden',
+      'invalid token'
+    ]) {
+      const findings = await failing(message)
+      expect(findings.find((item) => item.code === 'live-action-failed')?.level).toBe('error')
+    }
+  })
+
+  it('calls anything else advice, because the sandbox is not the connector', async () => {
+    for (const message of ['429 Too Many Requests', 'no records found', '500 from Acme']) {
+      const findings = await failing(message)
+      expect(findings.find((item) => item.code === 'live-action-failed')?.level).toBe('warn')
+    }
+  })
+
   it('runs no action at all when the check was not asked to go live', async () => {
     const run = vi.fn(() => ({ ok: true }))
     await checkConnector(connector({ actions: [{ ...read, run }] }))
