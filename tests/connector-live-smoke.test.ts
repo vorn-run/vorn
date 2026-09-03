@@ -53,7 +53,7 @@ describe('a live check, before it trusts anything else', () => {
   })
 
   it('stops after a failed preflight, rather than blaming every action for it', async () => {
-    const run = vi.fn(() => ({ ok: true }))
+    const run = vi.fn((_args: Record<string, unknown>) => ({ ok: true }))
     const findings = await live({
       preflight: () => ({ ok: false }),
       actions: [{ ...read, run }]
@@ -71,7 +71,7 @@ describe('a live check, before it trusts anything else', () => {
 
 describe('what a live check does to a real service', () => {
   it('runs an action that says repeating it is safe', async () => {
-    const run = vi.fn(() => ({ ok: true }))
+    const run = vi.fn((_args: Record<string, unknown>) => ({ ok: true }))
     await live({ actions: [{ ...read, run }] })
     expect(run).toHaveBeenCalled()
   })
@@ -120,7 +120,7 @@ describe('what a live check does to a real service', () => {
   })
 
   it('skips an action whose arguments it would have to invent', async () => {
-    const run = vi.fn(() => ({ ok: true }))
+    const run = vi.fn((_args: Record<string, unknown>) => ({ ok: true }))
     const byId: ActionDefinition = {
       ...read,
       inputs: [{ key: 'id', label: 'Id', description: 'Which one', required: true }],
@@ -134,7 +134,7 @@ describe('what a live check does to a real service', () => {
   })
 
   it('runs it with the arguments the author named, exactly', async () => {
-    const run = vi.fn(() => ({ ok: true }))
+    const run = vi.fn((_args: Record<string, unknown>) => ({ ok: true }))
     const byId: ActionDefinition = {
       ...read,
       inputs: [{ key: 'id', label: 'Id', description: 'Which one', required: true }],
@@ -148,7 +148,7 @@ describe('what a live check does to a real service', () => {
   })
 
   it('runs one whose arguments are all optional, with none of them', async () => {
-    const run = vi.fn(() => ({ ok: true }))
+    const run = vi.fn((_args: Record<string, unknown>) => ({ ok: true }))
     const listing: ActionDefinition = {
       ...read,
       inputs: [{ key: 'limit', label: 'Limit', description: 'How many', type: 'number' }],
@@ -195,7 +195,7 @@ describe('how a live failure is graded', () => {
   })
 
   it('runs no action at all when the check was not asked to go live', async () => {
-    const run = vi.fn(() => ({ ok: true }))
+    const run = vi.fn((_args: Record<string, unknown>) => ({ ok: true }))
     await checkConnector(connector({ actions: [{ ...read, run }] }))
     expect(run).not.toHaveBeenCalled()
   })

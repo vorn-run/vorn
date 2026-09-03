@@ -156,7 +156,9 @@ describe('writing the receipt from the command line', () => {
     const base: CliDeps = {
       load: async () => ({ default: clean() }),
       write: (line) => lines.push(line),
-      writeFile: (path, contents) => written.push({ path, contents }),
+      writeFile: async (path, contents) => {
+        written.push({ path, contents })
+      },
       ...over
     }
     return { deps: base, lines, written }

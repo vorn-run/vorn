@@ -494,8 +494,10 @@ describe('checkConnector', () => {
 
   it('renders findings for a terminal', () => {
     expect(
-      formatFindings([{ level: 'error', code: 'x', target: 'trigger a', message: 'broke' }])
-    ).toBe('error  trigger a: broke [x]')
+      formatFindings([
+        { level: 'error', code: 'poll-failed', target: 'trigger a', message: 'broke' }
+      ])
+    ).toBe('error  trigger a: broke [poll-failed]')
     expect(formatFindings([])).toBe('')
   })
 })

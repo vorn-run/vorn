@@ -449,7 +449,7 @@ async function checkPollBehaviour(
 
   const attempt = async (
     cursor: string | undefined,
-    code: string,
+    code: CheckCode,
     what: string
   ): Promise<PollPage | CheckFinding> => {
     try {
