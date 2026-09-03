@@ -5,6 +5,7 @@ import {
   defineConnector,
   withMockHttp
 } from '../packages/connector-sdk/src/index'
+import { mockConfig } from '../packages/connector-sdk/src/check'
 import type { ActionDefinition } from '../packages/connector-sdk/src/types'
 
 /** An action that talks to a service, the way a real connector's would. */
@@ -163,6 +164,36 @@ describe('a check that runs every action against served HTTP', () => {
     })
     const escape = findings.find((item) => item.code === 'mock-network-escape')
     expect(escape?.level).toBe('error')
+  })
+
+  it('fills config from defaults and placeholders, so a templated URL resolves', async () => {
+    const declared: ActionDefinition = {
+      type: 'create',
+      label: 'Create',
+      request: {
+        method: 'POST',
+        url: '{{config.baseUrl}}/v1/items',
+        headers: { authorization: 'Bearer {{config.apiToken}}' }
+      }
+    }
+    const sdk = defineConnector({
+      id: 'acme',
+      name: 'Acme',
+      config: [
+        { key: 'apiToken', label: 'Token', required: true, secret: true },
+        { key: 'baseUrl', label: 'Base URL', default: 'https://api.example.com' }
+      ],
+      actions: [declared]
+    })
+    expect(mockConfig(sdk)).toEqual({
+      apiToken: 'mock-apiToken',
+      baseUrl: 'https://api.example.com'
+    })
+    const findings = await checkConnector(sdk, {
+      mock: true,
+      mockRoutes: [{ url: '/v1/items', body: { id: 'i-1' } }]
+    })
+    expect(codes(findings)).not.toContain('mock-action-failed')
   })
 
   it('answers everything when no routes were named, so a bare run still proves it runs', async () => {

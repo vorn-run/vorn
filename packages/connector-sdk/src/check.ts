@@ -274,8 +274,18 @@ function sampleArg(input: ActionInputField): string {
  * the service returns, so a throw is the connector's. Against the bare `{}`
  * default it is a warning, because an empty object is not a real reply.
  */
+// A mock run needs every config field to resolve a template: defaults where declared, placeholders elsewhere.
+export function mockConfig(connector: Connector): ConnectorConfig {
+  const config: ConnectorConfig = {}
+  for (const field of connector.config) {
+    config[field.key] = field.default ?? `mock-${field.key}`
+  }
+  return config
+}
+
 async function mockFindings(connector: Connector, options: CheckOptions): Promise<CheckFinding[]> {
   if (!options.mock) return []
+  const config = options.config ?? mockConfig(connector)
   const routes = options.mockRoutes ?? [{ url: /.*/ }]
   const level = options.mockRoutes?.length ? 'error' : 'warn'
   const found: CheckFinding[] = []
@@ -288,7 +298,7 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
     const { result: thrown, calls } = await withMockHttp(routes, async () => {
       try {
         await runAction(connector, action.type, args, {
-          config: options.config ?? {},
+          config,
           ...(options.now && { now: options.now })
         })
         return undefined
