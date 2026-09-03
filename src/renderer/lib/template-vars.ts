@@ -422,6 +422,19 @@ function walkPath(root: unknown, path: string[]): unknown {
 /** Turn a resolved value into the string that gets substituted into the
  *  template. Scalars stringify directly; objects/arrays get JSON-serialized
  *  so downstream prompts / args still receive something meaningful. */
+/**
+ * What an input answers to on its own, before any dotted path.
+ *
+ * A resource-backed input holds the whole thing it stands for — a project, an
+ * issue — and the bare `{{inputs.x}}` is asking for the one someone picked, not
+ * for its JSON. The name is that answer; the rest stays reachable by path.
+ */
+function namedValue(val: unknown): unknown {
+  if (val === null || typeof val !== 'object' || Array.isArray(val)) return val
+  const name = (val as { name?: unknown }).name
+  return typeof name === 'string' ? name : val
+}
+
 function stringifyResolved(val: unknown): string {
   if (val == null) return ''
   if (typeof val === 'string') {
@@ -478,7 +491,7 @@ export function resolveTemplateVars(
       const [key, ...keyPath] = rest
       const value = context.inputs[key]
       if (value === undefined) return ''
-      if (keyPath.length === 0) return stringifyResolved(value)
+      if (keyPath.length === 0) return stringifyResolved(namedValue(value))
       return stringifyResolved(walkPath(value, keyPath))
     }
     if (ns === 'context' && rest.length === 1 && context) {

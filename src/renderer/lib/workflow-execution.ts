@@ -16,6 +16,8 @@ import {
   HttpRequestConfig,
   TaskConfig,
   ConnectorItemContext,
+  ProjectConfig,
+  WorkflowInputDef,
   getProjectRemoteHostId
 } from '../../shared/types'
 import {
@@ -456,6 +458,40 @@ function updateNodeState(
   if (state) {
     Object.assign(state, updates)
   }
+}
+
+/**
+ * A project input, carrying the directory it named.
+ *
+ * The run dialog stores the project's name, because that is what a person
+ * picks — but a step needs the path, and no template could reach it. Both
+ * travel: `{{inputs.repo}}` is still the name, `{{inputs.repo.path}}` the
+ * directory. Already-enriched values pass through, so a re-run of a stored run
+ * does not wrap one twice.
+ */
+export function withProjectInputs(
+  inputs: Record<string, unknown> | undefined,
+  defs: WorkflowInputDef[],
+  projects: ProjectConfig[]
+): Record<string, unknown> | undefined {
+  if (!inputs) return inputs
+  const named = defs.filter((def) => def.type === 'project').map((def) => def.key)
+  let enriched: Record<string, unknown> | undefined
+  for (const key of named) {
+    const value = inputs[key]
+    if (typeof value !== 'string' || value === '') continue
+    const project = projects.find((candidate) => candidate.name === value)
+    if (!project) continue
+    enriched = { ...(enriched ?? inputs), [key]: { name: project.name, path: project.path } }
+  }
+  return enriched ?? inputs
+}
+
+/** What a manual trigger asks for before the run starts. */
+function declaredInputs(workflow: WorkflowDefinition): WorkflowInputDef[] {
+  const trigger = workflow.nodes.find((node) => node.type === 'trigger')
+  const config = trigger?.config as { triggerType?: string; inputs?: WorkflowInputDef[] } | undefined
+  return config?.triggerType === 'manual' ? (config.inputs ?? []) : []
 }
 
 /**
@@ -1478,9 +1514,19 @@ export function skipEntryPoints(
 
 export async function executeWorkflow(
   workflow: WorkflowDefinition,
-  context?: WorkflowExecutionContext,
+  supplied?: WorkflowExecutionContext,
   options?: ExecuteWorkflowOptions
 ): Promise<WorkflowExecution> {
+  // Done once, here, because every route in — the run dialog, the scheduler,
+  // the MCP server — arrives through this function.
+  const inputs = withProjectInputs(
+    supplied?.inputs,
+    declaredInputs(workflow),
+    useAppStore.getState().config?.projects ?? []
+  )
+  const context =
+    supplied && inputs !== supplied.inputs ? { ...supplied, inputs } : supplied
+
   // connectorPoll workflows cannot be run directly from the renderer — the
   // scheduler owns the poll + fan-out. Route user-initiated "Run" clicks
   // through workflow:runManual. Scheduler-originated runs already carry a
