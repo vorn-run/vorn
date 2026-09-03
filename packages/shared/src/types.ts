@@ -416,6 +416,16 @@ export interface ConnectorStatusOption {
 
 export interface ConnectorManifest {
   auth: ConnectorConfigField[]
+  /**
+   * Name the connection after a git repository, detected from the project.
+   *
+   * The add-connection form then offers the owner/repo of whichever project is
+   * selected, falling back to typing them in. Declared rather than inferred from
+   * the connector's id, which is what it used to be -- so a connector that
+   * arrives as a pack can ask for it, and the app has no list of which services
+   * happen to live in git.
+   */
+  detectRepo?: boolean
   taskFilters?: ConnectorConfigField[]
   statusMapping?: ConnectorStatusOption[]
   triggers?: ConnectorTriggerDef[]

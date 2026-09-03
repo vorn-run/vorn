@@ -45,7 +45,10 @@ export function AddConnectionForm({
 }) {
   const projects = useAppStore((s) => s.config?.projects || [])
   const manifest = connector.manifest
-  const usesRepoDetect = connector.id === 'github'
+  // Asked for by the connector rather than decided here. This was a test on the
+  // id of the one built-in that wanted it; a connector that ships as a pack
+  // could not have it at all, which made the built-in irreplaceable.
+  const usesRepoDetect = manifest.detectRepo === true
   // An MCP connection is either a connector package that describes itself or
   // a raw server the user wires up by hand. The first covers most cases, so
   // it leads.

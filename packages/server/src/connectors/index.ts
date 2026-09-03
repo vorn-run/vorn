@@ -1,5 +1,4 @@
 export { connectorRegistry } from './registry'
-export { githubConnector } from './github'
 export {
   mcpConnector,
   invokeMcpTool,

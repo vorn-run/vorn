@@ -162,7 +162,6 @@ import {
   syncImplicitConnection,
   type ImplicitConnectionDeps
 } from './connectors/implicit-connection'
-import { GH_SOURCE } from './connectors/gh-cli'
 import { probeAuth, type BorrowSource } from './connectors/auth-rung'
 import { resolveConnectorAuth } from './connectors/connector-auth'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
@@ -247,9 +246,7 @@ function unusableSource(source: ConnectorPackSource): string {
   }
 }
 
-// The built-in GitHub connector predates rungs and declares its auth beside its client.
 async function authForConnector(connectorId: string): Promise<BorrowSource> {
-  if (connectorId === 'github') return GH_SOURCE
   return (await resolveConnectorAuth(connectorId)) ?? { auth: undefined, declared: [] }
 }
 

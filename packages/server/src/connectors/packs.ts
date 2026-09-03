@@ -109,7 +109,7 @@ function requireSafeId(id: string): void {
 }
 
 /** Ids the app already answers to; a pack claiming one would shadow it in every list. */
-const RESERVED_IDS = new Set(['mcp', 'http', 'github', 'ado', 'kusto'])
+const RESERVED_IDS = new Set(['mcp', 'http', 'ado', 'kusto'])
 
 function requireUnreservedId(id: string): void {
   if (RESERVED_IDS.has(id.toLowerCase())) {
