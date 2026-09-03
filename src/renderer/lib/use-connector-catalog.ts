@@ -17,6 +17,8 @@ const EMPTY: CatalogSnapshot = { items: [], templates: [], mcpServers: [] }
 
 let cache: CatalogSnapshot | undefined
 let inFlight: Promise<CatalogSnapshot> | undefined
+// Bumped by a refresh, so a read that started before it cannot overwrite what the refresh brought back.
+let generation = 0
 const listeners = new Set<(snapshot: CatalogSnapshot) => void>()
 
 // Keep what came back and tell everyone; the one place a snapshot is shaped.
@@ -36,8 +38,10 @@ function publish(raw: Partial<CatalogSnapshot> | undefined): CatalogSnapshot {
 async function load(): Promise<CatalogSnapshot> {
   if (cache) return cache
   if (inFlight) return inFlight
+  const started = generation
   inFlight = Promise.resolve(window.api?.listConnectorCatalog?.())
-    .then(publish)
+    // No answer is a build that cannot ask yet, not an empty catalog: nothing is kept.
+    .then((raw) => (raw && started === generation ? publish(raw) : (cache ?? EMPTY)))
     .catch(() => EMPTY)
     .finally(() => {
       inFlight = undefined
@@ -68,6 +72,7 @@ export function useConnectorCatalog(enabled: boolean = true): CatalogSnapshot {
 // "Check now": ask the publisher again rather than re-read the copy this process holds.
 export async function refreshConnectorCatalog(): Promise<CatalogSnapshot> {
   cache = undefined
+  generation += 1
   const fetched = await Promise.resolve(window.api?.refreshConnectorCatalog?.()).catch(
     () => undefined
   )

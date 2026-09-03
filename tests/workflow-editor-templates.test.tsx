@@ -330,7 +330,7 @@ describe('a requirement answered from the panel', () => {
     expect(api.installConnectorPack).not.toHaveBeenCalled()
   })
 
-  // What the file knew must survive meeting the step it describes: the canvas can only see that the field is empty,.
+  // What the file knew must survive meeting the step it describes; the canvas only sees an empty field.
   it('keeps the connector an import named, on the step the canvas also sees', async () => {
     api.listConnectorCatalog.mockResolvedValue({
       items: [SLACK_CATALOG],

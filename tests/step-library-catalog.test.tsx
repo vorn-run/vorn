@@ -49,7 +49,7 @@ const DISCORD: ConnectorCatalogItem = {
 // Nothing vouched for this one; it is findable but not offered first.
 delete (DISCORD as { verified?: unknown }).verified
 
-// The connector this machine already has a connection to must not be offered twice — once as a live action, once as.
+// A connector this machine is connected to is offered once, as a live action, never also as an install.
 const PACKDEMO: ConnectorCatalogItem = {
   ...SLACK,
   id: 'packdemo',
