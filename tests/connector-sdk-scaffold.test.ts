@@ -36,7 +36,9 @@ describe('the files a new connector starts as', () => {
     expect(pkg.name).toBe('vorn-connector-acme-tickets')
     expect(pkg.scripts.check).toBe('vorn-connector check src/index.ts')
     expect(pkg.scripts.pack).toBe('vorn-connector pack src/index.ts')
-    expect(pkg.dependencies['@vornrun/connector-sdk']).toMatch(/^\^/)
+    // Names a prerelease because that is all there is: a bare `^0.7.0` matches
+    // no prerelease, so a scaffold pinned to it would install nothing.
+    expect(pkg.dependencies['@vornrun/connector-sdk']).toBe('^0.7.0-beta.8')
     expect(pkg.vorn.keywords).toContain('acme-tickets')
   })
 

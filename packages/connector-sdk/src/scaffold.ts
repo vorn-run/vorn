@@ -16,10 +16,11 @@ const ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 /**
  * What a scaffolded connector depends on.
  *
- * A range rather than the exact current version: a connector generated today
- * should still build against the next patch. Bumped with the SDK's own major.
+ * Names a prerelease on purpose. Only `0.7.0-beta.x` is published, and a bare
+ * `^0.7.0` matches no prerelease at all — a scaffold pinned to it installs
+ * nothing. Bumped with the SDK's own version until a stable one exists.
  */
-const SDK_DEPENDENCY_RANGE = '^0.7.0'
+const SDK_DEPENDENCY_RANGE = '^0.7.0-beta.8'
 
 export interface ScaffoldOptions {
   id: string
