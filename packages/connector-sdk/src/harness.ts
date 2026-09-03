@@ -145,7 +145,8 @@ export async function withMockHttp<T>(
   const original = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    const method = (init?.method ?? 'GET').toUpperCase()
+    const own = typeof input === 'object' && 'method' in input ? input.method : undefined
+    const method = (init?.method ?? own ?? 'GET').toUpperCase()
     calls.push({
       method,
       url,

@@ -56,6 +56,13 @@ describe('serving a connector its HTTP in-process', () => {
     ).rejects.toThrow(/No mock route for POST https:\/\/acme.test\/api\/messages/)
   })
 
+  it('reads the method off a Request, not only off init', async () => {
+    const { calls } = await withMockHttp([{ url: '/api/messages', method: 'POST' }], () =>
+      fetch(new Request('https://acme.test/api/messages', { method: 'POST' }))
+    )
+    expect(calls[0].method).toBe('POST')
+  })
+
   it('serves the status a route names, so error handling can be exercised', async () => {
     const failing: ActionDefinition = {
       ...post,

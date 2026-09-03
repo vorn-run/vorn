@@ -179,10 +179,15 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       const { findings } = run
       const errors = findings.filter((item) => item.level === 'error')
       if (findings.length > 0) deps.write(formatFindings(findings))
-      if (flags.receipt !== undefined && run.receipt) {
-        const write = deps.writeFile ?? ((path, contents) => writeFile(path, contents))
-        await write(flags.receipt, `${JSON.stringify(run.receipt, null, 2)}\n`)
-        deps.write(`Verified ${run.receipt.checks.join(', ')} — wrote ${flags.receipt}`)
+      if (flags.receipt !== undefined) {
+        if (run.receipt) {
+          const write = deps.writeFile ?? ((path, contents) => writeFile(path, contents))
+          await write(flags.receipt, `${JSON.stringify(run.receipt, null, 2)}\n`)
+          deps.write(`Verified ${run.receipt.checks.join(', ')} — wrote ${flags.receipt}`)
+        } else {
+          deps.write(`No receipt written: nothing could be vouched for`)
+          if (errors.length === 0) return 1
+        }
       }
       deps.write(
         errors.length > 0

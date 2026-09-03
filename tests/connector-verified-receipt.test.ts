@@ -207,6 +207,20 @@ describe('writing the receipt from the command line', () => {
     expect(written).toHaveLength(0)
   })
 
+  it('says so, and fails, when a receipt was asked for but nothing could be vouched for', async () => {
+    const hollow = defineConnector({
+      id: 'hollow',
+      name: 'Hollow',
+      actions: [{ type: 'ping', label: 'Ping', run: () => ({}) }]
+    })
+    const { deps: cli, lines, written } = deps({ load: async () => ({ default: hollow }) })
+
+    const code = await runCli(['check', './acme.js', '--receipt', 'verified.json'], cli)
+    expect(written).toHaveLength(0)
+    expect(lines.join('\n')).toContain('No receipt written')
+    expect(code).toBe(1)
+  })
+
   it('runs the package gates too when asked to mock, so one command is the whole gate', async () => {
     const bundle = vi.fn(async () => ({ code: '', external: [] }))
     const { deps: cli } = deps({ bundle, cwd: process.cwd() })
