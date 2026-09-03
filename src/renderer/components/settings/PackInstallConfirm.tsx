@@ -1,4 +1,4 @@
-import type { ConnectorPackSummary } from '../../../shared/types'
+import { declaredBorrows, type ConnectorPackSummary } from '../../../shared/types'
 import { ConnectorIcon } from '../ConnectorIcon'
 
 /**
@@ -21,10 +21,7 @@ export function PackInstallConfirm({
 }) {
   const replacing = preview.installedVersion && preview.installedVersion !== preview.version
   const required = (preview.env ?? []).filter((entry) => entry.required)
-  const declared = new Set((preview.env ?? []).map((entry) => entry.name.toUpperCase()))
-  const borrows = (preview.auth?.borrow?.env ?? []).filter((name) =>
-    declared.has(name.toUpperCase())
-  )
+  const borrows = declaredBorrows(preview.auth, preview.env ?? [])
 
   return (
     <div className="border border-white/[0.1] rounded-sm bg-white/[0.02] p-3">

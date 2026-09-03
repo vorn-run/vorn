@@ -1,4 +1,5 @@
 import type {
+  AuthProbeReport,
   CreateTerminalPayload,
   RestoredSession,
   TerminalSession,
@@ -915,7 +916,7 @@ export interface RequestMethods {
    */
   'connector:probeAuth': {
     params: string
-    result: { ok: boolean | null; identity?: string; message?: string; installHint?: string }
+    result: AuthProbeReport
   }
 
   // ─── Agent-controllable browser pane ──────────────────────────

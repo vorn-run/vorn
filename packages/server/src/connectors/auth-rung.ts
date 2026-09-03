@@ -1,45 +1,25 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { SdkConnectorAuth } from '@vornrun/shared/types'
+import type { AuthProbeReport, SdkConnectorAuth } from '@vornrun/shared/types'
+import { declaredBorrows } from '@vornrun/shared/types'
 import { resolveExecutable } from '../resolve-executable'
 import {
-  SENSITIVE_ENV_PREFIXES,
   getEnvPassthrough,
   getSafeEnv,
-  isAbsolutelyStrippedEnvName
+  isAbsolutelyStrippedEnvName,
+  isSensitiveEnvName
 } from '../process-utils'
+import { stripAnsi } from '../ansi-strip'
 import log from '../logger'
 
-/**
- * The rung a connector declared, acted on.
- *
- * A `cli` connector borrows a login that already works on the machine, which
- * means two questions the app can answer without asking anyone to paste
- * anything: is that tool signed in, and what does it hand over. Both were
- * previously answered for `gh` alone, in two places; this is the one
- * implementation every connector's declaration drives.
- */
+// The rung a connector declared, acted on: is the borrowed tool signed in, and what does it hand over.
 
 const execFileAsync = promisify(execFile)
 
 /** Long enough for a cold CLI, short enough that a form does not hang on it. */
 const PROBE_TIMEOUT_MS = 5_000
 
-/**
- * What asking the borrowed tool answered.
- *
- * `ok: null` is "nothing to ask" — a rung whose readiness this probe cannot
- * speak to — kept distinct from `false` so a key-rung connector is never
- * reported as signed out.
- */
-export interface AuthProbeReport {
-  ok: boolean | null
-  /** Who the tool says you are, when its output names anyone. */
-  identity?: string
-  message?: string
-  /** How to get the tool, when it is the tool that is missing. */
-  installHint?: string
-}
+export type { AuthProbeReport }
 
 /** The impure edges, so a test can answer for a CLI that is not installed here. */
 export interface AuthProbeDeps {
@@ -61,12 +41,7 @@ function deps(overrides: AuthProbeDeps): Required<AuthProbeDeps> {
   }
 }
 
-/**
- * Where to get a tool, for the tools we can say something useful about.
- *
- * A generic sentence is the honest answer for anything else: guessing a
- * package name reads as authority and sends people to install the wrong thing.
- */
+// Only the tools we can say something useful about; a generic sentence is the honest answer otherwise.
 const KNOWN_HINTS: Record<string, () => string> = {
   gh: () => {
     switch (process.platform) {
@@ -96,47 +71,28 @@ export function installHintFor(command: string): string {
   return `Install \`${command}\` and make sure it is on your PATH.`
 }
 
-/**
- * The variables a connector is allowed to borrow from this machine.
- *
- * Naming a variable in `borrow.env` walks around `getSafeEnv()`, so the ask is
- * held to two things it cannot talk its way past: the connector must declare
- * the variable in its own manifest — a package can only reach for what it
- * openly reads — and no ask reaches a name that is stripped for everyone. A
- * name failing either is dropped and said out loud, because silently handing a
- * connector less than it asked for reads as the service being down.
- */
-// Auth blocks the app itself wrote; a manifest can never be one, so only these may name a credential.
-const FIRST_PARTY = new WeakSet<SdkConnectorAuth>()
-
-export function markFirstParty<T extends SdkConnectorAuth>(auth: T): T {
-  FIRST_PARTY.add(auth)
-  return auth
-}
-
-function isCredentialName(name: string): boolean {
-  const upper = name.toUpperCase()
-  return !getEnvPassthrough().has(upper) && SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))
-}
-
-export function borrowableNames(
-  auth: SdkConnectorAuth | undefined,
+/** The borrow a connection may act on: which auth block, what it declares reading, and whether the app wrote it. */
+export interface BorrowSource {
+  auth: SdkConnectorAuth | undefined
   declared: readonly string[]
-): string[] {
-  const asked = auth?.borrow?.env ?? []
-  const declaredUpper = new Set(declared.map((name) => name.toUpperCase()))
-  const trusted = auth !== undefined && FIRST_PARTY.has(auth)
+  trusted?: boolean
+}
+
+// Held to three things a manifest cannot talk past: declared, not stripped for everyone, not a credential name.
+export function borrowableNames(source: BorrowSource): string[] {
   const allowed: string[] = []
-  for (const name of asked) {
+  const declared = source.declared.map((name) => ({ name }))
+  const passthrough = getEnvPassthrough()
+  for (const name of source.auth?.borrow?.env ?? []) {
     if (isAbsolutelyStrippedEnvName(name)) {
       log.warn(`[auth] refused to borrow ${name}: it is stripped from every environment`)
       continue
     }
-    if (!declaredUpper.has(name.toUpperCase())) {
+    if (!declaredBorrows(source.auth, declared).includes(name)) {
       log.warn(`[auth] refused to borrow ${name}: the connector does not declare reading it`)
       continue
     }
-    if (!trusted && isCredentialName(name)) {
+    if (!source.trusted && isSensitiveEnvName(name, passthrough)) {
       log.warn(`[auth] refused to borrow ${name}: a connector may not ask for a credential by name`)
       continue
     }
@@ -145,19 +101,13 @@ export function borrowableNames(
   return allowed
 }
 
-/**
- * The environment a borrowed tool is invoked with.
- *
- * `getSafeEnv()` strips tokens on purpose, so a connector cannot read
- * credentials meant for something else. Only the names it may borrow are put
- * back, and only when this machine actually has them.
- */
+// The safe env plus only the names this source may borrow, and only when the machine has them.
 export function borrowedEnv(
-  auth: SdkConnectorAuth | undefined,
-  declared: readonly string[] = []
+  source: BorrowSource,
+  names = borrowableNames(source)
 ): Record<string, string> {
   const env = getSafeEnv()
-  for (const name of borrowableNames(auth, declared)) {
+  for (const name of names) {
     const value = process.env[name]
     if (value) env[name] = value
     else delete env[name]
@@ -165,37 +115,18 @@ export function borrowedEnv(
   return env
 }
 
-/** Colour codes are for a terminal; an identity read out of them is not. */
-const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g')
-
 /** Only a phrase that names somebody counts, never whatever came first. */
 const NAMED = [/\baccount\s+(\S+)/i, /\bas\s+(\S+)/i]
 
-/**
- * Words that turn the rest of a line into a denial.
- *
- * `could not authenticate as anonymous` names nobody, and a lookbehind on the
- * word before would not catch it — the whole run-up to the phrase is what says
- * whether it is a claim or a refusal.
- */
+// The whole run-up to the phrase on its line says whether it is a claim or a refusal.
 const NEGATION = /\b(not|cannot|can't|couldn't|failed|unable|denied|expired|invalid)\b/i
 
-/**
- * The account a tool names, when its output names one at all.
- *
- * Deliberately narrow. An earlier version fell back to the first line of
- * output, which is a guess about a stranger's format: `gh auth token` prints a
- * credential, `az account show` prints `{`, and both would have been rendered
- * as who you are. No phrase, no identity — the row still says you are signed
- * in, which is the part the probe actually established.
- */
+// Deliberately narrow: no named phrase, no identity, since a first line can be a token or a brace.
 export function identityFrom(output: string): string | undefined {
-  const text = output.replace(ANSI, '')
+  const text = stripAnsi(output)
   for (const pattern of NAMED) {
     const named = pattern.exec(text)
     if (!named) continue
-    // Only what leads up to the phrase on its own line: a denial earlier in the
-    // output says nothing about this claim.
     const lineStart = text.lastIndexOf('\n', named.index) + 1
     if (NEGATION.test(text.slice(lineStart, named.index))) continue
     return named[1].replace(/[.,)]+$/, '')
@@ -208,13 +139,7 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message.split('\n')[0] : String(error)
 }
 
-/**
- * What to tell someone to run, derived from what they declared asking.
- *
- * A status command is conventionally one word away from its login, so the
- * probe's own args name the fix; anything else falls back to the tool itself
- * rather than inventing a subcommand it may not have.
- */
+// A status command is one word from its login; anything else names the tool rather than inventing a subcommand.
 export function signInCommand(auth: SdkConnectorAuth): string {
   const command = auth.probe?.command ?? ''
   const args = auth.probe?.args ?? []
@@ -223,18 +148,12 @@ export function signInCommand(auth: SdkConnectorAuth): string {
   return command
 }
 
-/**
- * Ask the tool a `cli` connector borrows whether it is signed in.
- *
- * Answers `ok: null` for every other rung rather than guessing: a key is
- * checked by preflight against the service itself, and `none` has nothing to
- * check at all.
- */
+// Answers ok:null for every rung but cli: a key is checked by preflight, and none has nothing to check.
 export async function probeAuth(
-  auth: SdkConnectorAuth | undefined,
-  declared: readonly string[] = [],
+  source: BorrowSource,
   overrides: AuthProbeDeps = {}
 ): Promise<AuthProbeReport> {
+  const { auth } = source
   if (auth?.rung === 'none') {
     return { ok: true, message: 'Nothing to sign in to — installing it is the whole setup.' }
   }
@@ -254,15 +173,13 @@ export async function probeAuth(
   try {
     const result = await run(resolved, auth.probe.args ?? [], {
       timeout: PROBE_TIMEOUT_MS,
-      env: borrowedEnv(auth, declared)
+      env: borrowedEnv(source)
     })
     // Several CLIs write their status to stderr; both streams are the answer.
     const identity = identityFrom(`${result.stdout}\n${result.stderr}`)
     return { ok: true, ...(identity && { identity }) }
   } catch (error) {
-    // A non-zero exit from a status command is the signed-out answer, not a
-    // fault to surface: the message names the sign-in a person can go run.
-    // Logged without either stream, which a status command can fill with one.
+    // A non-zero exit is the signed-out answer; logged without the streams, which can hold a token.
     log.warn(`[auth] ${command} reported no session: ${messageOf(error)}`)
     return {
       ok: false,
@@ -271,20 +188,14 @@ export async function probeAuth(
   }
 }
 
-/**
- * The variables a `cli` connector's child is started with.
- *
- * A name already set in the environment is passed through; anything left is
- * filled from the token command, run fresh at spawn so no credential is ever
- * written to the connection. A token command with nothing to fill is not run.
- */
+// What a cli connector's child is started with: set names pass through, the token is fetched fresh at spawn.
 export async function borrowedSecrets(
-  auth: SdkConnectorAuth | undefined,
-  declared: readonly string[] = [],
+  source: BorrowSource,
   overrides: AuthProbeDeps = {}
 ): Promise<Record<string, string>> {
+  const { auth } = source
   if (auth?.rung !== 'cli') return {}
-  const names = borrowableNames(auth, declared)
+  const names = borrowableNames(source)
   if (names.length === 0) return {}
 
   const borrowed: Record<string, string> = {}
@@ -293,9 +204,7 @@ export async function borrowedSecrets(
     if (value) borrowed[name] = value
   }
 
-  // One variable receives the token, named by the connector or defaulting to
-  // the first it asked for. The rest of `borrow.env` are pass-throughs — a host
-  // or an account id filled with a token would authenticate against nothing.
+  // One variable receives the token; the rest of borrow.env are pass-throughs.
   const target = auth.borrow?.tokenEnv ?? names[0]
   const tokenArgs = auth.borrow?.tokenArgs
   const command = auth.probe?.command
@@ -309,14 +218,12 @@ export async function borrowedSecrets(
   try {
     const result = await run(resolved, tokenArgs, {
       timeout: PROBE_TIMEOUT_MS,
-      env: borrowedEnv(auth, declared)
+      env: borrowedEnv(source, names)
     })
     const token = result.stdout.trim()
     if (token) borrowed[target] = token
   } catch (error) {
-    // A tool that will not hand over a token leaves the child to fail with its
-    // own message, which names the service rather than this borrow. Said here
-    // so it is not silent — the message only, since the streams held a token.
+    // Said so it is not silent; the message only, since the streams held a token.
     log.warn(`[auth] ${command} could not hand over a token: ${messageOf(error)}`)
   }
   return borrowed

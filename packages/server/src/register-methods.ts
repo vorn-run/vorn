@@ -136,6 +136,7 @@ import {
   stopMcpClient,
   stopClientsForConnector,
   connectionIdsForConnector,
+  connectionsForConnector,
   inspectPack,
   installPack,
   removePack,
@@ -156,17 +157,16 @@ import {
 } from './connectors/http'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { listKeys, passwordFields } from './connectors/keys'
-import { describePack } from './connectors/packs'
+import { installedPack } from './connectors/packs'
 import {
-  isImplicit,
   syncImplicitConnection,
   type ImplicitConnectionDeps
 } from './connectors/implicit-connection'
-import { GH_AUTH, GH_DECLARED_ENV } from './connectors/gh-cli'
-import { probeAuth } from './connectors/auth-rung'
-import { resolveBorrow } from './connectors/connector-auth'
+import { GH_SOURCE } from './connectors/gh-cli'
+import { probeAuth, type BorrowSource } from './connectors/auth-rung'
+import { resolveConnectorAuth } from './connectors/connector-auth'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
-import type { ConnectorPackSource, SdkConnectorAuth } from '@vornrun/shared/types'
+import { isImplicitConnection, type ConnectorPackSource } from '@vornrun/shared/types'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
@@ -247,28 +247,10 @@ function unusableSource(source: ConnectorPackSource): string {
   }
 }
 
-/**
- * How a connector says it signs in, wherever it said so.
- *
- * A packaged connector declares it on the manifest that was installed; the
- * built-in GitHub one predates rungs and declares it beside its client. Both
- * answer the same shape, so the probe has one input rather than a branch.
- */
-async function authForConnector(
-  connectorId: string
-): Promise<{ auth: SdkConnectorAuth | undefined; declared: string[] }> {
-  if (connectorId === 'github') return { auth: GH_AUTH, declared: GH_DECLARED_ENV }
-  // Resolved the way a launch is: an installed pack first, then the checkout a
-  // developer is running, so a connector under development answers too.
-  const borrow = await resolveBorrow(connectorId)
-  if (borrow) return borrow
-  try {
-    return { auth: describePack(connectorId)?.auth, declared: [] }
-  } catch {
-    // Before the data directory resolves there is nowhere to look, which is
-    // the same answer as a connector that never declared anything.
-    return { auth: undefined, declared: [] }
-  }
+// The built-in GitHub connector predates rungs and declares its auth beside its client.
+async function authForConnector(connectorId: string): Promise<BorrowSource> {
+  if (connectorId === 'github') return GH_SOURCE
+  return (await resolveConnectorAuth(connectorId)) ?? { auth: undefined, declared: [] }
 }
 
 /**
@@ -392,10 +374,8 @@ function deleteConnectionRecord(id: string): void {
 
 /** The edges the implicit-connection rule acts through, wired to this server. */
 const implicitConnectionDeps: ImplicitConnectionDeps = {
-  describe: (connectorId) => describePack(connectorId),
   list: () => dbListSourceConnections(),
-  // The caller runs discovery once the connection exists, so the timer this
-  // would otherwise set would only repeat that work.
+  // The caller runs discovery once the connection exists.
   create: (params) => createConnectionRecord({ ...params, statusMapping: {} }, { discover: false }),
   remove: (connectionId) => {
     deleteConnectionRecord(connectionId)
@@ -407,27 +387,15 @@ const implicitConnectionDeps: ImplicitConnectionDeps = {
   }
 }
 
-/**
- * Give every connector that asks for nothing the connection it works through.
- *
- * Installing one connects it, but a pack installed before that rule existed
- * never got its connection — it would sit in the directory looking installed
- * while none of its actions could be picked. This is the same rule, applied
- * once at startup to what is already on disk.
- */
+// The install-time rule, applied once at startup to packs installed before it existed.
 export function reconcileImplicitConnections(): void {
   try {
     for (const pack of listInstalledPacks()) {
-      const before = connectionIdsForConnector(pack.id)
-      syncImplicitConnection(pack.id, implicitConnectionDeps, MCP_CONNECTOR_ID)
-      // Only what this pass added: an untouched connector has been discovered
-      // already, and rediscovering every pack at boot would spawn all of them.
-      for (const id of connectionIdsForConnector(pack.id)) {
-        if (before.includes(id)) continue
-        void runMcpDiscovery(id).catch((err) =>
-          log.warn(`[packs] discovery failed for ${id}: ${err}`)
-        )
-      }
+      const made = syncImplicitConnection(pack.id, pack, implicitConnectionDeps, MCP_CONNECTOR_ID)
+      if (!made) continue
+      void runMcpDiscovery(made.id).catch((err) =>
+        log.warn(`[packs] discovery failed for ${made.id}: ${err}`)
+      )
     }
   } catch (err) {
     log.warn(`[packs] could not reconcile implicit connections: ${err}`)
@@ -443,9 +411,13 @@ export function reconcileImplicitConnections(): void {
  */
 async function onPackChanged(connectorId: string): Promise<void> {
   await stopClientsForConnector(connectorId)
-  // Before the ids are read: a connector that just connected itself has tools
-  // to discover too, and one that just left has none worth asking for.
-  syncImplicitConnection(connectorId, implicitConnectionDeps, MCP_CONNECTOR_ID)
+  // Before the ids are read, so a connector that just connected itself is discovered too.
+  syncImplicitConnection(
+    connectorId,
+    installedPack(connectorId),
+    implicitConnectionDeps,
+    MCP_CONNECTOR_ID
+  )
   await Promise.allSettled(
     connectionIdsForConnector(connectorId).map((id) =>
       runMcpDiscovery(id).catch((err) => log.warn(`[packs] rediscovery failed for ${id}: ${err}`))
@@ -1545,10 +1517,8 @@ export function registerAllMethods(): void {
 
   registerMethod('connection:delete', (id) => {
     const conn = dbGetSourceConnection(id)
-    // A connection the app made for a connector that asks for nothing is not
-    // the user's to delete: it would come straight back on the next pack
-    // change, and the thing they mean to be rid of is the connector.
-    if (conn && isImplicit(conn)) {
+    // It would come straight back on the next pack change; the pack is the thing to remove.
+    if (conn && isImplicitConnection(conn)) {
       throw new Error(`${conn.name} came with its connector. Remove the pack instead.`)
     }
     deleteConnectionRecord(id)
@@ -1799,13 +1769,10 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('connector:removePack', async (id: string) => {
-    // Counted before the files go, so the answer can name what stops working.
-    // The connection the app made for this connector is not one of them: it
-    // goes with the pack, so counting it would overstate the cost by one.
-    const connections = connectionIdsForConnector(id).filter((connectionId) => {
-      const conn = dbGetSourceConnection(connectionId)
-      return conn ? !isImplicit(conn) : false
-    }).length
+    // Counted before the files go; the app's own connection goes with the pack, so it is not one.
+    const connections = connectionsForConnector(id).filter(
+      (conn) => !isImplicitConnection(conn)
+    ).length
     const result = await removePack(id, { onChanged: onPackChanged })
     if (result.ok) dbSignalChange()
     return { ...result, connections }
@@ -1939,11 +1906,13 @@ export function registerAllMethods(): void {
 
   registerMethod('connector:status', async () => {
     const results: Array<{ connectorId: string; authed: boolean; message?: string }> = []
-    for (const c of connectorRegistry.list()) {
-      const { auth, declared } = await authForConnector(c.id)
-      const report = await probeAuth(auth, declared)
-      // `null` is "nothing this probe can answer" — a key rung is checked
-      // against the service by preflight, not reported here as signed out.
+    const reports = await Promise.all(
+      connectorRegistry
+        .list()
+        .map(async (c) => ({ c, report: await probeAuth(await authForConnector(c.id)) }))
+    )
+    for (const { c, report } of reports) {
+      // null is "nothing this probe can answer", never reported as signed out.
       const authed = report.ok !== false
       const message = [report.message, report.installHint].filter(Boolean).join('\n')
       results.push({ connectorId: c.id, authed, ...(!authed && message && { message }) })
@@ -1951,17 +1920,10 @@ export function registerAllMethods(): void {
     return results
   })
 
-  /**
-   * Ask the tool a connector borrows whether it is signed in, and as whom.
-   *
-   * This is what lets a `cli` connector's form show an identity instead of a
-   * token field, so the answer carries who you are rather than only whether
-   * the check passed.
-   */
-  registerMethod('connector:probeAuth', async (connectorId: string) => {
-    const { auth, declared } = await authForConnector(connectorId)
-    return probeAuth(auth, declared)
-  })
+  // What lets a cli connector's form show an identity instead of a token field.
+  registerMethod('connector:probeAuth', async (connectorId: string) =>
+    probeAuth(await authForConnector(connectorId))
+  )
 
   // ─── Browser pane (relayed to Electron main) ──────────────────
   //

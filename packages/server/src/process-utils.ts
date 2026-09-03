@@ -169,17 +169,16 @@ const STRIP_ENV_PREFIXES = ['CLAUDE_CODE_', BOOTSTRAP_ENV_VAR]
 // let `claudecode` through — and this list is meant to be absolute.
 const STRIP_ENV_KEYS_UPPER = STRIP_ENV_KEYS.map((k) => k.toUpperCase())
 
-/**
- * Whether a variable is stripped no matter who asks.
- *
- * `filterEnv` applies this while building an environment; a connector that
- * borrows a login names the variables it wants by hand, which walks around that
- * filter entirely. Exported so the borrow answers to the same list rather than
- * to a second copy of it that can drift.
- */
+// Stripped no matter who asks; a borrow that names variables by hand answers to this same list.
 export function isAbsolutelyStrippedEnvName(name: string): boolean {
   const upper = name.toUpperCase()
   return STRIP_ENV_KEYS_UPPER.includes(upper) || STRIP_ENV_PREFIXES.some((p) => upper.startsWith(p))
+}
+
+// A credential-shaped name, unless the user passed it through by name.
+export function isSensitiveEnvName(name: string, passthrough: ReadonlySet<string>): boolean {
+  const upper = name.toUpperCase()
+  return !passthrough.has(upper) && SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))
 }
 
 /**
@@ -242,9 +241,7 @@ export function filterEnv(
   const env: Record<string, string> = {}
   for (const [key, val] of Object.entries(source)) {
     if (val === undefined) continue
-    const upper = key.toUpperCase()
-    if (isAbsolutelyStrippedEnvName(key)) continue
-    if (!passthrough.has(upper) && SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue
+    if (isAbsolutelyStrippedEnvName(key) || isSensitiveEnvName(key, passthrough)) continue
     env[key] = val
   }
   return env

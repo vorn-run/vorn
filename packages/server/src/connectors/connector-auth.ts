@@ -1,86 +1,47 @@
-import type { SdkConnectorAuth, SdkConnectorManifest } from '@vornrun/shared/types'
-import { describePack } from './packs'
+import type { SdkConnectorAuth } from '@vornrun/shared/types'
+import { installedPack } from './packs'
 import { localLaunchSpec } from './catalog'
 import { probeSdkConnector } from './sdk-probe'
 import log from '../logger'
 
-/**
- * How a packaged connector signs in, whichever copy of it is going to run.
- *
- * `resolveLaunch` prefers a local checkout over an installed pack, and the auth
- * has to follow the same order or a connector run from a checkout — which is
- * how every connector is developed — would borrow nothing and report that its
- * rung has nothing to check. A checkout has no installed manifest to read, so
- * it is asked for one, once.
- */
-export interface ConnectorBorrow {
-  auth: SdkConnectorAuth
+// How a connector signs in, read from whichever copy of it resolveLaunch will run: checkout first.
+export interface ConnectorAuthSource {
+  auth: SdkConnectorAuth | undefined
   /** The variables the connector declares reading, which bound what it may borrow. */
   declared: string[]
+  /** Only an auth block the app itself wrote may name a credential. */
+  trusted: boolean
 }
 
-/** Probed manifests by connector id; `null` records a connector that would not answer. */
-const checkoutManifests = new Map<string, SdkConnectorManifest | null>()
+type Described = { auth?: SdkConnectorAuth; env: Array<{ name: string }> }
 
-export function resetCheckoutAuthCache(): void {
-  checkoutManifests.clear()
+const checkoutAuth = new Map<string, ConnectorAuthSource | null>()
+
+function sourceFrom(manifest: Described): ConnectorAuthSource {
+  return { auth: manifest.auth, declared: manifest.env.map((entry) => entry.name), trusted: false }
 }
 
-function borrowFrom(manifest: {
-  auth?: SdkConnectorAuth
-  env: Array<{ name: string }>
-}): ConnectorBorrow | undefined {
-  if (manifest.auth?.rung !== 'cli') return undefined
-  return { auth: manifest.auth, declared: manifest.env.map((entry) => entry.name) }
-}
-
-/** What is installed for a connector, or nothing when there is nowhere to look. */
-function installed(sdkId: string): ReturnType<typeof describePack> {
-  try {
-    return describePack(sdkId)
-  } catch {
-    // No data directory yet, so nothing is installed to read.
-    return undefined
-  }
-}
-
-/**
- * Whether resolving this connector's auth is worth suspending for.
- *
- * Answered synchronously so the common case — a connector that borrows nothing
- * — reaches its spawn in the tick that asked for it.
- */
-export function mightBorrow(sdkId: string): boolean {
-  if (!sdkId) return false
-  // The checkout is what runs, so it decides; a cached answer for it is still an answer.
-  if (localLaunchSpec(sdkId) !== undefined) {
-    const cached = checkoutManifests.get(sdkId)
-    if (cached !== undefined) return cached !== null && borrowFrom(cached) !== undefined
-    return true
-  }
-  return installed(sdkId)?.auth?.rung === 'cli'
-}
-
-export async function resolveBorrow(sdkId: string): Promise<ConnectorBorrow | undefined> {
+export async function resolveConnectorAuth(
+  sdkId: string
+): Promise<ConnectorAuthSource | undefined> {
   if (!sdkId) return undefined
   const launch = localLaunchSpec(sdkId)
   if (!launch) {
-    const pack = installed(sdkId)
-    return pack ? borrowFrom(pack) : undefined
+    const pack = installedPack(sdkId)
+    return pack ? sourceFrom(pack) : undefined
   }
 
-  const cached = checkoutManifests.get(sdkId)
-  if (cached !== undefined) return cached ? borrowFrom(cached) : undefined
+  const cached = checkoutAuth.get(sdkId)
+  if (cached !== undefined) return cached ?? undefined
 
   const result = await probeSdkConnector(launch)
   if (!result.ok) {
-    // Remembered as a no rather than retried on every spawn: a checkout that
-    // will not start is a development problem, not a reason to keep paying for
-    // a child process before every launch.
-    checkoutManifests.set(sdkId, null)
+    // Remembered as a no: a checkout that will not start is not worth a child before every spawn.
+    checkoutAuth.set(sdkId, null)
     log.warn(`[auth] could not read ${sdkId} from its checkout: ${result.error}`)
     return undefined
   }
-  checkoutManifests.set(sdkId, result.manifest)
-  return borrowFrom(result.manifest)
+  const source = sourceFrom(result.manifest)
+  checkoutAuth.set(sdkId, source)
+  return source
 }

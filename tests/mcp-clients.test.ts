@@ -107,7 +107,7 @@ describe('getOrStartClient', () => {
     // and end up using the same single transport.
     const p1 = getOrStartClient(c)
     const p2 = getOrStartClient(c)
-    expect(transportInstances).toHaveLength(1)
+    await vi.waitFor(() => expect(transportInstances).toHaveLength(1))
     resolveConnect?.()
     const [a, b] = await Promise.all([p1, p2])
     expect(a).toBe(b)

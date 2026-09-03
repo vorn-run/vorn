@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
-import type {
-  ConnectorCatalogItem,
-  InstalledConnectorPack,
-  SdkConnectorManifest,
-  SdkTrigger,
-  TaskStatus
+import {
+  declaredBorrows,
+  type AuthProbeReport,
+  type ConnectorCatalogItem,
+  type InstalledConnectorPack,
+  type SdkConnectorManifest,
+  type SdkTrigger,
+  type TaskStatus
 } from '../../../shared/types'
 import { useAppStore } from '../../stores'
 import { parseLaunchSpec } from './parse-launch-spec'
@@ -15,14 +17,6 @@ import { packLaunch } from '../../lib/pack-status'
 
 const INPUT_CLASS =
   'w-full px-3 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-sm text-gray-200 focus:border-white/[0.2] outline-none'
-
-/** What asking the borrowed tool answered; `ok: null` is "nothing to ask". */
-interface AuthProbeReport {
-  ok: boolean | null
-  identity?: string
-  message?: string
-  installHint?: string
-}
 
 /**
  * Install a connector package by reading its own manifest.
@@ -74,10 +68,7 @@ export function SdkConnectorForm({
   const [selectedProject, setSelectedProject] = useState(projects[0]?.name || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [signedIn, setSignedIn] = useState<{
-    connectorId: string
-    report: AuthProbeReport
-  } | null>(null)
+  const [identity, setIdentity] = useState<AuthProbeReport | null>(null)
   // A borrowed login is the point of the rung, but it is not a trap: a token
   // stays one click away for the machine where the CLI is not the answer.
   const [useToken, setUseToken] = useState(false)
@@ -137,24 +128,17 @@ export function SdkConnectorForm({
   // in, so switching packages never shows one connector's identity on another.
   useEffect(() => {
     if (manifest?.auth?.rung !== 'cli') return
-    const asked = manifest.id
     let live = true
-    void Promise.resolve(window.api.probeConnectorAuth?.(asked))
-      .then((report) => {
-        // Recorded either way: a build that cannot ask has answered too, and
-        // leaving the in-flight line up forever would read as a hang.
-        if (live) setSignedIn({ connectorId: asked, report: report ?? { ok: null } })
-      })
-      // An identity is a courtesy: a build that cannot ask still connects.
-      .catch(() => {
-        if (live) setSignedIn({ connectorId: asked, report: { ok: null } })
-      })
+    void Promise.resolve().then(() => setIdentity(null))
+    // A build that cannot ask has answered too; an identity is a courtesy, the connect still happens.
+    void Promise.resolve(window.api.probeConnectorAuth?.(manifest.id)).then(
+      (report) => live && setIdentity(report ?? { ok: null }),
+      () => live && setIdentity({ ok: null })
+    )
     return () => {
       live = false
     }
   }, [manifest])
-
-  const identity = signedIn && signedIn.connectorId === manifest?.id ? signedIn.report : null
 
   const trigger = manifest?.triggers.find((entry) => entry.type === triggerType)
   // Nothing to fill in for a connector that asks for nothing, and no secret to
@@ -163,13 +147,7 @@ export function SdkConnectorForm({
     (entry) => rung !== 'none' && !(borrowing && entry.secret)
   )
   const missing = fields.filter((entry) => entry.required && !values[entry.name]?.trim())
-  // What the borrow will actually hand over: a name the connector asks for and
-  // also declares reading. The server refuses the rest, so naming them here
-  // would promise something that will not happen.
-  const declaredNames = new Set((manifest?.env ?? []).map((entry) => entry.name.toUpperCase()))
-  const borrowed = borrowing
-    ? (manifest?.auth?.borrow?.env ?? []).filter((name) => declaredNames.has(name.toUpperCase()))
-    : []
+  const borrowed = borrowing && manifest ? declaredBorrows(manifest.auth, manifest.env) : []
 
   const handleSave = async () => {
     if (!manifest || !launch) return

@@ -513,8 +513,33 @@ export interface ConnectorKey {
 export const SDK_FILTER_KEYS = {
   connectorId: 'sdkConnectorId',
   version: 'sdkVersion',
-  icon: 'sdkIcon'
+  icon: 'sdkIcon',
+  implicit: 'implicit'
 } as const
+
+/** Whether the app made this connection itself for a connector that asks for nothing. */
+export function isImplicitConnection(connection: {
+  filters: SourceConnection['filters']
+}): boolean {
+  return connection.filters?.[SDK_FILTER_KEYS.implicit] === true
+}
+
+/** The borrow names a manifest can honour: what it asks for that it also declares reading. */
+export function declaredBorrows(
+  auth: SdkConnectorAuth | undefined,
+  env: ReadonlyArray<{ name: string }>
+): string[] {
+  const declared = new Set(env.map((entry) => entry.name.toUpperCase()))
+  return (auth?.borrow?.env ?? []).filter((name) => declared.has(name.toUpperCase()))
+}
+
+/** What asking a borrowed tool answered; `ok: null` is "nothing to ask". */
+export interface AuthProbeReport {
+  ok: boolean | null
+  identity?: string
+  message?: string
+  installHint?: string
+}
 
 /** The connector a connection belongs to, which for a package is not `mcp`. */
 export function connectionConnectorId(connection: {

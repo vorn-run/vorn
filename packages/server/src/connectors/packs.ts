@@ -520,6 +520,15 @@ function pruneVersions(id: string, keep: Array<string | undefined>, options: Pac
 }
 
 /** The installed pack for a connector, or undefined when there is none. */
+// Before the data directory resolves there is nowhere to look, which is the same as nothing installed.
+export function installedPack(id: string): InstalledConnectorPack | undefined {
+  try {
+    return describePack(id)
+  } catch {
+    return undefined
+  }
+}
+
 export function describePack(
   id: string,
   options: PackOptions = {}

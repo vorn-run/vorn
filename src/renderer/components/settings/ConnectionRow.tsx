@@ -5,7 +5,12 @@ import { ConnectorIcon } from '../ConnectorIcon'
 import { connectionIcon } from '../../lib/connection-icon'
 import { McpToolsPanel } from './McpToolsPanel'
 import { humanCron } from '../../lib/cron-text'
-import type { ConnectorManifest, SourceConnection, WorkflowDefinition } from '../../../shared/types'
+import {
+  isImplicitConnection,
+  type ConnectorManifest,
+  type SourceConnection,
+  type WorkflowDefinition
+} from '../../../shared/types'
 
 /**
  * One configured connection: what it polls, when it last ran, and what can be
@@ -46,9 +51,7 @@ export function ConnectionRow({
   onOpenWorkflow: (workflowId: string) => void
   onRefresh: () => void
 }) {
-  // Made by the app for a connector that asks for nothing: it goes when the
-  // connector does, so deleting the row on its own would only bring it back.
-  const implicit = conn.filters.implicit === true
+  const implicit = isImplicitConnection(conn)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean | null; message?: string } | null>(
     null

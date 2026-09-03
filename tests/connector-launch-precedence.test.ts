@@ -92,7 +92,7 @@ describe('resolveLaunch precedence', () => {
         return { command: 'node', args: [join(packsRoot.current, 'acme', '2.0.0', 'index.js')] }
       },
       // Read for the auth a spawn borrows; this suite is about which files run.
-      describePack: () => undefined
+      installedPack: () => undefined
     }))
   })
 
@@ -165,7 +165,7 @@ describe('stopClientsForConnector', () => {
     }))
     vi.doMock('../packages/server/src/connectors/packs', () => ({
       installedLaunch: () => undefined,
-      describePack: () => undefined
+      installedPack: () => undefined
     }))
     vi.resetModules()
   })

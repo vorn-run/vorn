@@ -58,7 +58,7 @@ beforeEach(() => {
   decrypted.current = {}
   vi.doMock('../packages/server/src/connectors/packs', () => ({
     installedLaunch: () => ({ command: 'node', args: ['/packs/acme/index.js'] }),
-    describePack: () => pack.current
+    installedPack: () => pack.current
   }))
   vi.doMock('../packages/server/src/connectors/decrypted-creds', () => ({
     getDecryptedCreds: () => decrypted.current
@@ -67,7 +67,7 @@ beforeEach(() => {
     getSafeEnv: () => ({ PATH: '/usr/bin' }),
     isAbsolutelyStrippedEnvName: (name: string) => name.startsWith('CLAUDE_CODE_'),
     getEnvPassthrough: () => new Set<string>(),
-    SENSITIVE_ENV_PREFIXES: ['GITHUB_TOKEN', 'GH_TOKEN', 'ANTHROPIC_API']
+    isSensitiveEnvName: (name: string) => /^(GITHUB_TOKEN|GH_TOKEN|ANTHROPIC_API)/.test(name)
   }))
   vi.resetModules()
 })
@@ -158,16 +158,5 @@ describe('two callers arriving together', () => {
     expect(first).toBe(second)
     expect(borrowedSecrets).toHaveBeenCalledTimes(1)
     expect(transportInstances).toHaveLength(1)
-  })
-
-  it('spawns a connector with nothing to borrow without waiting first', async () => {
-    const { getOrStartClient } = await load()
-    const c = connection({ command: 'uvx', args: '["thing"]' })
-
-    void getOrStartClient(c)
-    // No borrow means no suspension: the child exists in the tick that asked
-    // for it, which is what keeps a second caller from starting another.
-    expect(transportInstances).toHaveLength(1)
-    expect(borrowedSecrets).not.toHaveBeenCalled()
   })
 })

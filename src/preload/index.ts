@@ -50,7 +50,8 @@ import {
   DeviceAnnotation,
   DeviceTarget,
   DevicePoint,
-  UpdateStatus
+  UpdateStatus,
+  AuthProbeReport
 } from '../shared/types'
 
 const api = {
@@ -971,14 +972,8 @@ const api = {
     Array<{ connectorId: string; authed: boolean; message?: string }>
   > => ipcRenderer.invoke(IPC.CONNECTOR_STATUS),
 
-  probeConnectorAuth: (
-    connectorId: string
-  ): Promise<{
-    ok: boolean | null
-    identity?: string
-    message?: string
-    installHint?: string
-  }> => ipcRenderer.invoke(IPC.CONNECTOR_PROBE_AUTH, connectorId)
+  probeConnectorAuth: (connectorId: string): Promise<AuthProbeReport> =>
+    ipcRenderer.invoke(IPC.CONNECTOR_PROBE_AUTH, connectorId)
 }
 
 contextBridge.exposeInMainWorld('api', api)
