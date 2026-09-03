@@ -3,13 +3,7 @@ import { resolveScriptConfig } from '../src/renderer/lib/workflow-execution'
 import type { ScriptConfig } from '../src/shared/types'
 import type { StepOutputs } from '../src/renderer/lib/template-vars'
 
-/**
- * Where a script runs, resolved the way what it runs already was.
- *
- * A check step follows the agent that wrote the code, and the only name for
- * that directory is the earlier step's output — a literal path in the config
- * would name one machine and one run.
- */
+// Where a script runs, resolved the way what it runs already was.
 
 const script = (over: Partial<ScriptConfig> = {}): ScriptConfig => ({
   scriptType: 'bash',

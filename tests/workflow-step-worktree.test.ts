@@ -3,12 +3,7 @@ import { buildStepOutputsMap } from '../src/renderer/lib/workflow-execution'
 import { DEFAULT_OUTPUT_KEYS, WORKTREE_OUTPUT_KEY } from '../src/renderer/lib/template-vars'
 import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
 
-/**
- * The directory a step worked in, offered to the steps after it.
- *
- * An agent asked for a worktree gets one made for the run; nothing else can
- * name it, so without this a later step has no way to work where it worked.
- */
+// The directory a step worked in, offered to the steps after it.
 
 const node = (id: string, slug: string): WorkflowNode =>
   ({ id, type: 'launchAgent', label: id, slug, config: {}, position: { x: 0, y: 0 } }) as never

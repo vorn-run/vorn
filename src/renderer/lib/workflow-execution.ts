@@ -458,14 +458,7 @@ function updateNodeState(
   }
 }
 
-/**
- * A script step with its templates filled in, directory included.
- *
- * Where a script runs is as much a step output as what it runs — a check that
- * follows an agent belongs in the worktree that agent made. Resolving to
- * nothing leaves the key unset, so the runner falls back the way it always did
- * rather than launching in an empty string.
- */
+// A script step with its templates filled in, directory included.
 export function resolveScriptConfig(
   config: ScriptConfig,
   context?: WorkflowExecutionContext,
