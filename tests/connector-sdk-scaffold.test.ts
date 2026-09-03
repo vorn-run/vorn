@@ -71,6 +71,66 @@ describe('the files a new connector starts as', () => {
   })
 })
 
+describe('a scaffold shaped for the connectors repository', () => {
+  const repoMap = (id = 'acme-tickets') =>
+    new Map(scaffoldFiles({ id, repoConventions: true }).map((file) => [file.path, file.contents]))
+
+  it('carries the files a package in that repository has to have', () => {
+    expect([...repoMap().keys()]).toEqual([
+      'package.json',
+      'src/connector.ts',
+      'src/entry.ts',
+      'src/index.ts',
+      'src/connector.test.ts',
+      'README.md',
+      'CHANGELOG.md',
+      'tsconfig.json',
+      'tsup.config.ts',
+      'vitest.config.ts'
+    ])
+  })
+
+  it('takes the scoped name and lists the changelog among what it publishes', () => {
+    const pkg = JSON.parse(repoMap().get('package.json') as string) as {
+      name: string
+      version: string
+      files: string[]
+      repository: { directory: string }
+      vorn: { auth?: string }
+    }
+
+    expect(pkg.name).toBe('@vornrun/connector-acme-tickets')
+    expect(pkg.files).toEqual(['dist', 'README.md', 'CHANGELOG.md'])
+    expect(pkg.repository.directory).toBe('packages/acme-tickets')
+    // The catalog prints this line; the scaffold leaves a prompt rather than a guess.
+    expect(pkg.vorn.auth).toBeTruthy()
+  })
+
+  it('answers to the one test configuration the repository keeps, not its own', () => {
+    expect(repoMap().get('vitest.config.ts')).toContain('vitest.shared')
+  })
+
+  it('opens the changelog at the version the package claims', () => {
+    const pkg = JSON.parse(repoMap().get('package.json') as string) as { version: string }
+    expect(repoMap().get('CHANGELOG.md')).toContain(`## ${pkg.version}`)
+  })
+
+  it('builds the way the other packages build', () => {
+    const tsup = repoMap().get('tsup.config.ts') as string
+    expect(tsup).toContain("target: 'node22'")
+    expect(tsup).toContain("banner: { js: '#!/usr/bin/env node' }")
+    expect(tsup).toContain("'@vornrun/connector-sdk'")
+    expect(repoMap().get('tsconfig.json')).toContain('"noEmit": true')
+  })
+
+  it('leaves a scaffold nobody asked to shape exactly as it was', () => {
+    const plain = new Map(scaffoldFiles({ id: 'acme' }).map((f) => [f.path, f.contents]))
+    expect([...plain.keys()]).not.toContain('CHANGELOG.md')
+    expect(plain.get('package.json')).toContain('"name": "vorn-connector-acme"')
+    expect(plain.get('package.json')).not.toContain('repository')
+  })
+})
+
 describe('vorn-connector new', () => {
   const capture = () => {
     const lines: string[] = []
@@ -98,6 +158,29 @@ describe('vorn-connector new', () => {
     expect(out.lines.join('\n')).toContain('Created acme in /tmp/work/acme')
   })
 
+  it('shapes the package for the connectors repository when asked, and only then', async () => {
+    const written = new Map<string, string>()
+    const writeFile = async (path: string, contents: string) => {
+      written.set(path, contents)
+    }
+    await runCli(['new', 'acme', '--repo-conventions', '--out', '/tmp/work'], {
+      load,
+      write: capture().write,
+      writeFile
+    })
+
+    expect([...written.keys()]).toContain('/tmp/work/acme/vitest.config.ts')
+    expect(written.get('/tmp/work/acme/package.json')).toContain('"@vornrun/connector-acme"')
+
+    written.clear()
+    await runCli(['new', 'acme', '--out', '/tmp/work'], {
+      load,
+      write: capture().write,
+      writeFile
+    })
+    expect([...written.keys()]).not.toContain('/tmp/work/acme/vitest.config.ts')
+  })
+
   it('takes a display name, and reports an id it cannot use', async () => {
     const written = new Map<string, string>()
     const writeFile = async (path: string, contents: string) => {
@@ -119,5 +202,6 @@ describe('vorn-connector new', () => {
     const help = capture()
     await runCli(['help'], { load, write: help.write })
     expect(help.lines.join('\n')).toContain('new <id>')
+    expect(help.lines.join('\n')).toContain('--repo-conventions')
   })
 })

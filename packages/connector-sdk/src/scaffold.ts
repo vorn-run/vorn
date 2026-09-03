@@ -22,11 +22,16 @@ const ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
  */
 const SDK_DEPENDENCY_RANGE = '^0.7.0-beta.8'
 
+/** What a scaffold starts at, in the package and in the changelog section that must match it. */
+const SCAFFOLD_VERSION = '0.1.0'
+
 export interface ScaffoldOptions {
   id: string
   /** Defaults to the id in title case. */
   name?: string
   description?: string
+  /** Emit the shape the connectors repository expects of a package inside it. */
+  repoConventions?: boolean
 }
 
 export interface ScaffoldFile {
@@ -44,18 +49,25 @@ export function titleCase(id: string): string {
     .join(' ')
 }
 
-function packageJson(id: string, description: string): string {
+function packageJson(id: string, description: string, inRepo: boolean): string {
   return `${JSON.stringify(
     {
-      name: `vorn-connector-${id}`,
-      version: '0.1.0',
+      name: inRepo ? `@vornrun/connector-${id}` : `vorn-connector-${id}`,
+      version: SCAFFOLD_VERSION,
       description,
       type: 'module',
       license: 'MIT',
       bin: { [`vorn-connector-${id}`]: 'dist/index.js' },
       main: './dist/index.js',
       types: './dist/index.d.ts',
-      files: ['dist', 'README.md'],
+      files: inRepo ? ['dist', 'README.md', 'CHANGELOG.md'] : ['dist', 'README.md'],
+      ...(inRepo && {
+        repository: {
+          type: 'git',
+          url: 'git+https://github.com/vorn-run/connectors.git',
+          directory: `packages/${id}`
+        }
+      }),
       scripts: {
         build: 'tsup src/index.ts --format esm --target node22 --clean --dts',
         check: 'vorn-connector check src/index.ts',
@@ -65,12 +77,71 @@ function packageJson(id: string, description: string): string {
       },
       dependencies: { '@vornrun/connector-sdk': SDK_DEPENDENCY_RANGE },
       devDependencies: { tsup: '^8.5.1', typescript: '^6.0.3', vitest: '^4.1.10' },
-      // Read by the catalog build: how this connector is filed and found.
-      vorn: { category: 'Other', keywords: [id] }
+      // Read by the catalog build: how this connector is filed, found, and what it asks of you.
+      vorn: {
+        category: 'Other',
+        keywords: [id],
+        ...(inRepo && { auth: 'Say in one line what signing in takes.' })
+      }
     },
     null,
     2
   )}\n`
+}
+
+function tsconfig(): string {
+  return `${JSON.stringify(
+    {
+      compilerOptions: {
+        target: 'ES2022',
+        module: 'ESNext',
+        moduleResolution: 'bundler',
+        lib: ['ES2023'],
+        types: ['node'],
+        strict: true,
+        noUncheckedIndexedAccess: true,
+        esModuleInterop: true,
+        resolveJsonModule: true,
+        verbatimModuleSyntax: true,
+        skipLibCheck: true,
+        noEmit: true
+      },
+      include: ['src']
+    },
+    null,
+    2
+  )}\n`
+}
+
+function tsupConfig(): string {
+  return `import { defineConfig } from 'tsup'
+
+export default defineConfig({
+  entry: ['src/index.ts'],
+  format: ['esm'],
+  target: 'node22',
+  clean: true,
+  dts: true,
+  // Vorn spawns the built file directly.
+  banner: { js: '#!/usr/bin/env node' },
+  external: ['@modelcontextprotocol/sdk', '@vornrun/connector-sdk', 'zod']
+})
+`
+}
+
+function vitestConfig(): string {
+  return `// The repository's one test configuration, so no package drifts from its coverage gate.
+export { default } from '../../vitest.shared'
+`
+}
+
+function changelog(): string {
+  return `# Changelog
+
+## ${SCAFFOLD_VERSION}
+
+- First release.
+`
 }
 
 function connectorSource(id: string, name: string, description: string): string {
@@ -282,13 +353,23 @@ export function scaffoldFiles(options: ScaffoldOptions): ScaffoldFile[] {
   }
   const name = options.name?.trim() || titleCase(options.id)
   const description = options.description?.trim() || `${name} connector for Vorn`
+  const inRepo = options.repoConventions === true
 
   return [
-    { path: 'package.json', contents: packageJson(options.id, description) },
+    { path: 'package.json', contents: packageJson(options.id, description, inRepo) },
     { path: 'src/connector.ts', contents: connectorSource(options.id, name, description) },
     { path: 'src/entry.ts', contents: entrySource() },
     { path: 'src/index.ts', contents: indexSource() },
     { path: 'src/connector.test.ts', contents: testSource(name) },
-    { path: 'README.md', contents: readme(options.id, name, description) }
+    { path: 'README.md', contents: readme(options.id, name, description) },
+    // The rest of what a package in the connectors repository has to carry.
+    ...(inRepo
+      ? [
+          { path: 'CHANGELOG.md', contents: changelog() },
+          { path: 'tsconfig.json', contents: tsconfig() },
+          { path: 'tsup.config.ts', contents: tsupConfig() },
+          { path: 'vitest.config.ts', contents: vitestConfig() }
+        ]
+      : [])
   ]
 }

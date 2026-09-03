@@ -31,7 +31,8 @@ Options:
   --mock                        Run every action against served HTTP, not the network
   --receipt <file>              Where check writes what it verified, as JSON
   --out <dir>                   Directory new and pack write to
-  --name <name>                 Display name for a new connector`
+  --name <name>                 Display name for a new connector
+  --repo-conventions            Scaffold a package shaped for the connectors repository`
 
 export interface CliDeps {
   load(modulePath: string): Promise<unknown>
@@ -48,7 +49,7 @@ export interface CliDeps {
 }
 
 /** Flags that stand alone; everything else must be followed by a value. */
-const BOOLEAN_FLAGS = new Set(['live', 'mock'])
+const BOOLEAN_FLAGS = new Set(['live', 'mock', 'repo-conventions'])
 
 /**
  * Split arguments into flags and positionals in one pass, so a flag's value is
@@ -114,7 +115,8 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     }
     const files = scaffoldFiles({
       id: modulePath,
-      ...(flags.name !== undefined && { name: flags.name })
+      ...(flags.name !== undefined && { name: flags.name }),
+      ...(flags['repo-conventions'] === 'true' && { repoConventions: true })
     })
     const root = join(flags.out ?? deps.cwd ?? '.', modulePath)
     if ((deps.exists ?? existsSync)(root)) {
