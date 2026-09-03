@@ -44,6 +44,7 @@ describe('the files a new connector starts as', () => {
 
   it('starts from the SDK it is being written against: declared, with an auth rung', () => {
     const source = fileMap().get('src/connector.ts') as string
+    expect(source).toContain("version: '0.1.0'")
     expect(source).toContain('auth: { rung:')
     expect(source).toContain('request: {')
     expect(source).toContain('postReceive:')

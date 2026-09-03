@@ -80,8 +80,8 @@ export const connector = defineConnector({
   id: '${id}',
   name: '${name}',
   description: '${description}',
-  // How this connector signs in. Prefer a login the machine already has:
-  // \`{ rung: 'cli', probe: { command: 'tool', args: ['auth', 'status'] } }\`.
+  version: '0.1.0',
+  // Prefer a login the machine already has: { rung: 'cli', probe: { command: 'tool', args: ['auth', 'status'] } }
   auth: { rung: 'key', keys: ['apiToken'] },
   config: [
     {
@@ -98,9 +98,7 @@ export const connector = defineConnector({
       type: 'itemCreated',
       label: 'Item created',
       description: 'Items created since the last poll',
-      // Declarative: return what is there and the SDK handles cursors and
-      // de-duplication. Use \`poll\` instead only if paging cannot be expressed
-      // as "give me everything since X".
+      // Return what is there; the SDK handles cursors and de-duplication.
       dedupe: 'timestamp',
       async fetch(context) {
         const url = new URL('/v1/items', context.config.baseUrl)
@@ -130,8 +128,7 @@ export const connector = defineConnector({
         { key: 'body', label: 'Body' }
       ],
       outputs: [{ key: 'id', type: 'string', description: 'The created item' }],
-      // Declared rather than written: the SDK fills the templates, sends it,
-      // and keeps what \`postReceive\` names.
+      // Declared, not written: the SDK fills the templates, sends it, and keeps what postReceive names.
       request: {
         method: 'POST',
         url: '{{config.baseUrl}}/v1/items',
