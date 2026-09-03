@@ -910,10 +910,7 @@ export interface RequestMethods {
     params: void
     result: Array<{ connectorId: string; authed: boolean; message?: string }>
   }
-  /**
-   * Ask the tool a connector borrows whether it is signed in, and as whom.
-   * `ok: null` means the rung has nothing this probe can answer.
-   */
+  // Ask the tool a connector borrows whether it is signed in, and as whom.
   'connector:probeAuth': {
     params: string
     result: AuthProbeReport

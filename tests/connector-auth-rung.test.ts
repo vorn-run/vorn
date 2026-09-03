@@ -196,8 +196,7 @@ describe('reading an identity out of what a tool printed', () => {
   })
 
   it('says nothing rather than printing whatever came first', () => {
-    // `gh auth token` prints a credential; a first-line fallback would have
-    // rendered it as who you are.
+    // `gh auth token` prints a credential; a first-line fallback would have rendered it as who you are.
     expect(identityFrom('ghp_0123456789abcdefghijklmnopqrstuvwxyz')).toBeUndefined()
     expect(identityFrom('{\n  "id": "abc",\n  "name": "Prod"\n}')).toBeUndefined()
   })

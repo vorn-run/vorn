@@ -4,12 +4,7 @@ import { render, cleanup, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { SourceConnection } from '../src/shared/types'
 
-/**
- * A connection the app made for a connector that asks for nothing.
- *
- * Deleting it alone would achieve nothing — the next pack change makes it again
- * — so the row says what to do instead of offering an action that undoes itself.
- */
+// A connection the app made for a connector that asks for nothing.
 
 vi.mock('../src/renderer/components/Tooltip', () => ({
   Tooltip: ({ label, children }: React.PropsWithChildren<{ label: string }>) => (

@@ -28,13 +28,7 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
   }
 }))
 
-/**
- * What a packaged connector's child is started with.
- *
- * The point of the `cli` rung is that nothing is stored: the token is asked
- * for at spawn, so these tests read the environment a spawn would use rather
- * than anything written to the connection.
- */
+// What a packaged connector's child is started with.
 
 const pack = {
   current: undefined as { auth?: SdkConnectorAuth; env?: Array<{ name: string }> } | undefined

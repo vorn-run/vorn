@@ -350,8 +350,7 @@ export async function startServer(
 
   // Register all RPC methods
   registerAllMethods()
-  // A connector that asks for no sign-in is connected by installing it; this
-  // catches the ones installed before that was true.
+  // Connects the rung-none packs installed before installing meant connecting.
   reconcileImplicitConnections()
   scheduler.startInboxWorker()
 

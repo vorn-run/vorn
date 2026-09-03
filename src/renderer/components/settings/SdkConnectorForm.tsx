@@ -69,8 +69,7 @@ export function SdkConnectorForm({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [identity, setIdentity] = useState<AuthProbeReport | null>(null)
-  // A borrowed login is the point of the rung, but it is not a trap: a token
-  // stays one click away for the machine where the CLI is not the answer.
+  // A token stays one click away for the machine where the CLI is not the answer.
   const [useToken, setUseToken] = useState(false)
 
   /**
@@ -118,14 +117,10 @@ export function SdkConnectorForm({
   }, [catalogEntry, pack, probe])
 
   const rung = manifest?.auth?.rung
-  // Borrowing covers the credential, so the fields that would have asked for
-  // one are not shown and cannot hold the form shut — unless someone asked to
-  // enter one anyway.
+  // Borrowing covers the credential, so its fields are hidden and cannot hold the form shut.
   const borrowing = rung === 'cli' && !useToken
 
   // Ask the tool who you are, once the manifest says there is a tool to ask.
-  // Kept under the connector it answered for rather than cleared on the way
-  // in, so switching packages never shows one connector's identity on another.
   useEffect(() => {
     if (manifest?.auth?.rung !== 'cli') return
     let live = true
@@ -141,8 +136,7 @@ export function SdkConnectorForm({
   }, [manifest])
 
   const trigger = manifest?.triggers.find((entry) => entry.type === triggerType)
-  // Nothing to fill in for a connector that asks for nothing, and no secret to
-  // ask for while its login is being borrowed.
+  // Nothing to fill in for a connector that asks for nothing, and no secret to ask for while its login is being borrowed.
   const fields = (manifest?.env ?? []).filter(
     (entry) => rung !== 'none' && !(borrowing && entry.secret)
   )
@@ -156,9 +150,7 @@ export function SdkConnectorForm({
     try {
       const plain: Record<string, string> = {}
       const secret: Record<string, string> = {}
-      // Only what the form actually asked for. A token typed and then hidden
-      // behind the borrow would otherwise be saved and outrank the login it
-      // was hidden in favour of.
+      // Only what the form actually asked for.
       for (const entry of fields) {
         const value = values[entry.name]?.trim()
         if (!value) continue
@@ -352,8 +344,7 @@ export function SdkConnectorForm({
               )}
               <button
                 onClick={() => {
-                  // Whatever was typed into a field that is about to be hidden
-                  // goes with it, so nothing invisible is carried into the save.
+                  // Whatever was typed into a field that is about to be hidden goes with it, so nothing invisible is carried into the save.
                   setValues((prev) => {
                     const kept = { ...prev }
                     for (const entry of manifest.env) if (entry.secret) delete kept[entry.name]
@@ -402,8 +393,7 @@ export function SdkConnectorForm({
 
       <div className="flex gap-2 pt-1">
         <button
-          // A connector that asks for nothing was connected when it was
-          // installed; offering Connect again would make a second one.
+          // A connector that asks for nothing was connected when it was installed; offering Connect again would make a second one.
           onClick={() => (rung === 'none' ? onDone() : void handleSave())}
           disabled={!manifest || saving || (rung !== 'none' && missing.length > 0)}
           className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50"

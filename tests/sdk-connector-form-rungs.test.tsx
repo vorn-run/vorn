@@ -5,13 +5,7 @@ import '@testing-library/jest-dom/vitest'
 import { SdkConnectorForm } from '../src/renderer/components/settings/SdkConnectorForm'
 import type { ConnectorCatalogItem, SdkConnectorManifest } from '../src/shared/types'
 
-/**
- * What the connection form asks for, per rung.
- *
- * The rung is the whole point: a connector that borrows a login should show
- * who you already are rather than a token field, and one that asks for nothing
- * should not ask.
- */
+// What the connection form asks for, per rung.
 
 vi.mock('../src/renderer/stores', () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -132,8 +126,7 @@ describe('a connector that borrows a login', () => {
     fireEvent.click(getByText('Connect'))
 
     await waitFor(() => expect(createConnection).toHaveBeenCalled())
-    // Hidden means gone: a token left behind would outrank the borrow it was
-    // hidden in favour of.
+    // Hidden means gone: a token left behind would outrank the borrow it was hidden in favour of.
     expect(createConnection.mock.calls[0][0].filters.secretEnv).toBeUndefined()
     expect(encryptString).not.toHaveBeenCalled()
   })

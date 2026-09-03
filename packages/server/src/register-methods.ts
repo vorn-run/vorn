@@ -253,13 +253,7 @@ async function authForConnector(connectorId: string): Promise<BorrowSource> {
   return (await resolveConnectorAuth(connectorId)) ?? { auth: undefined, declared: [] }
 }
 
-/**
- * Make a connection and everything that comes with one.
- *
- * Extracted from `connection:create` because a connector that needs no sign-in
- * is connected by installing it — the app makes that connection itself rather
- * than asking someone to fill in a form with no questions on it.
- */
+// Make a connection and everything that comes with one.
 function createConnectionRecord(
   params: Omit<
     SourceConnection,
@@ -282,17 +276,12 @@ function createConnectionRecord(
   }
   dbInsertSourceConnection(conn)
 
-  // Seed visible + editable default workflows. A built-in declares them on
-  // its manifest; a packaged connector cannot, because the connector the
-  // registry resolves for it is the generic MCP one — so the caller passes
-  // through what the probe read from the package.
+  // Seed visible + editable default workflows.
   const connector = connectorRegistry.get(conn.connectorId)
   const manifest = connector?.describe()
   const seeded: Array<NonNullable<ConnectorManifest['defaultWorkflows']>[number]> = [
     ...(manifest?.defaultWorkflows ?? []),
-    // Only for MCP: the event seeded is MCP_POLL_EVENT, which no other
-    // connector emits — seeding it for one would leave a workflow polling on
-    // a schedule for something that never fires.
+    // Only for MCP: no other connector emits MCP_POLL_EVENT.
     ...(params.seedWorkflow && params.connectorId === MCP_CONNECTOR_ID
       ? [
           {
@@ -308,8 +297,7 @@ function createConnectionRecord(
     for (const event of seeded) {
       const wfId = connectorSeededWorkflowId(conn.id, event.event)
       if (dbGetWorkflow(wfId)) continue
-      // The connection's own mapping beats the connector's suggestion: it is
-      // what the person setting it up actually chose.
+      // The connection's own mapping beats the connector's suggestion: it is what the person setting it up actually chose.
       const withMapping: ConnectorManifest = {
         ...manifest,
         statusMapping: Object.entries(conn.statusMapping ?? {}).map(([upstream, local]) => ({
@@ -326,11 +314,7 @@ function createConnectionRecord(
   dbSignalChange()
   configManager.notifyChanged()
 
-  // For MCP connections, kick off tool discovery in the background. We
-  // delay briefly so the main process has time to decrypt + push secretEnv
-  // via the credential-sync path (triggered by notifyChanged above).
-  // Skipped where the caller discovers for itself, so a connection the app
-  // makes during a pack change is not discovered twice.
+  // For MCP connections, kick off tool discovery in the background.
   if (conn.connectorId === MCP_CONNECTOR_ID && options.discover !== false) {
     setTimeout(() => {
       void runMcpDiscovery(conn.id).catch((err) =>
@@ -342,31 +326,20 @@ function createConnectionRecord(
   return conn
 }
 
-/**
- * Take a connection out, with everything that only existed for it.
- *
- * Shared by the RPC and by the withdrawal of a connection the app made itself,
- * so a pack removal cleans up exactly as much as a person deleting a row does.
- */
+// Take a connection out, with everything that only existed for it.
 function deleteConnectionRecord(id: string): void {
-  // Delete any seeded workflows tied to this connection. User-created
-  // workflows that reference this connection stay — deleting a connection
-  // should never silently remove a workflow the user built by hand.
+  // Delete any seeded workflows tied to this connection.
   const prefix = connectorSeededWorkflowIdPrefix(id)
   for (const wf of dbListWorkflows()) {
     if (wf.id.startsWith(prefix)) {
       dbDeleteWorkflow(wf.id)
     }
   }
-  // task_source_links cascade via FK. Tasks themselves stay and retain
-  // their source_connector_id / source_external_id metadata — so a later
-  // connection add + backfill can re-adopt them via the orphan dedup path
-  // in upsertExternalItem instead of creating duplicates.
+  // task_source_links cascade via FK.
   dbDeleteSourceConnection(id)
   // Forget any decrypted plaintext for this connection.
   clearDecryptedCreds(id)
-  // Terminate any live MCP stdio child for this connection. Fire-and-forget
-  // because delete is synchronous and the child may take a moment to exit.
+  // Terminate any live MCP stdio child for this connection.
   void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
   dbSignalChange()
   configManager.notifyChanged()
