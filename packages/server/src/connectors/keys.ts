@@ -80,21 +80,12 @@ export function envNamesOf(blob: string | undefined): string[] {
   }
 }
 
-/**
- * Every connection a step names, whether it runs against it or borrows from it.
- *
- * `boundConnectionKey` answers a narrower question — which connection a step
- * cannot run without — and a script's `secretsFrom` is deliberately not that:
- * it is optional, so a script missing one is not an unmet requirement. It is
- * still a real use of the key, and this page is asked what rotating one would
- * touch, so it is counted here rather than widened there.
- */
+/** Every connection a step names, whether it runs against it or borrows from it. */
 function boundConnectionIds(node: WorkflowNode, config: Record<string, unknown>): string[] {
-  const ids: string[] = []
-  const required = boundConnectionKey(node, config)
-  if (required !== null) ids.push(String(config[required] ?? ''))
-  if (node.type === 'script') ids.push(String(config.secretsFrom ?? ''))
-  return ids.filter((id) => id !== '')
+  const key = boundConnectionKey(node, config)
+  if (key === null) return []
+  const id = String(config[key] ?? '')
+  return id === '' ? [] : [id]
 }
 
 /**

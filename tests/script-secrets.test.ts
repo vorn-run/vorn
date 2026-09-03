@@ -73,12 +73,35 @@ describe('what a workflow file says about the keys it needs', () => {
     edges: []
   } as unknown as WorkflowDefinition
 
-  it('names no connection of this machine, so the file asks rather than inherits', () => {
-    const portable = toPortable(withSecrets, '/Users/someone/dev/novum')
+  const slack = {
+    id: 'conn-slack',
+    name: 'Sandbox Slack',
+    connectorId: 'mcp',
+    filters: { sdkConnectorId: 'slack' }
+  }
+
+  it('asks for the key by name rather than carrying an id of this machine', () => {
+    const portable = toPortable(withSecrets, '/Users/someone/dev/novum', [slack])
     const config = portable.nodes[0].config as Record<string, unknown>
     expect(config.secretsFrom).toBeUndefined()
+    expect(portable.requires).toEqual([
+      { kind: 'connection', nodeId: 'run', connectorId: 'slack', name: 'Sandbox Slack' }
+    ])
     // The script itself still travels; only the binding is local.
     expect(config.scriptContent).toBe('echo "$SLACK_BOT_TOKEN"')
+  })
+
+  it('binds the key again where the same connection is held', () => {
+    const portable = toPortable(withSecrets, '/Users/someone/dev/novum', [slack])
+    const here = { ...slack, id: 'conn-local' }
+    const definition = fromPortable(portable, 'bundle', { name: 'Novum', path: '/x' }, [here])
+    expect((definition.nodes[0].config as Record<string, unknown>).secretsFrom).toBe('conn-local')
+  })
+
+  it('leaves the step asking where this machine holds no such key', () => {
+    const portable = toPortable(withSecrets, '/Users/someone/dev/novum', [slack])
+    const definition = fromPortable(portable, 'bundle', { name: 'Novum', path: '/x' }, [])
+    expect((definition.nodes[0].config as Record<string, unknown>).secretsFrom).toBeUndefined()
   })
 
   it('refuses one a file carries anyway, rather than binding to a stranger', () => {
@@ -102,5 +125,18 @@ describe('what a workflow file says about the keys it needs', () => {
       path: '/Users/someone/dev/novum'
     })
     expect((definition.nodes[0].config as Record<string, unknown>).secretsFrom).toBeUndefined()
+  })
+
+  it('says nothing about a script that borrows no key at all', () => {
+    const plain = {
+      ...withSecrets,
+      nodes: [
+        {
+          ...withSecrets.nodes[0],
+          config: { scriptType: 'bash', scriptContent: 'echo hi' }
+        }
+      ]
+    } as unknown as WorkflowDefinition
+    expect(toPortable(plain, '/Users/someone/dev/novum').requires).toBeUndefined()
   })
 })

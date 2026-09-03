@@ -119,6 +119,9 @@ export function requirementsOfDefinition(nodes: WorkflowNode[]): PortableRequire
     const config = node.config as Record<string, unknown>
     const key = boundConnectionKey(node, config)
     if (key === null) continue
+    // A script's key is optional, and the canvas cannot say which one it wants;
+    // its own panel is where that gets bound.
+    if (key === 'secretsFrom') continue
     const bound = config[key]
     if (typeof bound === 'string' && bound !== '') continue
 

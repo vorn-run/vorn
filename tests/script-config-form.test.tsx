@@ -32,12 +32,70 @@ vi.mock('../src/renderer/stores', () => ({
     selector ? selector({ config: { projects: [] } }) : { config: { projects: [] } }
 }))
 
+const selectPickerProps: Array<Record<string, unknown>> = []
+vi.mock('../src/renderer/components/SelectPicker', () => ({
+  SelectPicker: (props: Record<string, unknown>) => {
+    selectPickerProps.push(props)
+    return <div data-testid="select-picker" />
+  }
+}))
+
+const listConnectorKeys = vi.fn()
+;(globalThis as unknown as { window: { api: unknown } }).window = {
+  ...(globalThis as unknown as { window?: object }).window,
+  api: { listConnectorKeys }
+} as never
+
 import { ScriptConfigForm } from '../src/renderer/components/workflow-editor/panels/ScriptConfigForm'
 import type { ScriptConfig } from '../src/shared/types'
 
 function base(o: Partial<ScriptConfig> = {}): ScriptConfig {
   return { scriptType: 'bash', scriptContent: '', ...o }
 }
+
+describe('the key a script borrows', () => {
+  beforeEach(() => {
+    selectPickerProps.length = 0
+    listConnectorKeys.mockResolvedValue([
+      { connectionId: 'conn-slack', name: 'Sandbox Slack', connectorId: 'slack', fields: [] }
+    ])
+  })
+
+  const secretsPicker = () =>
+    selectPickerProps.find((props) => {
+      const options = props.options as Array<{ value: string }> | undefined
+      return options?.some((option) => option.value === 'conn-slack')
+    })
+
+  it('offers the connections this machine holds a secret for', async () => {
+    render(<ScriptConfigForm config={base()} onChange={vi.fn()} />)
+    await vi.waitFor(() => expect(secretsPicker()).toBeDefined())
+    expect(secretsPicker()!.options).toEqual([
+      { value: '', label: 'None' },
+      { value: 'conn-slack', label: 'Sandbox Slack' }
+    ])
+  })
+
+  it('names the connection on the step, and unsets it rather than storing an empty one', async () => {
+    const onChange = vi.fn<(config: ScriptConfig) => void>()
+    render(<ScriptConfigForm config={base()} onChange={onChange} />)
+    await vi.waitFor(() => expect(secretsPicker()).toBeDefined())
+
+    const pick = secretsPicker()!.onChange as (value: string) => void
+    pick('conn-slack')
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ secretsFrom: 'conn-slack' }))
+
+    pick('')
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ secretsFrom: undefined }))
+  })
+
+  it('asks for nothing when this machine holds no keys', async () => {
+    listConnectorKeys.mockResolvedValue([])
+    render(<ScriptConfigForm config={base()} onChange={vi.fn()} />)
+    await vi.waitFor(() => expect(listConnectorKeys).toHaveBeenCalled())
+    expect(secretsPicker()).toBeUndefined()
+  })
+})
 
 describe('ScriptConfigForm — contextual surface', () => {
   beforeEach(() => {

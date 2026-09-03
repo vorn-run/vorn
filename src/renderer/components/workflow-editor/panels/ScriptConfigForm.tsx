@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Terminal, FileCode, Braces, ChevronRight, Settings2 } from 'lucide-react'
-import { ScriptConfig, TriggerConfig } from '../../../../shared/types'
+import { ConnectorKey, ScriptConfig, TriggerConfig } from '../../../../shared/types'
 import { useAppStore } from '../../../stores'
 import {
   StepVariableGroup,
@@ -45,6 +45,7 @@ export function ScriptConfigForm({
   stepGroups = []
 }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(!!config.args?.length)
+  const [keys, setKeys] = useState<ConnectorKey[]>([])
   const projects = useAppStore((s) => s.config?.projects ?? EMPTY_PROJECTS)
   const isTaskTrigger = triggerType === 'taskCreated' || triggerType === 'taskStatusChanged'
   const hasTemplateVars =
@@ -55,6 +56,13 @@ export function ScriptConfigForm({
   ]
   const cwdIsFromContext =
     isContextRef(config.cwd) || isContextRef(config.projectName) || isContextRef(config.projectPath)
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: loads the keys from the main process on mount
+    void Promise.resolve(window.api.listConnectorKeys?.())
+      .then((held) => setKeys(held ?? []))
+      .catch(() => setKeys([]))
+  }, [])
 
   // The runtime resolver returns empty strings for `{{context.*}}` when
   // there's no source, so leaving sentinels in place after toggling off
@@ -113,6 +121,23 @@ export function ScriptConfigForm({
             })
           }
         />
+      </div>
+
+      <div>
+        <label className="text-[13px] text-gray-400 font-medium block mb-2">Secrets from</label>
+        <SelectPicker
+          value={config.secretsFrom ?? ''}
+          options={[
+            { value: '', label: 'None' },
+            ...keys.map((key) => ({ value: key.connectionId, label: key.name }))
+          ]}
+          onChange={(v) => onChange({ ...config, secretsFrom: v || undefined })}
+          variant="form"
+        />
+        <p className="text-[11px] text-gray-600 mt-1.5">
+          The connection&apos;s secrets are read on the server and handed to this step alone, as
+          environment variables. The workflow file names the connection, never the value.
+        </p>
       </div>
 
       <div>

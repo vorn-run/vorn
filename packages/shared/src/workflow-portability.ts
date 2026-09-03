@@ -133,8 +133,12 @@ export function boundConnectionKey(
   if (node.type === 'trigger' && config.triggerType === 'connectorPoll') return 'connectionId'
   if (node.type === 'callConnectorAction') return 'connectionId'
   if (node.type === 'httpRequest') return 'profileConnectionId'
+  if (node.type === 'script') return 'secretsFrom'
   return null
 }
+
+/** Keys a step may simply not have: unset is a finished step, not a question. */
+const OPTIONAL_CONNECTION_KEYS = new Set(['profileConnectionId', 'secretsFrom'])
 
 /**
  * The connection a requirement should bind to here, if this machine has one answer.
@@ -190,16 +194,12 @@ export function toPortable(
       // id means nothing elsewhere, so the import runs locally rather than
       // against a host the importer never configured.
       delete config.remoteHostId
-      // Names a connection in this install's own table. Elsewhere it would
-      // bind a step to whatever happened to take that id, so the import asks
-      // for a key rather than inheriting one.
-      delete config.secretsFrom
     }
 
     const key = boundConnectionKey(node, config)
     const bound = key === null ? '' : config[key]
     // A step bound to a connection here, and one that was never bound at all, both arrive elsewhere needing the same.
-    const unbound = key !== null && key !== 'profileConnectionId' && bound === ''
+    const unbound = key !== null && !OPTIONAL_CONNECTION_KEYS.has(key) && bound === ''
     if (key !== null && ((typeof bound === 'string' && bound !== '') || unbound)) {
       const source = connections.find((connection) => connection.id === bound)
       const event = config.event
@@ -219,8 +219,8 @@ export function toPortable(
               ...(typeof event === 'string' && event !== '' && { event })
             }
       )
-      // Optional on the node, so the step reads as simply having no profile.
-      if (key === 'profileConnectionId') delete config[key]
+      // Optional on the node, so the step reads as simply having no key.
+      if (OPTIONAL_CONNECTION_KEYS.has(key)) delete config[key]
       else config[key] = ''
     }
 
@@ -293,11 +293,10 @@ export function fromPortable(
   const nodes = portable.nodes.map((node) => {
     const config = { ...(node.config as Record<string, unknown>) }
 
-    // Export strips this, so a file carrying one was hand-written or came from
-    // a build that did not. Either way the id names a row in the writer's
-    // table, and honouring it here would hand a step whichever key happens to
-    // hold that id on this machine.
-    delete config.secretsFrom
+    // The id names a row in the writer's table, so only a requirement this
+    // machine resolved below may bind one; a carried id is dropped rather than
+    // handing the step whichever key happens to hold it here.
+    if (node.type === 'script') delete config.secretsFrom
 
     for (const [key, value] of Object.entries(config)) {
       if (typeof value !== 'string') continue
@@ -314,6 +313,7 @@ export function fromPortable(
       const resolved = resolveRequirement(requirement, connections)
       if (resolved === undefined) continue
       if (requirement.kind === 'httpProfile') config.profileConnectionId = resolved
+      else if (node.type === 'script') config.secretsFrom = resolved
       else config.connectionId = resolved
     }
 
