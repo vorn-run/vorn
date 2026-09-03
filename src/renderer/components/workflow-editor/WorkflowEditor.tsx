@@ -705,9 +705,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const handleConnected = useCallback(() => {
     setConnectFor(null)
     setProfileFor(null)
-    // The shared cache is what every glyph and picker reads; refreshing it here
-    // means a new connection shows up without waiting for a config round trip.
-    void refreshConnections()
+    // The shared cache is what every glyph and picker reads, so a new connection shows up at once.
     void refreshConnections()
   }, [])
 
