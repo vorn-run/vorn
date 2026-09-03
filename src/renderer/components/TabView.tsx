@@ -199,7 +199,13 @@ export function TabView() {
     return map
   }, [tasks])
 
+  // The restored tab names a session that has not arrived yet, so clamping it
+  // against the list before then throws the restore away -- first to null while
+  // the list is empty, then onto whichever session happened to land first.
+  const viewRestored = useAppStore((s) => s.viewRestored)
+
   useEffect(() => {
+    if (!viewRestored) return
     if (allTabIds.length === 0) {
       if (activeTabId !== null) setActiveTabId(null)
       return
@@ -207,7 +213,7 @@ export function TabView() {
     if (!activeTabId || !allTabIds.includes(activeTabId)) {
       setActiveTabId(allTabIds[0])
     }
-  }, [allTabIds, activeTabId, setActiveTabId])
+  }, [allTabIds, activeTabId, setActiveTabId, viewRestored])
 
   const handleSelectTab = (id: string): void => {
     setActiveTabId(id)

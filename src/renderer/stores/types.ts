@@ -355,6 +355,16 @@ export interface UISlice {
   statusFilter: StatusFilter
   terminalOrder: string[]
   visibleTerminalIds: string[]
+  /**
+   * True once sessions have landed and the restored view has been reconciled
+   * against them.
+   *
+   * Until then an empty session list means "not yet", not "nothing" — and the
+   * two are indistinguishable from a component. Anything that clamps a restored
+   * id against what exists has to wait for this, or it discards the restore
+   * while the sessions are still arriving.
+   */
+  viewRestored: boolean
   focusableTerminalIds: string[]
   minimizedTerminals: Set<string>
   /** Session ids whose file-tree pane is open. Keyed by owner, one per session. */
@@ -457,6 +467,15 @@ export interface UISlice {
   setCardSplit: (sessionId: string, split: CardSplit) => void
   setTerminalOrder: (order: string[]) => void
   setVisibleTerminalIds: (ids: string[]) => void
+  /**
+   * Say that the board now holds everything the server knows about, so the
+   * restored view can be reconciled against it.
+   *
+   * Called once the sync pass has finished adding sessions -- including the
+   * pass that found none, which is a settled board too and the case a
+   * "wait for a live session" rule would leave waiting forever.
+   */
+  markViewRestored: () => void
   setFocusableTerminalIds: (ids: string[]) => void
   /**
    * Move `draggedId` to where `droppedOnId` sits in the session order.

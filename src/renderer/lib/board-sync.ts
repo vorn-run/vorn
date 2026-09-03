@@ -54,8 +54,13 @@ async function reconcile(options: { showCold: boolean; resume: boolean }): Promi
     console.error('[board] failed to read what the server has:', err)
     return null
   })
-  // A board left as it is beats a board rebuilt from an answer nobody gave.
-  if (!answers) return
+  // A board left as it is beats a board rebuilt from an answer nobody gave --
+  // but it is still the board we have, so the restored view stops waiting for
+  // one that is never coming.
+  if (!answers) {
+    useAppStore.getState().markViewRestored()
+    return
+  }
   const [active, carried]: [TerminalSession[], RestoredSession[]] = answers
 
   const store = useAppStore.getState()
@@ -101,6 +106,10 @@ async function reconcile(options: { showCold: boolean; resume: boolean }): Promi
         ...(one.session.shellCwd !== undefined && { cwd: one.session.shellCwd })
       })
     }
+
+  // Before the resumes, not after: each one spawns a process and goes in order,
+  // and the view has nothing to wait for once every pane is on the board.
+  useAppStore.getState().markViewRestored()
 
   if (options.resume) await resumeAll(justEnded)
 }

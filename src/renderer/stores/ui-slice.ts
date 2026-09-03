@@ -46,12 +46,69 @@ const FLEXIBLE_STORAGE_KEY = 'vorn:flexibleLayouts'
 const CARD_SPLITS_STORAGE_KEY = 'vorn:cardSplits'
 const PANES_STORAGE_KEY = 'vorn:panes'
 const TERMINAL_PANELS_STORAGE_KEY = 'vorn:terminalPanels'
+const VIEW_STORAGE_KEY = 'vorn:view'
 /**
  * Where a browser pane opened with no url starts. Deliberately blank: guessing
  * a page would be wrong more often than not, and the address bar is focused
  * and empty, which is the prompt to type one.
  */
 const DEFAULT_BROWSER_URL = 'about:blank'
+
+interface PersistedView {
+  minimized: string[]
+  activeTabId: string | null
+  maximizedPaneId: string | null
+  activeProject: string | null
+  activeWorktreePath: string | null
+}
+
+const EMPTY_VIEW: PersistedView = {
+  minimized: [],
+  activeTabId: null,
+  maximizedPaneId: null,
+  activeProject: null,
+  activeWorktreePath: null
+}
+
+// Pane ids, the namespace focus and minimise already use -- not session ids.
+function loadView(): PersistedView {
+  try {
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY)
+    if (!raw) return EMPTY_VIEW
+    const parsed = JSON.parse(raw) as Partial<PersistedView>
+    return {
+      minimized: Array.isArray(parsed.minimized) ? parsed.minimized.filter(isNonEmpty) : [],
+      activeTabId: orNull(parsed.activeTabId),
+      maximizedPaneId: orNull(parsed.maximizedPaneId),
+      activeProject: orNull(parsed.activeProject),
+      activeWorktreePath: orNull(parsed.activeWorktreePath)
+    }
+  } catch {
+    return EMPTY_VIEW
+  }
+}
+
+function isNonEmpty(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0
+}
+
+function orNull(value: unknown): string | null {
+  return isNonEmpty(value) ? value : null
+}
+
+/** The reader, for tests: everything else reads it once at construction. */
+export const loadViewForTest = loadView
+
+export { loadView, saveView }
+
+function saveView(view: Partial<PersistedView>): void {
+  try {
+    const merged = { ...loadView(), ...view }
+    localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(merged))
+  } catch {
+    /* ignore */
+  }
+}
 
 function loadGridSettings(): { gridColumns?: number; sortMode?: string; statusFilter?: string } {
   try {
@@ -366,6 +423,50 @@ function reconcilePanes(
 }
 
 /**
+ * Drop view state pointing at sessions that never came back.
+ *
+ * The same reasoning as `reconcilePanes`, on the fields that key by pane id
+ * rather than by session: a card minimised before a quit whose session is gone
+ * would stay in the pill row forever, naming a session nobody can restore.
+ *
+ * `paneOwnerId` is what makes one live set answer for all three — a terminal
+ * pane is its own owner, so a raw session id passes through unchanged and a
+ * `browser:`/`card:` id resolves to the session it hangs off.
+ *
+ * The project and worktree are deliberately not touched: they name a checkout
+ * on disk, not a session, and a workspace with nothing running in it is still
+ * the one you were last looking at.
+ */
+function reconcileView(
+  minimized: Set<string>,
+  activeTabId: string | null,
+  maximizedPaneId: string | null,
+  liveSessionIds: Set<string>
+): {
+  minimizedTerminals: Set<string>
+  activeTabId: string | null
+  maximizedPaneId: string | null
+} | null {
+  const alive = (paneId: string): boolean => liveSessionIds.has(paneOwnerId(paneId))
+  const nextMinimized = new Set([...minimized].filter(alive))
+  const nextTab = activeTabId && alive(activeTabId) ? activeTabId : null
+  const nextMax = maximizedPaneId && alive(maximizedPaneId) ? maximizedPaneId : null
+  if (
+    nextMinimized.size === minimized.size &&
+    nextTab === activeTabId &&
+    nextMax === maximizedPaneId
+  ) {
+    return null
+  }
+  saveView({
+    minimized: [...nextMinimized],
+    activeTabId: nextTab,
+    maximizedPaneId: nextMax
+  })
+  return { minimizedTerminals: nextMinimized, activeTabId: nextTab, maximizedPaneId: nextMax }
+}
+
+/**
  * Let go of a terminal that a panel is holding.
  *
  * Extraction and closing both arrive here: one keeps the terminal alive and one
@@ -581,8 +682,9 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     (savedGrid.statusFilter as 'all' | 'running' | 'waiting' | 'idle' | 'error') ?? 'all',
   terminalOrder: [],
   visibleTerminalIds: [],
+  viewRestored: false,
   focusableTerminalIds: [],
-  minimizedTerminals: new Set(),
+  minimizedTerminals: new Set(loadView().minimized),
   ...loadPanes(),
   // Not persisted: remembering tabs across a close is about the current
   // sitting, and a reload already restores whatever was open from loadPanes.
@@ -591,7 +693,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   // device pane restored from disk would frame a simulator nobody holds.
   devicePanes: new Map(),
   terminalsPanes: loadTerminalPanels(),
-  maximizedPaneId: null,
+  maximizedPaneId: loadView().maximizedPaneId,
   sessionDockCollapsed: false,
   isOnboardingOpen: false,
   diffSidebarTerminalId: null,
@@ -612,7 +714,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   isTaskDialogOpen: false,
   taskDialogDefaultStatus: 'todo' as const,
   editingTask: null,
-  activeTabId: null,
+  activeTabId: loadView().activeTabId,
 
   setActiveWorkspace: (id) => {
     const config = get().config
@@ -738,9 +840,21 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // Gating both on the list changing meant a launch where the visible set
       // never moved (everything filtered out, or every restored session
       // minimized) never pruned a dead session's panes at all.
-      if (unchanged && !reconciled) return {}
-      return { ...(unchanged ? {} : { visibleTerminalIds: ids }), ...(reconciled ?? {}) }
+      // Gated on the settled flag rather than on a live session: the pass that
+      // found nothing running still settles the board, and pruning before it
+      // would drop the restored view against a list that is merely still empty.
+      const view = state.viewRestored
+        ? reconcileView(state.minimizedTerminals, state.activeTabId, state.maximizedPaneId, live)
+        : null
+      if (unchanged && !reconciled && !view) return {}
+      return {
+        ...(unchanged ? {} : { visibleTerminalIds: ids }),
+        ...(reconciled ?? {}),
+        ...(view ?? {})
+      }
     }),
+  markViewRestored: () => set((state) => (state.viewRestored ? {} : { viewRestored: true })),
+
   setFocusableTerminalIds: (ids) =>
     set((state) => (sameIds(state.focusableTerminalIds, ids) ? {} : { focusableTerminalIds: ids })),
 
@@ -774,6 +888,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       else next.delete(id)
       // A pane that just got minimized can't stay maximized.
       const clearMax = nowMinimized && state.maximizedPaneId === id
+      saveView({ minimized: [...next], ...(clearMax ? { maximizedPaneId: null } : {}) })
       return { minimizedTerminals: next, ...(clearMax ? { maximizedPaneId: null } : {}) }
     }),
 
@@ -1300,7 +1415,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     set({ isTaskDialogOpen: open, taskDialogDefaultStatus: defaultStatus ?? 'todo' }),
   setEditingTask: (task) => set({ editingTask: task }),
 
-  setActiveTabId: (id) => set({ activeTabId: id }),
+  setActiveTabId: (id) => {
+    saveView({ activeTabId: id })
+    set({ activeTabId: id })
+  },
 
   workflowExecutions: new Map(),
   setWorkflowExecution: (runId, execution) =>
