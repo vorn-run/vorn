@@ -224,6 +224,31 @@ describe('following a source to the end of its pages', () => {
     expect(nextLink('<https://api.test/t?page=1>; rel="prev"')).toBeUndefined()
   })
 
+  it('says the path is wrong when the first page has no list there', async () => {
+    const { impl } = scripted([{ body: { results: [1, 2] } }])
+    await expect(
+      runAction(
+        paginated({ kind: 'cursor', cursorPath: 'next', param: 'cursor', itemsPath: 'data' }),
+        'act',
+        {},
+        { fetchImpl: impl }
+      )
+    ).rejects.toThrow(
+      /Action act: Cannot page through this request: the response has no list at "data"/
+    )
+  })
+
+  it('treats a later page that is not a list as the end of the walk', async () => {
+    const { impl } = scripted([{ body: { data: [1], next: 'c2' } }, { body: { done: true } }])
+    const output = await runAction(
+      paginated({ kind: 'cursor', cursorPath: 'next', param: 'cursor', itemsPath: 'data' }),
+      'act',
+      {},
+      { fetchImpl: impl }
+    )
+    expect(output).toEqual({ items: [1] })
+  })
+
   it('refuses a cursor that does not move rather than looping forever', async () => {
     const { impl } = scripted([{ body: { data: [1], next: 'same' } }])
     await expect(

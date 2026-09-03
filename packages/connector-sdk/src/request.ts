@@ -284,9 +284,20 @@ async function collectPages(
 
     const { response, body } = await sendRequest(resolved, options)
     const items = pageItems(body, strategy.itemsPath)
-    // A page that is not a list ends the walk: a source that answered with an
-    // object has nothing left to concatenate.
-    if (items === undefined) return collected
+    if (items === undefined) {
+      // On the first page this is the declaration being wrong, not the source
+      // running out — and answering "no items" would hide that for good.
+      if (index === 0) {
+        const where =
+          strategy.itemsPath === undefined
+            ? 'the response is not a list'
+            : `the response has no list at "${strategy.itemsPath}"`
+        throw new Error(`Cannot page through this request: ${where}`)
+      }
+      // Later on it is the end of the walk: a source that answered with an
+      // object has nothing left to concatenate.
+      return collected
+    }
     collected.push(...items)
     if (items.length === 0) return collected
 
