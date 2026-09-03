@@ -46,6 +46,9 @@ export function ConnectionRow({
   onOpenWorkflow: (workflowId: string) => void
   onRefresh: () => void
 }) {
+  // Made by the app for a connector that asks for nothing: it goes when the
+  // connector does, so deleting the row on its own would only bring it back.
+  const implicit = conn.filters.implicit === true
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean | null; message?: string } | null>(
     null
@@ -98,10 +101,17 @@ export function ConnectionRow({
               </button>
             </Tooltip>
           )}
-          <Tooltip label="Remove this connection (seeded workflows are also deleted)">
+          <Tooltip
+            label={
+              implicit
+                ? 'This connection came with its connector. Remove the pack instead.'
+                : 'Remove this connection (seeded workflows are also deleted)'
+            }
+          >
             <button
               onClick={() => onDelete(conn.id)}
-              className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors"
+              disabled={implicit}
+              className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors disabled:opacity-40 disabled:hover:text-gray-500"
             >
               <Trash2 size={13} />
             </button>

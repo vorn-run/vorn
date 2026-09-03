@@ -158,6 +158,7 @@ import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { listKeys, passwordFields } from './connectors/keys'
 import { describePack } from './connectors/packs'
 import {
+  isImplicit,
   syncImplicitConnection,
   type ImplicitConnectionDeps
 } from './connectors/implicit-connection'
@@ -283,7 +284,8 @@ function createConnectionRecord(
     'id' | 'createdAt' | 'lastSyncAt' | 'lastSyncError' | 'syncCursor'
   > & {
     seedWorkflow?: { name: string; defaultCronFromMinutes: number }
-  }
+  },
+  options: { discover?: boolean } = {}
 ): SourceConnection {
   const id = crypto.randomUUID()
   const conn: SourceConnection = {
@@ -345,7 +347,9 @@ function createConnectionRecord(
   // For MCP connections, kick off tool discovery in the background. We
   // delay briefly so the main process has time to decrypt + push secretEnv
   // via the credential-sync path (triggered by notifyChanged above).
-  if (conn.connectorId === MCP_CONNECTOR_ID) {
+  // Skipped where the caller discovers for itself, so a connection the app
+  // makes during a pack change is not discovered twice.
+  if (conn.connectorId === MCP_CONNECTOR_ID && options.discover !== false) {
     setTimeout(() => {
       void runMcpDiscovery(conn.id).catch((err) =>
         log.warn(`[mcp] initial discovery failed for ${conn.id}: ${err}`)
@@ -356,18 +360,77 @@ function createConnectionRecord(
   return conn
 }
 
+/**
+ * Take a connection out, with everything that only existed for it.
+ *
+ * Shared by the RPC and by the withdrawal of a connection the app made itself,
+ * so a pack removal cleans up exactly as much as a person deleting a row does.
+ */
+function deleteConnectionRecord(id: string): void {
+  // Delete any seeded workflows tied to this connection. User-created
+  // workflows that reference this connection stay — deleting a connection
+  // should never silently remove a workflow the user built by hand.
+  const prefix = connectorSeededWorkflowIdPrefix(id)
+  for (const wf of dbListWorkflows()) {
+    if (wf.id.startsWith(prefix)) {
+      dbDeleteWorkflow(wf.id)
+    }
+  }
+  // task_source_links cascade via FK. Tasks themselves stay and retain
+  // their source_connector_id / source_external_id metadata — so a later
+  // connection add + backfill can re-adopt them via the orphan dedup path
+  // in upsertExternalItem instead of creating duplicates.
+  dbDeleteSourceConnection(id)
+  // Forget any decrypted plaintext for this connection.
+  clearDecryptedCreds(id)
+  // Terminate any live MCP stdio child for this connection. Fire-and-forget
+  // because delete is synchronous and the child may take a moment to exit.
+  void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
+  dbSignalChange()
+  configManager.notifyChanged()
+}
+
 /** The edges the implicit-connection rule acts through, wired to this server. */
 const implicitConnectionDeps: ImplicitConnectionDeps = {
   describe: (connectorId) => describePack(connectorId),
   list: () => dbListSourceConnections(),
-  create: (params) => createConnectionRecord({ ...params, statusMapping: {} }),
+  // The caller runs discovery once the connection exists, so the timer this
+  // would otherwise set would only repeat that work.
+  create: (params) => createConnectionRecord({ ...params, statusMapping: {} }, { discover: false }),
   remove: (connectionId) => {
-    dbDeleteSourceConnection(connectionId)
+    deleteConnectionRecord(connectionId)
     log.info(`[packs] withdrew the implicit connection ${connectionId}`)
   },
   changed: () => {
     dbSignalChange()
     configManager.notifyChanged()
+  }
+}
+
+/**
+ * Give every connector that asks for nothing the connection it works through.
+ *
+ * Installing one connects it, but a pack installed before that rule existed
+ * never got its connection — it would sit in the directory looking installed
+ * while none of its actions could be picked. This is the same rule, applied
+ * once at startup to what is already on disk.
+ */
+export function reconcileImplicitConnections(): void {
+  try {
+    for (const pack of listInstalledPacks()) {
+      const before = connectionIdsForConnector(pack.id)
+      syncImplicitConnection(pack.id, implicitConnectionDeps, MCP_CONNECTOR_ID)
+      // Only what this pass added: an untouched connector has been discovered
+      // already, and rediscovering every pack at boot would spawn all of them.
+      for (const id of connectionIdsForConnector(pack.id)) {
+        if (before.includes(id)) continue
+        void runMcpDiscovery(id).catch((err) =>
+          log.warn(`[packs] discovery failed for ${id}: ${err}`)
+        )
+      }
+    }
+  } catch (err) {
+    log.warn(`[packs] could not reconcile implicit connections: ${err}`)
   }
 }
 
@@ -1481,27 +1544,14 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('connection:delete', (id) => {
-    // Delete any seeded workflows tied to this connection. User-created
-    // workflows that reference this connection stay — deleting a connection
-    // should never silently remove a workflow the user built by hand.
-    const prefix = connectorSeededWorkflowIdPrefix(id)
-    for (const wf of dbListWorkflows()) {
-      if (wf.id.startsWith(prefix)) {
-        dbDeleteWorkflow(wf.id)
-      }
+    const conn = dbGetSourceConnection(id)
+    // A connection the app made for a connector that asks for nothing is not
+    // the user's to delete: it would come straight back on the next pack
+    // change, and the thing they mean to be rid of is the connector.
+    if (conn && isImplicit(conn)) {
+      throw new Error(`${conn.name} came with its connector. Remove the pack instead.`)
     }
-    // task_source_links cascade via FK. Tasks themselves stay and retain
-    // their source_connector_id / source_external_id metadata — so a later
-    // connection add + backfill can re-adopt them via the orphan dedup path
-    // in upsertExternalItem instead of creating duplicates.
-    dbDeleteSourceConnection(id)
-    // Forget any decrypted plaintext for this connection.
-    clearDecryptedCreds(id)
-    // Terminate any live MCP stdio child for this connection. Fire-and-forget
-    // because delete is synchronous and the child may take a moment to exit.
-    void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
-    dbSignalChange()
-    configManager.notifyChanged()
+    deleteConnectionRecord(id)
   })
 
   registerMethod('workflow:runManual', ({ workflowId, inputs }) => {
@@ -1750,7 +1800,12 @@ export function registerAllMethods(): void {
 
   registerMethod('connector:removePack', async (id: string) => {
     // Counted before the files go, so the answer can name what stops working.
-    const connections = connectionIdsForConnector(id).length
+    // The connection the app made for this connector is not one of them: it
+    // goes with the pack, so counting it would overstate the cost by one.
+    const connections = connectionIdsForConnector(id).filter((connectionId) => {
+      const conn = dbGetSourceConnection(connectionId)
+      return conn ? !isImplicit(conn) : false
+    }).length
     const result = await removePack(id, { onChanged: onPackChanged })
     if (result.ok) dbSignalChange()
     return { ...result, connections }
