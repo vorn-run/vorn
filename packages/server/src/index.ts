@@ -20,11 +20,7 @@ import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
 import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
-import {
-  reconcileImplicitConnections,
-  registerAllMethods,
-  setServerPort
-} from './register-methods'
+import { reconcileImplicitConnections, registerAllMethods, setServerPort } from './register-methods'
 import { registerWebhookRoute } from './webhook-trigger'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'

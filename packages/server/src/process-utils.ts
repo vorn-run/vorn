@@ -179,9 +179,7 @@ const STRIP_ENV_KEYS_UPPER = STRIP_ENV_KEYS.map((k) => k.toUpperCase())
  */
 export function isAbsolutelyStrippedEnvName(name: string): boolean {
   const upper = name.toUpperCase()
-  return (
-    STRIP_ENV_KEYS_UPPER.includes(upper) || STRIP_ENV_PREFIXES.some((p) => upper.startsWith(p))
-  )
+  return STRIP_ENV_KEYS_UPPER.includes(upper) || STRIP_ENV_PREFIXES.some((p) => upper.startsWith(p))
 }
 
 /**
