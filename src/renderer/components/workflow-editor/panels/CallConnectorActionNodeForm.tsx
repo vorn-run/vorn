@@ -36,13 +36,7 @@ interface ArgumentFieldProps {
  * value is one of the choices, the template-aware input whenever it is not, and
  * there is a way to move between them on purpose.
  */
-function ArgumentField({
-  field,
-  value,
-  onChange,
-  stepGroups,
-  contextVars
-}: ArgumentFieldProps): React.JSX.Element {
+function ArgumentField({ field, value, onChange, stepGroups, contextVars }: ArgumentFieldProps) {
   const choices = field.options ?? []
   const listed = choices.some((option) => option.value === value)
   const [chosenFree, setChosenFree] = useState(false)

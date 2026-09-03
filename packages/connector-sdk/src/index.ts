@@ -14,7 +14,7 @@ export {
   nextLink,
   MAX_REQUEST_PAGES
 } from './request'
-export type { RequestScope, ResolvedRequest } from './request'
+export type { RequestScope, ResolvedRequest, Substitution } from './request'
 export { resilientFetch, retryAfterMs, backoffMs } from './resilience'
 export type { RetryPolicy, ResilientFetchOptions } from './resilience'
 export {
