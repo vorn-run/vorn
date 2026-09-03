@@ -348,7 +348,15 @@ export function SdkConnectorForm({
                   // Whatever was typed into a field that is about to be hidden goes with it, so nothing invisible is carried into the save.
                   setValues((prev) => {
                     const kept = { ...prev }
-                    for (const entry of manifest.env) if (entry.secret) delete kept[entry.name]
+                    const hidden = new Set(
+                      borrowableFromManifest(manifest.auth, manifest.env).map((n) =>
+                        n.toUpperCase()
+                      )
+                    )
+                    for (const entry of manifest.env) {
+                      if (entry.secret && hidden.has(entry.name.toUpperCase()))
+                        delete kept[entry.name]
+                    }
                     return kept
                   })
                   setUseToken((prev) => !prev)
