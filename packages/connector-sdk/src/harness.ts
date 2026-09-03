@@ -92,6 +92,30 @@ export interface ConnectorHarness {
   withMockHttp<T>(routes: MockRoute[], body: () => Promise<T> | T): Promise<MockRun<T>>
 }
 
+/**
+ * A call the routes did not offer.
+ *
+ * Its own class because callers wrap it: a declarative action rethrows with
+ * the action's name in front, so recognising an escape by reading the message
+ * would stop working the moment anything added a prefix.
+ */
+export class MockRouteMissError extends Error {
+  constructor(method: string, url: string) {
+    super(`No mock route for ${method} ${url}`)
+    this.name = 'MockRouteMissError'
+  }
+}
+
+/** Whether a call escaped the stub, however many times it was rethrown. */
+export function escapedMockHttp(error: unknown): boolean {
+  for (let current: unknown = error; current instanceof Error; current = current.cause) {
+    if (current instanceof MockRouteMissError) return true
+    // A connector that rethrew without a cause still leaves the sentence.
+    if (current.message.includes('No mock route for ')) return true
+  }
+  return false
+}
+
 /** Whether a stub is already installed, so a second one cannot orphan the first. */
 let serving = false
 
@@ -128,7 +152,7 @@ export async function withMockHttp<T>(
       ...(typeof init?.body === 'string' && { body: init.body })
     })
     const route = routes.find((candidate) => matches(candidate, method, url))
-    if (!route) throw new Error(`No mock route for ${method} ${url}`)
+    if (!route) throw new MockRouteMissError(method, url)
     return reply(route)
   }) as typeof fetch
 

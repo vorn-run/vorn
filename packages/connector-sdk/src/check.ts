@@ -7,7 +7,7 @@ import {
   type BundleOutput,
   type BundleRequest
 } from './packaging'
-import { withMockHttp, type MockRoute } from './harness'
+import { escapedMockHttp, withMockHttp, type MockRoute } from './harness'
 import { runAction, runPoll, type PollPage } from './runtime'
 import type {
   ActionDefinition,
@@ -300,8 +300,10 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
     if (thrown !== undefined) {
       const reason = thrown instanceof Error ? thrown.message : String(thrown)
       // Reaching for the network is a failure in either mode: a conformance
-      // run that touches a real service is not a conformance run.
-      const escaped = reason.startsWith('No mock route')
+      // run that touches a real service is not a conformance run. Asked of the
+      // error itself, not its wording, because a declarative action rethrows
+      // the refusal with its own name in front.
+      const escaped = escapedMockHttp(thrown)
       found.push(
         finding(
           escaped ? 'error' : level,

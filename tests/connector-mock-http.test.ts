@@ -195,6 +195,27 @@ describe('a check that runs every action against served HTTP', () => {
     expect(codes(findings)).not.toContain('mock-not-observed')
   })
 
+  it('still calls it an escape when the action rethrew with its own name in front', async () => {
+    // What a declarative action does: catch, prefix, rethrow with a cause.
+    const wrapping: ActionDefinition = {
+      ...post,
+      async run() {
+        try {
+          await fetch('https://acme.test/elsewhere')
+          return {}
+        } catch (error) {
+          throw new Error(`Action post: ${(error as Error).message}`, { cause: error })
+        }
+      }
+    }
+    const findings = await checkConnector(connector([wrapping]), {
+      mock: true,
+      mockRoutes: [{ url: '/api/messages' }]
+    })
+    const escape = findings.find((item) => item.code === 'mock-network-escape')
+    expect(escape?.level).toBe('error')
+  })
+
   it('reports the escape, not the silence, when an action reached past its routes', async () => {
     const findings = await checkConnector(connector(), {
       mock: true,

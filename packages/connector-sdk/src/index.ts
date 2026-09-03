@@ -46,7 +46,12 @@ export { createConnectorServer, serveConnector } from './server'
 export type { ConnectorServerOptions } from './server'
 export { scaffoldFiles, titleCase } from './scaffold'
 export type { ScaffoldOptions, ScaffoldFile } from './scaffold'
-export { createConnectorHarness, withMockHttp } from './harness'
+export {
+  createConnectorHarness,
+  escapedMockHttp,
+  withMockHttp,
+  MockRouteMissError
+} from './harness'
 export type { ConnectorHarness, HarnessOptions, MockCall, MockRoute, MockRun } from './harness'
 export type {
   ActionContext,
