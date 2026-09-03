@@ -1,6 +1,7 @@
 import {
   bundleDependencyFindings,
   lifecycleScriptFindings,
+  packageDirFor,
   packEntryContents,
   readNearestPackageJson,
   type BundleOutput,
@@ -219,7 +220,10 @@ function actionShapeFindings(action: ActionDefinition): CheckFinding[] {
 /** What the package says about itself, when a check was pointed at one. */
 async function packageFindings(options: CheckOptions): Promise<CheckFinding[]> {
   if (options.packageDir === undefined) return []
-  const pkg = readNearestPackageJson(options.packageDir)
+  // The entry's own package, not the directory the command was run from: in a
+  // monorepo those are rarely the same, and the root's package.json says
+  // nothing about the connector being checked.
+  const pkg = readNearestPackageJson(packageDirFor(options.packageDir, options.entry))
   const found = [...lifecycleScriptFindings(pkg)]
 
   const vorn = (pkg as { vorn?: { keywords?: unknown } } | undefined)?.vorn

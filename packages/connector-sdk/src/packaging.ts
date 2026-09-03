@@ -1,6 +1,6 @@
 import { builtinModules } from 'node:module'
 import { readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { CheckCode, CheckFinding } from './check'
 
 /**
@@ -73,6 +73,21 @@ export function bundleDependencyFindings(external: string[]): CheckFinding[] {
       `${[...specifiers].sort().join(', ')} stayed outside the bundle; a pack must launch with no install step`
     )
   ]
+}
+
+/**
+ * The directory whose package.json describes the connector being examined.
+ *
+ * A path-like entry names its own package — checking `packages/slack/dist` from
+ * a monorepo root has to judge Slack's package.json, not the root's — while a
+ * bare specifier was resolved from the working directory, so that is what
+ * describes it. `check` and `pack` share this, or a gate would judge one
+ * package and the artifact come from another.
+ */
+export function packageDirFor(resolveDir: string, entry: string | undefined): string {
+  const from = resolve(resolveDir)
+  if (entry === undefined) return from
+  return entry.startsWith('.') || isAbsolute(entry) ? dirname(resolve(from, entry)) : from
 }
 
 /** Nearest package.json at or above a directory, or undefined when there is none. */

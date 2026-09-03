@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { checkConnector, defineConnector } from '../packages/connector-sdk/src/index'
@@ -164,6 +164,39 @@ describe('what a check says about the package a connector ships as', () => {
     // Builtins and relative files are not dependencies a pack has to carry.
     expect(deps?.message).toContain('left-pad')
     expect(deps?.message).not.toContain('node:fs')
+  })
+
+  it('judges the entry package, not the directory the command was run from', async () => {
+    // A monorepo: the root is clean, the connector's own package is not.
+    const root = mkdtempSync(join(tmpdir(), 'vorn-check-root-'))
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ vorn: { keywords: ['root'] } }))
+    const own = join(root, 'packages', 'slack')
+    mkdirSync(join(own, 'dist'), { recursive: true })
+    writeFileSync(
+      join(own, 'package.json'),
+      JSON.stringify({ name: 'slack', scripts: { postinstall: 'node setup.js' } })
+    )
+
+    const findings = await checkConnector(connector(), {
+      packageDir: root,
+      entry: './packages/slack/dist/index.js'
+    })
+
+    const codes = findings.map((item) => item.code)
+    expect(codes).toContain('lifecycle-scripts')
+    // Slack's package names no keywords; the root's do not stand in for them.
+    expect(codes).toContain('keywords-missing')
+  })
+
+  it('judges the working directory when the entry is a bare specifier', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'vorn-check-bare-'))
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ vorn: { keywords: ['root'] } }))
+
+    const findings = await checkConnector(connector(), {
+      packageDir: root,
+      entry: '@acme/connector-slack'
+    })
+    expect(findings.map((item) => item.code)).not.toContain('keywords-missing')
   })
 
   it('passes a package that bundles everything it needs', async () => {

@@ -1,11 +1,12 @@
 import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { checkConnector, type CheckCode, type CheckFinding } from './check'
 import {
   bundleDependencyFindings,
   esbuildBundle,
   lifecycleScriptFindings,
+  packageDirFor,
   packEntryContents,
   readNearestPackageJson,
   MAX_PACK_BYTES,
@@ -56,10 +57,7 @@ export async function packConnector(
   options: PackOptions
 ): Promise<PackResult> {
   const resolveDir = resolve(options.resolveDir ?? process.cwd())
-  const entryDir =
-    options.entry.startsWith('.') || isAbsolute(options.entry)
-      ? dirname(resolve(resolveDir, options.entry))
-      : resolveDir
+  const entryDir = packageDirFor(resolveDir, options.entry)
 
   const findings = await checkConnector(connector)
   findings.push(...lifecycleScriptFindings(readNearestPackageJson(entryDir)))
