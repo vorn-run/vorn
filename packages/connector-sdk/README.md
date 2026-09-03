@@ -125,6 +125,13 @@ second one. Prefer `context.fetch` over the global one in a hand-written action.
 A `select` with fixed choices carries them; one whose choices only exist against
 a live connection names a set the connector serves.
 
+Choices are **suggestions, not a closed set**. Vorn draws a picker while the
+value is one of them and its template-aware input whenever it is not, because a
+step is entitled to compute the value from an earlier one — so the served tool
+schema keeps the argument a plain string and lists the choices in its
+description. Your action still receives whatever was finally sent, and it is
+the connector's job to refuse a value it cannot use.
+
 ```ts
 options: { channels: async ({ config, fetch }) => ['general', 'random'] },
 actions: [{
@@ -134,6 +141,12 @@ actions: [{
   request: { method: 'POST', url: '{{config.baseUrl}}/post/{{args.channel}}' }
 }]
 ```
+
+`loadOptions` is served today but not yet consumed: the SDK registers a
+`vorn_connector_options` tool and answers it, and the manifest carries the set's
+name, but the app does not fetch the list yet — such a field is edited as text
+until it does. Declaring it now is what makes it work then; a field whose
+choices are already known should use `options` instead.
 
 A `json` argument arrives parsed. `builderHint` on a field is a note for whoever
 writes the next connector, not for whoever runs this one.
