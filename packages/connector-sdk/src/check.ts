@@ -17,10 +17,43 @@ import type {
   TriggerDefinition
 } from './types'
 
+/**
+ * Every finding this SDK can report.
+ *
+ * A closed set, so `CHECK_OWNERS` cannot fall behind it: a new code that no
+ * named check owns is a compile error rather than a receipt quietly vouching
+ * for a check whose failure nothing was watching.
+ */
+export type CheckCode =
+  | 'missing-description'
+  | 'auth-undeclared'
+  | 'auth-probe-missing'
+  | 'secret-not-marked'
+  | 'action-no-outputs'
+  | 'input-type-unsupported'
+  | 'missing-idempotent'
+  | 'unverifiable'
+  | 'sample-unusable'
+  | 'poll-failed'
+  | 'no-items'
+  | 'no-cursor'
+  | 'cursor-rejected'
+  | 'redelivers-items'
+  | 'stuck-cursor'
+  | 'lifecycle-scripts'
+  | 'keywords-missing'
+  | 'runtime-dependencies'
+  | 'mock-action-failed'
+  | 'mock-network-escape'
+  | 'mock-not-observed'
+  | 'preflight-failed'
+  | 'live-action-failed'
+  | 'pack-too-large'
+
 export interface CheckFinding {
   /** `error` means the connector will misbehave in Vorn; `warn` is advisory. */
   level: 'error' | 'warn'
-  code: string
+  code: CheckCode
   /** Which part of the connector the finding is about. */
   target: string
   message: string
@@ -66,7 +99,7 @@ const INPUT_TYPES = new Set(['string', 'number', 'boolean', 'select', 'json'])
 
 function finding(
   level: CheckFinding['level'],
-  code: string,
+  code: CheckCode,
   target: string,
   message: string
 ): CheckFinding {
@@ -588,8 +621,14 @@ export interface ConnectorVerification {
   checks: string[]
 }
 
-/** Which named check each finding belongs to, so one failure clears one name. */
-const CHECK_OWNERS: Record<string, string> = {
+/**
+ * Which named check each finding belongs to, so one failure clears one name.
+ *
+ * `null` means the code belongs to no check a receipt can carry — `pack` has
+ * its own gates, and a receipt speaks only for the conformance run.
+ */
+export const CHECK_OWNERS: Record<CheckCode, string | null> = {
+  'pack-too-large': null,
   'missing-description': 'manifest',
   'auth-undeclared': 'auth',
   'auth-probe-missing': 'auth',

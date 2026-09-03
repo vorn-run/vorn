@@ -1,7 +1,7 @@
 import { builtinModules } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import type { CheckFinding } from './check'
+import type { CheckCode, CheckFinding } from './check'
 
 /**
  * What a connector must be true of as a *package*, rather than as a definition.
@@ -38,7 +38,7 @@ export interface BundleOutput {
   external: string[]
 }
 
-function finding(code: string, target: string, message: string): CheckFinding {
+function finding(code: CheckCode, target: string, message: string): CheckFinding {
   return { level: 'error', code, target, message }
 }
 

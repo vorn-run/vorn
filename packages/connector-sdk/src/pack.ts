@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { checkConnector, type CheckFinding } from './check'
+import { checkConnector, type CheckCode, type CheckFinding } from './check'
 import {
   bundleDependencyFindings,
   esbuildBundle,
@@ -41,7 +41,7 @@ export interface PackResult {
 }
 
 /** A gate pack refuses on; the package-level ones say this for themselves. */
-function finding(code: string, target: string, message: string): CheckFinding {
+function finding(code: CheckCode, target: string, message: string): CheckFinding {
   return { level: 'error', code, target, message }
 }
 
