@@ -112,6 +112,44 @@ describe('a connector that borrows a login', () => {
     await waitFor(() => expect(container.textContent).toContain('GITLAB_TOKEN'))
   })
 
+  it('names what it will hand over', async () => {
+    const { findByText } = setup()
+    expect(await findByText(/Hands over GITLAB_TOKEN from glab/)).toBeInTheDocument()
+  })
+
+  it('forgets a token typed before the borrow was chosen again', async () => {
+    const { findByText, getByText, container } = setup()
+    await findByText(/Signed in as javier/)
+
+    fireEvent.click(getByText('Use a token instead'))
+    await waitFor(() => expect(container.textContent).toContain('GITLAB_TOKEN'))
+    const secret = container.querySelector('input[type="password"]') as HTMLInputElement
+    fireEvent.change(secret, { target: { value: 'typed-by-hand' } })
+    fireEvent.click(getByText('Borrow the signed-in tool instead'))
+
+    const host = container.querySelector('input[type="text"]') as HTMLInputElement
+    fireEvent.change(host, { target: { value: 'gitlab.com' } })
+    fireEvent.click(getByText('Connect'))
+
+    await waitFor(() => expect(createConnection).toHaveBeenCalled())
+    // Hidden means gone: a token left behind would outrank the borrow it was
+    // hidden in favour of.
+    expect(createConnection.mock.calls[0][0].filters.secretEnv).toBeUndefined()
+    expect(encryptString).not.toHaveBeenCalled()
+  })
+
+  it('says the check cannot be made rather than checking forever', async () => {
+    probeConnectorAuth.mockResolvedValue({ ok: null })
+    const { findByText } = setup()
+    expect(await findByText(/Nothing to check for this connector/)).toBeInTheDocument()
+  })
+
+  it('says the same when the build cannot ask at all', async () => {
+    probeConnectorAuth.mockResolvedValue(undefined)
+    const { findByText } = setup()
+    expect(await findByText(/Nothing to check for this connector/)).toBeInTheDocument()
+  })
+
   it('says what to run when the tool is signed out', async () => {
     probeConnectorAuth.mockResolvedValue({
       ok: false,

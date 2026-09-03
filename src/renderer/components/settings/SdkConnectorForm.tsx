@@ -141,10 +141,14 @@ export function SdkConnectorForm({
     let live = true
     void Promise.resolve(window.api.probeConnectorAuth?.(asked))
       .then((report) => {
-        if (live && report) setSignedIn({ connectorId: asked, report })
+        // Recorded either way: a build that cannot ask has answered too, and
+        // leaving the in-flight line up forever would read as a hang.
+        if (live) setSignedIn({ connectorId: asked, report: report ?? { ok: null } })
       })
       // An identity is a courtesy: a build that cannot ask still connects.
-      .catch(() => {})
+      .catch(() => {
+        if (live) setSignedIn({ connectorId: asked, report: { ok: null } })
+      })
     return () => {
       live = false
     }
@@ -159,6 +163,13 @@ export function SdkConnectorForm({
     (entry) => rung !== 'none' && !(borrowing && entry.secret)
   )
   const missing = fields.filter((entry) => entry.required && !values[entry.name]?.trim())
+  // What the borrow will actually hand over: a name the connector asks for and
+  // also declares reading. The server refuses the rest, so naming them here
+  // would promise something that will not happen.
+  const declaredNames = new Set((manifest?.env ?? []).map((entry) => entry.name))
+  const borrowed = borrowing
+    ? (manifest?.auth?.borrow?.env ?? []).filter((name) => declaredNames.has(name))
+    : []
 
   const handleSave = async () => {
     if (!manifest || !launch) return
@@ -167,7 +178,10 @@ export function SdkConnectorForm({
     try {
       const plain: Record<string, string> = {}
       const secret: Record<string, string> = {}
-      for (const entry of manifest.env) {
+      // Only what the form actually asked for. A token typed and then hidden
+      // behind the borrow would otherwise be saved and outrank the login it
+      // was hidden in favour of.
+      for (const entry of fields) {
         const value = values[entry.name]?.trim()
         if (!value) continue
         ;(entry.secret ? secret : plain)[entry.name] = value
@@ -343,14 +357,32 @@ export function SdkConnectorForm({
                 </div>
               ) : (
                 <div className="text-[11px] text-gray-400">
-                  {identity?.message ?? 'Checking whether the tool it borrows is signed in…'}
+                  {identity === null
+                    ? 'Checking whether the tool it borrows is signed in…'
+                    : // `ok: null` is an answer — this build cannot ask — and
+                      // leaving the in-flight line up would read as a hang.
+                      (identity.message ?? 'Nothing to check for this connector.')}
                   {identity?.installHint && (
                     <span className="block text-gray-600 mt-1">{identity.installHint}</span>
                   )}
                 </div>
               )}
+              {borrowed.length > 0 && (
+                <p className="text-[11px] text-gray-600 mt-1">
+                  Hands over {borrowed.join(', ')} from {manifest.auth?.probe?.command}.
+                </p>
+              )}
               <button
-                onClick={() => setUseToken((prev) => !prev)}
+                onClick={() => {
+                  // Whatever was typed into a field that is about to be hidden
+                  // goes with it, so nothing invisible is carried into the save.
+                  setValues((prev) => {
+                    const kept = { ...prev }
+                    for (const entry of manifest.env) if (entry.secret) delete kept[entry.name]
+                    return kept
+                  })
+                  setUseToken((prev) => !prev)
+                }}
                 className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors mt-1.5"
               >
                 {useToken ? 'Borrow the signed-in tool instead' : 'Use a token instead'}
