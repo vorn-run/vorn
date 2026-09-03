@@ -95,7 +95,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     return command ? 0 : 1
   }
   if (!modulePath) {
-    deps.write(`Missing <module> argument\n\n${USAGE}`)
+    deps.write(`Missing <${command === 'new' ? 'id' : 'module'}> argument\n\n${USAGE}`)
     return 1
   }
 

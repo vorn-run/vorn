@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { useState } from 'react'
 import { render, waitFor, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type {
@@ -270,6 +271,27 @@ describe('CallConnectorActionNodeForm', () => {
 
     const input = container.querySelector('textarea') as HTMLTextAreaElement
     expect(input.value).toBe('high')
+  })
+
+  it('hands a template back after a trip through the list', async () => {
+    listConnectionsMock.mockResolvedValue([CONN])
+    listConnectionActionsMock.mockResolvedValue(SELECT_MANIFEST.actions ?? [])
+    function Stateful() {
+      const [level, setLevel] = useState('{{steps.pick.level}}')
+      return (
+        <CallConnectorActionNodeForm
+          config={{ ...baseConfig, connectionId: 'conn-1', action: 'post', args: { level } }}
+          onChange={(next) => setLevel((next.args as { level: string }).level)}
+        />
+      )
+    }
+    const { findByText, container } = render(<Stateful />)
+    fireEvent.click(await findByText('Choose from the list'))
+    expect(container.querySelector('textarea')).toBeNull()
+
+    fireEvent.click(await findByText('Use a template instead'))
+    const input = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(input.value).toBe('{{steps.pick.level}}')
   })
 
   it('calls onChange when an argument value is edited', async () => {

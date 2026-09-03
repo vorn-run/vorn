@@ -27,21 +27,12 @@ interface ArgumentFieldProps {
   contextVars: TemplateVariable[]
 }
 
-/**
- * One argument's editor.
- *
- * A connector's listed choices are suggestions rather than a closed set: a step
- * is entitled to compute this value from an earlier one, and the connector —
- * not this form — is what finally judges it. So the picker is offered while the
- * value is one of the choices, the template-aware input whenever it is not, and
- * there is a way to move between them on purpose.
- */
+// Listed choices are suggestions: the picker while the value is one of them, the template input otherwise.
 function ArgumentField({ field, value, onChange, stepGroups, contextVars }: ArgumentFieldProps) {
   const choices = field.options ?? []
   const listed = choices.some((option) => option.value === value)
   const [chosenFree, setChosenFree] = useState(false)
-  // Derived rather than stored, so a value that arrives already holding a
-  // template opens in the input that can edit it.
+  const [parked, setParked] = useState('')
   const free = chosenFree || (value !== '' && !listed)
   const pickable = field.type === 'select' && choices.length > 0
 
@@ -57,7 +48,10 @@ function ArgumentField({ field, value, onChange, stepGroups, contextVars }: Argu
         />
         <button
           type="button"
-          onClick={() => setChosenFree(true)}
+          onClick={() => {
+            setChosenFree(true)
+            if (parked !== '') onChange(parked)
+          }}
           className="text-[10px] text-gray-500 hover:text-gray-300 mt-1 transition-colors"
         >
           Use a template instead
@@ -82,8 +76,11 @@ function ArgumentField({ field, value, onChange, stepGroups, contextVars }: Argu
           type="button"
           onClick={() => {
             setChosenFree(false)
-            // Cleared, because the list cannot show a value it does not hold.
-            if (!listed) onChange('')
+            // Parked, not lost: the list cannot show it, the template input can take it back.
+            if (!listed) {
+              setParked(value)
+              onChange('')
+            }
           }}
           className="text-[10px] text-gray-500 hover:text-gray-300 mt-1 transition-colors"
         >
