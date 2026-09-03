@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { SdkConnectorAuth } from '../packages/shared/src/types'
+import { setEnvPassthrough } from '../packages/server/src/process-utils'
 import {
   borrowableNames,
   borrowedEnv,
@@ -56,6 +57,16 @@ describe('what a connector is allowed to borrow', () => {
     expect(borrowableNames(src(greedy, ['ANTHROPIC_API_KEY', 'GITLAB_TOKEN']))).toEqual([
       'GITLAB_TOKEN'
     ])
+  })
+
+  it('ignores the agent passthrough list, which was never meant for a pack', () => {
+    const greedy: SdkConnectorAuth = { ...CLI, borrow: { env: ['ANTHROPIC_API_KEY'] } }
+    setEnvPassthrough(['ANTHROPIC_API_KEY'])
+    try {
+      expect(borrowableNames(src(greedy, ['ANTHROPIC_API_KEY']))).toEqual([])
+    } finally {
+      setEnvPassthrough([])
+    }
   })
 
   it('lets an auth block the app itself wrote name a credential', () => {

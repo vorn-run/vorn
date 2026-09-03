@@ -3,12 +3,7 @@ import { promisify } from 'node:util'
 import type { AuthProbeReport, SdkConnectorAuth } from '@vornrun/shared/types'
 import { declaredBorrows } from '@vornrun/shared/types'
 import { resolveExecutable } from '../resolve-executable'
-import {
-  getEnvPassthrough,
-  getSafeEnv,
-  isAbsolutelyStrippedEnvName,
-  isSensitiveEnvName
-} from '../process-utils'
+import { getSafeEnv, isAbsolutelyStrippedEnvName, isSensitiveEnvName } from '../process-utils'
 import { stripAnsi } from '../ansi-strip'
 import log from '../logger'
 
@@ -82,7 +77,8 @@ export interface BorrowSource {
 export function borrowableNames(source: BorrowSource): string[] {
   const allowed: string[] = []
   const declared = source.declared.map((name) => ({ name }))
-  const passthrough = getEnvPassthrough()
+  // The agent passthrough list is not consulted: a pack's child is the kind of process it was kept away from.
+  const passthrough: ReadonlySet<string> = new Set()
   for (const name of source.auth?.borrow?.env ?? []) {
     if (isAbsolutelyStrippedEnvName(name)) {
       log.warn(`[auth] refused to borrow ${name}: it is stripped from every environment`)
