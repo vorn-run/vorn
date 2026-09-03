@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { SdkConnectorAuth } from '../packages/shared/src/types'
 import {
+  borrowableNames,
   borrowedEnv,
   borrowedSecrets,
   identityFrom,
@@ -15,6 +16,9 @@ const CLI: SdkConnectorAuth = {
   borrow: { env: ['GITLAB_TOKEN'], tokenArgs: ['auth', 'token'] }
 }
 
+/** What the connector declares reading, which is what it may borrow. */
+const DECLARED = ['GITLAB_TOKEN', 'GITLAB_HOST']
+
 /** A tool that is on PATH and answers however the test says. */
 const found = (stdout = '', stderr = '') => ({
   resolve: () => '/usr/bin/glab',
@@ -25,16 +29,48 @@ afterEach(() => {
   vi.unstubAllEnvs()
 })
 
+describe('what a connector is allowed to borrow', () => {
+  it('passes a name it declares reading', () => {
+    expect(borrowableNames(CLI, DECLARED)).toEqual(['GITLAB_TOKEN'])
+  })
+
+  it('refuses a name the connector never declared', () => {
+    const greedy: SdkConnectorAuth = { ...CLI, borrow: { env: ['AWS_SECRET_ACCESS_KEY'] } }
+    expect(borrowableNames(greedy, DECLARED)).toEqual([])
+  })
+
+  it('refuses a name that is stripped from every environment, declared or not', () => {
+    const sneaky: SdkConnectorAuth = { ...CLI, borrow: { env: ['CLAUDE_CODE_SECRET'] } }
+    expect(borrowableNames(sneaky, [...DECLARED, 'CLAUDE_CODE_SECRET'])).toEqual([])
+  })
+
+  it('keeps a declared name out of the environment when nothing set it', () => {
+    vi.stubEnv('GITLAB_TOKEN', '')
+    expect(borrowedEnv(CLI, DECLARED).GITLAB_TOKEN).toBeUndefined()
+  })
+
+  it('hands over a declared name the shell already set', () => {
+    vi.stubEnv('GITLAB_TOKEN', 'from-the-shell')
+    expect(borrowedEnv(CLI, DECLARED).GITLAB_TOKEN).toBe('from-the-shell')
+  })
+
+  it('will not hand over an undeclared name even when the shell has one', () => {
+    vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'not-yours')
+    const greedy: SdkConnectorAuth = { ...CLI, borrow: { env: ['AWS_SECRET_ACCESS_KEY'] } }
+    expect(borrowedEnv(greedy, DECLARED).AWS_SECRET_ACCESS_KEY).toBeUndefined()
+  })
+})
+
 describe('asking a borrowed tool who you are', () => {
   it('reports the account the tool names', async () => {
     const deps = found('', 'Logged in to gitlab.com account javier (keyring)')
-    expect(await probeAuth(CLI, deps)).toEqual({ ok: true, identity: 'javier' })
+    expect(await probeAuth(CLI, DECLARED, deps)).toEqual({ ok: true, identity: 'javier' })
   })
 
   it('runs the probe the connector declared, with its own borrowed variables', async () => {
     vi.stubEnv('GITLAB_TOKEN', 'from-the-shell')
     const deps = found('Logged in as javier')
-    await probeAuth(CLI, deps)
+    await probeAuth(CLI, DECLARED, deps)
     const [file, args, options] = deps.run.mock.calls[0]
     expect(file).toBe('/usr/bin/glab')
     expect(args).toEqual(['auth', 'status'])
@@ -43,13 +79,13 @@ describe('asking a borrowed tool who you are', () => {
 
   it('names the sign-in to run when the tool says no', async () => {
     const deps = { resolve: () => '/usr/bin/glab', run: vi.fn().mockRejectedValue(new Error('1')) }
-    const report = await probeAuth(CLI, deps)
+    const report = await probeAuth(CLI, DECLARED, deps)
     expect(report.ok).toBe(false)
     expect(report.message).toContain('glab auth login')
   })
 
   it('offers a way to get the tool when it is the tool that is missing', async () => {
-    const report = await probeAuth(CLI, { resolve: () => null, run: vi.fn() })
+    const report = await probeAuth(CLI, DECLARED, { resolve: () => null, run: vi.fn() })
     expect(report.ok).toBe(false)
     expect(report.message).toContain('not installed')
     expect(report.installHint).toBeTruthy()
@@ -71,38 +107,61 @@ describe('what a borrowed tool hands over', () => {
   it('passes through a variable the shell already set, without running anything', async () => {
     vi.stubEnv('GITLAB_TOKEN', 'already-here')
     const deps = found('printed-token')
-    expect(await borrowedSecrets(CLI, deps)).toEqual({ GITLAB_TOKEN: 'already-here' })
+    expect(await borrowedSecrets(CLI, DECLARED, deps)).toEqual({ GITLAB_TOKEN: 'already-here' })
     expect(deps.run).not.toHaveBeenCalled()
   })
 
   it('asks the tool for a token when nothing set it', async () => {
     vi.stubEnv('GITLAB_TOKEN', '')
     const deps = found('printed-token\n')
-    expect(await borrowedSecrets(CLI, deps)).toEqual({ GITLAB_TOKEN: 'printed-token' })
+    expect(await borrowedSecrets(CLI, DECLARED, deps)).toEqual({ GITLAB_TOKEN: 'printed-token' })
     expect(deps.run.mock.calls[0][1]).toEqual(['auth', 'token'])
+  })
+
+  it('fills only the variable meant for the token, not every name borrowed', async () => {
+    vi.stubEnv('GITLAB_TOKEN', '')
+    vi.stubEnv('GITLAB_HOST', '')
+    const both: SdkConnectorAuth = {
+      ...CLI,
+      borrow: {
+        env: ['GITLAB_HOST', 'GITLAB_TOKEN'],
+        tokenArgs: ['auth', 'token'],
+        tokenEnv: 'GITLAB_TOKEN'
+      }
+    }
+    const borrowed = await borrowedSecrets(both, DECLARED, found('printed-token'))
+    expect(borrowed).toEqual({ GITLAB_TOKEN: 'printed-token' })
+    expect(borrowed.GITLAB_HOST).toBeUndefined()
+  })
+
+  it('gives the token to the first name asked for when none is singled out', async () => {
+    vi.stubEnv('GITLAB_TOKEN', '')
+    const borrowed = await borrowedSecrets(CLI, DECLARED, found('printed-token'))
+    expect(borrowed).toEqual({ GITLAB_TOKEN: 'printed-token' })
   })
 
   it('borrows nothing for a rung that does not borrow', async () => {
     const deps = found('printed-token')
-    expect(await borrowedSecrets({ rung: 'key', keys: ['token'] }, deps)).toEqual({})
+    expect(await borrowedSecrets({ rung: 'key', keys: ['token'] }, DECLARED, deps)).toEqual({})
     expect(deps.run).not.toHaveBeenCalled()
+  })
+
+  it('borrows nothing the connector did not declare reading', async () => {
+    vi.stubEnv('AWS_SECRET_ACCESS_KEY', 'not-yours')
+    const greedy: SdkConnectorAuth = { ...CLI, borrow: { env: ['AWS_SECRET_ACCESS_KEY'] } }
+    expect(await borrowedSecrets(greedy, DECLARED, found())).toEqual({})
   })
 
   it('leaves the child to fail on its own when the tool will not hand a token over', async () => {
     vi.stubEnv('GITLAB_TOKEN', '')
     const deps = { resolve: () => '/usr/bin/glab', run: vi.fn().mockRejectedValue(new Error('no')) }
-    expect(await borrowedSecrets(CLI, deps)).toEqual({})
-  })
-
-  it('keeps a declared variable out of the environment when nothing set it', () => {
-    vi.stubEnv('GITLAB_TOKEN', '')
-    expect(borrowedEnv(CLI).GITLAB_TOKEN).toBeUndefined()
+    expect(await borrowedSecrets(CLI, DECLARED, deps)).toEqual({})
   })
 })
 
 describe('reading an identity out of what a tool printed', () => {
-  it('prefers the account a tool names over its first line', () => {
-    expect(identityFrom('github.com\n  ✓ Logged in to github.com account javier (keyring)')).toBe(
+  it('prefers the account a tool names', () => {
+    expect(identityFrom('github.com\n  Logged in to github.com account javier (keyring)')).toBe(
       'javier'
     )
   })
@@ -111,8 +170,16 @@ describe('reading an identity out of what a tool printed', () => {
     expect(identityFrom('Logged in to gitlab.com as javier.')).toBe('javier')
   })
 
-  it('falls back to the first line it was given', () => {
-    expect(identityFrom('\n\nSubscription: Pay-As-You-Go\n')).toBe('Subscription: Pay-As-You-Go')
+  it('says nothing rather than printing whatever came first', () => {
+    // `gh auth token` prints a credential; a first-line fallback would have
+    // rendered it as who you are.
+    expect(identityFrom('ghp_0123456789abcdefghijklmnopqrstuvwxyz')).toBeUndefined()
+    expect(identityFrom('{\n  "id": "abc",\n  "name": "Prod"\n}')).toBeUndefined()
+  })
+
+  it('does not read a refusal as a name', () => {
+    expect(identityFrom('could not authenticate as anonymous')).toBeUndefined()
+    expect(identityFrom('not signed in as anyone')).toBeUndefined()
   })
 
   it('says nothing about an empty answer', () => {

@@ -145,7 +145,16 @@ export function borrowedEnv(
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g')
 
 /** Only a phrase that names somebody counts, never whatever came first. */
-const NAMED = [/\baccount\s+(\S+)/i, /(?<!\bnot\s)(?<!could not\s)(?<!failed to\s)\bas\s+(\S+)/i]
+const NAMED = [/\baccount\s+(\S+)/i, /\bas\s+(\S+)/i]
+
+/**
+ * Words that turn the rest of a line into a denial.
+ *
+ * `could not authenticate as anonymous` names nobody, and a lookbehind on the
+ * word before would not catch it — the whole run-up to the phrase is what says
+ * whether it is a claim or a refusal.
+ */
+const NEGATION = /\b(not|cannot|can't|couldn't|failed|unable|denied|expired|invalid)\b/i
 
 /**
  * The account a tool names, when its output names one at all.
@@ -159,8 +168,13 @@ const NAMED = [/\baccount\s+(\S+)/i, /(?<!\bnot\s)(?<!could not\s)(?<!failed to\
 export function identityFrom(output: string): string | undefined {
   const text = output.replace(ANSI, '')
   for (const pattern of NAMED) {
-    const named = text.match(pattern)
-    if (named) return named[1].replace(/[.,)]+$/, '')
+    const named = pattern.exec(text)
+    if (!named) continue
+    // Only what leads up to the phrase on its own line: a denial earlier in the
+    // output says nothing about this claim.
+    const lineStart = text.lastIndexOf('\n', named.index) + 1
+    if (NEGATION.test(text.slice(lineStart, named.index))) continue
+    return named[1].replace(/[.,)]+$/, '')
   }
   return undefined
 }
