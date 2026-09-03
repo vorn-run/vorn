@@ -136,12 +136,13 @@ export function SdkConnectorForm({
   }, [manifest])
 
   const trigger = manifest?.triggers.find((entry) => entry.type === triggerType)
-  // Nothing to fill in for a connector that asks for nothing, and no secret to ask for while its login is being borrowed.
+  const borrowed = borrowing && manifest ? borrowableFromManifest(manifest.auth, manifest.env) : []
+  const covered = new Set(borrowed.map((name) => name.toUpperCase()))
+  // Nothing to fill in for a connector that asks for nothing; a secret the borrow covers is not asked for either.
   const fields = (manifest?.env ?? []).filter(
-    (entry) => rung !== 'none' && !(borrowing && entry.secret)
+    (entry) => rung !== 'none' && !(entry.secret && covered.has(entry.name.toUpperCase()))
   )
   const missing = fields.filter((entry) => entry.required && !values[entry.name]?.trim())
-  const borrowed = borrowing && manifest ? borrowableFromManifest(manifest.auth, manifest.env) : []
 
   const handleSave = async () => {
     if (!manifest || !launch) return

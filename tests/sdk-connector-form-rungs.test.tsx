@@ -82,6 +82,29 @@ describe('a connector that borrows a login', () => {
     expect(queryByDisplayValue('token')).toBeNull()
   })
 
+  it('still asks for a secret the borrow does not cover', async () => {
+    probeSdkConnector.mockResolvedValue({
+      ok: true,
+      manifest: {
+        ...manifest({
+          rung: 'cli',
+          probe: { command: 'glab', args: ['auth', 'status'] },
+          borrow: { env: ['GITLAB_TOKEN'], tokenArgs: ['auth', 'token'] }
+        }),
+        env: [
+          { name: 'GITLAB_TOKEN', required: true, secret: true },
+          { name: 'WEBHOOK_SECRET', required: true, secret: true }
+        ]
+      }
+    })
+    const { findByText, container, getByText } = setup()
+    await findByText(/Signed in as javier/)
+    // One secret field left: the token is borrowed, the webhook secret is not.
+    expect(container.querySelectorAll('input[type="password"]')).toHaveLength(1)
+    expect(container.textContent).toContain('WEBHOOK_SECRET')
+    expect(getByText('Connect').closest('button')).toBeDisabled()
+  })
+
   it('names the command it asked', async () => {
     const { findByText } = setup()
     expect(await findByText(/glab auth status/)).toBeInTheDocument()
