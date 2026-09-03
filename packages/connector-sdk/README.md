@@ -366,6 +366,23 @@ hand:
 npx vorn-connector setup ./dist/index.js
 ```
 
+### Where a config field is read from
+
+A field is read from the environment variable it names in `env`, or from its
+key in CONSTANT_CASE when it names none — `apiToken` becomes `API_TOKEN`. The
+same rule decides what `--live` reads and what the host must set when it hands
+a connector its credentials, so it is exported rather than kept private:
+
+```ts
+import { envNameFor } from '@vornrun/connector-sdk'
+
+envNameFor('apiToken') // API_TOKEN
+envNameFor('apiToken', 'GH_TOKEN') // GH_TOKEN — an explicit env always wins
+```
+
+Anything computing these names on the host side should call this rather than
+re-implement it, or the two will disagree about a field named `oauth2Token`.
+
 ## Pack it as a file
 
 `vorn-connector pack` builds a single installable file: the manifest plus one

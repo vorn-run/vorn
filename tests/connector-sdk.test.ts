@@ -116,6 +116,37 @@ describe('resolveConfig', () => {
   })
 })
 
+/**
+ * The host has to compute the same names when it hands a connector its
+ * secrets, so this is a shared contract rather than an internal detail: it is
+ * exported for that reason, and pinned here so both sides can rely on it.
+ */
+describe('the environment name a config field is read from', () => {
+  it('turns a camelCase key into CONSTANT_CASE', () => {
+    expect(envNameFor('apiToken')).toBe('API_TOKEN')
+    expect(envNameFor('organizationUrl')).toBe('ORGANIZATION_URL')
+    expect(envNameFor('token')).toBe('TOKEN')
+  })
+
+  it('treats hyphens and spaces as the same separator', () => {
+    expect(envNameFor('api-token')).toBe('API_TOKEN')
+    expect(envNameFor('api token')).toBe('API_TOKEN')
+  })
+
+  it('keeps a digit with the word it belongs to', () => {
+    expect(envNameFor('oauth2Token')).toBe('OAUTH2_TOKEN')
+  })
+
+  it('leaves a name that is already shouting alone', () => {
+    expect(envNameFor('API_TOKEN')).toBe('API_TOKEN')
+  })
+
+  it('lets the field name its own variable, which then wins outright', () => {
+    expect(envNameFor('organizationUrl', 'ACME_ORG_URL')).toBe('ACME_ORG_URL')
+    expect(envNameFor('apiToken', 'GH_TOKEN')).toBe('GH_TOKEN')
+  })
+})
+
 describe('normalizeItem', () => {
   it('fills every field Vorn reads by name', () => {
     expect(normalizeItem({ externalId: 7, title: 'Seven' }, NOW)).toEqual({
