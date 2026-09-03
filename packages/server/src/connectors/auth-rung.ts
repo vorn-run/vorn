@@ -77,15 +77,16 @@ export interface BorrowSource {
 export function borrowableNames(source: BorrowSource): string[] {
   const allowed: string[] = []
   const declared = source.declared.map((name) => ({ name }))
-  // The agent passthrough list is not consulted: a pack's child is the kind of process it was kept away from.
+  const honoured = declaredBorrows(source.auth, declared)
   const passthrough: ReadonlySet<string> = new Set()
-  for (const name of source.auth?.borrow?.env ?? []) {
-    if (isAbsolutelyStrippedEnvName(name)) {
-      log.warn(`[auth] refused to borrow ${name}: it is stripped from every environment`)
+  for (const asked of source.auth?.borrow?.env ?? []) {
+    const name = honoured.find((entry) => entry.toUpperCase() === asked.toUpperCase())
+    if (name === undefined) {
+      log.warn(`[auth] refused to borrow ${asked}: the connector does not declare reading it`)
       continue
     }
-    if (!declaredBorrows(source.auth, declared).includes(name)) {
-      log.warn(`[auth] refused to borrow ${name}: the connector does not declare reading it`)
+    if (isAbsolutelyStrippedEnvName(name)) {
+      log.warn(`[auth] refused to borrow ${name}: it is stripped from every environment`)
       continue
     }
     if (!source.trusted && isSensitiveEnvName(name, passthrough)) {
@@ -201,10 +202,11 @@ export async function borrowedSecrets(
   }
 
   // One variable receives the token; the rest of borrow.env are pass-throughs.
-  const target = auth.borrow?.tokenEnv ?? names[0]
+  const asked = (auth.borrow?.tokenEnv ?? names[0]).toUpperCase()
+  const target = names.find((name) => name.toUpperCase() === asked)
   const tokenArgs = auth.borrow?.tokenArgs
   const command = auth.probe?.command
-  const wanted = names.includes(target) && !borrowed[target]
+  const wanted = target !== undefined && !borrowed[target]
   if (!wanted || !tokenArgs || tokenArgs.length === 0 || !command) return borrowed
 
   const { resolve, run } = deps(overrides)
@@ -217,7 +219,7 @@ export async function borrowedSecrets(
       env: borrowedEnv(source, names)
     })
     const token = result.stdout.trim()
-    if (token) borrowed[target] = token
+    if (token && target) borrowed[target] = token
   } catch (error) {
     // Said so it is not silent; the message only, since the streams held a token.
     log.warn(`[auth] ${command} could not hand over a token: ${messageOf(error)}`)

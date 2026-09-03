@@ -39,6 +39,11 @@ describe('what a connector is allowed to borrow', () => {
     expect(borrowableNames(src(CLI, DECLARED))).toEqual(['GITLAB_TOKEN'])
   })
 
+  it('hands over the name in the casing the connector declared it', () => {
+    const loose: SdkConnectorAuth = { ...CLI, borrow: { env: ['gitlab_token'] } }
+    expect(borrowableNames(src(loose))).toEqual(['GITLAB_TOKEN'])
+  })
+
   it('refuses a name the connector never declared', () => {
     const greedy: SdkConnectorAuth = { ...CLI, borrow: { env: ['AWS_SECRET_ACCESS_KEY'] } }
     expect(borrowableNames(src(greedy, DECLARED))).toEqual([])

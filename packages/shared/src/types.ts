@@ -524,13 +524,13 @@ export function isImplicitConnection(connection: {
   return connection.filters?.[SDK_FILTER_KEYS.implicit] === true
 }
 
-/** The borrow names a manifest can honour: what it asks for that it also declares reading. */
+/** The borrow names a manifest can honour, in the casing it declared them: what it reads is what it gets. */
 export function declaredBorrows(
   auth: SdkConnectorAuth | undefined,
   env: ReadonlyArray<{ name: string }>
 ): string[] {
-  const declared = new Set(env.map((entry) => entry.name.toUpperCase()))
-  return (auth?.borrow?.env ?? []).filter((name) => declared.has(name.toUpperCase()))
+  const declared = new Map(env.map((entry) => [entry.name.toUpperCase(), entry.name]))
+  return (auth?.borrow?.env ?? []).flatMap((name) => declared.get(name.toUpperCase()) ?? [])
 }
 
 /** What asking a borrowed tool answered; `ok: null` is "nothing to ask". */

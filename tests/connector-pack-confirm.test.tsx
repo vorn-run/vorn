@@ -47,7 +47,7 @@ describe('the sheet shown before a pack is kept', () => {
     }
     render(<PackInstallConfirm preview={borrowing} onConfirm={() => {}} onCancel={() => {}} />)
     expect(screen.getByText('Borrows')).toBeInTheDocument()
-    expect(screen.getByText('GITLAB_TOKEN from glab')).toBeInTheDocument()
+    expect(screen.getByText('gitlab_token from glab')).toBeInTheDocument()
     expect(screen.queryByText(/NOT_DECLARED/)).toBeNull()
   })
 
