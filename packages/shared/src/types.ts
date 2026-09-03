@@ -1945,8 +1945,12 @@ export interface SdkConnectorAuth {
   rung: ConnectorAuthRung
   /** Asks the borrowed tool who you are. Present for `cli`. */
   probe?: { command: string; args?: string[] }
-  /** What to take from the signed-in tool at spawn; never stored. */
-  borrow?: { env?: string[]; tokenArgs?: string[] }
+  /**
+   * What to take from the signed-in tool at spawn; never stored. `tokenEnv`
+   * names the one variable the token command fills, defaulting to the first
+   * of `env`; the rest are passed through as they are.
+   */
+  borrow?: { env?: string[]; tokenArgs?: string[]; tokenEnv?: string }
   /** Config field keys holding the credential. Present for `key`. */
   keys?: string[]
 }

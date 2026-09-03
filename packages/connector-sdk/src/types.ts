@@ -392,11 +392,17 @@ export interface ConnectorAuth {
    */
   probe?: { command: string; args?: string[] }
   /**
-   * What to take from the signed-in tool. `env` names variables to pass
-   * through; `tokenArgs` is a command that prints a token, run fresh at spawn
-   * so nothing is ever stored.
+   * What to take from the signed-in tool.
+   *
+   * `env` names variables to pass through, and every one of them must also
+   * appear in this connector's own `config` — the host refuses to borrow a
+   * name the connector does not openly read. `tokenArgs` is a command that
+   * prints a token, run fresh at spawn so nothing is ever stored, and
+   * `tokenEnv` names the one variable that receives it (the first of `env` by
+   * default). The rest are pass-throughs: a host or an account id filled with
+   * a token would authenticate against nothing.
    */
-  borrow?: { env?: string[]; tokenArgs?: string[] }
+  borrow?: { env?: string[]; tokenArgs?: string[]; tokenEnv?: string }
   /** Config field keys holding the credential. Required for `key`. */
   keys?: string[]
 }

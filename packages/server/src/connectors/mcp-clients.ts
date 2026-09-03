@@ -16,14 +16,14 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import {
   SDK_FILTER_KEYS,
   connectionConnectorId,
-  type SdkConnectorAuth,
   type SourceConnection
 } from '@vornrun/shared/types'
 import { dbListSourceConnections } from '../database'
 import { getDecryptedCreds } from './decrypted-creds'
 import { localLaunchSpec } from './catalog'
-import { describePack, installedLaunch } from './packs'
+import { installedLaunch } from './packs'
 import { borrowedSecrets } from './auth-rung'
+import { mightBorrow, resolveBorrow } from './connector-auth'
 import { getSafeEnv } from '../process-utils'
 import log from '../logger'
 
@@ -99,22 +99,9 @@ function spawnBase(conn: SourceConnection): SpawnConfig {
   return { command, args, env: { ...env, ...secretEnv } }
 }
 
-/**
- * The login a packaged connector borrows, when it declared one.
- *
- * Answered synchronously so a connector that borrows nothing — which is every
- * connection that predates rungs — reaches its spawn without suspending.
- */
-function borrowFor(conn: SourceConnection): SdkConnectorAuth | undefined {
-  const sdkId = String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
-  if (!sdkId) return undefined
-  try {
-    const auth = describePack(sdkId)?.auth
-    return auth?.rung === 'cli' ? auth : undefined
-  } catch {
-    // No data directory yet, so nothing is installed to borrow from.
-    return undefined
-  }
+/** The connector a connection runs, when it names a packaged one. */
+function sdkIdOf(conn: SourceConnection): string {
+  return String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
 }
 
 /**
@@ -127,9 +114,10 @@ function borrowFor(conn: SourceConnection): SdkConnectorAuth | undefined {
  */
 export async function buildSpawnConfig(conn: SourceConnection): Promise<SpawnConfig> {
   const base = spawnBase(conn)
-  const auth = borrowFor(conn)
-  if (!auth) return base
-  return { ...base, env: { ...(await borrowedSecrets(auth)), ...base.env } }
+  const borrow = await resolveBorrow(sdkIdOf(conn))
+  if (!borrow) return base
+  const borrowed = await borrowedSecrets(borrow.auth, borrow.declared)
+  return { ...base, env: { ...borrowed, ...base.env } }
 }
 
 export async function getOrStartClient(conn: SourceConnection): Promise<Client> {
@@ -153,7 +141,9 @@ async function startClient(conn: SourceConnection): Promise<Client> {
   // spawned in this tick, which is what keeps one child per connection when
   // two callers arrive together. Both routes assemble through the same pair of
   // helpers, so neither can drift from what a caller of buildSpawnConfig sees.
-  const { command, args, env } = borrowFor(conn) ? await buildSpawnConfig(conn) : spawnBase(conn)
+  const { command, args, env } = mightBorrow(sdkIdOf(conn))
+    ? await buildSpawnConfig(conn)
+    : spawnBase(conn)
   // Inherit PATH and friends from the parent via getSafeEnv() — same
   // sanitization the rest of the server uses for child processes — so
   // GH/Linear/NPM tokens etc. don't leak into arbitrary MCP servers

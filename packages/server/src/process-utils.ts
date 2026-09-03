@@ -170,6 +170,21 @@ const STRIP_ENV_PREFIXES = ['CLAUDE_CODE_', BOOTSTRAP_ENV_VAR]
 const STRIP_ENV_KEYS_UPPER = STRIP_ENV_KEYS.map((k) => k.toUpperCase())
 
 /**
+ * Whether a variable is stripped no matter who asks.
+ *
+ * `filterEnv` applies this while building an environment; a connector that
+ * borrows a login names the variables it wants by hand, which walks around that
+ * filter entirely. Exported so the borrow answers to the same list rather than
+ * to a second copy of it that can drift.
+ */
+export function isAbsolutelyStrippedEnvName(name: string): boolean {
+  const upper = name.toUpperCase()
+  return (
+    STRIP_ENV_KEYS_UPPER.includes(upper) || STRIP_ENV_PREFIXES.some((p) => upper.startsWith(p))
+  )
+}
+
+/**
  * Exact variable names the user has opted into forwarding, uppercased.
  *
  * SENSITIVE_ENV_PREFIXES is the right default — a shell that exports a real
@@ -230,8 +245,7 @@ export function filterEnv(
   for (const [key, val] of Object.entries(source)) {
     if (val === undefined) continue
     const upper = key.toUpperCase()
-    if (STRIP_ENV_KEYS_UPPER.includes(upper)) continue
-    if (STRIP_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue
+    if (isAbsolutelyStrippedEnvName(key)) continue
     if (!passthrough.has(upper) && SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue
     env[key] = val
   }

@@ -161,8 +161,9 @@ import {
   syncImplicitConnection,
   type ImplicitConnectionDeps
 } from './connectors/implicit-connection'
-import { GH_AUTH } from './connectors/gh-cli'
+import { GH_AUTH, GH_DECLARED_ENV } from './connectors/gh-cli'
 import { probeAuth } from './connectors/auth-rung'
+import { resolveBorrow } from './connectors/connector-auth'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import type { ConnectorPackSource, SdkConnectorAuth } from '@vornrun/shared/types'
 import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
@@ -252,14 +253,20 @@ function unusableSource(source: ConnectorPackSource): string {
  * built-in GitHub one predates rungs and declares it beside its client. Both
  * answer the same shape, so the probe has one input rather than a branch.
  */
-function authForConnector(connectorId: string): SdkConnectorAuth | undefined {
-  if (connectorId === 'github') return GH_AUTH
+async function authForConnector(
+  connectorId: string
+): Promise<{ auth: SdkConnectorAuth | undefined; declared: string[] }> {
+  if (connectorId === 'github') return { auth: GH_AUTH, declared: GH_DECLARED_ENV }
+  // Resolved the way a launch is: an installed pack first, then the checkout a
+  // developer is running, so a connector under development answers too.
+  const borrow = await resolveBorrow(connectorId)
+  if (borrow) return borrow
   try {
-    return describePack(connectorId)?.auth
+    return { auth: describePack(connectorId)?.auth, declared: [] }
   } catch {
     // Before the data directory resolves there is nowhere to look, which is
     // the same answer as a connector that never declared anything.
-    return undefined
+    return { auth: undefined, declared: [] }
   }
 }
 
@@ -1878,7 +1885,8 @@ export function registerAllMethods(): void {
   registerMethod('connector:status', async () => {
     const results: Array<{ connectorId: string; authed: boolean; message?: string }> = []
     for (const c of connectorRegistry.list()) {
-      const report = await probeAuth(authForConnector(c.id))
+      const { auth, declared } = await authForConnector(c.id)
+      const report = await probeAuth(auth, declared)
       // `null` is "nothing this probe can answer" — a key rung is checked
       // against the service by preflight, not reported here as signed out.
       const authed = report.ok !== false
@@ -1895,9 +1903,10 @@ export function registerAllMethods(): void {
    * token field, so the answer carries who you are rather than only whether
    * the check passed.
    */
-  registerMethod('connector:probeAuth', async (connectorId: string) =>
-    probeAuth(authForConnector(connectorId))
-  )
+  registerMethod('connector:probeAuth', async (connectorId: string) => {
+    const { auth, declared } = await authForConnector(connectorId)
+    return probeAuth(auth, declared)
+  })
 
   // ─── Browser pane (relayed to Electron main) ──────────────────
   //

@@ -286,12 +286,20 @@ function toAuth(value: unknown): SdkConnectorAuth | undefined {
   const env = strings(borrow?.env)
   const tokenArgs = strings(borrow?.tokenArgs)
   const keys = strings(value.keys)
+  // The token lands in one variable. A name that is not among the ones being
+  // borrowed would fill something nothing reads, so it falls back to the first.
+  const asked = str(borrow?.tokenEnv).trim()
+  const tokenEnv = env.includes(asked) ? asked : undefined
 
   return {
     rung: rung as ConnectorAuthRung,
     ...(usable && args !== undefined && { probe: { command, ...(args.length > 0 && { args }) } }),
     ...((env.length > 0 || tokenArgs.length > 0) && {
-      borrow: { ...(env.length > 0 && { env }), ...(tokenArgs.length > 0 && { tokenArgs }) }
+      borrow: {
+        ...(env.length > 0 && { env }),
+        ...(tokenArgs.length > 0 && { tokenArgs }),
+        ...(tokenEnv !== undefined && { tokenEnv })
+      }
     }),
     ...(keys.length > 0 && { keys })
   }
