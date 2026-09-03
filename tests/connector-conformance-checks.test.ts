@@ -122,7 +122,9 @@ describe('what a check says about an action', () => {
       inputs: [{ key: 'channel', label: 'Channel', type: 'select', loadOptions: 'channels' }]
     }
     expect(await codes({ actions: [fixed] })).not.toContain('input-type-unsupported')
-    expect(await codes({ actions: [loaded] })).not.toContain('input-type-unsupported')
+    expect(await codes({ actions: [loaded], options: { channels: () => [] } })).not.toContain(
+      'input-type-unsupported'
+    )
   })
 })
 
