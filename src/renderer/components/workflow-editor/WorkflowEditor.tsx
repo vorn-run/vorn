@@ -646,9 +646,25 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   // against this machine each render, so answering one clears its row.
   const imported = useAppStore((s) => s.importedRequirements)
   const setImportedRequirements = useAppStore((s) => s.setImportedRequirements)
-  // The start-from list needs the catalog, and so does a workflow whose import
-  // left needs — without it a row could name a connector but never offer it.
-  const needsConnectorData = !editingId || imported?.workflowId === editingId
+  /**
+   * Everything the canvas is still missing, however it got here.
+   *
+   * An import announces its needs; a step picked from a connector nobody has
+   * installed simply sits there unbound. Both are the same question, so they
+   * are answered by one list of rows, merged per step so the import keeps what
+   * only it knows — which connector, and which account it was pointed at.
+   */
+  const stillNeeded = useMemo(() => {
+    const fromImport = imported && imported.workflowId === editingId ? imported.requirements : []
+    const all = mergeRequirements(requirementsOfDefinition(nodes), fromImport)
+    return requirementsWithBindings(all, connections).filter(
+      (entry) => entry.connectionId === undefined
+    )
+  }, [imported, editingId, connections, nodes])
+  // Dismiss means "stop asking about the import"; a row the canvas derives is a live fact until the step is bound.
+  const importContributed = imported !== null && imported.workflowId === editingId
+  // The start-from list needs the catalog, and so does any row that must offer an install or a connection.
+  const needsConnectorData = !editingId || importContributed || stillNeeded.length > 0
 
   // The one catalog the settings list also reads, asked for only while someone
   // is looking: a fetch that lost the startup race against the server socket
@@ -702,22 +718,6 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     },
     [install]
   )
-
-  /**
-   * Everything the canvas is still missing, however it got here.
-   *
-   * An import announces its needs; a step picked from a connector nobody has
-   * installed simply sits there unbound. Both are the same question, so they
-   * are answered by one list of rows, merged per step so the import keeps what
-   * only it knows — which connector, and which account it was pointed at.
-   */
-  const stillNeeded = useMemo(() => {
-    const fromImport = imported && imported.workflowId === editingId ? imported.requirements : []
-    const all = mergeRequirements(requirementsOfDefinition(nodes), fromImport)
-    return requirementsWithBindings(all, connections).filter(
-      (entry) => entry.connectionId === undefined
-    )
-  }, [imported, editingId, connections, nodes])
 
   /** Nothing half-opened survives leaving the panel that opened it. */
   const closeStartFrom = useCallback(() => {
@@ -1594,13 +1594,15 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             <div className="w-[280px] border-l border-white/[0.08] bg-surface-node flex flex-col h-full overflow-y-auto titlebar-no-drag">
               <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
                 <span className="text-[13px] font-medium text-white">Still needs</span>
-                <button
-                  aria-label="Dismiss"
-                  onClick={() => setImportedRequirements(null)}
-                  className="p-1 rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
-                >
-                  <X size={14} />
-                </button>
+                {importContributed && (
+                  <button
+                    aria-label="Dismiss"
+                    onClick={() => setImportedRequirements(null)}
+                    className="p-1 rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
               {install.error && (
                 <div className="px-4 py-2 border-b border-white/[0.08] text-[11px] text-danger">

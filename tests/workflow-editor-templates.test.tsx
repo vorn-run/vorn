@@ -112,6 +112,16 @@ const IMPORTED: WorkflowDefinition = {
   edges: []
 }
 
+/** A saved workflow with a step placed from the catalog and never bound. */
+const UNBOUND: WorkflowDefinition = {
+  ...IMPORTED,
+  id: 'wf-unbound',
+  name: 'Post from the catalog',
+  nodes: IMPORTED.nodes.map((node) =>
+    node.id === 'n1' ? { ...node, config: { ...node.config, connectorId: 'slack' } } : node
+  ) as WorkflowDefinition['nodes']
+}
+
 const mockState = {
   isWorkflowEditorOpen: true,
   editingWorkflowId: null as string | null,
@@ -121,7 +131,7 @@ const mockState = {
   updateWorkflow: vi.fn(),
   removeWorkflow: vi.fn(),
   config: {
-    workflows: [EXPORTABLE, IMPORTED],
+    workflows: [EXPORTABLE, IMPORTED, UNBOUND],
     tasks: [],
     projects: [{ name: 'Novum', path: '/Users/someone/dev/novum', preferredAgents: [] }],
     defaults: {}
@@ -407,6 +417,20 @@ describe('a requirement answered from the panel', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Add connection' }))
 
     expect(await screen.findByText('Connect GitHub')).toBeInTheDocument()
+  })
+
+  it('offers the install for a step the canvas placed, with no import in sight', async () => {
+    api.listConnectorCatalog.mockResolvedValue({
+      items: [SLACK_CATALOG],
+      templates: TEMPLATE_SEED,
+      mcpServers: []
+    })
+    mockState.editingWorkflowId = 'wf-unbound'
+    render(<WorkflowEditor />)
+
+    expect(await screen.findByRole('button', { name: 'Install Slack' })).toBeInTheDocument()
+    // A row the canvas derives cannot be dismissed: binding or deleting the step is what clears it.
+    expect(screen.queryByLabelText('Dismiss')).toBeNull()
   })
 
   it('says what an import could not bind, on the workflow it imported', async () => {
