@@ -93,7 +93,7 @@ export function resilientFetch(options: ResilientFetchOptions): typeof fetch {
 
   const ceiling = options.retry?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS
 
-  const send = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const send = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     let waited = 0
     /** Wait, unless doing so would spend more than one call is allowed. */
     const pause = async (ms: number): Promise<boolean> => {
