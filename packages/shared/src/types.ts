@@ -907,11 +907,7 @@ export interface CallConnectorActionConfig {
   action: string
   /** The action's authored label, kept so a card can name it without asking the connector. */
   actionLabel?: string
-  /**
-   * Which connector the action belongs to, for a step placed before any
-   * connection existed. Two connectors can serve an action of the same name, so
-   * the connector cannot be inferred from `action` once the step is unbound.
-   */
+  // Which connector the action belongs to, for a step placed before any connection existed.
   connectorId?: string
   /** Raw args map; values support template placeholders. */
   args: Record<string, string>

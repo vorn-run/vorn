@@ -16,11 +16,9 @@ import { AddConnectionForm, MCP_CONNECTOR_ID, type ConnectorInfo } from './AddCo
 
 export function ConnectorSettings() {
   const workflows = useAppStore((s) => s.config?.workflows ?? [])
-  const openWorkflowEditor = (id: string) => {
+  // Settings is a modal overlay, so it closes first or the editor renders behind it; null opens a new workflow.
+  const openWorkflowEditor = (id: string | null) => {
     const store = useAppStore.getState()
-    // Close settings, switch to workflows view, select the workflow, and
-    // open the editor. Settings is a modal overlay — if we only set the
-    // editor state, the editor renders behind settings and looks dead.
     store.setSettingsOpen(false)
     store.setMainViewMode('workflows')
     store.setEditingWorkflowId(id)
@@ -35,8 +33,7 @@ export function ConnectorSettings() {
   // connectors before they are installed, and two copies would disagree the
   // moment either was refreshed.
   const { items: catalog, mcpServers, fetchedAt: catalogFetchedAt } = useConnectorCatalog()
-  // What the detail view is describing. Separate from `adding` so opening a
-  // connector to read about it is not the same as committing to install it.
+  // What the detail view is describing.
   const [selected, setSelected] = useState<ConnectorListing | null>(null)
   // Connections lead once there are any; with none there is nothing to lead
   // with, so the catalog opens instead of a second empty-state layout.
@@ -73,13 +70,10 @@ export function ConnectorSettings() {
     void load()
   }, [load])
 
-  // Inspect, ask, keep — the same three steps the editor's template rows use.
-  // Installing changes what is on disk, which the library reads too, so the
-  // shared cache is refreshed rather than only this page's copy.
+  // Installing changes what is on disk, which the library reads too, so the shared cache is told as well.
   const install = usePackInstall(
     useCallback(async () => {
-      await load()
-      await refreshConnections()
+      await Promise.all([load(), refreshConnections()])
     }, [load])
   )
   const {
@@ -261,6 +255,7 @@ export function ConnectorSettings() {
             progress: installProgress[selectedListing.id]
           })}
           onAdd={() => setAdding(selectedListing)}
+          onUse={() => openWorkflowEditor(null)}
           onInstall={() => handleInstall(selectedListing)}
           onRollback={() => handleRollback(selectedListing.id)}
           onRemove={() => handleRemovePack(selectedListing.id)}

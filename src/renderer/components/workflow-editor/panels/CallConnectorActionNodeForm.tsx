@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type {
   CallConnectorActionConfig,
   ConnectorActionDef,
@@ -13,14 +13,7 @@ import { useConnectorCatalog } from '../../../lib/use-connector-catalog'
 import { TEMPLATE_VARIABLES, StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 
-/**
- * A published argument, in the shape this form already draws.
- *
- * The connector describes an argument once; it reaches the app as a tool schema
- * when a connection exists and as a catalog entry when one does not. Mapping
- * the second onto the first is what keeps a step from looking like a different
- * step before and after it is installed.
- */
+// A published argument, in the shape this form already draws.
 function asConfigField(input: ConnectorCatalogActionInput): ConnectorConfigField {
   const type: ConnectorConfigField['type'] =
     input.type === 'select' ? 'select' : input.type === 'json' ? 'textarea' : 'text'
@@ -173,18 +166,17 @@ export function CallConnectorActionNodeForm({
     (a) => a.type === config.action
   )
 
-  // A step picked from the catalog has no connection to ask, so its arguments
-  // come from what the catalog published — the same description the connector
-  // will serve once it is installed, so the form does not change under you.
-  const catalog = useConnectorCatalog()
-  const awaited =
-    !config.connectionId && config.connectorId
-      ? catalog.items
-          .find((entry) => entry.id === config.connectorId)
-          ?.actions?.find((action) => action.type === config.action)
-      : undefined
-
-  const argFields = selectedAction?.configFields ?? (awaited?.inputs ?? []).map(asConfigField)
+  // A step picked from the catalog has no connection to ask, so its arguments come from what the catalog published.
+  const unbound = !config.connectionId && Boolean(config.connectorId)
+  const catalog = useConnectorCatalog(unbound)
+  const argFields = useMemo(() => {
+    if (selectedAction?.configFields) return selectedAction.configFields
+    if (!unbound) return []
+    const awaited = catalog.items
+      .find((entry) => entry.id === config.connectorId)
+      ?.actions?.find((action) => action.type === config.action)
+    return (awaited?.inputs ?? []).map(asConfigField)
+  }, [selectedAction, unbound, catalog.items, config.connectorId, config.action])
 
   return (
     <div className="space-y-5">
@@ -208,7 +200,7 @@ export function CallConnectorActionNodeForm({
           variant="form"
           placeholder="Select a connection..."
         />
-        {awaited ? (
+        {unbound ? (
           <p className="text-[11px] text-gray-500 mt-1.5">
             {config.actionLabel || config.action} comes from a connector that is not installed yet —
             the workflow panel offers to install and connect it.

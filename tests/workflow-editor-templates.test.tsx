@@ -84,11 +84,7 @@ const EXPORTABLE: WorkflowDefinition = {
   edges: []
 }
 
-/**
- * A workflow as an import leaves it: the step is on the canvas with its
- * connection blanked, and nothing in the node itself says which connector it
- * came from — only the `requires` block the file carried does.
- */
+// A workflow as an import leaves it: the step is on the canvas with its connection blanked, and nothing in the node.
 const IMPORTED: WorkflowDefinition = {
   ...EXPORTABLE,
   id: 'wf-imported',
@@ -334,9 +330,7 @@ describe('a requirement answered from the panel', () => {
     expect(api.installConnectorPack).not.toHaveBeenCalled()
   })
 
-  // What the file knew must survive meeting the step it describes: the canvas
-  // can only see that the field is empty, and a row that forgets the connector
-  // is a row with nothing to offer.
+  // What the file knew must survive meeting the step it describes: the canvas can only see that the field is empty,.
   it('keeps the connector an import named, on the step the canvas also sees', async () => {
     api.listConnectorCatalog.mockResolvedValue({
       items: [SLACK_CATALOG],

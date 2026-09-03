@@ -11,8 +11,7 @@ import {
   connectorCategories,
   groupListingsByCategory,
   listingDetails,
-  AUTH_RUNG_BADGE,
-  AUTH_RUNG_LABEL,
+  AUTH_RUNG,
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
@@ -166,7 +165,7 @@ export function ConnectorDirectory({
             <option value="">Any sign-in</option>
             {rungs.map((name) => (
               <option key={name} value={name}>
-                {AUTH_RUNG_LABEL[name]}
+                {AUTH_RUNG[name].label}
               </option>
             ))}
           </select>
@@ -287,7 +286,7 @@ export function ConnectorRow({
             {/* Both are facts rather than states, so they are lettered, not coloured. */}
             {listing.authRung && (
               <span className="shrink-0 text-[10px] text-gray-500 border border-white/[0.1] rounded-sm px-1.5 py-px">
-                {AUTH_RUNG_BADGE[listing.authRung]}
+                {AUTH_RUNG[listing.authRung].badge}
               </span>
             )}
             {listing.verified && (

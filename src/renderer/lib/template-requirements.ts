@@ -112,19 +112,7 @@ export function requirementAction(
     : { kind: 'install', listing }
 }
 
-/**
- * What the workflow on the canvas is still missing.
- *
- * An imported file says what it needs in its own `requires` block, but a step
- * picked from the library says it only by sitting there unbound — and both
- * deserve the same row offering the same fix. Derived from the definition on
- * every render rather than stored: answering a requirement is what makes it
- * stop being one, and nothing should have to remember to clear it.
- *
- * Only a step that cannot run without a connection counts, and only one this
- * panel can do something about: a row that names no connector has no button to
- * offer, and the step's own config panel is where it gets pointed at one.
- */
+// What the workflow on the canvas is still missing.
 export function requirementsOfDefinition(nodes: WorkflowNode[]): PortableRequirement[] {
   const requirements: PortableRequirement[] = []
   for (const node of nodes) {
@@ -135,16 +123,13 @@ export function requirementsOfDefinition(nodes: WorkflowNode[]): PortableRequire
     if (typeof bound === 'string' && bound !== '') continue
 
     if (key === 'profileConnectionId') {
-      // A request with no profile field at all is a request to a public URL —
-      // a finished step, not a question. One whose profile was chosen and then
-      // cleared is the opposite, and the field left behind is what says so.
+      // A request with no profile field at all is a request to a public URL — a finished step, not a question.
       if (!(key in config)) continue
       requirements.push({ kind: 'httpProfile', nodeId: node.id, name: '' })
       continue
     }
 
-    // Nothing recorded which connector this came from, so no row could offer to
-    // install or connect one; the config panel is where it gets chosen.
+    // Nothing recorded which connector this came from, so no row could offer to install or connect one; the config panel.
     const connectorId = typeof config.connectorId === 'string' ? config.connectorId : ''
     if (connectorId === '') continue
     requirements.push({ kind: 'connection', nodeId: node.id, connectorId, name: '' })
@@ -152,15 +137,7 @@ export function requirementsOfDefinition(nodes: WorkflowNode[]): PortableRequire
   return requirements
 }
 
-/**
- * One list of gaps from the two that describe them.
- *
- * A step can be named twice: once by the file that imported it, which knows the
- * connector, the account it was pointed at and the event it fired on, and once
- * by the canvas, which knows only that the field is empty. They are the same
- * gap, so they become one row — and the import wins every field it filled,
- * because a row that forgets the connector is a row with nothing to offer.
- */
+// One list of gaps from the two that describe them.
 export function mergeRequirements(
   derived: PortableRequirement[],
   imported: PortableRequirement[]
@@ -196,10 +173,7 @@ export function templateRequirements(
   template: WorkflowTemplate,
   connections: SourceConnection[]
 ): TemplateRequirement[] {
-  return (template.portable.requires ?? []).map((requirement) => {
-    const connectionId = resolveRequirement(requirement, connections)
-    return connectionId === undefined ? { requirement } : { requirement, connectionId }
-  })
+  return requirementsWithBindings(template.portable.requires ?? [], connections)
 }
 
 /** Whether every connection this template names is already answered here. */

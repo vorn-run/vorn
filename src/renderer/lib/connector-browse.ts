@@ -8,6 +8,7 @@ import type {
   SdkConnectorIcon,
   SourceConnection
 } from '../../shared/types'
+import { isImplicitConnection } from '../../shared/types'
 import { connectionConnectorId, connectionIcon } from './connection-icon'
 
 /**
@@ -39,19 +40,11 @@ export interface ConnectorListing {
   icon?: SdkConnectorIcon
   /** The pack on disk, when this connector has been installed as one. */
   pack?: InstalledConnectorPack
-  /**
-   * What setting this one up will ask of you. Read from the pack that is on
-   * disk before the catalog's claim about it, since the pack is what runs.
-   * Absent means unknown, which is not the same as `none`.
-   */
+  // What setting this one up will ask of you.
   authRung?: ConnectorAuthRung
   /** What the factory checked, when this connector has been through it. */
   verified?: ConnectorCatalogVerification
-  /**
-   * Connected without anyone being asked to connect it — a connector that
-   * signs in with nothing is ready the moment it is installed. Absent reads as
-   * false, so a listing built by hand says only what it means to say.
-   */
+  // Connected without anyone being asked to connect it — a connector that signs in with nothing is ready the moment it.
   implicitlyConnected?: boolean
 }
 
@@ -157,16 +150,6 @@ export function listingDetails(
 
 const UNCATEGORIZED = 'Other'
 
-/**
- * A connection the app made for a connector that signs in with nothing.
- *
- * It exists so a step still binds to a connection id, and is deliberately not
- * shown: nobody chose it, and nobody can usefully edit it.
- */
-export function isImplicit(connection: SourceConnection): boolean {
-  return connection.filters?.implicit === true
-}
-
 /** What a pack offers, in the vocabulary the catalog uses for the same thing. */
 function packCapabilities(pack: InstalledConnectorPack): string[] {
   return [
@@ -193,11 +176,17 @@ export function buildConnectorListings(
   packs: InstalledConnectorPack[] = [],
   mcpServers: McpServerCatalogEntry[] = []
 ): ConnectorListing[] {
-  const mine = (id: string) => connections.filter((conn) => connectionConnectorId(conn) === id)
-  // Only the connections someone made: an implicit one was never asked for, so
-  // counting it would offer "Add another" for a connector nobody added once.
-  const countFor = (id: string) => mine(id).filter((conn) => !isImplicit(conn)).length
-  const implicitFor = (id: string) => mine(id).some(isImplicit)
+  // One pass over the connections; an implicit one was never asked for, so it is not counted as "another".
+  const owned = new Map<string, { count: number; implicit: boolean }>()
+  for (const conn of connections) {
+    const id = connectionConnectorId(conn)
+    const entry = owned.get(id) ?? { count: 0, implicit: false }
+    if (isImplicitConnection(conn)) entry.implicit = true
+    else entry.count += 1
+    owned.set(id, entry)
+  }
+  const countFor = (id: string) => owned.get(id)?.count ?? 0
+  const implicitFor = (id: string) => owned.get(id)?.implicit ?? false
   const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
   const listings: ConnectorListing[] = [
@@ -287,13 +276,7 @@ export interface ListingSection {
   listings: ConnectorListing[]
 }
 
-/**
- * Cut the list into the sections it already sorts itself into.
- *
- * Categories appear in the order their first connector does, so the ordering
- * the list was sorted by — what you can use right now, then by name — survives
- * being grouped rather than being overruled by an alphabet.
- */
+// Cut the list into the sections it already sorts itself into.
 export function groupListingsByCategory(listings: ConnectorListing[]): ListingSection[] {
   const sections = new Map<string, ConnectorListing[]>()
   for (const listing of listings) {
@@ -338,7 +321,7 @@ export function groupConnections(
 ): ConnectionGroup[] {
   const byConnector = new Map<string, ConnectionGroup>()
 
-  for (const conn of connections.filter((connection) => !isImplicit(connection))) {
+  for (const conn of connections.filter((connection) => !isImplicitConnection(connection))) {
     const id = connectionConnectorId(conn)
     const existing = byConnector.get(id)
     if (existing) {
@@ -413,26 +396,27 @@ export function connectorCategories(listings: ConnectorListing[]): string[] {
   return [...categories, ...facets]
 }
 
-/**
- * What a rung will ask of you, said as the question people actually have.
- *
- * Phrased from the reader's side rather than the manifest's: "signs in with a
- * tool you already use" is the fact that decides whether to click, where
- * "cli" is a word only the person who wrote the connector knows.
- */
-export const AUTH_RUNG_LABEL: Record<ConnectorAuthRung, string> = {
-  none: 'Needs no sign-in',
-  cli: 'Signs in with a CLI',
-  key: 'Needs a key',
-  oauth: 'Signs in through a browser'
-}
-
-/** The short form for a row, where the long one would crowd the facts line. */
-export const AUTH_RUNG_BADGE: Record<ConnectorAuthRung, string> = {
-  none: 'no sign-in',
-  cli: 'CLI login',
-  key: 'key',
-  oauth: 'OAuth'
+// What a rung asks of you, from the reader's side: a filter label, a row badge, and the detail page's sentence.
+export const AUTH_RUNG: Record<
+  ConnectorAuthRung,
+  { label: string; badge: string; detail: string }
+> = {
+  none: {
+    label: 'Needs no sign-in',
+    badge: 'no sign-in',
+    detail: 'Nothing — ready as soon as it is installed.'
+  },
+  cli: {
+    label: 'Signs in with a CLI',
+    badge: 'CLI login',
+    detail: 'Signs in with a CLI'
+  },
+  key: { label: 'Needs a key', badge: 'key', detail: 'Needs a key' },
+  oauth: {
+    label: 'Signs in through a browser',
+    badge: 'OAuth',
+    detail: 'Signs in through a browser'
+  }
 }
 
 /** The rungs actually present, so the filter never offers an empty answer. */

@@ -13,7 +13,7 @@ import { ConnectorIcon } from '../ConnectorIcon'
 import type { ConnectorCatalogVerification, ConnectorInstallProgress } from '../../../shared/types'
 import {
   listingDetails,
-  AUTH_RUNG_LABEL,
+  AUTH_RUNG,
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
@@ -147,18 +147,11 @@ export function ConnectorDetail({
         </>
       )}
 
-      {/* The rung answers "what will this ask of me" in one word the list can
-          also filter by; the connector's own sentence says it in its own terms. */}
+      {/* The rung answers "what will this ask of me"; the connector's own sentence says it in its terms. */}
       {(listing.authRung || entry?.auth) && (
         <Section label="Signs in with">
-          {listing.authRung === 'none' ? (
-            <p className="text-[12.5px] text-gray-300">
-              Nothing — ready as soon as it is installed.
-            </p>
-          ) : (
-            listing.authRung && (
-              <p className="text-[12.5px] text-gray-300">{AUTH_RUNG_LABEL[listing.authRung]}</p>
-            )
+          {listing.authRung && (
+            <p className="text-[12.5px] text-gray-300">{AUTH_RUNG[listing.authRung].detail}</p>
           )}
           {entry?.auth && <p className="text-[12.5px] text-gray-500">{entry.auth}</p>}
         </Section>
@@ -183,8 +176,7 @@ export function ConnectorDetail({
       )}
 
       <div className="flex items-center gap-2 mt-6">
-        {/* Nothing to connect: installing it was the whole setup, so the next
-            useful move is the one the connector exists for. */}
+        {/* Nothing to connect: installing it was the whole setup, so the next move is the one it exists for. */}
         {listing.implicitlyConnected ? (
           onUse ? (
             <button

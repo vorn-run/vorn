@@ -198,11 +198,7 @@ export function toPortable(
 
     const key = boundConnectionKey(node, config)
     const bound = key === null ? '' : config[key]
-    // A step bound to a connection here, and one that was never bound at all,
-    // both arrive elsewhere needing the same answer — so both say so. Only a
-    // request with no profile field stays silent: that is a public URL, not a
-    // question. An unbound step can still name its connector, which is what
-    // lets the importing machine offer to install it.
+    // A step bound to a connection here, and one that was never bound at all, both arrive elsewhere needing the same.
     const unbound = key !== null && key !== 'profileConnectionId' && bound === ''
     if (key !== null && ((typeof bound === 'string' && bound !== '') || unbound)) {
       const source = connections.find((connection) => connection.id === bound)

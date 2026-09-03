@@ -313,8 +313,7 @@ describe('what the canvas itself is still missing', () => {
       connectionId: '',
       event: 'issueCreated'
     })
-    // Both are fixed in the step's own panel, where the connector is chosen;
-    // a row here would be amber forever with no button on it.
+    // Both are fixed in the step's own panel, where the connector is chosen; a row here would be amber forever with no.
     expect(requirementsOfDefinition([anonymous, strippedTrigger])).toEqual([])
   })
 

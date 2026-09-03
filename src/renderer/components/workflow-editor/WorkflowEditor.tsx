@@ -30,7 +30,6 @@ import {
   WorkflowNodeErrorPolicy,
   WorkflowEdge,
   WorkflowTemplate,
-  InstalledConnectorPack,
   NodeExecutionStatus,
   WorkflowExecution,
   TriggerConfig,
@@ -43,6 +42,7 @@ import {
 } from '../../../shared/types'
 import { WorkflowCanvas, AddableNodeType, InsertAnchor } from './WorkflowCanvas'
 import { StepLibrary, type LibraryPick } from './panels/StepLibrary'
+import { stepForPick } from '../../lib/library-pick'
 import {
   alignedNodes,
   layoutPositions,
@@ -84,7 +84,7 @@ import {
   stopWorkflowRun
 } from '../../lib/workflow-execution'
 import { toast } from '../Toast'
-import { refreshConnections, useConnections } from '../../lib/use-connections'
+import { refreshConnections, useConnections, useInstalledPacks } from '../../lib/use-connections'
 import { useConnectorCatalog } from '../../lib/use-connector-catalog'
 import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
 import {
@@ -158,7 +158,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   /** The connector a requirement asked to connect, and the profile it asked for. */
   const [connectFor, setConnectFor] = useState<ConnectorListing | null>(null)
   const [profileFor, setProfileFor] = useState<string | null>(null)
-  const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
+  const packs = useInstalledPacks()
   const [launchingSince, setLaunchingSince] = useState<number | null>(null)
   const [followRunId, setFollowRunId] = useState<string | null>(null)
   const followArmRef = useRef(false)
@@ -646,14 +646,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   // against this machine each render, so answering one clears its row.
   const imported = useAppStore((s) => s.importedRequirements)
   const setImportedRequirements = useAppStore((s) => s.setImportedRequirements)
-  /**
-   * Everything the canvas is still missing, however it got here.
-   *
-   * An import announces its needs; a step picked from a connector nobody has
-   * installed simply sits there unbound. Both are the same question, so they
-   * are answered by one list of rows, merged per step so the import keeps what
-   * only it knows — which connector, and which account it was pointed at.
-   */
+  // Everything the canvas is still missing, however it got here.
   const stillNeeded = useMemo(() => {
     const fromImport = imported && imported.workflowId === editingId ? imported.requirements : []
     const all = mergeRequirements(requirementsOfDefinition(nodes), fromImport)
@@ -663,31 +656,16 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   }, [imported, editingId, connections, nodes])
   // Dismiss means "stop asking about the import"; a row the canvas derives is a live fact until the step is bound.
   const importContributed = imported !== null && imported.workflowId === editingId
-  // The start-from list needs the catalog, and so does any row that must offer an install or a connection.
-  const needsConnectorData = !editingId || importContributed || stillNeeded.length > 0
 
-  // The one catalog the settings list also reads, asked for only while someone
-  // is looking: a fetch that lost the startup race against the server socket
-  // caches nothing, so opening the editor again asks again.
-  const {
-    items: catalog,
-    templates,
-    mcpServers
-  } = useConnectorCatalog(isActive && needsConnectorData)
+  // Asked for only while someone is looking; a fetch that lost the startup race caches nothing, so opening again asks again.
+  const { items: catalog, templates, mcpServers } = useConnectorCatalog(isActive)
 
   useEffect(() => {
-    if (!isActive || !needsConnectorData) return
-    void Promise.resolve(window.api?.listConnectorPacks?.())
-      .then((list) => setPacks(list ?? []))
-      .catch(() => {})
-  }, [isActive, needsConnectorData])
-
-  useEffect(() => {
-    if (!isActive || !needsConnectorData) return
+    if (!isActive) return
     void Promise.resolve(window.api?.listConnectors?.())
       .then((list) => setConnectors(list ?? []))
       .catch(() => {})
-  }, [isActive, needsConnectorData])
+  }, [isActive])
 
   const suggestions = useMemo(
     () => connectorSuggestions(connections, connectors),
@@ -701,14 +679,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   )
 
   // The same inspect-then-confirm the directory uses, run from the panel.
-  const refreshPacks = useCallback(async () => {
-    const list = await window.api.listConnectorPacks?.().catch(() => [])
-    setPacks(list ?? [])
-    // What is on disk is also what the library reads to decide whether a step
-    // would install or only connect, so the shared cache is told too.
-    await refreshConnections()
-  }, [])
-  const install = usePackInstall(refreshPacks)
+  const install = usePackInstall(refreshConnections)
 
   const handleFixRequirement = useCallback(
     (action: RequirementAction) => {
@@ -737,8 +708,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     // The shared cache is what every glyph and picker reads; refreshing it here
     // means a new connection shows up without waiting for a config round trip.
     void refreshConnections()
-    void refreshPacks()
-  }, [refreshPacks])
+    void refreshConnections()
+  }, [])
 
   /** The server builds these from the connector's own manifest, and repeats are the same workflow. */
   const handlePickSuggestion = useCallback(
@@ -972,32 +943,14 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         return
       }
 
-      /** A step that arrives knowing something about itself, dropped where asked. */
-      const preset = (type: AddableNodeType, config: Record<string, unknown>): WorkflowNode => {
-        const n = createNodeWithUniqueSlug(type)
-        return {
-          ...n,
-          config: { ...(n.config as Record<string, unknown>), ...config }
-        } as WorkflowNode
-      }
-
-      const newNode =
-        pick.kind === 'connectorAction'
-          ? preset('connectorAction', {
-              connectionId: pick.connectionId,
-              action: pick.action,
-              actionLabel: pick.actionLabel
-            })
-          : pick.kind === 'catalogAction'
-            ? preset('connectorAction', {
-                connectionId: '',
-                connectorId: pick.connectorId,
-                action: pick.action,
-                actionLabel: pick.actionLabel
-              })
-            : pick.kind === 'httpProfile'
-              ? preset('httpRequest', { profileConnectionId: pick.profileConnectionId })
-              : createNodeWithUniqueSlug(pick.type)
+      const { type, config } = stepForPick(pick)
+      const created = createNodeWithUniqueSlug(type)
+      const newNode = config
+        ? ({
+            ...created,
+            config: { ...(created.config as Record<string, unknown>), ...config }
+          } as WorkflowNode)
+        : created
 
       const result = appendNodeAfter(nodes, edges, afterNodeId, newNode)
       setNodes(placeAll(result.nodes, result.edges, newNode.id))
@@ -1027,8 +980,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                 event: pick.event,
                 cron: '*/5 * * * *'
               }
-        // A pick replaces the existing trigger in place; edges stay put,
-        // while the label resets to the new type's default like any swap.
+        // A pick replaces the existing trigger in place; edges stay put, while the label resets to the new type's default.
         const existing = nodes.find((n) => n.type === 'trigger')
         if (existing) {
           const cur = existing.config as TriggerConfig
@@ -1113,26 +1065,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         handleAddParallelBranch(anchor.afterNodeId, 'agent')
       } else if (anchor.position && anchor.beforeNodeId === null) {
         handlePaletteInsert(pick, anchor.afterNodeId, anchor.position)
-      } else if (pick.kind === 'connectorAction') {
-        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, 'connectorAction', {
-          connectionId: pick.connectionId,
-          action: pick.action
-        })
-      } else if (pick.kind === 'catalogAction') {
-        // Nothing to bind it to yet: it lands naming what it is, and the panel
-        // that lists what is still needed offers the install.
-        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, 'connectorAction', {
-          connectionId: '',
-          connectorId: pick.connectorId,
-          action: pick.action,
-          actionLabel: pick.actionLabel
-        })
-      } else if (pick.kind === 'httpProfile') {
-        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, 'httpRequest', {
-          profileConnectionId: pick.profileConnectionId
-        })
       } else {
-        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, pick.type)
+        const { type, config } = stepForPick(pick)
+        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, type, config)
       }
     },
     [

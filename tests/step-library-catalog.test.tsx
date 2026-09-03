@@ -23,6 +23,8 @@ const SLACK: ConnectorCatalogItem = {
   name: 'Slack',
   description: 'Messages and channels',
   packageName: '@vornrun/connector-slack',
+  packUrl: 'https://packs.example/slack-1.2.0.vorn.tgz',
+  sha256: 'a'.repeat(64),
   capabilities: ['actions'],
   keywords: ['chat'],
   verified: {
@@ -39,7 +41,7 @@ const DISCORD: ConnectorCatalogItem = {
   ...SLACK,
   id: 'discord',
   name: 'Discord',
-  packageName: '@vornrun/connector-discord',
+  packUrl: 'https://packs.example/discord-1.0.0.vorn.tgz',
   keywords: ['chat'],
   actions: [{ type: 'post', label: 'Post message' }],
   launch: { command: 'npx', args: [] }
@@ -47,8 +49,7 @@ const DISCORD: ConnectorCatalogItem = {
 // Nothing vouched for this one; it is findable but not offered first.
 delete (DISCORD as { verified?: unknown }).verified
 
-// The connector this machine already has a connection to must not be offered
-// twice — once as a live action, once as something to install.
+// The connector this machine already has a connection to must not be offered twice — once as a live action, once as.
 const PACKDEMO: ConnectorCatalogItem = {
   ...SLACK,
   id: 'packdemo',

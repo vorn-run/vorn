@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { isImplicitConnection } from '../packages/shared/src/types'
 import {
   buildConnectorListings,
   filterConnectorListings,
@@ -9,7 +10,6 @@ import {
   listingDetails,
   connectorAuthRungs,
   filterByAuthRung,
-  isImplicit,
   CALLABLE_FILTER,
   CONNECTED_FILTER,
   type BuiltInConnector
@@ -465,8 +465,8 @@ describe('a connection nobody asked for', () => {
 
     expect(listing.connectedCount).toBe(0)
     expect(listing.implicitlyConnected).toBe(true)
-    expect(isImplicit(implicit)).toBe(true)
-    expect(isImplicit(chosen)).toBe(false)
+    expect(isImplicitConnection(implicit)).toBe(true)
+    expect(isImplicitConnection(chosen)).toBe(false)
   })
 
   it('still sorts a ready connector above one that needs setting up', () => {

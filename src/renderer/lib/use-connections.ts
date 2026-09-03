@@ -60,27 +60,10 @@ export function useConnections(): SourceConnection[] {
   return value
 }
 
-/**
- * The packs on disk, from the same read that refreshed the connections.
- *
- * Riding the one cache rather than fetching again keeps "what is installed"
- * from disagreeing with "what is connected" between two surfaces drawing at
- * the same moment.
- */
+// The packs on disk, from the same read that refreshed the connections, so two surfaces never disagree.
 export function useInstalledPacks(): InstalledConnectorPack[] {
-  const [value, setValue] = useState<InstalledConnectorPack[]>(packCache)
-  useEffect(() => {
-    void ensureInit()
-    const onChanged = (): void => setValue(packCache)
-    listeners.add(onChanged)
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: seeds from a cache populated before this component mounted
-    if (packCache !== value) setValue(packCache)
-    return () => {
-      listeners.delete(onChanged)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  return value
+  useConnections()
+  return packCache
 }
 
 /** Resolve a connectionId → connectorId via the cache. Returns null when

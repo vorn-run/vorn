@@ -34,19 +34,11 @@ import { connectionConnectorId } from '../../../lib/connection-icon'
 import { HTTP_PROFILE_CONNECTOR } from '../../../../shared/workflow-portability'
 import { ConnectorIcon } from '../../ConnectorIcon'
 import { NODE_GLYPH } from '../node-visuals'
+import { canAddConnection, packStateFor } from '../../../lib/pack-status'
 import type { AddableNodeType } from '../WorkflowCanvas'
+import type { LibraryPick } from '../../../lib/library-pick'
 
-/** A step type, a parallel branch, a connector action, or a trigger. */
-export type LibraryPick =
-  | { kind: 'type'; type: AddableNodeType }
-  | { kind: 'parallel' }
-  | { kind: 'connectorAction'; connectionId: string; action: string; actionLabel: string }
-  | { kind: 'triggerType'; triggerType: TriggerConfig['triggerType'] }
-  | { kind: 'connectorTrigger'; connectionId: string; event: string }
-  /** An action from a connector nobody has installed yet; it lands unbound. */
-  | { kind: 'catalogAction'; connectorId: string; action: string; actionLabel: string }
-  /** An HTTP request with one of the saved profiles already chosen. */
-  | { kind: 'httpProfile'; profileConnectionId: string; profileName: string }
+export type { LibraryPick } from '../../../lib/library-pick'
 
 /** What the anchor that opened the library allows. */
 export interface LibraryScope {
@@ -241,7 +233,7 @@ export function StepLibrary({
     // so it sits directly beneath the request rather than inside a form field.
     if (!scope.bodyOnly && !scope.replacing) {
       const profiles: Row[] = connections
-        .filter((c) => c.connectorId === HTTP_PROFILE_CONNECTOR)
+        .filter((c) => connectionConnectorId(c) === HTTP_PROFILE_CONNECTOR)
         .map((profile) => ({
           key: `profile:${profile.id}`,
           label: `Call ${profile.name}`,
@@ -290,63 +282,61 @@ export function StepLibrary({
       }
     }
 
-    // Steps from connectors nobody has connected. The catalog describes an
-    // action well enough to offer it, so search answers with the step you asked
-    // for rather than with silence and a trip to Settings.
-    //
-    // Not while replacing: swapping a step in place takes the pick apart and
-    // rebuilds the node, and neither of these picks survives that.
+    // Steps from connectors nobody has connected; not while replacing, which rebuilds the node from the pick.
     if (!scope.bodyOnly && !scope.replacing) {
       const connected = new Set(connections.map((conn) => connectionConnectorId(conn)))
-      const installed = new Set(packs.map((pack) => pack.id))
-      const offers = catalog.items
-        .filter((entry) => !connected.has(entry.id) && (entry.actions?.length ?? 0) > 0)
-        .map((entry) => ({
-          entry,
-          actions: (entry.actions ?? []).filter(
-            (action) =>
-              !q ||
-              (action.label || action.type).toLowerCase().includes(q) ||
-              entry.name.toLowerCase().includes(q) ||
-              (entry.keywords ?? []).some((word) => word.toLowerCase().includes(q))
-          )
-        }))
-        .filter((offer) => offer.actions.length > 0)
-
-      const rowFor = (
-        entry: (typeof offers)[number]['entry'],
-        action: { type: string; label: string }
-      ) => ({
-        key: `catalog:${entry.id}:${action.type}`,
-        label: action.label || action.type,
-        mark: { connectorId: entry.id, ...(entry.icon && { icon: entry.icon }) },
-        // Say the step someone is actually about to take: a connector already
-        // on disk only wants connecting, and promising an install would be a
-        // small lie repeated on every row.
-        detail:
-          !installed.has(entry.id) && (entry.packUrl || entry.packageName)
+      const vouched: Row[] = []
+      const unvouched: Row[] = []
+      for (const entry of catalog.items) {
+        if (connected.has(entry.id) || !entry.actions?.length) continue
+        const entryMatches =
+          !q ||
+          entry.name.toLowerCase().includes(q) ||
+          (entry.keywords ?? []).some((word) => word.toLowerCase().includes(q))
+        const actions = entryMatches
+          ? entry.actions
+          : entry.actions.filter((action) =>
+              (action.label || action.type).toLowerCase().includes(q)
+            )
+        if (actions.length === 0) continue
+        // Say the step someone is about to take: a connector already on disk only wants connecting.
+        const state = packStateFor({ installed: packs.find((pack) => pack.id === entry.id) })
+        const connectable = canAddConnection(state, {
+          source: 'catalog',
+          hasLegacyLaunch: Boolean(entry.packageName)
+        })
+        const detail =
+          state.kind !== 'installed' && entry.packUrl
             ? 'install on add'
-            : 'add connection',
-        pick: {
-          kind: 'catalogAction' as const,
-          connectorId: entry.id,
-          action: action.type,
-          actionLabel: action.label || action.type
+            : connectable
+              ? 'add connection'
+              : 'install on add'
+        const into = entry.verified ? vouched : unvouched
+        for (const action of actions) {
+          into.push({
+            key: `catalog:${entry.id}:${action.type}`,
+            label: action.label || action.type,
+            mark: { connectorId: entry.id, ...(entry.icon && { icon: entry.icon }) },
+            detail,
+            pick: {
+              kind: 'catalogAction' as const,
+              connectorId: entry.id,
+              action: action.type,
+              actionLabel: action.label || action.type
+            }
+          })
         }
-      })
-
-      // A connector the factory checked is offered as plainly as an installed
-      // one; the rest are worth finding, but not worth putting first.
-      for (const offer of offers.filter((o) => o.entry.verified)) {
-        rows.push(...offer.actions.map((action) => rowFor(offer.entry, action)))
       }
-      const unvouched = offers.filter((o) => !o.entry.verified)
-      const count = unvouched.reduce((total, offer) => total + offer.actions.length, 0)
-      if (count > 0) {
-        rows.push({ key: 'group:catalog', header: true, label: 'More from the catalog', count })
-        for (const offer of unvouched) {
-          rows.push(...offer.actions.map((action) => rowFor(offer.entry, action)))
-        }
+      // A connector the factory checked is offered as plainly as an installed one; the rest come after.
+      rows.push(...vouched)
+      if (unvouched.length > 0) {
+        rows.push({
+          key: 'group:catalog',
+          header: true,
+          label: 'More from the catalog',
+          count: unvouched.length
+        })
+        rows.push(...unvouched)
       }
     }
 
