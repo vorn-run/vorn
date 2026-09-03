@@ -282,7 +282,7 @@ export function unresolvedRequirements(
 }
 
 // A file may name the key a script wants; handing one over is a person's choice, made in the step.
-function bindsOnlyByHand(requirement: PortableRequirement): boolean {
+export function bindsOnlyByHand(requirement: PortableRequirement): boolean {
   return requirement.kind === 'connection' && requirement.key === 'secretsFrom'
 }
 

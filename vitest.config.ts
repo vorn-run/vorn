@@ -48,7 +48,7 @@ export default defineConfig({
       // Connector packages depend on the published SDK. Tests must exercise
       // the SDK source, not whatever `dist` a previous build left behind.
       '@vornrun/connector-sdk': path.resolve(__dirname, 'packages/connector-sdk/src/index.ts'),
-      // Pinned to this checkout: in a worktree the bare specifier resolves through the main clone's node_modules, so a.
+      // Pinned to this checkout; in a worktree the bare specifier would resolve through the main clone.
       '@vornrun/shared/': `${path.resolve(__dirname, 'packages/shared/src')}/`,
       '@vornrun/shared': path.resolve(__dirname, 'packages/shared/src/index.ts')
     }

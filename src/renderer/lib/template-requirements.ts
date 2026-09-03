@@ -11,7 +11,8 @@ import {
   fromPortable,
   resolveRequirement,
   unresolvedRequirements,
-  type PortableRequirement
+  type PortableRequirement,
+  bindsOnlyByHand
 } from '../../shared/workflow-portability'
 import type { ConnectorListing } from './connector-browse'
 import { canAddConnection, packStateFor } from './pack-status'
@@ -171,7 +172,10 @@ export function requirementsWithBindings(
   connections: SourceConnection[]
 ): TemplateRequirement[] {
   return requirements.map((requirement) => {
-    const connectionId = resolveRequirement(requirement, connections)
+    // A key a person has to hand over stays open here, whatever this machine holds.
+    const connectionId = bindsOnlyByHand(requirement)
+      ? undefined
+      : resolveRequirement(requirement, connections)
     return connectionId === undefined ? { requirement } : { requirement, connectionId }
   })
 }
