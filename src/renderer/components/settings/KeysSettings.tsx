@@ -200,7 +200,7 @@ export function KeysSettings() {
     let cancelled = false
     window.api
       .isSafeStorageAvailable?.()
-      .then((available) => {
+      ?.then((available) => {
         if (!cancelled) setSafeStorageAvailable(available)
       })
       .catch(() => {})
