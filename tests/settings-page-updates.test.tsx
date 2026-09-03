@@ -61,6 +61,9 @@ vi.mock('../src/renderer/components/settings/McpSettings', () => ({
 vi.mock('../src/renderer/components/settings/ConnectorSettings', () => ({
   ConnectorSettings: () => <div data-testid="connectors-panel" />
 }))
+vi.mock('../src/renderer/components/settings/KeysSettings', () => ({
+  KeysSettings: () => <div data-testid="keys-panel" />
+}))
 vi.mock('../src/renderer/components/settings/NetworkSettings', () => ({
   NetworkSettings: () => <div data-testid="network-panel" />
 }))
@@ -124,5 +127,18 @@ describe('SettingsPage', () => {
     mockStore.settingsCategory = 'about'
     render(<SettingsPage />)
     expect(screen.getByTestId('about-panel')).toBeInTheDocument()
+  })
+
+  it('offers Keys beside the other connection settings', () => {
+    render(<SettingsPage />)
+    expect(screen.getByRole('button', { name: 'Keys' })).toBeInTheDocument()
+  })
+
+  it('renders the Keys panel when that category is selected', () => {
+    mockStore.settingsCategory = 'keys'
+    render(<SettingsPage />)
+
+    expect(screen.getByTestId('keys-panel')).toBeInTheDocument()
+    expect(screen.queryByTestId('connectors-panel')).not.toBeInTheDocument()
   })
 })

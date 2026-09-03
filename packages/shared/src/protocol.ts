@@ -22,6 +22,7 @@ import type {
   SessionEventType,
   SourceConnection,
   TaskSourceLink,
+  ConnectorKey,
   ConnectorManifest,
   ConnectorItemContext,
   TaskConfig,
@@ -806,6 +807,20 @@ export interface RequestMethods {
   'connection:preflight': {
     params: string
     result: { ok: boolean | null; message?: string }
+  }
+  /** Every connection holding a secret, described without disclosing one. */
+  'connection:listKeys': {
+    params: void
+    result: ConnectorKey[]
+  }
+  /** Replace one stored secret. `value` is the ciphertext to persist, sealed
+   *  by the desktop process because only it holds the keychain. `plaintext` is
+   *  the same secret in the clear, handed over so the running server can serve
+   *  it immediately rather than leaving a window in which the key is stored
+   *  but unusable — the same trust boundary `credentials:setDecrypted` uses. */
+  'connection:rotateSecret': {
+    params: { connectionId: string; field: string; value: string; plaintext: string }
+    result: { ok: boolean; error?: string }
   }
   /** Main→server push of decrypted credential fields. Called after main
    *  decrypts values (via Electron safeStorage) on boot and on config

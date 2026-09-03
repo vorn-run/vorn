@@ -304,6 +304,7 @@ export type SettingsCategory =
   | 'ssh'
   | 'mcp'
   | 'connectors'
+  | 'keys'
   | 'network'
   | 'about'
 

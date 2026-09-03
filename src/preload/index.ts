@@ -33,6 +33,7 @@ import {
   FileEntry,
   SourceConnection,
   TaskSourceLink,
+  ConnectorKey,
   ConnectorManifest,
   ConnectorActionDef,
   InstalledShell,
@@ -866,6 +867,14 @@ const api = {
     ipcRenderer.invoke(IPC.HTTP_REQUEST, params),
   preflightConnection: (connectionId: string): Promise<{ ok: boolean | null; message?: string }> =>
     ipcRenderer.invoke(IPC.CONNECTION_PREFLIGHT, connectionId),
+  listConnectorKeys: (): Promise<ConnectorKey[]> => ipcRenderer.invoke(IPC.CONNECTION_LIST_KEYS),
+  rotateConnectionSecret: (params: {
+    connectionId: string
+    field: string
+    value: string
+    plaintext: string
+  }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IPC.CONNECTION_ROTATE_SECRET, params),
 
   listMcpTools: (
     connectionId: string

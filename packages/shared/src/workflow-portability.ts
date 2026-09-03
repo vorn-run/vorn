@@ -126,7 +126,10 @@ function connectorOf(connection: PortableConnection): string {
 }
 
 /** Whether this node runs against a connector connection. */
-function boundConnectionKey(node: WorkflowNode, config: Record<string, unknown>): string | null {
+export function boundConnectionKey(
+  node: WorkflowNode,
+  config: Record<string, unknown>
+): string | null {
   if (node.type === 'trigger' && config.triggerType === 'connectorPoll') return 'connectionId'
   if (node.type === 'callConnectorAction') return 'connectionId'
   if (node.type === 'httpRequest') return 'profileConnectionId'
@@ -187,6 +190,10 @@ export function toPortable(
       // id means nothing elsewhere, so the import runs locally rather than
       // against a host the importer never configured.
       delete config.remoteHostId
+      // Names a connection in this install's own table. Elsewhere it would
+      // bind a step to whatever happened to take that id, so the import asks
+      // for a key rather than inheriting one.
+      delete config.secretsFrom
     }
 
     const key = boundConnectionKey(node, config)
@@ -278,6 +285,12 @@ export function fromPortable(
 
   const nodes = portable.nodes.map((node) => {
     const config = { ...(node.config as Record<string, unknown>) }
+
+    // Export strips this, so a file carrying one was hand-written or came from
+    // a build that did not. Either way the id names a row in the writer's
+    // table, and honouring it here would hand a step whichever key happens to
+    // hold that id on this machine.
+    delete config.secretsFrom
 
     for (const [key, value] of Object.entries(config)) {
       if (typeof value !== 'string') continue

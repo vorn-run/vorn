@@ -476,6 +476,29 @@ export interface SourceConnection {
   createdAt: string
 }
 
+/** One stored secret on a connection, described without being disclosed. */
+export interface ConnectorKeyField {
+  key: string
+  label: string
+  /** False when the ciphertext is there but this machine cannot read it. */
+  readable: boolean
+  /** Enough of the value to recognize it by, for a single-value field. */
+  hint?: string
+  /** The env names carried, for a field that holds a set of them. */
+  envNames?: string[]
+}
+
+/** A connection seen as what it holds, rather than as what it connects to. */
+export interface ConnectorKey {
+  connectionId: string
+  name: string
+  /** The real connector id, unwrapped from the `mcp` a package is stored as. */
+  connectorId: string
+  fields: ConnectorKeyField[]
+  /** Workflow steps that run against this connection. */
+  usageCount: number
+}
+
 /**
  * Where a packaged connector records itself on the connection that runs it.
  *
@@ -759,6 +782,15 @@ export interface ScriptConfig {
    *  When set, the runner emits SCRIPT_DATA/SCRIPT_EXIT with this id so the
    *  renderer can show output live in Run History. */
   runId?: string
+  /**
+   * A connection whose secrets this step runs with, named rather than carried.
+   *
+   * The id is all the definition holds; the values are read from the server's
+   * decrypted store at spawn time and reach this one child's environment only.
+   * A workflow that needs a key to talk to a service therefore stays a file
+   * anyone can read.
+   */
+  secretsFrom?: string
 }
 
 export type ConditionOperator =
@@ -1671,6 +1703,8 @@ export const IPC = {
   WEBHOOK_INFO: 'webhook:info',
   HTTP_REQUEST: 'http:request',
   CONNECTION_PREFLIGHT: 'connection:preflight',
+  CONNECTION_LIST_KEYS: 'connection:listKeys',
+  CONNECTION_ROTATE_SECRET: 'connection:rotateSecret',
   CONNECTION_LIST_MCP_TOOLS: 'connection:listMcpTools',
   CONNECTION_REFRESH_MCP_TOOLS: 'connection:refreshMcpTools',
   CONNECTOR_PROBE_SDK: 'connector:probeSdk',
