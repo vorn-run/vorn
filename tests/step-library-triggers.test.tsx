@@ -9,7 +9,8 @@ vi.mock('../src/renderer/lib/use-connections', () => ({
     { id: 'c2', name: 'Notes MCP', connectorId: 'mcp' }
   ],
   useConnectorIdFor: () => null,
-  useConnectionIconFor: () => undefined
+  useConnectionIconFor: () => undefined,
+  useInstalledPacks: () => []
 }))
 
 const listConnectors = vi.fn(async () => [

@@ -211,6 +211,54 @@ describe('connections travel as requirements', () => {
     expect(p.requires).toEqual([{ kind: 'httpProfile', nodeId: 'http-1', name: '' }])
   })
 
+  it('reports a step that was never bound, and names what it was picked from', () => {
+    const wf = workflow()
+    wf.nodes.push({
+      id: 'act-2',
+      type: 'callConnectorAction',
+      label: 'Post message',
+      config: {
+        nodeType: 'callConnectorAction',
+        connectionId: '',
+        connectorId: 'slack',
+        action: 'post',
+        args: {}
+      } as WorkflowDefinition['nodes'][number]['config'],
+      position: { x: 0, y: 550 }
+    })
+
+    const p = toPortable(wf, PROJECT)
+    expect(p.requires).toEqual([
+      { kind: 'connection', nodeId: 'act-2', connectorId: 'slack', name: '' }
+    ])
+
+    // And the machine that opens it is told, rather than finding out at run time.
+    const imported = fromPortable(p, 'novum', { name: 'N', path: '/n' }, [])
+    expect(unresolvedRequirements(p, [])).toHaveLength(1)
+    expect(
+      (imported.nodes.find((n) => n.id === 'act-2')!.config as Record<string, unknown>).connectionId
+    ).toBe('')
+  })
+
+  it('says nothing about a step that never had a connection to lose', () => {
+    const wf = workflow()
+    wf.nodes.push({
+      id: 'anon-1',
+      type: 'callConnectorAction',
+      label: 'Connector Action',
+      config: {
+        nodeType: 'callConnectorAction',
+        connectionId: '',
+        action: '',
+        args: {}
+      } as WorkflowDefinition['nodes'][number]['config'],
+      position: { x: 0, y: 660 }
+    })
+
+    const p = toPortable(wf, PROJECT)
+    expect((p.requires ?? [])[0]).toMatchObject({ nodeId: 'anon-1', connectorId: '' })
+  })
+
   it('never lets a local id reach the file', () => {
     const p = toPortable(connectorWorkflow(), PROJECT, [connection()])
     expect(JSON.stringify(p)).not.toContain('conn-1')

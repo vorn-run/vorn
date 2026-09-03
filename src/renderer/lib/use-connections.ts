@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { InstalledConnectorPack, SdkConnectorIcon, SourceConnection } from '../../shared/types'
 import { connectionConnectorId } from '../../shared/types'
 import { connectionIcon } from './connection-icon'
@@ -58,6 +58,20 @@ export function useConnections(): SourceConnection[] {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   return value
+}
+
+// The packs on disk, from the same read that refreshed the connections, so two surfaces never disagree.
+export function useInstalledPacks(): InstalledConnectorPack[] {
+  return useSyncExternalStore(subscribePacks, () => packCache)
+}
+
+function subscribePacks(onChange: () => void): () => void {
+  void ensureInit()
+  const listener = (): void => onChange()
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
 }
 
 /** Resolve a connectionId → connectorId via the cache. Returns null when

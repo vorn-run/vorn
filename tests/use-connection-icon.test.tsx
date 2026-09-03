@@ -8,6 +8,7 @@ import {
   useConnectorGlyph,
   useConnectorIdFor,
   useConnectorLook,
+  useInstalledPacks,
   __resetConnectionsCacheForTests
 } from '../src/renderer/lib/use-connections'
 
@@ -182,5 +183,35 @@ describe('useConnectorGlyph', () => {
 
     await waitFor(() => expect(listConnections).toHaveBeenCalled())
     expect(getByTestId('out')).toHaveTextContent('none')
+  })
+})
+
+function PacksProbe() {
+  const packs = useInstalledPacks()
+  return <span data-testid="out">{packs.map((pack) => pack.id).join(',') || 'none'}</span>
+}
+
+describe('useInstalledPacks', () => {
+  it('reads the packs the connections refresh already fetched', async () => {
+    const { getByTestId } = render(<PacksProbe />)
+
+    await waitFor(() => expect(getByTestId('out')).toHaveTextContent('packdemo'))
+    // One read served both, rather than a second round trip for the same answer.
+    expect(listConnectorPacks).toHaveBeenCalledTimes(1)
+  })
+
+  it('sees a newly installed pack without being remounted', async () => {
+    const { getByTestId } = render(<PacksProbe />)
+    await waitFor(() => expect(getByTestId('out')).toHaveTextContent('packdemo'))
+
+    listConnectorPacks.mockResolvedValue([
+      { id: 'packdemo', name: 'Pack Demo', version: '1.0.0' },
+      { id: 'slack', name: 'Slack', version: '1.2.0' }
+    ])
+    await act(async () => {
+      await refreshConnections()
+    })
+
+    expect(getByTestId('out')).toHaveTextContent('packdemo,slack')
   })
 })

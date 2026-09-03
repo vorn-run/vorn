@@ -84,6 +84,40 @@ const EXPORTABLE: WorkflowDefinition = {
   edges: []
 }
 
+// A workflow as an import leaves it: the step is on the canvas with its connection blanked, and nothing in the node.
+const IMPORTED: WorkflowDefinition = {
+  ...EXPORTABLE,
+  id: 'wf-imported',
+  name: 'Announce a release',
+  nodes: [
+    ...EXPORTABLE.nodes,
+    {
+      id: 'n1',
+      type: 'callConnectorAction',
+      label: 'Post message',
+      config: {
+        nodeType: 'callConnectorAction',
+        connectionId: '',
+        action: 'post',
+        actionLabel: 'Post message',
+        args: {}
+      },
+      position: { x: 0, y: 120 }
+    }
+  ] as WorkflowDefinition['nodes'],
+  edges: []
+}
+
+/** A saved workflow with a step placed from the catalog and never bound. */
+const UNBOUND: WorkflowDefinition = {
+  ...IMPORTED,
+  id: 'wf-unbound',
+  name: 'Post from the catalog',
+  nodes: IMPORTED.nodes.map((node) =>
+    node.id === 'n1' ? { ...node, config: { ...node.config, connectorId: 'slack' } } : node
+  ) as WorkflowDefinition['nodes']
+}
+
 const mockState = {
   isWorkflowEditorOpen: true,
   editingWorkflowId: null as string | null,
@@ -93,7 +127,7 @@ const mockState = {
   updateWorkflow: vi.fn(),
   removeWorkflow: vi.fn(),
   config: {
-    workflows: [EXPORTABLE],
+    workflows: [EXPORTABLE, IMPORTED, UNBOUND],
     tasks: [],
     projects: [{ name: 'Novum', path: '/Users/someone/dev/novum', preferredAgents: [] }],
     defaults: {}
@@ -166,12 +200,14 @@ const CONNECTION = {
 const { TEMPLATE_SEED } = await import('../packages/server/src/connectors/template-seed')
 const { __resetConnectionsCacheForTests, refreshConnections } =
   await import('../src/renderer/lib/use-connections')
+const { __resetCatalogCacheForTests } = await import('../src/renderer/lib/use-connector-catalog')
 const { WorkflowEditor } = await import('../src/renderer/components/workflow-editor/WorkflowEditor')
 
 const api = (window as unknown as { api: Record<string, ReturnType<typeof vi.fn>> }).api
 
 beforeEach(() => {
   __resetConnectionsCacheForTests()
+  __resetCatalogCacheForTests()
   vi.clearAllMocks()
   api.listWorkflowRuns.mockResolvedValue([])
   api.listConnections.mockResolvedValue([CONNECTION])
@@ -294,6 +330,25 @@ describe('a requirement answered from the panel', () => {
     expect(api.installConnectorPack).not.toHaveBeenCalled()
   })
 
+  // What the file knew must survive meeting the step it describes; the canvas only sees an empty field.
+  it('keeps the connector an import named, on the step the canvas also sees', async () => {
+    api.listConnectorCatalog.mockResolvedValue({
+      items: [SLACK_CATALOG],
+      templates: TEMPLATE_SEED,
+      mcpServers: []
+    })
+    mockState.editingWorkflowId = 'wf-imported'
+    mockState.importedRequirements = {
+      workflowId: 'wf-imported',
+      requirements: [
+        { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: 'workspace-eng' }
+      ]
+    }
+    render(<WorkflowEditor />)
+
+    expect(await screen.findByRole('button', { name: 'Install Slack' })).toBeInTheDocument()
+  })
+
   // The whole point of the phase, in one pass: a requirement that named a
   // connector this machine did not have ends up answered without leaving.
   it('carries a requirement from install to connected', async () => {
@@ -356,6 +411,20 @@ describe('a requirement answered from the panel', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Add connection' }))
 
     expect(await screen.findByText('Connect GitHub')).toBeInTheDocument()
+  })
+
+  it('offers the install for a step the canvas placed, with no import in sight', async () => {
+    api.listConnectorCatalog.mockResolvedValue({
+      items: [SLACK_CATALOG],
+      templates: TEMPLATE_SEED,
+      mcpServers: []
+    })
+    mockState.editingWorkflowId = 'wf-unbound'
+    render(<WorkflowEditor />)
+
+    expect(await screen.findByRole('button', { name: 'Install Slack' })).toBeInTheDocument()
+    // A row the canvas derives cannot be dismissed: binding or deleting the step is what clears it.
+    expect(screen.queryByLabelText('Dismiss')).toBeNull()
   })
 
   it('says what an import could not bind, on the workflow it imported', async () => {

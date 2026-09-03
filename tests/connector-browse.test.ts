@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { isImplicitConnection } from '../packages/shared/src/types'
 import {
   buildConnectorListings,
   filterConnectorListings,
@@ -7,11 +8,18 @@ import {
   describeCatalogAge,
   filterByCategory,
   listingDetails,
+  connectorAuthRungs,
+  filterByAuthRung,
   CALLABLE_FILTER,
   CONNECTED_FILTER,
   type BuiltInConnector
 } from '../src/renderer/lib/connector-browse'
-import type { ConnectorCatalogItem, SourceConnection } from '../src/shared/types'
+import type {
+  ConnectorAuthRung,
+  ConnectorCatalogItem,
+  InstalledConnectorPack,
+  SourceConnection
+} from '../src/shared/types'
 
 const builtIn = (id: string, name: string): BuiltInConnector => ({
   id,
@@ -372,5 +380,141 @@ describe('describeCatalogAge', () => {
   it('does not say "1 minutes"', () => {
     expect(describeCatalogAge(now - 3_600_000, now)).toBe('Updated 1 hour ago')
     expect(describeCatalogAge(now - 86_400_000, now)).toBe('Updated 1 day ago')
+  })
+})
+
+const packOf = (id: string, rung?: ConnectorAuthRung): InstalledConnectorPack => ({
+  id,
+  name: id,
+  version: '1.0.0',
+  path: `/packs/${id}`,
+  installedAt: 0,
+  bytes: 1,
+  triggers: [],
+  actions: [],
+  env: [],
+  ...(rung && { auth: { rung } })
+})
+
+const RECEIPT = {
+  schema: 1 as const,
+  version: '1.2.0',
+  checkedAt: '2026-09-02T00:00:00Z',
+  checks: ['manifest', 'no-runtime-deps']
+}
+
+describe('what a listing says about signing in', () => {
+  it('carries the rung and the receipt the catalog published', () => {
+    const [listing] = buildConnectorListings(
+      [],
+      [catalogItem('slack', 'Slack', { authRung: 'key', verified: RECEIPT })],
+      []
+    )
+
+    expect(listing.authRung).toBe('key')
+    expect(listing.verified).toEqual(RECEIPT)
+  })
+
+  it('believes the pack on disk over the catalog, since the pack is what runs', () => {
+    const [listing] = buildConnectorListings(
+      [],
+      [catalogItem('slack', 'Slack', { authRung: 'key' })],
+      [],
+      [packOf('slack', 'cli')]
+    )
+
+    expect(listing.authRung).toBe('cli')
+  })
+
+  it('says nothing rather than none when neither declares a rung', () => {
+    const [listing] = buildConnectorListings([], [catalogItem('slack', 'Slack')], [])
+
+    expect(listing.authRung).toBeUndefined()
+    expect(listing.verified).toBeUndefined()
+  })
+
+  it('reads a side-loaded pack its rung from its own manifest', () => {
+    const [listing] = buildConnectorListings([], [], [], [packOf('echo', 'none')])
+
+    expect(listing.authRung).toBe('none')
+  })
+
+  it('offers only the rungs on the page, in the order they ask for less', () => {
+    const listings = buildConnectorListings(
+      [],
+      [
+        catalogItem('a', 'A', { authRung: 'key' }),
+        catalogItem('b', 'B', { authRung: 'none' }),
+        catalogItem('c', 'C')
+      ],
+      []
+    )
+
+    expect(connectorAuthRungs(listings)).toEqual(['none', 'key'])
+    expect(filterByAuthRung(listings, 'key').map((l) => l.id)).toEqual(['a'])
+    expect(filterByAuthRung(listings, undefined)).toHaveLength(3)
+  })
+})
+
+describe('a connection nobody asked for', () => {
+  const implicit = connection({ id: 'imp', filters: { sdkConnectorId: 'echo', implicit: true } })
+  const chosen = connection({ id: 'mine', filters: { sdkConnectorId: 'echo' } })
+
+  it('leaves the count at nothing, so no row offers another of it', () => {
+    const [listing] = buildConnectorListings([], [catalogItem('echo', 'Echo')], [implicit])
+
+    expect(listing.connectedCount).toBe(0)
+    expect(listing.implicitlyConnected).toBe(true)
+    expect(isImplicitConnection(implicit)).toBe(true)
+    expect(isImplicitConnection(chosen)).toBe(false)
+  })
+
+  it('still sorts a ready connector above one that needs setting up', () => {
+    const listings = buildConnectorListings(
+      [],
+      [catalogItem('alpha', 'Alpha'), catalogItem('echo', 'Echo')],
+      [implicit]
+    )
+
+    expect(listings.map((l) => l.id)).toEqual(['echo', 'alpha'])
+  })
+
+  it('counts the connections someone made beside it', () => {
+    const [listing] = buildConnectorListings([], [catalogItem('echo', 'Echo')], [implicit, chosen])
+
+    expect(listing.connectedCount).toBe(1)
+    expect(listing.implicitlyConnected).toBe(true)
+  })
+
+  it('keeps it out of the connections someone can manage', () => {
+    expect(groupConnections([implicit], [])).toEqual([])
+
+    const groups = groupConnections([implicit, chosen], [])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].connections.map((c) => c.id)).toEqual(['mine'])
+  })
+})
+
+describe('an action carried before it is installed', () => {
+  it('keeps the arguments a step will ask for', () => {
+    const [listing] = buildConnectorListings(
+      [],
+      [
+        catalogItem('slack', 'Slack', {
+          actions: [
+            {
+              type: 'post',
+              label: 'Post message',
+              inputs: [{ key: 'text', label: 'Text', type: 'string', required: true }]
+            }
+          ]
+        })
+      ],
+      []
+    )
+
+    expect(listingDetails(listing).actions[0].inputs).toEqual([
+      { key: 'text', label: 'Text', type: 'string', required: true }
+    ])
   })
 })

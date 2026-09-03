@@ -30,20 +30,19 @@ import {
   WorkflowNodeErrorPolicy,
   WorkflowEdge,
   WorkflowTemplate,
-  ConnectorCatalogItem,
-  InstalledConnectorPack,
-  McpServerCatalogEntry,
   NodeExecutionStatus,
   WorkflowExecution,
   TriggerConfig,
   AiAgentType,
   CallConnectorActionConfig,
+  HttpRequestConfig,
   ConnectorActionDef,
   supportsExactSessionResume,
   getProjectRemoteHostId
 } from '../../../shared/types'
 import { WorkflowCanvas, AddableNodeType, InsertAnchor } from './WorkflowCanvas'
 import { StepLibrary, type LibraryPick } from './panels/StepLibrary'
+import { stepForPick } from '../../lib/library-pick'
 import {
   alignedNodes,
   layoutPositions,
@@ -85,10 +84,14 @@ import {
   stopWorkflowRun
 } from '../../lib/workflow-execution'
 import { toast } from '../Toast'
-import { refreshConnections, useConnections } from '../../lib/use-connections'
+import { refreshConnections, useConnections, useInstalledPacks } from '../../lib/use-connections'
+import { useConnectorCatalog } from '../../lib/use-connector-catalog'
 import { describeRequirement, fileFromWorkflow, projectForWorkflow } from '../../lib/workflow-files'
 import {
   connectorSuggestions,
+  mergeRequirements,
+  requirementsOfDefinition,
+  requirementsWithBindings,
   templateSeed,
   type ConnectorSuggestion,
   type RequirementAction
@@ -110,7 +113,6 @@ function connectorFor(
 }
 import { StartFromPanel } from './panels/StartFromPanel'
 import { RequirementRow } from './panels/RequirementRow'
-import { resolveRequirement } from '../../../shared/workflow-portability'
 import {
   slugify,
   ensureUniqueSlug,
@@ -152,14 +154,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [pendingInsert, setPendingInsert] = useState<InsertAnchor | null>(null)
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [showStartFrom, setShowStartFrom] = useState(true)
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([])
   /** The connector a requirement asked to connect, and the profile it asked for. */
   const [connectFor, setConnectFor] = useState<ConnectorListing | null>(null)
   const [profileFor, setProfileFor] = useState<string | null>(null)
-  const [catalog, setCatalog] = useState<ConnectorCatalogItem[]>([])
-  const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
-  const [mcpServers, setMcpServers] = useState<McpServerCatalogEntry[]>([])
+  const packs = useInstalledPacks()
   const [launchingSince, setLaunchingSince] = useState<number | null>(null)
   const [followRunId, setFollowRunId] = useState<string | null>(null)
   const followArmRef = useRef(false)
@@ -647,39 +646,26 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   // against this machine each render, so answering one clears its row.
   const imported = useAppStore((s) => s.importedRequirements)
   const setImportedRequirements = useAppStore((s) => s.setImportedRequirements)
-  // The start-from list needs the catalog, and so does a workflow whose import
-  // left needs — without it a row could name a connector but never offer it.
-  const needsConnectorData = !editingId || imported?.workflowId === editingId
+  // Everything the canvas is still missing, however it got here.
+  const stillNeeded = useMemo(() => {
+    const fromImport = imported && imported.workflowId === editingId ? imported.requirements : []
+    const all = mergeRequirements(requirementsOfDefinition(nodes), fromImport)
+    return requirementsWithBindings(all, connections).filter(
+      (entry) => entry.connectionId === undefined
+    )
+  }, [imported, editingId, connections, nodes])
+  // Dismiss means "stop asking about the import"; a row the canvas derives is a live fact until the step is bound.
+  const importContributed = imported?.workflowId === editingId
 
-  // Optional calls: a build without a catalog costs the offer, never the editor.
-  // Keyed on the editor opening: a fetch that lost the startup race against the
-  // server socket must try again the next time someone is actually looking.
-  useEffect(() => {
-    if (!isActive || !needsConnectorData || templates.length > 0) return
-    void Promise.resolve(window.api?.listConnectorCatalog?.())
-      .then((snapshot) => {
-        setTemplates(snapshot?.templates ?? [])
-        // Kept as well as the templates: what a requirement can offer to do
-        // about itself is a question about the catalog.
-        setCatalog(snapshot?.items ?? [])
-        setMcpServers(snapshot?.mcpServers ?? [])
-      })
-      .catch(() => {})
-  }, [isActive, needsConnectorData, templates.length])
+  // Asked for only while someone is looking; a fetch that lost the startup race caches nothing, so opening again asks again.
+  const { items: catalog, templates, mcpServers } = useConnectorCatalog(isActive)
 
   useEffect(() => {
-    if (!isActive || !needsConnectorData) return
-    void Promise.resolve(window.api?.listConnectorPacks?.())
-      .then((list) => setPacks(list ?? []))
-      .catch(() => {})
-  }, [isActive, needsConnectorData])
-
-  useEffect(() => {
-    if (!isActive || !needsConnectorData) return
+    if (!isActive) return
     void Promise.resolve(window.api?.listConnectors?.())
       .then((list) => setConnectors(list ?? []))
       .catch(() => {})
-  }, [isActive, needsConnectorData])
+  }, [isActive])
 
   const suggestions = useMemo(
     () => connectorSuggestions(connections, connectors),
@@ -693,11 +679,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   )
 
   // The same inspect-then-confirm the directory uses, run from the panel.
-  const refreshPacks = useCallback(async () => {
-    const list = await window.api.listConnectorPacks?.().catch(() => [])
-    setPacks(list ?? [])
-  }, [])
-  const install = usePackInstall(refreshPacks)
+  const install = usePackInstall(refreshConnections)
 
   const handleFixRequirement = useCallback(
     (action: RequirementAction) => {
@@ -707,16 +689,6 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     },
     [install]
   )
-
-  const importedPending = useMemo(() => {
-    if (!imported || imported.workflowId !== editingId) return []
-    return imported.requirements
-      .map((requirement) => {
-        const connectionId = resolveRequirement(requirement, connections)
-        return connectionId === undefined ? { requirement } : { requirement, connectionId }
-      })
-      .filter((entry) => entry.connectionId === undefined)
-  }, [imported, editingId, connections])
 
   /** Nothing half-opened survives leaving the panel that opened it. */
   const closeStartFrom = useCallback(() => {
@@ -733,11 +705,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const handleConnected = useCallback(() => {
     setConnectFor(null)
     setProfileFor(null)
-    // The shared cache is what every glyph and picker reads; refreshing it here
-    // means a new connection shows up without waiting for a config round trip.
+    // The shared cache is what every glyph and picker reads, so a new connection shows up at once.
     void refreshConnections()
-    void refreshPacks()
-  }, [refreshPacks])
+  }, [])
 
   /** The server builds these from the connector's own manifest, and repeats are the same workflow. */
   const handlePickSuggestion = useCallback(
@@ -830,7 +800,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       afterNodeId: string,
       beforeNodeId: string | null,
       type: AddableNodeType,
-      preset?: Partial<CallConnectorActionConfig>
+      // A step can arrive already knowing part of its own configuration: which
+      // action it is, or which profile it calls.
+      preset?: Partial<CallConnectorActionConfig> | Partial<HttpRequestConfig>
     ) => {
       // Condition nodes use a special insertion that creates true/false branches
       if (type === 'condition') {
@@ -847,7 +819,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
       const created = createNodeWithUniqueSlug(type)
       const newNode = preset
-        ? { ...created, config: { ...(created.config as CallConnectorActionConfig), ...preset } }
+        ? ({
+            ...created,
+            config: { ...(created.config as Record<string, unknown>), ...preset }
+          } as WorkflowNode)
         : created
 
       let result: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
@@ -966,21 +941,14 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         return
       }
 
-      const newNode =
-        pick.kind === 'connectorAction'
-          ? (() => {
-              const n = createNodeWithUniqueSlug('connectorAction')
-              return {
-                ...n,
-                config: {
-                  ...(n.config as CallConnectorActionConfig),
-                  connectionId: pick.connectionId,
-                  action: pick.action,
-                  actionLabel: pick.actionLabel
-                }
-              }
-            })()
-          : createNodeWithUniqueSlug(pick.type)
+      const { type, config } = stepForPick(pick)
+      const created = createNodeWithUniqueSlug(type)
+      const newNode = config
+        ? ({
+            ...created,
+            config: { ...(created.config as Record<string, unknown>), ...config }
+          } as WorkflowNode)
+        : created
 
       const result = appendNodeAfter(nodes, edges, afterNodeId, newNode)
       setNodes(placeAll(result.nodes, result.edges, newNode.id))
@@ -1010,8 +978,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                 event: pick.event,
                 cron: '*/5 * * * *'
               }
-        // A pick replaces the existing trigger in place; edges stay put,
-        // while the label resets to the new type's default like any swap.
+        // A pick replaces the existing trigger in place; edges stay put, while the label resets to the new type's default.
         const existing = nodes.find((n) => n.type === 'trigger')
         if (existing) {
           const cur = existing.config as TriggerConfig
@@ -1096,13 +1063,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         handleAddParallelBranch(anchor.afterNodeId, 'agent')
       } else if (anchor.position && anchor.beforeNodeId === null) {
         handlePaletteInsert(pick, anchor.afterNodeId, anchor.position)
-      } else if (pick.kind === 'connectorAction') {
-        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, 'connectorAction', {
-          connectionId: pick.connectionId,
-          action: pick.action
-        })
       } else {
-        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, pick.type)
+        const { type, config } = stepForPick(pick)
+        handleInsertNode(anchor.afterNodeId, anchor.beforeNodeId, type, config)
       }
     },
     [
@@ -1551,7 +1514,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           </StartFromPanel>
         )}
 
-        {/* An imported workflow says what it could not bind, with the same
+        {/* Whatever the canvas cannot run yet — an import's leftovers, or a step
+            picked from a connector that is not installed — with the same
             actions the template rows offer. */}
         {/* One occupant of the slot, on the same terms as the rest: the panels
             that answer a selection or a run outrank an import's leftovers. */}
@@ -1559,17 +1523,19 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           !pendingInsert &&
           !showRunHistory &&
           !selectedNode &&
-          importedPending.length > 0 && (
+          stillNeeded.length > 0 && (
             <div className="w-[280px] border-l border-white/[0.08] bg-surface-node flex flex-col h-full overflow-y-auto titlebar-no-drag">
               <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
                 <span className="text-[13px] font-medium text-white">Still needs</span>
-                <button
-                  aria-label="Dismiss"
-                  onClick={() => setImportedRequirements(null)}
-                  className="p-1 rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
-                >
-                  <X size={14} />
-                </button>
+                {importContributed && (
+                  <button
+                    aria-label="Dismiss"
+                    onClick={() => setImportedRequirements(null)}
+                    className="p-1 rounded-md text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
               {install.error && (
                 <div className="px-4 py-2 border-b border-white/[0.08] text-[11px] text-danger">
@@ -1615,7 +1581,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
                 </div>
               )}
               <div className="py-2">
-                {importedPending.map((entry) => (
+                {stillNeeded.map((entry) => (
                   <RequirementRow
                     key={entry.requirement.nodeId + entry.requirement.kind}
                     requirement={entry}

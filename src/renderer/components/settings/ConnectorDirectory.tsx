@@ -1,13 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Search, Plus, RefreshCw, ChevronRight, Download, FolderOpen } from 'lucide-react'
+import { Search, Plus, RefreshCw, ChevronRight, Check, Download, FolderOpen } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
-import type { ConnectorInstallProgress } from '../../../shared/types'
+import type { ConnectorAuthRung, ConnectorInstallProgress } from '../../../shared/types'
 import {
   describeCatalogAge,
   filterConnectorListings,
+  filterByAuthRung,
   filterByCategory,
+  connectorAuthRungs,
   connectorCategories,
+  groupListingsByCategory,
   listingDetails,
+  AUTH_RUNG,
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
@@ -60,14 +64,23 @@ export function ConnectorDirectory({
 }) {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
+  const [rung, setRung] = useState<'' | ConnectorAuthRung>('')
   const [refreshing, setRefreshing] = useState(false)
   const [dragOver, setDragOver] = useState(false)
 
   const categories = useMemo(() => connectorCategories(listings), [listings])
+  const rungs = useMemo(() => connectorAuthRungs(listings), [listings])
   const visible = useMemo(
-    () => filterByCategory(filterConnectorListings(listings, search), category || undefined),
-    [listings, search, category]
+    () =>
+      filterByAuthRung(
+        filterByCategory(filterConnectorListings(listings, search), category || undefined),
+        rung || undefined
+      ),
+    [listings, search, category, rung]
   )
+  // Sections earn their keep once there is more than one; below that they are
+  // a heading over the whole list, which says nothing.
+  const sections = useMemo(() => groupListingsByCategory(visible), [visible])
 
   const handleDrop = (event: React.DragEvent): void => {
     event.preventDefault()
@@ -140,6 +153,23 @@ export function ConnectorDirectory({
             ))}
           </select>
         )}
+        {/* What setting one up will ask of you is the question people bring
+            here second, right after what it talks to. */}
+        {rungs.length > 1 && (
+          <select
+            value={rung}
+            onChange={(e) => setRung(e.target.value as '' | ConnectorAuthRung)}
+            aria-label="Filter by sign-in"
+            className="py-1.5 px-2 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-300 outline-none focus:border-white/[0.2]"
+          >
+            <option value="">Any sign-in</option>
+            {rungs.map((name) => (
+              <option key={name} value={name}>
+                {AUTH_RUNG[name].label}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {installError && (
@@ -152,23 +182,30 @@ export function ConnectorDirectory({
       {/* A verified pack waiting on the decision to keep it. */}
       {pending && <div className="mt-2">{pending}</div>}
 
-      <div>
-        {visible.map((listing) => (
-          <ConnectorRow
-            key={listing.key}
-            listing={listing}
-            builtIns={builtIns}
-            {...(progress?.[listing.id] && { progress: progress[listing.id] })}
-            onSelect={() => onSelect(listing)}
-            onAdd={() => onAdd(listing)}
-            {...(onInstall && { onInstall: () => onInstall(listing) })}
-          />
-        ))}
-      </div>
+      {sections.map((section) => (
+        <div key={section.category}>
+          {sections.length > 1 && (
+            <h3 className="text-[10px] uppercase tracking-[0.08em] text-gray-600 pt-4 pb-1">
+              {section.category}
+            </h3>
+          )}
+          {section.listings.map((listing) => (
+            <ConnectorRow
+              key={listing.key}
+              listing={listing}
+              builtIns={builtIns}
+              {...(progress?.[listing.id] && { progress: progress[listing.id] })}
+              onSelect={() => onSelect(listing)}
+              onAdd={() => onAdd(listing)}
+              {...(onInstall && { onInstall: () => onInstall(listing) })}
+            />
+          ))}
+        </div>
+      ))}
 
       {visible.length === 0 && (
         <p className="text-sm text-gray-500 py-4">
-          {search || category
+          {search || category || rung
             ? 'No connectors match that.'
             : 'No connectors available. Check your connection and try again.'}
         </p>
@@ -242,8 +279,24 @@ export function ConnectorRow({
           />
         </span>
         <span className="min-w-0">
-          <span className="block text-[13.5px] text-gray-200 font-medium group-hover:underline underline-offset-2 decoration-white/25">
-            {listing.name}
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[13.5px] text-gray-200 font-medium group-hover:underline underline-offset-2 decoration-white/25 truncate">
+              {listing.name}
+            </span>
+            {/* Both are facts rather than states, so they are lettered, not coloured. */}
+            {listing.authRung && (
+              <span className="shrink-0 text-[10px] text-gray-500 border border-white/[0.1] rounded-sm px-1.5 py-px">
+                {AUTH_RUNG[listing.authRung].badge}
+              </span>
+            )}
+            {listing.verified && (
+              <span
+                title={`Checked ${listing.verified.checks.join(', ')} against v${listing.verified.version}`}
+                className="shrink-0 inline-flex items-center gap-0.5 text-[10px] text-gray-500 border border-white/[0.1] rounded-sm px-1.5 py-px"
+              >
+                <Check size={9} /> verified
+              </span>
+            )}
           </span>
           {listing.description && (
             <span className="block text-[12.5px] text-gray-500 leading-snug mt-0.5">
@@ -292,23 +345,25 @@ export function ConnectorRow({
             {status.label}
           </button>
         )}
-        {/* A pack must be on disk before there is anything to connect to. */}
-        {canAddConnection(state, {
-          source: listing.source,
-          hasLegacyLaunch: Boolean(listing.catalogItem?.packageName)
-        }) && (
-          <button
-            onClick={onAdd}
-            className="text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
-          >
-            <Plus size={11} />{' '}
-            {listing.connectedCount > 0
-              ? 'Add another'
-              : listing.source === 'mcp'
-                ? 'Add server'
-                : 'Add'}
-          </button>
-        )}
+        {/* A pack must be on disk before there is anything to connect to, and a
+            connector that signs in with nothing was connected by installing it. */}
+        {!listing.implicitlyConnected &&
+          canAddConnection(state, {
+            source: listing.source,
+            hasLegacyLaunch: Boolean(listing.catalogItem?.packageName)
+          }) && (
+            <button
+              onClick={onAdd}
+              className="text-[11.5px] text-gray-300 hover:text-white px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+            >
+              <Plus size={11} />{' '}
+              {listing.connectedCount > 0
+                ? 'Add another'
+                : listing.source === 'mcp'
+                  ? 'Add server'
+                  : 'Add'}
+            </button>
+          )}
       </div>
     </div>
   )
@@ -334,6 +389,8 @@ function facts(listing: ConnectorListing, details: ReturnType<typeof listingDeta
   const version = listing.catalogItem?.version
   if (version) parts.push(`v${version}`)
   if (listing.connectedCount > 0) parts.push('in use')
+  // Nothing was connected, and nothing needs to be: it is usable as it stands.
+  else if (listing.implicitlyConnected) parts.push('ready')
 
   return parts.join(' · ')
 }

@@ -7,6 +7,7 @@ import type {
 } from '../../shared/types'
 import { connectionConnectorId } from '../../shared/types'
 import {
+  boundConnectionKey,
   fromPortable,
   resolveRequirement,
   unresolvedRequirements,
@@ -111,14 +112,68 @@ export function requirementAction(
     : { kind: 'install', listing }
 }
 
+// What the workflow on the canvas is still missing.
+export function requirementsOfDefinition(nodes: WorkflowNode[]): PortableRequirement[] {
+  const requirements: PortableRequirement[] = []
+  for (const node of nodes) {
+    const config = node.config as Record<string, unknown>
+    const key = boundConnectionKey(node, config)
+    if (key === null) continue
+    const bound = config[key]
+    if (typeof bound === 'string' && bound !== '') continue
+
+    if (key === 'profileConnectionId') {
+      // A request with no profile field at all is a request to a public URL — a finished step, not a question.
+      if (!(key in config)) continue
+      requirements.push({ kind: 'httpProfile', nodeId: node.id, name: '' })
+      continue
+    }
+
+    // Nothing recorded which connector this came from, so no row could offer to install or connect one; the config panel.
+    const connectorId = typeof config.connectorId === 'string' ? config.connectorId : ''
+    if (connectorId === '') continue
+    requirements.push({ kind: 'connection', nodeId: node.id, connectorId, name: '' })
+  }
+  return requirements
+}
+
+// One list of gaps from the two that describe them.
+export function mergeRequirements(
+  derived: PortableRequirement[],
+  imported: PortableRequirement[]
+): PortableRequirement[] {
+  const byNode = new Map(imported.map((requirement) => [requirement.nodeId, requirement]))
+  const merged = derived.map((fromCanvas) => {
+    const fromFile = byNode.get(fromCanvas.nodeId)
+    byNode.delete(fromCanvas.nodeId)
+    if (!fromFile) return fromCanvas
+    if (fromFile.kind !== 'connection' || fromCanvas.kind !== 'connection') return fromFile
+    return {
+      ...fromFile,
+      connectorId: fromFile.connectorId || fromCanvas.connectorId,
+      name: fromFile.name || fromCanvas.name
+    }
+  })
+  // An import can also name a step the canvas has nothing to say about.
+  return [...merged, ...byNode.values()]
+}
+
+/** Pair each requirement with the connection this machine would bind to it. */
+export function requirementsWithBindings(
+  requirements: PortableRequirement[],
+  connections: SourceConnection[]
+): TemplateRequirement[] {
+  return requirements.map((requirement) => {
+    const connectionId = resolveRequirement(requirement, connections)
+    return connectionId === undefined ? { requirement } : { requirement, connectionId }
+  })
+}
+
 export function templateRequirements(
   template: WorkflowTemplate,
   connections: SourceConnection[]
 ): TemplateRequirement[] {
-  return (template.portable.requires ?? []).map((requirement) => {
-    const connectionId = resolveRequirement(requirement, connections)
-    return connectionId === undefined ? { requirement } : { requirement, connectionId }
-  })
+  return requirementsWithBindings(template.portable.requires ?? [], connections)
 }
 
 /** Whether every connection this template names is already answered here. */

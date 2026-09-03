@@ -1,10 +1,14 @@
 import type {
+  ConnectorAuthRung,
+  ConnectorCatalogActionInput,
   ConnectorCatalogItem,
+  ConnectorCatalogVerification,
   InstalledConnectorPack,
   McpServerCatalogEntry,
   SdkConnectorIcon,
   SourceConnection
 } from '../../shared/types'
+import { isImplicitConnection } from '../../shared/types'
 import { connectionConnectorId, connectionIcon } from './connection-icon'
 
 /**
@@ -36,6 +40,12 @@ export interface ConnectorListing {
   icon?: SdkConnectorIcon
   /** The pack on disk, when this connector has been installed as one. */
   pack?: InstalledConnectorPack
+  // What setting this one up will ask of you.
+  authRung?: ConnectorAuthRung
+  /** What the factory checked, when this connector has been through it. */
+  verified?: ConnectorCatalogVerification
+  // Connected without anyone being asked to connect it — a connector that signs in with nothing is ready the moment it.
+  implicitlyConnected?: boolean
 }
 
 export interface BuiltInConnector {
@@ -59,7 +69,13 @@ export interface BuiltInConnector {
  */
 export interface ConnectorDetails {
   triggers: Array<{ type: string; label: string; description?: string }>
-  actions: Array<{ type: string; label: string; description?: string }>
+  /** Arguments ride along, so a step can be offered before anything is installed. */
+  actions: Array<{
+    type: string
+    label: string
+    description?: string
+    inputs?: ConnectorCatalogActionInput[]
+  }>
   settings: Array<{ name: string; required: boolean; description?: string }>
   /** Absent on a row nothing describes — an installed package with no manifest. */
   known: boolean
@@ -160,8 +176,17 @@ export function buildConnectorListings(
   packs: InstalledConnectorPack[] = [],
   mcpServers: McpServerCatalogEntry[] = []
 ): ConnectorListing[] {
-  const countFor = (id: string) =>
-    connections.filter((conn) => connectionConnectorId(conn) === id).length
+  // One pass over the connections; an implicit one was never asked for, so it is not counted as "another".
+  const owned = new Map<string, { count: number; implicit: boolean }>()
+  for (const conn of connections) {
+    const id = connectionConnectorId(conn)
+    const entry = owned.get(id) ?? { count: 0, implicit: false }
+    if (isImplicitConnection(conn)) entry.implicit = true
+    else entry.count += 1
+    owned.set(id, entry)
+  }
+  const countFor = (id: string) => owned.get(id)?.count ?? 0
+  const implicitFor = (id: string) => owned.get(id)?.implicit ?? false
   const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
   const listings: ConnectorListing[] = [
@@ -173,10 +198,14 @@ export function buildConnectorListings(
       category: 'Built in',
       source: 'builtin' as const,
       keywords: [],
-      connectedCount: countFor(c.id)
+      connectedCount: countFor(c.id),
+      implicitlyConnected: implicitFor(c.id)
     })),
     ...catalog.map((entry) => {
       const pack = packFor(entry.id)
+      // The installed files answer for themselves; the catalog only says what
+      // installing would ask for, which a newer pack on disk may have changed.
+      const rung = pack?.auth?.rung ?? entry.authRung
       return {
         ...entry,
         key: `catalog:${entry.id}`,
@@ -184,7 +213,10 @@ export function buildConnectorListings(
         source: 'catalog' as const,
         keywords: entry.keywords ?? [],
         connectedCount: countFor(entry.id),
+        implicitlyConnected: implicitFor(entry.id),
         catalogItem: entry,
+        ...(rung !== undefined && { authRung: rung }),
+        ...(entry.verified !== undefined && { verified: entry.verified }),
         ...(pack && { pack })
       }
     }),
@@ -207,6 +239,8 @@ export function buildConnectorListings(
         source: 'installed' as const,
         keywords: [],
         connectedCount: countFor(pack.id),
+        implicitlyConnected: implicitFor(pack.id),
+        ...(pack.auth?.rung !== undefined && { authRung: pack.auth.rung }),
         ...(pack.icon !== undefined && { icon: pack.icon }),
         pack
       })),
@@ -222,14 +256,35 @@ export function buildConnectorListings(
       source: 'mcp' as const,
       keywords: server.keywords ?? [],
       connectedCount: countFor(server.id),
+      implicitlyConnected: implicitFor(server.id),
       mcpServer: server
     }))
   ]
 
+  // Usable-now sorts first, whether that took a connection or nothing at all.
+  const ready = (listing: ConnectorListing): boolean =>
+    listing.connectedCount > 0 || listing.implicitlyConnected === true
   return listings.sort((a, b) => {
-    if (a.connectedCount > 0 !== b.connectedCount > 0) return a.connectedCount > 0 ? -1 : 1
+    if (ready(a) !== ready(b)) return ready(a) ? -1 : 1
     return a.name.localeCompare(b.name)
   })
+}
+
+/** A heading and the connectors under it, for a list too long to scan flat. */
+export interface ListingSection {
+  category: string
+  listings: ConnectorListing[]
+}
+
+// Cut the list into the sections it already sorts itself into.
+export function groupListingsByCategory(listings: ConnectorListing[]): ListingSection[] {
+  const sections = new Map<string, ConnectorListing[]>()
+  for (const listing of listings) {
+    const existing = sections.get(listing.category)
+    if (existing) existing.push(listing)
+    else sections.set(listing.category, [listing])
+  }
+  return [...sections].map(([category, entries]) => ({ category, listings: entries }))
 }
 
 /** A connector someone actually uses, with the connections they made to it. */
@@ -255,6 +310,10 @@ export interface ConnectionGroup {
  * named after its connector id, with the icon the connection itself stored.
  * Groups keep the order the connections arrive in, which is the order the
  * server returns them.
+ *
+ * A connection the app made for a connector that signs in with nothing is left
+ * out: nobody chose it, there is nothing in it to edit, and deleting it would
+ * only break the connector it was made for.
  */
 export function groupConnections(
   connections: SourceConnection[],
@@ -262,7 +321,7 @@ export function groupConnections(
 ): ConnectionGroup[] {
   const byConnector = new Map<string, ConnectionGroup>()
 
-  for (const conn of connections) {
+  for (const conn of connections.filter((connection) => !isImplicitConnection(connection))) {
     const id = connectionConnectorId(conn)
     const existing = byConnector.get(id)
     if (existing) {
@@ -335,6 +394,44 @@ export function connectorCategories(listings: ConnectorListing[]): string[] {
   }
   if (listings.some((listing) => listing.connectedCount > 0)) facets.push(CONNECTED_FILTER)
   return [...categories, ...facets]
+}
+
+// What a rung asks of you, from the reader's side: a filter label, a row badge, and the detail page's sentence.
+export const AUTH_RUNG: Record<
+  ConnectorAuthRung,
+  { label: string; badge: string; detail: string }
+> = {
+  none: {
+    label: 'Needs no sign-in',
+    badge: 'no sign-in',
+    detail: 'Nothing — ready as soon as it is installed.'
+  },
+  cli: {
+    label: 'Signs in with a CLI',
+    badge: 'CLI login',
+    detail: 'Signs in with a CLI'
+  },
+  key: { label: 'Needs a key', badge: 'key', detail: 'Needs a key' },
+  oauth: {
+    label: 'Signs in through a browser',
+    badge: 'OAuth',
+    detail: 'Signs in through a browser'
+  }
+}
+
+/** The rungs actually present, so the filter never offers an empty answer. */
+export function connectorAuthRungs(listings: ConnectorListing[]): ConnectorAuthRung[] {
+  const order: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
+  return order.filter((rung) => listings.some((listing) => listing.authRung === rung))
+}
+
+/** Narrow to the connectors that sign in a particular way. */
+export function filterByAuthRung(
+  listings: ConnectorListing[],
+  rung: ConnectorAuthRung | undefined
+): ConnectorListing[] {
+  if (!rung) return listings
+  return listings.filter((listing) => listing.authRung === rung)
 }
 
 /** Narrow to one category, or to one of the two derived facets. */

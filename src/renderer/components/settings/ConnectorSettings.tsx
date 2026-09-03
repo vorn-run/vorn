@@ -3,28 +3,22 @@ import { useAppStore } from '../../stores'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { buildConnectorListings, type ConnectorListing } from '../../lib/connector-browse'
 import { usePackInstall } from '../../lib/use-pack-install'
+import { useConnectorCatalog, refreshConnectorCatalog } from '../../lib/use-connector-catalog'
+import { refreshConnections } from '../../lib/use-connections'
 import { SDK_FILTER_KEYS } from '../../../shared/types'
 import { ConnectorDirectory } from './ConnectorDirectory'
 import { ConnectorDetail } from './ConnectorDetail'
 import { ConnectionGroups, type ConnectorStatus } from './ConnectionGroups'
-import type {
-  ConnectorCatalogItem,
-  ConnectorCatalogSnapshot,
-  InstalledConnectorPack,
-  McpServerCatalogEntry,
-  SourceConnection
-} from '../../../shared/types'
+import type { InstalledConnectorPack, SourceConnection } from '../../../shared/types'
 import { SdkConnectorForm } from './SdkConnectorForm'
 import { PackInstallConfirm } from './PackInstallConfirm'
 import { AddConnectionForm, MCP_CONNECTOR_ID, type ConnectorInfo } from './AddConnectionForm'
 
 export function ConnectorSettings() {
   const workflows = useAppStore((s) => s.config?.workflows ?? [])
-  const openWorkflowEditor = (id: string) => {
+  // Settings is a modal overlay, so it closes first or the editor renders behind it; null opens a new workflow.
+  const openWorkflowEditor = (id: string | null) => {
     const store = useAppStore.getState()
-    // Close settings, switch to workflows view, select the workflow, and
-    // open the editor. Settings is a modal overlay — if we only set the
-    // editor state, the editor renders behind settings and looks dead.
     store.setSettingsOpen(false)
     store.setMainViewMode('workflows')
     store.setEditingWorkflowId(id)
@@ -35,11 +29,11 @@ export function ConnectorSettings() {
   const [statuses, setStatuses] = useState<ConnectorStatus[]>([])
   // One selection, so "both open at once" is not a representable state.
   const [adding, setAdding] = useState<ConnectorListing | null>(null)
-  const [catalog, setCatalog] = useState<ConnectorCatalogItem[]>([])
-  const [mcpServers, setMcpServers] = useState<McpServerCatalogEntry[]>([])
-  const [catalogFetchedAt, setCatalogFetchedAt] = useState<number>()
-  // What the detail view is describing. Separate from `adding` so opening a
-  // connector to read about it is not the same as committing to install it.
+  // One catalog for the whole app: the step library offers these same
+  // connectors before they are installed, and two copies would disagree the
+  // moment either was refreshed.
+  const { items: catalog, mcpServers, fetchedAt: catalogFetchedAt } = useConnectorCatalog()
+  // What the detail view is describing.
   const [selected, setSelected] = useState<ConnectorListing | null>(null)
   // Connections lead once there are any; with none there is nothing to lead
   // with, so the catalog opens instead of a second empty-state layout.
@@ -76,21 +70,12 @@ export function ConnectorSettings() {
     void load()
   }, [load])
 
-  // Fetched once rather than with every refresh: the catalog is fixed for the
-  // life of the process, so re-reading it after each run, delete or install
-  // would be a round trip that always returns the same answer.
-  const applyCatalog = useCallback((snapshot: ConnectorCatalogSnapshot) => {
-    setCatalog(snapshot.items)
-    setMcpServers(snapshot.mcpServers ?? [])
-    setCatalogFetchedAt(snapshot.fetchedAt)
-  }, [])
-
-  useEffect(() => {
-    void window.api.listConnectorCatalog().then(applyCatalog)
-  }, [applyCatalog])
-
-  // Inspect, ask, keep — the same three steps the editor's template rows use.
-  const install = usePackInstall(load)
+  // Installing changes what is on disk, which the library reads too, so the shared cache is told as well.
+  const install = usePackInstall(
+    useCallback(async () => {
+      await Promise.all([load(), refreshConnections()])
+    }, [load])
+  )
   const {
     progress: installProgress,
     pending: pendingPack,
@@ -240,7 +225,9 @@ export function ConnectorSettings() {
           builtIns={connectors}
           progress={installProgress}
           fetchedAt={catalogFetchedAt}
-          onRefresh={async () => applyCatalog(await window.api.refreshConnectorCatalog())}
+          onRefresh={async () => {
+            await refreshConnectorCatalog()
+          }}
           onSelect={setSelected}
           onAdd={setAdding}
           onInstall={handleInstall}
@@ -268,6 +255,7 @@ export function ConnectorSettings() {
             progress: installProgress[selectedListing.id]
           })}
           onAdd={() => setAdding(selectedListing)}
+          onUse={() => openWorkflowEditor(null)}
           onInstall={() => handleInstall(selectedListing)}
           onRollback={() => handleRollback(selectedListing.id)}
           onRemove={() => handleRemovePack(selectedListing.id)}

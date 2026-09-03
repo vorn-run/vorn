@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   connectorSuggestions,
+  mergeRequirements,
   requirementAction,
+  requirementsOfDefinition,
+  requirementsWithBindings,
   templateRequirements,
   templateIsReady,
   templateSeed,
@@ -12,6 +15,7 @@ import { TEMPLATE_SEED } from '../packages/server/src/connectors/template-seed'
 import type {
   ConnectorManifest,
   SourceConnection,
+  WorkflowNode,
   WorkflowTemplate
 } from '../packages/shared/src/types'
 
@@ -241,5 +245,116 @@ describe('what a template puts on the canvas', () => {
     expect(seed.nodes).toHaveLength(3)
     expect(seed.edges.find((e) => e.conditionBranch === 'true')).toBeTruthy()
     expect(seed.name).toBe('Webhook to report')
+  })
+})
+
+describe('what the canvas itself is still missing', () => {
+  const node = (id: string, type: string, config: Record<string, unknown>): WorkflowNode =>
+    ({ id, type, label: id, config, position: { x: 0, y: 0 } }) as WorkflowNode
+
+  const unbound = node('n1', 'callConnectorAction', {
+    nodeType: 'callConnectorAction',
+    connectionId: '',
+    connectorId: 'slack',
+    action: 'post',
+    args: {}
+  })
+
+  it('asks for the connector a step was picked from', () => {
+    expect(requirementsOfDefinition([unbound])).toEqual([
+      { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: '' }
+    ])
+  })
+
+  it('says nothing about a step that is already bound', () => {
+    const bound = node('n2', 'callConnectorAction', {
+      nodeType: 'callConnectorAction',
+      connectionId: 'conn-1',
+      action: 'post',
+      args: {}
+    })
+    expect(requirementsOfDefinition([bound])).toEqual([])
+  })
+
+  it('leaves a request to a public URL alone', () => {
+    const request = node('n3', 'httpRequest', {
+      nodeType: 'httpRequest',
+      method: 'GET',
+      url: 'https://example.test',
+      headers: {},
+      body: ''
+    })
+    expect(requirementsOfDefinition([request])).toEqual([])
+  })
+
+  it('asks about a profile that was chosen and then cleared', () => {
+    const emptied = node('n5', 'httpRequest', {
+      nodeType: 'httpRequest',
+      method: 'GET',
+      url: '/report',
+      headers: {},
+      body: '',
+      profileConnectionId: ''
+    })
+    expect(requirementsOfDefinition([emptied])).toEqual([
+      { kind: 'httpProfile', nodeId: 'n5', name: '' }
+    ])
+  })
+
+  it('says nothing it could not offer a fix for', () => {
+    const anonymous = node('n4', 'callConnectorAction', {
+      nodeType: 'callConnectorAction',
+      connectionId: '',
+      action: 'post',
+      args: {}
+    })
+    const strippedTrigger = node('n6', 'trigger', {
+      triggerType: 'connectorPoll',
+      connectionId: '',
+      event: 'issueCreated'
+    })
+    // Both are fixed in the step's own panel, where the connector is chosen; a row here could offer nothing.
+    expect(requirementsOfDefinition([anonymous, strippedTrigger])).toEqual([])
+  })
+
+  it('keeps what only the file knew about a step the canvas also names', () => {
+    const fromFile = {
+      kind: 'connection' as const,
+      nodeId: 'n1',
+      connectorId: 'slack',
+      name: 'workspace-eng',
+      event: 'message'
+    }
+    const merged = mergeRequirements(requirementsOfDefinition([unbound]), [fromFile])
+
+    expect(merged).toEqual([fromFile])
+  })
+
+  it('falls back to the canvas for a field the file left empty', () => {
+    const vague = { kind: 'connection' as const, nodeId: 'n1', connectorId: '', name: '' }
+    const [merged] = mergeRequirements(requirementsOfDefinition([unbound]), [vague])
+
+    expect(merged.kind === 'connection' && merged.connectorId).toBe('slack')
+  })
+
+  it('keeps a requirement for a step the canvas says nothing about', () => {
+    const orphan = { kind: 'httpProfile' as const, nodeId: 'gone', name: 'reporting API' }
+    expect(mergeRequirements([], [orphan])).toEqual([orphan])
+  })
+
+  it('binds a requirement the moment this machine has one answer for it', () => {
+    const slack = connection({
+      id: 'slack-1',
+      name: 'workspace',
+      connectorId: 'mcp',
+      filters: { sdkConnectorId: 'slack' }
+    })
+
+    expect(requirementsWithBindings(requirementsOfDefinition([unbound]), [])).toEqual([
+      { requirement: { kind: 'connection', nodeId: 'n1', connectorId: 'slack', name: '' } }
+    ])
+    expect(
+      requirementsWithBindings(requirementsOfDefinition([unbound]), [slack])[0].connectionId
+    ).toBe('slack-1')
   })
 })
