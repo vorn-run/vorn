@@ -2,7 +2,12 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { SdkConnectorAuth } from '@vornrun/shared/types'
 import { resolveExecutable } from '../resolve-executable'
-import { getSafeEnv, isAbsolutelyStrippedEnvName } from '../process-utils'
+import {
+  SENSITIVE_ENV_PREFIXES,
+  getEnvPassthrough,
+  getSafeEnv,
+  isAbsolutelyStrippedEnvName
+} from '../process-utils'
 import log from '../logger'
 
 /**
@@ -101,12 +106,26 @@ export function installHintFor(command: string): string {
  * name failing either is dropped and said out loud, because silently handing a
  * connector less than it asked for reads as the service being down.
  */
+// Auth blocks the app itself wrote; a manifest can never be one, so only these may name a credential.
+const FIRST_PARTY = new WeakSet<SdkConnectorAuth>()
+
+export function markFirstParty<T extends SdkConnectorAuth>(auth: T): T {
+  FIRST_PARTY.add(auth)
+  return auth
+}
+
+function isCredentialName(name: string): boolean {
+  const upper = name.toUpperCase()
+  return !getEnvPassthrough().has(upper) && SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))
+}
+
 export function borrowableNames(
   auth: SdkConnectorAuth | undefined,
   declared: readonly string[]
 ): string[] {
   const asked = auth?.borrow?.env ?? []
   const declaredUpper = new Set(declared.map((name) => name.toUpperCase()))
+  const trusted = auth !== undefined && FIRST_PARTY.has(auth)
   const allowed: string[] = []
   for (const name of asked) {
     if (isAbsolutelyStrippedEnvName(name)) {
@@ -115,6 +134,10 @@ export function borrowableNames(
     }
     if (!declaredUpper.has(name.toUpperCase())) {
       log.warn(`[auth] refused to borrow ${name}: the connector does not declare reading it`)
+      continue
+    }
+    if (!trusted && isCredentialName(name)) {
+      log.warn(`[auth] refused to borrow ${name}: a connector may not ask for a credential by name`)
       continue
     }
     allowed.push(name)

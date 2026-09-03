@@ -52,25 +52,25 @@ function installed(sdkId: string): ReturnType<typeof describePack> {
  */
 export function mightBorrow(sdkId: string): boolean {
   if (!sdkId) return false
-  const pack = installed(sdkId)
-  if (pack) return pack.auth?.rung === 'cli'
-  // A checkout cannot be read without asking, and a cached answer is still an
-  // answer: only an unprobed or borrowing checkout is worth the wait.
-  const cached = checkoutManifests.get(sdkId)
-  if (cached !== undefined) return cached !== null && borrowFrom(cached) !== undefined
-  return localLaunchSpec(sdkId) !== undefined
+  // The checkout is what runs, so it decides; a cached answer for it is still an answer.
+  if (localLaunchSpec(sdkId) !== undefined) {
+    const cached = checkoutManifests.get(sdkId)
+    if (cached !== undefined) return cached !== null && borrowFrom(cached) !== undefined
+    return true
+  }
+  return installed(sdkId)?.auth?.rung === 'cli'
 }
 
 export async function resolveBorrow(sdkId: string): Promise<ConnectorBorrow | undefined> {
   if (!sdkId) return undefined
-  const pack = installed(sdkId)
-  if (pack) return borrowFrom(pack)
+  const launch = localLaunchSpec(sdkId)
+  if (!launch) {
+    const pack = installed(sdkId)
+    return pack ? borrowFrom(pack) : undefined
+  }
 
   const cached = checkoutManifests.get(sdkId)
   if (cached !== undefined) return cached ? borrowFrom(cached) : undefined
-
-  const launch = localLaunchSpec(sdkId)
-  if (!launch) return undefined
 
   const result = await probeSdkConnector(launch)
   if (!result.ok) {

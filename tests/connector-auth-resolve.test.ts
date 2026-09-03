@@ -100,6 +100,21 @@ describe('a connector being run from a checkout', () => {
   })
 })
 
+describe('a connector that is both installed and checked out', () => {
+  it('answers from the checkout, because that is what runs', async () => {
+    pack.current = { auth: { rung: 'key', keys: ['t'] }, env: [] }
+    checkout.launch = { command: 'node', args: ['/checkout/gitlab/dist/index.js'] }
+    probeSdkConnector.mockResolvedValue({
+      ok: true,
+      manifest: { id: 'gitlab', auth: CLI, env: [{ name: 'GITLAB_TOKEN' }] }
+    })
+    const { mightBorrow, resolveBorrow } = await load()
+
+    expect(mightBorrow('gitlab')).toBe(true)
+    expect(await resolveBorrow('gitlab')).toEqual({ auth: CLI, declared: ['GITLAB_TOKEN'] })
+  })
+})
+
 describe('a connection that names no packaged connector', () => {
   it('borrows nothing and waits for nothing', async () => {
     const { mightBorrow, resolveBorrow } = await load()

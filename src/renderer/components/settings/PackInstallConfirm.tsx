@@ -21,6 +21,10 @@ export function PackInstallConfirm({
 }) {
   const replacing = preview.installedVersion && preview.installedVersion !== preview.version
   const required = (preview.env ?? []).filter((entry) => entry.required)
+  const declared = new Set((preview.env ?? []).map((entry) => entry.name.toUpperCase()))
+  const borrows = (preview.auth?.borrow?.env ?? []).filter((name) =>
+    declared.has(name.toUpperCase())
+  )
 
   return (
     <div className="border border-white/[0.1] rounded-sm bg-white/[0.02] p-3">
@@ -57,6 +61,14 @@ export function PackInstallConfirm({
         />
         {required.length > 0 && (
           <PackCapability label="Needs" items={required.map((entry) => entry.name)} />
+        )}
+        {borrows.length > 0 && (
+          <PackCapability
+            label="Borrows"
+            items={borrows.map(
+              (name) => `${name} from ${preview.auth?.probe?.command ?? 'a signed-in tool'}`
+            )}
+          />
         )}
       </dl>
 

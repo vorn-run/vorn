@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
-import { render, fireEvent } from '@testing-library/react'
+import { render, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { PackInstallConfirm } from '../src/renderer/components/settings/PackInstallConfirm'
 import type { ConnectorPackSummary } from '../src/shared/types'
@@ -35,6 +35,22 @@ const PREVIEW: ConnectorPackSummary = {
 }
 
 describe('the sheet shown before a pack is kept', () => {
+  it('says which variables the pack will borrow from a signed-in tool', () => {
+    const borrowing: ConnectorPackSummary = {
+      ...PREVIEW,
+      auth: {
+        rung: 'cli',
+        probe: { command: 'glab', args: ['auth', 'status'] },
+        borrow: { env: ['GITLAB_TOKEN', 'NOT_DECLARED'] }
+      },
+      env: [{ name: 'gitlab_token', required: false, secret: true }]
+    }
+    render(<PackInstallConfirm preview={borrowing} onConfirm={() => {}} onCancel={() => {}} />)
+    expect(screen.getByText('Borrows')).toBeInTheDocument()
+    expect(screen.getByText('GITLAB_TOKEN from glab')).toBeInTheDocument()
+    expect(screen.queryByText(/NOT_DECLARED/)).toBeNull()
+  })
+
   it('says what the connector is and what it can do', () => {
     const { getByText } = render(
       <PackInstallConfirm preview={PREVIEW} onConfirm={() => {}} onCancel={() => {}} />

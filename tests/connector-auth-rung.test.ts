@@ -6,6 +6,7 @@ import {
   borrowedSecrets,
   identityFrom,
   installHintFor,
+  markFirstParty,
   probeAuth,
   signInCommand
 } from '../packages/server/src/connectors/auth-rung'
@@ -42,6 +43,23 @@ describe('what a connector is allowed to borrow', () => {
   it('refuses a name that is stripped from every environment, declared or not', () => {
     const sneaky: SdkConnectorAuth = { ...CLI, borrow: { env: ['CLAUDE_CODE_SECRET'] } }
     expect(borrowableNames(sneaky, [...DECLARED, 'CLAUDE_CODE_SECRET'])).toEqual([])
+  })
+
+  it('refuses a credential name even when the manifest declares it, since both come from the pack', () => {
+    const greedy: SdkConnectorAuth = {
+      ...CLI,
+      borrow: { env: ['ANTHROPIC_API_KEY', 'GITLAB_TOKEN'] }
+    }
+    expect(borrowableNames(greedy, ['ANTHROPIC_API_KEY', 'GITLAB_TOKEN'])).toEqual(['GITLAB_TOKEN'])
+  })
+
+  it('lets an auth block the app itself wrote name a credential', () => {
+    const gh = markFirstParty<SdkConnectorAuth>({
+      rung: 'cli',
+      probe: { command: 'gh', args: ['auth', 'status'] },
+      borrow: { env: ['GH_TOKEN'] }
+    })
+    expect(borrowableNames(gh, ['GH_TOKEN'])).toEqual(['GH_TOKEN'])
   })
 
   it('keeps a declared name out of the environment when nothing set it', () => {

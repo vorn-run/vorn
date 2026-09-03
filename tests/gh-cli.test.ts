@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('../packages/server/src/process-utils', () => ({
   getSafeEnv: () => ({ PATH: '/usr/bin' }),
-  isAbsolutelyStrippedEnvName: (name: string) => name.startsWith('CLAUDE_CODE_')
+  isAbsolutelyStrippedEnvName: (name: string) => name.startsWith('CLAUDE_CODE_'),
+  getEnvPassthrough: () => new Set<string>(),
+  SENSITIVE_ENV_PREFIXES: ['GITHUB_TOKEN', 'GH_TOKEN', 'ANTHROPIC_API']
 }))
 
 const importGhCli = async () => import('../packages/server/src/connectors/gh-cli')

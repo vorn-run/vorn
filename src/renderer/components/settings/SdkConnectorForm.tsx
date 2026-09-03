@@ -166,9 +166,9 @@ export function SdkConnectorForm({
   // What the borrow will actually hand over: a name the connector asks for and
   // also declares reading. The server refuses the rest, so naming them here
   // would promise something that will not happen.
-  const declaredNames = new Set((manifest?.env ?? []).map((entry) => entry.name))
+  const declaredNames = new Set((manifest?.env ?? []).map((entry) => entry.name.toUpperCase()))
   const borrowed = borrowing
-    ? (manifest?.auth?.borrow?.env ?? []).filter((name) => declaredNames.has(name))
+    ? (manifest?.auth?.borrow?.env ?? []).filter((name) => declaredNames.has(name.toUpperCase()))
     : []
 
   const handleSave = async () => {

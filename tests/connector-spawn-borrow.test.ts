@@ -65,7 +65,9 @@ beforeEach(() => {
   }))
   vi.doMock('../packages/server/src/process-utils', () => ({
     getSafeEnv: () => ({ PATH: '/usr/bin' }),
-    isAbsolutelyStrippedEnvName: (name: string) => name.startsWith('CLAUDE_CODE_')
+    isAbsolutelyStrippedEnvName: (name: string) => name.startsWith('CLAUDE_CODE_'),
+    getEnvPassthrough: () => new Set<string>(),
+    SENSITIVE_ENV_PREFIXES: ['GITHUB_TOKEN', 'GH_TOKEN', 'ANTHROPIC_API']
   }))
   vi.resetModules()
 })

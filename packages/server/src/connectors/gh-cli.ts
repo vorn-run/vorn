@@ -1,6 +1,6 @@
 import type { SdkConnectorAuth } from '@vornrun/shared/types'
 import { resolveExecutable } from '../resolve-executable'
-import { borrowedEnv, installHintFor } from './auth-rung'
+import { borrowedEnv, installHintFor, markFirstParty } from './auth-rung'
 
 /**
  * How the built-in GitHub connector signs in, said the way a packaged one says
@@ -9,11 +9,11 @@ import { borrowedEnv, installHintFor } from './auth-rung'
  * the probe and the borrow read for every other connector, which is what keeps
  * one implementation rather than a special case for `gh`.
  */
-export const GH_AUTH: SdkConnectorAuth = {
+export const GH_AUTH: SdkConnectorAuth = markFirstParty({
   rung: 'cli',
   probe: { command: 'gh', args: ['auth', 'status'] },
   borrow: { env: ['GH_TOKEN', 'GITHUB_TOKEN'], tokenArgs: ['auth', 'token'], tokenEnv: 'GH_TOKEN' }
-}
+})
 
 /**
  * The variables this connector reads, which is what it may borrow.
