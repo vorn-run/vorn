@@ -127,6 +127,36 @@ describe('a call the SDK is allowed to repeat', () => {
     expect(calls()).toBe(2)
   })
 
+  it('will not try more than ten times, whatever it was asked for', async () => {
+    const { impl, calls } = scripted([{ status: 500 }])
+    const fetchImpl = resilientFetch({
+      fetchImpl: impl,
+      retryable: true,
+      retry: { attempts: 50, baseDelayMs: 1 },
+      sleep: fakeSleep().sleep
+    })
+
+    expect((await fetchImpl('https://api.test/t')).status).toBe(500)
+    expect(calls()).toBe(10)
+  })
+
+  it('stops once it would have waited two minutes on one call', async () => {
+    const { impl, calls } = scripted([{ status: 503 }])
+    const clock = fakeSleep()
+    const fetchImpl = resilientFetch({
+      fetchImpl: impl,
+      retryable: true,
+      retry: { attempts: 10, baseDelayMs: 30_000 },
+      sleep: clock.sleep
+    })
+
+    expect((await fetchImpl('https://api.test/t')).status).toBe(503)
+    // Four waits of the 30s ceiling spend the budget exactly; a fifth would
+    // pass it, so the call gives up with the status it had.
+    expect(clock.waits).toEqual([30_000, 30_000, 30_000, 30_000])
+    expect(calls()).toBe(5)
+  })
+
   it('leaves an answer that is not a hiccup alone', async () => {
     const { impl, calls } = scripted([{ status: 404, body: { error: 'gone' } }])
     const fetchImpl = resilientFetch({ fetchImpl: impl, retryable: true })

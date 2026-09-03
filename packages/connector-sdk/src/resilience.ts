@@ -36,6 +36,16 @@ const DEFAULT_ATTEMPTS = 3
 const DEFAULT_BASE_DELAY_MS = 250
 const DEFAULT_MAX_DELAY_MS = 30_000
 
+/**
+ * The bounds a connector cannot talk its way past.
+ *
+ * A policy is the connector's to set, but a step that waits forever is nobody's
+ * intention — an author who asks for fifty tries, or an upstream that keeps
+ * asking for another minute, would otherwise hold a run open indefinitely.
+ */
+const MAX_ATTEMPTS = 10
+const MAX_TOTAL_WAIT_MS = 120_000
+
 const wait = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms)
@@ -78,12 +88,21 @@ export function backoffMs(attempt: number, policy: RetryPolicy = {}): number {
  * hand-written action and a declared request are equally protected.
  */
 export function resilientFetch(options: ResilientFetchOptions): typeof fetch {
-  const attempts = Math.max(1, options.retry?.attempts ?? DEFAULT_ATTEMPTS)
+  const attempts = Math.min(MAX_ATTEMPTS, Math.max(1, options.retry?.attempts ?? DEFAULT_ATTEMPTS))
   const sleep = options.sleep ?? wait
 
   const ceiling = options.retry?.maxDelayMs ?? DEFAULT_MAX_DELAY_MS
 
   const send = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    let waited = 0
+    /** Wait, unless doing so would spend more than one call is allowed. */
+    const pause = async (ms: number): Promise<boolean> => {
+      if (waited + ms > MAX_TOTAL_WAIT_MS) return false
+      waited += ms
+      await sleep(ms)
+      return true
+    }
+
     for (let attempt = 0; attempt < attempts; attempt++) {
       const last = attempt === attempts - 1
       try {
@@ -94,14 +113,15 @@ export function resilientFetch(options: ResilientFetchOptions): typeof fetch {
         // The server named its own wait; honour it over our backoff, because
         // it knows when the limit resets and we are only guessing.
         const asked = retryAfterMs(response.headers.get('retry-after'), Date.now())
-        await sleep(
+        const delay =
           asked === undefined ? backoffMs(attempt, options.retry) : Math.min(asked, ceiling)
-        )
+        // Out of patience rather than out of tries; the status is still the answer.
+        if (!(await pause(delay))) return response
       } catch (error) {
         // A thrown fetch is the network failing rather than the server
         // answering, which is exactly the case a retry exists for.
         if (!options.retryable || last) throw error
-        await sleep(backoffMs(attempt, options.retry))
+        if (!(await pause(backoffMs(attempt, options.retry)))) throw error
       }
     }
     // `attempts` is at least 1, so the loop always returns or throws first.
