@@ -194,12 +194,14 @@ const CONNECTION = {
 const { TEMPLATE_SEED } = await import('../packages/server/src/connectors/template-seed')
 const { __resetConnectionsCacheForTests, refreshConnections } =
   await import('../src/renderer/lib/use-connections')
+const { __resetCatalogCacheForTests } = await import('../src/renderer/lib/use-connector-catalog')
 const { WorkflowEditor } = await import('../src/renderer/components/workflow-editor/WorkflowEditor')
 
 const api = (window as unknown as { api: Record<string, ReturnType<typeof vi.fn>> }).api
 
 beforeEach(() => {
   __resetConnectionsCacheForTests()
+  __resetCatalogCacheForTests()
   vi.clearAllMocks()
   api.listWorkflowRuns.mockResolvedValue([])
   api.listConnections.mockResolvedValue([CONNECTION])

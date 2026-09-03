@@ -9,7 +9,8 @@ vi.mock('../src/renderer/lib/use-connections', () => ({
     { id: 'c2', name: 'Azure DevOps' }
   ],
   useConnectorIdFor: () => null,
-  useConnectionIconFor: () => undefined
+  useConnectionIconFor: () => undefined,
+  useInstalledPacks: () => []
 }))
 
 const listConnectionActions = vi.fn(async (id: string) =>
