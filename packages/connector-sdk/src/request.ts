@@ -28,6 +28,40 @@ function lookup(source: string, path: string, scope: RequestScope): unknown {
 }
 
 /**
+ * How a substituted value is written into its surroundings.
+ *
+ * A value's meaning depends on where it lands: a path segment has to be
+ * escaped, a header has characters it may not contain at all. Passing that
+ * decision in means the substitution is made safe once, here, instead of by
+ * every author who interpolates an argument.
+ */
+export type Substitution = (value: string, source: 'args' | 'config') => string
+
+/**
+ * Escape a substitution for a URL, but leave one that came from config alone.
+ *
+ * An argument is somebody else's input: `42?role=admin` or `../../admin` in one
+ * would otherwise rewrite the request the connector's own credentials are about
+ * to authenticate. Config is the connector's own setting — a base URL is a URL,
+ * and escaping it would break the request instead of protecting it.
+ */
+const intoUrl: Substitution = (value, source) =>
+  source === 'config' ? value : encodeURIComponent(value)
+
+/**
+ * A header value may not carry a line ending: one would end the header and
+ * start whatever the injected text says next.
+ */
+function intoHeader(name: string): Substitution {
+  return (value) => {
+    if (/[\r\n]/.test(value)) {
+      throw new Error(`Header "${name}" would carry a line ending, which is not allowed`)
+    }
+    return value
+  }
+}
+
+/**
  * Resolve `{{args.x}}` and `{{config.y}}` inside a value.
  *
  * A whole-string placeholder keeps the referenced value's own type, so a body
@@ -35,25 +69,53 @@ function lookup(source: string, path: string, scope: RequestScope): unknown {
  * into the string. An unset reference resolves to `undefined` on its own and to
  * the empty string when it is part of a larger one, which is what lets an
  * optional argument simply not appear.
+ *
+ * With a `substitute`, every resolved value passes through it — including a
+ * whole-string one, which then arrives as text rather than keeping its type,
+ * because a place that needs escaping is a place that holds a string.
  */
-export function resolveTemplates(value: unknown, scope: RequestScope): unknown {
+export function resolveTemplates(
+  value: unknown,
+  scope: RequestScope,
+  substitute?: Substitution
+): unknown {
   if (typeof value === 'string') {
     const whole = WHOLE_PLACEHOLDER.exec(value)
-    if (whole) return lookup(whole[1], whole[2], scope)
+    if (whole) {
+      const resolved = lookup(whole[1], whole[2], scope)
+      if (substitute === undefined || resolved === undefined || resolved === null) return resolved
+      return substitute(String(resolved), whole[1] as 'args' | 'config')
+    }
     return value.replace(PLACEHOLDER, (_match, source: string, path: string) => {
       const resolved = lookup(source, path, scope)
-      return resolved === undefined || resolved === null ? '' : String(resolved)
+      if (resolved === undefined || resolved === null) return ''
+      const text = String(resolved)
+      return substitute === undefined ? text : substitute(text, source as 'args' | 'config')
     })
   }
-  if (Array.isArray(value)) return value.map((entry) => resolveTemplates(entry, scope))
+  if (Array.isArray(value)) return value.map((entry) => resolveTemplates(entry, scope, substitute))
   if (typeof value === 'object' && value !== null) {
     const out: Record<string, unknown> = {}
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = resolveTemplates(entry, scope)
+      out[key] = resolveTemplates(entry, scope, substitute)
     }
     return out
   }
   return value
+}
+
+/** Resolve each header on its own, so a refusal can name the one at fault. */
+function resolveHeaders(
+  raw: Record<string, string> | undefined,
+  scope: RequestScope
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [name, value] of Object.entries(raw ?? {})) {
+    const resolved = resolveTemplates(value, scope, intoHeader(name))
+    if (resolved === undefined || resolved === null || resolved === '') continue
+    out[name] = String(resolved)
+  }
+  return out
 }
 
 /** Drop entries whose value never resolved, and stringify the rest. */
@@ -77,17 +139,24 @@ export interface ResolvedRequest {
 /** Build the exact call a declared request makes, with its templates resolved. */
 export function resolveRequest(request: ActionRequest, scope: RequestScope): ResolvedRequest {
   const method = (request.method ?? 'GET').toUpperCase()
-  const rawUrl = resolveTemplates(request.url, scope)
+  const rawUrl = resolveTemplates(request.url, scope, intoUrl)
   if (typeof rawUrl !== 'string' || rawUrl.trim() === '') {
     throw new Error('Request has no URL once its templates are resolved')
   }
 
-  const url = new URL(rawUrl)
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    // Says what it actually tried to call: the declared template rarely names
+    // the problem, and the resolved string always does.
+    throw new Error(`Request URL is not a URL once its templates are resolved: "${rawUrl}"`)
+  }
   for (const [key, value] of Object.entries(stringMap(resolveTemplates(request.query, scope)))) {
     url.searchParams.set(key, value)
   }
 
-  const headers = stringMap(resolveTemplates(request.headers, scope))
+  const headers = resolveHeaders(request.headers, scope)
   const resolved: ResolvedRequest = { url: url.toString(), method, headers }
 
   if (request.body !== undefined && method !== 'GET' && method !== 'HEAD') {

@@ -101,6 +101,56 @@ describe('a request an action declares', () => {
   })
 })
 
+describe('an argument that tries to rewrite the request', () => {
+  const resolve = (url: string, args: Record<string, unknown>) =>
+    resolveRequest({ url }, { args, config: { baseUrl: 'https://api.test' } }).url
+
+  it('escapes a query string smuggled into a path segment', () => {
+    expect(resolve('https://api.test/things/{{args.id}}', { id: '42?role=admin' })).toBe(
+      'https://api.test/things/42%3Frole%3Dadmin'
+    )
+  })
+
+  it('escapes a fragment, so nothing after it is dropped', () => {
+    expect(resolve('https://api.test/things/{{args.id}}', { id: 'a#b' })).toBe(
+      'https://api.test/things/a%23b'
+    )
+  })
+
+  it('escapes traversal, so the path cannot climb out of where it was put', () => {
+    expect(resolve('https://api.test/things/{{args.id}}', { id: '../../admin' })).toBe(
+      'https://api.test/things/..%2F..%2Fadmin'
+    )
+  })
+
+  it('leaves the connector own settings alone, so a base URL stays a URL', () => {
+    expect(resolve('{{config.baseUrl}}/v1/items', {})).toBe('https://api.test/v1/items')
+    expect(resolve('{{config.baseUrl}}', {})).toBe('https://api.test/')
+  })
+
+  it('escapes a whole-placeholder argument too, so it cannot become the host', () => {
+    // Escaped, the borrowed URL is no longer a URL — which is the point.
+    expect(() => resolve('{{args.target}}', { target: 'https://elsewhere.test/x' })).toThrow(
+      /not a URL once its templates are resolved/
+    )
+  })
+
+  it('refuses a header value carrying a line ending, and names the header', () => {
+    expect(() =>
+      resolveRequest(
+        { url: 'https://api.test/t', headers: { 'x-note': 'note: {{args.note}}' } },
+        { args: { note: 'ok\r\nAuthorization: Bearer stolen' }, config: {} }
+      )
+    ).toThrow(/Header "x-note" would carry a line ending/)
+  })
+
+  it('still sends an ordinary argument unmangled', () => {
+    expect(resolve('https://api.test/rooms/{{args.room}}', { room: 'general' })).toBe(
+      'https://api.test/rooms/general'
+    )
+  })
+})
+
 describe('reshaping what came back', () => {
   const envelope = {
     data: [
