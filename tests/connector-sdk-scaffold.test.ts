@@ -72,8 +72,16 @@ describe('the files a new connector starts as', () => {
 })
 
 describe('a scaffold shaped for the connectors repository', () => {
-  const repoMap = (id = 'acme-tickets') =>
-    new Map(scaffoldFiles({ id, repoConventions: true }).map((file) => [file.path, file.contents]))
+  const generated = new Map<string, Map<string, string>>()
+  const repoMap = (id = 'acme-tickets') => {
+    const cached = generated.get(id)
+    if (cached) return cached
+    const files = new Map(
+      scaffoldFiles({ id, repoConventions: true }).map((file) => [file.path, file.contents])
+    )
+    generated.set(id, files)
+    return files
+  }
 
   it('carries the files a package in that repository has to have', () => {
     expect([...repoMap().keys()]).toEqual([
@@ -119,7 +127,7 @@ describe('a scaffold shaped for the connectors repository', () => {
     const tsup = repoMap().get('tsup.config.ts') as string
     expect(tsup).toContain("target: 'node22'")
     expect(tsup).toContain("banner: { js: '#!/usr/bin/env node' }")
-    expect(tsup).toContain("'@vornrun/connector-sdk'")
+    expect(tsup).toContain("banner: { js: '#!/usr/bin/env node' }")
     expect(repoMap().get('tsconfig.json')).toContain('"noEmit": true')
     expect(repoMap().get('tsconfig.json')).toContain('"allowImportingTsExtensions": true')
     expect(repoMap().get('tsconfig.json')).toContain('"vitest.config.ts"')

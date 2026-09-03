@@ -24,6 +24,11 @@ const SDK_DEPENDENCY_RANGE = '^0.7.0-beta.8'
 
 /** What a scaffold starts at, in the package and in the changelog section that must match it. */
 const SCAFFOLD_VERSION = '0.1.0'
+const VITEST_RANGE = '^4.1.10'
+
+function jsonFile(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`
+}
 
 export interface ScaffoldOptions {
   id: string
@@ -50,72 +55,65 @@ export function titleCase(id: string): string {
 }
 
 function packageJson(id: string, description: string, inRepo: boolean): string {
-  return `${JSON.stringify(
-    {
-      name: inRepo ? `@vornrun/connector-${id}` : `vorn-connector-${id}`,
-      version: SCAFFOLD_VERSION,
-      description,
-      type: 'module',
-      license: 'MIT',
-      bin: { [`vorn-connector-${id}`]: 'dist/index.js' },
-      main: './dist/index.js',
-      types: './dist/index.d.ts',
-      files: inRepo ? ['dist', 'README.md', 'CHANGELOG.md'] : ['dist', 'README.md'],
-      ...(inRepo && {
-        repository: {
-          type: 'git',
-          url: 'git+https://github.com/vorn-run/connectors.git',
-          directory: `packages/${id}`
-        }
-      }),
-      scripts: {
-        build: 'tsup src/index.ts --format esm --target node22 --clean --dts',
-        check: 'vorn-connector check src/index.ts',
-        pack: 'vorn-connector pack src/index.ts',
-        test: 'vitest run',
-        typecheck: 'tsc --noEmit'
-      },
-      dependencies: { '@vornrun/connector-sdk': SDK_DEPENDENCY_RANGE },
-      devDependencies: {
-        ...(inRepo && { '@types/node': '^22.10.2', '@vitest/coverage-v8': '^4.1.10' }),
-        tsup: '^8.5.1',
-        typescript: '^6.0.3',
-        vitest: '^4.1.10'
-      },
-      // Read by the catalog build: how this connector is filed, found, and what it asks of you.
-      vorn: {
-        category: 'Other',
-        keywords: [id],
-        ...(inRepo && { auth: 'Say in one line what signing in takes.' })
+  return jsonFile({
+    name: inRepo ? `@vornrun/connector-${id}` : `vorn-connector-${id}`,
+    version: SCAFFOLD_VERSION,
+    description,
+    type: 'module',
+    license: 'MIT',
+    bin: { [`vorn-connector-${id}`]: 'dist/index.js' },
+    main: './dist/index.js',
+    types: './dist/index.d.ts',
+    files: ['dist', 'README.md', ...(inRepo ? ['CHANGELOG.md'] : [])],
+    ...(inRepo && {
+      repository: {
+        type: 'git',
+        url: 'git+https://github.com/vorn-run/connectors.git',
+        directory: `packages/${id}`
       }
+    }),
+    scripts: {
+      // In the repository the config file is the one definition of the build.
+      build: inRepo ? 'tsup' : 'tsup src/index.ts --format esm --target node22 --clean --dts',
+      check: 'vorn-connector check src/index.ts',
+      pack: 'vorn-connector pack src/index.ts',
+      test: 'vitest run',
+      typecheck: 'tsc --noEmit'
     },
-    null,
-    2
-  )}\n`
+    dependencies: { '@vornrun/connector-sdk': SDK_DEPENDENCY_RANGE },
+    devDependencies: {
+      ...(inRepo && { '@types/node': '^22.10.2', '@vitest/coverage-v8': VITEST_RANGE }),
+      tsup: '^8.5.1',
+      typescript: '^6.0.3',
+      vitest: VITEST_RANGE
+    },
+    // Read by the catalog build: how this connector is filed, found, and what it asks of you.
+    vorn: {
+      category: 'Other',
+      keywords: [id],
+      ...(inRepo && { auth: 'Say in one line what signing in takes.' })
+    }
+  })
 }
 
 function tsconfig(): string {
-  return `${JSON.stringify(
-    {
-      compilerOptions: {
-        target: 'ES2022',
-        lib: ['ES2022'],
-        module: 'ESNext',
-        moduleResolution: 'bundler',
-        allowSyntheticDefaultImports: true,
-        esModuleInterop: true,
-        strict: true,
-        skipLibCheck: true,
-        types: ['node'],
-        noEmit: true,
-        ignoreDeprecations: '6.0',
-        allowImportingTsExtensions: true
-      },
-      include: ['src/**/*', 'vitest.config.ts']
+  return jsonFile({
+    compilerOptions: {
+      target: 'ES2022',
+      lib: ['ES2022'],
+      module: 'ESNext',
+      moduleResolution: 'bundler',
+      allowSyntheticDefaultImports: true,
+      esModuleInterop: true,
+      strict: true,
+      skipLibCheck: true,
+      types: ['node'],
+      noEmit: true,
+      ignoreDeprecations: '6.0',
+      allowImportingTsExtensions: true
     },
-    null,
-    2
-  )}\n`
+    include: ['src/**/*', 'vitest.config.ts']
+  })
 }
 
 function tsupConfig(): string {
@@ -128,15 +126,15 @@ export default defineConfig({
   clean: true,
   dts: true,
   // Vorn spawns the built file directly.
-  banner: { js: '#!/usr/bin/env node' },
-  external: ['@modelcontextprotocol/sdk', '@vornrun/connector-sdk', 'zod']
+  banner: { js: '#!/usr/bin/env node' }
 })
 `
 }
 
 function vitestConfig(): string {
-  return `// The repository's one test configuration, so no package drifts from its coverage gate.
-export { default } from '../../vitest.shared.ts'
+  return `import shared from '../../vitest.shared.ts'
+
+export default shared
 `
 }
 
@@ -156,7 +154,7 @@ export const connector = defineConnector({
   id: ${JSON.stringify(id)},
   name: ${JSON.stringify(name)},
   description: ${JSON.stringify(description)},
-  version: '0.1.0',
+  version: '${SCAFFOLD_VERSION}',
   // Prefer a login the machine already has: { rung: 'cli', probe: { command: 'tool', args: ['auth', 'status'] } }
   auth: { rung: 'key', keys: ['apiToken'] },
   config: [
@@ -331,7 +329,7 @@ yarn install
 yarn build
 yarn check      # verifies the connector against Vorn's contract
 yarn test
-yarn pack       # writes ${id}-0.1.0.vorn.tgz, installable in Vorn
+yarn pack       # writes ${id}-${SCAFFOLD_VERSION}.vorn.tgz, installable in Vorn
 \`\`\`
 
 ## Settings
@@ -358,7 +356,7 @@ export function scaffoldFiles(options: ScaffoldOptions): ScaffoldFile[] {
   }
   const name = options.name?.trim() || titleCase(options.id)
   const description = options.description?.trim() || `${name} connector for Vorn`
-  const inRepo = options.repoConventions === true
+  const inRepo = options.repoConventions ?? false
 
   return [
     { path: 'package.json', contents: packageJson(options.id, description, inRepo) },
@@ -367,7 +365,6 @@ export function scaffoldFiles(options: ScaffoldOptions): ScaffoldFile[] {
     { path: 'src/index.ts', contents: indexSource() },
     { path: 'src/connector.test.ts', contents: testSource(name) },
     { path: 'README.md', contents: readme(options.id, name, description) },
-    // The rest of what a package in the connectors repository has to carry.
     ...(inRepo
       ? [
           { path: 'CHANGELOG.md', contents: changelog() },
