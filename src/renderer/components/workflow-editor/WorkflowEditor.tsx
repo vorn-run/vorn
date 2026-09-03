@@ -655,7 +655,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     )
   }, [imported, editingId, connections, nodes])
   // Dismiss means "stop asking about the import"; a row the canvas derives is a live fact until the step is bound.
-  const importContributed = imported !== null && imported.workflowId === editingId
+  const importContributed = imported?.workflowId === editingId
 
   // Asked for only while someone is looking; a fetch that lost the startup race caches nothing, so opening again asks again.
   const { items: catalog, templates, mcpServers } = useConnectorCatalog(isActive)
