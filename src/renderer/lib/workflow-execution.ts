@@ -458,6 +458,29 @@ function updateNodeState(
   }
 }
 
+/**
+ * A script step with its templates filled in, directory included.
+ *
+ * Where a script runs is as much a step output as what it runs — a check that
+ * follows an agent belongs in the worktree that agent made. Resolving to
+ * nothing leaves the key unset, so the runner falls back the way it always did
+ * rather than launching in an empty string.
+ */
+export function resolveScriptConfig(
+  config: ScriptConfig,
+  context?: WorkflowExecutionContext,
+  stepOutputs?: StepOutputs
+): ScriptConfig {
+  const path = (value: string | undefined): string | undefined =>
+    value === undefined ? undefined : resolveTemplateVars(value, context, stepOutputs) || undefined
+  return {
+    ...config,
+    scriptContent: resolveTemplateVars(config.scriptContent, context, stepOutputs),
+    cwd: path(config.cwd),
+    projectPath: path(config.projectPath)
+  }
+}
+
 export function buildStepOutputsMap(
   execution: WorkflowExecution,
   nodeMap: Map<string, WorkflowNode>
@@ -776,8 +799,7 @@ async function executeNode(
 
     const runId = crypto.randomUUID()
     const resolvedConfig: ScriptConfig = {
-      ...config,
-      scriptContent: resolveTemplateVars(config.scriptContent, context, stepOutputs),
+      ...resolveScriptConfig(config, context, stepOutputs),
       runId
     }
 
