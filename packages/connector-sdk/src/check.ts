@@ -615,13 +615,26 @@ const CHECK_OWNERS: Record<string, string> = {
   'live-action-failed': 'live'
 }
 
-/** The checks a run of these options actually performs. */
-function checksRun(options: CheckOptions): string[] {
-  const names = ['manifest', 'auth', 'secrets', 'actions', 'dedupe']
+/**
+ * The checks this run actually performed.
+ *
+ * Derived from what there was to examine, not from what was asked for: a
+ * connector with no triggers has nothing to say about dedupe, and listing it
+ * anyway would make the receipt vouch for a check that never looked at
+ * anything. Absent is the true answer, and a truthful short list is worth more
+ * than a long one.
+ */
+function checksRun(connector: Connector, options: CheckOptions): string[] {
+  const names = ['manifest', 'auth']
+  if (connector.config.length > 0) names.push('secrets')
+  if (connector.actions.length > 0) names.push('actions')
+  if (connector.triggers.length > 0) names.push('dedupe')
   if (options.packageDir !== undefined) names.push('no-lifecycle-scripts', 'keywords')
   if (options.bundle && options.entry !== undefined) names.push('no-runtime-deps')
-  if (options.mock) names.push('mock')
-  if (options.live) names.push('live')
+  // Whether the stub was actually reached is the `mock-not-observed` finding's
+  // job: it spoils this name for the action that stayed silent.
+  if (options.mock && connector.actions.length > 0) names.push('mock')
+  if (options.live && liveExamines(connector)) names.push('live')
   return names
 }
 
@@ -648,21 +661,24 @@ export async function runConformance(
 ): Promise<ConformanceRun> {
   const findings = await checkConnector(connector, options)
   const spoiled = new Set(findings.map((item) => CHECK_OWNERS[item.code]).filter(Boolean))
-  const passed = checksRun(options).filter((name) => !spoiled.has(name))
+  const passed = checksRun(connector, options).filter((name) => !spoiled.has(name))
   const failed = findings.some((item) => item.level === 'error')
   const now = options.now ?? (() => new Date().toISOString())
 
   return {
     findings,
     passed,
-    ...(!failed && {
-      receipt: {
-        schema: 1 as const,
-        version: connector.version,
-        checkedAt: now(),
-        checks: passed
-      }
-    })
+    // A receipt listing nothing would read as verified while vouching for
+    // nothing at all, which is worse than saying nothing.
+    ...(!failed &&
+      passed.length > 0 && {
+        receipt: {
+          schema: 1 as const,
+          version: connector.version,
+          checkedAt: now(),
+          checks: passed
+        }
+      })
   }
 }
 

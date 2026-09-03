@@ -29,12 +29,59 @@ const clean = (over: Partial<ConnectorDefinition> = {}) =>
 describe('what a conformance run vouches for', () => {
   it('names the checks that ran and had nothing to say', async () => {
     const run = await runConformance(clean(), { now: at })
+    // No config fields and no triggers: `secrets` and `dedupe` examined
+    // nothing, so they are absent rather than vouched for.
     expect(run.receipt).toEqual({
       schema: 1,
       version: '1.2.0',
       checkedAt: at(),
-      checks: ['manifest', 'auth', 'secrets', 'actions', 'dedupe']
+      checks: ['manifest', 'auth', 'actions']
     })
+  })
+
+  it('claims dedupe only once there is a trigger to have checked', async () => {
+    const withTrigger = clean({
+      triggers: [
+        {
+          type: 'newTicket',
+          label: 'New ticket',
+          description: 'Tickets since the last poll',
+          dedupe: 'timestamp',
+          fetch: () => [],
+          sample: [{ externalId: '1', title: 'One', updatedAt: '2026-09-01T00:00:00.000Z' }]
+        }
+      ]
+    })
+    expect((await runConformance(withTrigger, { now: at })).receipt?.checks).toContain('dedupe')
+    expect((await runConformance(clean(), { now: at })).receipt?.checks).not.toContain('dedupe')
+  })
+
+  it('claims secrets only once there is a config field to have checked', async () => {
+    const withConfig = clean({ config: [{ key: 'project', label: 'Project' }] })
+    expect((await runConformance(withConfig, { now: at })).receipt?.checks).toContain('secrets')
+    expect((await runConformance(clean(), { now: at })).receipt?.checks).not.toContain('secrets')
+  })
+
+  it('claims actions only once there is an action to have checked', async () => {
+    const bare = clean({
+      actions: undefined,
+      triggers: [{ type: 't', label: 'T', poll: () => ({ items: [] }) }]
+    })
+    expect((await runConformance(bare, { now: at })).receipt?.checks).not.toContain('actions')
+  })
+
+  it('writes no receipt at all when every check came back empty-handed', async () => {
+    // Nothing to examine but a description it does not have: the run looked at
+    // nothing, so it says nothing rather than issuing a blank badge.
+    const nothing = defineConnector({
+      id: 'hollow',
+      name: 'Hollow',
+      actions: [{ type: 'ping', label: 'Ping', run: () => ({}) }]
+    })
+    const run = await runConformance(nothing, { now: at })
+
+    expect(run.passed).toEqual([])
+    expect(run.receipt).toBeUndefined()
   })
 
   it('leaves out a check that had something to say, rather than vouching for it', async () => {
