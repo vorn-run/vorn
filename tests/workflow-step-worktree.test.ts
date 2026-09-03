@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildStepOutputsMap } from '../src/renderer/lib/workflow-execution'
-import { DEFAULT_OUTPUT_KEYS } from '../src/renderer/lib/template-vars'
+import { DEFAULT_OUTPUT_KEYS, WORKTREE_OUTPUT_KEY } from '../src/renderer/lib/template-vars'
 import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
 
 /**
@@ -54,6 +54,7 @@ describe('what a step hands the ones after it', () => {
   })
 
   it('is offered by name, so the editor can complete it', () => {
-    expect(DEFAULT_OUTPUT_KEYS.map((k) => k.key)).toContain('worktreePath')
+    expect(DEFAULT_OUTPUT_KEYS.map((k) => k.key)).not.toContain('worktreePath')
+    expect(WORKTREE_OUTPUT_KEY.key).toBe('worktreePath')
   })
 })

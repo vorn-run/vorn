@@ -174,6 +174,14 @@ describe('the bundled seed', () => {
         for (const id of body) expect(byId.get(id)).toBeDefined()
         // The engine refuses a gate inside a body, and the run would stop there.
         expect(body.some((id) => byId.get(id)?.type === 'approval')).toBe(false)
+        // The chain the loop drives: loop → body[0] → body[1] → … with one edge each.
+        const chain = [node.id, ...body]
+        for (let i = 0; i < chain.length - 1; i += 1) {
+          const hop = template.portable.edges.find(
+            (edge) => edge.source === chain[i] && edge.target === chain[i + 1]
+          )
+          expect(hop, `${chain[i]} → ${chain[i + 1]}`).toBeDefined()
+        }
       }
     }
   })
@@ -203,7 +211,7 @@ describe('the workflow that builds from a spec', () => {
       worktreeMode: 'new',
       useWorktree: true,
       branch: '{{inputs.branch}}',
-      projectPath: '{{inputs.repoPath.path}}'
+      projectName: '{{inputs.repoPath}}'
     })
     for (const id of ['develop', 'review']) {
       expect(config(id)).toMatchObject({
@@ -253,8 +261,11 @@ describe('the workflow that builds from a spec', () => {
     ])
     expect(node('approve').type).toBe('approval')
     expect(config('pr').scriptContent).toContain('gh pr create')
-    expect(config('pr').scriptContent).toContain('{{inputs.branch}}')
-    expect(config('pr').scriptContent).toContain('{{steps.review.notes}}')
+    // Untrusted text reaches the script as arguments, never spliced into its source.
+    expect(config('pr').args).toEqual(['{{inputs.branch}}', '{{steps.review.notes}}'])
+    expect(config('pr').scriptContent).not.toContain('{{')
+    expect(node('check').onError).toBe('continue')
+    expect(node('check-live').onError).toBe('continue')
   })
 })
 

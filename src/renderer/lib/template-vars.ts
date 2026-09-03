@@ -43,9 +43,15 @@ export type StepOutputs = Record<string, Record<string, unknown>>
 export const DEFAULT_OUTPUT_KEYS = [
   { key: 'output', label: 'Output', description: 'Primary output (stdout / agent logs)' },
   { key: 'status', label: 'Status', description: 'success or error' },
-  { key: 'error', label: 'Error', description: 'Error message if failed' },
-  { key: 'worktreePath', label: 'Worktree', description: 'Directory the step worked in' }
+  { key: 'error', label: 'Error', description: 'Error message if failed' }
 ] as const
+
+/** Only an agent step works in a directory of its own. */
+export const WORKTREE_OUTPUT_KEY = {
+  key: 'worktreePath',
+  label: 'Worktree',
+  description: 'Directory the step worked in'
+} as const
 
 // --- Variable Group for Autocomplete UI ---
 
@@ -263,7 +269,7 @@ export function buildStepGroups(
           const schemaKeys = schemaTopLevelKeys(action?.outputSchema)
           if (schemaKeys.length > 0) {
             // Schema-derived keys first — those are what users will usually
-            // reach for. The three defaults stay at the bottom as fallbacks.
+            // reach for. The defaults stay at the bottom as fallbacks.
             keys = [...schemaKeys, ...defaultKeys]
           }
         }
@@ -282,9 +288,7 @@ export function buildStepGroups(
         // advertising these vars for an interactive node would be misleading.
         const cfg = n.config as LaunchAgentConfig
         const schemaKeys = cfg.headless ? schemaTopLevelKeys(cfg.outputSchema) : []
-        if (schemaKeys.length > 0) {
-          keys = [...schemaKeys, ...defaultKeys]
-        }
+        keys = [...schemaKeys, ...defaultKeys, { ...WORKTREE_OUTPUT_KEY }]
       }
       const runOutputs = lastRun?.outputs[n.slug!]
       const runState = lastRun?.states[n.id]
@@ -422,19 +426,6 @@ function walkPath(root: unknown, path: string[]): unknown {
 /** Turn a resolved value into the string that gets substituted into the
  *  template. Scalars stringify directly; objects/arrays get JSON-serialized
  *  so downstream prompts / args still receive something meaningful. */
-/**
- * What an input answers to on its own, before any dotted path.
- *
- * A resource-backed input holds the whole thing it stands for — a project, an
- * issue — and the bare `{{inputs.x}}` is asking for the one someone picked, not
- * for its JSON. The name is that answer; the rest stays reachable by path.
- */
-function namedValue(val: unknown): unknown {
-  if (val === null || typeof val !== 'object' || Array.isArray(val)) return val
-  const name = (val as { name?: unknown }).name
-  return typeof name === 'string' ? name : val
-}
-
 function stringifyResolved(val: unknown): string {
   if (val == null) return ''
   if (typeof val === 'string') {
@@ -491,7 +482,7 @@ export function resolveTemplateVars(
       const [key, ...keyPath] = rest
       const value = context.inputs[key]
       if (value === undefined) return ''
-      if (keyPath.length === 0) return stringifyResolved(namedValue(value))
+      if (keyPath.length === 0) return stringifyResolved(value)
       return stringifyResolved(walkPath(value, keyPath))
     }
     if (ns === 'context' && rest.length === 1 && context) {

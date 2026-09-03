@@ -216,7 +216,6 @@ export const TEMPLATE_SEED: WorkflowTemplate[] = [
           config: {
             agentType: 'claude',
             projectName: '{{inputs.repoPath}}',
-            projectPath: '{{inputs.repoPath.path}}',
             branch: '{{inputs.branch}}',
             useWorktree: true,
             worktreeMode: 'new',
@@ -242,7 +241,6 @@ export const TEMPLATE_SEED: WorkflowTemplate[] = [
           config: {
             agentType: 'claude',
             projectName: '{{inputs.repoPath}}',
-            projectPath: '{{inputs.repoPath.path}}',
             worktreeMode: 'fromStep',
             worktreeFromStepSlug: 'research',
             headless: true,
@@ -274,6 +272,8 @@ export const TEMPLATE_SEED: WorkflowTemplate[] = [
           type: 'script',
           label: 'Check',
           slug: 'check',
+          // A failing check is what the reviewer is for; the pass must reach it.
+          onError: 'continue',
           config: {
             scriptType: 'bash',
             cwd: '{{steps.research.worktreePath}}',
@@ -292,6 +292,8 @@ export const TEMPLATE_SEED: WorkflowTemplate[] = [
           type: 'script',
           label: 'Check against the real thing',
           slug: 'check-live',
+          // A failing check is what the reviewer is for; the pass must reach it.
+          onError: 'continue',
           config: {
             scriptType: 'bash',
             cwd: '{{steps.research.worktreePath}}',
@@ -313,7 +315,6 @@ export const TEMPLATE_SEED: WorkflowTemplate[] = [
           config: {
             agentType: 'claude',
             projectName: '{{inputs.repoPath}}',
-            projectPath: '{{inputs.repoPath.path}}',
             worktreeMode: 'fromStep',
             worktreeFromStepSlug: 'research',
             headless: true,

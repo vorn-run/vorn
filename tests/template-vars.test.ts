@@ -126,7 +126,12 @@ describe('buildStepGroups', () => {
   it('maps to StepVariableGroup with default output keys', () => {
     const nodes = [makeNode('a', 'script', 'my_script')]
     const groups = buildStepGroups(nodes)
-    expect(groups[0].keys).toHaveLength(4)
+    expect(groups[0].keys).toHaveLength(3)
+    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error'])
+  })
+
+  it('offers the worktree only where a step has one of its own', () => {
+    const groups = buildStepGroups([makeNode('a', 'launchAgent', 'agent')])
     expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error', 'worktreePath'])
   })
 
@@ -162,7 +167,7 @@ describe('buildStepGroups', () => {
     const groups = buildStepGroups([node], lookup)
     const keys = groups[0].keys.map((k) => k.key)
     expect(keys.slice(0, 2)).toEqual(['html_url', 'number'])
-    expect(keys.slice(-4)).toEqual(['output', 'status', 'error', 'worktreePath'])
+    expect(keys.slice(-3)).toEqual(['output', 'status', 'error'])
   })
 
   it('prepends outputSchema keys for launchAgent nodes', () => {

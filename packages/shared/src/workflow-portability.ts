@@ -127,7 +127,7 @@ function connectorOf(connection: PortableConnection): string {
   })
 }
 
-/** Whether this node runs against a connector connection. */
+/** The config key that binds this node to a connection, whether it runs against one or borrows its key. */
 export function boundConnectionKey(
   node: WorkflowNode,
   config: Record<string, unknown>
@@ -302,10 +302,9 @@ export function fromPortable(
   const nodes = portable.nodes.map((node) => {
     const config = { ...(node.config as Record<string, unknown>) }
 
-    // The id names a row in the writer's table, so only a requirement this
-    // machine resolved below may bind one; a carried id is dropped rather than
-    // handing the step whichever key happens to hold it here.
-    if (node.type === 'script') delete config.secretsFrom
+    // A carried id names a row in the writer's table: dropped rather than bound to whatever holds it here.
+    const key = boundConnectionKey(node, config)
+    if (key !== null && OPTIONAL_CONNECTION_KEYS.has(key)) delete config[key]
 
     for (const [key, value] of Object.entries(config)) {
       if (typeof value !== 'string') continue
@@ -319,11 +318,9 @@ export function fromPortable(
     }
 
     for (const requirement of bindings.get(node.id) ?? []) {
-      if (bindsOnlyByHand(requirement) || node.type === 'script') continue
+      if (bindsOnlyByHand(requirement) || key === null) continue
       const resolved = resolveRequirement(requirement, connections)
-      if (resolved === undefined) continue
-      if (requirement.kind === 'httpProfile') config.profileConnectionId = resolved
-      else config.connectionId = resolved
+      if (resolved !== undefined) config[key] = resolved
     }
 
     // Export blanks it; this install gets a hook secret of its own.

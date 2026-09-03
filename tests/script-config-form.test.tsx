@@ -40,11 +40,10 @@ vi.mock('../src/renderer/components/SelectPicker', () => ({
   }
 }))
 
-const listConnectorKeys = vi.fn()
-;(globalThis as unknown as { window: { api: unknown } }).window = {
-  ...(globalThis as unknown as { window?: object }).window,
-  api: { listConnectorKeys }
-} as never
+const held = { keys: [] as Array<{ connectionId: string; name: string }> }
+vi.mock('../src/renderer/lib/use-connections', () => ({
+  useConnectorKeys: () => held.keys
+}))
 
 import { ScriptConfigForm } from '../src/renderer/components/workflow-editor/panels/ScriptConfigForm'
 import type { ScriptConfig } from '../src/shared/types'
@@ -56,9 +55,7 @@ function base(o: Partial<ScriptConfig> = {}): ScriptConfig {
 describe('the key a script borrows', () => {
   beforeEach(() => {
     selectPickerProps.length = 0
-    listConnectorKeys.mockResolvedValue([
-      { connectionId: 'conn-slack', name: 'Sandbox Slack', connectorId: 'slack', fields: [] }
-    ])
+    held.keys = [{ connectionId: 'conn-slack', name: 'Sandbox Slack' }]
   })
 
   const secretsPicker = () =>
@@ -89,11 +86,15 @@ describe('the key a script borrows', () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ secretsFrom: undefined }))
   })
 
-  it('asks for nothing when this machine holds no keys', async () => {
-    listConnectorKeys.mockResolvedValue([])
-    render(<ScriptConfigForm config={base()} onChange={vi.fn()} />)
-    await vi.waitFor(() => expect(listConnectorKeys).toHaveBeenCalled())
-    expect(secretsPicker()).toBeUndefined()
+  it('asks for nothing when this machine holds no keys', () => {
+    held.keys = []
+    const { queryByText } = render(<ScriptConfigForm config={base()} onChange={vi.fn()} />)
+    expect(queryByText('Secrets from')).toBeNull()
+    expect(
+      selectPickerProps.some((props) =>
+        (props.options as Array<{ label: string }>).some((o) => o.label === 'None')
+      )
+    ).toBe(false)
   })
 })
 
