@@ -37,7 +37,7 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
  */
 
 const pack = {
-  current: undefined as { auth?: SdkConnectorAuth } | undefined
+  current: undefined as { auth?: SdkConnectorAuth; env?: Array<{ name: string }> } | undefined
 }
 const decrypted = { current: {} as Record<string, string> }
 
@@ -77,12 +77,14 @@ afterEach(() => {
 const load = async (): Promise<typeof import('../packages/server/src/connectors/mcp-clients')> =>
   import('../packages/server/src/connectors/mcp-clients')
 
-const CLI_PACK: { auth: SdkConnectorAuth } = {
+/** A pack declares what it reads; the borrow is held to that list. */
+const CLI_PACK: { auth: SdkConnectorAuth; env: Array<{ name: string }> } = {
   auth: {
     rung: 'cli',
     probe: { command: 'glab', args: ['auth', 'status'] },
     borrow: { env: ['GITLAB_TOKEN'], tokenArgs: ['auth', 'token'] }
-  }
+  },
+  env: [{ name: 'GITLAB_TOKEN' }]
 }
 
 describe('the environment a packaged connector is spawned with', () => {
@@ -95,7 +97,7 @@ describe('the environment a packaged connector is spawned with', () => {
   })
 
   it('borrows nothing for a connector that asks for a key instead', async () => {
-    pack.current = { auth: { rung: 'key', keys: ['token'] } }
+    pack.current = { auth: { rung: 'key', keys: ['token'] }, env: [{ name: 'GITLAB_TOKEN' }] }
     vi.stubEnv('GITLAB_TOKEN', 'from-the-shell')
     const { buildSpawnConfig } = await load()
     const spawn = await buildSpawnConfig(connection({ sdkConnectorId: 'acme' }))
