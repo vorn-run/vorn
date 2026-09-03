@@ -499,7 +499,9 @@ export function buildStepOutputsMap(
       ...(ns.structuredOutput ?? {}),
       output: ns.output || ns.logs || '',
       status: ns.status,
-      error: ns.error || ''
+      error: ns.error || '',
+      // The directory the step worked in, so a later step can run there.
+      worktreePath: ns.worktreePath ?? ''
     }
   }
   return outputs

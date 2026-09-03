@@ -43,7 +43,8 @@ export type StepOutputs = Record<string, Record<string, unknown>>
 export const DEFAULT_OUTPUT_KEYS = [
   { key: 'output', label: 'Output', description: 'Primary output (stdout / agent logs)' },
   { key: 'status', label: 'Status', description: 'success or error' },
-  { key: 'error', label: 'Error', description: 'Error message if failed' }
+  { key: 'error', label: 'Error', description: 'Error message if failed' },
+  { key: 'worktreePath', label: 'Worktree', description: 'Directory the step worked in' }
 ] as const
 
 // --- Variable Group for Autocomplete UI ---
