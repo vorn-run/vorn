@@ -490,7 +490,9 @@ export function withProjectInputs(
 /** What a manual trigger asks for before the run starts. */
 function declaredInputs(workflow: WorkflowDefinition): WorkflowInputDef[] {
   const trigger = workflow.nodes.find((node) => node.type === 'trigger')
-  const config = trigger?.config as { triggerType?: string; inputs?: WorkflowInputDef[] } | undefined
+  const config = trigger?.config as
+    | { triggerType?: string; inputs?: WorkflowInputDef[] }
+    | undefined
   return config?.triggerType === 'manual' ? (config.inputs ?? []) : []
 }
 
@@ -1524,8 +1526,7 @@ export async function executeWorkflow(
     declaredInputs(workflow),
     useAppStore.getState().config?.projects ?? []
   )
-  const context =
-    supplied && inputs !== supplied.inputs ? { ...supplied, inputs } : supplied
+  const context = supplied && inputs !== supplied.inputs ? { ...supplied, inputs } : supplied
 
   // connectorPoll workflows cannot be run directly from the renderer — the
   // scheduler owns the poll + fan-out. Route user-initiated "Run" clicks

@@ -206,7 +206,10 @@ describe('the workflow that builds from a spec', () => {
       projectPath: '{{inputs.repoPath.path}}'
     })
     for (const id of ['develop', 'review']) {
-      expect(config(id)).toMatchObject({ worktreeMode: 'fromStep', worktreeFromStepSlug: 'research' })
+      expect(config(id)).toMatchObject({
+        worktreeMode: 'fromStep',
+        worktreeFromStepSlug: 'research'
+      })
     }
     for (const id of ['check', 'check-live', 'pr']) {
       expect(config(id).cwd).toBe('{{steps.research.worktreePath}}')

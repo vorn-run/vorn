@@ -41,7 +41,9 @@ describe('what a step hands the ones after it', () => {
 
   it('keeps saying so for a step that failed there, which is where to look', () => {
     const outputs = buildStepOutputsMap(
-      run([{ nodeId: 'research', status: 'error', error: 'nope', worktreePath: '/tmp/wt/build-1' }]),
+      run([
+        { nodeId: 'research', status: 'error', error: 'nope', worktreePath: '/tmp/wt/build-1' }
+      ]),
       nodes
     )
     expect(outputs.research).toMatchObject({

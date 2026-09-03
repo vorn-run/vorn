@@ -53,8 +53,8 @@ export function WorkflowInputsEditor({ inputs, onChange }: Props) {
       <p className="text-[11px] text-gray-500 mb-2">
         Values the user is asked for before the run starts. Use them anywhere as{' '}
         <code className="font-mono text-gray-400">{'{{inputs.key}}'}</code>. A Project input also
-        carries its directory, as <code className="font-mono text-gray-400">{'{{inputs.key.path}}'}</code>
-        .
+        carries its directory, as{' '}
+        <code className="font-mono text-gray-400">{'{{inputs.key.path}}'}</code>.
       </p>
 
       <div className="space-y-2">

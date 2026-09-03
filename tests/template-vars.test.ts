@@ -127,12 +127,7 @@ describe('buildStepGroups', () => {
     const nodes = [makeNode('a', 'script', 'my_script')]
     const groups = buildStepGroups(nodes)
     expect(groups[0].keys).toHaveLength(4)
-    expect(groups[0].keys.map((k) => k.key)).toEqual([
-      'output',
-      'status',
-      'error',
-      'worktreePath'
-    ])
+    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error', 'worktreePath'])
   })
 
   it('prepends schema-derived keys for callConnectorAction nodes when a lookup is provided', () => {
@@ -206,12 +201,7 @@ describe('buildStepGroups', () => {
       projectPath: '/p'
     } as WorkflowNode['config']
     const groups = buildStepGroups([node])
-    expect(groups[0].keys.map((k) => k.key)).toEqual([
-      'output',
-      'status',
-      'error',
-      'worktreePath'
-    ])
+    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error', 'worktreePath'])
   })
 
   it('does not surface schema keys for a non-headless launchAgent', () => {
@@ -226,12 +216,7 @@ describe('buildStepGroups', () => {
       outputSchema: { type: 'object', properties: { verdict: { type: 'string' } } }
     } as WorkflowNode['config']
     const groups = buildStepGroups([node])
-    expect(groups[0].keys.map((k) => k.key)).toEqual([
-      'output',
-      'status',
-      'error',
-      'worktreePath'
-    ])
+    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error', 'worktreePath'])
   })
 })
 
