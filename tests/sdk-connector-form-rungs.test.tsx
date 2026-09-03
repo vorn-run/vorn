@@ -82,8 +82,8 @@ describe('a connector that borrows a login', () => {
   it('says who you already are instead of asking for a token', async () => {
     const { findByText, queryByDisplayValue, container } = setup()
     expect(await findByText(/Signed in as javier/)).toBeInTheDocument()
-    // The secret field is what borrowing replaces; the rest of the form stays.
-    expect(container.textContent).not.toContain('GITLAB_TOKEN')
+    // The secret field is what borrowing replaces; the form says what is handed over instead.
+    expect(container.textContent).toContain('Hands over GITLAB_TOKEN from glab')
     expect(container.textContent).toContain('GITLAB_HOST')
     expect(queryByDisplayValue('token')).toBeNull()
   })

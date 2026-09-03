@@ -64,7 +64,8 @@ beforeEach(() => {
     getDecryptedCreds: () => decrypted.current
   }))
   vi.doMock('../packages/server/src/process-utils', () => ({
-    getSafeEnv: () => ({ PATH: '/usr/bin' })
+    getSafeEnv: () => ({ PATH: '/usr/bin' }),
+    isAbsolutelyStrippedEnvName: (name: string) => name.startsWith('CLAUDE_CODE_')
   }))
   vi.resetModules()
 })

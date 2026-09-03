@@ -137,6 +137,7 @@ export function borrowedEnv(
   for (const name of borrowableNames(auth, declared)) {
     const value = process.env[name]
     if (value) env[name] = value
+    else delete env[name]
   }
   return env
 }
