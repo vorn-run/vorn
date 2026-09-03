@@ -76,7 +76,12 @@ function packageJson(id: string, description: string, inRepo: boolean): string {
         typecheck: 'tsc --noEmit'
       },
       dependencies: { '@vornrun/connector-sdk': SDK_DEPENDENCY_RANGE },
-      devDependencies: { tsup: '^8.5.1', typescript: '^6.0.3', vitest: '^4.1.10' },
+      devDependencies: {
+        ...(inRepo && { '@types/node': '^22.10.2', '@vitest/coverage-v8': '^4.1.10' }),
+        tsup: '^8.5.1',
+        typescript: '^6.0.3',
+        vitest: '^4.1.10'
+      },
       // Read by the catalog build: how this connector is filed, found, and what it asks of you.
       vorn: {
         category: 'Other',
@@ -94,19 +99,19 @@ function tsconfig(): string {
     {
       compilerOptions: {
         target: 'ES2022',
+        lib: ['ES2022'],
         module: 'ESNext',
         moduleResolution: 'bundler',
-        lib: ['ES2023'],
-        types: ['node'],
-        strict: true,
-        noUncheckedIndexedAccess: true,
+        allowSyntheticDefaultImports: true,
         esModuleInterop: true,
-        resolveJsonModule: true,
-        verbatimModuleSyntax: true,
+        strict: true,
         skipLibCheck: true,
-        noEmit: true
+        types: ['node'],
+        noEmit: true,
+        ignoreDeprecations: '6.0',
+        allowImportingTsExtensions: true
       },
-      include: ['src']
+      include: ['src/**/*', 'vitest.config.ts']
     },
     null,
     2
@@ -131,7 +136,7 @@ export default defineConfig({
 
 function vitestConfig(): string {
   return `// The repository's one test configuration, so no package drifts from its coverage gate.
-export { default } from '../../vitest.shared'
+export { default } from '../../vitest.shared.ts'
 `
 }
 

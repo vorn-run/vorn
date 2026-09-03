@@ -121,6 +121,14 @@ describe('a scaffold shaped for the connectors repository', () => {
     expect(tsup).toContain("banner: { js: '#!/usr/bin/env node' }")
     expect(tsup).toContain("'@vornrun/connector-sdk'")
     expect(repoMap().get('tsconfig.json')).toContain('"noEmit": true')
+    expect(repoMap().get('tsconfig.json')).toContain('"allowImportingTsExtensions": true')
+    expect(repoMap().get('tsconfig.json')).toContain('"vitest.config.ts"')
+    const pkg = JSON.parse(repoMap().get('package.json') ?? '{}') as {
+      devDependencies: Record<string, string>
+    }
+    expect(Object.keys(pkg.devDependencies)).toEqual(
+      expect.arrayContaining(['@types/node', '@vitest/coverage-v8'])
+    )
   })
 
   it('leaves a scaffold nobody asked to shape exactly as it was', () => {
