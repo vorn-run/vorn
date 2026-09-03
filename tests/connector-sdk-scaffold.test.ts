@@ -19,9 +19,9 @@ describe('the files a new connector starts as', () => {
 
   it('names the connector after its id when nobody said otherwise', () => {
     expect(titleCase('acme-tickets')).toBe('Acme Tickets')
-    expect(fileMap().get('src/connector.ts')).toContain("name: 'Acme Tickets'")
+    expect(fileMap().get('src/connector.ts')).toContain('name: "Acme Tickets"')
     expect(scaffoldFiles({ id: 'acme', name: 'Acme Corp' })[1].contents).toContain(
-      "name: 'Acme Corp'"
+      'name: "Acme Corp"'
     )
   })
 
@@ -45,6 +45,10 @@ describe('the files a new connector starts as', () => {
   it('starts from the SDK it is being written against: declared, with an auth rung', () => {
     const source = fileMap().get('src/connector.ts') as string
     expect(source).toContain("version: '0.1.0'")
+    const quoted = scaffoldFiles({ id: 'acme', name: "Bob's App", description: 'Two\nlines' })
+    const connector = quoted.find((f) => f.path === 'src/connector.ts')?.contents ?? ''
+    expect(connector).toContain('name: "Bob\'s App"')
+    expect(connector).toContain('description: "Two\\nlines"')
     expect(source).toContain('auth: { rung:')
     expect(source).toContain('request: {')
     expect(source).toContain('postReceive:')
@@ -104,7 +108,7 @@ describe('vorn-connector new', () => {
       write: capture().write,
       writeFile
     })
-    expect(written.get('/tmp/work/acme/src/connector.ts')).toContain("name: 'Acme Corp'")
+    expect(written.get('/tmp/work/acme/src/connector.ts')).toContain('name: "Acme Corp"')
 
     await expect(
       runCli(['new', '1nope'], { load, write: capture().write, writeFile })

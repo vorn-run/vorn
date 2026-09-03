@@ -77,9 +77,9 @@ function connectorSource(id: string, name: string, description: string): string 
   return `import { defineConnector } from '@vornrun/connector-sdk'
 
 export const connector = defineConnector({
-  id: '${id}',
-  name: '${name}',
-  description: '${description}',
+  id: ${JSON.stringify(id)},
+  name: ${JSON.stringify(name)},
+  description: ${JSON.stringify(description)},
   version: '0.1.0',
   // Prefer a login the machine already has: { rung: 'cli', probe: { command: 'tool', args: ['auth', 'status'] } }
   auth: { rung: 'key', keys: ['apiToken'] },
@@ -191,7 +191,7 @@ function fakeFetch(body: unknown) {
 
 const config = { apiToken: 'test-token', baseUrl: 'https://api.example.com' }
 
-describe('${name}', () => {
+describe(${JSON.stringify(name)}, () => {
   it('reports the items the source lists', async () => {
     const harness = createConnectorHarness(connector, {
       config,

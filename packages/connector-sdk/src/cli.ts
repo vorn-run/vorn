@@ -11,7 +11,7 @@ import { connectionSetup, connectorManifest } from './setup'
 import { serveConnector } from './server'
 import type { Connector } from './types'
 
-const USAGE = `vorn-connector <command> <module> [options]
+const USAGE = `vorn-connector <command> <module | id> [options]
 
 Commands:
   new <id>                      Scaffold a new connector, ready to build
