@@ -168,6 +168,9 @@ export function describeRequirement(requirement: PortableRequirement): string {
     return requirement.name ? `an HTTP profile like "${requirement.name}"` : 'an HTTP profile'
   }
   const connector = requirement.connectorId || 'connector'
+  if (requirement.key === 'secretsFrom') {
+    return `a ${connector} key for its Secrets from${requirement.name ? ` (it used "${requirement.name}")` : ''}`
+  }
   return requirement.name
     ? `a ${connector} connection like "${requirement.name}"`
     : `a ${connector} connection`

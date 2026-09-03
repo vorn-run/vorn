@@ -360,17 +360,16 @@ export const TEMPLATE_SEED: WorkflowTemplate[] = [
           config: {
             scriptType: 'bash',
             cwd: '{{steps.research.worktreePath}}',
+            args: ['{{inputs.branch}}', '{{steps.review.notes}}'],
             scriptContent:
               'set -e\n' +
-              'git push -u origin "{{inputs.branch}}"\n' +
+              'git push -u origin "$1"\n' +
               'body=$(mktemp)\n' +
               '{\n' +
               '  cat spec.md\n' +
               '  echo\n' +
               "  echo '## Review'\n" +
-              "  cat <<'VORN_NOTES'\n" +
-              '{{steps.review.notes}}\n' +
-              'VORN_NOTES\n' +
+              '  printf \'%s\\n\' "$2"\n' +
               '} > "$body"\n' +
               'gh pr create --title "$(git log -1 --pretty=%s)" --body-file "$body"\n'
           },

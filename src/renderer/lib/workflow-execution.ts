@@ -515,7 +515,11 @@ export function resolveScriptConfig(
     ...config,
     scriptContent: resolveTemplateVars(config.scriptContent, context, stepOutputs),
     cwd: path(config.cwd),
-    projectPath: path(config.projectPath)
+    projectPath: path(config.projectPath),
+    // Untrusted text reaches the script as an argument, never spliced into its source.
+    ...(config.args && {
+      args: config.args.map((arg) => resolveTemplateVars(arg, context, stepOutputs))
+    })
   }
 }
 

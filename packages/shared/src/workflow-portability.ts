@@ -41,6 +41,8 @@ export type PortableRequirement =
       connectorId: string
       name: string
       event?: string
+      /** A script's key: never bound by an import, only by a person in the step. */
+      key?: 'secretsFrom'
     }
   | { kind: 'httpProfile'; nodeId: string; name: string }
 
@@ -216,7 +218,8 @@ export function toPortable(
                   ? declared
                   : '',
               name: source?.name ?? '',
-              ...(typeof event === 'string' && event !== '' && { event })
+              ...(typeof event === 'string' && event !== '' && { event }),
+              ...(key === 'secretsFrom' && { key })
             }
       )
       // Optional on the node, so the step reads as simply having no key.
@@ -273,8 +276,14 @@ export function unresolvedRequirements(
   const present = new Set(portable.nodes.map((node) => node.id))
   return (portable.requires ?? []).filter(
     (requirement) =>
-      present.has(requirement.nodeId) && resolveRequirement(requirement, connections) === undefined
+      present.has(requirement.nodeId) &&
+      (bindsOnlyByHand(requirement) || resolveRequirement(requirement, connections) === undefined)
   )
+}
+
+// A file may name the key a script wants; handing one over is a person's choice, made in the step.
+function bindsOnlyByHand(requirement: PortableRequirement): boolean {
+  return requirement.kind === 'connection' && requirement.key === 'secretsFrom'
 }
 
 /** Resolve placeholders against the project this workflow is being imported into. */
@@ -310,10 +319,10 @@ export function fromPortable(
     }
 
     for (const requirement of bindings.get(node.id) ?? []) {
+      if (bindsOnlyByHand(requirement) || node.type === 'script') continue
       const resolved = resolveRequirement(requirement, connections)
       if (resolved === undefined) continue
       if (requirement.kind === 'httpProfile') config.profileConnectionId = resolved
-      else if (node.type === 'script') config.secretsFrom = resolved
       else config.connectionId = resolved
     }
 

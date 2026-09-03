@@ -74,4 +74,12 @@ describe('the directory a script step runs in', () => {
     )
     expect(resolved.scriptContent).toBe('cd /tmp/wt/build-1 && ls')
   })
+
+  it('resolves each argument, so untrusted text reaches the script as a value, not as source', () => {
+    const resolved = resolveScriptConfig(
+      { scriptType: 'bash', scriptContent: 'echo "$1"', args: ['{{inputs.branch}}', 'plain'] },
+      { inputs: { branch: 'build/x' } } as never
+    )
+    expect(resolved.args).toEqual(['build/x', 'plain'])
+  })
 })

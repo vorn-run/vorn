@@ -90,6 +90,13 @@ export function requirementAction(
   listings: ConnectorListing[]
 ): RequirementAction {
   if (requirement.connectionId !== undefined) return { kind: 'none' }
+  // A script's key is chosen in the step, never offered here.
+  if (
+    requirement.requirement.kind === 'connection' &&
+    requirement.requirement.key === 'secretsFrom'
+  ) {
+    return { kind: 'none' }
+  }
   // The HTTP connector is built in, so a profile is always one form away.
   if (requirement.requirement.kind === 'httpProfile') {
     return { kind: 'createProfile', name: requirement.requirement.name }

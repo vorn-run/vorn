@@ -3,6 +3,7 @@ import { secretEnvFor } from '../packages/server/src/script-runner'
 import {
   fromPortable,
   toPortable,
+  unresolvedRequirements,
   type PortableWorkflow
 } from '../packages/shared/src/workflow-portability'
 import type { WorkflowDefinition } from '../packages/shared/src/types'
@@ -85,17 +86,25 @@ describe('what a workflow file says about the keys it needs', () => {
     const config = portable.nodes[0].config as Record<string, unknown>
     expect(config.secretsFrom).toBeUndefined()
     expect(portable.requires).toEqual([
-      { kind: 'connection', nodeId: 'run', connectorId: 'slack', name: 'Sandbox Slack' }
+      {
+        kind: 'connection',
+        nodeId: 'run',
+        connectorId: 'slack',
+        name: 'Sandbox Slack',
+        key: 'secretsFrom'
+      }
     ])
     // The script itself still travels; only the binding is local.
     expect(config.scriptContent).toBe('echo "$SLACK_BOT_TOKEN"')
   })
 
-  it('binds the key again where the same connection is held', () => {
+  it('never binds a key on import, even where the same connection is held', () => {
+    // A file names the key it wants; handing one over is a person's choice, made in the step.
     const portable = toPortable(withSecrets, '/Users/someone/dev/novum', [slack])
     const here = { ...slack, id: 'conn-local' }
     const definition = fromPortable(portable, 'bundle', { name: 'Novum', path: '/x' }, [here])
-    expect((definition.nodes[0].config as Record<string, unknown>).secretsFrom).toBe('conn-local')
+    expect((definition.nodes[0].config as Record<string, unknown>).secretsFrom).toBeUndefined()
+    expect(unresolvedRequirements(portable, [here])).toEqual(portable.requires)
   })
 
   it('leaves the step asking where this machine holds no such key', () => {
