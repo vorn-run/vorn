@@ -18,6 +18,9 @@ function envNameFor(key: string): string {
  * written; a single-value field is named after itself. Nothing is read unless
  * a step asked for it by connection id.
  */
+// Only a name a shell would accept becomes a variable; anything else in a blob is dropped.
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
 export function secretEnvFor(
   connectionId: string | undefined,
   lookup: (id: string) => Record<string, string> | undefined = getDecryptedCreds
@@ -25,7 +28,7 @@ export function secretEnvFor(
   if (!connectionId) return {}
   const decrypted = lookup(connectionId)
   if (!decrypted) return {}
-  const env: Record<string, string> = {}
+  const env: Record<string, string> = Object.create(null)
   for (const [key, value] of Object.entries(decrypted)) {
     if (key !== SECRET_ENV_FIELD) {
       env[envNameFor(key)] = value
@@ -35,14 +38,14 @@ export function secretEnvFor(
       const parsed: unknown = JSON.parse(value)
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
       for (const [name, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (typeof v === 'string') env[name] = v
+        if (typeof v === 'string' && ENV_NAME.test(name)) env[name] = v
       }
     } catch {
       // A blob this build cannot read contributes nothing, and the step runs
       // without it rather than failing on a value nobody can see.
     }
   }
-  return env
+  return { ...env }
 }
 
 export interface ScriptExecutionResult {
