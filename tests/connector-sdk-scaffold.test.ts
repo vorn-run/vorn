@@ -129,7 +129,7 @@ describe('a scaffold shaped for the connectors repository', () => {
     const tsup = repoMap().get('tsup.config.ts') as string
     expect(tsup).toContain("target: 'node22'")
     expect(tsup).toContain("banner: { js: '#!/usr/bin/env node' }")
-    expect(tsup).toContain("banner: { js: '#!/usr/bin/env node' }")
+    expect(tsup).toContain('dts: true')
     expect(repoMap().get('tsconfig.json')).toContain('"noEmit": true')
     expect(repoMap().get('tsconfig.json')).toContain('"allowImportingTsExtensions": true')
     expect(repoMap().get('tsconfig.json')).toContain('"vitest.config.ts"')

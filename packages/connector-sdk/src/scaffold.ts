@@ -233,7 +233,7 @@ export function isEntryPoint(moduleUrl: string, argv = process.argv): boolean {
   }
 }
 
-/** Serve on stdio when run directly. This is what Vorn spawns. */
+/** Serve on stdio when run directly, which is what Vorn spawns; says whether it did. */
 export async function serveIfEntryPoint(
   moduleUrl: string,
   serve: (c: typeof connector) => Promise<void> = serveConnector
