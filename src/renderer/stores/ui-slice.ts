@@ -27,6 +27,7 @@ import {
   promotedCardId
 } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
+import { pruneScrollAnchors } from '../lib/scroll-anchor'
 import { confirmDiscard, confirmDiscardAll, clearDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 
@@ -447,6 +448,9 @@ function reconcileView(
   activeTabId: string | null
   maximizedPaneId: string | null
 } | null {
+  // Keyed by session id and pruned here rather than on its own trigger: a
+  // scroll position is view state, and it goes when the rest of it goes.
+  pruneScrollAnchors(liveSessionIds)
   const alive = (paneId: string): boolean => liveSessionIds.has(paneOwnerId(paneId))
   const nextMinimized = new Set([...minimized].filter(alive))
   const nextTab = activeTabId && alive(activeTabId) ? activeTabId : null
