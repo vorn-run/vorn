@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { FileEntry, RemoteHost } from '@vornrun/shared/types'
+import type { FileEntry, FileStamp, RemoteHost } from '@vornrun/shared/types'
 import { sshExecSync, shellEscape, getSafeEnv, buildSshArgs } from './process-utils'
 import { resolveExecutable } from './resolve-executable'
 
@@ -237,5 +237,49 @@ function writeFileContentRemote(
     return { success: true }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * What the file is right now, or null when there is nothing to stamp.
+ *
+ * Null covers gone, unreadable, and not-a-file alike — the same collapse
+ * `readFileContent` makes, and for the same reason: the caller's next move is
+ * identical in all three. What it must never do is invent a stamp for a file it
+ * could not read, because a draft would then be told the file is unchanged.
+ */
+export function fileStamp(filePath: string, remote?: RemoteHost): FileStamp | null {
+  if (remote) return fileStampRemote(filePath, remote)
+  try {
+    const stat = fs.statSync(filePath)
+    if (!stat.isFile()) return null
+    return { size: stat.size, mtimeMs: Math.floor(stat.mtimeMs) }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The same over ssh, from one `stat` call.
+ *
+ * BSD and GNU `stat` disagree on every flag, so this asks the shell for the
+ * portable pair instead: `wc -c` for the size and `find -newer` would need a
+ * reference file, leaving `ls`. `date -r` is not portable either. What is
+ * portable is `stat` on GNU and `stat -f` on BSD, tried in that order.
+ */
+function fileStampRemote(filePath: string, remote: RemoteHost): FileStamp | null {
+  const quoted = shellEscape(filePath, 'posix')
+  const script =
+    `stat -c '%s %Y' ${quoted} 2>/dev/null || ` + `stat -f '%z %m' ${quoted} 2>/dev/null`
+  try {
+    const out = sshExecSync(remote, script, { timeout: 10000 }).trim()
+    const [size, seconds] = out.split(/\s+/).map(Number)
+    if (!Number.isFinite(size) || !Number.isFinite(seconds)) return null
+    // Seconds there, milliseconds here: `stat` has no sub-second field either
+    // side, so a local stamp is floored to match rather than reading as changed
+    // against a remote one that never had the precision.
+    return { size, mtimeMs: seconds * 1000 }
+  } catch {
+    return null
   }
 }

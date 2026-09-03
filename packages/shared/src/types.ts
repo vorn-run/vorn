@@ -1747,6 +1747,7 @@ export const IPC = {
   OPEN_EXTERNAL: 'shell:openExternal',
   FILE_LIST_DIR: 'file:listDir',
   FILE_READ_CONTENT: 'file:readContent',
+  FILE_STAMP: 'file:stamp',
   FILE_WRITE_CONTENT: 'file:writeContent',
   SHELL_LIST_EXECUTABLES: 'shell:listExecutables',
   SHELL_LIST_INSTALLED: 'shell:listInstalled',
@@ -2415,6 +2416,19 @@ export interface DeviceInfo {
   booted: boolean
   /** The session holding it. Claiming a held device fails, naming this. */
   claimedBy?: string
+}
+
+/**
+ * A file as it was when a draft was based on it.
+ *
+ * Size and mtime, which is what every editor uses for this and what a remote
+ * host can answer over one `stat`. Not a hash: the question is whether the file
+ * has changed under an unsaved edit, and answering it must not cost reading the
+ * whole file every time somebody saves.
+ */
+export interface FileStamp {
+  size: number
+  mtimeMs: number
 }
 
 /**

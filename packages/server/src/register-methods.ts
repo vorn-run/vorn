@@ -75,7 +75,7 @@ import {
   measureWorktree,
   invalidateSizeCache
 } from './worktree-inventory'
-import { listDir, readFileContent, writeFileContent } from './file-utils'
+import { fileStamp, listDir, readFileContent, writeFileContent } from './file-utils'
 import { listShellExecutables } from './shell-integration'
 import { listInstalledShells } from './shell-integration/installed'
 import {
@@ -1382,6 +1382,10 @@ export function registerAllMethods(): void {
   registerMethod('file:readContent', ({ filePath, maxBytes, remoteHostId }) => {
     const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined
     return readFileContent(filePath, maxBytes, remote)
+  })
+  registerMethod('file:stamp', ({ filePath, remoteHostId }) => {
+    const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined
+    return fileStamp(filePath, remote)
   })
   registerMethod('file:writeContent', ({ filePath, content, remoteHostId }) => {
     const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined

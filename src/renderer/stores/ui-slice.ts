@@ -29,6 +29,7 @@ import {
 } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
 import { pruneScrollAnchors } from '../lib/scroll-anchor'
+import { pruneDrafts } from '../lib/editor-drafts'
 import { confirmDiscard, confirmDiscardAll, clearDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 
@@ -420,6 +421,10 @@ function reconcilePanes(
   // card id, and pruning by key would delete every one of them on the first
   // reconcile — silently discarding the pages and files someone put there.
   const nextEditors = new Map([...editorPanes].filter(([, e]) => liveSessionIds.has(e.sessionId)))
+  // Keyed by pane, so pruned against the panes that survived rather than against
+  // the sessions -- an editor popped out into a card outlives its owner's pane
+  // and its draft has to outlive it too.
+  pruneDrafts(new Set(nextEditors.keys()))
   const nextBrowsers = new Map([...browserPanes].filter(([, b]) => liveSessionIds.has(b.sessionId)))
   // Tabs remembered for a closed pane die with their session as well. This is
   // the path `removeTerminal` cannot cover: a session that simply never came

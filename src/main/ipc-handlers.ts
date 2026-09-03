@@ -288,6 +288,7 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.FILE_READ_CONTENT, (_, params) =>
     requireBridge().request(IPC.FILE_READ_CONTENT, params)
   )
+  safeHandle(IPC.FILE_STAMP, (_, params) => requireBridge().request(IPC.FILE_STAMP, params))
   safeHandle(IPC.FILE_WRITE_CONTENT, (_, params) =>
     requireBridge().request(IPC.FILE_WRITE_CONTENT, params)
   )

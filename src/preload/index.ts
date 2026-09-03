@@ -47,6 +47,7 @@ import {
   BrowserAnnotation,
   DeviceInfo,
   DeviceClaimResult,
+  FileStamp,
   DeviceSelection,
   DeviceAnnotation,
   DeviceTarget,
@@ -322,6 +323,9 @@ const api = {
     remoteHostId?: string
   ): Promise<string | null> =>
     ipcRenderer.invoke(IPC.FILE_READ_CONTENT, { filePath, maxBytes, remoteHostId }),
+  /** Size and mtime, for telling whether a file moved under an unsaved draft. */
+  fileStamp: (filePath: string, remoteHostId?: string): Promise<FileStamp | null> =>
+    ipcRenderer.invoke(IPC.FILE_STAMP, { filePath, remoteHostId }),
   writeFileContent: (
     filePath: string,
     content: string,
