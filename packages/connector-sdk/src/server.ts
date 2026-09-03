@@ -48,23 +48,23 @@ function describeInput(input: ActionInputField): string {
     return `${base}. Choices come from this connector's "${input.loadOptions}" list.`
   }
   if (input.type === 'json') return `${base}. Takes JSON.`
+  const choices = (input.options ?? [])
+    .map((option) => option.value)
+    .filter((value) => typeof value === 'string' && value !== '')
+  if (choices.length > 0) return `${base}. Suggested values: ${choices.join(', ')}.`
   return base
 }
 
 function inputShape(inputs: ActionInputField[]): Record<string, ZodTypeAny> {
   const shape: Record<string, ZodTypeAny> = {}
   for (const input of inputs) {
-    const choices = (input.options ?? [])
-      .map((option) => option.value)
-      .filter((value) => typeof value === 'string' && value !== '')
-    // Vorn renders action arguments from templates, so every value arrives as
-    // a string; the declared type is applied by `runAction` instead. Fixed
-    // choices are still stated, because a caller that knows them draws a
-    // picker instead of a text box.
-    const base =
-      choices.length > 0
-        ? z.enum(choices as [string, ...string[]]).describe(describeInput(input))
-        : z.string().describe(describeInput(input))
+    // Every value arrives as a string because Vorn renders action arguments
+    // from templates, and the declared type is applied by `runAction`. Choices
+    // stay in the description rather than becoming an enum: a step is entitled
+    // to compute this value, and a rendered template outside the list would
+    // otherwise be refused here — before the connector could say anything
+    // useful about it. The manifest carries `options` for the picker.
+    const base = z.string().describe(describeInput(input))
     shape[input.key] = input.required ? base : base.optional()
   }
   return shape

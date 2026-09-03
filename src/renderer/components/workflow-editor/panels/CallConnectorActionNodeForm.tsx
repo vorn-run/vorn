@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type {
   CallConnectorActionConfig,
   ConnectorActionDef,
+  ConnectorConfigField,
   TriggerConfig
 } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
@@ -16,6 +17,87 @@ interface Props {
   triggerType?: TriggerConfig['triggerType']
   inputVars?: TemplateVariable[]
   stepGroups?: StepVariableGroup[]
+}
+
+interface ArgumentFieldProps {
+  field: ConnectorConfigField
+  value: string
+  onChange: (value: string) => void
+  stepGroups: StepVariableGroup[]
+  contextVars: TemplateVariable[]
+}
+
+/**
+ * One argument's editor.
+ *
+ * A connector's listed choices are suggestions rather than a closed set: a step
+ * is entitled to compute this value from an earlier one, and the connector —
+ * not this form — is what finally judges it. So the picker is offered while the
+ * value is one of the choices, the template-aware input whenever it is not, and
+ * there is a way to move between them on purpose.
+ */
+function ArgumentField({
+  field,
+  value,
+  onChange,
+  stepGroups,
+  contextVars
+}: ArgumentFieldProps): React.JSX.Element {
+  const choices = field.options ?? []
+  const listed = choices.some((option) => option.value === value)
+  const [chosenFree, setChosenFree] = useState(false)
+  // Derived rather than stored, so a value that arrives already holding a
+  // template opens in the input that can edit it.
+  const free = chosenFree || (value !== '' && !listed)
+  const pickable = field.type === 'select' && choices.length > 0
+
+  if (pickable && !free) {
+    return (
+      <>
+        <SelectPicker
+          value={value}
+          options={choices.map((option) => ({ value: option.value, label: option.label }))}
+          onChange={onChange}
+          variant="form"
+          placeholder={field.placeholder ?? '—'}
+        />
+        <button
+          type="button"
+          onClick={() => setChosenFree(true)}
+          className="text-[10px] text-gray-500 hover:text-gray-300 mt-1 transition-colors"
+        >
+          Use a template instead
+        </button>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <VariableAutocomplete
+        value={value}
+        onChange={onChange}
+        placeholder={field.placeholder}
+        rows={field.type === 'textarea' ? 3 : 1}
+        stepGroups={stepGroups}
+        contextVars={contextVars}
+        mono
+      />
+      {pickable && (
+        <button
+          type="button"
+          onClick={() => {
+            setChosenFree(false)
+            // Cleared, because the list cannot show a value it does not hold.
+            if (!listed) onChange('')
+          }}
+          className="text-[10px] text-gray-500 hover:text-gray-300 mt-1 transition-colors"
+        >
+          Choose from the list
+        </button>
+      )}
+    </>
+  )
 }
 
 export function CallConnectorActionNodeForm({
@@ -156,31 +238,17 @@ export function CallConnectorActionNodeForm({
                   {field.label}
                   {field.required && <span className="text-danger ml-0.5">*</span>}
                 </label>
-                {field.type === 'select' ? (
-                  <SelectPicker
-                    value={fieldValue}
-                    options={(field.options ?? []).map((o) => ({
-                      value: o.value,
-                      label: o.label
-                    }))}
-                    onChange={setFieldValue}
-                    variant="form"
-                    placeholder={field.placeholder ?? '—'}
-                  />
-                ) : (
-                  // text / textarea / password / etc. all flow through the
-                  // template-aware autocomplete so users can reference
-                  // ancestor steps with `{{...}}`.
-                  <VariableAutocomplete
-                    value={fieldValue}
-                    onChange={setFieldValue}
-                    placeholder={field.placeholder}
-                    rows={field.type === 'textarea' ? 3 : 1}
-                    stepGroups={stepGroups}
-                    contextVars={contextVars}
-                    mono
-                  />
-                )}
+                {/* A picker when the choices fit, the template-aware input
+                    otherwise — text, textarea, and a select holding a value
+                    its list does not contain all reference ancestor steps
+                    with `{{...}}`. */}
+                <ArgumentField
+                  field={field}
+                  value={fieldValue}
+                  onChange={setFieldValue}
+                  stepGroups={stepGroups}
+                  contextVars={contextVars}
+                />
                 {field.description && (
                   <p className="text-[10px] text-gray-600 mt-0.5">{field.description}</p>
                 )}

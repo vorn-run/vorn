@@ -103,13 +103,29 @@ describe('choices a connection has to be asked for', () => {
 })
 
 describe('what the served schema says about an argument', () => {
-  it('states fixed choices, so a caller draws a picker rather than a text box', async () => {
+  it('suggests fixed choices without refusing anything else', async () => {
     const client = await connect(withOptions())
     const post = (await client.listTools()).tools.find((tool) => tool.name === 'post')
-    const properties = (post?.inputSchema as { properties: Record<string, { enum?: string[] }> })
-      .properties
+    const properties = (
+      post?.inputSchema as {
+        properties: Record<string, { enum?: string[]; description?: string; type?: string }>
+      }
+    ).properties
 
-    expect(properties.level.enum).toEqual(['high', 'low'])
+    // Not an enum: a step may compute this value, and a rendered template
+    // outside the list would otherwise be refused before the connector saw it.
+    expect(properties.level.enum).toBeUndefined()
+    expect(properties.level.type).toBe('string')
+    expect(properties.level.description).toContain('Suggested values: high, low')
+  })
+
+  it('accepts a value the list does not hold, and lets the connector judge it', async () => {
+    const client = await connect(withOptions())
+    const result = await client.callTool({
+      name: 'post',
+      arguments: { level: 'computed-elsewhere', channel: 'C1' }
+    })
+    expect(result.isError).not.toBe(true)
   })
 
   it('names the set a dynamic field loads from, since its choices are not known yet', async () => {
