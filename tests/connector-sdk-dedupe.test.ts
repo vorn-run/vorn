@@ -347,6 +347,7 @@ describe('checkConnector', () => {
     id: 'acme',
     name: 'Acme',
     description: 'Acme tickets',
+    auth: { rung: 'none' },
     triggers: [
       {
         type: 'newTicket',
@@ -364,6 +365,7 @@ describe('checkConnector', () => {
         description: 'Close a ticket',
         idempotent: true,
         inputs: [{ key: 'id', label: 'Id', description: 'Ticket id' }],
+        outputs: [{ key: 'closed', type: 'boolean' }],
         run: () => ({})
       }
     ]
@@ -399,6 +401,7 @@ describe('checkConnector', () => {
       id: 'broken',
       name: 'Broken',
       description: 'Broken',
+      auth: { rung: 'none' },
       triggers: [
         {
           type: 'newTicket',
@@ -417,6 +420,7 @@ describe('checkConnector', () => {
       id: 'broken',
       name: 'Broken',
       description: 'Broken',
+      auth: { rung: 'none' },
       triggers: [
         {
           type: 'newTicket',
@@ -453,6 +457,7 @@ describe('checkConnector', () => {
       id: 'manual',
       name: 'Manual',
       description: 'Manual',
+      auth: { rung: 'none' },
       triggers: [
         {
           type: 'newTicket',
@@ -471,6 +476,7 @@ describe('checkConnector', () => {
       id: 'empty',
       name: 'Empty',
       description: 'Empty',
+      auth: { rung: 'none' },
       triggers: [
         {
           type: 'newTicket',
@@ -488,8 +494,10 @@ describe('checkConnector', () => {
 
   it('renders findings for a terminal', () => {
     expect(
-      formatFindings([{ level: 'error', code: 'x', target: 'trigger a', message: 'broke' }])
-    ).toBe('error  trigger a: broke [x]')
+      formatFindings([
+        { level: 'error', code: 'poll-failed', target: 'trigger a', message: 'broke' }
+      ])
+    ).toBe('error  trigger a: broke [poll-failed]')
     expect(formatFindings([])).toBe('')
   })
 })

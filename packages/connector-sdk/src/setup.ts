@@ -129,6 +129,8 @@ export interface ConnectorManifest {
      * none, which is not the same as saying it returns nothing.
      */
     outputs?: Array<{ key: string; type?: string; description?: string }>
+    /** Arguments a live check may call it with, when the author named some. */
+    sample?: Record<string, string>
   }>
 }
 
@@ -165,7 +167,8 @@ export function connectorManifest(connector: Connector): ConnectorManifest {
         ...(input.loadOptions !== undefined && { loadOptions: input.loadOptions }),
         ...(input.builderHint !== undefined && { builderHint: input.builderHint })
       })),
-      ...(action.outputs !== undefined && { outputs: action.outputs })
+      ...(action.outputs !== undefined && { outputs: action.outputs }),
+      ...(action.sample !== undefined && { sample: action.sample })
     }))
   }
 }

@@ -1,10 +1,60 @@
-import { runPoll, type PollPage } from './runtime'
-import type { Connector, ConnectorConfig, DedupeStrategy, TriggerDefinition } from './types'
+import {
+  bundleDependencyFindings,
+  lifecycleScriptFindings,
+  packageDirFor,
+  packEntryContents,
+  readNearestPackageJson,
+  type BundleOutput,
+  type BundleRequest
+} from './packaging'
+import { escapedMockHttp, withMockHttp, type MockRoute } from './harness'
+import { runAction, runPoll, type PollPage } from './runtime'
+import type {
+  ActionDefinition,
+  ActionInputField,
+  Connector,
+  ConnectorConfig,
+  DedupeStrategy,
+  TriggerDefinition
+} from './types'
+
+/**
+ * Every finding this SDK can report.
+ *
+ * A closed set, so `CHECK_OWNERS` cannot fall behind it: a new code that no
+ * named check owns is a compile error rather than a receipt quietly vouching
+ * for a check whose failure nothing was watching.
+ */
+export type CheckCode =
+  | 'missing-description'
+  | 'auth-undeclared'
+  | 'auth-probe-missing'
+  | 'secret-not-marked'
+  | 'action-no-outputs'
+  | 'input-type-unsupported'
+  | 'missing-idempotent'
+  | 'unverifiable'
+  | 'sample-unusable'
+  | 'poll-failed'
+  | 'no-items'
+  | 'no-cursor'
+  | 'cursor-rejected'
+  | 'redelivers-items'
+  | 'stuck-cursor'
+  | 'lifecycle-scripts'
+  | 'keywords-missing'
+  | 'runtime-dependencies'
+  | 'mock-action-failed'
+  | 'mock-network-escape'
+  | 'mock-not-observed'
+  | 'preflight-failed'
+  | 'live-action-failed'
+  | 'pack-too-large'
 
 export interface CheckFinding {
   /** `error` means the connector will misbehave in Vorn; `warn` is advisory. */
   level: 'error' | 'warn'
-  code: string
+  code: CheckCode
   /** Which part of the connector the finding is about. */
   target: string
   message: string
@@ -19,15 +69,361 @@ export interface CheckOptions {
   /** Credentials, required by `live`. */
   config?: ConnectorConfig
   now?: () => string
+  /**
+   * Directory whose nearest package.json says how the connector ships. Given,
+   * the checks that are about the package rather than the definition run too.
+   */
+  packageDir?: string
+  /**
+   * Bundles the connector so the check can see what would stay outside it.
+   * Given, a pack's no-install-step promise is verified before packing.
+   */
+  bundle?(request: BundleRequest): Promise<BundleOutput>
+  /** Module specifier the bundle starts from; required by `bundle`. */
+  entry?: string
+  /**
+   * Run every action against served HTTP rather than the network. Without
+   * routes each request is answered `{}`, which proves an action runs and
+   * escapes nowhere; with them, that it does the right thing.
+   */
+  mock?: boolean
+  mockRoutes?: MockRoute[]
 }
+
+/** What the host will run a probe by, so a check refuses what it would drop. */
+const EXECUTABLE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/** Config keys that name a credential, whatever the connector calls them. */
+const CREDENTIAL_NAME = /(secret|token|password|passphrase|api[-_]?key|credential)/i
+
+const INPUT_TYPES = new Set(['string', 'number', 'boolean', 'select', 'json'])
 
 function finding(
   level: CheckFinding['level'],
-  code: string,
+  code: CheckCode,
   target: string,
   message: string
 ): CheckFinding {
   return { level, code, target, message }
+}
+
+/**
+ * How the connector says it signs in, checked against what the host will keep.
+ *
+ * `defineConnector` already refuses a rung it cannot back up, so what is left
+ * here is the gap between the two: an author-side probe that passes validation
+ * and is then dropped at the host for not being a bare executable name, which
+ * would silently turn a Sign in into a token field.
+ */
+function authFindings(connector: Connector): CheckFinding[] {
+  const auth = connector.auth
+  if (!auth) {
+    return [
+      finding(
+        'warn',
+        'auth-undeclared',
+        connector.id,
+        'does not say how it signs in, so the app cannot tell anyone before they install it'
+      )
+    ]
+  }
+
+  const found: CheckFinding[] = []
+  const command = auth.probe?.command?.trim() ?? ''
+  const args = auth.probe?.args ?? []
+  if (auth.rung === 'cli') {
+    if (!EXECUTABLE_NAME.test(command)) {
+      found.push(
+        finding(
+          'error',
+          'auth-probe-missing',
+          `${connector.id} auth`,
+          `probe command "${command}" is not a bare executable name, so the host drops it and the rung promises a sign-in it cannot ask for`
+        )
+      )
+    }
+    if (args.some((arg) => typeof arg !== 'string')) {
+      found.push(
+        finding(
+          'error',
+          'auth-probe-missing',
+          `${connector.id} auth`,
+          'probe arguments must all be strings, or the host drops the probe'
+        )
+      )
+    }
+  }
+
+  return found
+}
+
+/** A credential Vorn would store in the clear because nothing marked it secret. */
+function secretFindings(connector: Connector): CheckFinding[] {
+  const named = new Set(connector.auth?.keys ?? [])
+  return connector.config
+    .filter((field) => !field.secret)
+    .filter((field) => named.has(field.key) || CREDENTIAL_NAME.test(field.key))
+    .map((field) =>
+      finding(
+        named.has(field.key) ? 'error' : 'warn',
+        'secret-not-marked',
+        `config ${field.key}`,
+        'holds a credential but is not marked `secret`, so Vorn would store it unencrypted'
+      )
+    )
+}
+
+/** What an action takes and returns, as far as a step can see it before running. */
+function actionShapeFindings(action: ActionDefinition): CheckFinding[] {
+  const target = `action ${action.type}`
+  const found: CheckFinding[] = []
+
+  if (!action.outputs?.length) {
+    found.push(
+      finding(
+        'warn',
+        'action-no-outputs',
+        target,
+        'declares no outputs, so a later step has nothing to autocomplete from'
+      )
+    )
+  }
+
+  for (const input of action.inputs ?? []) {
+    if (input.type !== undefined && !INPUT_TYPES.has(input.type)) {
+      found.push(
+        finding(
+          'error',
+          'input-type-unsupported',
+          `${target} input ${input.key}`,
+          `declares type "${input.type}", which Vorn cannot draw a field for`
+        )
+      )
+    }
+    // A select is a promise of choices; one with neither list is a text box
+    // wearing a dropdown's clothes.
+    if (input.type === 'select' && !input.options?.length && !input.loadOptions) {
+      found.push(
+        finding(
+          'error',
+          'input-type-unsupported',
+          `${target} input ${input.key}`,
+          'is a select with neither fixed options nor a loadOptions set to draw from'
+        )
+      )
+    }
+  }
+
+  return found
+}
+
+/** What the package says about itself, when a check was pointed at one. */
+async function packageFindings(options: CheckOptions): Promise<CheckFinding[]> {
+  if (options.packageDir === undefined) return []
+  // The entry's own package, not the directory the command was run from: in a
+  // monorepo those are rarely the same, and the root's package.json says
+  // nothing about the connector being checked.
+  const pkg = readNearestPackageJson(packageDirFor(options.packageDir, options.entry))
+  const found = [...lifecycleScriptFindings(pkg)]
+
+  const vorn = (pkg as { vorn?: { keywords?: unknown } } | undefined)?.vorn
+  const keywords = Array.isArray(vorn?.keywords) ? vorn.keywords : []
+  if (keywords.length === 0) {
+    found.push(
+      finding(
+        'warn',
+        'keywords-missing',
+        'package.json',
+        'names no keywords, so the connector is findable only by its own name'
+      )
+    )
+  }
+
+  if (options.bundle && options.entry !== undefined) {
+    const built = await options.bundle({
+      contents: packEntryContents(options.entry),
+      resolveDir: options.packageDir
+    })
+    found.push(...bundleDependencyFindings(built.external))
+  }
+
+  return found
+}
+
+/** A value of the declared type, so an action can be run without a person. */
+function sampleArg(input: ActionInputField): string {
+  if (input.type === 'number') return '1'
+  if (input.type === 'boolean') return 'false'
+  if (input.type === 'json') return '{}'
+  if (input.type === 'select') return input.options?.[0]?.value ?? 'check'
+  return 'check'
+}
+
+/**
+ * Run every action once with nothing but served HTTP behind it.
+ *
+ * Two things are being asked. That an action runs at all on its own declared
+ * arguments — until now no check ever called one — and that it reaches nothing
+ * the routes did not offer, which is what makes a conformance run hermetic.
+ *
+ * Hermetic as far as `fetch` goes, which is the honest scope: a connector that
+ * shells out or opens its own socket is not intercepted, so an action the stub
+ * never heard from is reported as unobserved rather than counted as checked.
+ *
+ * A failure is an error only when the caller supplied routes: they said what
+ * the service returns, so a throw is the connector's. Against the bare `{}`
+ * default it is a warning, because an empty object is not a real reply.
+ */
+// A mock run needs every config field to resolve a template: defaults where declared, placeholders elsewhere.
+export function mockConfig(connector: Connector): ConnectorConfig {
+  const config: ConnectorConfig = {}
+  for (const field of connector.config) {
+    config[field.key] = field.default ?? `mock-${field.key}`
+  }
+  return config
+}
+
+async function mockFindings(connector: Connector, options: CheckOptions): Promise<CheckFinding[]> {
+  if (!options.mock) return []
+  const config = options.config ?? mockConfig(connector)
+  const routes = options.mockRoutes ?? [{ url: /.*/ }]
+  const level = options.mockRoutes?.length ? 'error' : 'warn'
+  const found: CheckFinding[] = []
+
+  for (const action of connector.actions) {
+    const args = Object.fromEntries(
+      (action.inputs ?? []).map((input) => [input.key, sampleArg(input)])
+    )
+    // Caught inside, so the calls are readable even when the action threw.
+    const { result: thrown, calls } = await withMockHttp(routes, async () => {
+      try {
+        await runAction(connector, action.type, args, {
+          config,
+          ...(options.now && { now: options.now })
+        })
+        return undefined
+      } catch (error) {
+        return error
+      }
+    })
+
+    if (thrown !== undefined) {
+      const reason = thrown instanceof Error ? thrown.message : String(thrown)
+      // Reaching for the network is a failure in either mode: a conformance
+      // run that touches a real service is not a conformance run. Asked of the
+      // error itself, not its wording, because a declarative action rethrows
+      // the refusal with its own name in front.
+      const escaped = escapedMockHttp(thrown)
+      found.push(
+        finding(
+          escaped ? 'error' : level,
+          escaped ? 'mock-network-escape' : 'mock-action-failed',
+          `action ${action.type}`,
+          `did not run against served HTTP: ${reason}`
+        )
+      )
+      continue
+    }
+
+    // Nothing was intercepted, so nothing was proved. The stub only sees
+    // `fetch`: an action that shells out or opens its own socket runs for
+    // real here, and saying `mock` of it would be a claim nobody checked.
+    if (calls.length === 0) {
+      found.push(
+        finding(
+          'warn',
+          'mock-not-observed',
+          `action ${action.type}`,
+          'made no request the stub could see, so this run vouches for nothing it did'
+        )
+      )
+    }
+  }
+
+  return found
+}
+
+/** A refusal to let the connector in at all, as opposed to any other failure. */
+const AUTH_FAILURE = /\b(401|403|unauthor|unauthenticat|forbidden|invalid[- ]?(token|credential))/i
+
+/**
+ * Whether a live run can call this action honestly.
+ *
+ * Only the ones that are safe to repeat, and only where the arguments are real:
+ * either the author named a `sample` set, or the action needs nothing required.
+ * Inventing an identifier just teaches the service to say "no such thing",
+ * which says nothing about the connector.
+ */
+function liveRunnable(action: ActionDefinition): boolean {
+  if (action.idempotent !== true) return false
+  if (action.sample !== undefined) return true
+  return !(action.inputs ?? []).some((input) => input.required === true)
+}
+
+/** Whether a live run has anything at all to ask, so a receipt can say it ran. */
+export function liveExamines(connector: Connector): boolean {
+  return connector.preflight !== undefined || connector.actions.some(liveRunnable)
+}
+
+/**
+ * Ask the connector, against the real service, the questions only it can answer.
+ *
+ * Preflight first, because a connector that cannot sign in fails every later
+ * check for one uninteresting reason. Then each action that is both safe to
+ * repeat and callable with real arguments — a live run of `createIssue` would
+ * leave real issues behind, and one of `closeIssue('check')` would only prove
+ * that no such issue exists.
+ */
+async function liveFindings(connector: Connector, options: CheckOptions): Promise<CheckFinding[]> {
+  if (!options.live) return []
+  const found: CheckFinding[] = []
+
+  if (connector.preflight) {
+    try {
+      const result = await connector.preflight()
+      if (!result.ok) {
+        found.push(
+          finding(
+            'error',
+            'preflight-failed',
+            connector.id,
+            result.message ?? 'reported that it is not ready, without saying why'
+          )
+        )
+        // Nothing below can succeed if it cannot sign in, and each failure
+        // would repeat this one in a less useful sentence.
+        return found
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      found.push(finding('error', 'preflight-failed', connector.id, `threw: ${reason}`))
+      return found
+    }
+  }
+
+  for (const action of connector.actions.filter(liveRunnable)) {
+    try {
+      await runAction(connector, action.type, action.sample ?? {}, {
+        config: options.config ?? {},
+        ...(options.now && { now: options.now })
+      })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      // A service can refuse for reasons that are not the connector's fault —
+      // an empty sandbox, a rate limit — so only a refusal to let it in at all
+      // is graded as broken.
+      found.push(
+        finding(
+          AUTH_FAILURE.test(reason) ? 'error' : 'warn',
+          'live-action-failed',
+          `action ${action.type}`,
+          `threw: ${reason}`
+        )
+      )
+    }
+  }
+
+  return found
 }
 
 /**
@@ -53,7 +449,7 @@ async function checkPollBehaviour(
 
   const attempt = async (
     cursor: string | undefined,
-    code: string,
+    code: CheckCode,
     what: string
   ): Promise<PollPage | CheckFinding> => {
     try {
@@ -144,6 +540,12 @@ export async function checkConnector(
     )
   }
 
+  found.push(...authFindings(connector))
+  found.push(...secretFindings(connector))
+  found.push(...(await packageFindings(options)))
+  found.push(...(await mockFindings(connector, options)))
+  found.push(...(await liveFindings(connector, options)))
+
   // Triggers share no state, so their checks run concurrently rather than
   // waiting on each other's polls.
   const perTrigger = await Promise.all(
@@ -201,6 +603,7 @@ export async function checkConnector(
         )
       )
     }
+    found.push(...actionShapeFindings(action))
     for (const input of action.inputs ?? []) {
       if (!input.description?.trim()) {
         found.push(
@@ -216,6 +619,122 @@ export async function checkConnector(
   }
 
   return found
+}
+
+/**
+ * What the factory checked, and when.
+ *
+ * Mirrors the receipt the catalog carries. "Verified" is not a word here but a
+ * list: the checks that ran and came back with nothing to say. A check that
+ * could not run — no sample to replay, no credentials to go live with — is
+ * absent rather than passed, because absent is the true answer.
+ */
+export interface ConnectorVerification {
+  /** Which receipt format this is, so a later one is not read as this one. */
+  schema: 1
+  version: string
+  checkedAt: string
+  checks: string[]
+}
+
+/**
+ * Which named check each finding belongs to, so one failure clears one name.
+ *
+ * `null` means the code belongs to no check a receipt can carry — `pack` has
+ * its own gates, and a receipt speaks only for the conformance run.
+ */
+export const CHECK_OWNERS: Record<CheckCode, string | null> = {
+  'pack-too-large': null,
+  'missing-description': 'manifest',
+  'auth-undeclared': 'auth',
+  'auth-probe-missing': 'auth',
+  'secret-not-marked': 'secrets',
+  'action-no-outputs': 'actions',
+  'input-type-unsupported': 'actions',
+  'missing-idempotent': 'actions',
+  'poll-failed': 'dedupe',
+  'no-items': 'dedupe',
+  'no-cursor': 'dedupe',
+  'cursor-rejected': 'dedupe',
+  'redelivers-items': 'dedupe',
+  'stuck-cursor': 'dedupe',
+  unverifiable: 'dedupe',
+  'sample-unusable': 'dedupe',
+  'lifecycle-scripts': 'no-lifecycle-scripts',
+  'keywords-missing': 'keywords',
+  'runtime-dependencies': 'no-runtime-deps',
+  'mock-action-failed': 'mock',
+  'mock-network-escape': 'mock',
+  'mock-not-observed': 'mock',
+  'preflight-failed': 'live',
+  'live-action-failed': 'live'
+}
+
+/**
+ * The checks this run actually performed.
+ *
+ * Derived from what there was to examine, not from what was asked for: a
+ * connector with no triggers has nothing to say about dedupe, and listing it
+ * anyway would make the receipt vouch for a check that never looked at
+ * anything. Absent is the true answer, and a truthful short list is worth more
+ * than a long one.
+ */
+function checksRun(connector: Connector, options: CheckOptions): string[] {
+  const names = ['manifest', 'auth']
+  if (connector.config.length > 0) names.push('secrets')
+  if (connector.actions.length > 0) names.push('actions')
+  if (connector.triggers.length > 0) names.push('dedupe')
+  if (options.packageDir !== undefined) names.push('no-lifecycle-scripts', 'keywords')
+  if (options.bundle && options.entry !== undefined) names.push('no-runtime-deps')
+  // Whether the stub was actually reached is the `mock-not-observed` finding's
+  // job: it spoils this name for the action that stayed silent.
+  if (options.mock && connector.actions.length > 0) names.push('mock')
+  if (options.live && liveExamines(connector)) names.push('live')
+  return names
+}
+
+export interface ConformanceRun {
+  findings: CheckFinding[]
+  /** Named checks that ran and had nothing to say. */
+  passed: string[]
+  /**
+   * The receipt to publish, or nothing when an error means there is no claim
+   * to make. Warnings do not void it — they are advice, not a failure.
+   */
+  receipt?: ConnectorVerification
+}
+
+/**
+ * Check a connector and say what can be vouched for.
+ *
+ * `checkConnector` answers "what is wrong"; this answers the catalog's
+ * question, "what did you check", which is what a verified badge shows.
+ */
+export async function runConformance(
+  connector: Connector,
+  options: CheckOptions = {}
+): Promise<ConformanceRun> {
+  const findings = await checkConnector(connector, options)
+  const spoiled = new Set(findings.map((item) => CHECK_OWNERS[item.code]).filter(Boolean))
+  const passed = checksRun(connector, options).filter((name) => !spoiled.has(name))
+  const failed = findings.some((item) => item.level === 'error')
+  const now = options.now ?? (() => new Date().toISOString())
+
+  return {
+    findings,
+    passed,
+    // A receipt listing nothing would read as verified while vouching for
+    // nothing at all, which is worse than saying nothing.
+    ...(!failed &&
+      passed.length > 0 && {
+        receipt: {
+          schema: 1 as const,
+          version: connector.version,
+          checkedAt: now(),
+          checks: passed
+        }
+      })
+  }
 }
 
 /** Render findings for a terminal. Returns an empty string when all clear. */

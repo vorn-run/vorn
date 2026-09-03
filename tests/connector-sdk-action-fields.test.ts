@@ -52,3 +52,14 @@ describe('the fields an action returns', () => {
     expect(manifestFor({}).outputs).toBeUndefined()
   })
 })
+
+describe('the arguments a live check may use', () => {
+  it('reach the manifest, so a factory can see what a live run would send', () => {
+    const sample = { id: 'ticket-42' }
+    expect(manifestFor({ sample }).sample).toEqual(sample)
+  })
+
+  it('stay absent when the author named none, which is what makes a live run skip it', () => {
+    expect(manifestFor({}).sample).toBeUndefined()
+  })
+})

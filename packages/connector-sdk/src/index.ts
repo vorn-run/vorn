@@ -1,6 +1,12 @@
 export { defineConnector, resolveConfig, envNameFor } from './define'
-export { checkConnector, formatFindings } from './check'
-export type { CheckFinding, CheckOptions } from './check'
+export { checkConnector, formatFindings, runConformance, CHECK_OWNERS } from './check'
+export type {
+  CheckCode,
+  CheckFinding,
+  CheckOptions,
+  ConformanceRun,
+  ConnectorVerification
+} from './check'
 export { pollWithDedupe } from './dedupe'
 export { normalizeItem, normalizeItems } from './normalize'
 export { runPoll, drainPoll, runAction, runOptions, MAX_POLL_PAGES } from './runtime'
@@ -26,21 +32,27 @@ export {
   PREFLIGHT_TOOL
 } from './setup'
 export type { ConnectionSetup, ConnectorManifest } from './setup'
+export { packConnector, packFileName } from './pack'
+export type { PackOptions, PackResult } from './pack'
 export {
-  packConnector,
-  packFileName,
   lifecycleScriptFindings,
   bundleDependencyFindings,
   readNearestPackageJson,
+  esbuildBundle,
   MAX_PACK_BYTES
-} from './pack'
-export type { PackOptions, PackResult, BundleRequest, BundleOutput } from './pack'
+} from './packaging'
+export type { BundleRequest, BundleOutput } from './packaging'
 export { createConnectorServer, serveConnector } from './server'
 export type { ConnectorServerOptions } from './server'
 export { scaffoldFiles, titleCase } from './scaffold'
 export type { ScaffoldOptions, ScaffoldFile } from './scaffold'
-export { createConnectorHarness } from './harness'
-export type { ConnectorHarness, HarnessOptions } from './harness'
+export {
+  createConnectorHarness,
+  escapedMockHttp,
+  withMockHttp,
+  MockRouteMissError
+} from './harness'
+export type { ConnectorHarness, HarnessOptions, MockCall, MockRoute, MockRun } from './harness'
 export type {
   ActionContext,
   ActionDefinition,

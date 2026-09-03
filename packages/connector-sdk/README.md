@@ -265,6 +265,48 @@ trigger and they are replayed through the real dedupe pipeline, so a connector
 can be checked before anyone has credentials for it; pass `--live` to poll the
 real source instead.
 
+`--mock` is the full gate, and the one to run in CI. It answers every HTTP
+request from routes instead of the network, runs each action on its own
+declared arguments, and asks the questions `pack` asks about the package —
+install-time scripts, and anything that would still need a registry at launch:
+
+```console
+$ npx vorn-connector check ./dist/index.js --mock --receipt verified.json
+Verified manifest, auth, secrets, actions, dedupe, no-lifecycle-scripts, keywords, no-runtime-deps, mock — wrote verified.json
+```
+
+`--receipt <file>` writes what was verified, for a catalog to carry:
+
+```json
+{ "schema": 1, "version": "1.2.0", "checkedAt": "…", "checks": ["manifest", "…"] }
+```
+
+A check that could not run is left out rather than listed as passed, and a
+connector with any error gets no receipt at all.
+
+`--live` additionally asks `preflight` whether the connector can sign in, then
+runs each action that declared `idempotent: true`. Actions that did not are
+never called: a smoke test must leave nothing behind.
+
+In a unit test the same stub is available directly, so an author can assert on
+what their connector sent:
+
+```ts
+const { result, calls } = await harness.withMockHttp(
+  [{ url: '/api/messages', method: 'POST', body: { id: 'm-1' } }],
+  () => harness.execute('post', { text: 'hi' })
+)
+expect(calls[0].url).toBe('https://acme.test/api/messages')
+```
+
+A request no route matches is refused rather than served, so a test says which
+call escaped instead of quietly reaching a real service.
+
+The stub replaces `fetch`, and only `fetch`. A connector that shells out to a
+CLI or opens its own socket is not intercepted by it, so `--mock` reports any
+action the stub never heard from as `mock-not-observed` and leaves `mock` out
+of the receipt rather than vouching for a run it did not see.
+
 ```ts
 {
   type: 'newTicket',
@@ -323,6 +365,23 @@ hand:
 ```bash
 npx vorn-connector setup ./dist/index.js
 ```
+
+### Where a config field is read from
+
+A field is read from the environment variable it names in `env`, or from its
+key in CONSTANT_CASE when it names none — `apiToken` becomes `API_TOKEN`. The
+same rule decides what `--live` reads and what the host must set when it hands
+a connector its credentials, so it is exported rather than kept private:
+
+```ts
+import { envNameFor } from '@vornrun/connector-sdk'
+
+envNameFor('apiToken') // API_TOKEN
+envNameFor('apiToken', 'GH_TOKEN') // GH_TOKEN — an explicit env always wins
+```
+
+Anything computing these names on the host side should call this rather than
+re-implement it, or the two will disagree about a field named `oauth2Token`.
 
 ## Pack it as a file
 
@@ -384,5 +443,6 @@ vorn-connector serve <module>             Serve on stdio (what Vorn runs)
 declared config from your shell environment — the fastest way to confirm
 credentials and field mapping before wiring anything up.
 
-`check` runs against declared `sample` data by default and takes `--live` to
-poll the real source instead.
+`check` runs against declared `sample` data by default. `--mock` serves its
+HTTP and runs every action, `--live` polls the real source and runs the actions
+that are safe to repeat, and `--receipt <file>` writes down what was verified.
