@@ -163,6 +163,96 @@ describe('the bundled seed', () => {
       }
     }
   })
+
+  it('keeps every loop body downstream of its own loop', () => {
+    for (const template of TEMPLATE_SEED) {
+      const byId = new Map(template.portable.nodes.map((node) => [node.id, node]))
+      for (const node of template.portable.nodes) {
+        if (node.type !== 'loop') continue
+        const body = (node.config as { bodyNodeIds?: string[] }).bodyNodeIds ?? []
+        expect(body.length).toBeGreaterThan(0)
+        for (const id of body) expect(byId.get(id)).toBeDefined()
+        // The engine refuses a gate inside a body, and the run would stop there.
+        expect(body.some((id) => byId.get(id)?.type === 'approval')).toBe(false)
+      }
+    }
+  })
+})
+
+describe('the workflow that builds from a spec', () => {
+  const template = TEMPLATE_SEED.find((entry) => entry.id === 'build-from-spec')!
+  const node = (id: string) => template.portable.nodes.find((entry) => entry.id === id)!
+  const config = (id: string) => node(id).config as Record<string, unknown>
+
+  it('asks for the spec, the repository and the branch before it starts', () => {
+    const inputs = (config('trigger') as { inputs: Array<{ key: string; type: string }> }).inputs
+    expect(inputs.map((input) => [input.key, input.type])).toEqual([
+      ['spec', 'textarea'],
+      ['repoPath', 'project'],
+      ['branch', 'text']
+    ])
+  })
+
+  it('quotes the spec to the agents that act on it, rather than describing it here', () => {
+    expect(config('research').prompt).toContain('{{inputs.spec}}')
+    expect(config('develop').prompt).toContain('{{inputs.spec}}')
+  })
+
+  it('makes one worktree and keeps every later step in it', () => {
+    expect(config('research')).toMatchObject({
+      worktreeMode: 'new',
+      useWorktree: true,
+      branch: '{{inputs.branch}}',
+      projectPath: '{{inputs.repoPath.path}}'
+    })
+    for (const id of ['develop', 'review']) {
+      expect(config(id)).toMatchObject({ worktreeMode: 'fromStep', worktreeFromStepSlug: 'research' })
+    }
+    for (const id of ['check', 'check-live', 'pr']) {
+      expect(config(id).cwd).toBe('{{steps.research.worktreePath}}')
+    }
+  })
+
+  it('repeats the checks and the review until the reviewer says it is clean', () => {
+    expect(config('review-loop')).toMatchObject({
+      bodyNodeIds: ['check', 'check-live', 'review'],
+      maxIterations: 3,
+      until: { variable: '{{steps.review.verdict}}', operator: 'equals', value: 'clean' }
+    })
+    const schema = config('review').outputSchema as {
+      properties: { verdict: { enum: string[] } }
+    }
+    expect(schema.properties.verdict.enum).toEqual(['clean', 'fix'])
+  })
+
+  it('reads the checks it just ran, rather than running them itself', () => {
+    expect(config('review').prompt).toContain('{{steps.check.output}}')
+    expect(config('review').prompt).toContain('{{steps.check-live.output}}')
+  })
+
+  it('says nothing about a live check until a key is bound to it', () => {
+    expect(config('check-live').secretsFrom).toBeUndefined()
+    expect(config('check-live').scriptContent).toContain('no live check')
+    expect(template.portable.requires).toBeUndefined()
+  })
+
+  it('waits for a person before anything leaves the machine', () => {
+    const order = template.portable.edges.map((edge) => `${edge.source}->${edge.target}`)
+    expect(order).toEqual([
+      'trigger->research',
+      'research->develop',
+      'develop->review-loop',
+      'review-loop->check',
+      'check->check-live',
+      'check-live->review',
+      'review->approve',
+      'approve->pr'
+    ])
+    expect(node('approve').type).toBe('approval')
+    expect(config('pr').scriptContent).toContain('gh pr create')
+    expect(config('pr').scriptContent).toContain('{{inputs.branch}}')
+    expect(config('pr').scriptContent).toContain('{{steps.review.notes}}')
+  })
 })
 
 describe('parseMcpServers', () => {
