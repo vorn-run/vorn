@@ -54,14 +54,36 @@ function read(): Stored {
   }
 }
 
+/**
+ * Replace the record in one step, never in place.
+ *
+ * A torn write is not a harmless corruption here. `read` treats an unparseable
+ * file as no claims at all -- which is the right answer for a file that was
+ * never written, and the wrong one for a file that was half written, because it
+ * reports every device free and lets a second Vorn take one this process is
+ * driving. That is precisely the collision this file exists to prevent, arriving
+ * through the file itself. Writing beside it and renaming makes the swap atomic,
+ * so a reader sees the old record or the new one and never half of either.
+ */
 function write(claims: Stored): void {
+  // Resolved inside the guard, like the read's is: `FILE()` reaches into
+  // Electron for the data directory and can throw before any file is touched.
+  let tmp: string | undefined
   try {
-    fs.writeFileSync(FILE(), JSON.stringify(claims, null, 2))
+    const target = FILE()
+    tmp = `${target}.${process.pid}.tmp`
+    fs.writeFileSync(tmp, JSON.stringify(claims, null, 2))
+    fs.renameSync(tmp, target)
   } catch (err) {
     // A record that cannot be written costs cross-process arbitration and
     // nothing else. Refusing the claim over it would make a read-only userData
     // directory look like every simulator being held.
     log.warn({ err }, '[device-claims] could not write the record')
+    try {
+      if (tmp) fs.unlinkSync(tmp)
+    } catch {
+      // Nothing to clean up, or nothing we can do about it.
+    }
   }
 }
 

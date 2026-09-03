@@ -233,3 +233,40 @@ describe('an edit begun now', () => {
     expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeUndefined()
   })
 })
+
+describe('a stamp that comes back late', () => {
+  it('does not declare a conflict on a file the pane has moved on from', async () => {
+    storeDraft('line one\nline two edited', STAMP)
+    let settle: (s: FileStamp) => void = () => {}
+    fileStamp.mockReturnValue(
+      new Promise<FileStamp>((resolve) => {
+        settle = resolve
+      })
+    )
+    const { unmount } = render(<FileEditorPane cwd="/repo" filePath={PATH} draftKey={PANE} />)
+    await act(async () => {})
+    unmount()
+    // The answer lands after the pane is gone. Nothing to update, and nothing
+    // to warn about.
+    await act(async () => {
+      settle(MOVED)
+    })
+    expect(screen.queryByText(/changed on disk/i)).not.toBeInTheDocument()
+  })
+
+  it('leaves the guard unarmed when the stamp cannot be taken at all', async () => {
+    // A rejected round trip must not become an unhandled rejection, and must
+    // not read as "the file moved" -- there is no version to have moved from.
+    storeDraft('line one\nline two edited', null)
+    fileStamp.mockRejectedValue(new Error('no such method'))
+    await open()
+    await waitFor(() => expect(editor()).toBeInTheDocument())
+    expect(screen.queryByText(/changed on disk/i)).not.toBeInTheDocument()
+
+    fileStamp.mockResolvedValue(STAMP)
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText(/^Save/))
+    })
+    await waitFor(() => expect(writeFileContent).toHaveBeenCalled())
+  })
+})

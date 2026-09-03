@@ -164,3 +164,33 @@ describe('a session the board is not showing yet', () => {
     expect([...useAppStore.getState().minimizedTerminals]).toEqual(['browser:term-2'])
   })
 })
+
+describe('a launch that finds nothing running', () => {
+  it('prunes on being told, without waiting for a list that will not change', () => {
+    // The board is empty before and after, so the visible list never moves and
+    // the reconcile it used to hang off never fired. This was the one board
+    // that kept its pills and panes for good.
+    useAppStore.setState({
+      knownSessionIds: null,
+      terminals: new Map(),
+      minimizedTerminals: new Set(['term-1']),
+      activeTabId: 'term-1',
+      maximizedPaneId: 'browser:term-1'
+    })
+    useAppStore.getState().setVisibleTerminalIds([])
+    useAppStore.getState().setKnownSessions([])
+
+    expect([...useAppStore.getState().minimizedTerminals]).toEqual([])
+    expect(useAppStore.getState().activeTabId).toBeNull()
+    expect(useAppStore.getState().maximizedPaneId).toBeNull()
+  })
+
+  it('prunes on being told what the server does have', () => {
+    useAppStore.setState({
+      knownSessionIds: null,
+      minimizedTerminals: new Set(['term-1', 'term-2'])
+    })
+    useAppStore.getState().setKnownSessions(['term-1'])
+    expect([...useAppStore.getState().minimizedTerminals]).toEqual(['term-1'])
+  })
+})

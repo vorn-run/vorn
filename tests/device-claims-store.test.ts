@@ -117,3 +117,52 @@ describe('letting go', () => {
     expect(after['udid-1']).toEqual({ pid: OTHER, sessionId: 'sess-a' })
   })
 })
+
+describe('writing the record', () => {
+  it('never leaves a half-written file where a reader could see it', () => {
+    // `read` answers "no claims" to anything it cannot parse, which is right for
+    // a file that was never written and catastrophic for one that was half
+    // written: every device reads as free and a second Vorn takes one this
+    // process is driving. The swap has to be atomic, so it goes through rename.
+    recordClaim('udid-1', 'sess-a')
+    const renamed: string[] = []
+    const realRename = fs.renameSync
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      renamed.push(String(to))
+      return realRename(from, to)
+    })
+    const written = vi.spyOn(fs, 'writeFileSync')
+
+    recordClaim('udid-2', 'sess-b')
+
+    expect(renamed).toEqual([FILE])
+    // Written beside the target, not over it.
+    expect(String(written.mock.calls[0][0])).not.toBe(FILE)
+    expect(String(written.mock.calls[0][0]).startsWith(FILE)).toBe(true)
+    spy.mockRestore()
+    written.mockRestore()
+  })
+
+  it('leaves no scratch file behind when the swap fails', () => {
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw new Error('EXDEV')
+    })
+    recordClaim('udid-1', 'sess-a')
+    spy.mockRestore()
+
+    const leftovers = fs.readdirSync(userData).filter((f) => f.includes('device-claims'))
+    expect(leftovers).toEqual([])
+  })
+
+  it('keeps the previous record readable when a write fails outright', () => {
+    recordClaim('udid-1', 'sess-a')
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw new Error('ENOSPC')
+    })
+    recordClaim('udid-2', 'sess-b')
+    spy.mockRestore()
+
+    // The old record survives intact rather than being truncated into nonsense.
+    expect(JSON.parse(fs.readFileSync(FILE, 'utf-8'))['udid-1']).toBeDefined()
+  })
+})

@@ -670,6 +670,8 @@ function FilePanel({
   const [saveError, setSaveError] = useState<string | null>(null)
   /** What the file was when this edit started; the save compares against it. */
   const baseRef = useRef<FileStamp | null>(null)
+  /** The file on screen right now, for answers that arrive after it changed. */
+  const pathRef = useRef(filePath)
   /** Set when the file moved under the draft. Cleared by whichever way out is taken. */
   const [conflict, setConflict] = useState(false)
 
@@ -681,6 +683,7 @@ function FilePanel({
 
   // Reset transient state when file changes
   useEffect(() => {
+    pathRef.current = filePath
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clear per-file edit/find state when the file changes
     setEditing(false)
     setDraft('')
@@ -716,9 +719,22 @@ function FilePanel({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: the draft is external state, read in once the file it belongs to has loaded
     setDraft(draft.text)
     setEditing(true)
-    void window.api.fileStamp?.(filePath, remoteHostId).then((current) => {
-      setConflict(hasMoved(draft.base, current ?? null))
-    })
+    // Guarded on the way back: this resolves after a round trip to the server,
+    // by which time the pane can have been given another file or closed, and
+    // the answer would then be about neither. A stamp that cannot be taken
+    // leaves the guard unarmed rather than declaring a conflict.
+    let stale = false
+    window.api
+      .fileStamp?.(filePath, remoteHostId)
+      .then((current) => {
+        if (!stale) setConflict(hasMoved(draft.base, current ?? null))
+      })
+      .catch(() => {
+        if (!stale) setConflict(false)
+      })
+    return () => {
+      stale = true
+    }
   }, [draftKey, filePath, remoteHostId, loading, content])
 
   useEffect(() => {
@@ -755,9 +771,18 @@ function FilePanel({
     // then the file may already have moved, and stamping it there would record
     // somebody else's version as the one being edited.
     baseRef.current = null
-    void window.api.fileStamp?.(filePath, remoteHostId).then((stamp) => {
-      baseRef.current = stamp ?? null
-    })
+    // Against the path this edit started on, because the answer can arrive after
+    // the pane has moved to another file -- and recording that file's stamp as
+    // this edit's base is worse than having none, since the guard would then be
+    // armed with the wrong version. A failure leaves it unarmed, which is the
+    // documented meaning of no base.
+    const editing = filePath
+    window.api
+      .fileStamp?.(filePath, remoteHostId)
+      .then((stamp) => {
+        if (pathRef.current === editing) baseRef.current = stamp ?? null
+      })
+      .catch(() => {})
   }
 
   const handleCancelEdit = (): void => {

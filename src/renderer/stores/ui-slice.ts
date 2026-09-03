@@ -534,6 +534,46 @@ function reconcileView(
 }
 
 /**
+ * Drop everything belonging to a session the server does not have.
+ *
+ * Sessions restore by their persisted id, so pane entries stay valid across
+ * restarts — but a session that never comes back would leave its entry behind
+ * forever.
+ *
+ * Reconciled against what the server has rather than against what is on the
+ * board. Those differ on the launch where reopen is off: the ended sessions are
+ * deliberately left off the board and offered by the banner instead, and pruning
+ * against the board would delete the panes of every one of them a moment before
+ * the person is asked whether to bring them back. Null until a sync pass has
+ * asked, which is not the same as none.
+ *
+ * Returns null when there is nothing to change, so a caller can tell a reconcile
+ * that did something from one that did not.
+ */
+function pruneAgainstKnown(state: AppStore): Partial<AppStore> | null {
+  const live = state.knownSessionIds
+  if (live === null) return null
+  const panes = reconcilePanes(
+    state.filesPanes,
+    state.editorPanes,
+    state.browserPanes,
+    state.browserMemory,
+    state.devicePanes,
+    state.terminalsPanes,
+    state.cardSplits,
+    live
+  )
+  const view = reconcileView(
+    state.minimizedTerminals,
+    state.activeTabId,
+    state.maximizedPaneId,
+    live
+  )
+  if (!panes && !view) return null
+  return { ...(panes ?? {}), ...(view ?? {}) }
+}
+
+/**
  * Let go of a terminal that a panel is holding.
  *
  * Extraction and closing both arrive here: one keeps the terminal alive and one
@@ -885,47 +925,23 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   setVisibleTerminalIds: (ids) =>
     set((state) => {
       const unchanged = sameIds(state.visibleTerminalIds, ids)
-      // Sessions restore by their persisted id, so pane entries stay valid across
-      // restarts — but a session that never comes back would leave its entry
-      // behind forever.
-      //
-      // Reconciled against what the server has rather than against what is on
-      // the board. Those differ on the launch where reopen is off: the ended
-      // sessions are deliberately left off the board and offered by the banner
-      // instead, and pruning against the board would delete the panes of every
-      // one of them a moment before the person is asked whether to bring them
-      // back. Null until a sync pass has asked, which is not the same as none.
-      const live = state.knownSessionIds
-      const reconciled =
-        live !== null
-          ? reconcilePanes(
-              state.filesPanes,
-              state.editorPanes,
-              state.browserPanes,
-              state.browserMemory,
-              state.devicePanes,
-              state.terminalsPanes,
-              state.cardSplits,
-              live
-            )
-          : null
-      // An unchanged list is not a change worth notifying the app about — but
-      // the reconcile above still has to run, because this is its only trigger.
-      // Gating both on the list changing meant a launch where the visible set
-      // never moved (everything filtered out, or every restored session
-      // minimized) never pruned a dead session's panes at all.
-      const view =
-        live !== null
-          ? reconcileView(state.minimizedTerminals, state.activeTabId, state.maximizedPaneId, live)
-          : null
-      if (unchanged && !reconciled && !view) return {}
+      const pruned = pruneAgainstKnown(state)
+      if (unchanged && !pruned) return {}
+      return { ...(unchanged ? {} : { visibleTerminalIds: ids }), ...(pruned ?? {}) }
+    }),
+
+  // Learning what exists is itself a reason to reconcile, and for a while the
+  // only trigger was the visible list changing. A launch that finds nothing
+  // running changes no list -- so a board whose every session was gone was the
+  // one board that never pruned, and its panes and pills stayed for good.
+  setKnownSessions: (ids) =>
+    set((state) => {
+      const known = new Set(ids)
       return {
-        ...(unchanged ? {} : { visibleTerminalIds: ids }),
-        ...(reconciled ?? {}),
-        ...(view ?? {})
+        knownSessionIds: known,
+        ...(pruneAgainstKnown({ ...state, knownSessionIds: known }) ?? {})
       }
     }),
-  setKnownSessions: (ids) => set({ knownSessionIds: new Set(ids) }),
 
   setFocusableTerminalIds: (ids) =>
     set((state) => (sameIds(state.focusableTerminalIds, ids) ? {} : { focusableTerminalIds: ids })),
