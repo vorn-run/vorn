@@ -92,6 +92,7 @@ describe('the env a blob carries', () => {
 
   it('answers nothing for a blob it cannot read', () => {
     expect(envNamesOf('not json')).toEqual([])
+    expect(envNamesOf('{"":"a","BAD-NAME":"b","__proto__":"c","OK":"d"}')).toEqual(['OK'])
     expect(envNamesOf(undefined)).toEqual([])
     expect(envNamesOf('[1,2]')).toEqual([])
   })

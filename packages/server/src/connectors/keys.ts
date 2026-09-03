@@ -61,13 +61,20 @@ export function maskSecret(value: string | undefined): string {
   return `${marker}••••${value.slice(-4)}`
 }
 
+const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype'])
+
+// A name a shell accepts and the prototype cannot be reached through.
+export function isEnvName(name: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !RESERVED_NAMES.has(name)
+}
+
 /** The env names a packaged connector's blob carries, when it can be read. */
 export function envNamesOf(blob: string | undefined): string[] {
   if (!blob) return []
   try {
     const parsed: unknown = JSON.parse(blob)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
-    return Object.keys(parsed as Record<string, unknown>).filter((name) => name !== '')
+    return Object.keys(parsed as Record<string, unknown>).filter(isEnvName)
   } catch {
     return []
   }

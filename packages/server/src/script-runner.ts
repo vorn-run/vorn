@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import { ScriptConfig, IPC } from '@vornrun/shared/types'
 import { getLaunchEnv } from './process-utils'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
-import { SECRET_ENV_FIELD } from './connectors/keys'
+import { SECRET_ENV_FIELD, isEnvName } from './connectors/keys'
 import log from './logger'
 
 /** `apiKey` names the variable `API_KEY`, the way a connector's own env does. */
@@ -18,9 +18,6 @@ function envNameFor(key: string): string {
  * written; a single-value field is named after itself. Nothing is read unless
  * a step asked for it by connection id.
  */
-// Only a name a shell would accept becomes a variable; anything else in a blob is dropped.
-const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
-
 export function secretEnvFor(
   connectionId: string | undefined,
   lookup: (id: string) => Record<string, string> | undefined = getDecryptedCreds
@@ -38,7 +35,7 @@ export function secretEnvFor(
       const parsed: unknown = JSON.parse(value)
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
       for (const [name, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (typeof v === 'string' && ENV_NAME.test(name)) env[name] = v
+        if (typeof v === 'string' && isEnvName(name)) env[name] = v
       }
     } catch {
       // A blob this build cannot read contributes nothing, and the step runs

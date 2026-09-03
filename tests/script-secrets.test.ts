@@ -29,7 +29,7 @@ describe('the environment a step borrows from a connection', () => {
   it('drops blob names a shell would refuse, including ones that reach the prototype', () => {
     const env = secretEnvFor('conn-hostile', (id) =>
       id === 'conn-hostile'
-        ? { secretEnv: '{"":"a","__proto__":{"x":"y"},"BAD-NAME":"b","OK":"o"}' }
+        ? { secretEnv: '{"":"a","__proto__":{"x":"y"},"constructor":"c","BAD-NAME":"b","OK":"o"}' }
         : undefined
     )
     expect(env).toEqual({ OK: 'o' })
