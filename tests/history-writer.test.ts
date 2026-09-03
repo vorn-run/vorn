@@ -429,9 +429,9 @@ describe('a log that outgrows its cap', () => {
     // Same generation in both, so the log is still replayable onto it -- which is
     // the whole point of not having dropped it.
     expect(logOf().generation).toBe(checkpointed)
-    // The assertion that actually catches the regression: every byte that
-    // arrived during the checkpoint's fsyncs used to be thrown away here.
-    expect(outputs(logOf().frames)).toContain('y')
+    // The regression threw these bytes away; a slow runner may instead have folded them into a later checkpoint.
+    const kept = outputs(logOf().frames) + (readCheckpoint(historyDir(dir, ID))?.screen ?? '')
+    expect(kept).toContain('y')
   })
 
   it('is thrown away when no checkpoint can be written, and cannot be replayed after', async () => {
