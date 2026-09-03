@@ -4673,7 +4673,7 @@ __metadata:
     tar: "npm:^7.5.21"
     tsup: "npm:^8.5.1"
     typescript: "npm:^6.0.3"
-    zod: "npm:^4.4.3"
+    zod: "npm:^4.5.4"
   bin:
     vorn-connector: dist/cli.js
   languageName: unknown
@@ -4707,7 +4707,7 @@ __metadata:
     tsx: "npm:^4.23.1"
     typescript: "npm:^6.0.3"
     ws: "npm:^8.21.1"
-    zod: "npm:^4.4.3"
+    zod: "npm:^4.5.4"
   bin:
     mcp: dist/index.js
     vorn-mcp: dist/index.js
@@ -4735,7 +4735,7 @@ __metadata:
     tsx: "npm:^4.23.1"
     typescript: "npm:^6.0.3"
     ws: "npm:^8.21.1"
-    zod: "npm:^4.4.3"
+    zod: "npm:^4.5.4"
   bin:
     vorn-server: ./dist/cli.cjs
   languageName: unknown
@@ -12553,7 +12553,7 @@ __metadata:
     vite: "npm:^8.1.5"
     vitest: "npm:4.1.10"
     ws: "npm:^8.21.1"
-    zod: "npm:^4.4.3"
+    zod: "npm:^4.5.4"
     zustand: "npm:^5.0.14"
   languageName: unknown
   linkType: soft
@@ -13158,10 +13158,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod@npm:^4.4.3":
-  version: 4.4.3
-  resolution: "zod@npm:4.4.3"
-  checksum: 10c0/7ea31b558e88f9faf44f31dd185e2e1cbf51fed3081787fb96cc2534749b50c0acfc6da7f0922a7353ed092dd358c7d50c28ea96c94d04af64191bd33152eca3
+"zod@npm:^4.5.4":
+  version: 4.5.4
+  resolution: "zod@npm:4.5.4"
+  checksum: 10c0/511a2a4d1a6f875dfdd70a1586989a8b14ef126776cd6218a2c760b9f65f14ef389ec20d92ee1aa4fcb4566d4ff3fa012956044f9dc503510d82e4c756a8ba92
   languageName: node
   linkType: hard
 
