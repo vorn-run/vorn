@@ -231,7 +231,9 @@ export function ConnectorSettings() {
           builtIns={connectors}
           progress={installProgress}
           fetchedAt={catalogFetchedAt}
-          onRefresh={refreshConnectorCatalog}
+          onRefresh={async () => {
+            await refreshConnectorCatalog()
+          }}
           onSelect={setSelected}
           onAdd={setAdding}
           onInstall={handleInstall}
