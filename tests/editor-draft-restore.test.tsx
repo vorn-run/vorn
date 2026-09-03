@@ -178,3 +178,58 @@ describe('an unchanged file', () => {
     expect(screen.queryByText(/changed on disk/i)).not.toBeInTheDocument()
   })
 })
+
+describe('an edit begun now', () => {
+  async function startEditing(): Promise<void> {
+    await open()
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Edit'))
+    })
+  }
+
+  it('stamps the file as the edit starts, not as it is saved', async () => {
+    // Stamping at save time would record whatever the file had become by then
+    // as the version being edited, and the guard would never fire.
+    await startEditing()
+    await waitFor(() => expect(fileStamp).toHaveBeenCalled())
+    fireEvent.change(editor(), { target: { value: 'line one\nline two edited' } })
+    fileStamp.mockResolvedValue(MOVED)
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText(/^Save/))
+    })
+    expect(await screen.findByText(/changed on disk/i)).toBeInTheDocument()
+    expect(writeFileContent).not.toHaveBeenCalled()
+  })
+
+  it('writes the edit down as it is typed, so a quit does not lose it', async () => {
+    await startEditing()
+    fireEvent.change(editor(), { target: { value: 'half a thought' } })
+    await waitFor(
+      () => expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]?.text).toBe('half a thought'),
+      { timeout: 2000 }
+    )
+  })
+
+  it('keeps nothing for an edit that ended up saying what the file said', async () => {
+    await startEditing()
+    fireEvent.change(editor(), { target: { value: 'changed' } })
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeDefined(), {
+      timeout: 2000
+    })
+    fireEvent.change(editor(), { target: { value: ON_DISK } })
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeUndefined())
+  })
+
+  it('lets go of the draft when the edit is cancelled', async () => {
+    await startEditing()
+    fireEvent.change(editor(), { target: { value: 'abandoned' } })
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeDefined(), {
+      timeout: 2000
+    })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Cancel edit'))
+    })
+    expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeUndefined()
+  })
+})

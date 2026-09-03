@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
-import { isTerminalPane, isPromotedCardId, paneOwnerId } from '../lib/pane-id'
+import { isTerminalPane, isPromotedCardId } from '../lib/pane-id'
+import { chooseActiveTab } from '../lib/active-tab'
 import { usePromotedCardsByOwner, usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PromotedPaneCard } from './PromotedPaneCard'
 import { CardSubjectIcon } from './CardSubjectIcon'
@@ -205,17 +206,8 @@ export function TabView() {
   const knownSessionIds = useAppStore((s) => s.knownSessionIds)
 
   useEffect(() => {
-    if (knownSessionIds === null) return
-    // A tab naming a session the server has but the board is not showing is
-    // waiting for the banner to bring it back, not pointing at nothing.
-    if (activeTabId && knownSessionIds.has(paneOwnerId(activeTabId))) return
-    if (allTabIds.length === 0) {
-      if (activeTabId !== null) setActiveTabId(null)
-      return
-    }
-    if (!activeTabId || !allTabIds.includes(activeTabId)) {
-      setActiveTabId(allTabIds[0])
-    }
+    const next = chooseActiveTab(activeTabId, allTabIds, knownSessionIds)
+    if (next !== undefined) setActiveTabId(next)
   }, [allTabIds, activeTabId, setActiveTabId, knownSessionIds])
 
   const handleSelectTab = (id: string): void => {
