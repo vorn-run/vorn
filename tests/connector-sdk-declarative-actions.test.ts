@@ -256,6 +256,23 @@ describe('what an action is allowed to be', () => {
     expect(() => build({ run: () => ({}), postReceive: [] })).toThrow(/no request/)
   })
 
+  it('refuses a URL an argument could aim, or one that names no host', () => {
+    expect(() => build({ request: { url: '{{args.target}}' } })).toThrow(
+      /Action post declares the request URL "\{\{args.target\}\}", which is neither absolute/
+    )
+    expect(() => build({ request: { url: '/v1/items' } })).toThrow(/neither absolute nor rooted/)
+    // Absolute, or built on the connector's own setting: both are its decision.
+    expect(() => build({ request: { url: 'https://api.test/t' } })).not.toThrow()
+    expect(() => build({ request: { url: '{{config.baseUrl}}/t' } })).not.toThrow()
+  })
+
+  it('names the action when a request fails, not just what went wrong', async () => {
+    const { impl } = fakeFetch({ error: 'gone' }, { status: 410 })
+    await expect(runAction(declared({}), 'post', {}, { fetchImpl: impl })).rejects.toThrow(
+      /^Action post: Request failed with 410/
+    )
+  })
+
   it('says so when one built in plain JS reaches the runtime as neither', async () => {
     // `defineConnector` refuses this; a hand-built object passed straight to
     // `runAction` has never been through it.

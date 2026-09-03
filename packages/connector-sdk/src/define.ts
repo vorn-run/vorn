@@ -21,6 +21,11 @@ const VIEW_BOX_PATTERN = /^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$/
 const DEDUPE_STRATEGIES: DedupeStrategy[] = ['timestamp', 'lastItem']
 const AUTH_RUNGS: AuthRung[] = ['none', 'cli', 'key', 'oauth']
 
+/** A declared request goes somewhere the connector named: a real URL, … */
+const ABSOLUTE_URL_PATTERN = /^https?:\/\//i
+/** … or one built on a value from its own settings. */
+const CONFIG_ROOTED_URL_PATTERN = /^\{\{\s*config\./
+
 function assertUnique(kind: string, keys: string[]): void {
   const seen = new Set<string>()
   for (const key of keys) {
@@ -175,6 +180,16 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
       const request = loose.request as { url?: unknown }
       if (typeof request?.url !== 'string' || request.url.trim() === '') {
         throw new Error(`Action ${action.type} declares a request with no URL`)
+      }
+      const url = request.url.trim()
+      // Where the call goes has to be the connector's decision. A URL built
+      // from an argument would let a step aim the connector's own credentials
+      // at a host of its choosing, and a relative one names no host at all.
+      if (!ABSOLUTE_URL_PATTERN.test(url) && !CONFIG_ROOTED_URL_PATTERN.test(url)) {
+        throw new Error(
+          `Action ${action.type} declares the request URL "${url}", which is neither absolute ` +
+            `nor rooted in a {{config.…}} value`
+        )
       }
     }
     if (!declared && loose.postReceive !== undefined) {

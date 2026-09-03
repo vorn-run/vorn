@@ -237,12 +237,21 @@ export async function runAction(
   })
 
   if (action.request !== undefined) {
-    return executeRequest(
-      action.request,
-      action.postReceive,
-      { args: coerced, config },
-      { fetchImpl }
-    )
+    try {
+      return await executeRequest(
+        action.request,
+        action.postReceive,
+        { args: coerced, config },
+        { fetchImpl }
+      )
+    } catch (error) {
+      // Which action failed is the first thing a reader needs; the message
+      // underneath already says what about it went wrong.
+      throw new Error(
+        `Action ${actionType}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      )
+    }
   }
   // `defineConnector` rules this out; a connector hand-built in plain JS and
   // passed straight here has not been through it.
