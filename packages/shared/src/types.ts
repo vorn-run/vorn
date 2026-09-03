@@ -2417,6 +2417,30 @@ export interface DeviceInfo {
   claimedBy?: string
 }
 
+/**
+ * Why a device could not be claimed.
+ *
+ * A closed set, because the caller has to act differently on each and a message
+ * string cannot be branched on without matching its wording. Re-claiming a
+ * device on launch is what forced this: "gone" is ordinary and silent — the
+ * simulator was deleted, or the record came from another machine — while "held
+ * by another session" is worth saying out loud, and the two used to arrive as
+ * prose that read the same.
+ */
+export type DeviceClaimFailure =
+  /** No simulator with that udid on this machine any more. */
+  | { reason: 'gone'; message: string }
+  /** Another session in this Vorn holds it. `holder` is that session's id. */
+  | { reason: 'held-by-session'; message: string; holder: string }
+  /** Another Vorn process holds it. `pid` is that process. */
+  | { reason: 'held-by-other-vorn'; message: string; pid: number }
+  /** The simulator exists and is free, but would not boot. */
+  | { reason: 'boot-failed'; message: string }
+
+export type DeviceClaimResult =
+  | { ok: true; udid: string; name: string; booted: boolean }
+  | ({ ok: false } & DeviceClaimFailure)
+
 /** A point in **points**, the accessibility tree's units — never pixels. */
 export interface DevicePoint {
   x: number

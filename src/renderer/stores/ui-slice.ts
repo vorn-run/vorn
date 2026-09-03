@@ -10,6 +10,7 @@ import {
   BrowserPaneState,
   BrowserTabState,
   DevicePaneState,
+  DeviceRestoreRefusal,
   TerminalsPaneState,
   CardSplit,
   isPromotedPane,
@@ -47,6 +48,7 @@ const FLEXIBLE_STORAGE_KEY = 'vorn:flexibleLayouts'
 const CARD_SPLITS_STORAGE_KEY = 'vorn:cardSplits'
 const PANES_STORAGE_KEY = 'vorn:panes'
 const TERMINAL_PANELS_STORAGE_KEY = 'vorn:terminalPanels'
+const DEVICE_PANES_STORAGE_KEY = 'vorn:devicePanes'
 const VIEW_STORAGE_KEY = 'vorn:view'
 /**
  * Where a browser pane opened with no url starts. Deliberately blank: guessing
@@ -106,6 +108,62 @@ function saveView(view: Partial<PersistedView>): void {
   try {
     const merged = { ...loadView(), ...view }
     localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(merged))
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * The devices that were open when the app last closed, keyed by session.
+ *
+ * A request rather than a pane. Every other pane kind can be put straight back
+ * because nothing outside this window has to agree; a device has to be taken
+ * from the machine, and the claim it was taken with died with the last process.
+ * So this is read by `restoreDevicePanes`, which asks for each one again, and
+ * never by the slice's constructor.
+ */
+function loadDeviceRequests(): Map<string, DevicePaneState> {
+  try {
+    const raw = localStorage.getItem(DEVICE_PANES_STORAGE_KEY)
+    if (!raw) return new Map()
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return new Map()
+    const out = new Map<string, DevicePaneState>()
+    for (const [sessionId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const device = value as Partial<DevicePaneState>
+      if (!isNonEmpty(device?.udid) || !isNonEmpty(device?.name)) continue
+      out.set(sessionId, { udid: device.udid, name: device.name })
+    }
+    return out
+  } catch {
+    return new Map()
+  }
+}
+
+/**
+ * Take back the split `openDevicePane` biased toward the terminal.
+ *
+ * That ratio is written to storage, and nothing used to remove it -- so closing
+ * the pane, or quitting with one open, left a card permanently sized for a phone
+ * that is not there. Only when it is still the ratio we wrote: a person who has
+ * dragged the divider since has made a decision, and this is not the place to
+ * overrule it.
+ */
+function dropDeviceSplit(
+  state: Pick<AppStore, 'cardSplits'>,
+  sessionId: string
+): { cardSplits?: Record<string, CardSplit> } {
+  const split = state.cardSplits[sessionId]
+  if (!split || split.terminal !== DEVICE_SPLIT_RATIO || split.panes.length > 0) return {}
+  const splits = { ...state.cardSplits }
+  delete splits[sessionId]
+  saveCardSplits(splits)
+  return { cardSplits: splits }
+}
+
+function saveDeviceRequests(devicePanes: Map<string, DevicePaneState>): void {
+  try {
+    localStorage.setItem(DEVICE_PANES_STORAGE_KEY, JSON.stringify(Object.fromEntries(devicePanes)))
   } catch {
     /* ignore */
   }
@@ -1107,6 +1165,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       if (existing && existing.udid === device.udid && existing.name === device.name) return {}
       const next = new Map(state.devicePanes)
       next.set(sessionId, device)
+      saveDeviceRequests(next)
       // A phone is roughly 0.46 as wide as it is tall, so the even split every
       // other pane kind wants renders it as a narrow strip of screen floating in
       // a wide field of empty background — while the terminal, which needs the
@@ -1128,13 +1187,48 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // boots the simulator if it is not running, so the person never has to
       // leave Vorn for Xcode.
       const claimed = await window.api.deviceClaim(sessionId, device.udid)
+      // Surfaced rather than swallowed: the likeliest failure is another
+      // session holding the device, and that message names the holder.
+      if (!claimed.ok) return claimed
       get().openDevicePane(sessionId, { udid: claimed.udid, name: claimed.name })
       return null
     } catch (e) {
-      // Surfaced rather than swallowed: the likeliest failure is another
-      // session holding the device, and that message names the holder.
-      return e instanceof Error ? e.message : String(e)
+      // Everything the claim does not have a name for -- the channel itself
+      // failing, an older main process. Reported as a boot failure because that
+      // is the one outcome that means "this device, this time, did not work".
+      return { reason: 'boot-failed', message: e instanceof Error ? e.message : String(e) }
     }
+  },
+
+  restoreDevicePanes: async () => {
+    const requests = loadDeviceRequests()
+    const refused: DeviceRestoreRefusal[] = []
+    if (requests.size === 0) return refused
+    // One at a time. Each claim boots a simulator, and `simctl bootstatus`
+    // blocks until it is up -- taking six together is six simulators starting
+    // in the same instant on a machine that has just finished launching.
+    for (const [sessionId, device] of requests) {
+      // Read per iteration: this loop awaits a boot each time round, and the
+      // board can gain a session while it does.
+      if (!get().terminals.has(sessionId)) continue
+      if (get().devicePanes.has(sessionId)) continue
+      const failure = await get().claimAndOpenDevicePane(sessionId, device)
+      if (!failure) continue
+      // A simulator that has been deleted, or a record carried to another
+      // machine, is not something the person did or can act on. Forgotten
+      // rather than reported, so it stops being tried on every launch.
+      if (failure.reason === 'gone') {
+        const next = new Map(loadDeviceRequests())
+        next.delete(sessionId)
+        saveDeviceRequests(next)
+        continue
+      }
+      // The rest are contested or broken, and the record is kept: the device is
+      // still the one this session was working against, and the next launch --
+      // after the other Vorn has quit -- should try it again.
+      refused.push({ sessionId, device, failure })
+    }
+    return refused
   },
 
   closeDevicePane: (sessionId) =>
@@ -1153,8 +1247,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       }
       const next = new Map(state.devicePanes)
       next.delete(sessionId)
+      saveDeviceRequests(next)
       return {
         devicePanes: next,
+        ...dropDeviceSplit(state, sessionId),
         ...clearPlacement(state, devicePaneId(sessionId))
       }
     }),

@@ -39,6 +39,7 @@ import type {
   BrowserTabInfo,
   BrowserTarget,
   DeviceInfo,
+  DeviceClaimResult,
   DeviceElement,
   DeviceScreenRead,
   DeviceTarget,
@@ -1003,7 +1004,7 @@ export interface RequestMethods {
   }
   'device:claim': {
     params: { sessionId: string; udid: string }
-    result: { udid: string; name: string; booted: boolean }
+    result: DeviceClaimResult
   }
   'device:release': {
     params: { sessionId: string }
