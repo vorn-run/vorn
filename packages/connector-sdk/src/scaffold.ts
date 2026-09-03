@@ -20,7 +20,7 @@ const ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
  * `^0.7.0` matches no prerelease at all — a scaffold pinned to it installs
  * nothing. Bumped with the SDK's own version until a stable one exists.
  */
-const SDK_DEPENDENCY_RANGE = '^0.7.0-beta.8'
+const SDK_DEPENDENCY_RANGE = '^0.7.0-beta.9'
 
 /** What a scaffold starts at, in the package and in the changelog section that must match it. */
 const SCAFFOLD_VERSION = '0.1.0'

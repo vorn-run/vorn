@@ -1,6 +1,6 @@
 {
   "name": "@vornrun/desktop",
-  "version": "0.7.0-beta.8",
+  "version": "0.7.0-beta.9",
   "private": true,
   "main": "./out/main/index.js",
   "dependencies": {
