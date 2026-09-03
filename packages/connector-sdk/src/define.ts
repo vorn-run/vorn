@@ -21,6 +21,11 @@ const VIEW_BOX_PATTERN = /^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$/
 const DEDUPE_STRATEGIES: DedupeStrategy[] = ['timestamp', 'lastItem']
 const AUTH_RUNGS: AuthRung[] = ['none', 'cli', 'key', 'oauth']
 
+/** A declared request goes somewhere the connector named: a real URL, … */
+const ABSOLUTE_URL_PATTERN = /^https?:\/\//i
+/** … or one built on a value from its own settings. */
+const CONFIG_ROOTED_URL_PATTERN = /^\{\{\s*config\./
+
 function assertUnique(kind: string, keys: string[]): void {
   const seen = new Set<string>()
   for (const key of keys) {
@@ -160,8 +165,48 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
     if (!KEY_PATTERN.test(action.type ?? '')) {
       throw new Error(`Action type "${action.type}" must start with a letter and be url-safe`)
     }
-    if (typeof action.run !== 'function') {
-      throw new Error(`Action ${action.type} is missing a run() implementation`)
+    // As with triggers, the union already rules these out for TypeScript
+    // authors; the checks stay for plain-JS connectors, where it buys nothing.
+    const loose = action as { run?: unknown; request?: unknown; postReceive?: unknown }
+    const written = typeof loose.run === 'function'
+    const declared = loose.request !== undefined
+    if (written && declared) {
+      throw new Error(`Action ${action.type} declares both run() and a request; pick one`)
+    }
+    if (!written && !declared) {
+      throw new Error(`Action ${action.type} is missing a run() implementation or a request`)
+    }
+    if (declared) {
+      const request = loose.request as { url?: unknown }
+      if (typeof request?.url !== 'string' || request.url.trim() === '') {
+        throw new Error(`Action ${action.type} declares a request with no URL`)
+      }
+      const url = request.url.trim()
+      // Where the call goes has to be the connector's decision. A URL built
+      // from an argument would let a step aim the connector's own credentials
+      // at a host of its choosing, and a relative one names no host at all.
+      if (!ABSOLUTE_URL_PATTERN.test(url) && !CONFIG_ROOTED_URL_PATTERN.test(url)) {
+        throw new Error(
+          `Action ${action.type} declares the request URL "${url}", which is neither absolute ` +
+            `nor rooted in a {{config.…}} value`
+        )
+      }
+    }
+    if (!declared && loose.postReceive !== undefined) {
+      throw new Error(`Action ${action.type} has postReceive but no request for it to reshape`)
+    }
+    for (const input of action.inputs ?? []) {
+      // A field pointing at a set nobody serves draws an empty picker in the
+      // app, which reads as "this connection has none" rather than as a typo.
+      if (
+        input.loadOptions !== undefined &&
+        definition.options?.[input.loadOptions] === undefined
+      ) {
+        throw new Error(
+          `Action ${action.type} argument "${input.key}" loads options from ` +
+            `"${input.loadOptions}", which the connector does not serve`
+        )
+      }
     }
   }
 

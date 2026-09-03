@@ -3,13 +3,26 @@ export { checkConnector, formatFindings } from './check'
 export type { CheckFinding, CheckOptions } from './check'
 export { pollWithDedupe } from './dedupe'
 export { normalizeItem, normalizeItems } from './normalize'
-export { runPoll, drainPoll, runAction, MAX_POLL_PAGES } from './runtime'
+export { runPoll, drainPoll, runAction, runOptions, MAX_POLL_PAGES } from './runtime'
 export type { PollPage, RunPollOptions, RunActionOptions } from './runtime'
+export { applyPostReceive, valueAt } from './post-receive'
+export {
+  resolveRequest,
+  resolveTemplates,
+  executeRequest,
+  asOutput,
+  nextLink,
+  MAX_REQUEST_PAGES
+} from './request'
+export type { RequestScope, ResolvedRequest, Substitution } from './request'
+export { resilientFetch, retryAfterMs, backoffMs } from './resilience'
+export type { RetryPolicy, ResilientFetchOptions } from './resilience'
 export {
   connectionSetup,
   connectorManifest,
   pollToolName,
   MANIFEST_TOOL,
+  OPTIONS_TOOL,
   PREFLIGHT_TOOL
 } from './setup'
 export type { ConnectionSetup, ConnectorManifest } from './setup'
@@ -24,6 +37,8 @@ export {
 export type { PackOptions, PackResult, BundleRequest, BundleOutput } from './pack'
 export { createConnectorServer, serveConnector } from './server'
 export type { ConnectorServerOptions } from './server'
+export { scaffoldFiles, titleCase } from './scaffold'
+export type { ScaffoldOptions, ScaffoldFile } from './scaffold'
 export { createConnectorHarness } from './harness'
 export type { ConnectorHarness, HarnessOptions } from './harness'
 export type {
@@ -33,7 +48,10 @@ export type {
   ActionInputOption,
   ActionInputType,
   ActionOutputField,
+  ActionRequest,
   AuthRung,
+  PaginationStrategy,
+  PostReceiveOp,
   Connector,
   ConnectorAuth,
   ConnectorConfig,
@@ -44,6 +62,8 @@ export type {
   DedupeStrategy,
   FetchContext,
   NormalizedItem,
+  OptionsContext,
+  OptionsLoader,
   PollContext,
   PollOutcome,
   PreflightResult,

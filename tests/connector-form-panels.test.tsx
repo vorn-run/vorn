@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { useState } from 'react'
 import { render, waitFor, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type {
@@ -209,6 +210,88 @@ describe('CallConnectorActionNodeForm', () => {
     )
     expect(await findByText('Issue #')).toBeInTheDocument()
     expect(await findByText('Comment')).toBeInTheDocument()
+  })
+
+  /** An action whose one argument offers choices. */
+  const SELECT_MANIFEST: ConnectorManifest = {
+    auth: [],
+    triggers: [],
+    actions: [
+      {
+        type: 'post',
+        label: 'Post',
+        configFields: [
+          {
+            key: 'level',
+            label: 'Level',
+            type: 'select',
+            options: [
+              { value: 'high', label: 'High' },
+              { value: 'low', label: 'Low' }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+
+  const renderWithSelect = (level: string) => {
+    listConnectionsMock.mockResolvedValue([CONN])
+    listConnectionActionsMock.mockResolvedValue(SELECT_MANIFEST.actions ?? [])
+    return render(
+      <CallConnectorActionNodeForm
+        config={{ ...baseConfig, connectionId: 'conn-1', action: 'post', args: { level } }}
+        onChange={() => {}}
+      />
+    )
+  }
+
+  it('offers the picker while the value is one of the choices', async () => {
+    const { findByText, container } = renderWithSelect('high')
+    await findByText('Level')
+
+    expect(container.querySelector('textarea')).toBeNull()
+    expect(await findByText('Use a template instead')).toBeInTheDocument()
+  })
+
+  it('edits a value the choices do not hold in the template-aware input', async () => {
+    // A step is entitled to compute this, so the form must not lose it.
+    const { findByText, container } = renderWithSelect('{{steps.pick.level}}')
+    await findByText('Level')
+
+    const input = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(input).not.toBeNull()
+    expect(input.value).toBe('{{steps.pick.level}}')
+    expect(await findByText('Choose from the list')).toBeInTheDocument()
+  })
+
+  it('swaps to the template input when asked, keeping the value it had', async () => {
+    const { findByText, container } = renderWithSelect('high')
+    fireEvent.click(await findByText('Use a template instead'))
+
+    const input = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(input.value).toBe('high')
+  })
+
+  it('hands a template back after a trip through the list', async () => {
+    listConnectionsMock.mockResolvedValue([CONN])
+    listConnectionActionsMock.mockResolvedValue(SELECT_MANIFEST.actions ?? [])
+    function Stateful() {
+      const [level, setLevel] = useState('{{steps.pick.level}}')
+      return (
+        <CallConnectorActionNodeForm
+          config={{ ...baseConfig, connectionId: 'conn-1', action: 'post', args: { level } }}
+          onChange={(next) => setLevel((next.args as { level: string }).level)}
+        />
+      )
+    }
+    const { findByText, container } = render(<Stateful />)
+    fireEvent.click(await findByText('Choose from the list'))
+    expect(container.querySelector('textarea')).toBeNull()
+
+    fireEvent.click(await findByText('Use a template instead'))
+    const input = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(input.value).toBe('{{steps.pick.level}}')
   })
 
   it('calls onChange when an argument value is edited', async () => {

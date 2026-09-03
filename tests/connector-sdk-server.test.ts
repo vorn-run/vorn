@@ -303,6 +303,10 @@ describe('vorn-connector CLI', () => {
     expect(await runCli(['manifest'], { load, write: noModule.write })).toBe(1)
     expect(noModule.lines.join('\n')).toContain('Missing <module>')
 
+    const noId = capture()
+    expect(await runCli(['new'], { load, write: noId.write })).toBe(1)
+    expect(noId.lines.join('\n')).toContain('Missing <id>')
+
     const noTrigger = capture()
     expect(await runCli(['poll', 'pkg'], { load, write: noTrigger.write })).toBe(1)
     expect(noTrigger.lines.join('\n')).toContain('Missing <trigger>')

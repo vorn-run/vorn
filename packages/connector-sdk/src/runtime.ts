@@ -1,6 +1,14 @@
 import { pollWithDedupe } from './dedupe'
 import { normalizeItems } from './normalize'
-import type { Connector, ConnectorConfig, NormalizedItem, PollContext } from './types'
+import { executeRequest } from './request'
+import { resilientFetch, type RetryPolicy } from './resilience'
+import type {
+  ActionInputOption,
+  Connector,
+  ConnectorConfig,
+  NormalizedItem,
+  PollContext
+} from './types'
 
 export interface PollPage {
   items: NormalizedItem[]
@@ -14,6 +22,11 @@ export interface RunPollOptions {
   cursor?: string
   limit?: number
   now?: () => string
+  /** Replaced by the harness and by tests; defaults to the global fetch. */
+  fetchImpl?: typeof fetch
+  retry?: RetryPolicy
+  /** Replaced in tests so backoff costs no real time. */
+  sleep?: (ms: number) => Promise<void>
 }
 
 /** Longest chain of pages `drainPoll` will follow before calling it a bug. */
@@ -40,7 +53,14 @@ export async function runPoll(
     ...(options.since !== undefined && { since: options.since }),
     ...(options.cursor !== undefined && { cursor: options.cursor }),
     ...(options.limit !== undefined && { limit: options.limit }),
-    now
+    now,
+    // A poll only reads, so every failure it meets is worth trying again.
+    fetch: resilientFetch({
+      fetchImpl: options.fetchImpl ?? globalThis.fetch,
+      retryable: true,
+      ...(options.retry !== undefined && { retry: options.retry }),
+      ...(options.sleep !== undefined && { sleep: options.sleep })
+    })
   }
 
   const outcome =
@@ -91,20 +111,79 @@ export async function drainPoll(
 export interface RunActionOptions {
   config?: ConnectorConfig
   now?: () => string
+  /** Replaced by the harness and by tests; defaults to the global fetch. */
+  fetchImpl?: typeof fetch
+  retry?: RetryPolicy
+  /** Replaced in tests so backoff costs no real time. */
+  sleep?: (ms: number) => Promise<void>
+}
+
+/** Methods that change nothing, so repeating one cannot do a thing twice. */
+const SAFE_METHODS = new Set(['GET', 'HEAD'])
+
+/**
+ * Ask a connector what one of its dynamic fields can be.
+ *
+ * Listing choices only reads, so it retries like a poll does. A bare string is
+ * taken as a choice that shows itself, which is the common case.
+ */
+export async function runOptions(
+  connector: Connector,
+  name: string,
+  options: RunActionOptions = {}
+): Promise<ActionInputOption[]> {
+  const loader = connector.options?.[name]
+  if (!loader) {
+    throw new Error(`Connector ${connector.id} serves no options set "${name}"`)
+  }
+
+  const loaded = await loader({
+    config: options.config ?? {},
+    now: options.now ?? (() => new Date().toISOString()),
+    fetch: resilientFetch({
+      fetchImpl: options.fetchImpl ?? globalThis.fetch,
+      retryable: true,
+      ...(options.retry !== undefined && { retry: options.retry }),
+      ...(options.sleep !== undefined && { sleep: options.sleep })
+    })
+  })
+
+  if (!Array.isArray(loaded)) {
+    throw new Error(`Options set "${name}" did not return an array`)
+  }
+  return loaded.map((entry) =>
+    typeof entry === 'string' ? { value: entry } : { ...entry, value: String(entry.value) }
+  )
+}
+
+/** How much of a bad value to quote back, so an error names it without a wall of text. */
+const MAX_QUOTED_VALUE = 80
+
+function quote(value: string): string {
+  return value.length > MAX_QUOTED_VALUE ? `${value.slice(0, MAX_QUOTED_VALUE)}…` : value
 }
 
 function coerceArg(value: unknown, type: string | undefined): unknown {
   if (typeof value !== 'string') return value
   if (type === 'number') {
     const parsed = Number(value)
-    if (Number.isNaN(parsed)) throw new Error(`Expected a number, got "${value}"`)
+    if (Number.isNaN(parsed)) throw new Error(`Expected a number, got "${quote(value)}"`)
     return parsed
   }
   if (type === 'boolean') {
     if (value === 'true') return true
     if (value === 'false') return false
-    throw new Error(`Expected a boolean, got "${value}"`)
+    throw new Error(`Expected a boolean, got "${quote(value)}"`)
   }
+  if (type === 'json') {
+    try {
+      return JSON.parse(value)
+    } catch {
+      throw new Error(`Expected JSON, got "${quote(value)}"`)
+    }
+  }
+  // `select` and `string` are both strings here: a select's value is one of
+  // its choices, which the served schema already states.
   return value
 }
 
@@ -144,9 +223,46 @@ export async function runAction(
     }
   }
 
+  const config = options.config ?? {}
+  // Repeating a write invents a second one, so a retry needs the action's word
+  // that it is safe — except for a declared read, which says so by its method.
+  const method = (action.request?.method ?? 'GET').toUpperCase()
+  const retryable =
+    action.idempotent === true || (action.request !== undefined && SAFE_METHODS.has(method))
+  const fetchImpl = resilientFetch({
+    fetchImpl: options.fetchImpl ?? globalThis.fetch,
+    retryable,
+    ...(options.retry !== undefined && { retry: options.retry }),
+    ...(options.sleep !== undefined && { sleep: options.sleep })
+  })
+
+  if (action.request !== undefined) {
+    try {
+      return await executeRequest(
+        action.request,
+        action.postReceive,
+        { args: coerced, config },
+        { fetchImpl }
+      )
+    } catch (error) {
+      // Which action failed is the first thing a reader needs; the message
+      // underneath already says what about it went wrong.
+      throw new Error(
+        `Action ${actionType}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      )
+    }
+  }
+  // `defineConnector` rules this out; a connector hand-built in plain JS and
+  // passed straight here has not been through it.
+  if (typeof action.run !== 'function') {
+    throw new Error(`Action ${actionType} has neither a run() implementation nor a request`)
+  }
+
   const output = await action.run(coerced, {
-    config: options.config ?? {},
-    now: options.now ?? (() => new Date().toISOString())
+    config,
+    now: options.now ?? (() => new Date().toISOString()),
+    fetch: fetchImpl
   })
   return output ?? {}
 }

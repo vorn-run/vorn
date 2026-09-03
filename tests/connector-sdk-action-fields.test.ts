@@ -7,6 +7,7 @@ const manifestFor = (action: Partial<ActionDefinition>) =>
     defineConnector({
       id: 'acme',
       name: 'Acme',
+      options: { channels: () => [] },
       actions: [{ type: 'post', label: 'Post', run: () => ({}), ...action } as ActionDefinition]
     })
   ).actions[0]

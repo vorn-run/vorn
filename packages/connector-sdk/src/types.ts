@@ -51,6 +51,13 @@ export interface ConnectorConfigField {
   secret?: boolean
   description?: string
   default?: string
+  /**
+   * A note for whoever is building this connector rather than using it: where
+   * the value is found, what a good one looks like. The factory's agent reads
+   * these, so a field that is easy to get wrong can say so once here instead of
+   * being got wrong in every connector that copies it.
+   */
+  builderHint?: string
 }
 
 export type ConnectorConfig = Record<string, string | undefined>
@@ -69,6 +76,8 @@ export interface PollContext {
   limit?: number
   /** Injectable clock so tests are deterministic. */
   now(): string
+  /** Fetch with the SDK's retry and backoff applied. A poll is always a read. */
+  fetch: typeof fetch
 }
 
 export interface PollOutcome {
@@ -111,6 +120,8 @@ export interface FetchContext {
   limit?: number
   /** Injectable clock so tests are deterministic. */
   now(): string
+  /** Fetch with the SDK's retry and backoff applied. A fetch is always a read. */
+  fetch: typeof fetch
 }
 
 /**
@@ -213,6 +224,8 @@ export interface ActionInputField {
    * the projects in an account.
    */
   loadOptions?: string
+  /** A note for whoever is building the connector, not for whoever runs it. */
+  builderHint?: string
 }
 
 /**
@@ -229,9 +242,63 @@ export interface ActionOutputField {
 export interface ActionContext {
   config: ConnectorConfig
   now(): string
+  /**
+   * Fetch, with the SDK's retry, backoff and rate-limit handling already
+   * applied. Prefer it over the global one: a hand-written action gets the
+   * same resilience a declared request does, and tests can replace it.
+   */
+  fetch: typeof fetch
 }
 
-export interface ActionDefinition {
+/**
+ * One step of reshaping a response.
+ *
+ * Each op reads the whole value, or just what lives at its dotted `path`, and
+ * leaves the rest alone. They compose left to right, which is enough to turn
+ * most envelopes into the record a workflow step wants.
+ */
+export type PostReceiveOp =
+  /** Keep only these keys, of the object or of every object in the list. */
+  | { op: 'pick'; keys: string[]; path?: string }
+  /** Give a key a better name, of the object or of every object in the list. */
+  | { op: 'rename'; from: string; to: string; path?: string }
+  /** Replace the whole value with what is at this path — unwrap the envelope. */
+  | { op: 'flatten'; path: string }
+  /** Keep the list entries whose `key` equals this value. */
+  | { op: 'filter'; key: string; equals: unknown; path?: string }
+  /** Run these ops against every entry of the list. */
+  | { op: 'map'; ops: PostReceiveOp[]; path?: string }
+
+/**
+ * How to ask for the page after this one.
+ *
+ * Declared rather than written because every source does the same three things
+ * — hand back a cursor, count pages, or put a link in a header — and following
+ * them by hand is where "only the first 100 items ever arrive" comes from.
+ */
+export type PaginationStrategy =
+  /** The response carries a cursor at `cursorPath`; send it back as `param`. */
+  | { kind: 'cursor'; cursorPath: string; param: string; itemsPath?: string }
+  /** Ask for page 1, 2, 3 … under `param`, until a page comes back short. */
+  | { kind: 'page'; param: string; startPage?: number; itemsPath?: string }
+  /** Follow the `Link` header's `rel="next"`, as paged HTTP APIs do. */
+  | { kind: 'link'; itemsPath?: string }
+
+/** An HTTP call an action makes, with `{{args.x}}` and `{{config.y}}` filled in. */
+export interface ActionRequest {
+  /** Defaults to GET. */
+  method?: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  url: string
+  headers?: Record<string, string>
+  /** Query parameters. An argument that resolves to nothing is left out. */
+  query?: Record<string, string>
+  /** Sent as JSON unless it is already a string, or a content type says otherwise. */
+  body?: unknown
+  /** Follow every page rather than returning only the first. */
+  paginate?: PaginationStrategy
+}
+
+interface ActionBase {
   /** Action key, e.g. `closeWorkItem`. Becomes an MCP tool of the same name. */
   type: string
   label: string
@@ -239,16 +306,37 @@ export interface ActionDefinition {
   /**
    * Whether repeating the call with the same arguments is safe. Surfaced in
    * the MCP tool description, because an agent retrying a failed step has no
-   * other way to know whether it is about to create a second issue.
+   * other way to know whether it is about to create a second issue — and it is
+   * what decides whether the SDK may retry the call itself.
    */
   idempotent?: boolean
   inputs?: ActionInputField[]
   outputs?: ActionOutputField[]
-  run(
-    args: Record<string, unknown>,
-    context: ActionContext
-  ): Promise<Record<string, unknown> | void> | Record<string, unknown> | void
 }
+
+/**
+ * An action is either declared or hand-written, never both — the same union
+ * shape triggers use, so the invalid combination is a type error while the
+ * connector is being written rather than a throw once it is installed.
+ */
+export type ActionDefinition = ActionBase &
+  (
+    | {
+        run(
+          args: Record<string, unknown>,
+          context: ActionContext
+        ): Promise<Record<string, unknown> | void> | Record<string, unknown> | void
+        request?: never
+        postReceive?: never
+      }
+    | {
+        /** The call to make. The SDK sends it and keeps the response. */
+        request: ActionRequest
+        /** How to reshape what came back, before the step sees it. */
+        postReceive?: PostReceiveOp[]
+        run?: never
+      }
+  )
 
 /**
  * A connector's own glyph, so an installed connector is recognizable in a list
@@ -311,6 +399,24 @@ export interface ConnectorAuth {
   keys?: string[]
 }
 
+/** What an options set is given to work out its choices. */
+export interface OptionsContext {
+  config: ConnectorConfig
+  now(): string
+  /** Fetch with the SDK's retry and backoff applied. Listing choices is a read. */
+  fetch: typeof fetch
+}
+
+/**
+ * Answers the question "what can this field be?" against a live connection.
+ *
+ * A bare string is taken as a choice that shows itself; return the object form
+ * when the value a step should send and the words a person should read differ.
+ */
+export type OptionsLoader = (
+  context: OptionsContext
+) => Promise<Array<ActionInputOption | string>> | Array<ActionInputOption | string>
+
 export interface ConnectorDefinition {
   /** Stable connector id, e.g. `azure-devops`. */
   id: string
@@ -319,6 +425,12 @@ export interface ConnectorDefinition {
   description?: string
   icon?: ConnectorIcon
   config?: ConnectorConfigField[]
+  /**
+   * Named sets of choices an input can point at with `loadOptions`, for fields
+   * whose values only exist against a live connection — the channels in a
+   * workspace, the projects in an account.
+   */
+  options?: Record<string, OptionsLoader>
   /**
    * How this connector signs in. Absent means the app cannot say, which reads
    * as "a key, probably" — declare it rather than leave that to be guessed.

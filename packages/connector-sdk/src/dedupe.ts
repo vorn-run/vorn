@@ -197,7 +197,8 @@ export async function pollWithDedupe(
       config: context.config,
       ...(state && { lastItemId: state.id }),
       ...(context.limit !== undefined && { limit: context.limit }),
-      now: context.now
+      now: context.now,
+      fetch: context.fetch
     })
     return lastItemPoll(fetched, state, context, polledAt)
   }
@@ -210,7 +211,8 @@ export async function pollWithDedupe(
     config: context.config,
     ...(since !== undefined && { since }),
     ...(context.limit !== undefined && { limit: context.limit }),
-    now: context.now
+    now: context.now,
+    fetch: context.fetch
   })
   return timestampPoll(fetched, state, context, polledAt)
 }
