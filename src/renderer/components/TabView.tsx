@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
-import { isTerminalPane, isPromotedCardId } from '../lib/pane-id'
+import { isTerminalPane, isPromotedCardId, paneOwnerId } from '../lib/pane-id'
 import { usePromotedCardsByOwner, usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PromotedPaneCard } from './PromotedPaneCard'
 import { CardSubjectIcon } from './CardSubjectIcon'
@@ -202,10 +202,13 @@ export function TabView() {
   // The restored tab names a session that has not arrived yet, so clamping it
   // against the list before then throws the restore away -- first to null while
   // the list is empty, then onto whichever session happened to land first.
-  const viewRestored = useAppStore((s) => s.viewRestored)
+  const knownSessionIds = useAppStore((s) => s.knownSessionIds)
 
   useEffect(() => {
-    if (!viewRestored) return
+    if (knownSessionIds === null) return
+    // A tab naming a session the server has but the board is not showing is
+    // waiting for the banner to bring it back, not pointing at nothing.
+    if (activeTabId && knownSessionIds.has(paneOwnerId(activeTabId))) return
     if (allTabIds.length === 0) {
       if (activeTabId !== null) setActiveTabId(null)
       return
@@ -213,7 +216,7 @@ export function TabView() {
     if (!activeTabId || !allTabIds.includes(activeTabId)) {
       setActiveTabId(allTabIds[0])
     }
-  }, [allTabIds, activeTabId, setActiveTabId, viewRestored])
+  }, [allTabIds, activeTabId, setActiveTabId, knownSessionIds])
 
   const handleSelectTab = (id: string): void => {
     setActiveTabId(id)

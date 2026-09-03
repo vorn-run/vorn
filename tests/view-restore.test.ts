@@ -14,7 +14,7 @@ beforeEach(() => {
     activeProject: null,
     activeWorktreePath: null,
     visibleTerminalIds: [],
-    viewRestored: true,
+    knownSessionIds: new Set<string>(),
     terminals: new Map()
   })
 })
@@ -89,10 +89,11 @@ describe('the project scope a reload used to revert', () => {
   })
 })
 
-/** Seed the live set the reconcile reads, without standing up real terminals. */
+/** Seed what the server is known to have, without standing up real terminals. */
 function live(...ids: string[]): void {
   useAppStore.setState({
-    terminals: new Map(ids.map((id) => [id, { id } as never]))
+    terminals: new Map(ids.map((id) => [id, { id } as never])),
+    knownSessionIds: new Set(ids)
   })
 }
 
@@ -120,9 +121,9 @@ describe('pruning view state whose session never came back', () => {
     expect(useAppStore.getState().activeTabId).toBeNull()
   })
 
-  it('holds everything back until the board says it has settled', () => {
+  it('holds everything back until the server has been asked', () => {
     useAppStore.setState({
-      viewRestored: false,
+      knownSessionIds: null,
       minimizedTerminals: new Set(['term-1']),
       activeTabId: 'term-1'
     })
@@ -131,13 +132,13 @@ describe('pruning view state whose session never came back', () => {
     expect(useAppStore.getState().activeTabId).toBe('term-1')
   })
 
-  it('prunes once the board settles with nothing running at all', () => {
+  it('prunes once the server answers that it has nothing at all', () => {
     useAppStore.setState({
-      viewRestored: false,
+      knownSessionIds: null,
       minimizedTerminals: new Set(['term-1']),
       activeTabId: 'term-1'
     })
-    useAppStore.getState().markViewRestored()
+    useAppStore.getState().setKnownSessions([])
     useAppStore.getState().setVisibleTerminalIds([])
     expect([...useAppStore.getState().minimizedTerminals]).toEqual([])
     expect(useAppStore.getState().activeTabId).toBeNull()
@@ -148,5 +149,18 @@ describe('pruning view state whose session never came back', () => {
     live('term-1')
     useAppStore.getState().setVisibleTerminalIds(['term-1'])
     expect(useAppStore.getState().activeProject).toBe('vorn')
+  })
+})
+
+describe('a session the board is not showing yet', () => {
+  it('keeps its pane while the banner is still offering to bring it back', () => {
+    // Reopen off: the ended session is not on the board, but the server has it.
+    useAppStore.setState({
+      terminals: new Map([['term-1', { id: 'term-1' } as never]]),
+      knownSessionIds: new Set(['term-1', 'term-2']),
+      minimizedTerminals: new Set(['browser:term-2'])
+    })
+    useAppStore.getState().setVisibleTerminalIds(['term-1'])
+    expect([...useAppStore.getState().minimizedTerminals]).toEqual(['browser:term-2'])
   })
 })

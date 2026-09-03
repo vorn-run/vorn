@@ -174,7 +174,8 @@ describe('the terminals panel', () => {
     // bug, where there is no removal to hang the cleanup off.
     act(() =>
       useAppStore.setState({
-        terminals: new Map([...s().terminals].filter(([id]) => id !== 'sh1')) as never
+        terminals: new Map([...s().terminals].filter(([id]) => id !== 'sh1')) as never,
+        knownSessionIds: new Set([...s().terminals.keys()].filter((id) => id !== 'sh1'))
       })
     )
 
@@ -186,7 +187,8 @@ describe('the terminals panel', () => {
     act(() => s().openTerminalsPane('owner', 'sh1'))
     act(() =>
       useAppStore.setState({
-        terminals: new Map([...s().terminals].filter(([id]) => id !== 'sh1')) as never
+        terminals: new Map([...s().terminals].filter(([id]) => id !== 'sh1')) as never,
+        knownSessionIds: new Set([...s().terminals.keys()].filter((id) => id !== 'sh1'))
       })
     )
 

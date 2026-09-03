@@ -54,13 +54,10 @@ async function reconcile(options: { showCold: boolean; resume: boolean }): Promi
     console.error('[board] failed to read what the server has:', err)
     return null
   })
-  // A board left as it is beats a board rebuilt from an answer nobody gave --
-  // but it is still the board we have, so the restored view stops waiting for
-  // one that is never coming.
-  if (!answers) {
-    useAppStore.getState().markViewRestored()
-    return
-  }
+  // A board left as it is beats a board rebuilt from an answer nobody gave. The
+  // restored view keeps waiting too: pruning it against a list nobody supplied
+  // would delete panes on the strength of a failed request.
+  if (!answers) return
   const [active, carried]: [TerminalSession[], RestoredSession[]] = answers
 
   const store = useAppStore.getState()
@@ -107,9 +104,13 @@ async function reconcile(options: { showCold: boolean; resume: boolean }): Promi
       })
     }
 
+  // Everything the server has, running or ended -- not what the board ended up
+  // showing. With reopen off the ended ones are left for the banner to offer,
+  // and their panes have to survive until that offer is answered.
+  //
   // Before the resumes, not after: each one spawns a process and goes in order,
-  // and the view has nothing to wait for once every pane is on the board.
-  useAppStore.getState().markViewRestored()
+  // and the view has nothing left to wait for once the answer is in.
+  useAppStore.getState().setKnownSessions([...live, ...carried.map((one) => one.session.id)])
 
   if (options.resume) await resumeAll(justEnded)
 }

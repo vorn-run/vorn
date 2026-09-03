@@ -367,15 +367,20 @@ export interface UISlice {
   terminalOrder: string[]
   visibleTerminalIds: string[]
   /**
-   * True once sessions have landed and the restored view has been reconciled
-   * against them.
+   * Every session the server has, running or ended — or null before it has been
+   * asked.
    *
-   * Until then an empty session list means "not yet", not "nothing" — and the
-   * two are indistinguishable from a component. Anything that clamps a restored
-   * id against what exists has to wait for this, or it discards the restore
-   * while the sessions are still arriving.
+   * Not the same set as `terminals`, and the difference is the whole reason this
+   * exists. Null means "not asked yet", which an empty board cannot be told
+   * apart from "nothing to show". And with reopen turned off the board
+   * deliberately leaves the ended sessions out, so pruning the restored view
+   * against what is on screen would throw away the panes of every session the
+   * banner is at that moment offering to bring back.
+   *
+   * So this is what the view is reconciled against: what exists, not what is
+   * currently drawn.
    */
-  viewRestored: boolean
+  knownSessionIds: Set<string> | null
   focusableTerminalIds: string[]
   minimizedTerminals: Set<string>
   /** Session ids whose file-tree pane is open. Keyed by owner, one per session. */
@@ -479,14 +484,12 @@ export interface UISlice {
   setTerminalOrder: (order: string[]) => void
   setVisibleTerminalIds: (ids: string[]) => void
   /**
-   * Say that the board now holds everything the server knows about, so the
-   * restored view can be reconciled against it.
+   * Record every session the server has, once a sync pass has asked.
    *
-   * Called once the sync pass has finished adding sessions -- including the
-   * pass that found none, which is a settled board too and the case a
-   * "wait for a live session" rule would leave waiting forever.
+   * Called even when the answer is none, which is a settled board too and the
+   * case a "wait for a live session" rule would leave waiting forever.
    */
-  markViewRestored: () => void
+  setKnownSessions: (ids: string[]) => void
   setFocusableTerminalIds: (ids: string[]) => void
   /**
    * Move `draggedId` to where `droppedOnId` sits in the session order.

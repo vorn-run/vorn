@@ -38,7 +38,10 @@ function seed(ids: string[] = ['t1']): void {
       minimizedTerminals: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids,
-      visibleTerminalIds: []
+      visibleTerminalIds: [],
+      // What the server has. The reconcile prunes against this, not against the
+      // board, so a fixture that seeds one without the other prunes everything.
+      knownSessionIds: new Set(ids)
     })
   })
 }
@@ -393,7 +396,8 @@ describe('pane store actions', () => {
     // localStorage forever and could attach to a recycled id.
     const terminals = new Map(s().terminals)
     terminals.delete('t2')
-    act(() => useAppStore.setState({ terminals }))
+    // What the server has, which is what the reconcile prunes against.
+    act(() => useAppStore.setState({ terminals, knownSessionIds: new Set(['t1']) }))
     act(() => s().setVisibleTerminalIds(['t1']))
 
     expect(s().filesPanes.has('t1')).toBe(true)
@@ -1011,7 +1015,8 @@ describe('popping an item out to its own card', () => {
         terminals: new Map([
           ['t2', { id: 't2', session: session('t2'), status: 'idle', lastOutputTimestamp: 1 }]
         ]),
-        visibleTerminalIds: ['t2']
+        visibleTerminalIds: ['t2'],
+        knownSessionIds: new Set(['t2'])
       } as never)
     )
     expect(s().filesPanes.has('t1')).toBe(true)

@@ -226,12 +226,18 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
         markSeededFromServer(terminalId)
       }
       flushHeld(seq)
-      // An empty write to get a callback after everything above it has been
+      // An empty write, to get a callback after everything above it has been
       // parsed. The blocks the anchor names are built by that parsing, and the
       // held chunks scroll the pane back to the bottom on their way through, so
-      // there is no earlier point where the restore would survive. Out of the
+      // there is no earlier point at which the restore would survive. Out of the
       // parse loop itself, which is where xterm runs write callbacks.
-      entry.term.write('', () => setTimeout(() => restoreScrollAnchor(terminalId), 0))
+      //
+      // Only when there is a position to put back, so a terminal that was left
+      // at the bottom -- which is nearly all of them -- puts nothing extra
+      // through the queue at all.
+      if (readScrollAnchor(terminalId)) {
+        entry.term.write('', () => setTimeout(() => restoreScrollAnchor(terminalId), 0))
+      }
       // The one moment a pane learns the truth about its session. A window
       // opened onto a terminal that died while it was closed has no start-up
       // reconciliation to tell it -- this is where it finds out.

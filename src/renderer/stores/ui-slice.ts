@@ -749,7 +749,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     (savedGrid.statusFilter as 'all' | 'running' | 'waiting' | 'idle' | 'error') ?? 'all',
   terminalOrder: [],
   visibleTerminalIds: [],
-  viewRestored: false,
+  knownSessionIds: null,
   focusableTerminalIds: [],
   minimizedTerminals: new Set(loadView().minimized),
   ...loadPanes(),
@@ -887,10 +887,17 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const unchanged = sameIds(state.visibleTerminalIds, ids)
       // Sessions restore by their persisted id, so pane entries stay valid across
       // restarts — but a session that never comes back would leave its entry
-      // behind forever. Reconcile against the live set as it settles.
-      const live = new Set(state.terminals.keys())
+      // behind forever.
+      //
+      // Reconciled against what the server has rather than against what is on
+      // the board. Those differ on the launch where reopen is off: the ended
+      // sessions are deliberately left off the board and offered by the banner
+      // instead, and pruning against the board would delete the panes of every
+      // one of them a moment before the person is asked whether to bring them
+      // back. Null until a sync pass has asked, which is not the same as none.
+      const live = state.knownSessionIds
       const reconciled =
-        live.size > 0
+        live !== null
           ? reconcilePanes(
               state.filesPanes,
               state.editorPanes,
@@ -907,12 +914,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // Gating both on the list changing meant a launch where the visible set
       // never moved (everything filtered out, or every restored session
       // minimized) never pruned a dead session's panes at all.
-      // Gated on the settled flag rather than on a live session: the pass that
-      // found nothing running still settles the board, and pruning before it
-      // would drop the restored view against a list that is merely still empty.
-      const view = state.viewRestored
-        ? reconcileView(state.minimizedTerminals, state.activeTabId, state.maximizedPaneId, live)
-        : null
+      const view =
+        live !== null
+          ? reconcileView(state.minimizedTerminals, state.activeTabId, state.maximizedPaneId, live)
+          : null
       if (unchanged && !reconciled && !view) return {}
       return {
         ...(unchanged ? {} : { visibleTerminalIds: ids }),
@@ -920,7 +925,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
         ...(view ?? {})
       }
     }),
-  markViewRestored: () => set((state) => (state.viewRestored ? {} : { viewRestored: true })),
+  setKnownSessions: (ids) => set({ knownSessionIds: new Set(ids) }),
 
   setFocusableTerminalIds: (ids) =>
     set((state) => (sameIds(state.focusableTerminalIds, ids) ? {} : { focusableTerminalIds: ids })),
