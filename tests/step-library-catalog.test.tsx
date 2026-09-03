@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, cleanup, fireEvent, screen } from '@testing-library/react'
+import { act, render, cleanup, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ConnectorCatalogItem } from '../src/shared/types'
 
@@ -64,16 +64,19 @@ const listConnectorCatalog = vi.fn(async () => ({
   templates: [],
   mcpServers: []
 }))
+const refreshCatalog = vi.fn()
 ;(window as unknown as { api: Record<string, unknown> }).api = {
   ...(window as unknown as { api?: Record<string, unknown> }).api,
   listConnectionActions,
-  listConnectorCatalog
+  listConnectorCatalog,
+  refreshConnectorCatalog: refreshCatalog
 }
 
 const { StepLibrary } =
   await import('../src/renderer/components/workflow-editor/panels/StepLibrary')
 type LibraryScope = Parameters<typeof StepLibrary>[0]['scope']
-const { __resetCatalogCacheForTests } = await import('../src/renderer/lib/use-connector-catalog')
+const { __resetCatalogCacheForTests, refreshConnectorCatalog } =
+  await import('../src/renderer/lib/use-connector-catalog')
 
 beforeEach(() => {
   __resetCatalogCacheForTests()
@@ -150,6 +153,23 @@ describe('steps from connectors nobody has installed', () => {
     expect(screen.getAllByText('add connection').length).toBeGreaterThan(0)
     // Discord is still only in the catalog, so its row still promises the install.
     expect(screen.getAllByText('install on add')).toHaveLength(1)
+  })
+
+  it('shows what Check now found, without the panel being reopened', async () => {
+    draw()
+    await screen.findAllByText('Post message')
+
+    refreshCatalog.mockResolvedValue({
+      items: [{ ...SLACK, actions: [{ type: 'status', label: 'Set status' }] }],
+      templates: [],
+      mcpServers: []
+    })
+    await act(async () => {
+      await refreshConnectorCatalog()
+    })
+
+    expect(await screen.findByText('Set status')).toBeInTheDocument()
+    expect(screen.queryByText('Post message')).toBeNull()
   })
 
   it('offers none of this when a step is being swapped in place', async () => {
