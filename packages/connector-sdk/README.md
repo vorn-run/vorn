@@ -436,8 +436,9 @@ vorn-connector pack <module>              Build an installable .vorn.tgz pack
 vorn-connector serve <module>             Serve on stdio (what Vorn runs)
 ```
 
-`new` accepts `--out <dir>` and `--name "Display Name"`; `pack` accepts
-`--out <dir>`.
+`new` accepts `--out <dir>`, `--name "Display Name"`, and `--repo-conventions`,
+which shapes the package the way the connectors repository expects it (scoped
+name, changelog, compiler and test settings); `pack` accepts `--out <dir>`.
 
 `poll` accepts `--since <iso>` and `--limit <n>`, and reads the connector's
 declared config from your shell environment — the fastest way to confirm
