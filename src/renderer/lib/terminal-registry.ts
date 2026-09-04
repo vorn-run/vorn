@@ -104,10 +104,6 @@ function flushWrites(): void {
     const data = chunks.length === 1 ? chunks[0].data : chunks.map((c) => c.data).join('')
     const entry = registry.get(id)
     if (entry) entry.term.write(data)
-    // Only when it was actually written. A handler that fires for a terminal
-    // nothing drew into is reporting something nobody saw -- and the one handler
-    // that exists rings a bell.
-    if (entry) statusHandlers.get(id)?.(data)
   }
   pendingWrites.clear()
 }
@@ -191,9 +187,6 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
     if (!kept.length) return
     const data = kept.map((chunk) => chunk.data).join('')
     entry.term.write(data)
-    // Live, unlike the seed: a bell that rang while the seed was in flight rang
-    // just now, and holding it back for a round trip would drop it entirely.
-    statusHandlers.get(terminalId)?.(data)
   }
 
   /**
@@ -268,17 +261,6 @@ let reportNotLive: NotLiveReporter | null = null
 
 export function setNotLiveReporter(fn: NotLiveReporter | null): void {
   reportNotLive = fn
-}
-
-// --- Status detection handler registry ---
-type StatusHandler = (data: string) => void
-const statusHandlers = new Map<string, StatusHandler>()
-
-export function registerStatusHandler(terminalId: string, handler: StatusHandler): () => void {
-  statusHandlers.set(terminalId, handler)
-  return () => {
-    statusHandlers.delete(terminalId)
-  }
 }
 
 /**
@@ -915,7 +897,6 @@ export function destroyTerminal(terminalId: string): void {
   // A seed still in flight would otherwise resolve and write into a terminal
   // that no longer exists.
   hydrating.delete(terminalId)
-  statusHandlers.delete(terminalId)
   entry._disposeCommandBlocks?.()
   entry._disposeCommandBlocks = null
   entry._disposeScrollAnchor?.()

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { registerSlot, unregisterSlot, focusTerminal } from '../lib/terminal-registry'
-import { useStatusDetection } from '../hooks/useStatusDetection'
+import { useOnScreenOnce } from '../hooks/useOnScreenOnce'
 
 interface Props {
   terminalId: string
@@ -18,17 +18,21 @@ interface Props {
  */
 export function TerminalSlot({ terminalId, isFocused, className, style }: Props) {
   const ref = useRef<HTMLDivElement>(null)
-
-  useStatusDetection(terminalId)
+  // Registering is what builds the xterm and pulls the session's scrollback, up
+  // to 256KB of it. Every card on the board mounts one of these, so a phone
+  // opening a board of ten paid for ten before reading anything -- and again on
+  // every reconnect, which on a phone is every network change. Waiting until the
+  // slot is near the viewport spends that on the cards somebody is looking at.
+  const onScreen = useOnScreenOnce(ref)
 
   useEffect(() => {
     const el = ref.current
-    if (!el) return
+    if (!el || !onScreen) return
     registerSlot(terminalId, el)
     return () => {
       unregisterSlot(terminalId, el)
     }
-  }, [terminalId])
+  }, [terminalId, onScreen])
 
   useEffect(() => {
     if (!isFocused) return

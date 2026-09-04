@@ -662,3 +662,52 @@ describe('idle timeout', () => {
     expect(() => ptyManager.killPty('gone')).not.toThrow()
   })
 })
+
+describe('the bell', () => {
+  it('rings for output that is actually arriving', () => {
+    const { session, fake } = createAgent()
+
+    fake.emitData('done \x07')
+    vi.advanceTimersByTime(50)
+
+    expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([{ id: session.id }])
+  })
+
+  it('rings for a plain shell too', () => {
+    // The status analysis above this returns early for a shell. A bell is not
+    // status -- a shell that rings wants you just as much as an agent does.
+    const session = ptyManager.createShellPty('/tmp/vorn-proj')
+    const fake = lastPty()
+
+    fake.emitData('\x07')
+    vi.advanceTimersByTime(50)
+
+    expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([{ id: session.id }])
+  })
+
+  it('stays quiet for output with no bell in it', () => {
+    const { fake } = createAgent()
+
+    fake.emitData('perfectly ordinary output\n')
+    vi.advanceTimersByTime(50)
+
+    expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([])
+  })
+
+  it('does not ring for a screen that is only being replayed', () => {
+    // The property this replaces was enforced in the client, which had to know
+    // which bytes were a seed and which were live. Here it holds by
+    // construction: a replay is read from the scrollback and never passes
+    // through the flush that announces one.
+    const { session, fake } = createAgent()
+    fake.emitData('ding \x07 ding')
+    vi.advanceTimersByTime(50)
+    messages.length = 0
+
+    // Whatever a pane does with the scrollback afterwards, it is not output.
+    ptyManager.getOutput(session.id, 100)
+    vi.advanceTimersByTime(50)
+
+    expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([])
+  })
+})

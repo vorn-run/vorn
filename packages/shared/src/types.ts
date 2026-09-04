@@ -1582,6 +1582,7 @@ export const IPC = {
   TERMINAL_ATTACH: 'terminal:attach',
   TERMINAL_LIST_ACTIVE: 'terminal:listActive',
   TERMINAL_DATA: 'terminal:data',
+  TERMINAL_BELL: 'terminal:bell',
   TERMINAL_EXIT: 'terminal:exit',
   SESSION_CREATED: 'session:created',
   SESSION_UPDATED: 'session:updated',

@@ -6,15 +6,10 @@ import '@testing-library/jest-dom/vitest'
 const hoisted = vi.hoisted(() => ({
   registerSlot: vi.fn(),
   unregisterSlot: vi.fn(),
-  focusTerminal: vi.fn(),
-  registerStatusHandler: vi.fn().mockReturnValue(() => {})
+  focusTerminal: vi.fn()
 }))
 
 vi.mock('../src/renderer/lib/terminal-registry', () => hoisted)
-
-vi.mock('../src/renderer/hooks/useStatusDetection', () => ({
-  useStatusDetection: () => {}
-}))
 
 const { registerSlot, unregisterSlot, focusTerminal } = hoisted
 

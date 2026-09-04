@@ -10,7 +10,6 @@ const registryMocks = vi.hoisted(() => ({
   registerSlot: vi.fn(),
   unregisterSlot: vi.fn(),
   hydrateTerminal: vi.fn(),
-  registerStatusHandler: vi.fn().mockReturnValue(() => {}),
   onTerminalReady: vi.fn().mockReturnValue(() => {})
 }))
 vi.mock('../src/renderer/lib/terminal-registry', () => registryMocks)

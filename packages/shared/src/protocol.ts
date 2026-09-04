@@ -1100,6 +1100,11 @@ export interface ServerNotifications {
    * numbered above what it was handed.
    */
   'terminal:data': { id: string; data: string; seq: number }
+  /**
+   * A terminal rang. Broadcast rather than read off `terminal:data`, so a
+   * session nobody has open still reaches whoever is meant to be interrupted.
+   */
+  'terminal:bell': { id: string }
   'terminal:exit': { id: string; exitCode: number }
   'session:created': TerminalSession
   'session:updated': TerminalSession
