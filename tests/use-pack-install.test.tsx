@@ -334,6 +334,46 @@ describe('installing a pack from wherever it was asked for', () => {
     expect(installConnectorPack).not.toHaveBeenCalled()
   })
 
+  it('holds the row from the press, before the server has said anything', async () => {
+    let answer: (value: unknown) => void = () => {}
+    inspectConnectorPack.mockReturnValue(new Promise((resolve) => (answer = resolve)))
+    render(<Probe />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    expect(screen.getByTestId('phase')).toHaveTextContent('checking')
+    await act(async () => answer({ ok: true, preview: DESCRIBED_PREVIEW }))
+    // The sheet has the question now, so the row is free again.
+    expect(screen.getByTestId('phase')).toHaveTextContent('none')
+  })
+
+  it('keeps the row installing until the reload has shown the pack', async () => {
+    inspectConnectorPack.mockResolvedValue({ ok: true, preview: DESCRIBED_PREVIEW })
+    let reloaded: () => void = () => {}
+    const onInstalled = vi.fn(() => new Promise<void>((resolve) => (reloaded = resolve)))
+    render(<Probe onInstalled={onInstalled} listing={DESCRIBED} direct />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(onInstalled).toHaveBeenCalled())
+    expect(screen.getByTestId('phase')).toHaveTextContent('installing')
+    await act(async () => reloaded())
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('none'))
+  })
+
+  it('frees the row and says so when the reload after an install fails', async () => {
+    inspectConnectorPack.mockResolvedValue({ ok: true, preview: DESCRIBED_PREVIEW })
+    const onInstalled = vi.fn(() => Promise.reject(new Error('server went away')))
+    render(<Probe onInstalled={onInstalled} listing={DESCRIBED} direct />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('none'))
+    expect(screen.getByTestId('error')).toHaveTextContent(
+      'Installed, but the list could not be re-read'
+    )
+  })
+
   it('closes the sheet even when the install call itself fails', async () => {
     installConnectorPack.mockRejectedValue(new Error('the server went away'))
     render(<Probe />)

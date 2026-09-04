@@ -2124,7 +2124,7 @@ export type ConnectorPackPreview =
 /** `id` is the connector's once its manifest is read, and the source label until then. */
 export interface ConnectorInstallProgress {
   id: string
-  phase: 'downloading' | 'verifying' | 'installing' | 'installed' | 'failed'
+  phase: 'checking' | 'downloading' | 'verifying' | 'installing' | 'installed' | 'failed'
   /** Download completion, absent when the size was not advertised. */
   percent?: number
   version?: string

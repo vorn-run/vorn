@@ -84,8 +84,7 @@ export function packStateFor(input: {
 }): PackState {
   const { installed, catalogVersion, progress } = input
 
-  // A reported install stays busy until the files show up, so the row never flashes back to Install.
-  if (progress && progress.phase !== 'failed' && (progress.phase !== 'installed' || !installed)) {
+  if (progress && progress.phase !== 'installed' && progress.phase !== 'failed') {
     return {
       kind: 'installing',
       phase: progress.phase,
@@ -120,6 +119,7 @@ export function describePackStatus(state: PackState): PackStatusView {
 
     case 'installing': {
       const labels: Record<ConnectorInstallProgress['phase'], string> = {
+        checking: 'Checking',
         downloading: 'Downloading',
         verifying: 'Verifying',
         installing: 'Installing',

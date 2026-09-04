@@ -105,6 +105,8 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       try {
         const result = await window.api.installConnectorPack(pack.source)
         if (result.ok) {
+          // Still installing to the row until the reload shows the pack; the server's last word came too early.
+          setProgress((current) => ({ ...current, [id]: { id, phase: 'installing' } }))
           installed = true
         } else {
           setProgress((current) => ({
@@ -122,9 +124,15 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
         setInstalling(false)
         setPending(null)
       }
-      // The row keeps saying it is installing until the reload shows it installed; then the record can go.
-      if (installed) {
+      if (!installed) return
+      try {
         await onInstalled?.()
+      } catch (err) {
+        // Kept on disk, but the list could not be re-read; say so rather than spin forever.
+        setError(
+          `Installed, but the list could not be re-read: ${err instanceof Error ? err.message : String(err)}`
+        )
+      } finally {
         forget(id)
       }
     },
@@ -139,7 +147,7 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       // Busy from the press itself, so the button cannot be pressed twice while the server is still silent.
       setProgress((current) => ({
         ...current,
-        [listing.id]: { id: listing.id, phase: 'downloading' }
+        [listing.id]: { id: listing.id, phase: 'checking' }
       }))
       const result = await stage(sourceFor(listing))
       if (!result.ok) {
