@@ -39,6 +39,7 @@ export function ConnectorDirectory({
   onPickFile,
   installError,
   pending,
+  pendingRowId,
   progress,
   fetchedAt,
   onRefresh
@@ -56,6 +57,8 @@ export function ConnectorDirectory({
   installError?: string | null
   /** The confirm sheet for a pack that has been verified but not yet kept. */
   pending?: React.ReactNode
+  /** The connector the sheet belongs to, so it opens under that row. */
+  pendingRowId?: string
   /** Installs running right now, by connector id. */
   progress?: Record<string, ConnectorInstallProgress>
   /** When the published list was last read. Absent until one has been. */
@@ -81,6 +84,11 @@ export function ConnectorDirectory({
   // Sections earn their keep once there is more than one; below that they are
   // a heading over the whole list, which says nothing.
   const sections = useMemo(() => groupListingsByCategory(visible), [visible])
+  // One row owns the sheet: an id can appear installed and in the catalog both.
+  const pendingKey = useMemo(
+    () => (pendingRowId ? visible.find((listing) => listing.id === pendingRowId)?.key : undefined),
+    [visible, pendingRowId]
+  )
 
   const handleDrop = (event: React.DragEvent): void => {
     event.preventDefault()
@@ -179,8 +187,8 @@ export function ConnectorDirectory({
         </p>
       )}
 
-      {/* A verified pack waiting on the decision to keep it. */}
-      {pending && <div className="mt-2">{pending}</div>}
+      {/* A verified pack with no row of its own, such as one dropped as a file. */}
+      {pending && !pendingKey && <div className="mt-2">{pending}</div>}
 
       {sections.map((section) => (
         <div key={section.category}>
@@ -190,15 +198,17 @@ export function ConnectorDirectory({
             </h3>
           )}
           {section.listings.map((listing) => (
-            <ConnectorRow
-              key={listing.key}
-              listing={listing}
-              builtIns={builtIns}
-              {...(progress?.[listing.id] && { progress: progress[listing.id] })}
-              onSelect={() => onSelect(listing)}
-              onAdd={() => onAdd(listing)}
-              {...(onInstall && { onInstall: () => onInstall(listing) })}
-            />
+            <div key={listing.key}>
+              <ConnectorRow
+                listing={listing}
+                builtIns={builtIns}
+                {...(progress?.[listing.id] && { progress: progress[listing.id] })}
+                onSelect={() => onSelect(listing)}
+                onAdd={() => onAdd(listing)}
+                {...(onInstall && { onInstall: () => onInstall(listing) })}
+              />
+              {listing.key === pendingKey && <div className="mt-2 mb-3">{pending}</div>}
+            </div>
           ))}
         </div>
       ))}

@@ -37,6 +37,7 @@ export function ConnectorDetail({
   listing,
   builtIns,
   progress,
+  pending,
   onAdd,
   onInstall,
   onRollback,
@@ -48,6 +49,8 @@ export function ConnectorDetail({
   builtIns: BuiltInConnector[]
   /** The install running for this connector, when one is. */
   progress?: ConnectorInstallProgress
+  /** The confirm sheet for this connector's pack, once it has been verified. */
+  pending?: React.ReactNode
   onAdd: () => void
   onInstall?: () => void
   onRollback?: () => void
@@ -255,6 +258,9 @@ export function ConnectorDetail({
           </span>
         )}
       </div>
+
+      {/* Under the button that raised it, where the answer is looked for. */}
+      {pending && <div className="mt-3">{pending}</div>}
     </div>
   )
 }

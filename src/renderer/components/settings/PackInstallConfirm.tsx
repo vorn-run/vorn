@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { borrowableFromManifest, type ConnectorPackSummary } from '../../../shared/types'
 import { ConnectorIcon } from '../ConnectorIcon'
 
@@ -22,9 +23,15 @@ export function PackInstallConfirm({
   const replacing = preview.installedVersion && preview.installedVersion !== preview.version
   const required = (preview.env ?? []).filter((entry) => entry.required)
   const borrows = borrowableFromManifest(preview.auth, preview.env ?? [])
+  const root = useRef<HTMLDivElement>(null)
+
+  // It opens beside the button that raised it, which can be below the fold.
+  useEffect(() => {
+    root.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [])
 
   return (
-    <div className="border border-white/[0.1] rounded-sm bg-white/[0.02] p-3">
+    <div ref={root} className="border border-white/[0.1] rounded-sm bg-white/[0.02] p-3">
       <div className="flex items-start gap-2.5">
         <ConnectorIcon
           connectorId={preview.id}

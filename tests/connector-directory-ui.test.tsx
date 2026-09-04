@@ -185,6 +185,62 @@ describe('the connector list', () => {
   })
 })
 
+describe('where a verified pack asks to be kept', () => {
+  const sheet = <div>Keep this pack?</div>
+
+  const order = (container: HTMLElement, text: string) => container.textContent!.indexOf(text)
+
+  it('asks under the row the install began on', () => {
+    const { container } = render(
+      <ConnectorDirectory
+        listings={listings()}
+        builtIns={[]}
+        onSelect={vi.fn()}
+        onAdd={vi.fn()}
+        pending={sheet}
+        pendingRowId="kusto"
+      />
+    )
+
+    // Between its own row and the next, rather than appended after the list.
+    expect(order(container, 'Keep this pack?')).toBeGreaterThan(
+      order(container, 'Azure Data Explorer')
+    )
+    expect(order(container, 'Keep this pack?')).toBeLessThan(order(container, 'Azure DevOps'))
+  })
+
+  it('asks above the list when no row owns the pack, as a dropped file has none', () => {
+    const { container } = render(
+      <ConnectorDirectory
+        listings={listings()}
+        builtIns={[]}
+        onSelect={vi.fn()}
+        onAdd={vi.fn()}
+        pending={sheet}
+        pendingRowId="dropped-from-a-file"
+      />
+    )
+
+    expect(order(container, 'Keep this pack?')).toBeLessThan(order(container, 'Azure DevOps'))
+  })
+
+  it('asks under the buttons on the page that raised it', () => {
+    const { container, getByText } = render(
+      <ConnectorDetail
+        listing={find('ado')}
+        builtIns={[]}
+        onAdd={vi.fn()}
+        onClose={vi.fn()}
+        onInstall={vi.fn()}
+        pending={sheet}
+      />
+    )
+
+    expect(getByText('Install')).toBeInTheDocument()
+    expect(order(container, 'Keep this pack?')).toBeGreaterThan(order(container, 'Install'))
+  })
+})
+
 describe('the connector detail panel', () => {
   const setup = (listing: ConnectorListing, builtIns: BuiltInConnector[] = []) => {
     const onAdd = vi.fn()

@@ -35,6 +35,23 @@ const PREVIEW: ConnectorPackSummary = {
 }
 
 describe('the sheet shown before a pack is kept', () => {
+  it('brings itself into view, since it opens beside the button that raised it', () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    try {
+      render(<PackInstallConfirm preview={PREVIEW} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
+  it('renders where scrolling an element into view is not implemented', () => {
+    expect(Element.prototype.scrollIntoView).toBeUndefined()
+    render(<PackInstallConfirm preview={PREVIEW} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.getByText(/Pack Demo/)).toBeInTheDocument()
+  })
+
   it('says which variables the pack will borrow from a signed-in tool', () => {
     const borrowing: ConnectorPackSummary = {
       ...PREVIEW,
