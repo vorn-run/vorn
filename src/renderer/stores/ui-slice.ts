@@ -570,33 +570,35 @@ function reconcileView(
 }
 
 /**
- * Drop everything belonging to a session the server does not have.
+ * Drop everything belonging to a session that no longer exists.
  *
  * Sessions restore by their persisted id, so pane entries stay valid across
  * restarts — but a session that never comes back would leave its entry behind
  * forever.
  *
- * Reconciled against what the server has rather than against what is on the
- * board. Those differ on the launch where reopen is off: the ended sessions are
- * deliberately left off the board and offered by the banner instead, and pruning
- * against the board would delete the panes of every one of them a moment before
- * the person is asked whether to bring them back. Null until a sync pass has
- * asked, which is not the same as none.
+ * "Exists" is the union of two answers, because neither is sufficient alone.
+ *
+ * What the server reported, because with reopen off the board deliberately
+ * leaves the ended sessions out for the banner to offer, and pruning against the
+ * board alone would delete their panes a moment before the person is asked
+ * whether to bring them back.
+ *
+ * And what is on the board, because the server is asked once at launch and
+ * nothing adds to that answer afterwards — so pruning against it alone treated
+ * every session opened later as one that never came back.
+ *
+ * A session missing from both is genuinely gone, which is the only case that
+ * should lose anything. Null before the first sync, which is not the same
+ * answer as none.
  *
  * Returns null when there is nothing to change, so a caller can tell a reconcile
  * that did something from one that did not.
  */
 function pruneAgainstKnown(state: AppStore): Partial<AppStore> | null {
   if (state.knownSessionIds === null) return null
-  // What the server reported, plus whatever is on the board now.
-  //
-  // The sync answers once, at launch. Every session opened after it -- a shell
-  // taken out inside a card, a second agent -- is absent from that answer
-  // forever, and pruning against it alone treated all of them as sessions that
-  // never came back. Minimising one un-minimised it on the next reconcile, and a
-  // shell added to a terminals panel was dropped straight back out of it.
-  //
-  // A session on the board is real by definition: something just created it.
+  // Minimising a shell used to undo itself on the next reconcile, and a shell
+  // added to a terminals panel was dropped straight back out of it. Both were
+  // sessions opened after the sync, absent from its answer and read as gone.
   const live = new Set([...state.knownSessionIds, ...state.terminals.keys()])
   const panes = reconcilePanes(
     state.filesPanes,
