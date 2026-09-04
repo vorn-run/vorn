@@ -273,6 +273,14 @@ describe('inspectPack', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('lets a pack take an id the seed catalog lists as a package', async () => {
+    const file = await buildArchive(goodFiles('1.0.0', 'kusto'))
+
+    const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })
+
+    expect(result.ok).toBe(true)
+  })
+
   it('reports a source that cannot be read rather than throwing', async () => {
     const root = tempDir()
 
