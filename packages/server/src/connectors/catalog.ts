@@ -126,12 +126,6 @@ interface CachedCatalog {
  * list it came for. Individually unusable templates are dropped for the same
  * reason a malformed connector entry is.
  */
-// The catalog's templates first, then every seed the catalog does not carry by id: a seed ships with the app.
-export function withSeeds(published: WorkflowTemplate[]): WorkflowTemplate[] {
-  const seen = new Set(published.map((template) => template.id))
-  return [...published, ...TEMPLATE_SEED.filter((template) => !seen.has(template.id))]
-}
-
 export function parseTemplates(document: unknown): WorkflowTemplate[] {
   const root = document as { templates?: unknown }
   if (!Array.isArray(root?.templates)) return []
@@ -525,7 +519,9 @@ export function catalogItems(options: CatalogOptions = {}): ConnectorCatalogItem
     const now = options.now ?? Date.now()
     const cache = readCache(options.cachePath ?? CACHE_PATH)
     resolved = withLaunch(cache?.connectors ?? CONNECTOR_CATALOG)
-    resolvedTemplates = withSeeds(cache?.templates ?? [])
+    // A cached document that predates templates falls back to the seed rather
+    // than to nothing, so the start-from list is never empty on an old cache.
+    resolvedTemplates = cache?.templates?.length ? cache.templates : TEMPLATE_SEED
     resolvedMcpServers = cache?.mcpServers ?? []
     resolvedAt = cache?.fetchedAt
     if (!cache || now - cache.fetchedAt > MAX_AGE_MS) void refreshCatalog(options)
@@ -536,7 +532,7 @@ export function catalogItems(options: CatalogOptions = {}): ConnectorCatalogItem
 /** The templates a new workflow can start from. */
 export function catalogTemplates(options: CatalogOptions = {}): WorkflowTemplate[] {
   catalogItems(options)
-  return resolvedTemplates ?? withSeeds([])
+  return resolvedTemplates ?? TEMPLATE_SEED
 }
 
 /** The MCP servers the catalog lists. No bundled seed: there is nothing to fall back to. */
@@ -574,7 +570,7 @@ export async function refreshCatalog(options: CatalogOptions = {}): Promise<bool
   const now = options.now ?? Date.now()
   writeCache(options.cachePath ?? CACHE_PATH, document, now)
   resolved = withLaunch(document.connectors)
-  resolvedTemplates = withSeeds(document.templates)
+  resolvedTemplates = document.templates.length > 0 ? document.templates : TEMPLATE_SEED
   resolvedMcpServers = document.mcpServers
   resolvedAt = now
   return true
