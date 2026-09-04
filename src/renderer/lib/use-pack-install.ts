@@ -14,22 +14,25 @@ import type { ConnectorListing } from './connector-browse'
  * connector it needs wants the same three steps, and two copies of a
  * verify-then-commit flow is one too many.
  */
+/** A checked pack, held between the two steps of an install. */
+export interface PendingPack {
+  source: ConnectorPackSource
+  preview: ConnectorPackSummary
+  /** The row this began on, so both steps report their refusals to it. */
+  rowId: string
+  /** The listing that was pressed, so the sheet opens under it; a dropped file has none. */
+  rowKey?: string
+}
+
 export interface PackInstall {
   /** Live install and rejection state, keyed by connector id. */
   progress: Record<string, ConnectorInstallProgress>
-  /** The pack awaiting a yes, with everything the sheet shows. */
-  pending: {
-    source: ConnectorPackSource
-    preview: ConnectorPackSummary
-    /** The row this began on, so both steps report their refusals to it. */
-    rowId: string
-    /** The listing that was pressed, so the sheet opens under it; a dropped file has none. */
-    rowKey?: string
-  } | null
+  /** The pack waiting to be asked about: a file, a replacement, or one unlike its listing. */
+  pending: PendingPack | null
   /** A refusal with no row to land on, such as a dropped file's. */
   error: string | null
   installing: boolean
-  /** Inspect what a catalog row would install, then ask. */
+  /** Inspect what a catalog row would install; install it, or ask when it differs. */
   inspect: (listing: ConnectorListing, source?: ConnectorPackSource) => Promise<void>
   /** Inspect a pack already on this disk, then ask. */
   inspectFile: (filePath: string) => Promise<void>
@@ -51,6 +54,24 @@ function sourceFor(listing: ConnectorListing): ConnectorPackSource {
     } as ConnectorPackSource
   }
   return { kind: 'npm', packageName: listing.catalogItem?.packageName ?? listing.id } as const
+}
+
+/**
+ * Whether the checked pack is the one the row already described.
+ *
+ * The sheet exists to show what a listing could not: a file nobody has seen, a
+ * pack that replaces an installed version, or one whose id, version or sign-in
+ * differs from what was advertised. When all of that agrees, the row said it
+ * already and asking again only adds a click. A catalog with no version cannot
+ * agree, so it is asked about.
+ */
+export function matchesListing(preview: ConnectorPackSummary, listing: ConnectorListing): boolean {
+  return (
+    preview.id === listing.id &&
+    preview.version === listing.catalogItem?.version &&
+    (preview.auth?.rung ?? 'none') === (listing.authRung ?? 'none') &&
+    preview.installedVersion === undefined
+  )
 }
 
 export function usePackInstall(onInstalled?: () => void | Promise<void>): PackInstall {
@@ -75,6 +96,40 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
     })
   }, [])
 
+  // The second step, whether a sheet asked or the pack matched what was pressed.
+  const keep = useCallback(
+    async (pack: PendingPack) => {
+      // The row that asked, so a refusal at either step lands in the same place.
+      const id = pack.rowId
+      let installed = false
+      setInstalling(true)
+      try {
+        const result = await window.api.installConnectorPack(pack.source)
+        if (result.ok) {
+          forget(id)
+          installed = true
+        } else {
+          setProgress((current) => ({
+            ...current,
+            [id]: { id, phase: 'failed', error: result.error }
+          }))
+          setError(result.error)
+        }
+      } catch (err) {
+        // A transport failure lands where a refusal lands, or the sheet never closes.
+        const message = err instanceof Error ? err.message : 'The pack could not be installed'
+        setProgress((current) => ({ ...current, [id]: { id, phase: 'failed', error: message } }))
+        setError(message)
+      } finally {
+        setInstalling(false)
+        setPending(null)
+      }
+      // Only when something was actually kept: a refusal changed nothing to read.
+      if (installed) await onInstalled?.()
+    },
+    [forget, onInstalled]
+  )
+
   const inspect = useCallback(
     async (listing: ConnectorListing, source?: ConnectorPackSource) => {
       // Whatever the last attempt said is about that attempt, not this one.
@@ -92,14 +147,20 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
         }))
         return
       }
-      setPending({
+      const pack: PendingPack = {
         source: { kind: 'staged', token: result.preview.token },
         preview: result.preview,
         rowId: listing.id,
         rowKey: listing.key
-      })
+      }
+      // Pressing install on a row that already said all this is the answer.
+      if (matchesListing(result.preview, listing)) {
+        await keep(pack)
+        return
+      }
+      setPending(pack)
     },
-    [forget]
+    [forget, keep]
   )
 
   const inspectFile = useCallback(async (filePath: string) => {
@@ -121,35 +182,8 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
   }, [])
 
   const confirm = useCallback(async () => {
-    if (!pending) return
-    // The row that asked, so a refusal at either step lands in the same place.
-    const id = pending.rowId
-    let installed = false
-    setInstalling(true)
-    try {
-      const result = await window.api.installConnectorPack(pending.source)
-      if (result.ok) {
-        forget(id)
-        installed = true
-      } else {
-        setProgress((current) => ({
-          ...current,
-          [id]: { id, phase: 'failed', error: result.error }
-        }))
-        setError(result.error)
-      }
-    } catch (err) {
-      // A transport failure lands where a refusal lands, or the sheet never closes.
-      const message = err instanceof Error ? err.message : 'The pack could not be installed'
-      setProgress((current) => ({ ...current, [id]: { id, phase: 'failed', error: message } }))
-      setError(message)
-    } finally {
-      setInstalling(false)
-      setPending(null)
-    }
-    // Only when something was actually kept: a refusal changed nothing to read.
-    if (installed) await onInstalled?.()
-  }, [pending, forget, onInstalled])
+    if (pending) await keep(pending)
+  }, [pending, keep])
 
   const cancel = useCallback(() => setPending(null), [])
   const clearError = useCallback(() => setError(null), [])

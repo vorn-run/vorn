@@ -2,8 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { usePackInstall } from '../src/renderer/lib/use-pack-install'
+import { usePackInstall, matchesListing } from '../src/renderer/lib/use-pack-install'
 import type { ConnectorListing } from '../src/renderer/lib/connector-browse'
+import type { ConnectorPackSummary } from '../src/shared/types'
 
 const inspectConnectorPack = vi.fn()
 const installConnectorPack = vi.fn()
@@ -26,6 +27,21 @@ const LISTING: ConnectorListing = {
     capabilities: ['actions'],
     launch: { command: 'node', args: [] }
   } as ConnectorListing['catalogItem']
+}
+
+/** A row that already says everything the pack will: version and sign-in both. */
+const DESCRIBED: ConnectorListing = {
+  ...LISTING,
+  authRung: 'key',
+  catalogItem: { ...LISTING.catalogItem, version: '1.2.0' } as ConnectorListing['catalogItem']
+}
+
+const DESCRIBED_PREVIEW = {
+  id: 'slack',
+  name: 'Slack',
+  version: '1.2.0',
+  auth: { rung: 'key' as const, keys: ['botToken'] },
+  token: 'tok-1'
 }
 
 beforeEach(() => {
@@ -207,6 +223,61 @@ describe('installing a pack from wherever it was asked for', () => {
     )
   })
 
+  // Pressing install on a row that already showed the version and the sign-in
+  // is the answer; asking it again only adds a click.
+  it('installs a pack the row already described, without asking again', async () => {
+    inspectConnectorPack.mockResolvedValue({ ok: true, preview: DESCRIBED_PREVIEW })
+    const onInstalled = vi.fn()
+    render(<Probe onInstalled={onInstalled} listing={DESCRIBED} />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(onInstalled).toHaveBeenCalled())
+    expect(installConnectorPack).toHaveBeenCalledTimes(1)
+    expect(installConnectorPack).toHaveBeenCalledWith({ kind: 'staged', token: 'tok-1' })
+    expect(screen.getByTestId('pending')).toHaveTextContent('none')
+  })
+
+  it('asks when the pack is a version the row did not advertise', async () => {
+    inspectConnectorPack.mockResolvedValue({
+      ok: true,
+      preview: { ...DESCRIBED_PREVIEW, version: '1.3.0' }
+    })
+    render(<Probe listing={DESCRIBED} />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.3.0'))
+    expect(installConnectorPack).not.toHaveBeenCalled()
+  })
+
+  it('asks when the pack signs in differently than the row said', async () => {
+    inspectConnectorPack.mockResolvedValue({
+      ok: true,
+      preview: { ...DESCRIBED_PREVIEW, auth: { rung: 'cli' as const } }
+    })
+    render(<Probe listing={DESCRIBED} />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+    expect(installConnectorPack).not.toHaveBeenCalled()
+  })
+
+  // Replacing something already on disk is a decision, not a repeat of the row.
+  it('asks when the pack would replace an installed version', async () => {
+    inspectConnectorPack.mockResolvedValue({
+      ok: true,
+      preview: { ...DESCRIBED_PREVIEW, installedVersion: '1.1.0' }
+    })
+    render(<Probe listing={DESCRIBED} />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+    expect(installConnectorPack).not.toHaveBeenCalled()
+  })
+
   it('closes the sheet even when the install call itself fails', async () => {
     installConnectorPack.mockRejectedValue(new Error('the server went away'))
     render(<Probe />)
@@ -219,5 +290,21 @@ describe('installing a pack from wherever it was asked for', () => {
       expect(screen.getByTestId('error')).toHaveTextContent('the server went away')
     )
     expect(screen.getByTestId('pending')).toHaveTextContent('none')
+  })
+})
+
+describe('whether a checked pack is the one the row described', () => {
+  const preview = DESCRIBED_PREVIEW as unknown as ConnectorPackSummary
+
+  it('agrees when the id, the version and the sign-in all do', () => {
+    expect(matchesListing(preview, DESCRIBED)).toBe(true)
+  })
+
+  it('refuses to agree with a catalog that names no version', () => {
+    expect(matchesListing(preview, LISTING)).toBe(false)
+  })
+
+  it('refuses to agree when the pack calls itself something else', () => {
+    expect(matchesListing({ ...preview, id: 'slack-connector' }, DESCRIBED)).toBe(false)
   })
 })
