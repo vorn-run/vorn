@@ -57,7 +57,7 @@ export function matchesListing(preview: ConnectorPackSummary, listing: Connector
     // An absent rung on either side is unknown rather than none, and unknown is what the sheet is for.
     preview.auth?.rung !== undefined &&
     preview.auth.rung === listing.authRung &&
-    listing.verified !== undefined &&
+    listing.verified?.version === preview.version &&
     preview.installedVersion === undefined
   )
 }

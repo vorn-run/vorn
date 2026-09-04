@@ -402,6 +402,13 @@ describe('whether a checked pack is the one the row described', () => {
 
   it('refuses to agree when the pack calls itself something else', () => {
     expect(matchesListing({ ...preview, id: 'slack-connector' }, DESCRIBED)).toBe(false)
+    // A receipt for an older version vouches for that version, not this one.
+    expect(
+      matchesListing(preview, {
+        ...DESCRIBED,
+        verified: { ...DESCRIBED.verified!, version: '1.1.0' }
+      })
+    ).toBe(false)
   })
 
   it('refuses to read two unstated sign-ins as the same one', () => {
