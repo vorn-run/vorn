@@ -1,14 +1,6 @@
 import { useCallback, useState } from 'react'
 
-/**
- * What a row's own actions report while they run.
- *
- * Installing a pack has always said what it was doing — a phrase on the row, a
- * disabled button, a refusal that lands where the press was. Everything else on
- * that screen fired its call and showed nothing until it came back, which on a
- * backfill that spawns the connector's own process reads as a dead button. This
- * is that reporting, for actions that answer once rather than in phases.
- */
+// What a row's own actions report while they run: a phrase while busy, and a refusal that lands where the press was.
 export interface RowActivity {
   /** Present tense, keyed by row, e.g. `Removing…`. */
   busy: Record<string, string>
