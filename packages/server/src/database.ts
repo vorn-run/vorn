@@ -1255,6 +1255,8 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     // terminal drew and waits. There is nothing to ask, and leaving it off made
     // the whole thing invisible unless somebody went looking for a toggle.
     reopenSessions: (map.reopenSessions as boolean) ?? true,
+    // Off by default: nothing starts itself because someone installed an app.
+    startAtLogin: (map.startAtLogin as boolean) ?? false,
     // Saving iterates over every key in defaults, but loading is this explicit
     // list — so a key missing here round-trips to nothing and its feature is
     // silently inert.
