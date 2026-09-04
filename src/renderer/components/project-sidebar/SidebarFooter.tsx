@@ -2,6 +2,7 @@ import { useAppStore } from '../../stores'
 import { Tooltip } from '../Tooltip'
 import { getShortcut } from '../../lib/keyboard-shortcuts'
 import { describeUpdateStatus, hasPendingUpdate } from '../../lib/update-status'
+import { facesRestart, updateCostLine } from '../../lib/update-cost'
 import { CircleHelp, Settings } from 'lucide-react'
 
 export function SidebarFooter({
@@ -22,8 +23,16 @@ export function SidebarFooter({
   const shortLabel = useAppStore((s) =>
     hasPendingUpdate(s.appUpdateStatus) ? describeUpdateStatus(s.appUpdateStatus).shortLabel : null
   )
+  // Selected as two primitives for the same reason as the status above: this
+  // subtree must not re-render on every keystroke a session prints.
+  const sessionCount = useAppStore((s) => [...s.terminals.values()].filter(facesRestart).length)
+  const aTurnIsRunning = useAppStore((s) =>
+    [...s.terminals.values()].some((t) => facesRestart(t) && t.status === 'running')
+  )
   const dismissed = useAppStore((s) => s.updateBannerDismissed)
   const setDismissed = useAppStore((s) => s.setUpdateBannerDismissed)
+
+  const cost = updateCostLine(sessionCount, aTurnIsRunning)
 
   const settingsShortcut = getShortcut('settings')?.display
   // Collapsed the rail is 52px, which the banner cannot live in; dismissed the
@@ -47,6 +56,10 @@ export function SidebarFooter({
               ✕
             </button>
           </div>
+          {/* The same sentence the Updates panel gives, because this button does
+              the same thing. Without it the shortcut is the quieter way to end
+              every session, which is the wrong way round. */}
+          {cost && <div className="mt-1.5 text-[10.5px] leading-snug text-bronzo">{cost}</div>}
           <button
             onClick={() => window.api.installUpdate()}
             className="mt-2 w-full px-2 py-1 text-[11px] text-gray-300 bg-white/[0.04]

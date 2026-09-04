@@ -11,7 +11,9 @@ const mockStore = {
   setOnboardingOpen: vi.fn(),
   appUpdateStatus: { kind: 'unsupported' } as UpdateStatus,
   updateBannerDismissed: false,
-  setUpdateBannerDismissed: vi.fn()
+  setUpdateBannerDismissed: vi.fn(),
+  /** The banner says what restarting costs, so it reads the board. */
+  terminals: new Map<string, { status: string; ended?: unknown }>()
 }
 
 vi.mock('../src/renderer/stores', () => ({
@@ -41,6 +43,7 @@ beforeEach(() => {
   installUpdate.mockReset()
   mockStore.appUpdateStatus = { kind: 'unsupported' }
   mockStore.updateBannerDismissed = false
+  mockStore.terminals = new Map()
 })
 
 describe('SidebarFooter', () => {
@@ -121,5 +124,38 @@ describe('SidebarFooter', () => {
       expect(mockStore.setSettingsCategory).toHaveBeenCalledWith('updates')
       expect(mockStore.setSettingsOpen).toHaveBeenCalledWith(true)
     })
+  })
+})
+
+describe('what the sidebar restart will cost', () => {
+  it('says it here too, because this button ends the sessions as well', () => {
+    // The shortcut must not be the quieter way to do the same thing.
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    mockStore.terminals = new Map([
+      ['a', { status: 'running' }],
+      ['b', { status: 'idle' }]
+    ])
+    render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+    expect(screen.getByText(/Your 2 sessions restart on the new version/)).toBeInTheDocument()
+    expect(screen.getByText(/A turn in flight is lost/)).toBeInTheDocument()
+  })
+
+  it('says nothing when there are no sessions to lose', () => {
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Restart to update' })).toBeInTheDocument()
+    expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()
+  })
+})
+
+describe('sessions that have already ended, in the sidebar', () => {
+  it('leave nothing to say when they are all there is', () => {
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    mockStore.terminals = new Map([
+      ['a', { status: 'idle', ended: { reason: 'app-closed', at: 1, replayed: true } }]
+    ])
+    render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Restart to update' })).toBeInTheDocument()
+    expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()
   })
 })

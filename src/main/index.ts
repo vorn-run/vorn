@@ -276,6 +276,16 @@ function explainRefusal(reason: string): string {
  */
 let keepSessionsRunning = true
 
+/**
+ * Set once the server has been stopped on purpose, so the quit that follows
+ * proceeds instead of holding itself open a second time.
+ *
+ * Two paths set it: the deliberate shutdown in `before-quit`, and an update,
+ * which stops the server before handing over to the updater rather than inside
+ * the quit it triggers.
+ */
+let serverStopped = false
+
 function rememberKeepSessionsRunning(config: unknown): void {
   const value = (config as AppConfig | null)?.defaults?.keepSessionsRunning
   keepSessionsRunning = value ?? true
@@ -589,7 +599,29 @@ app.whenReady().then(async () => {
   })
 
   // Update IPC handlers
-  ipcMain.on(IPC.UPDATE_INSTALL, () => {
+  //
+  // The update takes the server with it. Left alone, `before-quit` sees
+  // `keepSessionsRunning` and lets go of the server, so the new build adopts the
+  // old one and never moves off it -- an app on beta.12 talking to a beta.11
+  // server, with no way forward but a reboot. Ending it here is what keeps client
+  // and server on one build, which is cheaper than reconciling two.
+  //
+  // Before `quitAndInstall` rather than inside the quit it raises. The deliberate
+  // path below holds its own quit open with `preventDefault`, and doing that to
+  // the updater's quit risks cancelling the relaunch -- which is the very thing
+  // `onQuitForUpdate` exists to protect. Stopping first means `before-quit` finds
+  // the work done and never intervenes.
+  ipcMain.on(IPC.UPDATE_INSTALL, async () => {
+    keepSessionsRunning = false
+    try {
+      await stopServer()
+    } catch (err) {
+      // An update that cannot stop the server still has to install. The old
+      // server is left running and the next launch adopts it, which is exactly
+      // today's behaviour rather than something worse.
+      log.error('[main] could not stop the server before updating:', err)
+    }
+    serverStopped = true
     updateManager.installUpdate()
   })
 
@@ -703,9 +735,6 @@ app.whenReady().then(async () => {
 updateManager.onQuitForUpdate(() => {
   isQuitting = true
 })
-
-/** Set once the deliberate shutdown has finished, so the re-entered quit proceeds. */
-let serverStopped = false
 
 app.on('before-quit', async (event) => {
   isQuitting = true
