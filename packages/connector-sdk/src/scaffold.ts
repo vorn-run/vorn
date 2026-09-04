@@ -109,6 +109,7 @@ function tsconfig(): string {
       skipLibCheck: true,
       types: ['node'],
       noEmit: true,
+      resolveJsonModule: true,
       ignoreDeprecations: '6.0',
       allowImportingTsExtensions: true
     },
@@ -149,12 +150,14 @@ function changelog(): string {
 
 function connectorSource(id: string, name: string, description: string): string {
   return `import { defineConnector } from '@vornrun/connector-sdk'
+// Bundled at build time: a pack is one file, so a version read from disk is not there to read.
+import pkg from '../package.json'
 
 export const connector = defineConnector({
   id: ${JSON.stringify(id)},
   name: ${JSON.stringify(name)},
   description: ${JSON.stringify(description)},
-  version: '${SCAFFOLD_VERSION}',
+  version: pkg.version,
   // Prefer a login the machine already has: { rung: 'cli', probe: { command: 'tool', args: ['auth', 'status'] } }
   auth: { rung: 'key', keys: ['apiToken'] },
   config: [
