@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { checkConnector, type CheckCode, type CheckFinding } from './check'
 import {
   bundleDependencyFindings,
+  bundledRequireFindings,
   esbuildBundle,
   lifecycleScriptFindings,
   packageDirFor,
@@ -16,7 +17,13 @@ import {
 import { connectorManifest } from './setup'
 import type { Connector } from './types'
 
-export { bundleDependencyFindings, lifecycleScriptFindings, readNearestPackageJson, MAX_PACK_BYTES }
+export {
+  bundleDependencyFindings,
+  bundledRequireFindings,
+  lifecycleScriptFindings,
+  readNearestPackageJson,
+  MAX_PACK_BYTES
+}
 export type { BundleOutput, BundleRequest }
 
 export interface PackOptions {
@@ -66,7 +73,7 @@ export async function packConnector(
   const contents = packEntryContents(options.entry, options.sdkModule)
   const bundle = options.bundle ?? esbuildBundle
   const built = await bundle({ contents, resolveDir })
-  findings.push(...bundleDependencyFindings(built.external))
+  findings.push(...bundleDependencyFindings(built.external), ...bundledRequireFindings(built.code))
   if (findings.some((item) => item.level === 'error')) return { findings }
 
   const outDir = resolve(options.outDir ?? process.cwd())

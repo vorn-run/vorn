@@ -237,6 +237,38 @@ async function everyCodeAnyRunEmits(): Promise<Set<string>> {
     )
   )
 
+  // A bundle that starts, then dies reaching for a file packing left behind.
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ vorn: { keywords: ['shipped'] } }))
+  collect(
+    await checkConnector(
+      defineConnector({
+        id: 'unpacked',
+        name: 'Unpacked',
+        description: 'Unpacked',
+        auth: { rung: 'none' },
+        actions: [
+          {
+            type: 'go',
+            label: 'Go',
+            description: 'Go',
+            idempotent: true,
+            outputs: [{ key: 'ok' }],
+            run: () => ({})
+          }
+        ]
+      }),
+      {
+        mock: true,
+        packageDir: dir,
+        entry: './index.js',
+        bundle: async () => ({
+          code: 'import { createRequire } from "node:module"\ncreateRequire(import.meta.url)("../package.json")\n',
+          external: []
+        })
+      }
+    )
+  )
+
   const big = await packConnector(
     defineConnector({
       id: 'big',
@@ -283,6 +315,7 @@ describe('every finding a run can make', () => {
       'no-lifecycle-scripts',
       'keywords',
       'no-runtime-deps',
+      'launch',
       'mock',
       'live',
       null

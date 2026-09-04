@@ -76,6 +76,30 @@ export function bundleDependencyFindings(external: string[]): CheckFinding[] {
 }
 
 /**
+ * A require of a relative path, left for the runtime to resolve.
+ *
+ * Matches `require('../x')`, esbuild's `__require('../x')`, and the
+ * `createRequire(import.meta.url)('../x')` form, but not the bare
+ * `createRequire(import.meta.url)` esbuild emits as a helper and never calls
+ * with a path of its own.
+ */
+const RELATIVE_REQUIRE = /[rR]equire(?:\([^()]*\))?\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/g
+
+/** Files a pack does not carry, asked for after it is installed. */
+export function bundledRequireFindings(code: string): CheckFinding[] {
+  const specifiers = new Set<string>()
+  for (const [, , specifier] of code.matchAll(RELATIVE_REQUIRE)) specifiers.add(specifier)
+  if (specifiers.size === 0) return []
+  return [
+    finding(
+      'runtime-dependencies',
+      'bundle',
+      `${[...specifiers].sort().join(', ')} is required at runtime; a pack is one file, so nothing beside it survives packing`
+    )
+  ]
+}
+
+/**
  * The directory whose package.json describes the connector being examined.
  *
  * A path-like entry names its own package — checking `packages/slack/dist` from

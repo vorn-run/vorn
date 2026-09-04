@@ -157,6 +157,21 @@ describe('packConnector', () => {
     expect(result.findings.map((item) => item.code)).toContain('runtime-dependencies')
   })
 
+  it('packs nothing when the bundle reads a file that packing leaves behind', async () => {
+    const result = await packConnector(connector, {
+      entry: './index.js',
+      resolveDir: tempDir(),
+      outDir: tempDir(),
+      bundle: async () => ({
+        code: 'createRequire(import.meta.url)("../package.json")\n',
+        external: []
+      })
+    })
+    expect(result.file).toBeUndefined()
+    const deps = result.findings.find((item) => item.code === 'runtime-dependencies')
+    expect(deps?.message).toContain('../package.json')
+  })
+
   it('refuses a pack larger than the size ceiling and leaves no file behind', async () => {
     const out = tempDir()
     const result = await packConnector(connector, {

@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkConnector, defineConnector } from '../packages/connector-sdk/src/index'
+import {
+  bundledRequireFindings,
+  checkConnector,
+  defineConnector,
+  runConformance
+} from '../packages/connector-sdk/src/index'
 import type {
   ActionDefinition,
   ConnectorAuth,
@@ -209,5 +214,77 @@ describe('what a check says about the package a connector ships as', () => {
       bundle: async () => ({ code: '', external: [] })
     })
     expect(findings.map((item) => item.code)).not.toContain('runtime-dependencies')
+  })
+})
+
+/** A bundle that answers the initialize the check writes, then waits like a served connector. */
+const SERVES =
+  'process.stdin.on("data", () => process.stdout.write(\'{"jsonrpc":"2.0","id":1,"result":{}}\\n\'))\n'
+
+/** What every connector but one shipped: a require the bundler left for the runtime. */
+const READS_ITS_PACKAGE =
+  'import { createRequire } from "node:module"\ncreateRequire(import.meta.url)("../package.json")\n' +
+  SERVES
+
+describe('what a check says about starting the pack it would ship', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vorn-check-launch-'))
+  writeFileSync(
+    join(dir, 'package.json'),
+    JSON.stringify({ name: 'acme', vorn: { keywords: ['acme'] } })
+  )
+
+  const check = (code: string, over: Record<string, unknown> = {}) =>
+    checkConnector(connector(), {
+      mock: true,
+      packageDir: dir,
+      entry: './index.js',
+      bundle: async () => ({ code, external: [] }),
+      ...over
+    })
+
+  it('starts a bundle that carries everything it needs', async () => {
+    const findings = await check(SERVES)
+    expect(findings.map((item) => item.code)).not.toContain('pack-launch')
+  })
+
+  it('refuses a bundle that reads a file only the source tree has', async () => {
+    const findings = await check(READS_ITS_PACKAGE)
+    const launch = findings.find((item) => item.code === 'pack-launch')
+    expect(launch?.level).toBe('error')
+    // The line node prints under the frame, not the frame.
+    expect(launch?.message).toContain("Cannot find module '../package.json'")
+  })
+
+  it('refuses a bundle that starts and then serves nothing', async () => {
+    const findings = await check('')
+    expect(findings.find((item) => item.code === 'pack-launch')?.message).toContain(
+      'before it answered'
+    )
+  })
+
+  it('starts nothing without a mock run, which is where the packaging gates live', async () => {
+    const findings = await check(READS_ITS_PACKAGE, { mock: false })
+    expect(findings.map((item) => item.code)).not.toContain('pack-launch')
+  })
+
+  it('vouches for the launch only when it happened', async () => {
+    const served = await runConformance(connector(), {
+      mock: true,
+      packageDir: dir,
+      entry: './index.js',
+      bundle: async () => ({ code: SERVES, external: [] })
+    })
+    expect(served.passed).toContain('launch')
+    expect((await runConformance(connector(), { mock: true })).passed).not.toContain('launch')
+  })
+
+  it('names the file a bundle asks for after packing, wherever the require came from', () => {
+    const named = (code: string) => bundledRequireFindings(code)[0]?.message ?? ''
+    expect(named('createRequire(import.meta.url)("../package.json")')).toContain('../package.json')
+    expect(named('require("./schema.json")')).toContain('./schema.json')
+    expect(named('__require("../data/rows.json")')).toContain('../data/rows.json')
+    // The helper esbuild emits for bundled CommonJS is not a file left behind.
+    expect(bundledRequireFindings('var __require = createRequire(import.meta.url)')).toEqual([])
+    expect(bundledRequireFindings('const x = require("node:fs")')).toEqual([])
   })
 })
