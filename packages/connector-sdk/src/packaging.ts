@@ -143,13 +143,7 @@ function endOfRegex(code: string, start: number): number {
   return code.length
 }
 
-/**
- * Relative specifiers a bundle asks for once it runs.
- *
- * Read by walking the bundle rather than by matching it, because a minified
- * dependency carries the same words in its comments and its strings — a JSDoc
- * `@type {import('./get')}` is not a file the pack failed to carry.
- */
+// Relative specifiers a bundle asks for once it runs, read by walking it as code so comments and strings do not count.
 function relativeRuntimeSpecifiers(code: string): string[] {
   const found = new Set<string>()
   let previous = ''
@@ -204,13 +198,7 @@ function relativeRuntimeSpecifiers(code: string): string[] {
   return [...found]
 }
 
-/**
- * Files a pack does not carry, asked for after it is installed.
- *
- * Advice rather than a refusal: starting the pack is what proves it, and a
- * specifier a dependency never reaches would otherwise condemn a bundle that
- * runs.
- */
+// Files a pack does not carry, asked for after install: advice, since starting the pack is what proves it.
 export function bundledRequireFindings(code: string): CheckFinding[] {
   const specifiers = relativeRuntimeSpecifiers(code)
   if (specifiers.length === 0) return []
