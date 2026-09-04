@@ -121,7 +121,7 @@
   },
   "resolutions": {
     "serialize-javascript": "^7.0.5",
-    "@xmldom/xmldom": "^0.8.10",
+    "@xmldom/xmldom": "^0.8.15",
     "hono": "^4.13.1",
     "@hono/node-server": "^2.0.11",
     "lodash": "^4.18.1",
@@ -129,10 +129,11 @@
     "tar": "^7.5.21",
     "path-to-regexp": "^8.4.2",
     "picomatch": "^4.0.4",
-    "fastify": "^5.11.0",
+    "@humanfs/node": "^0.16.8",
+    "fastify": "^5.12.1",
     "js-yaml": "^4.3.1",
     "ip-address": "^10.3.1",
-    "fast-uri": "^3.1.5",
+    "fast-uri": "^3.1.6",
     "node-gyp/undici": "^8.9.0",
     "tsup/esbuild": "^0.28.1",
     "postcss": "^8.5.23"
