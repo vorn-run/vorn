@@ -102,7 +102,7 @@ export function GeneralSettings() {
         {isElectron && (
           <SettingRow
             label="Start Vorn When I Sign In"
-            description="Vorn opens with the machine, so a restart puts you back where you were. Not available on Linux."
+            description="Vorn opens with the machine, so a restart puts you back where you were."
             note={
               config.defaults.reopenSessions !== false
                 ? 'With Reopen Sessions on, your agents start again at sign-in rather than when you next open Vorn.'

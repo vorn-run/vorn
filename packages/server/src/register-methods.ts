@@ -1004,8 +1004,10 @@ export function registerAllMethods(): void {
           reason: 'workspace-gone' as const,
           message: `${previous.projectPath} is gone`
         }
-      // buildRestorePayload reads worktreePath for the cwd, so the fallback goes through it.
-      const grounded = landing.fellBackFrom
+      // buildRestorePayload reads worktreePath for the cwd, so a gone worktree is cleared from the record.
+      const worktreeGone =
+        previous.worktreePath !== undefined && landing.cwd === previous.projectPath
+      const grounded = worktreeGone
         ? { ...previous, worktreePath: undefined, isWorktree: false }
         : previous
 

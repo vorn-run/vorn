@@ -23,6 +23,13 @@ describe('where a session resumes into', () => {
     )
   })
 
+  it('falls from a missing shell directory to a worktree that is still there', () => {
+    expect(resumeCwdFor(shell, has('/repo', '/repo/.wt/feature'))).toEqual({
+      cwd: '/repo/.wt/feature',
+      fellBackFrom: '/repo/.wt/feature/src'
+    })
+  })
+
   it('falls back to the project when the worktree is gone, and says so', () => {
     // The live bug: an agent's worktree was handed to the spawn unchecked, so a
     // worktree cleaned up after its branch merged was spawned into anyway.
