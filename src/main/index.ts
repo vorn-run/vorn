@@ -30,6 +30,7 @@ import { registerConnectHandlers, showConnectWindow } from './server/connect-win
 import { readPortFile } from './server/server-adoption'
 import type { ServerBridge } from './server/server-bridge'
 import log from './logger'
+import { loginItemFor } from './login-item'
 
 let isQuitting = false
 
@@ -291,6 +292,14 @@ function rememberKeepSessionsRunning(config: unknown): void {
   keepSessionsRunning = value ?? true
 }
 
+// Null means leave the OS record alone; see loginItemFor for why a dev build must.
+function applyLoginItem(config: unknown): void {
+  const openAtLogin = loginItemFor(config as AppConfig | null, app.isPackaged)
+  if (openAtLogin === null) return
+  if (app.getLoginItemSettings().openAtLogin === openAtLogin) return
+  app.setLoginItemSettings({ openAtLogin })
+}
+
 /**
  * Wire up server notification forwarding.
  * When the server pushes events via WebSocket, forward them to the
@@ -301,7 +310,10 @@ function wireServerNotifications(bridge: ServerBridge): void {
     // Before the switch rather than inside it: `CONFIG_CHANGED` is one label in a
     // fall-through group that forwards seventeen events identically, so giving it
     // a body of its own would mean splitting it out and repeating the forward.
-    if (method === IPC.CONFIG_CHANGED) rememberKeepSessionsRunning(params)
+    if (method === IPC.CONFIG_CHANGED) {
+      rememberKeepSessionsRunning(params)
+      applyLoginItem(params)
+    }
     switch (method) {
       // Terminal data/exit → forward to renderer
       case IPC.TERMINAL_DATA:
@@ -581,6 +593,7 @@ app.whenReady().then(async () => {
     // who turned this off in an earlier session and never touched it again would
     // otherwise have their sessions kept running against their wish.
     rememberKeepSessionsRunning(config)
+    applyLoginItem(config)
   } catch {
     // Config not available yet, use defaults
   }

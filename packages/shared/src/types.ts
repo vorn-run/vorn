@@ -1219,6 +1219,8 @@ export interface AppConfig {
     notifications?: NotificationConfig
     hasSeenOnboarding?: boolean | number
     reopenSessions?: boolean
+    // Open Vorn at sign-in. Off until asked; a no-op on Linux.
+    startAtLogin?: boolean
     widgetEnabled?: boolean
     taskViewMode?: TaskViewMode
     layoutMode?: 'grid' | 'tabs'

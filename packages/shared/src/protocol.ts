@@ -562,7 +562,7 @@ export interface RequestMethods {
     params: { id: string }
     result: /** `boundTo` names the session already writing this conversation, when one was. */
       | { ok: true; session: TerminalSession; boundTo?: string }
-      | { ok: false; reason: 'gone' | 'failed'; message?: string }
+      | { ok: false; reason: 'gone' | 'failed' | 'workspace-gone'; message?: string }
   }
   'sessions:clear': { params: void; result: void }
   'sessions:getRecent': { params: string | undefined; result: RecentSession[] }
