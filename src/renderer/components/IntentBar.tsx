@@ -193,10 +193,17 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   // textarea may already have been removed. State would be stale in that closure.
   const hadFocusRef = useRef(false)
   const draftRef = useRef('')
+  // Re-pointed at another pane without unmounting: take that pane's draft
+  // before the effect below can write this one's under its id.
+  const [draftOwner, setDraftOwner] = useState(terminalId)
+  if (draftOwner !== terminalId) {
+    setDraftOwner(terminalId)
+    setValue(readIntentDraft(terminalId)?.text ?? '')
+  }
   useEffect(() => {
     draftRef.current = value
-    writeIntentDraft(terminalId, value)
-  }, [value, terminalId])
+    if (draftOwner === terminalId) writeIntentDraft(terminalId, value)
+  }, [value, terminalId, draftOwner])
   const [seenState, setSeenState] = useState(inputState)
   if (seenState !== inputState) {
     // Adjusted during render, which React sanctions: an effect writing this
