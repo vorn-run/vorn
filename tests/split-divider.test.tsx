@@ -181,7 +181,9 @@ describe('cardSplits store', () => {
   it('reconciles a split whose session never came back after a restart', () => {
     act(() =>
       useAppStore.setState({
-        cardSplits: { t1: { terminal: 0.6, panes: [] }, ghost: { terminal: 0.3, panes: [] } }
+        cardSplits: { t1: { terminal: 0.6, panes: [] }, ghost: { terminal: 0.3, panes: [] } },
+        // What the server has: t1 came back, ghost did not.
+        knownSessionIds: new Set(['t1'])
       })
     )
 

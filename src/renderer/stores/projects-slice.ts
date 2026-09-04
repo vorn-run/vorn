@@ -1,4 +1,5 @@
 import { StateCreator } from 'zustand'
+import { loadView, saveView } from './ui-slice'
 import { AppConfig } from '../../shared/types'
 import { AppStore, ProjectsSlice } from './types'
 
@@ -15,8 +16,8 @@ function patchConfig(
 
 export const createProjectsSlice: StateCreator<AppStore, [], [], ProjectsSlice> = (set) => ({
   config: null,
-  activeProject: null,
-  activeWorktreePath: null,
+  activeProject: loadView().activeProject,
+  activeWorktreePath: loadView().activeWorktreePath,
 
   setConfig: (config) =>
     set({
@@ -25,8 +26,14 @@ export const createProjectsSlice: StateCreator<AppStore, [], [], ProjectsSlice> 
       activeWorkspace: config.defaults.activeWorkspace ?? 'personal'
     }),
 
-  setActiveProject: (name) => set({ activeProject: name, activeWorktreePath: null }),
-  setActiveWorktreePath: (path) => set({ activeWorktreePath: path }),
+  setActiveProject: (name) => {
+    saveView({ activeProject: name, activeWorktreePath: null })
+    set({ activeProject: name, activeWorktreePath: null })
+  },
+  setActiveWorktreePath: (path) => {
+    saveView({ activeWorktreePath: path })
+    set({ activeWorktreePath: path })
+  },
 
   addProject: (project) =>
     set((s) => patchConfig(s.config, (c) => ({ projects: [...c.projects, project] }))),

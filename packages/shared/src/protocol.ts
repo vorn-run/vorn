@@ -7,6 +7,7 @@ import type {
   AppConfig,
   ResizePayload,
   FileEntry,
+  FileStamp,
   GitDiffStat,
   GitDiffResult,
   WorkflowDefinition,
@@ -39,6 +40,7 @@ import type {
   BrowserTabInfo,
   BrowserTarget,
   DeviceInfo,
+  DeviceClaimResult,
   DeviceElement,
   DeviceScreenRead,
   DeviceTarget,
@@ -730,6 +732,17 @@ export interface RequestMethods {
     params: { filePath: string; maxBytes?: number; remoteHostId?: string }
     result: string | null
   }
+  /**
+   * What the file is right now: size and mtime, and nothing else.
+   *
+   * Enough to tell whether a file has changed under an unsaved draft, which is
+   * the only question asked of it. A hash would be a stronger answer and would
+   * mean reading the whole file to ask a question about whether to read it.
+   */
+  'file:stamp': {
+    params: { filePath: string; remoteHostId?: string }
+    result: FileStamp | null
+  }
   'file:writeContent': {
     params: { filePath: string; content: string; remoteHostId?: string }
     result: { success: boolean; error?: string }
@@ -1003,7 +1016,7 @@ export interface RequestMethods {
   }
   'device:claim': {
     params: { sessionId: string; udid: string }
-    result: { udid: string; name: string; booted: boolean }
+    result: DeviceClaimResult
   }
   'device:release': {
     params: { sessionId: string }

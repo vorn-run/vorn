@@ -142,12 +142,11 @@ export async function startServer(
     buildChannel: resolveBuildChannel()
   })
 
-  // Register built-in connectors
+  // Register built-in connectors. Only the two that are a transport rather than
+  // a product: everything that speaks to a named service is a pack.
   const { connectorRegistry } = await import('./connectors')
-  const { githubConnector } = await import('./connectors/github')
   const { httpConnector } = await import('./connectors/http')
   const { mcpConnector } = await import('./connectors/mcp')
-  connectorRegistry.register(githubConnector)
   connectorRegistry.register(httpConnector)
   connectorRegistry.register(mcpConnector)
 

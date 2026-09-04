@@ -96,13 +96,15 @@ describe('connecting a connector', () => {
     expect(onDone).not.toHaveBeenCalled()
   })
 
-  // GitHub is the one connector that names itself from the repo it detects.
-  it('names a GitHub connection after the repository it found', async () => {
+  // Asked for in the manifest, so any connector can have it -- including one
+  // that arrives as a pack, which is how it has to work now that the connector
+  // this was built for is not shipped.
+  it('names a repo-scoped connection after the repository it found', async () => {
     detectRepo.mockResolvedValue({ owner: 'vorn-run', repo: 'vorn' })
     const onDone = vi.fn()
     render(
       <AddConnectionForm
-        connector={{ ...CONNECTOR, id: 'github', name: 'GitHub' }}
+        connector={{ ...CONNECTOR, manifest: { ...manifest, detectRepo: true } }}
         onDone={onDone}
         onCancel={vi.fn()}
       />
@@ -145,5 +147,13 @@ describe('connecting a connector', () => {
 
     await waitFor(() => expect(screen.getByText(/that name is taken/)).toBeInTheDocument())
     expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it('does not go looking for a repo unless the connector asked', async () => {
+    // The test used to be on the connector's id, so every other connector was
+    // repo-free by accident. One that declares nothing must still be.
+    form()
+    await waitFor(() => expect(screen.getByLabelText(/Name/)).toBeInTheDocument())
+    expect(detectRepo).not.toHaveBeenCalled()
   })
 })

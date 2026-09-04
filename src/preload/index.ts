@@ -46,6 +46,8 @@ import {
   BrowserTabInfo,
   BrowserAnnotation,
   DeviceInfo,
+  DeviceClaimResult,
+  FileStamp,
   DeviceSelection,
   DeviceAnnotation,
   DeviceTarget,
@@ -321,6 +323,9 @@ const api = {
     remoteHostId?: string
   ): Promise<string | null> =>
     ipcRenderer.invoke(IPC.FILE_READ_CONTENT, { filePath, maxBytes, remoteHostId }),
+  /** Size and mtime, for telling whether a file moved under an unsaved draft. */
+  fileStamp: (filePath: string, remoteHostId?: string): Promise<FileStamp | null> =>
+    ipcRenderer.invoke(IPC.FILE_STAMP, { filePath, remoteHostId }),
   writeFileContent: (
     filePath: string,
     content: string,
@@ -763,10 +768,7 @@ const api = {
     systemGesture?: boolean
   }): Promise<{ ok: true; generation: number }> => ipcRenderer.invoke(IPC.DEVICE_INTERACT, params),
   deviceList: (): Promise<DeviceInfo[]> => ipcRenderer.invoke(IPC.DEVICE_LIST),
-  deviceClaim: (
-    sessionId: string,
-    udid: string
-  ): Promise<{ udid: string; name: string; booted: boolean }> =>
+  deviceClaim: (sessionId: string, udid: string): Promise<DeviceClaimResult> =>
     ipcRenderer.invoke(IPC.DEVICE_CLAIM, { sessionId, udid }),
   deviceRelease: (sessionId: string): Promise<{ released: boolean }> =>
     ipcRenderer.invoke(IPC.DEVICE_RELEASE, { sessionId }),

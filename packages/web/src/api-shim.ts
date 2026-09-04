@@ -686,6 +686,8 @@ export function createApiShim(wsUrl: string) {
       rpc.invoke('file:listDir', { dirPath, remoteHostId }),
     readFileContent: (filePath: string, maxBytes?: number, remoteHostId?: string) =>
       rpc.invoke('file:readContent', { filePath, maxBytes, remoteHostId }),
+    fileStamp: (filePath: string, remoteHostId?: string) =>
+      rpc.invoke('file:stamp', { filePath, remoteHostId }),
     writeFileContent: (filePath: string, content: string, remoteHostId?: string) =>
       rpc.invoke('file:writeContent', { filePath, content, remoteHostId }),
 

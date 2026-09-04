@@ -100,6 +100,7 @@ export const EditorCard = memo(
           filePath={filePath}
           remoteHostId={remoteHostId}
           dirtyRef={dirtyRefFor(key)}
+          draftKey={key}
           onClose={handleClose}
           controls={
             isCard ? (

@@ -189,8 +189,10 @@ describe('ownership', () => {
     const d = claimFor('udid-1', 'sess-b', held, ['iPhone 17 (udid-2)'])
     expect(d.ok).toBe(false)
     if (d.ok) throw new Error('unreachable')
-    expect(d.error).toContain('sess-a')
-    expect(d.error).toContain('udid-2')
+    expect(d.reason).toBe('held-by-session')
+    expect(d.reason === 'held-by-session' && d.holder).toBe('sess-a')
+    expect(d.message).toContain('sess-a')
+    expect(d.message).toContain('udid-2')
   })
 
   it('lets the holder re-claim its own device', () => {

@@ -1,4 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type JSX, type ReactNode } from 'react'
+import type { FileStamp } from '../../shared/types'
+import { forgetDraft, hasMoved, readDraft, writeDraft } from '../lib/editor-drafts'
+
+/** How long typing has to stop before the draft is worth a synchronous write. */
+const DRAFT_SETTLE_MS = 400
 import type { FileEntry } from '../../shared/types'
 import { ChevronRight, Loader2, X, Search, Pencil, Save, SquareArrowOutUpRight } from 'lucide-react'
 import { FileTypeIcon } from './file-icons'
@@ -618,6 +623,7 @@ function FilePanel({
   onContentSaved,
   remoteHostId,
   dirtyRef,
+  draftKey,
   showHeader = true,
   controls,
   onHeaderPointerDown,
@@ -634,6 +640,17 @@ function FilePanel({
   onContentSaved: (next: string) => void
   remoteHostId?: string
   dirtyRef: React.MutableRefObject<boolean>
+  /**
+   * Where an unsaved edit is kept, so a quit does not throw it away.
+   *
+   * Keyed the way dirtiness already is — by pane, not by path — because two
+   * panes open on one file are two editors, and one draft between them would
+   * put a keystroke in either into both.
+   *
+   * Absent for a panel with no pane of its own to be keyed by, which keeps
+   * today's behaviour of losing the edit.
+   */
+  draftKey?: string
   /** False when hosted in a pane card that draws its own header. */
   showHeader?: boolean
   /**
@@ -651,6 +668,22 @@ function FilePanel({
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  /**
+   * What the file was when this edit started; the save compares against it.
+   *
+   * State rather than a ref, because it decides what gets written down. The
+   * stamp arrives over a round trip -- seconds of it, for a file on a remote
+   * host -- and a ref changing does not re-run the effect that persists the
+   * draft. So a draft saved before the stamp landed kept `base: null` for good,
+   * and a relaunch restored it with the guard unarmed: the next save would go
+   * over a file that had changed underneath, without asking. That is the one
+   * outcome all of this exists to prevent.
+   */
+  const [base, setBase] = useState<FileStamp | null>(null)
+  /** The file on screen right now, for answers that arrive after it changed. */
+  const pathRef = useRef(filePath)
+  /** Set when the file moved under the draft. Cleared by whichever way out is taken. */
+  const [conflict, setConflict] = useState(false)
 
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
@@ -660,14 +693,60 @@ function FilePanel({
 
   // Reset transient state when file changes
   useEffect(() => {
+    pathRef.current = filePath
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clear per-file edit/find state when the file changes
     setEditing(false)
     setDraft('')
     setSaveError(null)
+    setConflict(false)
+    setBase(null)
     setFindOpen(false)
     setFindQuery('')
     setFindIdx(0)
   }, [filePath])
+
+  /**
+   * Pick an edit back up where it was left.
+   *
+   * After the file has loaded, so the draft is compared against something. The
+   * conflict is decided here rather than at save time for the restored case:
+   * the file can have moved while the app was closed, and finding that out only
+   * once somebody presses save means they have been editing against a screen
+   * that was already wrong.
+   */
+  useEffect(() => {
+    if (!draftKey || loading || content === null) return
+    const draft = readDraft(draftKey, filePath)
+    if (!draft) return
+    // Saved elsewhere in the meantime, and the text now agrees with the file.
+    // Nothing to restore, and leaving the record would reopen the editor on
+    // every launch for an edit that has already landed.
+    if (draft.text === content) {
+      forgetDraft(draftKey)
+      return
+    }
+    /* eslint-disable react-hooks/set-state-in-effect -- intentional: the draft is external state, read in once the file it belongs to has loaded */
+    setBase(draft.base)
+    setDraft(draft.text)
+    setEditing(true)
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // Guarded on the way back: this resolves after a round trip to the server,
+    // by which time the pane can have been given another file or closed, and
+    // the answer would then be about neither. A stamp that cannot be taken
+    // leaves the guard unarmed rather than declaring a conflict.
+    let stale = false
+    window.api
+      .fileStamp?.(filePath, remoteHostId)
+      .then((current) => {
+        if (!stale) setConflict(hasMoved(draft.base, current ?? null))
+      })
+      .catch(() => {
+        if (!stale) setConflict(false)
+      })
+    return () => {
+      stale = true
+    }
+  }, [draftKey, filePath, remoteHostId, loading, content])
 
   useEffect(() => {
     if (findOpen) findInputRef.current?.focus()
@@ -698,33 +777,111 @@ function FilePanel({
     setDraft(content)
     setEditing(true)
     setSaveError(null)
+    setConflict(false)
+    // What this edit is based on, asked for now rather than at save time: by
+    // then the file may already have moved, and stamping it there would record
+    // somebody else's version as the one being edited.
+    setBase(null)
+    // Against the path this edit started on, because the answer can arrive after
+    // the pane has moved to another file -- and recording that file's stamp as
+    // this edit's base is worse than having none, since the guard would then be
+    // armed with the wrong version. A failure leaves it unarmed, which is the
+    // documented meaning of no base.
+    const editing = filePath
+    window.api
+      .fileStamp?.(filePath, remoteHostId)
+      .then((stamp) => {
+        if (pathRef.current === editing) setBase(stamp ?? null)
+      })
+      .catch(() => {})
   }
 
   const handleCancelEdit = (): void => {
     if (dirty && !window.confirm('Discard unsaved changes?')) return
+    if (draftKey) forgetDraft(draftKey)
     setEditing(false)
     setDraft('')
     setSaveError(null)
+    setConflict(false)
+    setBase(null)
   }
 
-  const handleSave = useCallback(async (): Promise<void> => {
-    if (!editing) return
-    setSaving(true)
-    setSaveError(null)
-    try {
-      const res = await window.api.writeFileContent(filePath, draft, remoteHostId)
-      if (!res.success) {
-        setSaveError(res.error || 'Failed to save')
-        return
-      }
-      onContentSaved(draft)
-      setEditing(false)
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSaving(false)
+  /**
+   * Keep the edit, so closing the window is not the same as discarding it.
+   *
+   * Written on a delay: this fires per keystroke, and `localStorage.setItem` is
+   * synchronous and on the same thread as the typing.
+   */
+  useEffect(() => {
+    if (!draftKey || !editing || content === null) return
+    if (draft === content) {
+      forgetDraft(draftKey)
+      return
     }
-  }, [filePath, editing, draft, remoteHostId, onContentSaved])
+    const timer = setTimeout(
+      () => writeDraft(draftKey, { filePath, text: draft, base }),
+      DRAFT_SETTLE_MS
+    )
+    return () => clearTimeout(timer)
+    // `base` included on purpose: a stamp that lands after the first write has
+    // to reach the record, or the draft outlives the window with no base.
+  }, [draftKey, editing, draft, content, filePath, base])
+
+  /**
+   * Write the draft to disk.
+   *
+   * `force` skips the check, and is only ever passed by the person answering the
+   * conflict. The write itself is last-writer-wins, so without asking first this
+   * silently discards whatever the file gained while the draft was open --
+   * which, now that a draft outlives the window, can be a day's work by an
+   * agent that was running the whole time.
+   */
+  const handleSave = useCallback(
+    async (force = false): Promise<void> => {
+      if (!editing) return
+      setSaving(true)
+      setSaveError(null)
+      try {
+        if (!force) {
+          const current = (await window.api.fileStamp?.(filePath, remoteHostId)) ?? null
+          if (hasMoved(base, current)) {
+            setConflict(true)
+            return
+          }
+        }
+        const res = await window.api.writeFileContent(filePath, draft, remoteHostId)
+        if (!res.success) {
+          setSaveError(res.error || 'Failed to save')
+          return
+        }
+        if (draftKey) forgetDraft(draftKey)
+        onContentSaved(draft)
+        setEditing(false)
+        setConflict(false)
+        setBase(null)
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setSaving(false)
+      }
+    },
+    [filePath, editing, draft, remoteHostId, onContentSaved, draftKey, base]
+  )
+
+  /** Throw the draft away and take what is on disk. */
+  const handleTakeDisk = useCallback(async (): Promise<void> => {
+    const next = await window.api.readFileContent(filePath, undefined, remoteHostId)
+    if (next === null) {
+      setSaveError('The file could not be read.')
+      return
+    }
+    if (draftKey) forgetDraft(draftKey)
+    onContentSaved(next)
+    setDraft(next)
+    setConflict(false)
+    setEditing(false)
+    setBase(null)
+  }, [filePath, remoteHostId, onContentSaved, draftKey])
 
   const handleToggleFind = (): void => {
     if (!canFind) return
@@ -777,7 +934,7 @@ function FilePanel({
               icon={Save}
               label={saving ? 'Saving…' : 'Save (⌘S)'}
               disabled={!dirty || saving}
-              onClick={handleSave}
+              onClick={() => void handleSave()}
             />
             <ToolbarBtn icon={X} label="Cancel edit" onClick={handleCancelEdit} />
           </>
@@ -846,6 +1003,39 @@ function FilePanel({
         </div>
       )}
 
+      {/* The file moved under the draft. Three ways out, none of them taken for
+          the person: saving over an agent's work and losing an afternoon of
+          your own are both worse than being asked. */}
+      {conflict && (
+        <div className="px-3 py-1.5 text-[11px] text-bronzo bg-bronzo/10 border-t border-white/[0.06] shrink-0 flex items-center gap-3 flex-wrap">
+          <span className="flex-1 min-w-0">
+            This file changed on disk while your edit was open.
+          </span>
+          <button
+            type="button"
+            className="text-gray-300 hover:text-gray-100 underline underline-offset-2"
+            onClick={() => void handleSave(true)}
+            disabled={saving}
+          >
+            Save mine anyway
+          </button>
+          <button
+            type="button"
+            className="text-gray-300 hover:text-gray-100 underline underline-offset-2"
+            onClick={() => void handleTakeDisk()}
+          >
+            Discard mine
+          </button>
+          <button
+            type="button"
+            className="text-gray-300 hover:text-gray-100 underline underline-offset-2"
+            onClick={() => setConflict(false)}
+          >
+            Keep editing
+          </button>
+        </div>
+      )}
+
       {/* Body */}
       {loading ? (
         <div className="flex-1 flex items-center justify-center">
@@ -856,7 +1046,7 @@ function FilePanel({
           Binary file — preview unavailable
         </div>
       ) : editing ? (
-        <EditView draft={draft} onChange={setDraft} onSaveShortcut={handleSave} />
+        <EditView draft={draft} onChange={setDraft} onSaveShortcut={() => void handleSave()} />
       ) : content !== null ? (
         <ReadView
           filePath={filePath}
@@ -1283,6 +1473,7 @@ export function FileEditorPane({
   remoteHostId,
   onClose,
   dirtyRef: externalDirtyRef,
+  draftKey,
   controls,
   onHeaderPointerDown,
   onHeaderDoubleClick,
@@ -1293,6 +1484,8 @@ export function FileEditorPane({
   filePath: string
   remoteHostId?: string
   onClose?: () => void
+  /** Where an unsaved edit is kept; see `FilePanel`. */
+  draftKey?: string
   /** Pane chrome seated in the path strip; see `FilePanel`. */
   controls?: ReactNode
   onHeaderPointerDown?: (e: React.PointerEvent) => void
@@ -1356,6 +1549,7 @@ export function FileEditorPane({
       onContentSaved={handleContentSaved}
       remoteHostId={remoteHostId}
       dirtyRef={dirtyRef}
+      draftKey={draftKey}
       showHeader={false}
       controls={controls}
       onHeaderPointerDown={onHeaderPointerDown}

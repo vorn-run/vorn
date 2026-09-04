@@ -4,6 +4,7 @@ import { act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
 import { activeBrowserUrl, isPromotedPane } from '../src/renderer/stores/types'
 import { parsePersistedBrowsers } from '../src/renderer/stores/ui-slice'
+import type { DeviceClaimFailure } from '../packages/shared/src/types'
 import { DEVICE_SPLIT_RATIO } from '../src/renderer/lib/split-ratio'
 
 /** The page a session's browser is showing, i.e. its active tab. */
@@ -37,7 +38,10 @@ function seed(ids: string[] = ['t1']): void {
       minimizedTerminals: new Set(),
       maximizedPaneId: null,
       terminalOrder: ids,
-      visibleTerminalIds: []
+      visibleTerminalIds: [],
+      // What the server has. The reconcile prunes against this, not against the
+      // board, so a fixture that seeds one without the other prunes everything.
+      knownSessionIds: new Set(ids)
     })
   })
 }
@@ -392,7 +396,8 @@ describe('pane store actions', () => {
     // localStorage forever and could attach to a recycled id.
     const terminals = new Map(s().terminals)
     terminals.delete('t2')
-    act(() => useAppStore.setState({ terminals }))
+    // What the server has, which is what the reconcile prunes against.
+    act(() => useAppStore.setState({ terminals, knownSessionIds: new Set(['t1']) }))
     act(() => s().setVisibleTerminalIds(['t1']))
 
     expect(s().filesPanes.has('t1')).toBe(true)
@@ -592,10 +597,12 @@ describe('claiming a device before showing it', () => {
   })
 
   it('claims the device before opening the pane', async () => {
-    const deviceClaim = vi.fn().mockResolvedValue({ udid: 'u1', name: 'iPhone 17', booted: true })
+    const deviceClaim = vi
+      .fn()
+      .mockResolvedValue({ ok: true, udid: 'u1', name: 'iPhone 17', booted: true })
     stubApi({ deviceClaim })
 
-    let err: string | null = 'unset'
+    let err: DeviceClaimFailure | null = { reason: 'gone', message: 'unset' }
     await act(async () => {
       err = await useAppStore.getState().claimAndOpenDevicePane('s1', device)
     })
@@ -610,7 +617,9 @@ describe('claiming a device before showing it', () => {
 
   it('takes the name main reports, not the one the picker guessed', async () => {
     stubApi({
-      deviceClaim: vi.fn().mockResolvedValue({ udid: 'u1', name: 'iPhone 17 Pro', booted: true })
+      deviceClaim: vi
+        .fn()
+        .mockResolvedValue({ ok: true, udid: 'u1', name: 'iPhone 17 Pro', booted: true })
     })
     await act(async () => {
       await useAppStore.getState().claimAndOpenDevicePane('s1', device)
@@ -620,10 +629,15 @@ describe('claiming a device before showing it', () => {
 
   it('leaves the pane shut when the claim is refused, and says why', async () => {
     stubApi({
-      deviceClaim: vi.fn().mockRejectedValue(new Error('iPhone 17 is in use by session other-1'))
+      deviceClaim: vi.fn().mockResolvedValue({
+        ok: false,
+        reason: 'held-by-session',
+        holder: 'other-1',
+        message: 'iPhone 17 is in use by session other-1'
+      })
     })
 
-    let err: string | null = null
+    let err: DeviceClaimFailure | null = { reason: 'gone', message: 'unset' }
     await act(async () => {
       err = await useAppStore.getState().claimAndOpenDevicePane('s1', device)
     })
@@ -631,7 +645,8 @@ describe('claiming a device before showing it', () => {
     // A pane opened over a refused claim is worse than no pane: it shows a
     // frame of nothing and buries the one message naming the holder.
     expect(useAppStore.getState().devicePanes.has('s1')).toBe(false)
-    expect(err).toContain('other-1')
+    expect(err?.reason).toBe('held-by-session')
+    expect(err?.message).toContain('other-1')
   })
 })
 
@@ -1000,7 +1015,8 @@ describe('popping an item out to its own card', () => {
         terminals: new Map([
           ['t2', { id: 't2', session: session('t2'), status: 'idle', lastOutputTimestamp: 1 }]
         ]),
-        visibleTerminalIds: ['t2']
+        visibleTerminalIds: ['t2'],
+        knownSessionIds: new Set(['t2'])
       } as never)
     )
     expect(s().filesPanes.has('t1')).toBe(true)

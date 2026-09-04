@@ -13,7 +13,8 @@ import {
   TaskConfig,
   TaskStatus,
   MobileProject,
-  UpdateStatus
+  UpdateStatus,
+  DeviceClaimFailure
 } from '../../shared/types'
 import type { PortableRequirement } from '../../shared/workflow-portability'
 
@@ -189,10 +190,20 @@ export function activeBrowserUrl(pane: BrowserPaneState | undefined): string | n
 /**
  * State of a session's device pane — the simulator that session has claimed.
  *
- * Deliberately not persisted, unlike files/editor/browser panes. A claim lives
- * in the main process and does not survive a restart, so reviving this pane
- * from disk would show a frame for a device this session no longer holds.
+ * Persisted, but not restored the way the other panes are. A claim lives in the
+ * main process and does not survive a restart, so what is written down is a
+ * request to take the device again rather than a pane to put back: the launch
+ * re-claims through `claimAndOpenDevicePane`, and the pane appears only once the
+ * device is genuinely held. Putting the frame back first would show a simulator
+ * nobody is driving, which is what this note used to prevent by writing nothing.
  */
+/** A device the launch asked for and did not get, with the reason. */
+export interface DeviceRestoreRefusal {
+  sessionId: string
+  device: DevicePaneState
+  failure: DeviceClaimFailure
+}
+
 export interface DevicePaneState {
   /** UDID of the claimed simulator this pane is showing. */
   udid: string
@@ -355,6 +366,21 @@ export interface UISlice {
   statusFilter: StatusFilter
   terminalOrder: string[]
   visibleTerminalIds: string[]
+  /**
+   * Every session the server has, running or ended — or null before it has been
+   * asked.
+   *
+   * Not the same set as `terminals`, and the difference is the whole reason this
+   * exists. Null means "not asked yet", which an empty board cannot be told
+   * apart from "nothing to show". And with reopen turned off the board
+   * deliberately leaves the ended sessions out, so pruning the restored view
+   * against what is on screen would throw away the panes of every session the
+   * banner is at that moment offering to bring back.
+   *
+   * So this is what the view is reconciled against: what exists, not what is
+   * currently drawn.
+   */
+  knownSessionIds: Set<string> | null
   focusableTerminalIds: string[]
   minimizedTerminals: Set<string>
   /** Session ids whose file-tree pane is open. Keyed by owner, one per session. */
@@ -457,6 +483,13 @@ export interface UISlice {
   setCardSplit: (sessionId: string, split: CardSplit) => void
   setTerminalOrder: (order: string[]) => void
   setVisibleTerminalIds: (ids: string[]) => void
+  /**
+   * Record every session the server has, once a sync pass has asked.
+   *
+   * Called even when the answer is none, which is a settled board too and the
+   * case a "wait for a live session" rule would leave waiting forever.
+   */
+  setKnownSessions: (ids: string[]) => void
   setFocusableTerminalIds: (ids: string[]) => void
   /**
    * Move `draggedId` to where `droppedOnId` sits in the session order.
@@ -532,7 +565,21 @@ export interface UISlice {
    * and the picker appears to have done nothing. Returns the failure message
    * so contention can be shown where the person is looking.
    */
-  claimAndOpenDevicePane: (sessionId: string, device: DevicePaneState) => Promise<string | null>
+  claimAndOpenDevicePane: (
+    sessionId: string,
+    device: DevicePaneState
+  ) => Promise<DeviceClaimFailure | null>
+  /**
+   * Take back the devices that were open when the app last closed.
+   *
+   * Called once the board has settled, for the sessions that came back with it.
+   * A device that is gone, or that another Vorn is driving, is left alone --
+   * this never ends somebody else's claim to satisfy a record on disk.
+   *
+   * Returns the ones it would not take, for the caller to tell the person
+   * about. The store does not raise toasts of its own.
+   */
+  restoreDevicePanes: () => Promise<DeviceRestoreRefusal[]>
   closeDevicePane: (sessionId: string) => void
   /**
    * Show the session's terminals panel, adding `terminalId` to it if given.

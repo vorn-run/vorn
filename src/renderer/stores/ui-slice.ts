@@ -10,6 +10,7 @@ import {
   BrowserPaneState,
   BrowserTabState,
   DevicePaneState,
+  DeviceRestoreRefusal,
   TerminalsPaneState,
   CardSplit,
   isPromotedPane,
@@ -27,6 +28,8 @@ import {
   promotedCardId
 } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
+import { pruneScrollAnchors } from '../lib/scroll-anchor'
+import { pruneDrafts } from '../lib/editor-drafts'
 import { confirmDiscard, confirmDiscardAll, clearDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 
@@ -46,12 +49,161 @@ const FLEXIBLE_STORAGE_KEY = 'vorn:flexibleLayouts'
 const CARD_SPLITS_STORAGE_KEY = 'vorn:cardSplits'
 const PANES_STORAGE_KEY = 'vorn:panes'
 const TERMINAL_PANELS_STORAGE_KEY = 'vorn:terminalPanels'
+const DEVICE_PANES_STORAGE_KEY = 'vorn:devicePanes'
+const VIEW_STORAGE_KEY = 'vorn:view'
 /**
  * Where a browser pane opened with no url starts. Deliberately blank: guessing
  * a page would be wrong more often than not, and the address bar is focused
  * and empty, which is the prompt to type one.
  */
 const DEFAULT_BROWSER_URL = 'about:blank'
+
+interface PersistedView {
+  minimized: string[]
+  activeTabId: string | null
+  maximizedPaneId: string | null
+  activeProject: string | null
+  activeWorktreePath: string | null
+}
+
+const EMPTY_VIEW: PersistedView = {
+  minimized: [],
+  activeTabId: null,
+  maximizedPaneId: null,
+  activeProject: null,
+  activeWorktreePath: null
+}
+
+// Pane ids, the namespace focus and minimise already use -- not session ids.
+function loadView(): PersistedView {
+  try {
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY)
+    if (!raw) return EMPTY_VIEW
+    const parsed = JSON.parse(raw) as Partial<PersistedView>
+    return {
+      minimized: Array.isArray(parsed.minimized) ? parsed.minimized.filter(isNonEmpty) : [],
+      activeTabId: orNull(parsed.activeTabId),
+      maximizedPaneId: orNull(parsed.maximizedPaneId),
+      activeProject: orNull(parsed.activeProject),
+      activeWorktreePath: orNull(parsed.activeWorktreePath)
+    }
+  } catch {
+    return EMPTY_VIEW
+  }
+}
+
+function isNonEmpty(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0
+}
+
+function orNull(value: unknown): string | null {
+  return isNonEmpty(value) ? value : null
+}
+
+/** The reader, for tests: everything else reads it once at construction. */
+export const loadViewForTest = loadView
+
+export { loadView, saveView }
+
+function saveView(view: Partial<PersistedView>): void {
+  try {
+    const merged = { ...loadView(), ...view }
+    localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(merged))
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * The devices that were open when the app last closed, keyed by session.
+ *
+ * A request rather than a pane. Every other pane kind can be put straight back
+ * because nothing outside this window has to agree; a device has to be taken
+ * from the machine, and the claim it was taken with died with the last process.
+ * So this is read by `restoreDevicePanes`, which asks for each one again, and
+ * never by the slice's constructor.
+ */
+function loadDeviceRequests(): Map<string, DevicePaneState> {
+  try {
+    const raw = localStorage.getItem(DEVICE_PANES_STORAGE_KEY)
+    if (!raw) return new Map()
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return new Map()
+    const out = new Map<string, DevicePaneState>()
+    for (const [sessionId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const device = value as Partial<DevicePaneState>
+      if (!isNonEmpty(device?.udid) || !isNonEmpty(device?.name)) continue
+      out.set(sessionId, { udid: device.udid, name: device.name })
+    }
+    return out
+  } catch {
+    return new Map()
+  }
+}
+
+/**
+ * Take back the split `openDevicePane` biased toward the terminal.
+ *
+ * That ratio is written to storage, and nothing used to remove it -- so closing
+ * the pane, or quitting with one open, left a card permanently sized for a phone
+ * that is not there. Only when it is still the ratio we wrote: a person who has
+ * dragged the divider since has made a decision, and this is not the place to
+ * overrule it.
+ */
+function dropDeviceSplit(
+  state: Pick<AppStore, 'cardSplits'>,
+  sessionId: string
+): { cardSplits?: Record<string, CardSplit> } {
+  const split = state.cardSplits[sessionId]
+  if (!split || split.terminal !== DEVICE_SPLIT_RATIO || split.panes.length > 0) return {}
+  const splits = { ...state.cardSplits }
+  delete splits[sessionId]
+  saveCardSplits(splits)
+  return { cardSplits: splits }
+}
+
+/**
+ * Write one device down, leaving the rest of the record alone.
+ *
+ * Never the whole in-memory map. On a launch that map starts empty and fills a
+ * device at a time as each claim comes back, so saving it wholesale made the
+ * first success erase every request still waiting its turn -- including the ones
+ * that were about to be refused and kept for the next launch. The stored record
+ * legitimately holds entries this window has not got to yet.
+ */
+function rememberDeviceRequest(sessionId: string, device: DevicePaneState): void {
+  const next = loadDeviceRequests()
+  const held = next.get(sessionId)
+  if (held?.udid === device.udid && held.name === device.name) return
+  next.set(sessionId, device)
+  saveDeviceRequests(next)
+}
+
+function forgetDeviceRequest(sessionId: string): void {
+  const next = loadDeviceRequests()
+  if (!next.delete(sessionId)) return
+  saveDeviceRequests(next)
+}
+
+/** Drop requests for sessions that are gone, alongside the rest of the view state. */
+function pruneDeviceRequests(liveSessionIds: Set<string>): void {
+  const next = loadDeviceRequests()
+  let changed = false
+  for (const sessionId of [...next.keys()]) {
+    if (liveSessionIds.has(sessionId)) continue
+    next.delete(sessionId)
+    changed = true
+  }
+  if (changed) saveDeviceRequests(next)
+}
+
+function saveDeviceRequests(devicePanes: Map<string, DevicePaneState>): void {
+  try {
+    localStorage.setItem(DEVICE_PANES_STORAGE_KEY, JSON.stringify(Object.fromEntries(devicePanes)))
+  } catch {
+    /* ignore */
+  }
+}
 
 function loadGridSettings(): { gridColumns?: number; sortMode?: string; statusFilter?: string } {
   try {
@@ -304,6 +456,10 @@ function reconcilePanes(
   // card id, and pruning by key would delete every one of them on the first
   // reconcile — silently discarding the pages and files someone put there.
   const nextEditors = new Map([...editorPanes].filter(([, e]) => liveSessionIds.has(e.sessionId)))
+  // Keyed by pane, so pruned against the panes that survived rather than against
+  // the sessions -- an editor popped out into a card outlives its owner's pane
+  // and its draft has to outlive it too.
+  pruneDrafts(new Set(nextEditors.keys()))
   const nextBrowsers = new Map([...browserPanes].filter(([, b]) => liveSessionIds.has(b.sessionId)))
   // Tabs remembered for a closed pane die with their session as well. This is
   // the path `removeTerminal` cannot cover: a session that simply never came
@@ -363,6 +519,94 @@ function reconcilePanes(
     terminalsPanes: nextPanels,
     cardSplits: nextSplits
   }
+}
+
+/**
+ * Drop view state pointing at sessions that never came back.
+ *
+ * The same reasoning as `reconcilePanes`, on the fields that key by pane id
+ * rather than by session: a card minimised before a quit whose session is gone
+ * would stay in the pill row forever, naming a session nobody can restore.
+ *
+ * `paneOwnerId` is what makes one live set answer for all three — a terminal
+ * pane is its own owner, so a raw session id passes through unchanged and a
+ * `browser:`/`card:` id resolves to the session it hangs off.
+ *
+ * The project and worktree are deliberately not touched: they name a checkout
+ * on disk, not a session, and a workspace with nothing running in it is still
+ * the one you were last looking at.
+ */
+function reconcileView(
+  minimized: Set<string>,
+  activeTabId: string | null,
+  maximizedPaneId: string | null,
+  liveSessionIds: Set<string>
+): {
+  minimizedTerminals: Set<string>
+  activeTabId: string | null
+  maximizedPaneId: string | null
+} | null {
+  // Keyed by session id and pruned here rather than on its own trigger: a
+  // scroll position is view state, and it goes when the rest of it goes.
+  pruneScrollAnchors(liveSessionIds)
+  pruneDeviceRequests(liveSessionIds)
+  const alive = (paneId: string): boolean => liveSessionIds.has(paneOwnerId(paneId))
+  const nextMinimized = new Set([...minimized].filter(alive))
+  const nextTab = activeTabId && alive(activeTabId) ? activeTabId : null
+  const nextMax = maximizedPaneId && alive(maximizedPaneId) ? maximizedPaneId : null
+  if (
+    nextMinimized.size === minimized.size &&
+    nextTab === activeTabId &&
+    nextMax === maximizedPaneId
+  ) {
+    return null
+  }
+  saveView({
+    minimized: [...nextMinimized],
+    activeTabId: nextTab,
+    maximizedPaneId: nextMax
+  })
+  return { minimizedTerminals: nextMinimized, activeTabId: nextTab, maximizedPaneId: nextMax }
+}
+
+/**
+ * Drop everything belonging to a session the server does not have.
+ *
+ * Sessions restore by their persisted id, so pane entries stay valid across
+ * restarts — but a session that never comes back would leave its entry behind
+ * forever.
+ *
+ * Reconciled against what the server has rather than against what is on the
+ * board. Those differ on the launch where reopen is off: the ended sessions are
+ * deliberately left off the board and offered by the banner instead, and pruning
+ * against the board would delete the panes of every one of them a moment before
+ * the person is asked whether to bring them back. Null until a sync pass has
+ * asked, which is not the same as none.
+ *
+ * Returns null when there is nothing to change, so a caller can tell a reconcile
+ * that did something from one that did not.
+ */
+function pruneAgainstKnown(state: AppStore): Partial<AppStore> | null {
+  const live = state.knownSessionIds
+  if (live === null) return null
+  const panes = reconcilePanes(
+    state.filesPanes,
+    state.editorPanes,
+    state.browserPanes,
+    state.browserMemory,
+    state.devicePanes,
+    state.terminalsPanes,
+    state.cardSplits,
+    live
+  )
+  const view = reconcileView(
+    state.minimizedTerminals,
+    state.activeTabId,
+    state.maximizedPaneId,
+    live
+  )
+  if (!panes && !view) return null
+  return { ...(panes ?? {}), ...(view ?? {}) }
 }
 
 /**
@@ -581,8 +825,9 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     (savedGrid.statusFilter as 'all' | 'running' | 'waiting' | 'idle' | 'error') ?? 'all',
   terminalOrder: [],
   visibleTerminalIds: [],
+  knownSessionIds: null,
   focusableTerminalIds: [],
-  minimizedTerminals: new Set(),
+  minimizedTerminals: new Set(loadView().minimized),
   ...loadPanes(),
   // Not persisted: remembering tabs across a close is about the current
   // sitting, and a reload already restores whatever was open from loadPanes.
@@ -591,7 +836,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   // device pane restored from disk would frame a simulator nobody holds.
   devicePanes: new Map(),
   terminalsPanes: loadTerminalPanels(),
-  maximizedPaneId: null,
+  maximizedPaneId: loadView().maximizedPaneId,
   sessionDockCollapsed: false,
   isOnboardingOpen: false,
   diffSidebarTerminalId: null,
@@ -612,7 +857,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   isTaskDialogOpen: false,
   taskDialogDefaultStatus: 'todo' as const,
   editingTask: null,
-  activeTabId: null,
+  activeTabId: loadView().activeTabId,
 
   setActiveWorkspace: (id) => {
     const config = get().config
@@ -716,31 +961,24 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   setVisibleTerminalIds: (ids) =>
     set((state) => {
       const unchanged = sameIds(state.visibleTerminalIds, ids)
-      // Sessions restore by their persisted id, so pane entries stay valid across
-      // restarts — but a session that never comes back would leave its entry
-      // behind forever. Reconcile against the live set as it settles.
-      const live = new Set(state.terminals.keys())
-      const reconciled =
-        live.size > 0
-          ? reconcilePanes(
-              state.filesPanes,
-              state.editorPanes,
-              state.browserPanes,
-              state.browserMemory,
-              state.devicePanes,
-              state.terminalsPanes,
-              state.cardSplits,
-              live
-            )
-          : null
-      // An unchanged list is not a change worth notifying the app about — but
-      // the reconcile above still has to run, because this is its only trigger.
-      // Gating both on the list changing meant a launch where the visible set
-      // never moved (everything filtered out, or every restored session
-      // minimized) never pruned a dead session's panes at all.
-      if (unchanged && !reconciled) return {}
-      return { ...(unchanged ? {} : { visibleTerminalIds: ids }), ...(reconciled ?? {}) }
+      const pruned = pruneAgainstKnown(state)
+      if (unchanged && !pruned) return {}
+      return { ...(unchanged ? {} : { visibleTerminalIds: ids }), ...(pruned ?? {}) }
     }),
+
+  // Learning what exists is itself a reason to reconcile, and for a while the
+  // only trigger was the visible list changing. A launch that finds nothing
+  // running changes no list -- so a board whose every session was gone was the
+  // one board that never pruned, and its panes and pills stayed for good.
+  setKnownSessions: (ids) =>
+    set((state) => {
+      const known = new Set(ids)
+      return {
+        knownSessionIds: known,
+        ...(pruneAgainstKnown({ ...state, knownSessionIds: known }) ?? {})
+      }
+    }),
+
   setFocusableTerminalIds: (ids) =>
     set((state) => (sameIds(state.focusableTerminalIds, ids) ? {} : { focusableTerminalIds: ids })),
 
@@ -774,6 +1012,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       else next.delete(id)
       // A pane that just got minimized can't stay maximized.
       const clearMax = nowMinimized && state.maximizedPaneId === id
+      saveView({ minimized: [...next], ...(clearMax ? { maximizedPaneId: null } : {}) })
       return { minimizedTerminals: next, ...(clearMax ? { maximizedPaneId: null } : {}) }
     }),
 
@@ -988,6 +1227,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       if (existing && existing.udid === device.udid && existing.name === device.name) return {}
       const next = new Map(state.devicePanes)
       next.set(sessionId, device)
+      rememberDeviceRequest(sessionId, device)
       // A phone is roughly 0.46 as wide as it is tall, so the even split every
       // other pane kind wants renders it as a narrow strip of screen floating in
       // a wide field of empty background — while the terminal, which needs the
@@ -1009,13 +1249,46 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // boots the simulator if it is not running, so the person never has to
       // leave Vorn for Xcode.
       const claimed = await window.api.deviceClaim(sessionId, device.udid)
+      // Surfaced rather than swallowed: the likeliest failure is another
+      // session holding the device, and that message names the holder.
+      if (!claimed.ok) return claimed
       get().openDevicePane(sessionId, { udid: claimed.udid, name: claimed.name })
       return null
     } catch (e) {
-      // Surfaced rather than swallowed: the likeliest failure is another
-      // session holding the device, and that message names the holder.
-      return e instanceof Error ? e.message : String(e)
+      // Everything the claim does not have a name for -- the channel itself
+      // failing, an older main process. Reported as a boot failure because that
+      // is the one outcome that means "this device, this time, did not work".
+      return { reason: 'boot-failed', message: e instanceof Error ? e.message : String(e) }
     }
+  },
+
+  restoreDevicePanes: async () => {
+    const requests = loadDeviceRequests()
+    const refused: DeviceRestoreRefusal[] = []
+    if (requests.size === 0) return refused
+    // One at a time. Each claim boots a simulator, and `simctl bootstatus`
+    // blocks until it is up -- taking six together is six simulators starting
+    // in the same instant on a machine that has just finished launching.
+    for (const [sessionId, device] of requests) {
+      // Read per iteration: this loop awaits a boot each time round, and the
+      // board can gain a session while it does.
+      if (!get().terminals.has(sessionId)) continue
+      if (get().devicePanes.has(sessionId)) continue
+      const failure = await get().claimAndOpenDevicePane(sessionId, device)
+      if (!failure) continue
+      // A simulator that has been deleted, or a record carried to another
+      // machine, is not something the person did or can act on. Forgotten
+      // rather than reported, so it stops being tried on every launch.
+      if (failure.reason === 'gone') {
+        forgetDeviceRequest(sessionId)
+        continue
+      }
+      // The rest are contested or broken, and the record is kept: the device is
+      // still the one this session was working against, and the next launch --
+      // after the other Vorn has quit -- should try it again.
+      refused.push({ sessionId, device, failure })
+    }
+    return refused
   },
 
   closeDevicePane: (sessionId) =>
@@ -1034,8 +1307,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       }
       const next = new Map(state.devicePanes)
       next.delete(sessionId)
+      forgetDeviceRequest(sessionId)
       return {
         devicePanes: next,
+        ...dropDeviceSplit(state, sessionId),
         ...clearPlacement(state, devicePaneId(sessionId))
       }
     }),
@@ -1300,7 +1575,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     set({ isTaskDialogOpen: open, taskDialogDefaultStatus: defaultStatus ?? 'todo' }),
   setEditingTask: (task) => set({ editingTask: task }),
 
-  setActiveTabId: (id) => set({ activeTabId: id }),
+  setActiveTabId: (id) => {
+    saveView({ activeTabId: id })
+    set({ activeTabId: id })
+  },
 
   workflowExecutions: new Map(),
   setWorkflowExecution: (runId, execution) =>

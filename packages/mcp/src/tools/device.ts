@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type {
   DeviceInfo,
+  DeviceClaimResult,
   DeviceElement,
   DeviceScreenRead,
   DeviceTarget
@@ -121,10 +122,14 @@ export function registerDeviceTools(server: McpServer): void {
     { udid: required('Simulator UDID from device_list') },
     async (args) =>
       withSession(async (id) => {
-        const r = await rpcCall<{ udid: string; name: string; booted: boolean }>('device:claim', {
+        const r = await rpcCall<DeviceClaimResult>('device:claim', {
           sessionId: id,
           udid: args.udid
         })
+        // The refusal is the answer, not an exception -- but an agent reads a
+        // failed tool call, so it is raised as one here rather than reported as
+        // a success whose text happens to say no.
+        if (!r.ok) throw new Error(r.message)
         return {
           content: [{ type: 'text', text: `Claimed ${r.name} (${r.udid}).` }]
         }

@@ -22,7 +22,12 @@ vi.mock('node:fs', () => ({
 }))
 
 import fs from 'node:fs'
-import { listDir, readFileContent, writeFileContent } from '../packages/server/src/file-utils'
+import {
+  fileStamp,
+  listDir,
+  readFileContent,
+  writeFileContent
+} from '../packages/server/src/file-utils'
 import type { RemoteHost } from '@vornrun/shared/types'
 
 beforeEach(() => {
@@ -248,5 +253,82 @@ describe('writeFileContent', () => {
 
     expect(result.success).toBe(false)
     expect(result.error).toContain('ssh: connect failed')
+  })
+})
+
+/**
+ * The stamp a draft is compared against. Its only job is to be wrong rather than
+ * absent when the file has moved, so every arm that could invent one is checked.
+ */
+describe('fileStamp', () => {
+  const remote: RemoteHost = {
+    id: 'h1',
+    label: 'example',
+    hostname: 'example.com',
+    user: 'alice',
+    port: 22
+  }
+
+  it('reports the size and mtime of a file', () => {
+    vi.mocked(fs.statSync).mockReturnValue({
+      isFile: () => true,
+      size: 120,
+      mtimeMs: 1_700_000_000_123
+    } as never)
+
+    expect(fileStamp('/repo/a.ts')).toEqual({ size: 120, mtimeMs: 1_700_000_000_123 })
+  })
+
+  it('floors the mtime, so a local stamp can be compared with a remote one', () => {
+    // `stat` over ssh answers in whole seconds either side; keeping the
+    // sub-second part here would read as changed against a stamp that never
+    // had the precision to disagree.
+    vi.mocked(fs.statSync).mockReturnValue({
+      isFile: () => true,
+      size: 1,
+      mtimeMs: 1_700_000_000_999.7
+    } as never)
+
+    expect(fileStamp('/repo/a.ts')?.mtimeMs).toBe(1_700_000_000_999)
+  })
+
+  it('refuses to stamp a directory', () => {
+    vi.mocked(fs.statSync).mockReturnValue({ isFile: () => false } as never)
+    expect(fileStamp('/repo/src')).toBeNull()
+  })
+
+  it('answers null for a file that is gone rather than inventing one', () => {
+    vi.mocked(fs.statSync).mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+    // A stamp made up here would tell a draft the file is unchanged, and the
+    // save would go through without asking.
+    expect(fileStamp('/repo/gone.ts')).toBeNull()
+  })
+
+  it('asks a remote host with one call and reads seconds as milliseconds', () => {
+    mockExecFileSync.mockReturnValue('120 1700000000\n')
+
+    expect(fileStamp('/remote/a.ts', remote)).toEqual({
+      size: 120,
+      mtimeMs: 1_700_000_000_000
+    })
+    const [, args] = mockExecFileSync.mock.calls[0]
+    // GNU first, BSD second: the flags are incompatible and there is no
+    // portable spelling, so the shell tries both.
+    expect(args[args.length - 1]).toContain("stat -c '%s %Y'")
+    expect(args[args.length - 1]).toContain("stat -f '%z %m'")
+  })
+
+  it('answers null when the remote says something that is not a stamp', () => {
+    mockExecFileSync.mockReturnValue('stat: illegal option\n')
+    expect(fileStamp('/remote/a.ts', remote)).toBeNull()
+  })
+
+  it('answers null when the remote cannot be reached', () => {
+    mockExecFileSync.mockImplementation(() => {
+      throw new Error('ssh: connect failed')
+    })
+    expect(fileStamp('/remote/a.ts', remote)).toBeNull()
   })
 })

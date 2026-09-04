@@ -239,7 +239,7 @@ export function SessionItem({
                 // The likeliest failure is another session holding the device,
                 // and that message names the holder. A toast rather than inline
                 // state because the picker has already closed by now.
-                if (err) toast.error(err)
+                if (err) toast.error(err.message)
               })
             }}
           />

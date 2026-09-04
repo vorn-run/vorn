@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { useVisibleTerminals, compareTerminalIds } from '../hooks/useVisibleTerminals'
 import { isTerminalPane, isPromotedCardId } from '../lib/pane-id'
+import { chooseActiveTab } from '../lib/active-tab'
 import { usePromotedCardsByOwner, usePromotedCardSubject } from '../hooks/usePromotedCards'
 import { PromotedPaneCard } from './PromotedPaneCard'
 import { CardSubjectIcon } from './CardSubjectIcon'
@@ -199,15 +200,15 @@ export function TabView() {
     return map
   }, [tasks])
 
+  // The restored tab names a session that has not arrived yet, so clamping it
+  // against the list before then throws the restore away -- first to null while
+  // the list is empty, then onto whichever session happened to land first.
+  const knownSessionIds = useAppStore((s) => s.knownSessionIds)
+
   useEffect(() => {
-    if (allTabIds.length === 0) {
-      if (activeTabId !== null) setActiveTabId(null)
-      return
-    }
-    if (!activeTabId || !allTabIds.includes(activeTabId)) {
-      setActiveTabId(allTabIds[0])
-    }
-  }, [allTabIds, activeTabId, setActiveTabId])
+    const next = chooseActiveTab(activeTabId, allTabIds, knownSessionIds)
+    if (next !== undefined) setActiveTabId(next)
+  }, [allTabIds, activeTabId, setActiveTabId, knownSessionIds])
 
   const handleSelectTab = (id: string): void => {
     setActiveTabId(id)

@@ -8,7 +8,9 @@ import type {
   DevicePoint,
   DeviceTarget,
   DeviceSelection,
-  DeviceAnnotation
+  DeviceAnnotation,
+  DeviceClaimFailure,
+  DeviceClaimResult
 } from '../shared/types'
 import { IPC } from '../shared/types'
 import {
@@ -20,6 +22,12 @@ import {
   CALL_TIMEOUT_MS,
   type CompanionHandle
 } from './device-companion'
+import {
+  dropAllClaimsForThisProcess,
+  dropClaim,
+  foreignClaim,
+  recordClaim
+} from './device-claims-store'
 import log from './logger'
 
 const exec = promisify(execFile)
@@ -132,7 +140,7 @@ export function claimFor(
   sessionId: string,
   claims: ReadonlyMap<string, { udid: string; sessionId: string }>,
   free: readonly string[] = []
-): { ok: true; alreadyMine: boolean } | { ok: false; error: string } {
+): { ok: true; alreadyMine: boolean } | ({ ok: false } & DeviceClaimFailure) {
   for (const held of claims.values()) {
     if (held.udid !== udid) continue
     if (held.sessionId === sessionId) return { ok: true, alreadyMine: true }
@@ -141,7 +149,9 @@ export function claimFor(
       : ' No other device is free — release one or create a new simulator.'
     return {
       ok: false,
-      error: `Device ${udid} is already claimed by session ${held.sessionId}.${alternatives}`
+      reason: 'held-by-session',
+      holder: held.sessionId,
+      message: `Device ${udid} is already claimed by session ${held.sessionId}.${alternatives}`
     }
   }
   return { ok: true, alreadyMine: false }
@@ -491,40 +501,66 @@ function explainSimctl(err: unknown): Error {
 // Claim / release
 // ---------------------------------------------------------------------------
 
-export function claim(params: {
-  sessionId: string
-  udid: string
-}): Promise<{ udid: string; name: string; booted: boolean }> {
+/**
+ * Take a device for a session.
+ *
+ * Answers with an outcome rather than throwing for the four ways this fails,
+ * because the caller has to tell them apart. Re-claiming a pane on launch is
+ * what made that necessary: a simulator that is gone is ordinary and passes in
+ * silence, while one another session is driving is worth interrupting for, and
+ * both used to arrive as an Error carrying only prose.
+ */
+export function claim(params: { sessionId: string; udid: string }): Promise<DeviceClaimResult> {
   return withDeviceLock(params.udid, () => claimLocked(params))
 }
 
 async function claimLocked(params: {
   sessionId: string
   udid: string
-}): Promise<{ udid: string; name: string; booted: boolean }> {
+}): Promise<DeviceClaimResult> {
   const devices = await listDevices()
   const device = devices.find((d) => d.udid === params.udid)
   if (!device) {
-    throw new Error(
-      `No simulator with udid ${params.udid}. Call device_list to see what is available.`
-    )
+    return {
+      ok: false,
+      reason: 'gone',
+      message: `No simulator with udid ${params.udid}. Call device_list to see what is available.`
+    }
   }
 
   const free = devices.filter((d) => !d.claimedBy).map((d) => `${d.name} (${d.udid})`)
   const decision = claimFor(params.udid, params.sessionId, claims(), free)
-  if (!decision.ok) throw new Error(decision.error)
+  if (!decision.ok) return decision
+
+  // Only once this process has no claim of its own to report: a device we
+  // already hold is ours, and the record would name us as the holder.
+  const foreign = decision.alreadyMine ? null : foreignClaim(params.udid)
+  if (foreign) {
+    return {
+      ok: false,
+      reason: 'held-by-other-vorn',
+      pid: foreign.pid,
+      message:
+        `Device ${device.name} is being driven by another Vorn (process ${foreign.pid}). ` +
+        'Quit it or pick a different simulator — two of them tapping one screen is ' +
+        'indistinguishable from the app misbehaving.'
+    }
+  }
 
   // Releasing first keeps a session from silently holding two devices, which
   // would leak the old claim for as long as the session lived.
   const previous = entries.get(params.sessionId)
   if (previous && previous.udid !== params.udid) await release({ sessionId: params.sessionId })
 
-  const boot = async (): Promise<void> => {
+  // Reports rather than throws, so a simulator that will not start is one of the
+  // named outcomes instead of an Error the caller has to read to understand.
+  const boot = async (): Promise<DeviceClaimFailure | null> => {
     try {
       await exec('xcrun', ['simctl', 'boot', params.udid])
       await exec('xcrun', ['simctl', 'bootstatus', params.udid, '-b'])
+      return null
     } catch (err) {
-      throw explainSimctl(err)
+      return { reason: 'boot-failed', message: explainSimctl(err).message }
     }
   }
 
@@ -547,17 +583,22 @@ async function claimLocked(params: {
     // The simulator can have gone down under us — shut down from Simulator.app,
     // or the machine slept. Booting it again makes it ours again.
     if (!device.booted) {
-      await boot()
+      const failed = await boot()
+      if (failed) return { ok: false, ...failed }
       previous.bootedByVorn = true
     }
     if (!previous.companion) {
       previous.companion = await startCompanion(params.udid, onCompanionExit)
     }
-    return { udid: params.udid, name: device.name, booted: true }
+    recordClaim(params.udid, params.sessionId)
+    return { ok: true, udid: params.udid, name: device.name, booted: true }
   }
 
   const wasBooted = device.booted
-  if (!wasBooted) await boot()
+  if (!wasBooted) {
+    const failed = await boot()
+    if (failed) return { ok: false, ...failed }
+  }
 
   const entry = newEntry(params.sessionId, params.udid)
   entry.bootedByVorn = !wasBooted
@@ -571,7 +612,10 @@ async function claimLocked(params: {
     throw err
   }
 
-  return { udid: params.udid, name: device.name, booted: true }
+  // Last, and only on success: the record says who is driving this simulator,
+  // and a Vorn that failed to take it is not driving anything.
+  recordClaim(params.udid, params.sessionId)
+  return { ok: true, udid: params.udid, name: device.name, booted: true }
 }
 
 /**
@@ -605,6 +649,7 @@ export function release(params: { sessionId: string }): Promise<{ released: bool
   // moment the session lets go of it, and making that wait behind a slow
   // shutdown would refuse a re-claim for a device nobody holds any more.
   entries.delete(params.sessionId)
+  dropClaim(entry.udid)
   return withDeviceLock(entry.udid, async () => {
     stopCompanion(entry.udid)
     // Only ours to shut down. A simulator the person booted stays up.
@@ -631,6 +676,12 @@ export function release(params: { sessionId: string }): Promise<{ released: bool
  * more, and better than an app that will not close.
  */
 export function shutdownOwnedDevices(): void {
+  // First, and synchronously: the shutdowns below are detached and may still be
+  // running when this process is gone, but the record has to say this Vorn is
+  // no longer driving anything before the next one reads it. A dead pid already
+  // reads as free, so this is tidiness rather than correctness -- except after a
+  // relaunch fast enough to reuse the pid, where it is neither.
+  dropAllClaimsForThisProcess()
   for (const entry of entries.values()) {
     if (!entry.bootedByVorn) continue
     try {
@@ -1144,7 +1195,13 @@ export async function openPane(params: {
   sessionId: string
   udid?: string
 }): Promise<{ udid: string }> {
-  if (params.udid) await claim({ sessionId: params.sessionId, udid: params.udid })
+  if (params.udid) {
+    // Raised here rather than passed on. The claim reports its failures now, and
+    // ignoring one left this falling through to "no device is claimed for this
+    // session" -- which is true, and says nothing about why.
+    const claimed = await claim({ sessionId: params.sessionId, udid: params.udid })
+    if (!claimed.ok) throw new Error(claimed.message)
+  }
   const entry = entries.get(params.sessionId)
   if (!entry) {
     throw new Error(

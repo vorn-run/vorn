@@ -255,12 +255,22 @@ describe('inspectPack', () => {
   })
 
   it('refuses a pack claiming the id of a connector Vorn ships', async () => {
-    const file = await buildArchive(goodFiles('1.0.0', 'github'))
+    const file = await buildArchive(goodFiles('1.0.0', 'http'))
 
     const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })
 
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error).toMatch(/already ships/)
+  })
+
+  it('lets a pack take an id the app no longer answers to', async () => {
+    // GitHub was a built-in and is not any more, so the id is a pack's to claim
+    // -- which is the whole point of it not being one.
+    const file = await buildArchive(goodFiles('1.0.0', 'github'))
+
+    const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })
+
+    expect(result.ok).toBe(true)
   })
 
   it('reports a source that cannot be read rather than throwing', async () => {

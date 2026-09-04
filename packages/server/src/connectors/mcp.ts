@@ -373,7 +373,7 @@ function fieldString(item: Record<string, unknown>, field: string | undefined): 
  * `@vornrun/connector-sdk` are wired this way, so their dedupe strategy — not
  * this function — decides what is new.
  *
- * Otherwise Vorn dedupes client-side, mirroring the GitHub connector: with a
+ * Otherwise Vorn dedupes client-side: with a
  * `timestampField` configured, only items with `timestampField >= cursor` are
  * emitted and the cursor advances to the newest timestamp seen. Items exactly
  * at the cursor are re-emitted so none are lost at the boundary; that stays
@@ -451,8 +451,7 @@ export async function pollMcpConnection(
       // several items, and skipping them would drop the ones that arrived
       // after this cursor was recorded — permanently, since nothing re-reads
       // that window. Re-emission is free because the inbox insert ignores an
-      // event id it has already stored. The GitHub connector rewinds its
-      // cursor by a second for the same reason.
+      // event id it has already stored.
       if (cursor && ts < cursor) continue
     }
     if (ts !== undefined && (newest === undefined || ts > newest)) newest = ts

@@ -75,7 +75,7 @@ import {
   measureWorktree,
   invalidateSizeCache
 } from './worktree-inventory'
-import { listDir, readFileContent, writeFileContent } from './file-utils'
+import { fileStamp, listDir, readFileContent, writeFileContent } from './file-utils'
 import { listShellExecutables } from './shell-integration'
 import { listInstalledShells } from './shell-integration/installed'
 import {
@@ -162,7 +162,6 @@ import {
   syncImplicitConnection,
   type ImplicitConnectionDeps
 } from './connectors/implicit-connection'
-import { GH_SOURCE } from './connectors/gh-cli'
 import { probeAuth, type BorrowSource } from './connectors/auth-rung'
 import { resolveConnectorAuth } from './connectors/connector-auth'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
@@ -247,9 +246,7 @@ function unusableSource(source: ConnectorPackSource): string {
   }
 }
 
-// The built-in GitHub connector predates rungs and declares its auth beside its client.
 async function authForConnector(connectorId: string): Promise<BorrowSource> {
-  if (connectorId === 'github') return GH_SOURCE
   return (await resolveConnectorAuth(connectorId)) ?? { auth: undefined, declared: [] }
 }
 
@@ -1382,6 +1379,10 @@ export function registerAllMethods(): void {
   registerMethod('file:readContent', ({ filePath, maxBytes, remoteHostId }) => {
     const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined
     return readFileContent(filePath, maxBytes, remote)
+  })
+  registerMethod('file:stamp', ({ filePath, remoteHostId }) => {
+    const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined
+    return fileStamp(filePath, remote)
   })
   registerMethod('file:writeContent', ({ filePath, content, remoteHostId }) => {
     const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined

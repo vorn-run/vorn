@@ -14,6 +14,15 @@ import { browserPaneId, isPromotedCardId } from '../lib/pane-id'
 import { normalizeUrl, displayHost, flattenPageText } from '../lib/browser-url'
 import { loadTweaks, saveTweak, mergeTweaks } from '../lib/design-tweaks'
 
+/**
+ * How long the attach waits for the session's record, in 50ms tries.
+ *
+ * Bounded rather than open-ended: a session that never arrives would otherwise
+ * retry forever, and an attach with no root is still better than no attach --
+ * the pane works, and only `file:` urls are refused.
+ */
+const ROOT_WAIT_TRIES = 40
+
 interface Props {
   /** Session that owns this browser. */
   sessionId: string
@@ -303,6 +312,7 @@ export const BrowserCard = memo(
       // is actually looking at rather than the one they left.
       let cancelled = false
       let retry = 0
+      let waited = 0
       const onAttached = (): void => {
         if (cancelled) return
         let id: number
@@ -312,6 +322,17 @@ export const BrowserCard = memo(
           // Not attached yet, or the guest died. Try again shortly; if it is
           // truly gone the retries lapse and the tools say so rather than
           // acting on a stale guest.
+          retry = window.setTimeout(onAttached, 50)
+          return
+        }
+        // A session always has a project path, so no root means the session's
+        // own record has not reached the store yet -- which on a launch it
+        // routinely has not, because the pane is restored from storage and the
+        // sessions arrive from the server. Attaching now sets the root to
+        // nothing, and a restored `file:` tab is then refused its own url with
+        // no second attach coming to fix it.
+        if (fileRootRef.current === undefined && waited < ROOT_WAIT_TRIES) {
+          waited++
           retry = window.setTimeout(onAttached, 50)
           return
         }

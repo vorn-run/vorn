@@ -77,6 +77,7 @@ import { WindowControls } from './components/WindowControls'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from './lib/platform'
 import { useIsMobile } from './hooks/useIsMobile'
 import { syncBoard } from './lib/board-sync'
+import { restoreDevicePanes } from './lib/device-restore'
 import { markPaneEnded } from './lib/session-resume'
 
 export function App() {
@@ -200,6 +201,12 @@ export function App() {
         // and the sessions behind them are started again. Only the ones that were
         // stopped -- see `resumeAll`.
         await syncBoard({ showCold: reopen, resume: reopen })
+
+        // After the sessions, because a device is claimed for one and there is
+        // nothing to attach a pane to until they are on the board. Not awaited
+        // with them either: each claim boots a simulator, and the window must
+        // not wait on `simctl bootstatus` to finish opening.
+        void restoreDevicePanes()
 
         if (!reopen) {
           // Panes stay off the board, and the banner offers to bring them in.

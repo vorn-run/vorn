@@ -416,6 +416,16 @@ export interface ConnectorStatusOption {
 
 export interface ConnectorManifest {
   auth: ConnectorConfigField[]
+  /**
+   * Name the connection after a git repository, detected from the project.
+   *
+   * The add-connection form then offers the owner/repo of whichever project is
+   * selected, falling back to typing them in. Declared rather than inferred from
+   * the connector's id, which is what it used to be -- so a connector that
+   * arrives as a pack can ask for it, and the app has no list of which services
+   * happen to live in git.
+   */
+  detectRepo?: boolean
   taskFilters?: ConnectorConfigField[]
   statusMapping?: ConnectorStatusOption[]
   triggers?: ConnectorTriggerDef[]
@@ -1747,6 +1757,7 @@ export const IPC = {
   OPEN_EXTERNAL: 'shell:openExternal',
   FILE_LIST_DIR: 'file:listDir',
   FILE_READ_CONTENT: 'file:readContent',
+  FILE_STAMP: 'file:stamp',
   FILE_WRITE_CONTENT: 'file:writeContent',
   SHELL_LIST_EXECUTABLES: 'shell:listExecutables',
   SHELL_LIST_INSTALLED: 'shell:listInstalled',
@@ -2416,6 +2427,43 @@ export interface DeviceInfo {
   /** The session holding it. Claiming a held device fails, naming this. */
   claimedBy?: string
 }
+
+/**
+ * A file as it was when a draft was based on it.
+ *
+ * Size and mtime, which is what every editor uses for this and what a remote
+ * host can answer over one `stat`. Not a hash: the question is whether the file
+ * has changed under an unsaved edit, and answering it must not cost reading the
+ * whole file every time somebody saves.
+ */
+export interface FileStamp {
+  size: number
+  mtimeMs: number
+}
+
+/**
+ * Why a device could not be claimed.
+ *
+ * A closed set, because the caller has to act differently on each and a message
+ * string cannot be branched on without matching its wording. Re-claiming a
+ * device on launch is what forced this: "gone" is ordinary and silent — the
+ * simulator was deleted, or the record came from another machine — while "held
+ * by another session" is worth saying out loud, and the two used to arrive as
+ * prose that read the same.
+ */
+export type DeviceClaimFailure =
+  /** No simulator with that udid on this machine any more. */
+  | { reason: 'gone'; message: string }
+  /** Another session in this Vorn holds it. `holder` is that session's id. */
+  | { reason: 'held-by-session'; message: string; holder: string }
+  /** Another Vorn process holds it. `pid` is that process. */
+  | { reason: 'held-by-other-vorn'; message: string; pid: number }
+  /** The simulator exists and is free, but would not boot. */
+  | { reason: 'boot-failed'; message: string }
+
+export type DeviceClaimResult =
+  | { ok: true; udid: string; name: string; booted: boolean }
+  | ({ ok: false } & DeviceClaimFailure)
 
 /** A point in **points**, the accessibility tree's units — never pixels. */
 export interface DevicePoint {

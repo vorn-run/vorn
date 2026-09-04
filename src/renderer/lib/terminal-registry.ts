@@ -2,7 +2,13 @@ import { Terminal, type ITerminalAddon } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import { attachCommandBlocks, jumpToCommand, markSeededFromServer } from './command-blocks'
+import {
+  attachCommandBlocks,
+  getCommandBlocks,
+  jumpToCommand,
+  markSeededFromServer
+} from './command-blocks'
+import { chooseAnchor, readScrollAnchor, resolveAnchor, writeScrollAnchor } from './scroll-anchor'
 import type { BufferMetrics } from './spine-layout'
 import { TERMINAL_BACKGROUND } from '../../shared/surface'
 
@@ -17,12 +23,16 @@ interface TerminalEntry {
   _loadRenderer?: (() => void) | null
   _gpuAddon?: { dispose(): void } | null
   _disposeCommandBlocks?: (() => void) | null
+  _disposeScrollAnchor?: (() => void) | null
   /** Whether this terminal has already been seeded from the server. */
   _hydrated?: boolean
 }
 
 /** data attribute on the persistent wrapper, read by TerminalHost for event delegation. */
 export const TERMINAL_ID_ATTR = 'data-terminal-id'
+
+/** How long the scroll has to stand still before an anchor is worth a write. */
+const ANCHOR_SETTLE_MS = 250
 
 const registry = new Map<string, TerminalEntry>()
 
@@ -216,6 +226,18 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
         markSeededFromServer(terminalId)
       }
       flushHeld(seq)
+      // An empty write, to get a callback after everything above it has been
+      // parsed. The blocks the anchor names are built by that parsing, and the
+      // held chunks scroll the pane back to the bottom on their way through, so
+      // there is no earlier point at which the restore would survive. Out of the
+      // parse loop itself, which is where xterm runs write callbacks.
+      //
+      // Only when there is a position to put back, so a terminal that was left
+      // at the bottom -- which is nearly all of them -- puts nothing extra
+      // through the queue at all.
+      if (readScrollAnchor(terminalId)) {
+        entry.term.write('', () => setTimeout(() => restoreScrollAnchor(terminalId), 0))
+      }
       // The one moment a pane learns the truth about its session. A window
       // opened onto a terminal that died while it was closed has no start-up
       // reconciliation to tell it -- this is where it finds out.
@@ -444,6 +466,9 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
   entry._disposeCommandBlocks = disposeCommandBlocks
 
   registry.set(terminalId, entry)
+
+  // After the entry is in the registry, which is what `onTerminalScroll` reads.
+  entry._disposeScrollAnchor = trackScrollAnchor(terminalId)
 
   // Every terminal is seeded, not only the ones adopted from a previous run.
   //
@@ -893,6 +918,8 @@ export function destroyTerminal(terminalId: string): void {
   statusHandlers.delete(terminalId)
   entry._disposeCommandBlocks?.()
   entry._disposeCommandBlocks = null
+  entry._disposeScrollAnchor?.()
+  entry._disposeScrollAnchor = null
   // Dispose GPU addon first to avoid WebGL errors when the terminal
   // tears down the DOM element before the addon can clean up its GL context
   if (entry._gpuAddon) {
@@ -944,4 +971,34 @@ export function fitAllTerminals(): void {
   for (const [id, entry] of registry) {
     if (entry.activeSlot) fitTerminal(id)
   }
+}
+
+/**
+ * Keep one terminal's scroll anchor current. Returns a disposer.
+ *
+ * Settled rather than per event: xterm emits a scroll for every row that goes
+ * past, and a `yarn build` would otherwise write to storage a few hundred times.
+ */
+function trackScrollAnchor(terminalId: string): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const stop = onTerminalScroll(terminalId, () => {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = null
+      const metrics = getTerminalBufferMetrics(terminalId)
+      if (!metrics) return
+      writeScrollAnchor(terminalId, chooseAnchor(getCommandBlocks(terminalId), metrics))
+    }, ANCHOR_SETTLE_MS)
+  })
+  return () => {
+    if (timer) clearTimeout(timer)
+    timer = null
+    stop?.()
+  }
+}
+
+/** Put a freshly seeded terminal back where it was being read. */
+function restoreScrollAnchor(terminalId: string): void {
+  const line = resolveAnchor(getCommandBlocks(terminalId), readScrollAnchor(terminalId))
+  if (line !== null) scrollTerminalToLine(terminalId, line)
 }
