@@ -1,6 +1,6 @@
 {
   "name": "@vornrun/connector-sdk",
-  "version": "0.7.0-beta.11",
+  "version": "0.7.0-beta.12",
   "description": "Build and share Vorn pull connectors as ordinary npm packages",
   "type": "module",
   "license": "MIT",
