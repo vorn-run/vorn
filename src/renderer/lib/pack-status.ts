@@ -84,7 +84,8 @@ export function packStateFor(input: {
 }): PackState {
   const { installed, catalogVersion, progress } = input
 
-  if (progress && progress.phase !== 'installed' && progress.phase !== 'failed') {
+  // A reported install stays busy until the files show up, so the row never flashes back to Install.
+  if (progress && progress.phase !== 'failed' && (progress.phase !== 'installed' || !installed)) {
     return {
       kind: 'installing',
       phase: progress.phase,

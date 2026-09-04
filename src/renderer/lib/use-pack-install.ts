@@ -105,7 +105,6 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       try {
         const result = await window.api.installConnectorPack(pack.source)
         if (result.ok) {
-          forget(id)
           installed = true
         } else {
           setProgress((current) => ({
@@ -123,8 +122,11 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
         setInstalling(false)
         setPending(null)
       }
-      // Only when something was actually kept: a refusal changed nothing to read.
-      if (installed) await onInstalled?.()
+      // The row keeps saying it is installing until the reload shows it installed; then the record can go.
+      if (installed) {
+        await onInstalled?.()
+        forget(id)
+      }
     },
     [forget, onInstalled]
   )
