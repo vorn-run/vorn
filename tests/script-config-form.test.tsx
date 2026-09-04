@@ -16,7 +16,11 @@ vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-const projectPickerProps: Array<Record<string, unknown>> = []
+const { projectPickerProps, selectPickerProps, held } = vi.hoisted(() => ({
+  projectPickerProps: [] as Array<Record<string, unknown>>,
+  selectPickerProps: [] as Array<Record<string, unknown>>,
+  held: { keys: [] as Array<{ connectionId: string; name: string }> }
+}))
 vi.mock('../src/renderer/components/ProjectPicker', () => ({
   ProjectPicker: (props: Record<string, unknown>) => {
     projectPickerProps.push(props)
@@ -32,7 +36,6 @@ vi.mock('../src/renderer/stores', () => ({
     selector ? selector({ config: { projects: [] } }) : { config: { projects: [] } }
 }))
 
-const selectPickerProps: Array<Record<string, unknown>> = []
 vi.mock('../src/renderer/components/SelectPicker', () => ({
   SelectPicker: (props: Record<string, unknown>) => {
     selectPickerProps.push(props)
@@ -40,7 +43,6 @@ vi.mock('../src/renderer/components/SelectPicker', () => ({
   }
 }))
 
-const held = { keys: [] as Array<{ connectionId: string; name: string }> }
 vi.mock('../src/renderer/lib/use-connections', () => ({
   useConnectorKeys: () => held.keys
 }))
