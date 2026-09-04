@@ -56,7 +56,7 @@
     "@tiptap/extension-list": "^3.27.4",
     "@tiptap/extension-placeholder": "^3.30.3",
     "@tiptap/extension-task-item": "^3.29.2",
-    "@tiptap/extension-task-list": "^3.27.4",
+    "@tiptap/extension-task-list": "^3.30.6",
     "@tiptap/extensions": "^3.27.4",
     "@tiptap/pm": "^3.27.4",
     "@tiptap/react": "^3.27.4",
