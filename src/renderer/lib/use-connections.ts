@@ -182,6 +182,7 @@ export async function refreshConnections(): Promise<void> {
 
 /** Test hook — drop cached state so unit tests can start clean. */
 export function __resetConnectionsCacheForTests(): void {
+  keyCache = []
   cache = null
   packCache = []
   initPromise = null
