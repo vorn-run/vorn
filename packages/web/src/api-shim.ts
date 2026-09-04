@@ -398,6 +398,8 @@ export function createApiShim(wsUrl: string) {
     // ── Terminal Events ──
     onTerminalData: (callback: (event: { id: string; data: string; seq: number }) => void) =>
       rpc.on('terminal:data', callback as (p: unknown) => void),
+    onTerminalBell: (callback: (event: { id: string }) => void) =>
+      rpc.on('terminal:bell', callback as (p: unknown) => void),
     onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) =>
       rpc.on('terminal:exit', callback as (p: unknown) => void),
     onSessionCreated: (callback: (session: unknown) => void) =>

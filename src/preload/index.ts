@@ -94,6 +94,14 @@ const api = {
     }
   },
 
+  onTerminalBell: (callback: (event: { id: string }) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, event: { id: string }): void => callback(event)
+    ipcRenderer.on(IPC.TERMINAL_BELL, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.TERMINAL_BELL, listener)
+    }
+  },
+
   onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) => {
     const listener = (
       _: Electron.IpcRendererEvent,

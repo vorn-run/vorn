@@ -644,6 +644,19 @@ class PtyManager extends EventEmitter {
       appendScrollback(id, data)
       feedScreen(id, data)
       recordOutput(id, data)
+
+      // The bell, said out loud rather than left for whoever happens to be
+      // attached. A client only sees bytes for terminals it has opened, so a
+      // notification that depended on that was a notification you got for the
+      // sessions you were already looking at -- and missed for the one ringing
+      // out of view, which is the only one worth interrupting anybody for.
+      //
+      // On the raw bytes, before any stripping: BEL is exactly what `stripAnsi`
+      // exists to remove. Here rather than in `appendOutput`, which returns
+      // early for a plain shell -- a shell rings too.
+      if (data.includes('\x07')) {
+        this.emit('client-message', IPC.TERMINAL_BELL, { id })
+      }
     }
   }
 

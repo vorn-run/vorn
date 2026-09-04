@@ -85,7 +85,6 @@ import {
   registerSlot,
   destroyTerminal,
   hydrateTerminal,
-  registerStatusHandler,
   initGlobalDataListener,
   disposeGlobalDataListener
 } from '../src/renderer/lib/terminal-registry'
@@ -218,51 +217,6 @@ describe('nothing is written ahead of the seed', () => {
     answer({ data: 'THE SEED', seq: 5, live: true })
     await hydrating
     expect(writes()).toEqual(['THE SEED', 'arrived first'])
-  })
-})
-
-describe('the bell', () => {
-  it('does not ring for output that is only being replayed', async () => {
-    // The one thing that scans terminal output fires a desktop notification on
-    // \x07. A restored screen holding a bell an agent rang an hour ago must not
-    // announce itself as though it had just happened.
-    const handler = vi.fn()
-    registerStatusHandler(ID, handler)
-    attachTerminal.mockResolvedValue({ data: 'ding \x07 ding', seq: 3, live: true })
-
-    await open()
-
-    expect(handler).not.toHaveBeenCalled()
-  })
-
-  it('rings for a bell that arrived while the seed was in flight', async () => {
-    // Those bytes are live -- they rang a moment ago. Holding them back for the
-    // length of a round trip and then writing them silently would drop the
-    // notification for the one case where the pane was not yet looking.
-    const handler = vi.fn()
-    registerStatusHandler(ID, handler)
-    let answer: (v: unknown) => void = () => {}
-    attachTerminal.mockReturnValue(new Promise((r) => (answer = r)))
-
-    const hydrating = open()
-    emit({ id: ID, data: 'attention \x07', seq: 9 })
-    await frame()
-    answer({ data: 'THE SEED', seq: 5, live: true })
-    await hydrating
-
-    expect(handler).toHaveBeenCalledWith('attention \x07')
-  })
-
-  it('still rings for output that is actually arriving', async () => {
-    const handler = vi.fn()
-    registerStatusHandler(ID, handler)
-    attachTerminal.mockResolvedValue({ data: 'seed', seq: 3, live: true })
-    await open()
-
-    emit({ id: ID, data: 'live \x07', seq: 4 })
-    await frame()
-
-    expect(handler).toHaveBeenCalledWith('live \x07')
   })
 })
 
