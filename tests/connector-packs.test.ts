@@ -1,3 +1,4 @@
+import { CONNECTOR_CATALOG } from '../packages/server/src/connectors/catalog'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   chmodSync,
@@ -274,6 +275,7 @@ describe('inspectPack', () => {
   })
 
   it('lets a pack take an id the seed catalog lists as a package', async () => {
+    expect(CONNECTOR_CATALOG.map((entry) => entry.id)).toContain('kusto')
     const file = await buildArchive(goodFiles('1.0.0', 'kusto'))
 
     const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })

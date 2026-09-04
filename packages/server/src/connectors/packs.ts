@@ -108,7 +108,7 @@ function requireSafeId(id: string): void {
   if (!isSafeId(id)) throw new Error(`"${id}" is not a usable connector id`)
 }
 
-/** The two connector kinds the app answers to itself; a pack claiming one would shadow it in every list. */
+/** The two connector ids the app answers to itself; a pack claiming one would shadow it in every list. */
 const RESERVED_IDS = new Set(['mcp', 'http'])
 
 function requireUnreservedId(id: string): void {
