@@ -56,15 +56,7 @@ function sourceFor(listing: ConnectorListing): ConnectorPackSource {
   return { kind: 'npm', packageName: listing.catalogItem?.packageName ?? listing.id } as const
 }
 
-/**
- * Whether the checked pack is the one the row already described.
- *
- * The sheet exists to show what a listing could not: a file nobody has seen, a
- * pack that replaces an installed version, or one whose id, version or sign-in
- * differs from what was advertised. When all of that agrees, the row said it
- * already and asking again only adds a click. A catalog with no version cannot
- * agree, so it is asked about.
- */
+// The sheet shows what a row could not: a file, a replacement, or a pack unlike its listing; when the row said it all, install.
 export function matchesListing(preview: ConnectorPackSummary, listing: ConnectorListing): boolean {
   return (
     preview.id === listing.id &&
