@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { usePackInstall, matchesListing } from '../src/renderer/lib/use-pack-install'
-import type { ConnectorListing } from '../src/renderer/lib/connector-browse'
+import { usePackInstall } from '../src/renderer/lib/use-pack-install'
+import { matchesListing, type ConnectorListing } from '../src/renderer/lib/connector-browse'
 import type { ConnectorPackSummary } from '../src/shared/types'
 
 const inspectConnectorPack = vi.fn()
@@ -29,10 +29,16 @@ const LISTING: ConnectorListing = {
   } as ConnectorListing['catalogItem']
 }
 
-/** A row that already says everything the pack will: version and sign-in both. */
+/** A row that already says everything the pack will: version, sign-in and receipt. */
 const DESCRIBED: ConnectorListing = {
   ...LISTING,
   authRung: 'key',
+  verified: {
+    schema: 1,
+    version: '1.2.0',
+    checkedAt: '2026-09-04T00:00:00Z',
+    checks: ['manifest']
+  },
   catalogItem: { ...LISTING.catalogItem, version: '1.2.0' } as ConnectorListing['catalogItem']
 }
 
@@ -59,15 +65,20 @@ beforeEach(() => {
 
 function Probe({
   onInstalled,
-  listing = LISTING
+  listing = LISTING,
+  direct
 }: {
   onInstalled?: () => void
   listing?: ConnectorListing
+  /** What a surface that showed the pack's facts passes; the requirement row does not. */
+  direct?: boolean
 }) {
   const install = usePackInstall(onInstalled)
   return (
     <div>
-      <button onClick={() => void install.inspect(listing)}>inspect</button>
+      <button onClick={() => void install.inspect(listing, { ...(direct && { direct }) })}>
+        inspect
+      </button>
       <button onClick={() => void install.inspectFile('/tmp/pack.vorn.tgz')}>inspect file</button>
       <button onClick={() => void install.confirm()}>confirm</button>
       <button onClick={install.cancel}>cancel</button>
@@ -228,7 +239,7 @@ describe('installing a pack from wherever it was asked for', () => {
   it('installs a pack the row already described, without asking again', async () => {
     inspectConnectorPack.mockResolvedValue({ ok: true, preview: DESCRIBED_PREVIEW })
     const onInstalled = vi.fn()
-    render(<Probe onInstalled={onInstalled} listing={DESCRIBED} />)
+    render(<Probe onInstalled={onInstalled} listing={DESCRIBED} direct />)
 
     fireEvent.click(screen.getByText('inspect'))
 
@@ -238,12 +249,23 @@ describe('installing a pack from wherever it was asked for', () => {
     expect(screen.getByTestId('pending')).toHaveTextContent('none')
   })
 
+  // A requirement row names the connector and nothing else, so it never asks to skip.
+  it('asks from a surface that did not describe the pack, however well it matches', async () => {
+    inspectConnectorPack.mockResolvedValue({ ok: true, preview: DESCRIBED_PREVIEW })
+    render(<Probe listing={DESCRIBED} />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+    expect(installConnectorPack).not.toHaveBeenCalled()
+  })
+
   it('asks when the pack is a version the row did not advertise', async () => {
     inspectConnectorPack.mockResolvedValue({
       ok: true,
       preview: { ...DESCRIBED_PREVIEW, version: '1.3.0' }
     })
-    render(<Probe listing={DESCRIBED} />)
+    render(<Probe listing={DESCRIBED} direct />)
 
     fireEvent.click(screen.getByText('inspect'))
 
@@ -256,7 +278,41 @@ describe('installing a pack from wherever it was asked for', () => {
       ok: true,
       preview: { ...DESCRIBED_PREVIEW, auth: { rung: 'cli' as const } }
     })
-    render(<Probe listing={DESCRIBED} />)
+    render(<Probe listing={DESCRIBED} direct />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+    expect(installConnectorPack).not.toHaveBeenCalled()
+  })
+
+  // Absent on either side means nobody stated it, and the row's badge is blank.
+  it('asks when the pack states no sign-in', async () => {
+    inspectConnectorPack.mockResolvedValue({
+      ok: true,
+      preview: { ...DESCRIBED_PREVIEW, auth: undefined }
+    })
+    render(<Probe listing={DESCRIBED} direct />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+    expect(installConnectorPack).not.toHaveBeenCalled()
+  })
+
+  it('asks when the row states no sign-in', async () => {
+    inspectConnectorPack.mockResolvedValue({ ok: true, preview: DESCRIBED_PREVIEW })
+    render(<Probe listing={{ ...DESCRIBED, authRung: undefined }} direct />)
+
+    fireEvent.click(screen.getByText('inspect'))
+
+    await waitFor(() => expect(screen.getByTestId('pending')).toHaveTextContent('1.2.0'))
+    expect(installConnectorPack).not.toHaveBeenCalled()
+  })
+
+  it('asks when nothing vouched for the connector', async () => {
+    inspectConnectorPack.mockResolvedValue({ ok: true, preview: DESCRIBED_PREVIEW })
+    render(<Probe listing={{ ...DESCRIBED, verified: undefined }} direct />)
 
     fireEvent.click(screen.getByText('inspect'))
 
@@ -270,7 +326,7 @@ describe('installing a pack from wherever it was asked for', () => {
       ok: true,
       preview: { ...DESCRIBED_PREVIEW, installedVersion: '1.1.0' }
     })
-    render(<Probe listing={DESCRIBED} />)
+    render(<Probe listing={DESCRIBED} direct />)
 
     fireEvent.click(screen.getByText('inspect'))
 
@@ -296,7 +352,7 @@ describe('installing a pack from wherever it was asked for', () => {
 describe('whether a checked pack is the one the row described', () => {
   const preview = DESCRIBED_PREVIEW as unknown as ConnectorPackSummary
 
-  it('agrees when the id, the version and the sign-in all do', () => {
+  it('agrees when the id, the version, the sign-in and the receipt all do', () => {
     expect(matchesListing(preview, DESCRIBED)).toBe(true)
   })
 
@@ -306,5 +362,14 @@ describe('whether a checked pack is the one the row described', () => {
 
   it('refuses to agree when the pack calls itself something else', () => {
     expect(matchesListing({ ...preview, id: 'slack-connector' }, DESCRIBED)).toBe(false)
+  })
+
+  it('refuses to read two unstated sign-ins as the same one', () => {
+    const unstated = { ...preview, auth: undefined } as unknown as ConnectorPackSummary
+    expect(matchesListing(unstated, { ...DESCRIBED, authRung: undefined })).toBe(false)
+  })
+
+  it('refuses to agree when nothing vouched for the connector', () => {
+    expect(matchesListing(preview, { ...DESCRIBED, verified: undefined })).toBe(false)
   })
 })

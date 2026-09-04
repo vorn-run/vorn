@@ -82,7 +82,11 @@ export function ConnectorSettings() {
     error: fileInstallError,
     installing: installingPending
   } = install
-  const handleInstall = install.inspect
+  // The row and the page both show the version, the sign-in and the receipt, so a pack that matches needs no sheet.
+  const handleInstall = useCallback(
+    (listing: ConnectorListing) => install.inspect(listing, { direct: true }),
+    [install]
+  )
   const handleInstallFile = install.inspectFile
   const handleConfirmPending = install.confirm
   // One sheet, shown wherever the install was asked for.

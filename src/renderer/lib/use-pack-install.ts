@@ -4,7 +4,7 @@ import type {
   ConnectorPackSource,
   ConnectorPackSummary
 } from '../../shared/types'
-import type { ConnectorListing } from './connector-browse'
+import { matchesListing, type ConnectorListing } from './connector-browse'
 
 /**
  * Installing a pack: inspect first, show what it is, keep it only on confirm.
@@ -32,8 +32,8 @@ export interface PackInstall {
   /** A refusal with no row to land on, such as a dropped file's. */
   error: string | null
   installing: boolean
-  /** Inspect what a catalog row would install; install it, or ask when it differs. */
-  inspect: (listing: ConnectorListing, source?: ConnectorPackSource) => Promise<void>
+  /** Inspect what a catalog row would install; `direct` lets a surface that showed the pack's facts skip the sheet. */
+  inspect: (listing: ConnectorListing, options?: { direct?: boolean }) => Promise<void>
   /** Inspect a pack already on this disk, then ask. */
   inspectFile: (filePath: string) => Promise<void>
   /** Install the files the sheet described. Resolves once they are on disk. */
@@ -56,21 +56,28 @@ function sourceFor(listing: ConnectorListing): ConnectorPackSource {
   return { kind: 'npm', packageName: listing.catalogItem?.packageName ?? listing.id } as const
 }
 
-// The sheet shows what a row could not: a file, a replacement, or a pack unlike its listing; when the row said it all, install.
-export function matchesListing(preview: ConnectorPackSummary, listing: ConnectorListing): boolean {
-  return (
-    preview.id === listing.id &&
-    preview.version === listing.catalogItem?.version &&
-    (preview.auth?.rung ?? 'none') === (listing.authRung ?? 'none') &&
-    preview.installedVersion === undefined
-  )
+/** Check a source, answering a refusal rather than throwing one. */
+async function stage(source: ConnectorPackSource) {
+  return window.api
+    .inspectConnectorPack(source)
+    .catch((e: unknown) => ({ ok: false as const, error: describeFailure(e) }))
+}
+
+/** What was checked, addressed to the row that asked for it. */
+function staged(preview: ConnectorPackSummary, rowId: string, rowKey?: string): PendingPack {
+  return {
+    source: { kind: 'staged', token: preview.token },
+    preview,
+    rowId,
+    ...(rowKey !== undefined && { rowKey })
+  }
 }
 
 export function usePackInstall(onInstalled?: () => void | Promise<void>): PackInstall {
   // Rejections live only here: nothing was written to disk, so they clear on reload.
   const [progress, setProgress] = useState<Record<string, ConnectorInstallProgress>>({})
   const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState<PackInstall['pending']>(null)
+  const [pending, setPending] = useState<PendingPack | null>(null)
   const [installing, setInstalling] = useState(false)
 
   // The unsubscribe is what keeps a reopened panel from stacking a second listener.
@@ -123,14 +130,12 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
   )
 
   const inspect = useCallback(
-    async (listing: ConnectorListing, source?: ConnectorPackSource) => {
+    async (listing: ConnectorListing, options?: { direct?: boolean }) => {
       // Whatever the last attempt said is about that attempt, not this one.
       setError(null)
       setPending(null)
       forget(listing.id)
-      const result = await window.api
-        .inspectConnectorPack(source ?? sourceFor(listing))
-        .catch((e: unknown) => ({ ok: false as const, error: describeFailure(e) }))
+      const result = await stage(sourceFor(listing))
       if (!result.ok) {
         // Keyed by the row that asked, which is the row that shows the refusal.
         setProgress((current) => ({
@@ -139,14 +144,9 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
         }))
         return
       }
-      const pack: PendingPack = {
-        source: { kind: 'staged', token: result.preview.token },
-        preview: result.preview,
-        rowId: listing.id,
-        rowKey: listing.key
-      }
-      // Pressing install on a row that already said all this is the answer.
-      if (matchesListing(result.preview, listing)) {
+      const pack = staged(result.preview, listing.id, listing.key)
+      // Only a surface that showed the pack's facts asks for this; elsewhere the sheet is the only disclosure.
+      if (options?.direct && matchesListing(result.preview, listing)) {
         await keep(pack)
         return
       }
@@ -158,19 +158,13 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
   const inspectFile = useCallback(async (filePath: string) => {
     setError(null)
     setPending(null)
-    const result = await window.api
-      .inspectConnectorPack({ kind: 'file', path: filePath })
-      .catch((e: unknown) => ({ ok: false as const, error: describeFailure(e) }))
+    const result = await stage({ kind: 'file', path: filePath })
     if (!result.ok) {
       setError(result.error)
       return
     }
     // A dropped file has no row; the pack names itself once it is read.
-    setPending({
-      source: { kind: 'staged', token: result.preview.token },
-      preview: result.preview,
-      rowId: result.preview.id
-    })
+    setPending(staged(result.preview, result.preview.id))
   }, [])
 
   const confirm = useCallback(async () => {

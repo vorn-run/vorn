@@ -683,6 +683,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
   const handleFixRequirement = useCallback(
     (action: RequirementAction) => {
+      // No `direct` here: a requirement row names the connector and nothing else, so the sheet is the disclosure.
       if (action.kind === 'install') void install.inspect(action.listing)
       if (action.kind === 'addConnection') setConnectFor(action.listing)
       if (action.kind === 'createProfile') setProfileFor(action.name)
