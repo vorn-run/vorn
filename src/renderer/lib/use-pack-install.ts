@@ -136,7 +136,11 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       // Whatever the last attempt said is about that attempt, not this one.
       setError(null)
       setPending(null)
-      forget(listing.id)
+      // Busy from the press itself, so the button cannot be pressed twice while the server is still silent.
+      setProgress((current) => ({
+        ...current,
+        [listing.id]: { id: listing.id, phase: 'downloading' }
+      }))
       const result = await stage(sourceFor(listing))
       if (!result.ok) {
         // Keyed by the row that asked, which is the row that shows the refusal.
@@ -152,6 +156,8 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
         await keep(pack)
         return
       }
+      // The sheet takes over; the row is not busy again until a decision is made.
+      forget(listing.id)
       setPending(pack)
     },
     [forget, keep]
