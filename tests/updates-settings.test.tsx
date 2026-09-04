@@ -7,7 +7,9 @@ import type { AppConfig, UpdateStatus } from '../src/shared/types'
 const mockStore = {
   config: null as AppConfig | null,
   setConfig: vi.fn(),
-  appUpdateStatus: { kind: 'idle', lastCheckedAt: null } as UpdateStatus
+  appUpdateStatus: { kind: 'idle', lastCheckedAt: null } as UpdateStatus,
+  /** The panel says what restarting costs, so it reads the board. */
+  terminals: new Map<string, { status: string }>()
 }
 
 vi.mock('../src/renderer/stores', () => ({
@@ -48,6 +50,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockStore.config = makeConfig()
   mockStore.appUpdateStatus = { kind: 'idle', lastCheckedAt: null }
+  mockStore.terminals = new Map()
 })
 
 describe('UpdatesSettings', () => {
@@ -179,5 +182,40 @@ describe('UpdatesSettings', () => {
       expect(saveConfig.mock.calls[0][0].defaults.updateAutoDownload).toBe(false)
       expect(setUpdateAutoDownload).toHaveBeenCalledWith(false)
     })
+  })
+})
+
+describe('what the restart will cost', () => {
+  it('names the sessions it will end', () => {
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    mockStore.terminals = new Map([
+      ['a', { status: 'idle' }],
+      ['b', { status: 'idle' }]
+    ])
+    render(<UpdatesSettings />)
+    expect(screen.getByText(/Your 2 sessions restart on the new version/)).toBeInTheDocument()
+  })
+
+  it('names the turn only when one is running', () => {
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    mockStore.terminals = new Map([['a', { status: 'running' }]])
+    render(<UpdatesSettings />)
+    expect(screen.getByText(/A turn in flight is lost/)).toBeInTheDocument()
+  })
+
+  it('says nothing about sessions when there are none', () => {
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    render(<UpdatesSettings />)
+    expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()
+    // The status detail is still there; it was replaced, not removed.
+    expect(screen.getByText(/restart to apply/)).toBeInTheDocument()
+  })
+
+  it('stays quiet while a download is only downloading', () => {
+    // Nothing ends until the button that ends it appears.
+    mockStore.appUpdateStatus = { kind: 'downloading', version: '0.7.0-beta.13', percent: 40 }
+    mockStore.terminals = new Map([['a', { status: 'running' }]])
+    render(<UpdatesSettings />)
+    expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()
   })
 })

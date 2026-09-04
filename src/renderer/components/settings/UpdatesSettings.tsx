@@ -3,6 +3,7 @@ import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
 import { SegmentedControl } from './SegmentedControl'
+import { updateCostLine } from '../../lib/update-cost'
 import { describeUpdateStatus } from '../../lib/update-status'
 import { TONE_DOT } from '../../lib/status-tone'
 
@@ -32,6 +33,10 @@ export function UpdatesSettings() {
   const config = useAppStore((s) => s.config)
   const setConfig = useAppStore((s) => s.setConfig)
   const status = useAppStore((s) => s.appUpdateStatus)
+  const sessionCount = useAppStore((s) => s.terminals.size)
+  const aTurnIsRunning = useAppStore((s) =>
+    [...s.terminals.values()].some((t) => t.status === 'running')
+  )
 
   if (!config) return null
 
@@ -39,6 +44,9 @@ export function UpdatesSettings() {
   const autoDownload = config.defaults.updateAutoDownload !== false
   const view = describeUpdateStatus(status, channel)
   const action = view.action ? ACTIONS[view.action] : null
+  // Only where the button ends them. Every other state is reporting on a
+  // download, which costs nothing.
+  const cost = view.action === 'restart' ? updateCostLine(sessionCount, aTurnIsRunning) : null
 
   const updateDefaults = (patch: Partial<typeof config.defaults>): void => {
     const updated = {
@@ -59,7 +67,11 @@ export function UpdatesSettings() {
         <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${TONE_DOT[view.tone]}`} />
         <div className="min-w-0 flex-1">
           <div className="text-[13px] text-gray-200">{view.label}</div>
-          {view.detail && <div className="text-xs text-gray-500 mt-0.5">{view.detail}</div>}
+          {cost ? (
+            <div className="text-xs text-bronzo mt-0.5">{cost}</div>
+          ) : (
+            view.detail && <div className="text-xs text-gray-500 mt-0.5">{view.detail}</div>
+          )}
           {view.percent != null && (
             <div className="h-[3px] bg-white/[0.08] rounded-full mt-2 overflow-hidden">
               <div
