@@ -343,16 +343,20 @@ describe('vorn-connector CLI', () => {
 
 describe('the CLI knowing it is the entry point', () => {
   it('matches its own file through a symlink, and never anything else', async () => {
-    const { mkdtempSync, symlinkSync } = await import('node:fs')
+    const { mkdtempSync, rmSync, symlinkSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
-    const { pathToFileURL } = await import('node:url')
-    const here = new URL(import.meta.url).pathname
+    const { fileURLToPath } = await import('node:url')
+    const here = fileURLToPath(import.meta.url)
     const dir = mkdtempSync(join(tmpdir(), 'vorn-cli-entry-'))
-    const link = join(dir, 'vorn-connector')
-    symlinkSync(here, link)
-    expect(isEntryPoint(pathToFileURL(here).href, ['node', link])).toBe(true)
-    expect(isEntryPoint(pathToFileURL(here).href, ['node', '/nowhere/at/all'])).toBe(false)
-    expect(isEntryPoint(pathToFileURL(here).href, ['node'])).toBe(false)
+    try {
+      const link = join(dir, 'vorn-connector')
+      symlinkSync(here, link)
+      expect(isEntryPoint(import.meta.url, ['node', link])).toBe(true)
+      expect(isEntryPoint(import.meta.url, ['node', '/nowhere/at/all'])).toBe(false)
+      expect(isEntryPoint(import.meta.url, ['node'])).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

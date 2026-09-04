@@ -248,7 +248,6 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   }
 }
 
-/* c8 ignore start -- process wiring exercised by the bin, not by unit tests */
 // Compared through realpath: a .bin launcher or a portal reaches this file through a symlink.
 export function isEntryPoint(moduleUrl: string, argv: readonly string[] = process.argv): boolean {
   const invoked = argv[1]
@@ -259,6 +258,7 @@ export function isEntryPoint(moduleUrl: string, argv: readonly string[] = proces
     return false
   }
 }
+/* c8 ignore start -- process wiring exercised by the bin, not by unit tests */
 const invokedDirectly = isEntryPoint(import.meta.url)
 
 if (invokedDirectly) {
