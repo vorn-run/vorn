@@ -1,3 +1,4 @@
+import { CONNECTOR_CATALOG } from '../packages/server/src/connectors/catalog'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   chmodSync,
@@ -267,6 +268,15 @@ describe('inspectPack', () => {
     // GitHub was a built-in and is not any more, so the id is a pack's to claim
     // -- which is the whole point of it not being one.
     const file = await buildArchive(goodFiles('1.0.0', 'github'))
+
+    const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })
+
+    expect(result.ok).toBe(true)
+  })
+
+  it('lets a pack take an id the seed catalog lists as a package', async () => {
+    expect(CONNECTOR_CATALOG.map((entry) => entry.id)).toContain('kusto')
+    const file = await buildArchive(goodFiles('1.0.0', 'kusto'))
 
     const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })
 
