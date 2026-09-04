@@ -194,3 +194,37 @@ describe('a launch that finds nothing running', () => {
     expect([...useAppStore.getState().minimizedTerminals]).toEqual(['term-1'])
   })
 })
+
+describe('a session opened after the launch sync', () => {
+  it('can be minimised and stays minimised', () => {
+    // The sync answers once, at launch. Everything opened afterwards is absent
+    // from that answer forever, and pruning against it alone treated all of it
+    // as sessions that never came back -- so minimising un-minimised on the
+    // next reconcile, which is every time the visible list moves.
+    useAppStore.setState({ terminals: new Map([['term-1', { id: 'term-1' } as never]]) })
+    useAppStore.getState().setKnownSessions(['term-1'])
+
+    useAppStore.setState({
+      terminals: new Map([
+        ['term-1', { id: 'term-1' } as never],
+        ['shell-2', { id: 'shell-2' } as never]
+      ])
+    })
+    useAppStore.getState().toggleMinimized('shell-2')
+    useAppStore.getState().setVisibleTerminalIds(['term-1'])
+
+    expect([...useAppStore.getState().minimizedTerminals]).toContain('shell-2')
+  })
+
+  it('is still dropped once the server says it is gone', () => {
+    // The board is what makes a session real, so it has to stop being on it.
+    useAppStore.setState({
+      terminals: new Map([['term-1', { id: 'term-1' } as never]]),
+      minimizedTerminals: new Set(['shell-2'])
+    })
+    useAppStore.getState().setKnownSessions(['term-1'])
+    useAppStore.getState().setVisibleTerminalIds(['term-1'])
+
+    expect([...useAppStore.getState().minimizedTerminals]).toEqual([])
+  })
+})

@@ -587,8 +587,17 @@ function reconcileView(
  * that did something from one that did not.
  */
 function pruneAgainstKnown(state: AppStore): Partial<AppStore> | null {
-  const live = state.knownSessionIds
-  if (live === null) return null
+  if (state.knownSessionIds === null) return null
+  // What the server reported, plus whatever is on the board now.
+  //
+  // The sync answers once, at launch. Every session opened after it -- a shell
+  // taken out inside a card, a second agent -- is absent from that answer
+  // forever, and pruning against it alone treated all of them as sessions that
+  // never came back. Minimising one un-minimised it on the next reconcile, and a
+  // shell added to a terminals panel was dropped straight back out of it.
+  //
+  // A session on the board is real by definition: something just created it.
+  const live = new Set([...state.knownSessionIds, ...state.terminals.keys()])
   const panes = reconcilePanes(
     state.filesPanes,
     state.editorPanes,
