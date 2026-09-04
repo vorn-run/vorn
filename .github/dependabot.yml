@@ -1,52 +1,22 @@
 version: 2
 updates:
+  # One entry for the whole workspace, not one per package.
+  #
+  # There is a single yarn.lock, at the root. Pointed at `/packages/server` and
+  # the rest, Dependabot treated each as a project of its own, found no lockfile
+  # beside the manifest, and opened pull requests that changed a package.json
+  # and nothing else -- which `yarn install --immutable` rejects on sight. Those
+  # could never go green, and three of them were open at once. From the root it
+  # resolves the workspace manifests together and updates the one lockfile they
+  # share.
+  #
   # TypeScript 7 is the native (Go port) rewrite: its main entry no longer
   # exposes the classic compiler API (breaks typescript-eslint) and Yarn's
   # bundled compat/typescript patch fails to install it. Hold the major bump
-  # in every npm package until the toolchain supports the native port.
-  # TS 6.x minor/patch updates still flow.
+  # until the toolchain supports the native port. TS 6.x minor and patch
+  # updates still flow.
   - package-ecosystem: 'npm'
     directory: '/'
-    schedule:
-      interval: 'weekly'
-    ignore:
-      - dependency-name: 'typescript'
-        update-types: ['version-update:semver-major']
-
-  - package-ecosystem: 'npm'
-    directory: '/packages/web'
-    schedule:
-      interval: 'weekly'
-    ignore:
-      - dependency-name: 'typescript'
-        update-types: ['version-update:semver-major']
-
-  - package-ecosystem: 'npm'
-    directory: '/packages/desktop'
-    schedule:
-      interval: 'weekly'
-    ignore:
-      - dependency-name: 'typescript'
-        update-types: ['version-update:semver-major']
-
-  - package-ecosystem: 'npm'
-    directory: '/packages/server'
-    schedule:
-      interval: 'weekly'
-    ignore:
-      - dependency-name: 'typescript'
-        update-types: ['version-update:semver-major']
-
-  - package-ecosystem: 'npm'
-    directory: '/packages/shared'
-    schedule:
-      interval: 'weekly'
-    ignore:
-      - dependency-name: 'typescript'
-        update-types: ['version-update:semver-major']
-
-  - package-ecosystem: 'npm'
-    directory: '/packages/mcp'
     schedule:
       interval: 'weekly'
     ignore:
