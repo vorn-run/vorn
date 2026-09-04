@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { Search, Plus, RefreshCw, ChevronRight, Check, Download, FolderOpen } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
 import type { ConnectorAuthRung, ConnectorInstallProgress } from '../../../shared/types'
@@ -39,7 +39,6 @@ export function ConnectorDirectory({
   onPickFile,
   installError,
   pending,
-  pendingRowId,
   progress,
   fetchedAt,
   onRefresh
@@ -55,10 +54,8 @@ export function ConnectorDirectory({
   onPickFile?: () => Promise<string | null>
   /** Why the last file install was refused, for the one that has no row yet. */
   installError?: string | null
-  /** The confirm sheet for a pack that has been verified but not yet kept. */
-  pending?: React.ReactNode
-  /** The connector the sheet belongs to, so it opens under that row. */
-  pendingRowId?: string
+  /** The confirm sheet for a verified pack, and the listing it opens under when one was pressed. */
+  pending?: { sheet: React.ReactNode; rowKey?: string }
   /** Installs running right now, by connector id. */
   progress?: Record<string, ConnectorInstallProgress>
   /** When the published list was last read. Absent until one has been. */
@@ -84,11 +81,10 @@ export function ConnectorDirectory({
   // Sections earn their keep once there is more than one; below that they are
   // a heading over the whole list, which says nothing.
   const sections = useMemo(() => groupListingsByCategory(visible), [visible])
-  // One row owns the sheet: an id can appear installed and in the catalog both.
-  const pendingKey = useMemo(
-    () => (pendingRowId ? visible.find((listing) => listing.id === pendingRowId)?.key : undefined),
-    [visible, pendingRowId]
-  )
+  const pendingKey =
+    pending?.rowKey && visible.some((listing) => listing.key === pending.rowKey)
+      ? pending.rowKey
+      : undefined
 
   const handleDrop = (event: React.DragEvent): void => {
     event.preventDefault()
@@ -187,8 +183,8 @@ export function ConnectorDirectory({
         </p>
       )}
 
-      {/* A verified pack with no row of its own, such as one dropped as a file. */}
-      {pending && !pendingKey && <div className="mt-2">{pending}</div>}
+      {/* A verified pack with no row on screen, such as one dropped as a file. */}
+      {pending && !pendingKey && <div className="mt-2">{pending.sheet}</div>}
 
       {sections.map((section) => (
         <div key={section.category}>
@@ -198,7 +194,7 @@ export function ConnectorDirectory({
             </h3>
           )}
           {section.listings.map((listing) => (
-            <div key={listing.key}>
+            <Fragment key={listing.key}>
               <ConnectorRow
                 listing={listing}
                 builtIns={builtIns}
@@ -207,8 +203,8 @@ export function ConnectorDirectory({
                 onAdd={() => onAdd(listing)}
                 {...(onInstall && { onInstall: () => onInstall(listing) })}
               />
-              {listing.key === pendingKey && <div className="mt-2 mb-3">{pending}</div>}
-            </div>
+              {listing.key === pendingKey && <div className="mt-2 mb-3">{pending?.sheet}</div>}
+            </Fragment>
           ))}
         </div>
       ))}

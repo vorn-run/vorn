@@ -23,6 +23,8 @@ export interface PackInstall {
     preview: ConnectorPackSummary
     /** The row this began on, so both steps report their refusals to it. */
     rowId: string
+    /** The listing that was pressed, so the sheet opens under it; a dropped file has none. */
+    rowKey?: string
   } | null
   /** A refusal with no row to land on, such as a dropped file's. */
   error: string | null
@@ -93,7 +95,8 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       setPending({
         source: { kind: 'staged', token: result.preview.token },
         preview: result.preview,
-        rowId: listing.id
+        rowId: listing.id,
+        rowKey: listing.key
       })
     },
     [forget]

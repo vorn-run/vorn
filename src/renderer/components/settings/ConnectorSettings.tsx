@@ -243,7 +243,7 @@ export function ConnectorSettings() {
           onInstallFile={handleInstallFile}
           onPickFile={() => window.api.openFileDialog()}
           installError={fileInstallError}
-          {...(pendingPack && { pending: pendingSheet, pendingRowId: pendingPack.rowId })}
+          pending={pendingPack ? { sheet: pendingSheet, rowKey: pendingPack.rowKey } : undefined}
         />
       )}
 
@@ -254,7 +254,7 @@ export function ConnectorSettings() {
           {...(installProgress[selectedListing.id] && {
             progress: installProgress[selectedListing.id]
           })}
-          {...(pendingPack?.rowId === selectedListing.id && { pending: pendingSheet })}
+          pending={pendingPack?.rowKey === selectedListing.key ? pendingSheet : null}
           onAdd={() => setAdding(selectedListing)}
           onUse={() => openWorkflowEditor(null)}
           onInstall={() => handleInstall(selectedListing)}

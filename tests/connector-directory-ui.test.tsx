@@ -197,8 +197,7 @@ describe('where a verified pack asks to be kept', () => {
         builtIns={[]}
         onSelect={vi.fn()}
         onAdd={vi.fn()}
-        pending={sheet}
-        pendingRowId="kusto"
+        pending={{ sheet, rowKey: find('kusto').key }}
       />
     )
 
@@ -216,8 +215,7 @@ describe('where a verified pack asks to be kept', () => {
         builtIns={[]}
         onSelect={vi.fn()}
         onAdd={vi.fn()}
-        pending={sheet}
-        pendingRowId="dropped-from-a-file"
+        pending={{ sheet }}
       />
     )
 
