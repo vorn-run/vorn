@@ -35,6 +35,30 @@ const PREVIEW: ConnectorPackSummary = {
 }
 
 describe('the sheet shown before a pack is kept', () => {
+  it('brings itself into view, since it opens beside the button that raised it', () => {
+    const scrollIntoView = vi.fn()
+    const had = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
+    Element.prototype.scrollIntoView = scrollIntoView
+    try {
+      render(<PackInstallConfirm preview={PREVIEW} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+    } finally {
+      if (had) Object.defineProperty(Element.prototype, 'scrollIntoView', had)
+      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
+  it('renders where scrolling an element into view is not implemented', () => {
+    const had = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    try {
+      render(<PackInstallConfirm preview={PREVIEW} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+      expect(screen.getByText(/Pack Demo/)).toBeInTheDocument()
+    } finally {
+      if (had) Object.defineProperty(Element.prototype, 'scrollIntoView', had)
+    }
+  })
+
   it('says which variables the pack will borrow from a signed-in tool', () => {
     const borrowing: ConnectorPackSummary = {
       ...PREVIEW,

@@ -3,6 +3,7 @@ import type {
   ConnectorCatalogActionInput,
   ConnectorCatalogItem,
   ConnectorCatalogVerification,
+  ConnectorPackSummary,
   InstalledConnectorPack,
   McpServerCatalogEntry,
   SdkConnectorIcon,
@@ -46,6 +47,19 @@ export interface ConnectorListing {
   verified?: ConnectorCatalogVerification
   // Connected without anyone being asked to connect it — a connector that signs in with nothing is ready the moment it.
   implicitlyConnected?: boolean
+}
+
+// Whether a checked pack is the one the row already described, down to the version, the sign-in and the receipt.
+export function matchesListing(preview: ConnectorPackSummary, listing: ConnectorListing): boolean {
+  return (
+    preview.id === listing.id &&
+    preview.version === listing.catalogItem?.version &&
+    // An absent rung on either side is unknown rather than none, and unknown is what the sheet is for.
+    preview.auth?.rung !== undefined &&
+    preview.auth.rung === listing.authRung &&
+    listing.verified?.version === preview.version &&
+    preview.installedVersion === undefined
+  )
 }
 
 export interface BuiltInConnector {

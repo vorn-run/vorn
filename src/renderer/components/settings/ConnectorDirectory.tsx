@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { Search, Plus, RefreshCw, ChevronRight, Check, Download, FolderOpen } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
 import type { ConnectorAuthRung, ConnectorInstallProgress } from '../../../shared/types'
@@ -54,8 +54,8 @@ export function ConnectorDirectory({
   onPickFile?: () => Promise<string | null>
   /** Why the last file install was refused, for the one that has no row yet. */
   installError?: string | null
-  /** The confirm sheet for a pack that has been verified but not yet kept. */
-  pending?: React.ReactNode
+  /** The confirm sheet for a verified pack, and the listing it opens under when one was pressed. */
+  pending?: { sheet: React.ReactNode; rowKey?: string }
   /** Installs running right now, by connector id. */
   progress?: Record<string, ConnectorInstallProgress>
   /** When the published list was last read. Absent until one has been. */
@@ -81,6 +81,10 @@ export function ConnectorDirectory({
   // Sections earn their keep once there is more than one; below that they are
   // a heading over the whole list, which says nothing.
   const sections = useMemo(() => groupListingsByCategory(visible), [visible])
+  const pendingKey =
+    pending?.rowKey && visible.some((listing) => listing.key === pending.rowKey)
+      ? pending.rowKey
+      : undefined
 
   const handleDrop = (event: React.DragEvent): void => {
     event.preventDefault()
@@ -179,8 +183,8 @@ export function ConnectorDirectory({
         </p>
       )}
 
-      {/* A verified pack waiting on the decision to keep it. */}
-      {pending && <div className="mt-2">{pending}</div>}
+      {/* A verified pack with no row on screen, such as one dropped as a file. */}
+      {pending && !pendingKey && <div className="mt-2">{pending.sheet}</div>}
 
       {sections.map((section) => (
         <div key={section.category}>
@@ -190,15 +194,17 @@ export function ConnectorDirectory({
             </h3>
           )}
           {section.listings.map((listing) => (
-            <ConnectorRow
-              key={listing.key}
-              listing={listing}
-              builtIns={builtIns}
-              {...(progress?.[listing.id] && { progress: progress[listing.id] })}
-              onSelect={() => onSelect(listing)}
-              onAdd={() => onAdd(listing)}
-              {...(onInstall && { onInstall: () => onInstall(listing) })}
-            />
+            <Fragment key={listing.key}>
+              <ConnectorRow
+                listing={listing}
+                builtIns={builtIns}
+                {...(progress?.[listing.id] && { progress: progress[listing.id] })}
+                onSelect={() => onSelect(listing)}
+                onAdd={() => onAdd(listing)}
+                {...(onInstall && { onInstall: () => onInstall(listing) })}
+              />
+              {listing.key === pendingKey && <div className="mt-2 mb-3">{pending?.sheet}</div>}
+            </Fragment>
           ))}
         </div>
       ))}
