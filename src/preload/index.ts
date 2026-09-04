@@ -16,6 +16,7 @@ import {
   IPC,
   GitDiffStat,
   GitDiffResult,
+  GitDiffRange,
   GitCommitPayload,
   GitCommitResult,
   ScheduleLogEntry,
@@ -311,8 +312,8 @@ const api = {
   getGitDiffStat: (cwd: string): Promise<GitDiffStat | null> =>
     ipcRenderer.invoke(IPC.GIT_DIFF_STAT, cwd),
 
-  getGitDiffFull: (cwd: string): Promise<GitDiffResult | null> =>
-    ipcRenderer.invoke(IPC.GIT_DIFF_FULL, cwd),
+  getGitDiffFull: (req: string | GitDiffRange): Promise<GitDiffResult | null> =>
+    ipcRenderer.invoke(IPC.GIT_DIFF_FULL, req),
 
   gitCommit: (payload: GitCommitPayload): Promise<GitCommitResult> =>
     ipcRenderer.invoke(IPC.GIT_COMMIT, payload),

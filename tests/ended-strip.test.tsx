@@ -304,3 +304,123 @@ describe('when a pane came back from a previous run', () => {
     expect(useAppStore.getState().terminals.get(ID)?.lastOutputTimestamp).not.toBe(0)
   })
 })
+
+/** After a reboot the record was checked against the tree before it was offered. */
+const RESTARTED = { reason: 'machine-restarted' as const, at: 2_000_000, replayed: true }
+const okEnv = {
+  worktree: 'ok' as const,
+  branch: { recorded: 'feature', actual: 'feature' },
+  head: { recorded: 'aaaa1111bbbb', actual: 'aaaa1111bbbb' }
+}
+
+describe('what a pane says after the machine restarted', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    ;(window.api as unknown as { writeTerminal: unknown }).writeTerminal = vi.fn()
+  })
+
+  it('names the reboot, and shows the three checks when they pass', () => {
+    useAppStore.getState().addTerminal(session(), { ...RESTARTED, environment: okEnv })
+    render(<SessionComposer terminalId={ID} />)
+
+    expect(screen.getByText(/the machine restarted/)).toBeInTheDocument()
+    expect(screen.getByText(/aaaa1111 · unchanged/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument()
+  })
+
+  it('offers no Resume when the worktree is gone, and says what the session was', () => {
+    useAppStore
+      .getState()
+      .addTerminal(
+        session({ worktreePath: '/dev/vorn/.wt/x', branch: 'deps/x', displayName: 'bump them' }),
+        { ...RESTARTED, environment: { ...okEnv, worktree: 'missing' } }
+      )
+    render(<SessionComposer terminalId={ID} />)
+
+    expect(screen.getByText(/the worktree is gone/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument()
+    expect(screen.getByText('bump them')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close this pane' })).toBeInTheDocument()
+  })
+
+  it('warns with both commits when HEAD moved, and never checks anything out', async () => {
+    useAppStore.getState().addTerminal(session(), {
+      ...RESTARTED,
+      environment: { ...okEnv, head: { recorded: 'aaaa1111bbbb', actual: 'cccc2222dddd' } }
+    })
+    render(<SessionComposer terminalId={ID} />)
+
+    expect(screen.getByText(/the branch moved/)).toBeInTheDocument()
+    expect(screen.getByText(/was aaaa1111 · now cccc2222/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show what changed' }))
+    expect(useAppStore.getState().diffRange).toEqual({
+      terminalId: ID,
+      from: 'aaaa1111bbbb',
+      to: 'cccc2222dddd'
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume anyway' }))
+    await waitFor(() => expect(resumeMocks.resumeEndedSession).toHaveBeenCalledWith(ID))
+  })
+
+  it('leaves the warning behind on request, with Resume still there', () => {
+    useAppStore.getState().addTerminal(session(), {
+      ...RESTARTED,
+      environment: { ...okEnv, head: { recorded: 'aaaa1111bbbb', actual: 'cccc2222dddd' } }
+    })
+    render(<SessionComposer terminalId={ID} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Leave it' }))
+    expect(screen.queryByRole('button', { name: 'Leave it' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument()
+  })
+
+  it('offers a shell its unsent command back, and runs it only when asked', async () => {
+    const command = 'rebase onto main'
+    localStorage.setItem(
+      'vorn:intentDrafts',
+      JSON.stringify({ [ID]: { text: command, savedAt: 1 } })
+    )
+    useAppStore.getState().addTerminal(session({ agentType: 'shell' }), RESTARTED)
+    resumeMocks.resumeEndedSession.mockImplementationOnce(async () => {
+      useAppStore.setState((s) => {
+        const term = s.terminals.get(ID)!
+        return { terminals: new Map(s.terminals).set(ID, { ...term, ended: undefined }) }
+      })
+    })
+    render(<SessionComposer terminalId={ID} />)
+
+    expect(screen.getByText(command)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New shell here' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'New shell and run it' }))
+    await waitFor(() => expect(registryMocks.pasteToTerminal).toHaveBeenCalledWith(ID, command))
+    expect(window.api.writeTerminal).toHaveBeenCalledWith(ID, '\r')
+    expect(localStorage.getItem('vorn:intentDrafts')).not.toContain(command)
+  })
+
+  it('never runs the command when the shell comes back without it', async () => {
+    localStorage.setItem(
+      'vorn:intentDrafts',
+      JSON.stringify({ [ID]: { text: 'rm -rf build', savedAt: 1 } })
+    )
+    useAppStore.getState().addTerminal(session({ agentType: 'shell' }), RESTARTED)
+    render(<SessionComposer terminalId={ID} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New shell without it' }))
+    await waitFor(() => expect(resumeMocks.resumeEndedSession).toHaveBeenCalledWith(ID))
+    expect(registryMocks.pasteToTerminal).not.toHaveBeenCalled()
+  })
+
+  it('discards it on request', () => {
+    localStorage.setItem('vorn:intentDrafts', JSON.stringify({ [ID]: { text: 'ls', savedAt: 1 } }))
+    useAppStore.getState().addTerminal(session({ agentType: 'shell' }), RESTARTED)
+    render(<SessionComposer terminalId={ID} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    expect(screen.queryByText('ls')).not.toBeInTheDocument()
+    expect(localStorage.getItem('vorn:intentDrafts')).not.toContain('ls')
+    expect(screen.getByRole('button', { name: 'New shell here' })).toBeInTheDocument()
+  })
+})

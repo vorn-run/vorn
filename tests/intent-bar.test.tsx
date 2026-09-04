@@ -735,3 +735,31 @@ describe('the composer while a full-screen program is up', () => {
     expect(pty).not.toHaveBeenCalled()
   })
 })
+
+describe('IntentBar keeps what was typed', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetCommandHistoryCache()
+    seedStore()
+  })
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('brings a half-typed command back after the pane is rebuilt', () => {
+    const first = render(<IntentBar terminalId="term-1" />)
+    fireEvent.change(getInput(), { target: { value: 'rebase onto ma' } })
+    first.unmount()
+
+    render(<IntentBar terminalId="term-1" />)
+    expect(getInput().value).toBe('rebase onto ma')
+  })
+
+  it('keeps nothing once the command is sent', () => {
+    render(<IntentBar terminalId="term-1" />)
+    fireEvent.change(getInput(), { target: { value: 'pwd' } })
+    fireEvent.keyDown(getInput(), { key: 'Enter' })
+    expect(localStorage.getItem('vorn:intentDrafts') ?? '{}').not.toContain('pwd')
+  })
+})

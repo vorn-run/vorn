@@ -10,6 +10,7 @@ import type {
   FileStamp,
   GitDiffStat,
   GitDiffResult,
+  GitDiffRange,
   WorkflowDefinition,
   WorkflowExecution,
   ScriptConfig,
@@ -624,7 +625,7 @@ export interface RequestMethods {
     result: Array<{ path: string; branch: string; isMain: boolean; name: string }>
   }
   'git:diffStat': { params: string; result: GitDiffStat | null }
-  'git:diffFull': { params: string; result: GitDiffResult | null }
+  'git:diffFull': { params: string | GitDiffRange; result: GitDiffResult | null }
   'git:commit': {
     params: { cwd: string; message: string; includeUnstaged: boolean }
     result: { success: boolean; error?: string }

@@ -38,7 +38,8 @@ import { DEFAULT_SERVER_PORT, EXIT_ENDPOINT_TAKEN } from '@vornrun/shared/protoc
 import { ptyManager } from './pty-manager'
 import { configureHistory, flushHistory } from './history/writer'
 import { recoverHistory } from './history/recovery'
-import { seedRestored, markRecovered } from './restored-sessions'
+import { seedRestored, markRecovered, verifyRestored } from './restored-sessions'
+import { getGitBranch, getGitHead } from './git-utils'
 import { sessionManager } from './session-persistence'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
@@ -345,7 +346,9 @@ export async function startServer(
   // next line can launch a workflow session -- so a save can fire from here, and
   // a save is a whole-table replace. Seeding after it would mean the records
   // this is holding had already been erased by the thing it exists to survive.
-  const carriedOver = seedRestored(sessionManager.readPreviousSessions())
+  // Uptime counts through sleep, so a laptop closed overnight is not a reboot.
+  const bootTime = Date.now() - os.uptime() * 1000
+  const carriedOver = seedRestored(sessionManager.readPreviousSessions(), Date.now(), bootTime)
 
   // Register all RPC methods
   registerAllMethods()
@@ -478,6 +481,17 @@ export async function startServer(
   // ask for history that has not been read yet. The cost is that discovery waits
   // on it -- measured at 77ms for fifty terminals.
   markRecovered((await recoverHistory(dataDir, carriedOver)).recovered)
+  verifyRestored({
+    isDirectory: (at) => {
+      try {
+        return fs.statSync(at).isDirectory()
+      } catch {
+        return false
+      }
+    },
+    branch: getGitBranch,
+    head: getGitHead
+  })
 
   // Published together, after the claim, because they are one announcement: the
   // port says where, the credential says how, and a reader that finds one

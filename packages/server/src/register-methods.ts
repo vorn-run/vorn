@@ -1240,9 +1240,11 @@ export function registerAllMethods(): void {
     const remote = resolveRemoteHostByPath(cwd)
     return gitUtils.getGitDiffStat(cwd, remote)
   })
-  registerMethod('git:diffFull', (cwd) => {
+  registerMethod('git:diffFull', (req) => {
+    const cwd = typeof req === 'string' ? req : req.cwd
     const remote = resolveRemoteHostByPath(cwd)
-    return gitUtils.getGitDiffFull(cwd, remote)
+    const range = typeof req === 'string' ? undefined : { from: req.from, to: req.to }
+    return gitUtils.getGitDiffFull(cwd, remote, range)
   })
   registerMethod('git:commit', ({ cwd, message, includeUnstaged }) => {
     const remote = resolveRemoteHostByPath(cwd)
@@ -2011,7 +2013,11 @@ export function registerAllMethods(): void {
   // record gone, the next start judged that session's history unreachable and
   // deleted it. Holding them here is what makes a terminal survive more than one
   // restart.
-  sessionManager.startAutoSave(() => [...ptyManager.getActiveSessions(), ...restoredRecords()])
+  sessionManager.startAutoSave(() => {
+    const active = ptyManager.getActiveSessions()
+    ptyManager.heads.refresh(active)
+    return [...active, ...restoredRecords()]
+  })
 
   // ─── Hook server integration ──────────────────────────────────
 

@@ -30,6 +30,7 @@ import {
 import { normalizeUrl } from '../lib/browser-url'
 import { pruneScrollAnchors } from '../lib/scroll-anchor'
 import { pruneDrafts } from '../lib/editor-drafts'
+import { pruneIntentDrafts } from '../lib/intent-drafts'
 import { confirmDiscard, confirmDiscardAll, clearDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 
@@ -460,6 +461,7 @@ function reconcilePanes(
   // the sessions -- an editor popped out into a card outlives its owner's pane
   // and its draft has to outlive it too.
   pruneDrafts(new Set(nextEditors.keys()))
+  pruneIntentDrafts(liveSessionIds)
   const nextBrowsers = new Map([...browserPanes].filter(([, b]) => liveSessionIds.has(b.sessionId)))
   // Tabs remembered for a closed pane die with their session as well. This is
   // the path `removeTerminal` cannot cover: a session that simply never came
@@ -851,6 +853,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   sessionDockCollapsed: false,
   isOnboardingOpen: false,
   diffSidebarTerminalId: null,
+  diffRange: null,
   gitDiffStats: new Map(),
   rightPanelTab: 'changes',
   isDiffPanelMaximized: false,
@@ -1519,9 +1522,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     set((state) => ({ sessionDockCollapsed: !state.sessionDockCollapsed })),
 
   setOnboardingOpen: (open) => set({ isOnboardingOpen: open }),
-  setDiffSidebarTerminalId: (id, tab) =>
+  setDiffSidebarTerminalId: (id, tab, range) =>
     set({
       diffSidebarTerminalId: id,
+      diffRange: id && range ? { terminalId: id, ...range } : null,
       rightPanelTab: tab ?? 'changes',
       isDiffPanelMaximized: false
     }),

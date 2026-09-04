@@ -1,5 +1,6 @@
 import type { RestoredSession, TerminalSession } from '@vornrun/shared/types'
 import log from './logger'
+import { probeEnvironment, type EnvironmentProbe } from './restore-environment'
 
 /**
  * The sessions a previous run left behind that no pane has claimed yet.
@@ -66,7 +67,9 @@ const held = new Map<string, RestoredSession>()
  */
 export function seedRestored(
   previous: TerminalSession[] | null,
-  now: number = Date.now()
+  now: number = Date.now(),
+  /** When this machine came up. A record saved before it was interrupted by the machine going down. */
+  bootTime: number = 0
 ): TerminalSession[] | null {
   held.clear()
   if (previous === null) return null
@@ -84,7 +87,8 @@ export function seedRestored(
       endedAt,
       replayable: false,
       partial: false,
-      closedCleanly: false
+      closedCleanly: false,
+      rebooted: endedAt < bootTime
     })
     keep.push(session)
   }
@@ -105,6 +109,18 @@ export function markRecovered(
     entry.replayable = true
     entry.partial = one.stopped !== 'end'
     entry.closedCleanly = one.closedCleanly
+  }
+}
+
+/** Check each record against the tree once, so Resume is offered knowingly. One that throws is left unchecked. */
+export function verifyRestored(probe: EnvironmentProbe): void {
+  for (const entry of held.values()) {
+    try {
+      const environment = probeEnvironment(entry.session, probe)
+      if (environment) entry.environment = environment
+    } catch (err) {
+      log.warn({ err, id: entry.session.id }, '[restored] could not verify a session')
+    }
   }
 }
 

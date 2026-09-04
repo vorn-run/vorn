@@ -68,6 +68,19 @@ export function getGitBranch(projectPath: string, remote?: RemoteHost): string |
   }
 }
 
+export function getGitHead(projectPath: string, remote?: RemoteHost): string | null {
+  try {
+    return gitExec(['rev-parse', 'HEAD'], projectPath, { timeout: 3000, remote }).trim() || null
+  } catch {
+    return null
+  }
+}
+
+/** Working tree against HEAD, or one commit against another. */
+function diffTarget(range?: { from: string; to: string }): string[] {
+  return range ? [`${range.from}..${range.to}`] : ['HEAD']
+}
+
 /**
  * Pull `owner/repo` out of a git remote URL, for the forms git actually
  * stores: `git@host:owner/repo.git`, `https://host/owner/repo.git`,
@@ -551,10 +564,11 @@ export interface WorktreeEntry {
 
 export function getGitDiffStat(
   cwd: string,
-  remote?: RemoteHost
+  remote?: RemoteHost,
+  range?: { from: string; to: string }
 ): { filesChanged: number; insertions: number; deletions: number } | null {
   try {
-    const output = gitExec(['diff', 'HEAD', '--numstat'], cwd, {
+    const output = gitExec(['diff', ...diffTarget(range), '--numstat'], cwd, {
       timeout: 10000,
       remote
     }).trim()
@@ -583,17 +597,18 @@ export function getGitDiffStat(
 
 export function getGitDiffFull(
   cwd: string,
-  remote?: RemoteHost
+  remote?: RemoteHost,
+  range?: { from: string; to: string }
 ): {
   stat: { filesChanged: number; insertions: number; deletions: number }
   files: GitFileDiff[]
 } | null {
   try {
-    const stat = getGitDiffStat(cwd, remote)
+    const stat = getGitDiffStat(cwd, remote, range)
     if (!stat) return null
 
     const MAX_DIFF_SIZE = 500 * 1024 // 500KB
-    let rawDiff = gitExec(['diff', 'HEAD', '-U3'], cwd, {
+    let rawDiff = gitExec(['diff', ...diffTarget(range), '-U3'], cwd, {
       timeout: 15000,
       maxBuffer: MAX_DIFF_SIZE * 2,
       remote
@@ -603,7 +618,7 @@ export function getGitDiffFull(
       rawDiff = rawDiff.slice(0, MAX_DIFF_SIZE) + '\n\n... diff truncated (too large) ...\n'
     }
 
-    const numstatOutput = gitExec(['diff', 'HEAD', '--numstat'], cwd, {
+    const numstatOutput = gitExec(['diff', ...diffTarget(range), '--numstat'], cwd, {
       timeout: 10000,
       remote
     }).trim()

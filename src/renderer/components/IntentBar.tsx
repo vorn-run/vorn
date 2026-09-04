@@ -8,6 +8,7 @@ import {
   useSyncExternalStore,
   type KeyboardEvent
 } from 'react'
+import { readIntentDraft, writeIntentDraft } from '../lib/intent-drafts'
 import { createPortal } from 'react-dom'
 import {
   CornerDownLeft,
@@ -148,7 +149,8 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   const [menuPos, setMenuPos] = useState<{ left: number; width: number; bottom: number } | null>(
     null
   )
-  const [value, setValue] = useState('')
+  // Comes back after a reload or a reboot, the way an editor's unsaved edit does.
+  const [value, setValue] = useState(() => readIntentDraft(terminalId)?.text ?? '')
   const [isFocused, setIsFocused] = useState(false)
   const [history, setHistory] = useState<CommandHistoryEntry[]>([])
   const [completions, setCompletions] = useState<Completion[]>([])
@@ -191,9 +193,17 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   // textarea may already have been removed. State would be stale in that closure.
   const hadFocusRef = useRef(false)
   const draftRef = useRef('')
+  // Re-pointed at another pane without unmounting: take that pane's draft
+  // before the effect below can write this one's under its id.
+  const [draftOwner, setDraftOwner] = useState(terminalId)
+  if (draftOwner !== terminalId) {
+    setDraftOwner(terminalId)
+    setValue(readIntentDraft(terminalId)?.text ?? '')
+  }
   useEffect(() => {
     draftRef.current = value
-  }, [value])
+    if (draftOwner === terminalId) writeIntentDraft(terminalId, value)
+  }, [value, terminalId, draftOwner])
   const [seenState, setSeenState] = useState(inputState)
   if (seenState !== inputState) {
     // Adjusted during render, which React sanctions: an effect writing this
