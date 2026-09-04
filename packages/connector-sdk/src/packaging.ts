@@ -218,7 +218,7 @@ export function bundledRequireFindings(code: string): CheckFinding[] {
     finding(
       'runtime-dependencies',
       'bundle',
-      `${specifiers.sort().join(', ')} is required at runtime; a pack is one file, so nothing beside it survives packing`,
+      `${specifiers.sort().join(', ')} ${specifiers.length === 1 ? 'is' : 'are'} required at runtime; a pack is one file, so nothing beside it survives packing`,
       'warn'
     )
   ]
@@ -288,8 +288,34 @@ export async function stagePack(connector: Connector, code: string): Promise<str
 /** Long enough for a cold start on a loaded machine, short enough to fail a hung one. */
 const LAUNCH_TIMEOUT_MS = 15_000
 
-// Beyond the transport's own allowlist, which omits these; an ambient token still never reaches the child.
-const LAUNCH_ENV_KEYS = ['TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'TZ', 'PATHEXT', 'COMSPEC']
+// The platform basics the host keeps, named here rather than left to the transport's list; a credential matches none, and NODE_OPTIONS would start a program the host would not.
+const LAUNCH_ENV_KEYS = [
+  'PATH',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMDATA',
+  'PROGRAMFILES',
+  'SystemRoot',
+  'SYSTEMDRIVE',
+  'COMSPEC',
+  'PATHEXT',
+  'TMPDIR',
+  'TEMP',
+  'TMP',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  'SHELL',
+  'TERM',
+  'USER',
+  'LOGNAME',
+  'NODE_EXTRA_CA_CERTS'
+]
 
 function launchEnv(): Record<string, string> {
   const env: Record<string, string> = {}

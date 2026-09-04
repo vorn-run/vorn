@@ -13,6 +13,7 @@ import {
   MAX_PACK_BYTES
 } from '../packages/connector-sdk/src/index'
 import type { BundleOutput } from '../packages/connector-sdk/src/pack'
+import type { CheckFinding } from '../packages/connector-sdk/src/check'
 import { runCli } from '../packages/connector-sdk/src/cli'
 import type { Connector } from '../packages/connector-sdk/src/types'
 
@@ -47,6 +48,9 @@ const cleanBundle = async (): Promise<BundleOutput> => ({
   code: 'import { readFile } from "node:fs/promises"\nexport default readFile\n',
   external: ['node:fs/promises', 'path']
 })
+
+/** Stands in for starting the staged pack, where what is under test is the archive rather than the launch. */
+const starts = async (): Promise<CheckFinding[]> => []
 
 describe('pack gates', () => {
   it('passes a package with no install-time scripts', () => {
@@ -92,7 +96,8 @@ describe('packConnector', () => {
       entry: './connector.js',
       resolveDir: tempDir(),
       outDir: out,
-      bundle: cleanBundle
+      bundle: cleanBundle,
+      launch: starts
     })
 
     expect(result.file).toBe(join(out, 'acme-1.2.3.vorn.tgz'))
@@ -122,7 +127,8 @@ describe('packConnector', () => {
       bundle: async (request) => {
         seen = request.contents
         return cleanBundle()
-      }
+      },
+      launch: starts
     })
     expect(seen).toContain('serveConnector')
     expect(seen).toContain('"acme-connector"')
@@ -172,6 +178,24 @@ describe('packConnector', () => {
     expect(deps?.message).toContain('../package.json')
   })
 
+  it('packs nothing when the staged bundle does not start', async () => {
+    const out = tempDir()
+    const result = await packConnector(connector, {
+      entry: './index.js',
+      resolveDir: tempDir(),
+      outDir: out,
+      // Loads, says a word, and exits: what a pack that reads a file beside it does on the host.
+      bundle: async () => ({
+        code: 'console.log("starting")\nthrow new Error("Cannot find module \'../package.json\'")\n',
+        external: []
+      })
+    })
+    expect(result.file).toBeUndefined()
+    const launch = result.findings.find((item) => item.code === 'pack-launch')
+    expect(launch?.message).toContain("Cannot find module '../package.json'")
+    expect(() => readFileSync(join(out, 'acme-1.2.3.vorn.tgz'))).toThrow()
+  }, 30_000)
+
   it('refuses a pack larger than the size ceiling and leaves no file behind', async () => {
     const out = tempDir()
     const result = await packConnector(connector, {
@@ -182,7 +206,8 @@ describe('packConnector', () => {
       bundle: async () => ({
         code: `const filler = ${JSON.stringify('x'.repeat(4096))}\n`,
         external: []
-      })
+      }),
+      launch: starts
     })
     expect(result.file).toBeUndefined()
     expect(result.findings.map((item) => item.code)).toContain('pack-too-large')
@@ -239,7 +264,8 @@ describe('vorn-connector pack command', () => {
       load,
       write: written.write,
       cwd: tempDir(),
-      bundle: cleanBundle
+      bundle: cleanBundle,
+      launch: starts
     })
     expect(code).toBe(0)
     expect(written.lines.join('\n')).toContain(

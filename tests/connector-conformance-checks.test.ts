@@ -251,6 +251,14 @@ const READS_ITS_PACKAGE =
 /** A bundle that says something cheerful on its way out, which is not an answer. */
 const DIES_ON_LOAD = 'console.log("booting")\nthrow new Error("boom")\n'
 
+/** Answers only from the environment the host would give it: the platform basics, and no ambient secret. */
+const READS_ITS_ENV =
+  'if (!process.env.PATH) throw new Error("started without PATH")\n' +
+  // On this list rather than the transport's, so it proves which one carried it.
+  'if (process.env.LC_ALL !== "C") throw new Error("started without LC_ALL")\n' +
+  'if (process.env.GITHUB_TOKEN) throw new Error("started with an ambient token")\n' +
+  SERVES
+
 describe('what a check says about starting the pack it would ship', () => {
   const dir = mkdtempSync(join(tmpdir(), 'vorn-check-launch-'))
   writeFileSync(
@@ -278,6 +286,20 @@ describe('what a check says about starting the pack it would ship', () => {
     expect(launch?.level).toBe('error')
     // The line naming the failure, not the banner the connector logged first.
     expect(launch?.message).toContain('boom')
+  })
+
+  it('starts it with the platform basics and without an ambient secret', async () => {
+    const had = process.env.LC_ALL
+    process.env.LC_ALL = 'C'
+    process.env.GITHUB_TOKEN = 'ghp-never-travels'
+    try {
+      const findings = await check(READS_ITS_ENV)
+      expect(findings.map((item) => item.code)).not.toContain('pack-launch')
+    } finally {
+      delete process.env.GITHUB_TOKEN
+      if (had === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = had
+    }
   })
 
   it('refuses a bundle that starts and then serves nothing', async () => {
@@ -350,6 +372,14 @@ describe('what a check says about starting the pack it would ship', () => {
 
   it('advises rather than refuses, since starting the pack is what settles it', () => {
     expect(bundledRequireFindings('require("./schema.json")')[0]?.level).toBe('warn')
+  })
+
+  it('counts the files it names', () => {
+    expect(bundledRequireFindings('require("./one.json")')[0]?.message).toContain(
+      './one.json is required'
+    )
+    const two = 'require("./one.json")\nrequire("./two.json")'
+    expect(bundledRequireFindings(two)[0]?.message).toContain('./one.json, ./two.json are required')
   })
 
   it('reads a bundle as code, so a dependency that only writes the words is left alone', () => {

@@ -39,6 +39,8 @@ export interface PackOptions {
   maxBytes?: number
   /** Replaced in tests so packing does not shell out to a bundler. */
   bundle?(request: BundleRequest): Promise<BundleOutput>
+  /** Replaced in tests whose subject is the archive rather than the launch; defaults to starting it for real. */
+  launch?(dir: string): Promise<CheckFinding[]>
 }
 
 export interface PackResult {
@@ -82,7 +84,7 @@ export async function packConnector(
   const staging = await stagePack(connector, built.code)
   try {
     // Asked of the staged files themselves: an artifact that cannot start is not one to ship.
-    findings.push(...(await packLaunchFindings(staging)))
+    findings.push(...(await (options.launch ?? packLaunchFindings)(staging)))
     if (findings.some((item) => item.level === 'error')) return { findings }
     const { create } = await import('tar')
     await create({ gzip: true, file, cwd: staging }, ['manifest.json', 'index.js'])
