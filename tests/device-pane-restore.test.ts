@@ -160,3 +160,75 @@ describe('taking the simulators back on launch', () => {
     expect(deviceClaim).not.toHaveBeenCalled()
   })
 })
+
+describe('restoring more than one device', () => {
+  it('does not erase the requests still waiting their turn', async () => {
+    // The in-memory map starts empty on a launch and fills one device at a time.
+    // Saving it wholesale made the first success wipe every other request --
+    // so a second device was silently forgotten before it was ever asked for.
+    boardWith('term-1', 'term-2', 'term-3')
+    requested({
+      'term-1': { udid: 'udid-1', name: 'iPhone 17' },
+      'term-2': { udid: 'udid-2', name: 'iPad' },
+      'term-3': { udid: 'udid-3', name: 'iPhone 16' }
+    })
+    // The middle one will not boot, so it is kept for the next launch -- and it
+    // is the one a wholesale save loses, because the device restored after it
+    // writes a map that never contained it.
+    deviceClaim.mockImplementation(async (_s, udid) =>
+      udid === 'udid-2'
+        ? { ok: false as const, reason: 'boot-failed' as const, message: 'would not boot' }
+        : claimed(udid, udid)
+    )
+
+    await useAppStore.getState().restoreDevicePanes()
+
+    expect(Object.keys(JSON.parse(localStorage.getItem(KEY)!)).sort()).toEqual([
+      'term-1',
+      'term-2',
+      'term-3'
+    ])
+  })
+
+  it('keeps a refused device on the record even when another one restored first', async () => {
+    boardWith('term-1', 'term-2')
+    requested({
+      'term-1': { udid: 'udid-1', name: 'iPhone 17' },
+      'term-2': { udid: 'udid-2', name: 'iPad' }
+    })
+    deviceClaim.mockImplementation(async (_s, udid) =>
+      udid === 'udid-1'
+        ? claimed(udid, udid)
+        : { ok: false as const, reason: 'held-by-other-vorn' as const, pid: 9, message: 'held' }
+    )
+
+    const refused = await useAppStore.getState().restoreDevicePanes()
+
+    expect(refused).toHaveLength(1)
+    // The whole point of keeping it: the next launch tries again.
+    expect(JSON.parse(localStorage.getItem(KEY)!)['term-2']).toEqual({
+      udid: 'udid-2',
+      name: 'iPad'
+    })
+  })
+
+  it('closing one pane leaves another session request alone', () => {
+    requested({ 'term-2': { udid: 'udid-2', name: 'iPad' } })
+    useAppStore.getState().openDevicePane('term-1', { udid: 'udid-1', name: 'iPhone 17' })
+    useAppStore.getState().closeDevicePane('term-1')
+
+    expect(JSON.parse(localStorage.getItem(KEY)!)['term-2']).toBeDefined()
+    expect(JSON.parse(localStorage.getItem(KEY)!)['term-1']).toBeUndefined()
+  })
+
+  it('lets go of a request whose session never came back', () => {
+    requested({ 'term-1': { udid: 'udid-1', name: 'iPhone 17' } })
+    useAppStore.setState({
+      knownSessionIds: new Set(['term-2']),
+      terminals: new Map([['term-2', { id: 'term-2' } as never]])
+    })
+    useAppStore.getState().setVisibleTerminalIds(['term-2'])
+
+    expect(JSON.parse(localStorage.getItem(KEY)!)['term-1']).toBeUndefined()
+  })
+})

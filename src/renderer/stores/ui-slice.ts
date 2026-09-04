@@ -162,6 +162,41 @@ function dropDeviceSplit(
   return { cardSplits: splits }
 }
 
+/**
+ * Write one device down, leaving the rest of the record alone.
+ *
+ * Never the whole in-memory map. On a launch that map starts empty and fills a
+ * device at a time as each claim comes back, so saving it wholesale made the
+ * first success erase every request still waiting its turn -- including the ones
+ * that were about to be refused and kept for the next launch. The stored record
+ * legitimately holds entries this window has not got to yet.
+ */
+function rememberDeviceRequest(sessionId: string, device: DevicePaneState): void {
+  const next = loadDeviceRequests()
+  const held = next.get(sessionId)
+  if (held?.udid === device.udid && held.name === device.name) return
+  next.set(sessionId, device)
+  saveDeviceRequests(next)
+}
+
+function forgetDeviceRequest(sessionId: string): void {
+  const next = loadDeviceRequests()
+  if (!next.delete(sessionId)) return
+  saveDeviceRequests(next)
+}
+
+/** Drop requests for sessions that are gone, alongside the rest of the view state. */
+function pruneDeviceRequests(liveSessionIds: Set<string>): void {
+  const next = loadDeviceRequests()
+  let changed = false
+  for (const sessionId of [...next.keys()]) {
+    if (liveSessionIds.has(sessionId)) continue
+    next.delete(sessionId)
+    changed = true
+  }
+  if (changed) saveDeviceRequests(next)
+}
+
 function saveDeviceRequests(devicePanes: Map<string, DevicePaneState>): void {
   try {
     localStorage.setItem(DEVICE_PANES_STORAGE_KEY, JSON.stringify(Object.fromEntries(devicePanes)))
@@ -514,6 +549,7 @@ function reconcileView(
   // Keyed by session id and pruned here rather than on its own trigger: a
   // scroll position is view state, and it goes when the rest of it goes.
   pruneScrollAnchors(liveSessionIds)
+  pruneDeviceRequests(liveSessionIds)
   const alive = (paneId: string): boolean => liveSessionIds.has(paneOwnerId(paneId))
   const nextMinimized = new Set([...minimized].filter(alive))
   const nextTab = activeTabId && alive(activeTabId) ? activeTabId : null
@@ -1191,7 +1227,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       if (existing && existing.udid === device.udid && existing.name === device.name) return {}
       const next = new Map(state.devicePanes)
       next.set(sessionId, device)
-      saveDeviceRequests(next)
+      rememberDeviceRequest(sessionId, device)
       // A phone is roughly 0.46 as wide as it is tall, so the even split every
       // other pane kind wants renders it as a narrow strip of screen floating in
       // a wide field of empty background — while the terminal, which needs the
@@ -1244,9 +1280,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       // machine, is not something the person did or can act on. Forgotten
       // rather than reported, so it stops being tried on every launch.
       if (failure.reason === 'gone') {
-        const next = new Map(loadDeviceRequests())
-        next.delete(sessionId)
-        saveDeviceRequests(next)
+        forgetDeviceRequest(sessionId)
         continue
       }
       // The rest are contested or broken, and the record is kept: the device is
@@ -1273,7 +1307,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       }
       const next = new Map(state.devicePanes)
       next.delete(sessionId)
-      saveDeviceRequests(next)
+      forgetDeviceRequest(sessionId)
       return {
         devicePanes: next,
         ...dropDeviceSplit(state, sessionId),
