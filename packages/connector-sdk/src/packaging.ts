@@ -1,7 +1,11 @@
 import { builtinModules } from 'node:module'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { CheckCode, CheckFinding } from './check'
+import { connectorManifest } from './setup'
+import type { Connector } from './types'
 
 /**
  * What a connector must be true of as a *package*, rather than as a definition.
@@ -38,8 +42,13 @@ export interface BundleOutput {
   external: string[]
 }
 
-function finding(code: CheckCode, target: string, message: string): CheckFinding {
-  return { level: 'error', code, target, message }
+function finding(
+  code: CheckCode,
+  target: string,
+  message: string,
+  level: CheckFinding['level'] = 'error'
+): CheckFinding {
+  return { level, code, target, message }
 }
 
 /** Reject a source package whose install would run code on the user's machine. */
@@ -71,6 +80,134 @@ export function bundleDependencyFindings(external: string[]): CheckFinding[] {
       'runtime-dependencies',
       'bundle',
       `${[...specifiers].sort().join(', ')} stayed outside the bundle; a pack must launch with no install step`
+    )
+  ]
+}
+
+// `require('../x')`, esbuild's `__require('../x')`, `require.resolve('../x')` and `import('../x')`, anchored at the word.
+const RELATIVE_REQUIRE = /(?:__)?(?:require(?:\.resolve)?|import)\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/y
+
+// The `createRequire(...)('../x')` form, but not the bare helper esbuild emits and never calls with a path.
+const RELATIVE_CREATE_REQUIRE = /createRequire\([^()]*\)\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/y
+
+const CALL_WORDS = new Set(['require', '__require', 'createRequire', 'import'])
+
+// A `/` opens a regular expression only where a value cannot have just ended, or the quotes inside one read as a string.
+const BEFORE_REGEX = new Set(['', ...'(,=:[!&|?{};+-*%~^<>'])
+const BEFORE_REGEX_WORDS = new Set([
+  'return',
+  'typeof',
+  'instanceof',
+  'in',
+  'of',
+  'new',
+  'delete',
+  'void',
+  'case',
+  'do',
+  'else',
+  'yield',
+  'await'
+])
+const WORD = /[\w$]/
+
+function endOfQuoted(code: string, start: number): number {
+  const quote = code[start]
+  let i = start + 1
+  while (i < code.length) {
+    if (code[i] === '\\') {
+      i += 2
+      continue
+    }
+    if (code[i] === quote) return i + 1
+    i += 1
+  }
+  return code.length
+}
+
+function endOfRegex(code: string, start: number): number {
+  let i = start + 1
+  let inClass = false
+  while (i < code.length) {
+    const ch = code[i]
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (ch === '\n') return i
+    if (ch === '[') inClass = true
+    else if (ch === ']') inClass = false
+    else if (ch === '/' && !inClass) return i + 1
+    i += 1
+  }
+  return code.length
+}
+
+// Relative specifiers a bundle asks for once it runs, read by walking it as code so comments and strings do not count.
+function relativeRuntimeSpecifiers(code: string): string[] {
+  const found = new Set<string>()
+  let previous = ''
+  let previousWord = ''
+  let i = 0
+  while (i < code.length) {
+    const ch = code[i]
+    if (ch === '/' && code[i + 1] === '/') {
+      const end = code.indexOf('\n', i)
+      i = end === -1 ? code.length : end
+      continue
+    }
+    if (ch === '/' && code[i + 1] === '*') {
+      const end = code.indexOf('*/', i + 2)
+      i = end === -1 ? code.length : end + 2
+      continue
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      i = endOfQuoted(code, i)
+      previous = ch
+      previousWord = ''
+      continue
+    }
+    if (ch === '/' && (BEFORE_REGEX.has(previous) || BEFORE_REGEX_WORDS.has(previousWord))) {
+      i = endOfRegex(code, i)
+      previous = '/'
+      previousWord = ''
+      continue
+    }
+    if (WORD.test(ch)) {
+      const start = i
+      while (i < code.length && WORD.test(code[i])) i += 1
+      const word = code.slice(start, i)
+      // A property that happens to be named require is not the loader.
+      if (CALL_WORDS.has(word) && code[start - 1] !== '.') {
+        for (const pattern of [RELATIVE_REQUIRE, RELATIVE_CREATE_REQUIRE]) {
+          pattern.lastIndex = start
+          const match = pattern.exec(code)
+          if (match) found.add(match[2])
+        }
+      }
+      previous = code[i - 1]
+      previousWord = word
+      continue
+    }
+    if (!/\s/.test(ch)) {
+      previous = ch
+      previousWord = ''
+    }
+    i += 1
+  }
+  return [...found]
+}
+
+// Files a pack does not carry, asked for after install: advice, since starting the pack is what proves it.
+export function bundledRequireFindings(code: string): CheckFinding[] {
+  const specifiers = relativeRuntimeSpecifiers(code)
+  if (specifiers.length === 0) return []
+  return [
+    finding(
+      'runtime-dependencies',
+      'bundle',
+      `${specifiers.sort().join(', ')} ${specifiers.length === 1 ? 'is' : 'are'} required at runtime; a pack is one file, so nothing beside it survives packing`,
+      'warn'
     )
   ]
 }
@@ -124,6 +261,114 @@ export function packEntryContents(entry: string, sdkModule = '@vornrun/connector
   ].join('\n')
 }
 
+/** A directory holding nothing but the two files a pack carries, for tarring or for launching. */
+export async function stagePack(connector: Connector, code: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'vorn-pack-'))
+  await writeFile(join(dir, 'index.js'), code, 'utf8')
+  await writeFile(
+    join(dir, 'manifest.json'),
+    `${JSON.stringify(connectorManifest(connector), null, 2)}\n`,
+    'utf8'
+  )
+  return dir
+}
+
+/** Long enough for a cold start on a loaded machine, short enough to fail a hung one. */
+const LAUNCH_TIMEOUT_MS = 15_000
+
+// The platform basics the host keeps, named here rather than left to the transport's list; a credential matches none, and NODE_OPTIONS would start a program the host would not.
+const LAUNCH_ENV_KEYS = [
+  'PATH',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMDATA',
+  'PROGRAMFILES',
+  'SystemRoot',
+  'SYSTEMDRIVE',
+  'COMSPEC',
+  'PATHEXT',
+  'TMPDIR',
+  'TEMP',
+  'TMP',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  'SHELL',
+  'TERM',
+  'USER',
+  'LOGNAME',
+  'NODE_EXTRA_CA_CERTS'
+]
+
+function launchEnv(): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const key of LAUNCH_ENV_KEYS) {
+    const value = process.env[key]
+    if (value !== undefined) env[key] = value
+  }
+  return env
+}
+
+/** The line naming the failure, which node prints below the frames and the banners a connector logs first. */
+function errorLine(text: string): string | undefined {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  return [...lines].reverse().find((line) => /Error\b/.test(line)) ?? lines[lines.length - 1]
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms)
+    })
+  ])
+}
+
+// Start a staged pack the way the host does: only a completed `initialize` counts, so a bundle that logs and exits cannot pass.
+export async function packLaunchFindings(dir: string): Promise<CheckFinding[]> {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ['index.js'],
+    cwd: dir,
+    env: launchEnv(),
+    stderr: 'pipe'
+  })
+  const client = new Client({ name: 'vorn-connector-check', version: '1' }, { capabilities: {} })
+  let stderr = ''
+  // A PassThrough is handed over before the spawn, so nothing the child says on its way out is missed.
+  transport.stderr?.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString()
+  })
+  try {
+    await withTimeout(
+      client.connect(transport),
+      LAUNCH_TIMEOUT_MS,
+      `did not answer within ${LAUNCH_TIMEOUT_MS / 1000}s of starting`
+    )
+    return []
+  } catch (error) {
+    const said = error instanceof Error ? error.message : String(error)
+    return [
+      finding('pack-launch', 'bundle', `did not start as a pack: ${errorLine(stderr) ?? said}`)
+    ]
+  } finally {
+    // The child must not outlive the check, including when the timeout fired while it still ran.
+    await client.close().catch(() => {})
+    await transport.close().catch(() => {})
+  }
+}
+
 /** The bundler `pack` uses, shared so `check` gates on the same answer. */
 export async function esbuildBundle(request: BundleRequest): Promise<BundleOutput> {
   const { build } = await import('esbuild')
@@ -140,7 +385,15 @@ export async function esbuildBundle(request: BundleRequest): Promise<BundleOutpu
     format: 'esm',
     write: false,
     metafile: true,
-    legalComments: 'none'
+    legalComments: 'none',
+    // A bundled CommonJS dependency asks for its builtins through esbuild's shim, which throws unless a real require is in scope.
+    banner: {
+      js: [
+        "import { createRequire as __vornCreateRequire } from 'node:module'",
+        'const require = __vornCreateRequire(import.meta.url)',
+        ''
+      ].join('\n')
+    }
   })
   const output = Object.values(result.metafile.outputs)[0]
   return {

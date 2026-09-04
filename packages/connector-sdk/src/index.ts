@@ -37,6 +37,7 @@ export type { PackOptions, PackResult } from './pack'
 export {
   lifecycleScriptFindings,
   bundleDependencyFindings,
+  bundledRequireFindings,
   readNearestPackageJson,
   esbuildBundle,
   MAX_PACK_BYTES

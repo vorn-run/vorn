@@ -14,7 +14,8 @@ describe('the files a new connector starts as', () => {
       'src/index.ts',
       'src/connector.test.ts',
       'src/entry.test.ts',
-      'README.md'
+      'README.md',
+      'tsconfig.json'
     ])
   })
 
@@ -45,7 +46,9 @@ describe('the files a new connector starts as', () => {
 
   it('starts from the SDK it is being written against: declared, with an auth rung', () => {
     const source = fileMap().get('src/connector.ts') as string
-    expect(source).toContain("version: '0.1.0'")
+    // The version is read from package.json, not restated, so the two cannot drift.
+    expect(source).toContain("import pkg from '../package.json'")
+    expect(source).toContain('version: pkg.version')
     const quoted = scaffoldFiles({ id: 'acme', name: "Bob's App", description: 'Two\nlines' })
     const connector = quoted.find((f) => f.path === 'src/connector.ts')?.contents ?? ''
     expect(connector).toContain('name: "Bob\'s App"')
@@ -93,8 +96,8 @@ describe('a scaffold shaped for the connectors repository', () => {
       'src/connector.test.ts',
       'src/entry.test.ts',
       'README.md',
-      'CHANGELOG.md',
       'tsconfig.json',
+      'CHANGELOG.md',
       'tsup.config.ts',
       'vitest.config.ts'
     ])
