@@ -12,6 +12,7 @@ import {
   resetCatalogCache
 } from '../packages/server/src/connectors/catalog'
 import { TEMPLATE_SEED } from '../packages/server/src/connectors/template-seed'
+import { withSeeds } from '../packages/server/src/connectors/catalog'
 import { PORTABLE_FORMAT_VERSION } from '../packages/shared/src/workflow-portability'
 
 /** Nothing in these tests may touch the network or this machine's real cache. */
@@ -311,7 +312,10 @@ describe('templates ride the catalog', () => {
       )) as unknown as typeof fetch
 
     expect(await refreshCatalog({ fetchImpl, cachePath, now: 42 })).toBe(true)
-    expect(catalogTemplates({ ...offline(), cachePath }).map((t) => t.id)).toEqual(['remote'])
+    expect(catalogTemplates({ ...offline(), cachePath }).map((t) => t.id)).toEqual([
+      'remote',
+      ...TEMPLATE_SEED.map((t) => t.id)
+    ])
 
     resetCatalogCache()
     expect(catalogTemplates({ ...offline(), cachePath, now: 42 }).map((t) => t.id)).toEqual([
@@ -349,5 +353,18 @@ describe('templates ride the catalog', () => {
     expect(catalogMcpServers({ ...offline(), cachePath, now: 7 }).map((s) => s.id)).toEqual([
       'playwright'
     ])
+  })
+
+  describe('the seeds beside a published catalog', () => {
+    it('keeps every seed the catalog does not carry, and lets the catalog win on a shared id', () => {
+      const published = { ...TEMPLATE_SEED[0], name: 'Published copy' }
+      const merged = withSeeds([published])
+      expect(merged[0].name).toBe('Published copy')
+      expect(merged.map((t) => t.id)).toEqual([
+        TEMPLATE_SEED[0].id,
+        ...TEMPLATE_SEED.slice(1).map((t) => t.id)
+      ])
+      expect(merged.some((t) => t.id === 'build-from-spec')).toBe(true)
+    })
   })
 })
