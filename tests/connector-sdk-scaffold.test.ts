@@ -14,7 +14,8 @@ describe('the files a new connector starts as', () => {
       'src/index.ts',
       'src/connector.test.ts',
       'src/entry.test.ts',
-      'README.md'
+      'README.md',
+      'tsconfig.json'
     ])
   })
 
@@ -95,8 +96,8 @@ describe('a scaffold shaped for the connectors repository', () => {
       'src/connector.test.ts',
       'src/entry.test.ts',
       'README.md',
-      'CHANGELOG.md',
       'tsconfig.json',
+      'CHANGELOG.md',
       'tsup.config.ts',
       'vitest.config.ts'
     ])

@@ -1,20 +1,18 @@
-import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { rm } from 'node:fs/promises'
 import {
   bundleDependencyFindings,
   bundledRequireFindings,
   lifecycleScriptFindings,
   packageDirFor,
   packEntryContents,
+  packLaunchFindings,
   readNearestPackageJson,
+  stagePack,
   type BundleOutput,
   type BundleRequest
 } from './packaging'
 import { escapedMockHttp, withMockHttp, type MockRoute } from './harness'
 import { runAction, runPoll, type PollPage } from './runtime'
-import { connectorManifest } from './setup'
 import type {
   ActionDefinition,
   ActionInputField,
@@ -224,98 +222,14 @@ function actionShapeFindings(action: ActionDefinition): CheckFinding[] {
   return found
 }
 
-/** The first thing Vorn says to a connector it started, so an answer proves it serves. */
-const INITIALIZE = `${JSON.stringify({
-  jsonrpc: '2.0',
-  id: 1,
-  method: 'initialize',
-  params: {
-    protocolVersion: '2024-11-05',
-    capabilities: {},
-    clientInfo: { name: 'vorn-connector-check', version: '1' }
-  }
-})}\n`
-
-/** Long enough for a cold start on a loaded machine, short enough to fail a hung one. */
-const LAUNCH_TIMEOUT_MS = 15_000
-
-/** The line naming the failure, which node prints below the frame that raised it. */
-function firstErrorLine(text: string): string | undefined {
-  const lines = text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '')
-  return lines.find((line) => /^\w*Error\b/.test(line)) ?? lines[0]
+/** Whether this run can build the bundle the packaging gates are asked of. */
+function bundles(options: CheckOptions): boolean {
+  return Boolean(options.bundle && options.entry !== undefined && options.packageDir !== undefined)
 }
 
-/** Start the packed bundle the way the host does, and say why it did not answer. */
-function startPacked(dir: string): Promise<string | undefined> {
-  return new Promise((settle) => {
-    const child = spawn(process.execPath, ['index.js'], { cwd: dir })
-    let stderr = ''
-    let done = false
-    const finish = (reason?: string): void => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      child.kill('SIGKILL')
-      settle(reason)
-    }
-    const timer = setTimeout(
-      () => finish(`did not answer within ${LAUNCH_TIMEOUT_MS / 1000}s of starting`),
-      LAUNCH_TIMEOUT_MS
-    )
-    timer.unref?.()
-
-    child.stdout.on('data', (chunk: Buffer) => {
-      if (chunk.includes('\n')) finish()
-    })
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString()
-    })
-    child.on('error', (error: Error) => finish(`could not be started: ${error.message}`))
-    child.on('exit', (code) =>
-      finish(firstErrorLine(stderr) ?? `exited with code ${code ?? 0} before it answered`)
-    )
-    // A bundle that died on load has no stdin left to write to.
-    child.stdin.on('error', () => {})
-    child.stdin.write(INITIALIZE)
-  })
-}
-
-/**
- * Start the bundle from a directory holding nothing but the pack's own files.
- *
- * The source tree is a kinder place than a pack: a `require('../package.json')`
- * the bundler left behind resolves there and nowhere else, so every other check
- * passes and the connector still dies the first time Vorn launches it.
- */
-async function launchFindings(connector: Connector, code: string): Promise<CheckFinding[]> {
-  const dir = await mkdtemp(join(tmpdir(), 'vorn-launch-'))
-  try {
-    await writeFile(join(dir, 'index.js'), code, 'utf8')
-    await writeFile(
-      join(dir, 'manifest.json'),
-      `${JSON.stringify(connectorManifest(connector), null, 2)}\n`,
-      'utf8'
-    )
-    const failure = await startPacked(dir)
-    return failure
-      ? [finding('error', 'pack-launch', 'bundle', `did not start as a pack: ${failure}`)]
-      : []
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
-
-/** Whether this run can start the bundle, which takes everything packing takes. */
+/** Starting it costs a process, so only a mock run — the one that already runs the connector — pays. */
 function launches(options: CheckOptions): boolean {
-  return Boolean(
-    options.mock &&
-    options.bundle &&
-    options.entry !== undefined &&
-    options.packageDir !== undefined
-  )
+  return bundles(options) && options.mock === true
 }
 
 /** What the package says about itself, when a check was pointed at one. */
@@ -349,7 +263,15 @@ async function packageFindings(
       resolveDir: options.packageDir
     })
     found.push(...bundleDependencyFindings(built.external), ...bundledRequireFindings(built.code))
-    if (launches(options)) found.push(...(await launchFindings(connector, built.code)))
+    // A bundle already condemned would fail to start for the reason just given, and say it twice.
+    if (options.mock && !found.some((item) => item.level === 'error')) {
+      const dir = await stagePack(connector, built.code)
+      try {
+        found.push(...(await packLaunchFindings(dir)))
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    }
   }
 
   return found
@@ -791,7 +713,7 @@ function checksRun(connector: Connector, options: CheckOptions): string[] {
   if (connector.actions.length > 0) names.push('actions')
   if (connector.triggers.length > 0) names.push('dedupe')
   if (options.packageDir !== undefined) names.push('no-lifecycle-scripts', 'keywords')
-  if (options.bundle && options.entry !== undefined) names.push('no-runtime-deps')
+  if (bundles(options)) names.push('no-runtime-deps')
   if (launches(options)) names.push('launch')
   // Whether the stub was actually reached is the `mock-not-observed` finding's
   // job: it spoils this name for the action that stayed silent.

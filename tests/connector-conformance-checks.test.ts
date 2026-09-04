@@ -217,14 +217,37 @@ describe('what a check says about the package a connector ships as', () => {
   })
 })
 
-/** A bundle that answers the initialize the check writes, then waits like a served connector. */
-const SERVES =
-  'process.stdin.on("data", () => process.stdout.write(\'{"jsonrpc":"2.0","id":1,"result":{}}\\n\'))\n'
+/** A bundle that serves the MCP handshake Vorn opens with, then waits like a served connector. */
+const SERVES = [
+  "let buffered = ''",
+  "process.stdin.on('data', (chunk) => {",
+  '  buffered += chunk',
+  '  for (;;) {',
+  "    const end = buffered.indexOf('\\n')",
+  '    if (end < 0) return',
+  '    const line = buffered.slice(0, end)',
+  '    buffered = buffered.slice(end + 1)',
+  '    if (!line.trim()) continue',
+  '    const message = JSON.parse(line)',
+  "    if (message.method !== 'initialize') continue",
+  '    const result = {',
+  '      protocolVersion: message.params.protocolVersion,',
+  '      capabilities: {},',
+  "      serverInfo: { name: 'stub', version: '1' }",
+  '    }',
+  "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }) + '\\n')",
+  '  }',
+  '})',
+  ''
+].join('\n')
 
 /** What every connector but one shipped: a require the bundler left for the runtime. */
 const READS_ITS_PACKAGE =
   'import { createRequire } from "node:module"\ncreateRequire(import.meta.url)("../package.json")\n' +
   SERVES
+
+/** A bundle that says something cheerful on its way out, which is not an answer. */
+const DIES_ON_LOAD = 'console.log("booting")\nthrow new Error("boom")\n'
 
 describe('what a check says about starting the pack it would ship', () => {
   const dir = mkdtempSync(join(tmpdir(), 'vorn-check-launch-'))
@@ -247,23 +270,29 @@ describe('what a check says about starting the pack it would ship', () => {
     expect(findings.map((item) => item.code)).not.toContain('pack-launch')
   })
 
-  it('refuses a bundle that reads a file only the source tree has', async () => {
-    const findings = await check(READS_ITS_PACKAGE)
+  it('refuses a bundle that starts, says something, and never answers', async () => {
+    const findings = await check(DIES_ON_LOAD)
     const launch = findings.find((item) => item.code === 'pack-launch')
     expect(launch?.level).toBe('error')
-    // The line node prints under the frame, not the frame.
-    expect(launch?.message).toContain("Cannot find module '../package.json'")
+    // The line naming the failure, not the banner the connector logged first.
+    expect(launch?.message).toContain('boom')
   })
 
   it('refuses a bundle that starts and then serves nothing', async () => {
-    const findings = await check('')
-    expect(findings.find((item) => item.code === 'pack-launch')?.message).toContain(
-      'before it answered'
+    expect(await check('')).toContainEqual(
+      expect.objectContaining({ code: 'pack-launch', level: 'error' })
     )
   })
 
+  it('says once that a bundle reads a file only the source tree has', async () => {
+    const codes = (await check(READS_ITS_PACKAGE)).map((item) => item.code)
+    expect(codes).toContain('runtime-dependencies')
+    // Starting it would fail for the reason just given, so it is not said twice.
+    expect(codes).not.toContain('pack-launch')
+  })
+
   it('starts nothing without a mock run, which is where the packaging gates live', async () => {
-    const findings = await check(READS_ITS_PACKAGE, { mock: false })
+    const findings = await check(DIES_ON_LOAD, { mock: false })
     expect(findings.map((item) => item.code)).not.toContain('pack-launch')
   })
 
@@ -283,8 +312,11 @@ describe('what a check says about starting the pack it would ship', () => {
     expect(named('createRequire(import.meta.url)("../package.json")')).toContain('../package.json')
     expect(named('require("./schema.json")')).toContain('./schema.json')
     expect(named('__require("../data/rows.json")')).toContain('../data/rows.json')
+    expect(named('require.resolve("../rows.json")')).toContain('../rows.json')
+    expect(named('await import("./late.js")')).toContain('./late.js')
     // The helper esbuild emits for bundled CommonJS is not a file left behind.
     expect(bundledRequireFindings('var __require = createRequire(import.meta.url)')).toEqual([])
     expect(bundledRequireFindings('const x = require("node:fs")')).toEqual([])
+    expect(bundledRequireFindings('import { join } from "./path.js"')).toEqual([])
   })
 })

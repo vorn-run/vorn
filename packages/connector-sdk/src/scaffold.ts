@@ -96,7 +96,7 @@ function packageJson(id: string, description: string, inRepo: boolean): string {
   })
 }
 
-function tsconfig(): string {
+function tsconfig(inRepo: boolean): string {
   return jsonFile({
     compilerOptions: {
       target: 'ES2022',
@@ -113,7 +113,7 @@ function tsconfig(): string {
       ignoreDeprecations: '6.0',
       allowImportingTsExtensions: true
     },
-    include: ['src/**/*', 'vitest.config.ts']
+    include: ['src/**/*', ...(inRepo ? ['vitest.config.ts'] : [])]
   })
 }
 
@@ -419,10 +419,11 @@ export function scaffoldFiles(options: ScaffoldOptions): ScaffoldFile[] {
     { path: 'src/connector.test.ts', contents: testSource(name) },
     { path: 'src/entry.test.ts', contents: entryTestSource() },
     { path: 'README.md', contents: readme(options.id, name, description) },
+    // Everywhere: the generated source imports its package.json, which needs resolveJsonModule to compile.
+    { path: 'tsconfig.json', contents: tsconfig(inRepo) },
     ...(inRepo
       ? [
           { path: 'CHANGELOG.md', contents: changelog() },
-          { path: 'tsconfig.json', contents: tsconfig() },
           { path: 'tsup.config.ts', contents: tsupConfig() },
           { path: 'vitest.config.ts', contents: vitestConfig() }
         ]

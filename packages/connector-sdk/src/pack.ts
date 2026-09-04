@@ -1,5 +1,4 @@
-import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, rm, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { checkConnector, type CheckCode, type CheckFinding } from './check'
 import {
@@ -9,12 +8,13 @@ import {
   lifecycleScriptFindings,
   packageDirFor,
   packEntryContents,
+  packLaunchFindings,
   readNearestPackageJson,
+  stagePack,
   MAX_PACK_BYTES,
   type BundleOutput,
   type BundleRequest
 } from './packaging'
-import { connectorManifest } from './setup'
 import type { Connector } from './types'
 
 export {
@@ -79,14 +79,11 @@ export async function packConnector(
   const outDir = resolve(options.outDir ?? process.cwd())
   await mkdir(outDir, { recursive: true })
   const file = join(outDir, packFileName(connector))
-  const staging = await mkdtemp(join(tmpdir(), 'vorn-pack-'))
+  const staging = await stagePack(connector, built.code)
   try {
-    await writeFile(join(staging, 'index.js'), built.code, 'utf8')
-    await writeFile(
-      join(staging, 'manifest.json'),
-      `${JSON.stringify(connectorManifest(connector), null, 2)}\n`,
-      'utf8'
-    )
+    // Asked of the staged files themselves: an artifact that cannot start is not one to ship.
+    findings.push(...(await packLaunchFindings(staging)))
+    if (findings.some((item) => item.level === 'error')) return { findings }
     const { create } = await import('tar')
     await create({ gzip: true, file, cwd: staging }, ['manifest.json', 'index.js'])
   } finally {

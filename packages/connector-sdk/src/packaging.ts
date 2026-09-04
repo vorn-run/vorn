@@ -1,7 +1,11 @@
 import { builtinModules } from 'node:module'
 import { readFileSync } from 'node:fs'
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { CheckCode, CheckFinding } from './check'
+import { connectorManifest } from './setup'
+import type { Connector } from './types'
 
 /**
  * What a connector must be true of as a *package*, rather than as a definition.
@@ -75,20 +79,19 @@ export function bundleDependencyFindings(external: string[]): CheckFinding[] {
   ]
 }
 
-/**
- * A require of a relative path, left for the runtime to resolve.
- *
- * Matches `require('../x')`, esbuild's `__require('../x')`, and the
- * `createRequire(import.meta.url)('../x')` form, but not the bare
- * `createRequire(import.meta.url)` esbuild emits as a helper and never calls
- * with a path of its own.
- */
-const RELATIVE_REQUIRE = /[rR]equire(?:\([^()]*\))?\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/g
+// `require('../x')`, esbuild's `__require('../x')`, `require.resolve('../x')` and `import('../x')`.
+const RELATIVE_REQUIRE =
+  /(?:^|[^\w$.])(?:__)?(?:require(?:\.resolve)?|import)\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/g
+
+// The `createRequire(...)('../x')` form, but not the bare helper esbuild emits and never calls with a path.
+const RELATIVE_CREATE_REQUIRE = /createRequire\([^()]*\)\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/g
 
 /** Files a pack does not carry, asked for after it is installed. */
 export function bundledRequireFindings(code: string): CheckFinding[] {
   const specifiers = new Set<string>()
-  for (const [, , specifier] of code.matchAll(RELATIVE_REQUIRE)) specifiers.add(specifier)
+  for (const pattern of [RELATIVE_REQUIRE, RELATIVE_CREATE_REQUIRE]) {
+    for (const [, , specifier] of code.matchAll(pattern)) specifiers.add(specifier)
+  }
   if (specifiers.size === 0) return []
   return [
     finding(
@@ -146,6 +149,88 @@ export function packEntryContents(entry: string, sdkModule = '@vornrun/connector
     'await serveConnector(exported)',
     ''
   ].join('\n')
+}
+
+/** A directory holding nothing but the two files a pack carries, for tarring or for launching. */
+export async function stagePack(connector: Connector, code: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'vorn-pack-'))
+  await writeFile(join(dir, 'index.js'), code, 'utf8')
+  await writeFile(
+    join(dir, 'manifest.json'),
+    `${JSON.stringify(connectorManifest(connector), null, 2)}\n`,
+    'utf8'
+  )
+  return dir
+}
+
+/** Long enough for a cold start on a loaded machine, short enough to fail a hung one. */
+const LAUNCH_TIMEOUT_MS = 15_000
+
+// Beyond the transport's own allowlist, which omits these; an ambient token still never reaches the child.
+const LAUNCH_ENV_KEYS = ['TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'TZ', 'PATHEXT', 'COMSPEC']
+
+function launchEnv(): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const key of LAUNCH_ENV_KEYS) {
+    const value = process.env[key]
+    if (value !== undefined) env[key] = value
+  }
+  return env
+}
+
+/** The line naming the failure, which node prints below the frames and the banners a connector logs first. */
+function errorLine(text: string): string | undefined {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  return [...lines].reverse().find((line) => /Error\b/.test(line)) ?? lines[lines.length - 1]
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms)
+    })
+  ])
+}
+
+// Start a staged pack the way the host does: only a completed `initialize` counts, so a bundle that logs and exits cannot pass.
+export async function packLaunchFindings(dir: string): Promise<CheckFinding[]> {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ['index.js'],
+    cwd: dir,
+    env: launchEnv(),
+    stderr: 'pipe'
+  })
+  const client = new Client({ name: 'vorn-connector-check', version: '1' }, { capabilities: {} })
+  let stderr = ''
+  // A PassThrough is handed over before the spawn, so nothing the child says on its way out is missed.
+  transport.stderr?.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString()
+  })
+  try {
+    await withTimeout(
+      client.connect(transport),
+      LAUNCH_TIMEOUT_MS,
+      `did not answer within ${LAUNCH_TIMEOUT_MS / 1000}s of starting`
+    )
+    return []
+  } catch (error) {
+    const said = error instanceof Error ? error.message : String(error)
+    return [
+      finding('pack-launch', 'bundle', `did not start as a pack: ${errorLine(stderr) ?? said}`)
+    ]
+  } finally {
+    // The child must not outlive the check, including when the timeout fired while it still ran.
+    await client.close().catch(() => {})
+    await transport.close().catch(() => {})
+  }
 }
 
 /** The bundler `pack` uses, shared so `check` gates on the same answer. */
