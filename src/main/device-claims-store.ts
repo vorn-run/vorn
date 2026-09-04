@@ -64,6 +64,19 @@ function read(): Stored {
  * driving. That is precisely the collision this file exists to prevent, arriving
  * through the file itself. Writing beside it and renaming makes the swap atomic,
  * so a reader sees the old record or the new one and never half of either.
+ *
+ * The scratch name carries this process's pid and nothing finer, which is safe
+ * only because both calls below are synchronous: nothing else in this process
+ * runs between them, so the file cannot exist for two writes at once. Another
+ * Vorn writing at the same moment has a different pid and its own scratch file.
+ * If either call is ever made async, the name has to become unique per write.
+ *
+ * What this does not give is a lock. Two Vorns that read and write in the same
+ * instant can still lose one of the two claims, and the loser's device then
+ * reads as free to whoever asks next. Closing that needs an exclusive lock file
+ * rather than a bigger hammer here, and it is deliberately not done: a lost
+ * record degrades to the behaviour before any of this existed -- arbitration
+ * within one process only -- rather than to something worse.
  */
 function write(claims: Stored): void {
   // Resolved inside the guard, like the read's is: `FILE()` reaches into
