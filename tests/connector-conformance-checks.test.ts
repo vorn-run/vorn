@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { execFile } from 'node:child_process'
 import {
   bundledRequireFindings,
   checkConnector,
   defineConnector,
+  esbuildBundle,
   runConformance
 } from '../packages/connector-sdk/src/index'
 import type {
@@ -284,11 +286,37 @@ describe('what a check says about starting the pack it would ship', () => {
     )
   })
 
-  it('says once that a bundle reads a file only the source tree has', async () => {
-    const codes = (await check(READS_ITS_PACKAGE)).map((item) => item.code)
-    expect(codes).toContain('runtime-dependencies')
-    // Starting it would fail for the reason just given, so it is not said twice.
-    expect(codes).not.toContain('pack-launch')
+  it('advises about a file only the source tree has, and refuses it for not starting', async () => {
+    const findings = await check(READS_ITS_PACKAGE)
+    // The scan names the suspect; starting the pack is what condemns it.
+    expect(findings).toContainEqual(
+      expect.objectContaining({ code: 'runtime-dependencies', level: 'warn' })
+    )
+    expect(findings).toContainEqual(
+      expect.objectContaining({ code: 'pack-launch', level: 'error' })
+    )
+  })
+
+  it('starts a bundle whose CommonJS dependency asks for a builtin', async () => {
+    // What every connector wrapping a published CJS client hits: esbuild's shim throws unless a real require is in scope.
+    const source = mkdtempSync(join(tmpdir(), 'vorn-check-cjs-'))
+    writeFileSync(
+      join(source, 'legacy.cjs'),
+      'const url = require("url")\nmodule.exports = url.URL\n'
+    )
+    const built = await esbuildBundle({
+      contents: 'import URL from "./legacy.cjs"\nif (!URL) throw new Error("no URL")\n',
+      resolveDir: source
+    })
+    writeFileSync(join(source, 'bundle.mjs'), built.code)
+
+    const ran = await new Promise<number | null>((resolve) => {
+      execFile(process.execPath, [join(source, 'bundle.mjs')], (error) =>
+        resolve(error ? ((error as { code?: number }).code ?? 1) : 0)
+      )
+    })
+
+    expect(ran).toBe(0)
   })
 
   it('starts nothing without a mock run, which is where the packaging gates live', async () => {
@@ -318,5 +346,22 @@ describe('what a check says about starting the pack it would ship', () => {
     expect(bundledRequireFindings('var __require = createRequire(import.meta.url)')).toEqual([])
     expect(bundledRequireFindings('const x = require("node:fs")')).toEqual([])
     expect(bundledRequireFindings('import { join } from "./path.js"')).toEqual([])
+  })
+
+  it('advises rather than refuses, since starting the pack is what settles it', () => {
+    expect(bundledRequireFindings('require("./schema.json")')[0]?.level).toBe('warn')
+  })
+
+  it('reads a bundle as code, so a dependency that only writes the words is left alone', () => {
+    // What a minified dependency carries: a JSDoc type, an example, a message.
+    expect(bundledRequireFindings('/** @type {import("./get")} */\nvar x = 1')).toEqual([])
+    expect(bundledRequireFindings('// require("./get") is what the old build did\n')).toEqual([])
+    expect(bundledRequireFindings('var hint = "call require(\'./get\') yourself"')).toEqual([])
+    expect(bundledRequireFindings('var hint = `require("./get")`')).toEqual([])
+    // A quote inside a regular expression does not open a string that hides the call after it.
+    const afterRegex = 'var q = text.replace(/"/g, "")\nrequire("./late.js")'
+    expect(bundledRequireFindings(afterRegex)[0]?.message).toContain('./late.js')
+    // A property of that name is not the loader.
+    expect(bundledRequireFindings('loader.require("./get")')).toEqual([])
   })
 })

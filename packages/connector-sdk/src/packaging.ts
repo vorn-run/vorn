@@ -42,8 +42,13 @@ export interface BundleOutput {
   external: string[]
 }
 
-function finding(code: CheckCode, target: string, message: string): CheckFinding {
-  return { level: 'error', code, target, message }
+function finding(
+  code: CheckCode,
+  target: string,
+  message: string,
+  level: CheckFinding['level'] = 'error'
+): CheckFinding {
+  return { level, code, target, message }
 }
 
 /** Reject a source package whose install would run code on the user's machine. */
@@ -79,25 +84,142 @@ export function bundleDependencyFindings(external: string[]): CheckFinding[] {
   ]
 }
 
-// `require('../x')`, esbuild's `__require('../x')`, `require.resolve('../x')` and `import('../x')`.
-const RELATIVE_REQUIRE =
-  /(?:^|[^\w$.])(?:__)?(?:require(?:\.resolve)?|import)\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/g
+// `require('../x')`, esbuild's `__require('../x')`, `require.resolve('../x')` and `import('../x')`, anchored at the word.
+const RELATIVE_REQUIRE = /(?:__)?(?:require(?:\.resolve)?|import)\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/y
 
 // The `createRequire(...)('../x')` form, but not the bare helper esbuild emits and never calls with a path.
-const RELATIVE_CREATE_REQUIRE = /createRequire\([^()]*\)\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/g
+const RELATIVE_CREATE_REQUIRE = /createRequire\([^()]*\)\(\s*(['"])(\.\.?\/[^'"]*)\1\s*\)/y
 
-/** Files a pack does not carry, asked for after it is installed. */
-export function bundledRequireFindings(code: string): CheckFinding[] {
-  const specifiers = new Set<string>()
-  for (const pattern of [RELATIVE_REQUIRE, RELATIVE_CREATE_REQUIRE]) {
-    for (const [, , specifier] of code.matchAll(pattern)) specifiers.add(specifier)
+const CALL_WORDS = new Set(['require', '__require', 'createRequire', 'import'])
+
+// A `/` opens a regular expression only where a value cannot have just ended, or the quotes inside one read as a string.
+const BEFORE_REGEX = new Set(['', ...'(,=:[!&|?{};+-*%~^<>'])
+const BEFORE_REGEX_WORDS = new Set([
+  'return',
+  'typeof',
+  'instanceof',
+  'in',
+  'of',
+  'new',
+  'delete',
+  'void',
+  'case',
+  'do',
+  'else',
+  'yield',
+  'await'
+])
+const WORD = /[\w$]/
+
+function endOfQuoted(code: string, start: number): number {
+  const quote = code[start]
+  let i = start + 1
+  while (i < code.length) {
+    if (code[i] === '\\') {
+      i += 2
+      continue
+    }
+    if (code[i] === quote) return i + 1
+    i += 1
   }
-  if (specifiers.size === 0) return []
+  return code.length
+}
+
+function endOfRegex(code: string, start: number): number {
+  let i = start + 1
+  let inClass = false
+  while (i < code.length) {
+    const ch = code[i]
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (ch === '\n') return i
+    if (ch === '[') inClass = true
+    else if (ch === ']') inClass = false
+    else if (ch === '/' && !inClass) return i + 1
+    i += 1
+  }
+  return code.length
+}
+
+/**
+ * Relative specifiers a bundle asks for once it runs.
+ *
+ * Read by walking the bundle rather than by matching it, because a minified
+ * dependency carries the same words in its comments and its strings — a JSDoc
+ * `@type {import('./get')}` is not a file the pack failed to carry.
+ */
+function relativeRuntimeSpecifiers(code: string): string[] {
+  const found = new Set<string>()
+  let previous = ''
+  let previousWord = ''
+  let i = 0
+  while (i < code.length) {
+    const ch = code[i]
+    if (ch === '/' && code[i + 1] === '/') {
+      const end = code.indexOf('\n', i)
+      i = end === -1 ? code.length : end
+      continue
+    }
+    if (ch === '/' && code[i + 1] === '*') {
+      const end = code.indexOf('*/', i + 2)
+      i = end === -1 ? code.length : end + 2
+      continue
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      i = endOfQuoted(code, i)
+      previous = ch
+      previousWord = ''
+      continue
+    }
+    if (ch === '/' && (BEFORE_REGEX.has(previous) || BEFORE_REGEX_WORDS.has(previousWord))) {
+      i = endOfRegex(code, i)
+      previous = '/'
+      previousWord = ''
+      continue
+    }
+    if (WORD.test(ch)) {
+      const start = i
+      while (i < code.length && WORD.test(code[i])) i += 1
+      const word = code.slice(start, i)
+      // A property that happens to be named require is not the loader.
+      if (CALL_WORDS.has(word) && code[start - 1] !== '.') {
+        for (const pattern of [RELATIVE_REQUIRE, RELATIVE_CREATE_REQUIRE]) {
+          pattern.lastIndex = start
+          const match = pattern.exec(code)
+          if (match) found.add(match[2])
+        }
+      }
+      previous = code[i - 1]
+      previousWord = word
+      continue
+    }
+    if (!/\s/.test(ch)) {
+      previous = ch
+      previousWord = ''
+    }
+    i += 1
+  }
+  return [...found]
+}
+
+/**
+ * Files a pack does not carry, asked for after it is installed.
+ *
+ * Advice rather than a refusal: starting the pack is what proves it, and a
+ * specifier a dependency never reaches would otherwise condemn a bundle that
+ * runs.
+ */
+export function bundledRequireFindings(code: string): CheckFinding[] {
+  const specifiers = relativeRuntimeSpecifiers(code)
+  if (specifiers.length === 0) return []
   return [
     finding(
       'runtime-dependencies',
       'bundle',
-      `${[...specifiers].sort().join(', ')} is required at runtime; a pack is one file, so nothing beside it survives packing`
+      `${specifiers.sort().join(', ')} is required at runtime; a pack is one file, so nothing beside it survives packing`,
+      'warn'
     )
   ]
 }
@@ -249,7 +371,15 @@ export async function esbuildBundle(request: BundleRequest): Promise<BundleOutpu
     format: 'esm',
     write: false,
     metafile: true,
-    legalComments: 'none'
+    legalComments: 'none',
+    // A bundled CommonJS dependency asks for its builtins through esbuild's shim, which throws unless a real require is in scope.
+    banner: {
+      js: [
+        "import { createRequire as __vornCreateRequire } from 'node:module'",
+        'const require = __vornCreateRequire(import.meta.url)',
+        ''
+      ].join('\n')
+    }
   })
   const output = Object.values(result.metafile.outputs)[0]
   return {

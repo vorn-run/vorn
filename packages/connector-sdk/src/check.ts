@@ -263,8 +263,8 @@ async function packageFindings(
       resolveDir: options.packageDir
     })
     found.push(...bundleDependencyFindings(built.external), ...bundledRequireFindings(built.code))
-    // A bundle already condemned would fail to start for the reason just given, and say it twice.
-    if (options.mock && !found.some((item) => item.level === 'error')) {
+    // Always, so the receipt's `launch` names a launch that happened rather than one that was skipped.
+    if (options.mock) {
       const dir = await stagePack(connector, built.code)
       try {
         found.push(...(await packLaunchFindings(dir)))
