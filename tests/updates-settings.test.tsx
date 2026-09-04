@@ -9,7 +9,7 @@ const mockStore = {
   setConfig: vi.fn(),
   appUpdateStatus: { kind: 'idle', lastCheckedAt: null } as UpdateStatus,
   /** The panel says what restarting costs, so it reads the board. */
-  terminals: new Map<string, { status: string }>()
+  terminals: new Map<string, { status: string; ended?: unknown }>()
 }
 
 vi.mock('../src/renderer/stores', () => ({
@@ -215,6 +215,27 @@ describe('what the restart will cost', () => {
     // Nothing ends until the button that ends it appears.
     mockStore.appUpdateStatus = { kind: 'downloading', version: '0.7.0-beta.13', percent: 40 }
     mockStore.terminals = new Map([['a', { status: 'running' }]])
+    render(<UpdatesSettings />)
+    expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()
+  })
+})
+
+describe('sessions that have already ended', () => {
+  it('are not counted, because the update does not end them again', () => {
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    mockStore.terminals = new Map([
+      ['a', { status: 'idle', ended: { reason: 'app-closed', at: 1, replayed: true } }],
+      ['b', { status: 'idle' }]
+    ])
+    render(<UpdatesSettings />)
+    expect(screen.getByText(/Your session restarts on the new version/)).toBeInTheDocument()
+  })
+
+  it('leave nothing to say when they are all there is', () => {
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    mockStore.terminals = new Map([
+      ['a', { status: 'idle', ended: { reason: 'app-closed', at: 1, replayed: true } }]
+    ])
     render(<UpdatesSettings />)
     expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()
   })

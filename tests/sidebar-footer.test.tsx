@@ -13,7 +13,7 @@ const mockStore = {
   updateBannerDismissed: false,
   setUpdateBannerDismissed: vi.fn(),
   /** The banner says what restarting costs, so it reads the board. */
-  terminals: new Map<string, { status: string }>()
+  terminals: new Map<string, { status: string; ended?: unknown }>()
 }
 
 vi.mock('../src/renderer/stores', () => ({
@@ -142,6 +142,18 @@ describe('what the sidebar restart will cost', () => {
 
   it('says nothing when there are no sessions to lose', () => {
     mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Restart to update' })).toBeInTheDocument()
+    expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()
+  })
+})
+
+describe('sessions that have already ended, in the sidebar', () => {
+  it('leave nothing to say when they are all there is', () => {
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    mockStore.terminals = new Map([
+      ['a', { status: 'idle', ended: { reason: 'app-closed', at: 1, replayed: true } }]
+    ])
     render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
     expect(screen.getByRole('button', { name: 'Restart to update' })).toBeInTheDocument()
     expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()

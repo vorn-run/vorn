@@ -3,7 +3,7 @@ import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
 import { SegmentedControl } from './SegmentedControl'
-import { updateCostLine } from '../../lib/update-cost'
+import { facesRestart, updateCostLine } from '../../lib/update-cost'
 import { describeUpdateStatus } from '../../lib/update-status'
 import { TONE_DOT } from '../../lib/status-tone'
 
@@ -33,9 +33,9 @@ export function UpdatesSettings() {
   const config = useAppStore((s) => s.config)
   const setConfig = useAppStore((s) => s.setConfig)
   const status = useAppStore((s) => s.appUpdateStatus)
-  const sessionCount = useAppStore((s) => s.terminals.size)
+  const sessionCount = useAppStore((s) => [...s.terminals.values()].filter(facesRestart).length)
   const aTurnIsRunning = useAppStore((s) =>
-    [...s.terminals.values()].some((t) => t.status === 'running')
+    [...s.terminals.values()].some((t) => facesRestart(t) && t.status === 'running')
   )
 
   if (!config) return null

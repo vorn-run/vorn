@@ -2,7 +2,7 @@ import { useAppStore } from '../../stores'
 import { Tooltip } from '../Tooltip'
 import { getShortcut } from '../../lib/keyboard-shortcuts'
 import { describeUpdateStatus, hasPendingUpdate } from '../../lib/update-status'
-import { updateCostLine } from '../../lib/update-cost'
+import { facesRestart, updateCostLine } from '../../lib/update-cost'
 import { CircleHelp, Settings } from 'lucide-react'
 
 export function SidebarFooter({
@@ -25,9 +25,9 @@ export function SidebarFooter({
   )
   // Selected as two primitives for the same reason as the status above: this
   // subtree must not re-render on every keystroke a session prints.
-  const sessionCount = useAppStore((s) => s.terminals.size)
+  const sessionCount = useAppStore((s) => [...s.terminals.values()].filter(facesRestart).length)
   const aTurnIsRunning = useAppStore((s) =>
-    [...s.terminals.values()].some((t) => t.status === 'running')
+    [...s.terminals.values()].some((t) => facesRestart(t) && t.status === 'running')
   )
   const dismissed = useAppStore((s) => s.updateBannerDismissed)
   const setDismissed = useAppStore((s) => s.setUpdateBannerDismissed)
