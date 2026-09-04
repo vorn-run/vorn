@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url'
-import { existsSync } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { existsSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { formatFindings, runConformance } from './check'
@@ -248,9 +248,18 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   }
 }
 
+// Compared through realpath: a .bin launcher or a portal reaches this file through a symlink.
+export function isEntryPoint(moduleUrl: string, argv: readonly string[] = process.argv): boolean {
+  const invoked = argv[1]
+  if (invoked === undefined) return false
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(resolve(invoked))
+  } catch {
+    return false
+  }
+}
 /* c8 ignore start -- process wiring exercised by the bin, not by unit tests */
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+const invokedDirectly = isEntryPoint(import.meta.url)
 
 if (invokedDirectly) {
   runCli(process.argv.slice(2), {
