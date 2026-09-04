@@ -250,15 +250,16 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
 
 /* c8 ignore start -- process wiring exercised by the bin, not by unit tests */
 // Compared through realpath: a .bin launcher or a portal reaches this file through a symlink.
-function isEntryPoint(argv1: string | undefined): boolean {
-  if (argv1 === undefined) return false
+export function isEntryPoint(moduleUrl: string, argv: readonly string[] = process.argv): boolean {
+  const invoked = argv[1]
+  if (invoked === undefined) return false
   try {
-    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(argv1))
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(resolve(invoked))
   } catch {
     return false
   }
 }
-const invokedDirectly = isEntryPoint(process.argv[1])
+const invokedDirectly = isEntryPoint(import.meta.url)
 
 if (invokedDirectly) {
   runCli(process.argv.slice(2), {

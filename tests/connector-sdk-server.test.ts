@@ -9,7 +9,7 @@ import {
   pollToolName,
   MANIFEST_TOOL
 } from '../packages/connector-sdk/src/index'
-import { runCli } from '../packages/connector-sdk/src/cli'
+import { isEntryPoint, runCli } from '../packages/connector-sdk/src/cli'
 import type { Connector } from '../packages/connector-sdk/src/types'
 
 const NOW = '2026-08-05T00:00:00.000Z'
@@ -338,5 +338,21 @@ describe('vorn-connector CLI', () => {
     await expect(
       runCli(['poll', 'pkg', 'newTicket', '--since'], { load, write: out.write, env: {} })
     ).rejects.toThrow(/Missing value for --since/)
+  })
+})
+
+describe('the CLI knowing it is the entry point', () => {
+  it('matches its own file through a symlink, and never anything else', async () => {
+    const { mkdtempSync, symlinkSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { pathToFileURL } = await import('node:url')
+    const here = new URL(import.meta.url).pathname
+    const dir = mkdtempSync(join(tmpdir(), 'vorn-cli-entry-'))
+    const link = join(dir, 'vorn-connector')
+    symlinkSync(here, link)
+    expect(isEntryPoint(pathToFileURL(here).href, ['node', link])).toBe(true)
+    expect(isEntryPoint(pathToFileURL(here).href, ['node', '/nowhere/at/all'])).toBe(false)
+    expect(isEntryPoint(pathToFileURL(here).href, ['node'])).toBe(false)
   })
 })
