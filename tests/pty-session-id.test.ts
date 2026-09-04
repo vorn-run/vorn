@@ -35,6 +35,7 @@ vi.mock('../packages/server/node_modules/node-pty', () => ({
 }))
 vi.mock('../packages/server/src/git-utils', () => ({
   getGitBranch: vi.fn(() => 'main'),
+  getGitHead: vi.fn(() => 'cafe0000'),
   checkoutBranch: vi.fn(),
   createWorktree: vi.fn(),
   isGitRepo: vi.fn(() => false)

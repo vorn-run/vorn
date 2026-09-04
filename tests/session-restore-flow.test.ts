@@ -146,7 +146,8 @@ describe('what is left of what is not running', () => {
     endedAt: Date.now() - 3_600_000,
     replayable: true,
     partial: false,
-    closedCleanly: false
+    closedCleanly: false,
+    rebooted: false
   })
 
   it('is what the server holds, minus anything that has a process', () => {

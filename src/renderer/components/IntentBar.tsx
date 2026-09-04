@@ -8,6 +8,7 @@ import {
   useSyncExternalStore,
   type KeyboardEvent
 } from 'react'
+import { readIntentDraft, writeIntentDraft } from '../lib/intent-drafts'
 import { createPortal } from 'react-dom'
 import {
   CornerDownLeft,
@@ -148,7 +149,8 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   const [menuPos, setMenuPos] = useState<{ left: number; width: number; bottom: number } | null>(
     null
   )
-  const [value, setValue] = useState('')
+  // Comes back after a reload or a reboot, the way an editor's unsaved edit does.
+  const [value, setValue] = useState(() => readIntentDraft(terminalId)?.text ?? '')
   const [isFocused, setIsFocused] = useState(false)
   const [history, setHistory] = useState<CommandHistoryEntry[]>([])
   const [completions, setCompletions] = useState<Completion[]>([])
@@ -193,7 +195,8 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
   const draftRef = useRef('')
   useEffect(() => {
     draftRef.current = value
-  }, [value])
+    writeIntentDraft(terminalId, value)
+  }, [value, terminalId])
   const [seenState, setSeenState] = useState(inputState)
   if (seenState !== inputState) {
     // Adjusted during render, which React sanctions: an effect writing this

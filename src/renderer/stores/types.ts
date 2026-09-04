@@ -8,6 +8,7 @@ import {
   WorkspaceConfig,
   RemoteHost,
   TerminalSession,
+  RestoreEnvironment,
   HeadlessSession,
   GitDiffStat,
   TaskConfig,
@@ -224,9 +225,10 @@ export interface EndedSession {
    * `app-closed` — Vorn was quit and its server went with it.
    * `server-stopped` — it stopped without getting to shut down: a crash, a kill,
    *   a machine losing power.
+   * `machine-restarted` — the record was saved before this boot and never closed.
    * `exited` — the terminal's own process finished while somebody was watching.
    */
-  reason: 'app-closed' | 'server-stopped' | 'exited'
+  reason: 'app-closed' | 'server-stopped' | 'machine-restarted' | 'exited'
   /** Unix ms. The last save the previous run managed, or when the PTY exited. */
   at: number
   /** A screen was replayed into this pane, so it is showing something real. */
@@ -237,6 +239,8 @@ export interface EndedSession {
   exitCode?: number
   /** Shells only: the directory a fresh one would start in. */
   cwd?: string
+  /** What the server found when it checked the record against the tree. */
+  environment?: RestoreEnvironment
 }
 
 export interface TerminalState {
@@ -428,6 +432,8 @@ export interface UISlice {
   sessionDockCollapsed: boolean
   isOnboardingOpen: boolean
   diffSidebarTerminalId: string | null
+  /** Two commits to show instead of the working tree, for one pane. */
+  diffRange: { terminalId: string; from: string; to: string } | null
   gitDiffStats: Map<string, GitDiffStat>
   rightPanelTab: PanelTab
   isDiffPanelMaximized: boolean
@@ -637,7 +643,11 @@ export interface UISlice {
   closeCard: (cardId: string) => void
   toggleSessionDockCollapsed: () => void
   setOnboardingOpen: (open: boolean) => void
-  setDiffSidebarTerminalId: (id: string | null, tab?: PanelTab) => void
+  setDiffSidebarTerminalId: (
+    id: string | null,
+    tab?: PanelTab,
+    range?: { from: string; to: string }
+  ) => void
   updateGitDiffStat: (terminalId: string, stat: GitDiffStat) => void
   updateGitDiffStats: (stats: Map<string, GitDiffStat>) => void
   setRightPanelTab: (tab: PanelTab) => void

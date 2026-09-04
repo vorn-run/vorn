@@ -54,12 +54,15 @@ export function RightPanel() {
   } | null>(null)
 
   const cwd = terminal?.session.worktreePath || terminal?.session.projectPath || ''
+  const range = useAppStore((s) => s.diffRange)
+  const from = range && range.terminalId === terminalId ? range.from : null
+  const to = range && range.terminalId === terminalId ? range.to : null
 
   const fetchDiff = useCallback(async () => {
     if (!cwd) return
     setLoading(true)
     try {
-      const result = await window.api.getGitDiffFull(cwd)
+      const result = await window.api.getGitDiffFull(from && to ? { cwd, from, to } : cwd)
       setDiffResult(result)
       setSelectedFile(null)
       setComments([])
@@ -67,7 +70,7 @@ export function RightPanel() {
     } finally {
       setLoading(false)
     }
-  }, [cwd])
+  }, [cwd, from, to])
 
   useEffect(() => {
     if (terminalId && cwd) {
@@ -203,6 +206,11 @@ export function RightPanel() {
                 <span className="truncate">{terminal.session.branch}</span>
               </span>
             </>
+          )}
+          {from && to && (
+            <span className="ml-auto shrink-0 font-mono text-gray-500" title={`${from} to ${to}`}>
+              {from.slice(0, 8)} · {to.slice(0, 8)}
+            </span>
           )}
         </div>
 

@@ -50,6 +50,7 @@ function held(id: string, over: Partial<RestoredSession> = {}): RestoredSession 
     replayable: true,
     partial: false,
     closedCleanly: false,
+    rebooted: false,
     ...over
   }
 }
@@ -291,5 +292,39 @@ describe('bringing an ended pane in from the banner', () => {
     await showEndedSession('crashed')
 
     expect(ended('crashed')).toMatchObject({ reason: 'server-stopped' })
+  })
+})
+
+describe('a machine that restarted', () => {
+  it('is named as such, which a stopped server is not', async () => {
+    useAppStore.getState().addTerminal(session({ id: 'one' }))
+    getRestoredSessions.mockResolvedValue([held('one', { rebooted: true })])
+
+    await syncBoard({ showCold: true, resume: false })
+
+    expect(ended('one')).toMatchObject({ reason: 'machine-restarted' })
+  })
+
+  it('still calls a clean quit a quit, even across a reboot', async () => {
+    getRestoredSessions.mockResolvedValue([held('one', { rebooted: true, closedCleanly: true })])
+
+    await syncBoard({ showCold: true, resume: false })
+
+    expect(ended('one')).toMatchObject({ reason: 'app-closed' })
+  })
+
+  it('carries what the server found on the tree to the pane, by every door', async () => {
+    const environment = {
+      worktree: 'missing' as const,
+      branch: { recorded: 'x', actual: null },
+      head: { recorded: 'a', actual: null }
+    }
+    getRestoredSessions.mockResolvedValue([held('cold', { environment })])
+    await syncBoard({ showCold: true, resume: false })
+    expect(ended('cold')?.environment).toEqual(environment)
+
+    useAppStore.setState({ terminals: new Map(), terminalOrder: [] })
+    await showEndedSession('cold')
+    expect(ended('cold')?.environment).toEqual(environment)
   })
 })
