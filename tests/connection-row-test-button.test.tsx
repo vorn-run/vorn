@@ -37,8 +37,7 @@ function renderRow(connectorId = 'http') {
       conn={conn(connectorId)}
       seededWorkflows={[]}
       missingEvents={[]}
-      runningId={null}
-      backfillingId={null}
+      activity={{ busy: {}, failed: {}, run: async () => {} }}
       backfillResult={{}}
       onRun={vi.fn()}
       onBackfill={vi.fn()}

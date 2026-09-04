@@ -27,6 +27,12 @@ beforeEach(() => {
   ;(window as unknown as { api: unknown }).api = {}
 })
 
+const working = (key: string, phrase: string) => ({
+  busy: { [key]: phrase },
+  failed: {},
+  run: async () => {}
+})
+
 function setup(props: Partial<Parameters<typeof ConnectionRow>[0]> = {}) {
   const handlers = {
     onRun: vi.fn(),
@@ -41,8 +47,7 @@ function setup(props: Partial<Parameters<typeof ConnectionRow>[0]> = {}) {
       conn={connection()}
       seededWorkflows={[]}
       missingEvents={[]}
-      runningId={null}
-      backfillingId={null}
+      activity={{ busy: {}, failed: {}, run: async () => {} }}
       backfillResult={{}}
       {...handlers}
       {...props}
@@ -157,5 +162,43 @@ describe('a configured connection', () => {
     const buttons = getAllByRole('button')
     fireEvent.click(buttons[1])
     expect(onDelete).toHaveBeenCalledWith('c1')
+  })
+})
+
+describe('what a connection says while its own actions run', () => {
+  it('says it is importing, and holds the button, while a backfill runs', () => {
+    const { getByText, container } = setup({ activity: working('backfill:c1', 'Importing…') })
+
+    expect(getByText('Importing…')).toBeInTheDocument()
+    const backfill = container.querySelectorAll('button')[0]
+    expect(backfill).toBeDisabled()
+  })
+
+  it('says it is removing while a delete runs', () => {
+    const { getByText } = setup({ activity: working('delete:c1', 'Removing…') })
+
+    expect(getByText('Removing…')).toBeInTheDocument()
+  })
+
+  it('holds the poll button for the workflow being polled, not its neighbour', () => {
+    const { container } = setup({
+      seededWorkflows: [workflow()],
+      activity: working('run:connector:c1:workItem', 'Polling…')
+    })
+
+    const poll = Array.from(container.querySelectorAll('button')).at(-1)
+    expect(poll).toBeDisabled()
+  })
+
+  it('keeps a refusal on the row it was pressed on', () => {
+    const { getByText } = setup({
+      activity: {
+        busy: {},
+        failed: { 'backfill:c1': 'The connector never answered' },
+        run: async () => {}
+      }
+    })
+
+    expect(getByText('The connector never answered')).toBeInTheDocument()
   })
 })

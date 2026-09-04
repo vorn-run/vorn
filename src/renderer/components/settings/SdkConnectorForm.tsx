@@ -328,11 +328,17 @@ export function SdkConnectorForm({
                 </div>
               ) : (
                 <div className="text-[11px] text-gray-400">
-                  {identity === null
-                    ? 'Checking whether the tool it borrows is signed in…'
-                    : // `ok: null` is an answer — this build cannot ask — and
-                      // leaving the in-flight line up would read as a hang.
-                      (identity.message ?? 'Nothing to check for this connector.')}
+                  {identity === null ? (
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 size={11} className="animate-spin shrink-0" />
+                      Checking whether {manifest.auth?.probe?.command ?? 'the tool it borrows'} is
+                      signed in…
+                    </span>
+                  ) : (
+                    // `ok: null` is an answer — this build cannot ask — and
+                    // leaving the in-flight line up would read as a hang.
+                    (identity.message ?? 'Nothing to check for this connector.')
+                  )}
                   {identity?.installHint && (
                     <span className="block text-gray-600 mt-1">{identity.installHint}</span>
                   )}
@@ -405,8 +411,9 @@ export function SdkConnectorForm({
           // A connector that asks for nothing was connected when it was installed; offering Connect again would make a second one.
           onClick={() => (rung === 'none' ? onDone() : void handleSave())}
           disabled={!manifest || saving || (rung !== 'none' && missing.length > 0)}
-          className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50"
+          className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
         >
+          {saving && <Loader2 size={12} className="animate-spin" />}
           {rung === 'none' ? 'Done' : saving ? 'Connecting…' : 'Connect'}
         </button>
         <button

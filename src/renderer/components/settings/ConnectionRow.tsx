@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Play, Trash2, AlertCircle, Workflow, Import, Activity } from 'lucide-react'
+import { Play, Trash2, AlertCircle, Workflow, Import, Activity, Loader2 } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { connectionIcon } from '../../lib/connection-icon'
 import { McpToolsPanel } from './McpToolsPanel'
 import { humanCron } from '../../lib/cron-text'
+import { rowKey, type RowActivity } from '../../lib/use-row-action'
+import { TONE_DOT, TONE_DOT_MOVING, TONE_TEXT } from '../../lib/status-tone'
 import {
   isImplicitConnection,
   type ConnectorManifest,
@@ -27,8 +29,7 @@ export function ConnectionRow({
   manifest,
   seededWorkflows,
   missingEvents,
-  runningId,
-  backfillingId,
+  activity,
   backfillResult,
   onRun,
   onBackfill,
@@ -41,8 +42,7 @@ export function ConnectionRow({
   manifest?: ConnectorManifest
   seededWorkflows: WorkflowDefinition[]
   missingEvents: Array<{ name: string; event: string }>
-  runningId: string | null
-  backfillingId: string | null
+  activity: RowActivity
   backfillResult: Record<string, { imported: number; updated: number; error?: string }>
   onRun: (workflowId: string) => void
   onBackfill: (connectionId: string) => void
@@ -52,6 +52,12 @@ export function ConnectionRow({
   onRefresh: () => void
 }) {
   const implicit = isImplicitConnection(conn)
+  const backfilling = activity.busy[rowKey('backfill', conn.id)]
+  const deleting = activity.busy[rowKey('delete', conn.id)]
+  // One line for whichever of this connection's actions is working or last failed.
+  const phrase = backfilling ?? deleting
+  const failure =
+    activity.failed[rowKey('backfill', conn.id)] ?? activity.failed[rowKey('delete', conn.id)]
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean | null; message?: string } | null>(
     null
@@ -87,10 +93,10 @@ export function ConnectionRow({
           <Tooltip label="Import existing items matching this connection's filters. Bypasses the cron cursor.">
             <button
               onClick={() => onBackfill(conn.id)}
-              disabled={backfillingId === conn.id}
+              disabled={Boolean(backfilling)}
               className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors disabled:opacity-50"
             >
-              <Import size={13} className={backfillingId === conn.id ? 'animate-pulse' : ''} />
+              {backfilling ? <Loader2 size={13} className="animate-spin" /> : <Import size={13} />}
             </button>
           </Tooltip>
           {conn.connectorId === 'http' && (
@@ -113,10 +119,10 @@ export function ConnectionRow({
           >
             <button
               onClick={() => onDelete(conn.id)}
-              disabled={implicit}
+              disabled={implicit || Boolean(deleting)}
               className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors disabled:opacity-40 disabled:hover:text-gray-500"
             >
-              <Trash2 size={13} />
+              {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
             </button>
           </Tooltip>
         </div>
@@ -156,10 +162,14 @@ export function ConnectionRow({
               <Tooltip label="Poll the connector now instead of waiting for the next cron tick">
                 <button
                   onClick={() => onRun(wf.id)}
-                  disabled={runningId === wf.id}
+                  disabled={Boolean(activity.busy[rowKey('run', wf.id)])}
                   className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors disabled:opacity-50"
                 >
-                  <Play size={11} className={runningId === wf.id ? 'animate-pulse' : ''} />
+                  {activity.busy[rowKey('run', wf.id)] ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <Play size={11} />
+                  )}
                 </button>
               </Tooltip>
             </div>
@@ -187,6 +197,16 @@ export function ConnectionRow({
       </div>
 
       <div className="mt-1 flex items-center gap-2 text-[11px]">
+        {(phrase || failure) && (
+          <span
+            className={`flex items-center gap-1.5 ${phrase ? TONE_TEXT.live : TONE_TEXT.broken}`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${phrase ? TONE_DOT_MOVING.live : TONE_DOT.broken}`}
+            />
+            {phrase ?? failure}
+          </span>
+        )}
         {conn.lastSyncAt && (
           <span className="text-gray-600">
             Last synced {new Date(conn.lastSyncAt).toLocaleString()}

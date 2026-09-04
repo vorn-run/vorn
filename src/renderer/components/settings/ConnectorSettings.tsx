@@ -9,6 +9,7 @@ import { SDK_FILTER_KEYS } from '../../../shared/types'
 import { ConnectorDirectory } from './ConnectorDirectory'
 import { ConnectorDetail } from './ConnectorDetail'
 import { ConnectionGroups, type ConnectorStatus } from './ConnectionGroups'
+import { useRowAction, rowKey } from '../../lib/use-row-action'
 import type { InstalledConnectorPack, SourceConnection } from '../../../shared/types'
 import { SdkConnectorForm } from './SdkConnectorForm'
 import { PackInstallConfirm } from './PackInstallConfirm'
@@ -39,8 +40,7 @@ export function ConnectorSettings() {
   // with, so the catalog opens instead of a second empty-state layout.
   const [view, setView] = useState<'connections' | 'browse'>('connections')
   const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
-  const [runningId, setRunningId] = useState<string | null>(null)
-  const [backfillingId, setBackfillingId] = useState<string | null>(null)
+  const activity = useRowAction()
   const [backfillResult, setBackfillResult] = useState<
     Record<string, { imported: number; updated: number; error?: string }>
   >({})
@@ -88,25 +88,30 @@ export function ConnectorSettings() {
 
   const handleRollback = useCallback(
     async (id: string) => {
-      await window.api.rollbackConnectorPack(id)
+      await activity.run(rowKey('rollback', id), 'Rolling back…', () =>
+        window.api.rollbackConnectorPack(id)
+      )
       await load()
     },
-    [load]
+    [load, activity]
   )
 
   const handleRemovePack = useCallback(
     async (id: string) => {
-      const result = await window.api.removeConnectorPack(id)
-      // Said after the fact rather than asked before it: the count is what the
-      // server counted, and a connection left without files is worth naming.
-      if (result.ok && (result.connections ?? 0) > 0) {
-        install.report(
-          `Removed the files. ${result.connections} connection${result.connections === 1 ? '' : 's'} will stop working until the connector is installed again.`
-        )
-      }
+      await activity.run(rowKey('remove', id), 'Removing…', async () => {
+        const result = await window.api.removeConnectorPack(id)
+        // Said after the fact rather than asked before it: the count is what the
+        // server counted, and a connection left without files is worth naming.
+        if (result.ok && (result.connections ?? 0) > 0) {
+          install.report(
+            `Removed the files. ${result.connections} connection${result.connections === 1 ? '' : 's'} will stop working until the connector is installed again.`
+          )
+        }
+        return result
+      })
       await load()
     },
-    [load, install]
+    [load, install, activity]
   )
 
   const listings = useMemo(
@@ -131,14 +136,17 @@ export function ConnectorSettings() {
   // Every listed server is a connection to the built-in `mcp` connector.
   const mcpConnector = connectors.find((c) => c.id === MCP_CONNECTOR_ID)
 
+  // A pack's own actions, so its page can say which one is running and what it answered.
+  const packPhrase = (id: string): string | undefined =>
+    activity.busy[rowKey('rollback', id)] ?? activity.busy[rowKey('remove', id)]
+  const packFailure = (id: string): string | undefined =>
+    activity.failed[rowKey('rollback', id)] ?? activity.failed[rowKey('remove', id)]
+
   const handleRun = async (workflowId: string) => {
-    setRunningId(workflowId)
-    try {
-      await window.api.runWorkflowManual(workflowId)
-    } finally {
-      setTimeout(() => setRunningId(null), 800)
-      load()
-    }
+    await activity.run(rowKey('run', workflowId), 'Polling…', () =>
+      window.api.runWorkflowManual(workflowId)
+    )
+    load()
   }
 
   const handleReset = async (connectionId: string, event: string) => {
@@ -147,22 +155,21 @@ export function ConnectorSettings() {
   }
 
   const handleBackfill = async (connectionId: string) => {
-    setBackfillingId(connectionId)
     setBackfillResult((prev) => {
       const { [connectionId]: _removed, ...rest } = prev
       return rest
     })
-    try {
+    await activity.run(rowKey('backfill', connectionId), 'Importing…', async () => {
       const result = await window.api.backfillConnection(connectionId)
       setBackfillResult((prev) => ({ ...prev, [connectionId]: result }))
-    } finally {
-      setBackfillingId(null)
-      load()
-    }
+    })
+    load()
   }
 
   const handleDelete = async (connectionId: string) => {
-    await window.api.deleteConnection(connectionId)
+    await activity.run(rowKey('delete', connectionId), 'Removing…', () =>
+      window.api.deleteConnection(connectionId)
+    )
     load()
   }
 
@@ -200,8 +207,7 @@ export function ConnectorSettings() {
             manifests={manifests}
             statuses={statuses}
             workflows={workflows}
-            runningId={runningId}
-            backfillingId={backfillingId}
+            activity={activity}
             backfillResult={backfillResult}
             onAdd={setAdding}
             onRun={handleRun}
@@ -254,6 +260,10 @@ export function ConnectorSettings() {
           {...(installProgress[selectedListing.id] && {
             progress: installProgress[selectedListing.id]
           })}
+          activity={{
+            ...(packPhrase(selectedListing.id) && { phrase: packPhrase(selectedListing.id) }),
+            ...(packFailure(selectedListing.id) && { error: packFailure(selectedListing.id) })
+          }}
           onAdd={() => setAdding(selectedListing)}
           onUse={() => openWorkflowEditor(null)}
           onInstall={() => handleInstall(selectedListing)}

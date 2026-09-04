@@ -73,6 +73,21 @@ describe('a connector that borrows a login', () => {
     })
   })
 
+  it('names the tool it is asking, while the answer is still coming', async () => {
+    let answer = (): void => {}
+    probeConnectorAuth.mockReturnValue(
+      new Promise((resolve) => {
+        answer = () => resolve({ ok: true, identity: 'javier' })
+      })
+    )
+    const { findByText } = setup()
+
+    expect(await findByText(/Checking whether glab is/)).toBeInTheDocument()
+
+    answer()
+    expect(await findByText(/Signed in as javier/)).toBeInTheDocument()
+  })
+
   it('says who you already are instead of asking for a token', async () => {
     const { findByText, queryByDisplayValue, container } = setup()
     expect(await findByText(/Signed in as javier/)).toBeInTheDocument()

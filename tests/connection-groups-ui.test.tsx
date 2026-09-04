@@ -40,8 +40,7 @@ function setup(
       manifests={{}}
       statuses={statuses}
       workflows={[]}
-      runningId={null}
-      backfillingId={null}
+      activity={{ busy: {}, failed: {}, run: async () => {} }}
       backfillResult={{}}
       onAdd={onAdd}
       onRun={vi.fn()}

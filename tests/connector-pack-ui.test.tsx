@@ -223,6 +223,28 @@ describe('ConnectorDetail pack footer', () => {
     expect(within(container).queryByText('Remove')).not.toBeInTheDocument()
   })
 
+  it('says which of its own actions is running, and holds both buttons', () => {
+    const { getByText } = setup(listingFor([installedPack({ previousVersion: '1.1.0' })]), {
+      onRollback: () => {},
+      onRemove: () => {},
+      activity: { phrase: 'Removing…' }
+    })
+
+    expect(getByText('Removing…')).toBeInTheDocument()
+    expect(getByText('Remove').closest('button')).toBeDisabled()
+    expect(getByText('Roll back').closest('button')).toBeDisabled()
+  })
+
+  it('keeps what the last action answered, with the buttons live again', () => {
+    const { getByText } = setup(listingFor([installedPack()]), {
+      onRemove: () => {},
+      activity: { error: 'The files are in use' }
+    })
+
+    expect(getByText('The files are in use')).toBeInTheDocument()
+    expect(getByText('Remove').closest('button')).not.toBeDisabled()
+  })
+
   it('runs the footer actions it is handed', () => {
     const onInstall = vi.fn()
     const onRollback = vi.fn()
