@@ -183,6 +183,20 @@ describe('the terminals panel', () => {
     expect(s().terminalsPanes.get('owner')?.terminals).toEqual(['sh2'])
   })
 
+  it('keeps a shell taken out after the launch sync', () => {
+    // A shell opened now is a session the sync never heard of. Pruning against
+    // that answer alone dropped it straight back out of the panel it was just
+    // added to, which reads as the panel refusing to open a shell at all.
+    act(() =>
+      useAppStore.setState({
+        knownSessionIds: new Set(['owner']) as never
+      })
+    )
+    act(() => s().openTerminalsPane('owner', 'sh1'))
+    act(() => s().setVisibleTerminalIds(['owner']))
+    expect(s().terminalsPanes.get('owner')?.terminals).toEqual(['sh1'])
+  })
+
   it('drops a panel whose shells all failed to come back', () => {
     act(() => s().openTerminalsPane('owner', 'sh1'))
     act(() =>
