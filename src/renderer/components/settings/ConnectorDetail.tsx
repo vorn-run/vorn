@@ -7,8 +7,7 @@ import {
   RefreshCw,
   Undo2,
   Trash2,
-  Workflow,
-  Loader2
+  Workflow
 } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
 import type { ConnectorCatalogVerification, ConnectorInstallProgress } from '../../../shared/types'
@@ -19,7 +18,10 @@ import {
   type ConnectorListing
 } from '../../lib/connector-browse'
 import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
-import { TONE_DOT, TONE_DOT_MOVING, TONE_TEXT } from '../../lib/status-tone'
+import type { RowState } from '../../lib/use-row-action'
+import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
+import { ActivityLine } from './ActivityLine'
+import { BusyIcon } from './BusyIcon'
 
 /**
  * What a connector does, before anything is downloaded.
@@ -51,7 +53,7 @@ export function ConnectorDetail({
   /** The install running for this connector, when one is. */
   progress?: ConnectorInstallProgress
   /** What this connector's own actions are doing, and what the last one answered. */
-  activity?: { phrase?: string; error?: string }
+  activity?: RowState
   onAdd: () => void
   onInstall?: () => void
   onRollback?: () => void
@@ -180,17 +182,7 @@ export function ConnectorDetail({
         </p>
       )}
 
-      {/* The same line install writes, for the actions that answer in one step. */}
-      {(activity?.phrase || activity?.error) && (
-        <p
-          className={`flex items-start gap-1.5 text-[12px] mt-4 ${activity.phrase ? TONE_TEXT.live : TONE_TEXT.broken}`}
-        >
-          <span
-            className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1.5 ${activity.phrase ? TONE_DOT_MOVING.live : TONE_DOT.broken}`}
-          />
-          {activity.phrase ?? activity.error}
-        </p>
-      )}
+      <ActivityLine {...activity} className="text-[12px] mt-4" />
 
       <div className="flex items-center gap-2 mt-6">
         {/* Nothing to connect: installing it was the whole setup, so the next move is the one it exists for. */}
@@ -242,7 +234,7 @@ export function ConnectorDetail({
             title={`Go back to v${state.previousVersion}`}
             className="text-xs text-gray-400 hover:text-gray-200 px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1 disabled:opacity-50"
           >
-            {busy ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />} Roll back
+            <BusyIcon busy={busy} icon={Undo2} size={12} /> Roll back
           </button>
         )}
 
@@ -253,7 +245,7 @@ export function ConnectorDetail({
             title="Delete the installed files"
             className="text-xs text-danger hover:text-danger px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1 disabled:opacity-50"
           >
-            {busy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Remove
+            <BusyIcon busy={busy} icon={Trash2} size={12} /> Remove
           </button>
         )}
 

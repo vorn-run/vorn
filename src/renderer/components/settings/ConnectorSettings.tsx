@@ -9,7 +9,8 @@ import { SDK_FILTER_KEYS } from '../../../shared/types'
 import { ConnectorDirectory } from './ConnectorDirectory'
 import { ConnectorDetail } from './ConnectorDetail'
 import { ConnectionGroups, type ConnectorStatus } from './ConnectionGroups'
-import { useRowAction, rowKey } from '../../lib/use-row-action'
+import { useRowAction } from '../../lib/use-row-action'
+import { waitForSync } from '../../lib/connection-sync'
 import type { InstalledConnectorPack, SourceConnection } from '../../../shared/types'
 import { SdkConnectorForm } from './SdkConnectorForm'
 import { PackInstallConfirm } from './PackInstallConfirm'
@@ -88,9 +89,7 @@ export function ConnectorSettings() {
 
   const handleRollback = useCallback(
     async (id: string) => {
-      await activity.run(rowKey('rollback', id), 'Rolling back…', () =>
-        window.api.rollbackConnectorPack(id)
-      )
+      await activity.run('rollback', id, () => window.api.rollbackConnectorPack(id))
       await load()
     },
     [load, activity]
@@ -98,7 +97,7 @@ export function ConnectorSettings() {
 
   const handleRemovePack = useCallback(
     async (id: string) => {
-      await activity.run(rowKey('remove', id), 'Removing…', async () => {
+      await activity.run('remove', id, async () => {
         const result = await window.api.removeConnectorPack(id)
         // Said after the fact rather than asked before it: the count is what the
         // server counted, and a connection left without files is worth naming.
@@ -136,16 +135,12 @@ export function ConnectorSettings() {
   // Every listed server is a connection to the built-in `mcp` connector.
   const mcpConnector = connectors.find((c) => c.id === MCP_CONNECTOR_ID)
 
-  // A pack's own actions, so its page can say which one is running and what it answered.
-  const packPhrase = (id: string): string | undefined =>
-    activity.busy[rowKey('rollback', id)] ?? activity.busy[rowKey('remove', id)]
-  const packFailure = (id: string): string | undefined =>
-    activity.failed[rowKey('rollback', id)] ?? activity.failed[rowKey('remove', id)]
-
-  const handleRun = async (workflowId: string) => {
-    await activity.run(rowKey('run', workflowId), 'Polling…', () =>
-      window.api.runWorkflowManual(workflowId)
-    )
+  const handleRun = async (workflowId: string, connectionId: string) => {
+    const since = connections.find((connection) => connection.id === connectionId)?.lastSyncAt
+    await activity.run('run', workflowId, async () => {
+      await window.api.runWorkflowManual(workflowId)
+      await waitForSync(connectionId, since)
+    })
     load()
   }
 
@@ -159,7 +154,7 @@ export function ConnectorSettings() {
       const { [connectionId]: _removed, ...rest } = prev
       return rest
     })
-    await activity.run(rowKey('backfill', connectionId), 'Importing…', async () => {
+    await activity.run('backfill', connectionId, async () => {
       const result = await window.api.backfillConnection(connectionId)
       setBackfillResult((prev) => ({ ...prev, [connectionId]: result }))
     })
@@ -167,9 +162,7 @@ export function ConnectorSettings() {
   }
 
   const handleDelete = async (connectionId: string) => {
-    await activity.run(rowKey('delete', connectionId), 'Removing…', () =>
-      window.api.deleteConnection(connectionId)
-    )
+    await activity.run('delete', connectionId, () => window.api.deleteConnection(connectionId))
     load()
   }
 
@@ -260,10 +253,7 @@ export function ConnectorSettings() {
           {...(installProgress[selectedListing.id] && {
             progress: installProgress[selectedListing.id]
           })}
-          activity={{
-            ...(packPhrase(selectedListing.id) && { phrase: packPhrase(selectedListing.id) }),
-            ...(packFailure(selectedListing.id) && { error: packFailure(selectedListing.id) })
-          }}
+          activity={activity.state(selectedListing.id, ['rollback', 'remove'])}
           onAdd={() => setAdding(selectedListing)}
           onUse={() => openWorkflowEditor(null)}
           onInstall={() => handleInstall(selectedListing)}

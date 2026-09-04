@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
+import { BusyIcon } from './BusyIcon'
 import {
   borrowableFromManifest,
   type AuthProbeReport,
@@ -413,7 +414,7 @@ export function SdkConnectorForm({
           disabled={!manifest || saving || (rung !== 'none' && missing.length > 0)}
           className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
         >
-          {saving && <Loader2 size={12} className="animate-spin" />}
+          <BusyIcon busy={saving} size={12} />
           {rung === 'none' ? 'Done' : saving ? 'Connecting…' : 'Connect'}
         </button>
         <button

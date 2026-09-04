@@ -2,17 +2,16 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { useRowAction, rowKey } from '../src/renderer/lib/use-row-action'
+import { useRowAction, rowState } from '../src/renderer/lib/use-row-action'
 
-const KEY = rowKey('remove', 'slack')
-
-function Probe({ work }: { work: () => Promise<unknown> }) {
+function Probe({ work }: { work: () => Promise<void | { ok: boolean; error?: string }> }) {
   const activity = useRowAction()
+  const state = activity.state('slack', ['remove'])
   return (
     <div>
-      <button onClick={() => void activity.run(KEY, 'Removing…', work)}>go</button>
-      <span data-testid="busy">{activity.busy[KEY] ?? 'idle'}</span>
-      <span data-testid="failed">{activity.failed[KEY] ?? 'none'}</span>
+      <button onClick={() => void activity.run('remove', 'slack', work)}>go</button>
+      <span data-testid="busy">{state.phrase ?? 'idle'}</span>
+      <span data-testid="failed">{state.error ?? 'none'}</span>
     </div>
   )
 }
@@ -93,5 +92,29 @@ describe('a row action reporting itself', () => {
 
     await waitFor(() => expect(screen.getByTestId('busy')).toHaveTextContent('idle'))
     expect(screen.getByTestId('failed')).toHaveTextContent('none')
+  })
+})
+
+describe('what a row shows for the actions it owns', () => {
+  it('says the phrase of whichever action is working', () => {
+    expect(rowState({ 'delete:c1': 'Removing…' }, {}, 'c1', ['backfill', 'delete'])).toEqual({
+      phrase: 'Removing…'
+    })
+  })
+
+  it('prefers a working action over a stale failure', () => {
+    const state = rowState({ 'backfill:c1': 'Importing…' }, { 'delete:c1': 'It refused' }, 'c1', [
+      'backfill',
+      'delete'
+    ])
+
+    expect(state).toEqual({ phrase: 'Importing…' })
+  })
+
+  it('reads only the actions it was asked about, and only its own row', () => {
+    const busy = { 'run:c2': 'Polling…', 'backfill:c1': 'Importing…' }
+
+    expect(rowState(busy, {}, 'c1', ['delete'])).toEqual({})
+    expect(rowState(busy, {}, 'c2', ['run'])).toEqual({ phrase: 'Polling…' })
   })
 })

@@ -1,47 +1,72 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 // What a row's own actions report while they run: a phrase while busy, and a refusal that lands where the press was.
+export type RowAction = 'backfill' | 'delete' | 'run' | 'rollback' | 'remove'
+
+/** Present tense, so a row says what is happening rather than what was pressed. */
+const PHRASES: Record<RowAction, string> = {
+  backfill: 'Importing…',
+  delete: 'Removing…',
+  run: 'Polling…',
+  rollback: 'Rolling back…',
+  remove: 'Removing…'
+}
+
+/** A call that answers with a refusal rather than throwing one. */
+type Refusal = { ok: boolean; error?: string }
+
+/** What a row shows for the actions it owns: one phrase, or one reason it failed. */
+export interface RowState {
+  phrase?: string
+  error?: string
+}
+
 export interface RowActivity {
-  /** Present tense, keyed by row, e.g. `Removing…`. */
+  /** Present tense, keyed by action and row. */
   busy: Record<string, string>
   /** Why the last attempt on that row failed, until the next one starts. */
   failed: Record<string, string>
-  run: (key: string, phrase: string, work: () => Promise<unknown>) => Promise<void>
+  run: (action: RowAction, id: string, work: () => Promise<void | Refusal>) => Promise<void>
+  /** Whichever of a row's actions is working, else whichever of them last failed. */
+  state: (id: string, actions: RowAction[]) => RowState
 }
 
-/** One spelling of a row's key, so a component and its caller cannot disagree. */
-export function rowKey(action: string, id: string): string {
+function keyFor(action: RowAction, id: string): string {
   return `${action}:${id}`
 }
 
-/** A call that answered with a refusal rather than throwing one. */
-function refusalIn(result: unknown): string | undefined {
-  if (typeof result !== 'object' || result === null || !('ok' in result)) return undefined
-  if ((result as { ok: unknown }).ok !== false) return undefined
-  const error = (result as { error?: unknown }).error
-  return typeof error === 'string' && error !== '' ? error : 'It did not say why.'
+/** The fold a row does to show one line, kept here so every surface folds alike. */
+export function rowState(
+  busy: Record<string, string>,
+  failed: Record<string, string>,
+  id: string,
+  actions: RowAction[]
+): RowState {
+  const phrase = actions.map((action) => busy[keyFor(action, id)]).find(Boolean)
+  if (phrase) return { phrase }
+  const error = actions.map((action) => failed[keyFor(action, id)]).find(Boolean)
+  return error ? { error } : {}
 }
 
 export function useRowAction(): RowActivity {
   const [busy, setBusy] = useState<Record<string, string>>({})
   const [failed, setFailed] = useState<Record<string, string>>({})
 
-  const forget = useCallback((key: string) => {
-    setFailed((current) => {
-      if (!(key in current)) return current
-      const { [key]: _cleared, ...rest } = current
-      return rest
-    })
-  }, [])
-
   const run = useCallback(
-    async (key: string, phrase: string, work: () => Promise<unknown>) => {
-      setBusy((current) => ({ ...current, [key]: phrase }))
+    async (action: RowAction, id: string, work: () => Promise<void | Refusal>) => {
+      const key = keyFor(action, id)
+      setBusy((current) => ({ ...current, [key]: PHRASES[action] }))
       // Whatever the last attempt said was about that attempt, not this one.
-      forget(key)
+      setFailed((current) => {
+        if (!(key in current)) return current
+        const { [key]: _cleared, ...rest } = current
+        return rest
+      })
       try {
-        const refusal = refusalIn(await work())
-        if (refusal) setFailed((current) => ({ ...current, [key]: refusal }))
+        const result = await work()
+        if (result && result.ok === false) {
+          setFailed((current) => ({ ...current, [key]: result.error || 'It did not say why.' }))
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setFailed((current) => ({ ...current, [key]: message }))
@@ -52,8 +77,13 @@ export function useRowAction(): RowActivity {
         })
       }
     },
-    [forget]
+    []
   )
 
-  return { busy, failed, run }
+  const state = useCallback(
+    (id: string, actions: RowAction[]) => rowState(busy, failed, id, actions),
+    [busy, failed]
+  )
+
+  return useMemo(() => ({ busy, failed, run, state }), [busy, failed, run, state])
 }

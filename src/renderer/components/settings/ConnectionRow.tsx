@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { Play, Trash2, AlertCircle, Workflow, Import, Activity, Loader2 } from 'lucide-react'
+import { Play, Trash2, AlertCircle, Workflow, Import, Activity } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { connectionIcon } from '../../lib/connection-icon'
 import { McpToolsPanel } from './McpToolsPanel'
 import { humanCron } from '../../lib/cron-text'
-import { rowKey, type RowActivity } from '../../lib/use-row-action'
-import { TONE_DOT, TONE_DOT_MOVING, TONE_TEXT } from '../../lib/status-tone'
+import { type RowActivity } from '../../lib/use-row-action'
+import { ActivityLine } from './ActivityLine'
+import { BusyIcon } from './BusyIcon'
 import {
   isImplicitConnection,
   type ConnectorManifest,
@@ -44,7 +45,7 @@ export function ConnectionRow({
   missingEvents: Array<{ name: string; event: string }>
   activity: RowActivity
   backfillResult: Record<string, { imported: number; updated: number; error?: string }>
-  onRun: (workflowId: string) => void
+  onRun: (workflowId: string, connectionId: string) => void
   onBackfill: (connectionId: string) => void
   onDelete: (connectionId: string) => void
   onResetWorkflow: (connectionId: string, event: string) => void
@@ -52,12 +53,10 @@ export function ConnectionRow({
   onRefresh: () => void
 }) {
   const implicit = isImplicitConnection(conn)
-  const backfilling = activity.busy[rowKey('backfill', conn.id)]
-  const deleting = activity.busy[rowKey('delete', conn.id)]
+  const backfilling = Boolean(activity.state(conn.id, ['backfill']).phrase)
+  const deleting = Boolean(activity.state(conn.id, ['delete']).phrase)
   // One line for whichever of this connection's actions is working or last failed.
-  const phrase = backfilling ?? deleting
-  const failure =
-    activity.failed[rowKey('backfill', conn.id)] ?? activity.failed[rowKey('delete', conn.id)]
+  const reporting = activity.state(conn.id, ['backfill', 'delete'])
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean | null; message?: string } | null>(
     null
@@ -93,10 +92,10 @@ export function ConnectionRow({
           <Tooltip label="Import existing items matching this connection's filters. Bypasses the cron cursor.">
             <button
               onClick={() => onBackfill(conn.id)}
-              disabled={Boolean(backfilling)}
+              disabled={backfilling}
               className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors disabled:opacity-50"
             >
-              {backfilling ? <Loader2 size={13} className="animate-spin" /> : <Import size={13} />}
+              <BusyIcon busy={backfilling} icon={Import} size={13} />
             </button>
           </Tooltip>
           {conn.connectorId === 'http' && (
@@ -119,10 +118,10 @@ export function ConnectionRow({
           >
             <button
               onClick={() => onDelete(conn.id)}
-              disabled={implicit || Boolean(deleting)}
+              disabled={implicit || deleting}
               className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors disabled:opacity-40 disabled:hover:text-gray-500"
             >
-              {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              <BusyIcon busy={deleting} icon={Trash2} size={13} />
             </button>
           </Tooltip>
         </div>
@@ -137,6 +136,7 @@ export function ConnectionRow({
       {/* Polled-by-workflow rows — make the mechanism visible */}
       <div className="mt-1.5 space-y-1">
         {seededWorkflows.map((wf) => {
+          const polling = Boolean(activity.state(wf.id, ['run']).phrase)
           const trigger = wf.nodes.find((n) => n.type === 'trigger')
           const cron =
             trigger?.config && 'cron' in trigger.config
@@ -161,15 +161,11 @@ export function ConnectionRow({
               </Tooltip>
               <Tooltip label="Poll the connector now instead of waiting for the next cron tick">
                 <button
-                  onClick={() => onRun(wf.id)}
-                  disabled={Boolean(activity.busy[rowKey('run', wf.id)])}
+                  onClick={() => onRun(wf.id, conn.id)}
+                  disabled={polling}
                   className="p-1 text-gray-500 hover:text-gray-200 rounded-sm transition-colors disabled:opacity-50"
                 >
-                  {activity.busy[rowKey('run', wf.id)] ? (
-                    <Loader2 size={11} className="animate-spin" />
-                  ) : (
-                    <Play size={11} />
-                  )}
+                  <BusyIcon busy={polling} icon={Play} size={11} />
                 </button>
               </Tooltip>
             </div>
@@ -197,16 +193,7 @@ export function ConnectionRow({
       </div>
 
       <div className="mt-1 flex items-center gap-2 text-[11px]">
-        {(phrase || failure) && (
-          <span
-            className={`flex items-center gap-1.5 ${phrase ? TONE_TEXT.live : TONE_TEXT.broken}`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full shrink-0 ${phrase ? TONE_DOT_MOVING.live : TONE_DOT.broken}`}
-            />
-            {phrase ?? failure}
-          </span>
-        )}
+        <ActivityLine {...reporting} />
         {conn.lastSyncAt && (
           <span className="text-gray-600">
             Last synced {new Date(conn.lastSyncAt).toLocaleString()}

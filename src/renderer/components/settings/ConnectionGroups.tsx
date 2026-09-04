@@ -48,7 +48,7 @@ export function ConnectionGroups({
   activity: RowActivity
   backfillResult: Record<string, { imported: number; updated: number; error?: string }>
   onAdd: (listing: ConnectorListing) => void
-  onRun: (workflowId: string) => void
+  onRun: (workflowId: string, connectionId: string) => void
   onBackfill: (connectionId: string) => void
   onDelete: (connectionId: string) => void
   onResetWorkflow: (connectionId: string, event: string) => void

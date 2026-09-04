@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { ConnectionRow } from '../src/renderer/components/settings/ConnectionRow'
+import { rowState, type RowAction } from '../src/renderer/lib/use-row-action'
 import type { ConnectorManifest, SourceConnection, WorkflowDefinition } from '../src/shared/types'
 
 const connection = (overrides: Partial<SourceConnection> = {}): SourceConnection =>
@@ -27,10 +28,12 @@ beforeEach(() => {
   ;(window as unknown as { api: unknown }).api = {}
 })
 
-const working = (key: string, phrase: string) => ({
-  busy: { [key]: phrase },
-  failed: {},
-  run: async () => {}
+// Built through the same fold the hook uses, so a key the row cannot read fails the test.
+const reporting = (busy: Record<string, string>, failed: Record<string, string> = {}) => ({
+  busy,
+  failed,
+  run: async () => {},
+  state: (id: string, actions: RowAction[]) => rowState(busy, failed, id, actions)
 })
 
 function setup(props: Partial<Parameters<typeof ConnectionRow>[0]> = {}) {
@@ -47,7 +50,7 @@ function setup(props: Partial<Parameters<typeof ConnectionRow>[0]> = {}) {
       conn={connection()}
       seededWorkflows={[]}
       missingEvents={[]}
-      activity={{ busy: {}, failed: {}, run: async () => {} }}
+      activity={{ busy: {}, failed: {}, run: async () => {}, state: () => ({}) }}
       backfillResult={{}}
       {...handlers}
       {...props}
@@ -79,7 +82,7 @@ describe('a configured connection', () => {
     const { container, onRun } = setup({ seededWorkflows: [workflow()] })
     const run = container.querySelectorAll('button')
     fireEvent.click(run[run.length - 1])
-    expect(onRun).toHaveBeenCalledWith('connector:c1:workItem')
+    expect(onRun).toHaveBeenCalledWith('connector:c1:workItem', 'c1')
   })
 
   it('says when polling has stopped because the workflow was deleted', () => {
@@ -167,7 +170,7 @@ describe('a configured connection', () => {
 
 describe('what a connection says while its own actions run', () => {
   it('says it is importing, and holds the button, while a backfill runs', () => {
-    const { getByText, container } = setup({ activity: working('backfill:c1', 'Importing…') })
+    const { getByText, container } = setup({ activity: reporting({ 'backfill:c1': 'Importing…' }) })
 
     expect(getByText('Importing…')).toBeInTheDocument()
     const backfill = container.querySelectorAll('button')[0]
@@ -175,7 +178,7 @@ describe('what a connection says while its own actions run', () => {
   })
 
   it('says it is removing while a delete runs', () => {
-    const { getByText } = setup({ activity: working('delete:c1', 'Removing…') })
+    const { getByText } = setup({ activity: reporting({ 'delete:c1': 'Removing…' }) })
 
     expect(getByText('Removing…')).toBeInTheDocument()
   })
@@ -183,7 +186,7 @@ describe('what a connection says while its own actions run', () => {
   it('holds the poll button for the workflow being polled, not its neighbour', () => {
     const { container } = setup({
       seededWorkflows: [workflow()],
-      activity: working('run:connector:c1:workItem', 'Polling…')
+      activity: reporting({ 'run:connector:c1:workItem': 'Polling…' })
     })
 
     const poll = Array.from(container.querySelectorAll('button')).at(-1)
@@ -192,11 +195,7 @@ describe('what a connection says while its own actions run', () => {
 
   it('keeps a refusal on the row it was pressed on', () => {
     const { getByText } = setup({
-      activity: {
-        busy: {},
-        failed: { 'backfill:c1': 'The connector never answered' },
-        run: async () => {}
-      }
+      activity: reporting({}, { 'backfill:c1': 'The connector never answered' })
     })
 
     expect(getByText('The connector never answered')).toBeInTheDocument()
