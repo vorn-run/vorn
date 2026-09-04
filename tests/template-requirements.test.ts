@@ -357,4 +357,28 @@ describe('what the canvas itself is still missing', () => {
       requirementsWithBindings(requirementsOfDefinition([unbound]), [slack])[0].connectionId
     ).toBe('slack-1')
   })
+
+  describe('a key a person has to hand over', () => {
+    it('stays open on the canvas even where this machine holds a matching connection', () => {
+      const slack = {
+        id: 'conn-slack',
+        name: 'Sandbox Slack',
+        connectorId: 'mcp',
+        filters: { sdkConnectorId: 'slack' }
+      } as unknown as SourceConnection
+      const [row] = requirementsWithBindings(
+        [
+          {
+            kind: 'connection',
+            nodeId: 'run',
+            connectorId: 'slack',
+            name: 'Sandbox Slack',
+            key: 'secretsFrom'
+          }
+        ],
+        [slack]
+      )
+      expect(row.connectionId).toBeUndefined()
+    })
+  })
 })

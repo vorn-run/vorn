@@ -166,7 +166,8 @@ describe('rotating a key', () => {
       value: 'sealed',
       plaintext: 'sk_live_new'
     })
-    await waitFor(() => expect(api.listConnectorKeys).toHaveBeenCalledTimes(2))
+    // Once on mount, once after the rotation; the shared connections cache may read the list too.
+    await waitFor(() => expect(api.listConnectorKeys.mock.calls.length).toBeGreaterThanOrEqual(2))
   })
 
   it('re-lists what is held when a key changes somewhere else', async () => {

@@ -1,5 +1,10 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { InstalledConnectorPack, SdkConnectorIcon, SourceConnection } from '../../shared/types'
+import type {
+  ConnectorKey,
+  InstalledConnectorPack,
+  SdkConnectorIcon,
+  SourceConnection
+} from '../../shared/types'
 import { connectionConnectorId } from '../../shared/types'
 import { connectionIcon } from './connection-icon'
 
@@ -17,6 +22,8 @@ import { connectionIcon } from './connection-icon'
 let cache: SourceConnection[] | null = null
 /** Installed packs, so a glyph can come from the files that run rather than only the connection. */
 let packCache: InstalledConnectorPack[] = []
+/** The connections that hold a secret, for the one picker that offers them. */
+let keyCache: ConnectorKey[] = []
 const listeners = new Set<(c: SourceConnection[]) => void>()
 let initPromise: Promise<void> | null = null
 let unsubscribeConfigChange: (() => void) | null = null
@@ -25,6 +32,7 @@ async function refresh(): Promise<void> {
   const conns = await window.api.listConnections()
   // A missing pack list costs a glyph, never the connections themselves.
   packCache = (await window.api.listConnectorPacks?.().catch(() => [])) ?? []
+  keyCache = (await window.api.listConnectorKeys?.().catch(() => [])) ?? []
   cache = conns
   for (const l of listeners) l(conns)
 }
@@ -63,6 +71,10 @@ export function useConnections(): SourceConnection[] {
 // The packs on disk, from the same read that refreshed the connections, so two surfaces never disagree.
 export function useInstalledPacks(): InstalledConnectorPack[] {
   return useSyncExternalStore(subscribePacks, () => packCache)
+}
+
+export function useConnectorKeys(): ConnectorKey[] {
+  return useSyncExternalStore(subscribePacks, () => keyCache)
 }
 
 function subscribePacks(onChange: () => void): () => void {
@@ -170,6 +182,7 @@ export async function refreshConnections(): Promise<void> {
 
 /** Test hook — drop cached state so unit tests can start clean. */
 export function __resetConnectionsCacheForTests(): void {
+  keyCache = []
   cache = null
   packCache = []
   initPromise = null

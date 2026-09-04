@@ -130,6 +130,11 @@ describe('buildStepGroups', () => {
     expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error'])
   })
 
+  it('offers the worktree only where a step has one of its own', () => {
+    const groups = buildStepGroups([makeNode('a', 'launchAgent', 'agent')])
+    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error', 'worktreePath'])
+  })
+
   it('prepends schema-derived keys for callConnectorAction nodes when a lookup is provided', () => {
     const node: WorkflowNode = {
       id: 'n1',
@@ -190,7 +195,7 @@ describe('buildStepGroups', () => {
     const groups = buildStepGroups([node])
     const keys = groups[0].keys.map((k) => k.key)
     expect(keys.slice(0, 2)).toEqual(['verdict', 'tests_passed'])
-    expect(keys.slice(-3)).toEqual(['output', 'status', 'error'])
+    expect(keys.slice(-4)).toEqual(['output', 'status', 'error', 'worktreePath'])
   })
 
   it('keeps only default keys for a launchAgent node without a schema', () => {
@@ -201,7 +206,7 @@ describe('buildStepGroups', () => {
       projectPath: '/p'
     } as WorkflowNode['config']
     const groups = buildStepGroups([node])
-    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error'])
+    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error', 'worktreePath'])
   })
 
   it('does not surface schema keys for a non-headless launchAgent', () => {
@@ -216,7 +221,7 @@ describe('buildStepGroups', () => {
       outputSchema: { type: 'object', properties: { verdict: { type: 'string' } } }
     } as WorkflowNode['config']
     const groups = buildStepGroups([node])
-    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error'])
+    expect(groups[0].keys.map((k) => k.key)).toEqual(['output', 'status', 'error', 'worktreePath'])
   })
 })
 

@@ -163,8 +163,29 @@ describe('the bundled seed', () => {
       }
     }
   })
-})
 
+  it('keeps every loop body downstream of its own loop', () => {
+    for (const template of TEMPLATE_SEED) {
+      const byId = new Map(template.portable.nodes.map((node) => [node.id, node]))
+      for (const node of template.portable.nodes) {
+        if (node.type !== 'loop') continue
+        const body = (node.config as { bodyNodeIds?: string[] }).bodyNodeIds ?? []
+        expect(body.length).toBeGreaterThan(0)
+        for (const id of body) expect(byId.get(id)).toBeDefined()
+        // The engine refuses a gate inside a body, and the run would stop there.
+        expect(body.some((id) => byId.get(id)?.type === 'approval')).toBe(false)
+        // The chain the loop drives: loop → body[0] → body[1] → … with one edge each.
+        const chain = [node.id, ...body]
+        for (let i = 0; i < chain.length - 1; i += 1) {
+          const hop = template.portable.edges.find(
+            (edge) => edge.source === chain[i] && edge.target === chain[i + 1]
+          )
+          expect(hop, `${chain[i]} → ${chain[i + 1]}`).toBeDefined()
+        }
+      }
+    }
+  })
+})
 describe('parseMcpServers', () => {
   const server = { id: 'playwright', name: 'Playwright', command: 'npx', args: ['-y', 'mcp'] }
 

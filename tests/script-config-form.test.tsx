@@ -16,7 +16,11 @@ vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))
 
-const projectPickerProps: Array<Record<string, unknown>> = []
+const { projectPickerProps, selectPickerProps, held } = vi.hoisted(() => ({
+  projectPickerProps: [] as Array<Record<string, unknown>>,
+  selectPickerProps: [] as Array<Record<string, unknown>>,
+  held: { keys: [] as Array<{ connectionId: string; name: string }> }
+}))
 vi.mock('../src/renderer/components/ProjectPicker', () => ({
   ProjectPicker: (props: Record<string, unknown>) => {
     projectPickerProps.push(props)
@@ -32,12 +36,69 @@ vi.mock('../src/renderer/stores', () => ({
     selector ? selector({ config: { projects: [] } }) : { config: { projects: [] } }
 }))
 
+vi.mock('../src/renderer/components/SelectPicker', () => ({
+  SelectPicker: (props: Record<string, unknown>) => {
+    selectPickerProps.push(props)
+    return <div data-testid="select-picker" />
+  }
+}))
+
+vi.mock('../src/renderer/lib/use-connections', () => ({
+  useConnectorKeys: () => held.keys
+}))
+
 import { ScriptConfigForm } from '../src/renderer/components/workflow-editor/panels/ScriptConfigForm'
 import type { ScriptConfig } from '../src/shared/types'
 
 function base(o: Partial<ScriptConfig> = {}): ScriptConfig {
   return { scriptType: 'bash', scriptContent: '', ...o }
 }
+
+describe('the key a script borrows', () => {
+  beforeEach(() => {
+    selectPickerProps.length = 0
+    held.keys = [{ connectionId: 'conn-slack', name: 'Sandbox Slack' }]
+  })
+
+  const secretsPicker = () =>
+    selectPickerProps.find((props) => {
+      const options = props.options as Array<{ value: string }> | undefined
+      return options?.some((option) => option.value === 'conn-slack')
+    })
+
+  it('offers the connections this machine holds a secret for', async () => {
+    render(<ScriptConfigForm config={base()} onChange={vi.fn()} />)
+    await vi.waitFor(() => expect(secretsPicker()).toBeDefined())
+    expect(secretsPicker()!.options).toEqual([
+      { value: '', label: 'None' },
+      { value: 'conn-slack', label: 'Sandbox Slack' }
+    ])
+  })
+
+  it('names the connection on the step, and unsets it rather than storing an empty one', async () => {
+    const onChange = vi.fn<(config: ScriptConfig) => void>()
+    render(<ScriptConfigForm config={base()} onChange={onChange} />)
+    await vi.waitFor(() => expect(secretsPicker()).toBeDefined())
+
+    const pick = secretsPicker()!.onChange as (value: string) => void
+    pick('conn-slack')
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ secretsFrom: 'conn-slack' }))
+
+    pick('')
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ secretsFrom: undefined }))
+  })
+
+  it('asks for nothing when this machine holds no keys', () => {
+    held.keys = []
+    const { queryByText } = render(<ScriptConfigForm config={base()} onChange={vi.fn()} />)
+    expect(queryByText('Secrets from')).toBeNull()
+    expect(
+      selectPickerProps.some((props) =>
+        (props.options as Array<{ label: string }>).some((o) => o.label === 'None')
+      )
+    ).toBe(false)
+  })
+})
 
 describe('ScriptConfigForm — contextual surface', () => {
   beforeEach(() => {

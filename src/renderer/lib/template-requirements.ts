@@ -11,7 +11,8 @@ import {
   fromPortable,
   resolveRequirement,
   unresolvedRequirements,
-  type PortableRequirement
+  type PortableRequirement,
+  bindsOnlyByHand
 } from '../../shared/workflow-portability'
 import type { ConnectorListing } from './connector-browse'
 import { canAddConnection, packStateFor } from './pack-status'
@@ -90,6 +91,13 @@ export function requirementAction(
   listings: ConnectorListing[]
 ): RequirementAction {
   if (requirement.connectionId !== undefined) return { kind: 'none' }
+  // A script's key is chosen in the step, never offered here.
+  if (
+    requirement.requirement.kind === 'connection' &&
+    requirement.requirement.key === 'secretsFrom'
+  ) {
+    return { kind: 'none' }
+  }
   // The HTTP connector is built in, so a profile is always one form away.
   if (requirement.requirement.kind === 'httpProfile') {
     return { kind: 'createProfile', name: requirement.requirement.name }
@@ -164,7 +172,10 @@ export function requirementsWithBindings(
   connections: SourceConnection[]
 ): TemplateRequirement[] {
   return requirements.map((requirement) => {
-    const connectionId = resolveRequirement(requirement, connections)
+    // A key a person has to hand over stays open here, whatever this machine holds.
+    const connectionId = bindsOnlyByHand(requirement)
+      ? undefined
+      : resolveRequirement(requirement, connections)
     return connectionId === undefined ? { requirement } : { requirement, connectionId }
   })
 }

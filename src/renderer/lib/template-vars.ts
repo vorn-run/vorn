@@ -46,6 +46,13 @@ export const DEFAULT_OUTPUT_KEYS = [
   { key: 'error', label: 'Error', description: 'Error message if failed' }
 ] as const
 
+/** Only an agent step works in a directory of its own. */
+export const WORKTREE_OUTPUT_KEY = {
+  key: 'worktreePath',
+  label: 'Worktree',
+  description: 'Directory the step worked in'
+} as const
+
 // --- Variable Group for Autocomplete UI ---
 
 export interface StepVariableGroup {
@@ -262,7 +269,7 @@ export function buildStepGroups(
           const schemaKeys = schemaTopLevelKeys(action?.outputSchema)
           if (schemaKeys.length > 0) {
             // Schema-derived keys first — those are what users will usually
-            // reach for. The three defaults stay at the bottom as fallbacks.
+            // reach for. The defaults stay at the bottom as fallbacks.
             keys = [...schemaKeys, ...defaultKeys]
           }
         }
@@ -281,9 +288,7 @@ export function buildStepGroups(
         // advertising these vars for an interactive node would be misleading.
         const cfg = n.config as LaunchAgentConfig
         const schemaKeys = cfg.headless ? schemaTopLevelKeys(cfg.outputSchema) : []
-        if (schemaKeys.length > 0) {
-          keys = [...schemaKeys, ...defaultKeys]
-        }
+        keys = [...schemaKeys, ...defaultKeys, { ...WORKTREE_OUTPUT_KEY }]
       }
       const runOutputs = lastRun?.outputs[n.slug!]
       const runState = lastRun?.states[n.id]

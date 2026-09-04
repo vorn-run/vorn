@@ -458,6 +458,26 @@ function updateNodeState(
   }
 }
 
+// A script step with its templates filled in, directory included.
+export function resolveScriptConfig(
+  config: ScriptConfig,
+  context?: WorkflowExecutionContext,
+  stepOutputs?: StepOutputs
+): ScriptConfig {
+  const path = (value: string | undefined): string | undefined =>
+    value === undefined ? undefined : resolveTemplateVars(value, context, stepOutputs) || undefined
+  return {
+    ...config,
+    scriptContent: resolveTemplateVars(config.scriptContent, context, stepOutputs),
+    cwd: path(config.cwd),
+    projectPath: path(config.projectPath),
+    // Untrusted text reaches the script as an argument, never spliced into its source.
+    ...(config.args && {
+      args: config.args.map((arg) => resolveTemplateVars(arg, context, stepOutputs))
+    })
+  }
+}
+
 export function buildStepOutputsMap(
   execution: WorkflowExecution,
   nodeMap: Map<string, WorkflowNode>
@@ -469,14 +489,16 @@ export function buildStepOutputsMap(
     if (!node?.slug) continue
 
     // Schema-typed connector outputs come first so a declared key like
-    // `html_url` wins over the generic fallback — but the three defaults
+    // `html_url` wins over the generic fallback — but the defaults
     // (output/status/error) always overlay so control-flow references keep
     // working regardless of whether the connector returned a typed payload.
     outputs[node.slug] = {
       ...(ns.structuredOutput ?? {}),
       output: ns.output || ns.logs || '',
       status: ns.status,
-      error: ns.error || ''
+      error: ns.error || '',
+      // The directory the step worked in, so a later step can run there.
+      worktreePath: ns.worktreePath ?? ''
     }
   }
   return outputs
@@ -776,8 +798,7 @@ async function executeNode(
 
     const runId = crypto.randomUUID()
     const resolvedConfig: ScriptConfig = {
-      ...config,
-      scriptContent: resolveTemplateVars(config.scriptContent, context, stepOutputs),
+      ...resolveScriptConfig(config, context, stepOutputs),
       runId
     }
 

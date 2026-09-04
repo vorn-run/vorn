@@ -41,6 +41,8 @@ export type PortableRequirement =
       connectorId: string
       name: string
       event?: string
+      /** A script's key: never bound by an import, only by a person in the step. */
+      key?: 'secretsFrom'
     }
   | { kind: 'httpProfile'; nodeId: string; name: string }
 
@@ -125,7 +127,7 @@ function connectorOf(connection: PortableConnection): string {
   })
 }
 
-/** Whether this node runs against a connector connection. */
+/** The config key that binds this node to a connection, whether it runs against one or borrows its key. */
 export function boundConnectionKey(
   node: WorkflowNode,
   config: Record<string, unknown>
@@ -133,8 +135,12 @@ export function boundConnectionKey(
   if (node.type === 'trigger' && config.triggerType === 'connectorPoll') return 'connectionId'
   if (node.type === 'callConnectorAction') return 'connectionId'
   if (node.type === 'httpRequest') return 'profileConnectionId'
+  if (node.type === 'script') return 'secretsFrom'
   return null
 }
+
+/** Keys a step may simply not have: unset is a finished step, not a question. */
+const OPTIONAL_CONNECTION_KEYS = new Set(['profileConnectionId', 'secretsFrom'])
 
 /**
  * The connection a requirement should bind to here, if this machine has one answer.
@@ -190,16 +196,12 @@ export function toPortable(
       // id means nothing elsewhere, so the import runs locally rather than
       // against a host the importer never configured.
       delete config.remoteHostId
-      // Names a connection in this install's own table. Elsewhere it would
-      // bind a step to whatever happened to take that id, so the import asks
-      // for a key rather than inheriting one.
-      delete config.secretsFrom
     }
 
     const key = boundConnectionKey(node, config)
     const bound = key === null ? '' : config[key]
     // A step bound to a connection here, and one that was never bound at all, both arrive elsewhere needing the same.
-    const unbound = key !== null && key !== 'profileConnectionId' && bound === ''
+    const unbound = key !== null && !OPTIONAL_CONNECTION_KEYS.has(key) && bound === ''
     if (key !== null && ((typeof bound === 'string' && bound !== '') || unbound)) {
       const source = connections.find((connection) => connection.id === bound)
       const event = config.event
@@ -216,11 +218,12 @@ export function toPortable(
                   ? declared
                   : '',
               name: source?.name ?? '',
-              ...(typeof event === 'string' && event !== '' && { event })
+              ...(typeof event === 'string' && event !== '' && { event }),
+              ...(key === 'secretsFrom' && { key })
             }
       )
-      // Optional on the node, so the step reads as simply having no profile.
-      if (key === 'profileConnectionId') delete config[key]
+      // Optional on the node, so the step reads as simply having no key.
+      if (OPTIONAL_CONNECTION_KEYS.has(key)) delete config[key]
       else config[key] = ''
     }
 
@@ -273,8 +276,14 @@ export function unresolvedRequirements(
   const present = new Set(portable.nodes.map((node) => node.id))
   return (portable.requires ?? []).filter(
     (requirement) =>
-      present.has(requirement.nodeId) && resolveRequirement(requirement, connections) === undefined
+      present.has(requirement.nodeId) &&
+      (bindsOnlyByHand(requirement) || resolveRequirement(requirement, connections) === undefined)
   )
+}
+
+// A file may name the key a script wants; handing one over is a person's choice, made in the step.
+export function bindsOnlyByHand(requirement: PortableRequirement): boolean {
+  return requirement.kind === 'connection' && requirement.key === 'secretsFrom'
 }
 
 /** Resolve placeholders against the project this workflow is being imported into. */
@@ -293,11 +302,9 @@ export function fromPortable(
   const nodes = portable.nodes.map((node) => {
     const config = { ...(node.config as Record<string, unknown>) }
 
-    // Export strips this, so a file carrying one was hand-written or came from
-    // a build that did not. Either way the id names a row in the writer's
-    // table, and honouring it here would hand a step whichever key happens to
-    // hold that id on this machine.
-    delete config.secretsFrom
+    // A carried id names a row in the writer's table: dropped rather than bound to whatever holds it here.
+    const key = boundConnectionKey(node, config)
+    if (key !== null && OPTIONAL_CONNECTION_KEYS.has(key)) delete config[key]
 
     for (const [key, value] of Object.entries(config)) {
       if (typeof value !== 'string') continue
@@ -311,10 +318,9 @@ export function fromPortable(
     }
 
     for (const requirement of bindings.get(node.id) ?? []) {
+      if (bindsOnlyByHand(requirement) || key === null) continue
       const resolved = resolveRequirement(requirement, connections)
-      if (resolved === undefined) continue
-      if (requirement.kind === 'httpProfile') config.profileConnectionId = resolved
-      else config.connectionId = resolved
+      if (resolved !== undefined) config[key] = resolved
     }
 
     // Export blanks it; this install gets a hook secret of its own.
