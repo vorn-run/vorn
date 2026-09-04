@@ -60,7 +60,7 @@
     "@tiptap/extensions": "^3.30.5",
     "@tiptap/pm": "^3.30.5",
     "@tiptap/react": "^3.30.5",
-    "@tiptap/starter-kit": "^3.30.5",
+    "@tiptap/starter-kit": "^3.30.6",
     "@tiptap/suggestion": "^3.30.5",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.11.0",
