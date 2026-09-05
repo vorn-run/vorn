@@ -37,11 +37,11 @@ const INBOX_BATCH_SIZE = 50
 const MAX_POLL_PAGES_PER_TICK = 20
 
 /**
- * Try to acquire an execution lock for a workflow run.
+ * Try to acquire a tick lock for a workflow's schedule.
  * Uses exclusive file creation (wx flag) keyed by the current minute
- * so it's atomic across processes and auto-expires for the next run.
+ * so it's atomic across processes and auto-expires for the next tick.
  */
-function acquireExecutionLock(workflowId: string): boolean {
+function acquireTickLock(workflowId: string): boolean {
   // Key by current minute so the lock naturally expires for the next scheduled run
   const minuteKey = Math.floor(Date.now() / 60_000)
   const lockFile = path.join(LOCK_DIR, `scheduler-${workflowId}-${minuteKey}.lock`)
@@ -106,6 +106,8 @@ class Scheduler extends EventEmitter {
   /** Of those, the ones that do real work here rather than in a renderer. */
   private connectorPollWorkflowIds = new Set<string>()
   private timeouts = new Map<string, NodeJS.Timeout>()
+  /** Polls run server-side, before any run claim, so they serialize here. */
+  private pollsInFlight = new Set<string>()
   private inboxTimer: NodeJS.Timeout | null = null
 
   startInboxWorker(): void {
@@ -239,7 +241,7 @@ class Scheduler extends EventEmitter {
           continue
         }
         try {
-          const task = cron.schedule(trigger.cron, () => this.executeWorkflow(wf.id), {
+          const task = cron.schedule(trigger.cron, () => this.fireScheduled(wf.id), {
             timezone: trigger.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
           })
           this.cronJobs.set(wf.id, task)
@@ -279,7 +281,7 @@ class Scheduler extends EventEmitter {
               this.timeouts.delete(wf.id)
               this.syncSchedules(configManager.loadConfig().workflows ?? [])
             } else {
-              this.executeWorkflow(wf.id)
+              this.fireScheduled(wf.id)
             }
           }, safeDelay)
           this.timeouts.set(wf.id, timer)
@@ -288,36 +290,44 @@ class Scheduler extends EventEmitter {
     }
   }
 
-  private executeWorkflow(workflowId: string, inputs?: Record<string, unknown>): void {
-    if (!acquireExecutionLock(workflowId)) {
-      log.info(`[scheduler] skipping workflow ${workflowId} — already executed by another instance`)
-      this.timeouts.delete(workflowId)
+  /** A schedule reaching its time: one tick, however many instances hear it. */
+  private fireScheduled(workflowId: string): void {
+    this.timeouts.delete(workflowId)
+    if (!acquireTickLock(workflowId)) {
+      log.info(`[scheduler] skipping workflow ${workflowId} — already fired this minute`)
       return
     }
+    this.executeWorkflow(workflowId)
+  }
 
+  // Runs of one workflow go side by side; a repeat is caught by the run claim on its inputs.
+  private executeWorkflow(workflowId: string, inputs?: Record<string, unknown>): void {
     // Look up the workflow to decide whether this is a connector-poll fan-out
     // or a normal single-execution fire.
     const workflows = configManager.loadConfig().workflows ?? []
     const wf = workflows.find((w) => w.id === workflowId)
-    if (!wf) {
-      this.timeouts.delete(workflowId)
-      return
-    }
+    if (!wf) return
     const trigger = getTriggerConfig(wf)
 
     if (trigger?.triggerType === 'connectorPoll') {
+      // A poll works here, before any run claim exists to catch a repeat.
+      if (this.pollsInFlight.has(workflowId)) {
+        log.info(`[scheduler] skipping poll for ${workflowId} — one is already in flight`)
+        return
+      }
       // Fire-and-forget — the dispatcher emits N SCHEDULER_EXECUTE events, one
       // per new item. Cursor advance and error recording happen inside.
-      this.dispatchConnectorPoll(workflowId, trigger).catch((err) => {
-        log.error(`[scheduler] connectorPoll dispatch failed for ${workflowId}:`, err)
-      })
-      this.timeouts.delete(workflowId)
+      this.pollsInFlight.add(workflowId)
+      this.dispatchConnectorPoll(workflowId, trigger)
+        .catch((err) => {
+          log.error(`[scheduler] connectorPoll dispatch failed for ${workflowId}:`, err)
+        })
+        .finally(() => this.pollsInFlight.delete(workflowId))
       return
     }
 
     log.info(`[scheduler] executing workflow ${workflowId}`)
     this.emit('client-message', IPC.SCHEDULER_EXECUTE, { workflowId, inputs })
-    this.timeouts.delete(workflowId)
   }
 
   /**
@@ -456,15 +466,7 @@ class Scheduler extends EventEmitter {
     return null
   }
 
-  /**
-   * Trigger a workflow manually, bypassing the cron tick. Used by "Run now"
-   * in settings for connector-seeded workflows: the same dispatch path as
-   * cron, so no hidden logic — just a forced tick. The minute-key lock still
-   * applies so repeated clicks within the same minute fold into one run.
-   *
-   * `inputs` carries the values a manual run was started with, forwarded to
-   * the renderer so `{{inputs.*}}` resolves the same as a direct run.
-   */
+  /** `inputs` are forwarded to the renderer so `{{inputs.*}}` resolves as it does for a direct run. */
   triggerWorkflow(workflowId: string, inputs?: Record<string, unknown>): void {
     this.executeWorkflow(workflowId, inputs)
   }
@@ -486,6 +488,7 @@ class Scheduler extends EventEmitter {
     for (const [, timer] of this.timeouts) clearTimeout(timer)
     this.cronJobs.clear()
     this.connectorPollWorkflowIds.clear()
+    this.pollsInFlight.clear()
     this.timeouts.clear()
     if (this.inboxTimer) clearInterval(this.inboxTimer)
     this.inboxTimer = null

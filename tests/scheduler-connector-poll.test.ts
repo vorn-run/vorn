@@ -91,18 +91,6 @@ vi.mock('../packages/server/src/connectors/mcp', async (importOriginal) => {
 
 // Import after mocks are set up.
 import { scheduler } from '../packages/server/src/scheduler'
-import fs from 'node:fs'
-import path from 'node:path'
-import os from 'node:os'
-
-// The execution lock writes a file; point it at an empty tmp dir per-test so
-// no two tests collide on filenames.
-const LOCK_DIR = path.join(os.homedir(), '.vorn')
-try {
-  fs.mkdirSync(LOCK_DIR, { recursive: true })
-} catch {
-  /* ignore */
-}
 
 function makeConn(overrides: Partial<SourceConnection> = {}): SourceConnection {
   return {
@@ -157,17 +145,6 @@ beforeEach(() => {
   clientRegistryMock.size = 1
   connectorGetMock.mockReset()
   pollMcpConnectionMock.mockReset()
-  // Clean up any stale lock files from previous tests to avoid the minute-key
-  // dedup blocking subsequent triggerWorkflow() calls in the same minute.
-  try {
-    for (const f of fs.readdirSync(LOCK_DIR)) {
-      if (f.startsWith('scheduler-wf-') && f.endsWith('.lock')) {
-        fs.unlinkSync(path.join(LOCK_DIR, f))
-      }
-    }
-  } catch {
-    /* ignore */
-  }
 })
 
 describe('scheduler.triggerWorkflow for connectorPoll', () => {
@@ -554,6 +531,34 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
 
     expect(pollMcpConnectionMock).not.toHaveBeenCalled()
     expect(dbRecordConnectorPollPageMock).not.toHaveBeenCalled()
+  })
+
+  it('polls one at a time, however often it is asked', async () => {
+    // A poll calls the connector and writes the inbox here, before any run
+    // claim exists, so two fires would otherwise read the same cursor twice.
+    const wf = makePollWorkflow('wf-serial')
+    loadConfigMock.mockReturnValue({ workflows: [wf] })
+    dbGetSourceConnectionMock.mockReturnValue(makeConn())
+    let release: () => void = () => {}
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const poll = vi.fn().mockImplementation(() => inFlight.then(() => ({ events: [] })))
+    connectorGetMock.mockReturnValue({ poll })
+
+    scheduler.triggerWorkflow('wf-serial')
+    scheduler.triggerWorkflow('wf-serial')
+    await new Promise((r) => setImmediate(r))
+    expect(poll).toHaveBeenCalledTimes(1)
+
+    release()
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+
+    // The next ask, once the first has finished, polls again.
+    scheduler.triggerWorkflow('wf-serial')
+    await new Promise((r) => setImmediate(r))
+    expect(poll).toHaveBeenCalledTimes(2)
   })
 })
 
