@@ -310,8 +310,7 @@ class Scheduler extends EventEmitter {
     const trigger = getTriggerConfig(wf)
 
     if (trigger?.triggerType === 'connectorPoll') {
-      // A poll calls the connector and writes the inbox here, before any run
-      // claim exists to catch a repeat, so one workflow polls one at a time.
+      // A poll works here, before any run claim exists to catch a repeat.
       if (this.pollsInFlight.has(workflowId)) {
         log.info(`[scheduler] skipping poll for ${workflowId} — one is already in flight`)
         return
