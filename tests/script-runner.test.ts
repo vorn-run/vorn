@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
 import { executeScript, scriptRunnerEvents } from '../packages/server/src/script-runner'
 import { IPC } from '@vornrun/shared/types'
 
@@ -43,6 +45,40 @@ describe('script-runner streaming', () => {
       scriptRunnerEvents.off(IPC.SCRIPT_DATA, onData)
       scriptRunnerEvents.off(IPC.SCRIPT_EXIT, onExit)
     }
+  })
+
+  it('runs the rest of a script whose first line reads input', async () => {
+    // The script used to arrive on stdin, so `cat` swallowed everything below it.
+    const result = await executeScript({
+      scriptType: 'bash',
+      scriptContent: 'cat\necho "the second line ran"'
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('the second line ran')
+    expect(result.output).not.toContain('echo')
+  })
+
+  it('hands arguments to the script as its own', async () => {
+    const result = await executeScript({
+      scriptType: 'bash',
+      scriptContent: 'echo "first=$1 second=$2"',
+      args: ['alpha', 'beta']
+    })
+
+    expect(result.output).toContain('first=alpha second=beta')
+  })
+
+  it('takes the copy it wrote away with it', async () => {
+    const result = await executeScript({
+      scriptType: 'bash',
+      scriptContent: 'echo "$0"'
+    })
+
+    const script = result.output.trim()
+    expect(path.basename(script)).toBe('script.sh')
+    expect(existsSync(script)).toBe(false)
+    expect(existsSync(path.dirname(script))).toBe(false)
   })
 
   it('emits SCRIPT_EXIT with non-zero code on script failure', async () => {

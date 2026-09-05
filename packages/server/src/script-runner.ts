@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { ScriptConfig, IPC } from '@vornrun/shared/types'
 import { getLaunchEnv } from './process-utils'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
@@ -54,53 +57,75 @@ export interface ScriptExecutionResult {
 
 export const scriptRunnerEvents = new EventEmitter()
 
+/** The name a script of each type is written under, so its interpreter reads a file it recognises. */
+const SCRIPT_FILE: Record<ScriptConfig['scriptType'], string> = {
+  bash: 'script.sh',
+  powershell: 'script.ps1',
+  python: 'script.py',
+  node: 'script.js'
+}
+
+/** How each interpreter is asked to run that file; user args follow it as `$1`, `argv` and the like. */
+function invocationFor(
+  scriptType: ScriptConfig['scriptType'],
+  file: string
+): { command: string; args: string[] } {
+  const isWin = process.platform === 'win32'
+  switch (scriptType) {
+    case 'bash':
+      return { command: isWin ? 'bash.exe' : 'bash', args: [file] }
+    case 'powershell':
+      return { command: 'pwsh', args: ['-File', file] }
+    case 'python':
+      return { command: isWin ? 'python' : 'python3', args: [file] }
+    case 'node':
+      return { command: 'node', args: [file] }
+  }
+}
+
 export async function executeScript(config: ScriptConfig): Promise<ScriptExecutionResult> {
+  const fileName = SCRIPT_FILE[config.scriptType]
+  if (!fileName) {
+    return {
+      success: false,
+      output: '',
+      error: `Unsupported script type: ${config.scriptType}`
+    }
+  }
+
+  const runId = config.runId
+  let dir: string
+  try {
+    // A file rather than stdin, so a step that reads input does not swallow the rest of its own script.
+    dir = await mkdtemp(path.join(os.tmpdir(), 'vorn-script-'))
+    await writeFile(path.join(dir, fileName), config.scriptContent, { mode: 0o600 })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log.error(`[script-runner] could not write the script: ${message}`)
+    if (runId) {
+      scriptRunnerEvents.emit(IPC.SCRIPT_DATA, { runId, data: `Error: ${message}\n` })
+      scriptRunnerEvents.emit(IPC.SCRIPT_EXIT, { runId, exitCode: 1 })
+    }
+    return { success: false, output: '', error: message }
+  }
+
   return new Promise((resolve) => {
-    let command: string
-    let args: string[]
-
-    const isWin = process.platform === 'win32'
-
-    switch (config.scriptType) {
-      case 'bash':
-        command = isWin ? 'bash.exe' : 'bash'
-        // Run from stdin
-        args = ['-s']
-        break
-      case 'powershell':
-        command = 'pwsh'
-        args = ['-Command', '-']
-        break
-      case 'python':
-        command = isWin ? 'python' : 'python3'
-        args = ['-']
-        break
-      case 'node':
-        command = 'node'
-        args = ['-']
-        break
-      default:
-        resolve({
-          success: false,
-          output: '',
-          error: `Unsupported script type: ${config.scriptType}`
-        })
-        return
-    }
-
-    if (config.args && config.args.length > 0) {
-      // Append user args if the interpreter supports it (bash -s arg1 arg2)
-      args.push(...config.args)
-    }
+    const { command, args } = invocationFor(config.scriptType, path.join(dir, fileName))
+    if (config.args && config.args.length > 0) args.push(...config.args)
 
     const cwd = config.cwd || config.projectPath || process.cwd()
-    const runId = config.runId
 
     log.info(`[script-runner] executing ${config.scriptType} script in ${cwd}`)
 
+    /** The script's own copy goes with it, so nothing is left in the temp directory after the answer. */
+    const finish = async (result: ScriptExecutionResult): Promise<void> => {
+      await rm(dir, { recursive: true, force: true }).catch(() => {})
+      resolve(result)
+    }
+
     const child = spawn(command, args, {
       cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       // Only this child sees them: the secrets are read here rather than held
       // anywhere the definition, a run record or an export could reach.
       env: { ...getLaunchEnv(), ...secretEnvFor(config.secretsFrom) },
@@ -128,7 +153,7 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
         scriptRunnerEvents.emit(IPC.SCRIPT_DATA, { runId, data: `Error: ${err.message}\n` })
         scriptRunnerEvents.emit(IPC.SCRIPT_EXIT, { runId, exitCode: 1 })
       }
-      resolve({
+      void finish({
         success: false,
         output: stdout,
         error: err.message
@@ -138,17 +163,12 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
     child.on('close', (code) => {
       log.info(`[script-runner] exited with code ${code}`)
       if (runId) scriptRunnerEvents.emit(IPC.SCRIPT_EXIT, { runId, exitCode: code ?? 1 })
-      resolve({
+      void finish({
         success: code === 0,
         output: stdout,
         error: code !== 0 ? stderr || `Exited with code ${code}` : undefined,
         exitCode: code ?? undefined
       })
     })
-
-    // Write script content to stdin
-    child.stdin?.on('error', () => {}) // prevent EPIPE if process exits early
-    child.stdin?.write(config.scriptContent)
-    child.stdin?.end()
   })
 }
