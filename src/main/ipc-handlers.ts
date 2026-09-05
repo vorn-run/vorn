@@ -232,7 +232,10 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.HEADLESS_LIST, () => requireBridge().request(IPC.HEADLESS_LIST))
 
   // Scripts
-  safeHandle(IPC.SCRIPT_EXECUTE, (_, config) => requireBridge().request(IPC.SCRIPT_EXECUTE, config))
+  // A script step has no deadline of its own, so its request cannot have one either.
+  safeHandle(IPC.SCRIPT_EXECUTE, (_, config) =>
+    requireBridge().request(IPC.SCRIPT_EXECUTE, config, 0)
+  )
 
   // Workflow runs
   safeHandle(IPC.WORKFLOW_RUN_SAVE, (_, execution) =>
