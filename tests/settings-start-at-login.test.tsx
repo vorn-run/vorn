@@ -81,3 +81,12 @@ describe('Start Vorn When I Sign In', () => {
     expect(screen.queryByText('Start Vorn When I Sign In')).not.toBeInTheDocument()
   })
 })
+
+describe('Floating Widget', () => {
+  it('is off until asked', () => {
+    render(<GeneralSettings />)
+    const row = screen.getByText('Floating Widget').closest('div')!
+    const toggle = row.parentElement!.parentElement!.querySelector('[role="switch"]')!
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+  })
+})
