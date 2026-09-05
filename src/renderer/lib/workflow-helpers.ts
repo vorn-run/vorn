@@ -194,6 +194,7 @@ export function getTriggerLabel(wf: WorkflowDefinition): string | undefined {
   if (trigger.triggerType === 'recurring') return 'recurring'
   if (trigger.triggerType === 'taskCreated') return 'on task created'
   if (trigger.triggerType === 'taskStatusChanged') return 'on status change'
+  if (trigger.triggerType === 'sessionRestored') return 'on restore'
   return undefined
 }
 
@@ -447,6 +448,8 @@ export function switchTriggerType(type: TriggerConfig['triggerType']): TriggerCo
       return { triggerType: 'taskCreated' }
     case 'taskStatusChanged':
       return { triggerType: 'taskStatusChanged' }
+    case 'sessionRestored':
+      return { triggerType: 'sessionRestored' }
     case 'connectorPoll':
       return { triggerType: 'connectorPoll', connectionId: '', event: '', cron: '*/5 * * * *' }
     case 'webhook':

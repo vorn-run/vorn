@@ -15,7 +15,10 @@ import {
   saveConfig,
   dbDeleteWorkflow
 } from '../packages/server/src/database'
-import { DEFAULT_TASK_WORKFLOW_ID } from '../packages/server/src/default-workflows'
+import {
+  DEFAULT_TASK_WORKFLOW_ID,
+  DEV_SERVER_WORKFLOW_ID
+} from '../packages/server/src/default-workflows'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import type { AppConfig } from '@vornrun/shared/types'
 
@@ -144,5 +147,30 @@ describe('seedSystemDefaults', () => {
     const seeded = cfg.workflows?.find((w) => w.id === DEFAULT_TASK_WORKFLOW_ID)
     expect(seeded).toBeDefined()
     expect(cfg.defaults.hasSeededDefaultTaskWorkflow).toBe(true)
+  })
+})
+
+describe('the restore example', () => {
+  it('is seeded beside the task workflow, switched off, so nothing runs until asked', () => {
+    seedSystemDefaults()
+
+    const seeded = loadConfig().workflows?.find((w) => w.id === DEV_SERVER_WORKFLOW_ID)
+    expect(seeded?.name).toBe('Bring the dev server back')
+    expect(seeded?.enabled).toBe(false)
+    const trigger = seeded?.nodes.find((n) => n.type === 'trigger')
+    expect((trigger?.config as { triggerType?: string }).triggerType).toBe('sessionRestored')
+    expect(seeded?.nodes.find((n) => n.type === 'script')).toBeDefined()
+  })
+
+  it('stays deleted once deleted, and its flag survives a config save', () => {
+    seedSystemDefaults()
+    dbDeleteWorkflow(DEV_SERVER_WORKFLOW_ID)
+    saveConfig(loadConfig())
+    seedSystemDefaults()
+
+    const cfg = loadConfig()
+    expect(cfg.workflows?.find((w) => w.id === DEV_SERVER_WORKFLOW_ID)).toBeUndefined()
+    expect(cfg.defaults.hasSeededDevServerWorkflow).toBe(true)
+    expect(cfg.workflows?.find((w) => w.id === DEFAULT_TASK_WORKFLOW_ID)).toBeDefined()
   })
 })

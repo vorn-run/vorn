@@ -340,6 +340,16 @@ export async function settleHistory(): Promise<void> {
   // no screen falls back to a flush. Bounded so a test hangs on an assertion
   // rather than on this.
   for (let round = 0; round < 16; round++) {
+    // Output the tick has not picked up yet is still unwritten. Waiting only on
+    // the queue let a caller remove a directory a flush then recreated.
+    for (const held of recorded.values()) {
+      if (held.pending.length && held.queued === 0) {
+        void enqueue(held, async () => {
+          await flushPending(held)
+          if (held.logBytes > MAX_LOG_BYTES) await fold(held)
+        })
+      }
+    }
     const tails = [...recorded.values()].map((held) => held.tail)
     if (!tails.length) return
     await Promise.all(tails)

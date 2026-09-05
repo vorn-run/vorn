@@ -246,3 +246,28 @@ describe('TriggerConfigForm - webhook fields', () => {
     expect(screen.getByText(/trigger.query/)).toBeInTheDocument()
   })
 })
+
+describe('the session-restored trigger', () => {
+  it('offers project, which restores, and how many at a time', () => {
+    const onChange = vi.fn()
+    render(
+      <TriggerConfigForm
+        config={{ triggerType: 'sessionRestored' } as TriggerConfig}
+        onChange={onChange}
+      />
+    )
+    expect(screen.getByText('Session Restored')).toBeInTheDocument()
+    expect(screen.getByText('Project Filter')).toBeInTheDocument()
+    expect(screen.getByText('Cold only')).toBeInTheDocument()
+    expect(screen.getByText('One per project')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Warm too'))
+    expect(onChange).toHaveBeenCalledWith({ triggerType: 'sessionRestored', restore: 'any' })
+
+    fireEvent.click(screen.getByText('Any number'))
+    expect(onChange).toHaveBeenCalledWith({
+      triggerType: 'sessionRestored',
+      concurrency: 'unbounded'
+    })
+  })
+})

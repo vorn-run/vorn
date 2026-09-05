@@ -235,6 +235,7 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
       // opened onto a terminal that died while it was closed has no start-up
       // reconciliation to tell it -- this is where it finds out.
       if (live === false) reportNotLive?.(terminalId)
+      if (live === true) reportLive?.(terminalId)
     } catch (err) {
       console.error('[terminal] could not attach', terminalId, err)
       if (!stillOurs()) return
@@ -258,6 +259,12 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
  */
 type NotLiveReporter = (terminalId: string) => void
 let reportNotLive: NotLiveReporter | null = null
+/** Told when an attach found a process still running: a warm restore, if the board did not start it. */
+let reportLive: NotLiveReporter | null = null
+
+export function setLiveReporter(fn: NotLiveReporter | null): void {
+  reportLive = fn
+}
 
 export function setNotLiveReporter(fn: NotLiveReporter | null): void {
   reportNotLive = fn

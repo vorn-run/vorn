@@ -1554,6 +1554,14 @@ export async function executeWorkflow(
     }),
     ...(targetSlice && { partial: true }),
     triggerTaskId: context?.task?.id,
+    ...(context?.trigger?.restore &&
+      context.source && {
+        triggerSession: {
+          id: context.source.id,
+          label: context.source.displayName ?? context.source.id.slice(0, 8),
+          restore: context.trigger.restore
+        }
+      }),
     connectorItem: context?.connectorItem,
     connectorInboxId: context?.connectorItem?.inboxId,
     connectorInboxLeaseToken: context?.connectorItem?.inboxLeaseToken,

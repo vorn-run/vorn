@@ -315,6 +315,9 @@ const api = {
   getGitDiffFull: (req: string | GitDiffRange): Promise<GitDiffResult | null> =>
     ipcRenderer.invoke(IPC.GIT_DIFF_FULL, req),
 
+  // The desktop asks for nothing and is sent everything; only the web narrows.
+  setTopics: (_topics: readonly string[]): Promise<void> => Promise.resolve(),
+
   gitCommit: (payload: GitCommitPayload): Promise<GitCommitResult> =>
     ipcRenderer.invoke(IPC.GIT_COMMIT, payload),
 

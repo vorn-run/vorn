@@ -179,7 +179,7 @@ export function GeneralSettings() {
             description="Show agent status widget when app is not focused"
           >
             <ToggleSwitch
-              checked={config.defaults.widgetEnabled !== false}
+              checked={config.defaults.widgetEnabled === true}
               onChange={(enabled) => {
                 updateDefaults({ widgetEnabled: enabled })
                 window.api.setWidgetEnabled(enabled)

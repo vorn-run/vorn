@@ -1,4 +1,5 @@
 import { useAppStore } from '../stores'
+import { fireSessionRestoredTrigger } from './workflow-triggers'
 import { endedFromRestored } from './ended-from-restored'
 import { toast } from '../components/Toast'
 
@@ -58,6 +59,7 @@ export async function resumeEndedSession(
   }
 
   const state = useAppStore.getState()
+  const environment = state.terminals.get(terminalId)?.ended?.environment
   // Bound to a session this client already draws: the ended pane goes and the
   // running one is brought forward. Replacing in place would key two panes by
   // one id -- and closing either would then close both.
@@ -74,6 +76,8 @@ export async function resumeEndedSession(
   // Said even for an automatic resume: a pane quietly becoming a second view of
   // a session open elsewhere is the one surprise worth a line.
   if (result.boundTo) toast('That conversation was already running. This pane shows it.')
+  // A bound session was not started again; it was already going elsewhere.
+  if (!result.boundTo) fireSessionRestoredTrigger(result.session, { restore: 'cold', environment })
 }
 
 /**

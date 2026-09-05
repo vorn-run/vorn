@@ -1,4 +1,4 @@
-import { Zap, Clock, CheckSquare, Play, type LucideIcon } from 'lucide-react'
+import { Zap, Clock, CheckSquare, Play, type LucideIcon, RotateCcw } from 'lucide-react'
 import type {
   ApprovalConfig,
   NodeExecutionState,
@@ -56,7 +56,7 @@ export function bucketOf(execution: WorkflowExecution): RunBucket {
   return execution.status === 'success' ? 'success' : 'error'
 }
 
-export type RunSource = 'manual' | 'schedule' | 'task' | 'connector'
+export type RunSource = 'manual' | 'schedule' | 'task' | 'connector' | 'restore'
 
 /** The parts of a workflow definition a run row needs to render itself. */
 export interface RunWorkflowRef {
@@ -93,7 +93,8 @@ const SOURCE_ICONS: Record<RunSource, LucideIcon> = {
   manual: Zap,
   schedule: Clock,
   task: CheckSquare,
-  connector: Play
+  connector: Play,
+  restore: RotateCcw
 }
 
 function triggerNodeOf(nodes: WorkflowNode[]): WorkflowNode | undefined {
@@ -114,6 +115,7 @@ function sourceOf(
   if (triggerType === 'once' || triggerType === 'recurring') return 'schedule'
   if (triggerType === 'connectorPoll') return 'connector'
   if (triggerType === 'taskCreated' || triggerType === 'taskStatusChanged') return 'task'
+  if (execution.triggerSession || triggerType === 'sessionRestored') return 'restore'
   return 'manual'
 }
 
@@ -168,6 +170,19 @@ export function describeRun(
     }
   }
 
+  if (execution.triggerSession) {
+    const { label, restore } = execution.triggerSession
+    return {
+      title: name ?? label,
+      subtitle: `restore · ${restore} · ${label}`,
+      source: 'restore',
+      sourceLabel: 'restore',
+      iconName,
+      iconColor,
+      fallbackIcon: SOURCE_ICONS.restore
+    }
+  }
+
   if (execution.triggerTaskId) {
     return {
       title: name ?? `Task ${execution.triggerTaskId.slice(0, 6)}`,
@@ -184,7 +199,7 @@ export function describeRun(
     title: name ?? execution.workflowId.slice(0, 8),
     subtitle: undefined,
     source,
-    sourceLabel: source === 'schedule' ? 'scheduled' : 'manual',
+    sourceLabel: source === 'schedule' ? 'scheduled' : source === 'restore' ? 'restore' : 'manual',
     iconName,
     iconColor,
     fallbackIcon: SOURCE_ICONS[source]

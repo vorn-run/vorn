@@ -34,7 +34,12 @@ import {
   DeviceToken
 } from '@vornrun/shared/types'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
-import { DEFAULT_TASK_WORKFLOW_ID, buildDefaultTaskWorkflow } from './default-workflows'
+import {
+  DEFAULT_TASK_WORKFLOW_ID,
+  DEV_SERVER_WORKFLOW_ID,
+  buildDefaultTaskWorkflow,
+  buildDevServerWorkflow
+} from './default-workflows'
 
 /** Where the data directory lands when nothing overrides it. */
 const DEFAULT_DATA_DIR = path.join(os.homedir(), '.vorn')
@@ -118,11 +123,21 @@ export function initDatabase(dataDir?: string): void {
  * database via `initTestDatabase` without spinning up the full init path.
  */
 export function seedSystemDefaults(): void {
+  seedWorkflowOnce(
+    'hasSeededDefaultTaskWorkflow',
+    DEFAULT_TASK_WORKFLOW_ID,
+    buildDefaultTaskWorkflow
+  )
+  seedWorkflowOnce('hasSeededDevServerWorkflow', DEV_SERVER_WORKFLOW_ID, buildDevServerWorkflow)
+}
+
+/** Once per flag: a deleted seed stays deleted, and an upgrade gets it exactly once. */
+function seedWorkflowOnce(flag: string, id: string, build: () => WorkflowDefinition): void {
   const d = getDb()
 
-  const flagRow = d
-    .prepare("SELECT value FROM defaults WHERE key = 'hasSeededDefaultTaskWorkflow'")
-    .get() as { value: string } | undefined
+  const flagRow = d.prepare('SELECT value FROM defaults WHERE key = ?').get(flag) as
+    | { value: string }
+    | undefined
   if (flagRow) {
     try {
       if (JSON.parse(flagRow.value) === true) return
@@ -133,11 +148,11 @@ export function seedSystemDefaults(): void {
 
   // Safety net: skip if a workflow with the stable id already exists from a
   // manual import or partial upgrade. Still set the flag so we don't retry.
-  const existing = d
-    .prepare('SELECT id FROM workflows WHERE id = ?')
-    .get(DEFAULT_TASK_WORKFLOW_ID) as { id: string } | undefined
+  const existing = d.prepare('SELECT id FROM workflows WHERE id = ?').get(id) as
+    | { id: string }
+    | undefined
   if (!existing) {
-    const w = buildDefaultTaskWorkflow()
+    const w = build()
     d.prepare(
       `INSERT INTO workflows (id, name, icon, icon_color, nodes, edges, enabled, last_run_at, last_run_status, stagger_delay_ms, workspace_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -154,12 +169,13 @@ export function seedSystemDefaults(): void {
       w.staggerDelayMs ?? null,
       w.workspaceId ?? 'personal'
     )
-    log.info(`[database] Seeded default task workflow (${DEFAULT_TASK_WORKFLOW_ID})`)
+    log.info(`[database] Seeded workflow ${id}`)
   }
 
-  d.prepare(
-    "INSERT OR REPLACE INTO defaults (key, value) VALUES ('hasSeededDefaultTaskWorkflow', ?)"
-  ).run(JSON.stringify(true))
+  d.prepare('INSERT OR REPLACE INTO defaults (key, value) VALUES (?, ?)').run(
+    flag,
+    JSON.stringify(true)
+  )
 }
 
 /**
@@ -1309,6 +1325,9 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     }),
     ...(map.headlessRetentionMinutes !== undefined && {
       headlessRetentionMinutes: map.headlessRetentionMinutes as number
+    }),
+    ...(map.hasSeededDevServerWorkflow !== undefined && {
+      hasSeededDevServerWorkflow: map.hasSeededDevServerWorkflow as boolean
     }),
     ...(map.hasSeededDefaultTaskWorkflow !== undefined && {
       hasSeededDefaultTaskWorkflow: map.hasSeededDefaultTaskWorkflow as boolean

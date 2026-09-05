@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { registerSlot, unregisterSlot, focusTerminal } from '../lib/terminal-registry'
 import { useOnScreenOnce } from '../hooks/useOnScreenOnce'
+import { useOnScreen } from '../hooks/useOnScreen'
+import { markVisible, markHidden } from '../lib/visible-terminals'
 
 interface Props {
   terminalId: string
@@ -24,6 +26,14 @@ export function TerminalSlot({ terminalId, isFocused, className, style }: Props)
   // every reconnect, which on a phone is every network change. Waiting until the
   // slot is near the viewport spends that on the cards somebody is looking at.
   const onScreen = useOnScreenOnce(ref)
+  // Tracked, not latched: the web client asks the server only for the bytes of
+  // cards on screen, and that has to follow the scroll both ways.
+  const near = useOnScreen(ref)
+  useEffect(() => {
+    if (!near) return
+    markVisible(terminalId)
+    return () => markHidden(terminalId)
+  }, [terminalId, near])
 
   useEffect(() => {
     const el = ref.current

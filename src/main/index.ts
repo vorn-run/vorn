@@ -136,7 +136,7 @@ function createWindow(): void {
   })
 }
 
-let widgetEnabled = true
+let widgetEnabled = false
 let widgetReady = false
 
 function sendToWidget(channel: string, ...args: unknown[]): void {
@@ -586,7 +586,7 @@ app.whenReady().then(async () => {
   let updateAutoDownload = true
   try {
     const config = await bridge.request<AppConfig>(IPC.CONFIG_LOAD)
-    widgetEnabled = config.defaults.widgetEnabled !== false
+    widgetEnabled = config.defaults.widgetEnabled === true
     updateChannel = config.defaults.updateChannel ?? 'stable'
     updateAutoDownload = config.defaults.updateAutoDownload !== false
     // Primed here, not only from `config:changed`: that fires on save, so a user

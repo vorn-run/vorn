@@ -328,3 +328,60 @@ describe('a machine that restarted', () => {
     expect(ended('cold')?.environment).toEqual(environment)
   })
 })
+
+// ── the restore trigger hears about sessions coming back ─────────────────
+
+const triggerMocks = vi.hoisted(() => ({ fireSessionRestoredTrigger: vi.fn() }))
+vi.mock('../src/renderer/lib/workflow-triggers', () => triggerMocks)
+
+import { reportWarmAttach, resetRestoredIds } from '../src/renderer/lib/board-sync'
+import { resumeEndedSession } from '../src/renderer/lib/session-resume'
+
+describe('what the restore trigger is told', () => {
+  beforeEach(() => {
+    triggerMocks.fireSessionRestoredTrigger.mockClear()
+    resetRestoredIds()
+  })
+
+  it('hears cold, once, with the reboot check, when a resume starts the process again', async () => {
+    const environment = {
+      worktree: 'ok' as const,
+      branch: { recorded: 'main', actual: 'main' },
+      head: { recorded: 'a', actual: 'a' }
+    }
+    useAppStore.getState().addTerminal(session({ id: 'one' }), {
+      reason: 'machine-restarted',
+      at: 1,
+      replayed: true,
+      environment
+    })
+
+    await resumeEndedSession('one')
+
+    expect(triggerMocks.fireSessionRestoredTrigger).toHaveBeenCalledTimes(1)
+    const [back, how] = triggerMocks.fireSessionRestoredTrigger.mock.calls[0]
+    expect(back.id).toBe('one')
+    expect(how).toEqual({ restore: 'cold', environment })
+  })
+
+  it('hears warm, once, when a session the server had is attached live', async () => {
+    live.push(session({ id: 'from-server' }))
+    await syncBoard({ showCold: false, resume: false })
+
+    reportWarmAttach('from-server')
+    reportWarmAttach('from-server')
+
+    expect(triggerMocks.fireSessionRestoredTrigger).toHaveBeenCalledTimes(1)
+    expect(triggerMocks.fireSessionRestoredTrigger.mock.calls[0][1]).toEqual({ restore: 'warm' })
+  })
+
+  it('hears nothing about a session this client started itself', async () => {
+    useAppStore.getState().addTerminal(session({ id: 'mine' }))
+    live.push(session({ id: 'mine' }))
+    await syncBoard({ showCold: false, resume: false })
+
+    reportWarmAttach('mine')
+
+    expect(triggerMocks.fireSessionRestoredTrigger).not.toHaveBeenCalled()
+  })
+})

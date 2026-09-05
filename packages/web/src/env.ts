@@ -1,3 +1,5 @@
+import { PHONE_BASE_TOPICS, topicsQuery } from '@vornrun/shared/topics'
+
 /**
  * Detect the WebSocket URL for connecting to the Vorn server.
  *
@@ -6,5 +8,6 @@
  */
 export function getWebSocketUrl(): string {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${location.host}/ws`
+  // Declared on the upgrade, so no PTY byte is sent before the filter is known.
+  return `${protocol}//${location.host}/ws?${topicsQuery(PHONE_BASE_TOPICS)}`
 }

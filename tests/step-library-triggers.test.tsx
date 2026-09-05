@@ -81,6 +81,7 @@ describe('the step library in trigger scope', () => {
       'Schedule once',
       'Task created',
       'Task moved',
+      'Session restored',
       'Webhook'
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument()

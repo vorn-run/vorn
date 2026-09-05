@@ -1,5 +1,6 @@
 import type { RestoredSession, TerminalSession } from '../../shared/types'
 import { endedFromRestored } from './ended-from-restored'
+import { fireSessionRestoredTrigger } from './workflow-triggers'
 import { useAppStore } from '../stores'
 import { coldSessions } from './session-utils'
 import { resumeEndedSession } from './session-resume'
@@ -68,7 +69,11 @@ async function reconcile(options: { showCold: boolean; resume: boolean }): Promi
   // Anything the server has that this board does not. A session started from a
   // phone, or by a workflow, or before this window existed.
   for (const session of active) {
-    if (!store.terminals.has(session.id)) store.addTerminal(session)
+    if (store.terminals.has(session.id)) continue
+    store.addTerminal(session)
+    // Came from the server, not from this client. When its attach finds the
+    // process running, that is a warm restore and the trigger is told once.
+    restoredIds.add(session.id)
   }
 
   // Panes this board is holding for sessions the server no longer runs. On a
@@ -132,4 +137,21 @@ async function resumeAll(ids: string[]): Promise<void> {
     // the offer to try again by hand. Nothing is said twice.
     await resumeEndedSession(id, { automatic: true })
   }
+}
+
+const restoredIds = new Set<string>()
+
+/**
+ * Wired to the registry's live reporter at start-up. A session this client
+ * created in this lifetime is new, not restored, and is not in the set.
+ */
+export function reportWarmAttach(terminalId: string): void {
+  if (!restoredIds.delete(terminalId)) return
+  const session = useAppStore.getState().terminals.get(terminalId)?.session
+  if (session) fireSessionRestoredTrigger(session, { restore: 'warm' })
+}
+
+/** Test-only. */
+export function resetRestoredIds(): void {
+  restoredIds.clear()
 }
