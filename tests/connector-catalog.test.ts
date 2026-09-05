@@ -3,8 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { defineConnector } from '../packages/connector-sdk/src'
+import { IPC } from '../packages/shared/src/types'
 import {
   CONNECTOR_CATALOG,
+  catalogEvents,
   catalogItems,
   catalogLaunchSpec,
   catalogSnapshot,
@@ -318,6 +320,52 @@ describe('refreshCatalog', () => {
     // Emptying the connector list because a proxy blocked one request would
     // make the app look broken.
     expect(catalogItems({ ...offline(), cachePath }).length).toBeGreaterThan(0)
+  })
+
+  it('says so once when the published catalog has changed, so an open list can re-read it', async () => {
+    resetCatalogCache()
+    const cachePath = emptyCache()
+    const announced: unknown[] = []
+    const listener = () => announced.push(1)
+    catalogEvents.on(IPC.CONNECTOR_CATALOG_CHANGED, listener)
+    try {
+      const serve = (id: string) =>
+        (async () =>
+          new Response(
+            JSON.stringify({ version: 1, connectors: [published(id)] })
+          )) as unknown as typeof fetch
+
+      // The first catalog this process holds: nobody is holding an older one to tell.
+      expect(await refreshCatalog({ fetchImpl: serve('one'), cachePath, now: 1 })).toBe(true)
+      expect(announced).toHaveLength(0)
+
+      expect(await refreshCatalog({ fetchImpl: serve('two'), cachePath, now: 2 })).toBe(true)
+      expect(announced).toHaveLength(1)
+    } finally {
+      catalogEvents.off(IPC.CONNECTOR_CATALOG_CHANGED, listener)
+    }
+  })
+
+  it('stays quiet when the published catalog is the one already held', async () => {
+    resetCatalogCache()
+    const cachePath = emptyCache()
+    const announced: unknown[] = []
+    const listener = () => announced.push(1)
+    catalogEvents.on(IPC.CONNECTOR_CATALOG_CHANGED, listener)
+    try {
+      const fetchImpl = (async () =>
+        new Response(
+          JSON.stringify({ version: 1, connectors: [published('same')] })
+        )) as unknown as typeof fetch
+
+      await refreshCatalog({ fetchImpl, cachePath, now: 1 })
+      // A second check an hour later that finds the same list is not news.
+      await refreshCatalog({ fetchImpl, cachePath, now: 2 })
+
+      expect(announced).toHaveLength(0)
+    } finally {
+      catalogEvents.off(IPC.CONNECTOR_CATALOG_CHANGED, listener)
+    }
   })
 
   it('refuses a page served where the catalog should be', async () => {

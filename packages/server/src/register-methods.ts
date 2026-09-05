@@ -167,7 +167,7 @@ import { probeAuth, type BorrowSource } from './connectors/auth-rung'
 import { resolveConnectorAuth } from './connectors/connector-auth'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { isImplicitConnection, type ConnectorPackSource } from '@vornrun/shared/types'
-import { catalogSnapshot, refreshCatalog } from './connectors/catalog'
+import { catalogEvents, catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
 import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vornrun/shared/types'
@@ -1992,6 +1992,11 @@ export function registerAllMethods(): void {
   })
   scheduler.on('client-message', (channel: string, payload: unknown) => {
     clientRegistry.broadcast(channel, payload)
+  })
+
+  // A background refresh found a different catalog: hand it over rather than let a list on screen keep the old one.
+  catalogEvents.on(IPC.CONNECTOR_CATALOG_CHANGED, () => {
+    clientRegistry.broadcast(IPC.CONNECTOR_CATALOG_CHANGED, catalogSnapshot())
   })
 
   scriptRunnerEvents.on(IPC.SCRIPT_DATA, (payload) => {

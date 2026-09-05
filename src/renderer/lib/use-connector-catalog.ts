@@ -49,6 +49,23 @@ async function load(): Promise<CatalogSnapshot> {
   return inFlight
 }
 
+// Subscribed once, so a catalog the server refreshed in the background reaches a list already on screen.
+let unsubscribeCatalogChange: (() => void) | undefined
+function watchForChanges(): void {
+  if (unsubscribeCatalogChange || typeof window.api?.onConnectorCatalogChanged !== 'function')
+    return
+  unsubscribeCatalogChange = window.api.onConnectorCatalogChanged((next) => {
+    // Newer than any read in flight, which must not overwrite it.
+    generation += 1
+    inFlight = undefined
+    if (next) publish(next)
+    else {
+      cache = undefined
+      void load()
+    }
+  })
+}
+
 // `enabled` is how a closed panel says nobody is looking yet.
 export function useConnectorCatalog(enabled: boolean = true): CatalogSnapshot {
   const [snapshot, setSnapshot] = useState<CatalogSnapshot>(() => cache ?? EMPTY)
@@ -56,6 +73,7 @@ export function useConnectorCatalog(enabled: boolean = true): CatalogSnapshot {
   useEffect(() => {
     if (!enabled) return
     let live = true
+    watchForChanges()
     listeners.add(setSnapshot)
     void load().then((next) => {
       if (live) setSnapshot(next)
@@ -84,4 +102,6 @@ export function __resetCatalogCacheForTests(): void {
   cache = undefined
   inFlight = undefined
   listeners.clear()
+  unsubscribeCatalogChange?.()
+  unsubscribeCatalogChange = undefined
 }
