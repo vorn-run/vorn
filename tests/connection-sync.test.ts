@@ -7,10 +7,11 @@ const listConnections = vi.fn()
 beforeEach(() => {
   vi.useFakeTimers()
   listConnections.mockReset()
-  ;(window as unknown as { api: unknown }).api = { listConnections }
+  vi.stubGlobal('api', { listConnections })
 })
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 

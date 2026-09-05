@@ -136,7 +136,8 @@ export function ConnectionRow({
       {/* Polled-by-workflow rows — make the mechanism visible */}
       <div className="mt-1.5 space-y-1">
         {seededWorkflows.map((wf) => {
-          const polling = Boolean(activity.state(wf.id, ['run']).phrase)
+          const poll = activity.state(wf.id, ['run'])
+          const polling = Boolean(poll.phrase)
           const trigger = wf.nodes.find((n) => n.type === 'trigger')
           const cron =
             trigger?.config && 'cron' in trigger.config
@@ -170,6 +171,12 @@ export function ConnectionRow({
               </Tooltip>
             </div>
           )
+        })}
+        {seededWorkflows.map((wf) => {
+          const failed = activity.state(wf.id, ['run']).error
+          return failed ? (
+            <ActivityLine key={`${wf.id}-failed`} error={failed} className="text-[11px]" />
+          ) : null
         })}
 
         {missingEvents.map((e) => (

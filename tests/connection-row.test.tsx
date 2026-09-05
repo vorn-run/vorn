@@ -85,6 +85,14 @@ describe('a configured connection', () => {
     expect(onRun).toHaveBeenCalledWith('connector:c1:workItem', 'c1')
   })
 
+  it('says under the workflow when its poll failed', () => {
+    const { getByText } = setup({
+      seededWorkflows: [workflow()],
+      activity: reporting({}, { 'run:connector:c1:workItem': 'The connector went away' })
+    })
+    expect(getByText('The connector went away')).toBeInTheDocument()
+  })
+
   it('says when polling has stopped because the workflow was deleted', () => {
     // Deleting the seeded workflow silently stops the polling; without this the
     // connection looks configured and does nothing.

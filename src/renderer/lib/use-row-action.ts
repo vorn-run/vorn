@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 
 // What a row's own actions report while they run: a phrase while busy, and a refusal that lands where the press was.
 export type RowAction = 'backfill' | 'delete' | 'run' | 'rollback' | 'remove'
@@ -52,9 +52,13 @@ export function useRowAction(): RowActivity {
   const [busy, setBusy] = useState<Record<string, string>>({})
   const [failed, setFailed] = useState<Record<string, string>>({})
 
+  // Keys in flight, so a second press before the first render disables the button is dropped.
+  const inFlight = useRef(new Set<string>())
   const run = useCallback(
     async (action: RowAction, id: string, work: () => Promise<void | Refusal>) => {
       const key = keyFor(action, id)
+      if (inFlight.current.has(key)) return
+      inFlight.current.add(key)
       setBusy((current) => ({ ...current, [key]: PHRASES[action] }))
       // Whatever the last attempt said was about that attempt, not this one.
       setFailed((current) => {
@@ -71,6 +75,7 @@ export function useRowAction(): RowActivity {
         const message = err instanceof Error ? err.message : String(err)
         setFailed((current) => ({ ...current, [key]: message }))
       } finally {
+        inFlight.current.delete(key)
         setBusy((current) => {
           const { [key]: _done, ...rest } = current
           return rest

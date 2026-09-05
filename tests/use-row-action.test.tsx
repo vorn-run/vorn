@@ -85,6 +85,25 @@ describe('a row action reporting itself', () => {
     await waitFor(() => expect(screen.getByTestId('failed')).toHaveTextContent('none'))
   })
 
+  it('drops a second press on the same row while the first is still running', async () => {
+    let finish = (): void => {}
+    const work = vi.fn(
+      () =>
+        new Promise<{ ok: true }>((resolve) => {
+          finish = () => resolve({ ok: true })
+        })
+    )
+    render(<Probe work={work} />)
+
+    fireEvent.click(screen.getByText('go'))
+    fireEvent.click(screen.getByText('go'))
+    await waitFor(() => expect(screen.getByTestId('busy')).toHaveTextContent('Removing…'))
+    expect(work).toHaveBeenCalledTimes(1)
+
+    finish()
+    await waitFor(() => expect(screen.getByTestId('busy')).toHaveTextContent('idle'))
+  })
+
   it('answers a call that reports nothing as a success', async () => {
     render(<Probe work={async () => undefined} />)
 
