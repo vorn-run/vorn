@@ -488,6 +488,7 @@ class Scheduler extends EventEmitter {
     for (const [, timer] of this.timeouts) clearTimeout(timer)
     this.cronJobs.clear()
     this.connectorPollWorkflowIds.clear()
+    this.pollsInFlight.clear()
     this.timeouts.clear()
     if (this.inboxTimer) clearInterval(this.inboxTimer)
     this.inboxTimer = null

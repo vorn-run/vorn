@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, afterAll, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { WorkflowDefinition, WorkflowNode, TriggerConfig } from '../src/shared/types'
@@ -7,8 +7,14 @@ import type { WorkflowDefinition, WorkflowNode, TriggerConfig } from '../src/sha
 // at import; point it somewhere disposable before that happens.
 const lockHome = vi.hoisted(() => {
   const dir = `${process.env.TMPDIR?.replace(/\/$/, '') ?? '/tmp'}/vorn-scheduler-${process.pid}`
+  const real = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE }
   process.env.HOME = dir
-  return dir
+  process.env.USERPROFILE = dir
+  return { dir, real }
+})
+afterAll(() => {
+  process.env.HOME = lockHome.real.HOME
+  process.env.USERPROFILE = lockHome.real.USERPROFILE
 })
 
 // Mock dependencies before importing
@@ -140,7 +146,7 @@ describe('getNextRun', () => {
 })
 
 describe('firing a workflow', () => {
-  const LOCK_DIR = path.join(lockHome, '.vorn')
+  const LOCK_DIR = path.join(lockHome.dir, '.vorn')
 
   function clearLocks(workflowId: string): void {
     fs.mkdirSync(LOCK_DIR, { recursive: true })
@@ -187,8 +193,10 @@ describe('firing a workflow', () => {
     const tick = vi.mocked(cron.schedule).mock.calls.at(-1)?.[1] as () => void
     const { seen, stop } = watch()
 
+    vi.useFakeTimers({ toFake: ['Date'] })
     tick()
     tick()
+    vi.useRealTimers()
 
     stop()
     clearLocks('wf-tick')
