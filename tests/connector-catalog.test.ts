@@ -335,8 +335,7 @@ describe('refreshCatalog', () => {
             JSON.stringify({ version: 1, connectors: [published(id)] })
           )) as unknown as typeof fetch
 
-      // The first catalog this process holds: nobody is holding an older one to tell.
-      // The first list this process ever downloads is news to a client holding the seed.
+      // The first list this process downloads differs from the seed, so it is announced.
       expect(await refreshCatalog({ fetchImpl: serve('one'), cachePath, now: 1 })).toBe(true)
       expect(announced).toHaveLength(1)
 
