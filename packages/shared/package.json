@@ -16,6 +16,7 @@
     "./structured-output": "./src/structured-output.ts",
     "./config-scope": "./src/config-scope.ts",
     "./session-restore": "./src/session-restore.ts",
+    "./topics": "./src/topics.ts",
     "./workflow-portability": "./src/workflow-portability.ts",
     "./viewer-settings-store": "./src/viewer-settings-store.ts"
   }

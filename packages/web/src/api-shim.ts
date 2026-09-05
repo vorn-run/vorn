@@ -522,6 +522,9 @@ export function createApiShim(wsUrl: string) {
       rpc.invoke('git:deleteBranches', { projectPath, branches, force }),
     getGitDiffStat: (cwd: string) => rpc.invoke('git:diffStat', cwd),
     getGitDiffFull: (req: string | GitDiffRange) => rpc.invoke('git:diffFull', req),
+    // Replaces the socket's filter in place; the initial one rides on the URL.
+    setTopics: (topics: readonly string[]) =>
+      rpc.invoke('subscribe:set', { topics }).then(() => undefined),
     gitCommit: (payload: unknown) => rpc.invoke('git:commit', payload),
     gitPush: (cwd: string) => rpc.invoke('git:push', cwd),
 
