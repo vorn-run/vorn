@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type {
   NodeExecutionState,
@@ -8,11 +9,13 @@ import type {
 
 const rpcCall = vi.fn()
 const listAllWorkflowRuns = vi.fn()
+const listRunsWithWaitingGates = vi.fn()
 const dbListWorkflows = vi.fn()
 
 vi.mock('../packages/mcp/src/ws-client', () => ({ rpcCall: (...a: unknown[]) => rpcCall(...a) }))
 vi.mock('../packages/mcp/src/data-access', () => ({
   listAllWorkflowRuns: (...a: unknown[]) => listAllWorkflowRuns(...a),
+  listRunsWithWaitingGates: (...a: unknown[]) => listRunsWithWaitingGates(...a),
   dbListWorkflows: (...a: unknown[]) => dbListWorkflows(...a),
   listWorkflowRuns: vi.fn(),
   listWorkflowRunsByTask: vi.fn(),
@@ -31,12 +34,17 @@ type Handler = (args: Record<string, unknown>) => Promise<{
   isError?: boolean
 }>
 
-/** Collects the tools the module registers so they can be invoked directly. */
-function collect(): Map<string, Handler> {
-  const tools = new Map<string, Handler>()
+type Registered = { handler: Handler; schema?: z.ZodRawShape }
+
+/** Collects the tools the module registers, with the shape each declares, so both can be exercised. */
+function collect(): Map<string, Registered> {
+  const tools = new Map<string, Registered>()
   const server = {
     tool: (name: string, _desc: string, schemaOrHandler: unknown, maybeHandler?: unknown) => {
-      tools.set(name, (maybeHandler ?? schemaOrHandler) as Handler)
+      tools.set(name, {
+        handler: (maybeHandler ?? schemaOrHandler) as Handler,
+        ...(maybeHandler ? { schema: schemaOrHandler as z.ZodRawShape } : {})
+      })
     }
   } as unknown as McpServer
   registerWorkflowTools(server)
@@ -157,14 +165,17 @@ describe('answering a gate', () => {
   beforeEach(() => {
     rpcCall.mockReset().mockResolvedValue({ accepted: true })
     listAllWorkflowRuns.mockReset().mockResolvedValue([{ ...parked, workflowName: 'Build' }])
+    listRunsWithWaitingGates.mockReset().mockResolvedValue([])
     dbListWorkflows.mockReset().mockResolvedValue([workflow('Read spec.md, then approve.')])
   })
 
-  const resolve = async (args: Record<string, unknown>) => {
+  const registered = () => {
     const tool = collect().get('resolve_gate')
     if (!tool) throw new Error('resolve_gate was not registered')
-    return tool(args)
+    return tool
   }
+
+  const resolve = async (args: Record<string, unknown>) => registered().handler(args)
 
   it('approves the node that was waiting, and says what it answered', async () => {
     const result = await resolve({ run_id: 'run-1', decision: 'approve' })
@@ -190,24 +201,64 @@ describe('answering a gate', () => {
     expect(result.content[0].text).toContain('Rejected "Approval Gate"')
   })
 
-  it('refuses a run that already finished, rather than broadcasting at nothing', async () => {
+  it('says a run already finished rather than broadcasting at nothing, the way stopping one does', async () => {
     listAllWorkflowRuns.mockResolvedValue([{ ...parked, status: 'success' }])
 
     const result = await resolve({ run_id: 'run-1', decision: 'approve' })
 
-    expect(result.isError).toBe(true)
+    expect(result.isError).toBeUndefined()
     expect(result.content[0].text).toContain('already finished (success)')
     expect(rpcCall).not.toHaveBeenCalled()
   })
 
-  it('refuses a run it cannot find', async () => {
+  it('refuses a run it cannot find, having asked for the parked ones too', async () => {
     listAllWorkflowRuns.mockResolvedValue([])
 
     const result = await resolve({ run_id: 'run-9', decision: 'approve' })
 
+    expect(listRunsWithWaitingGates).toHaveBeenCalled()
     expect(result.isError).toBe(true)
     expect(result.content[0].text).toContain('no run "run-9"')
     expect(rpcCall).not.toHaveBeenCalled()
+  })
+
+  it('answers a gate that waited past the recent history', async () => {
+    listAllWorkflowRuns.mockResolvedValue([])
+    listRunsWithWaitingGates.mockResolvedValue([parked])
+
+    const result = await resolve({ run_id: 'run-1', decision: 'approve' })
+
+    expect(result.isError).toBeUndefined()
+    expect(rpcCall).toHaveBeenCalledWith('workflow:resolveGate', {
+      runId: 'run-1',
+      nodeId: 'approve',
+      decision: 'approve'
+    })
+  })
+
+  it('lists the runs parked on a gate when asked for no workflow in particular', async () => {
+    const tool = collect().get('list_workflow_runs')
+    if (!tool) throw new Error('list_workflow_runs was not registered')
+    listRunsWithWaitingGates.mockResolvedValue([parked])
+
+    const result = await tool.handler({})
+
+    expect(result.isError).toBeUndefined()
+    const [listed] = JSON.parse(result.content[0].text) as WorkflowExecution[]
+    expect(listed.runId).toBe('run-1')
+    expect(listed.nodeStates.find((n) => n.nodeId === 'approve')).toMatchObject({
+      status: 'waiting',
+      asks: 'Read spec.md, then approve.'
+    })
+  })
+
+  it('takes only the two decisions it declares', () => {
+    const schema = registered().schema
+    if (!schema) throw new Error('resolve_gate registered no schema')
+    const shape = z.object(schema)
+
+    expect(shape.safeParse({ run_id: 'run-1', decision: 'maybe' }).success).toBe(false)
+    expect(shape.safeParse({ run_id: 'run-1', decision: 'approve' }).success).toBe(true)
   })
 
   it('asks which gate when a run has two open, and answers the named one', async () => {

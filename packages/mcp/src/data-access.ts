@@ -195,6 +195,11 @@ export async function listWorkflowRunsByTask(
   })
 }
 
+/** Every run parked on a gate, however old: the capped history can lose one that waited a long time. */
+export async function listRunsWithWaitingGates(): Promise<WorkflowExecution[]> {
+  return rpcCall<WorkflowExecution[]>('workflowRun:listWaiting')
+}
+
 export async function listAllWorkflowRuns(
   workspaceId?: string,
   limit = 50

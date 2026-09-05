@@ -22,6 +22,7 @@ import {
   listWorkflowRuns,
   listWorkflowRunsByTask,
   listAllWorkflowRuns,
+  listRunsWithWaitingGates,
   dbSignalChange
 } from '../data-access'
 import { rpcCall } from '../ws-client'
@@ -455,14 +456,25 @@ export function resolveWorkflowId(args: {
   return { id }
 }
 
+/** The approval node a gate belongs to, so its question and its name come from one lookup. */
+export function approvalNode(
+  workflow: Pick<WorkflowDefinition, 'nodes'> | undefined,
+  nodeId: string
+): WorkflowNode | undefined {
+  return workflow?.nodes.find((n) => n.id === nodeId && n.type === 'approval')
+}
+
 /** What an approval node asks, so a caller answering a gate can read the question first. */
+export function askedBy(node: WorkflowNode | undefined): string | undefined {
+  return (node?.config as ApprovalConfig | undefined)?.message?.trim() || undefined
+}
+
+/** What the gate on a node asks, for a caller holding the definition rather than the node. */
 export function gateMessage(
   workflow: Pick<WorkflowDefinition, 'nodes'> | undefined,
   nodeId: string
 ): string | undefined {
-  const node = workflow?.nodes.find((n) => n.id === nodeId && n.type === 'approval')
-  const message = (node?.config as ApprovalConfig | undefined)?.message
-  return message?.trim() || undefined
+  return askedBy(approvalNode(workflow, nodeId))
 }
 
 /** A waiting node says it is waiting and nothing else; the gate's own question lives in the definition. */
@@ -484,13 +496,16 @@ export function annotateWaitingGates<T extends WorkflowExecution>(
   })
 }
 
-/**
- * Which gate a decision answers.
- *
- * A run parked on an approval has one waiting node, so naming it is usually
- * redundant. A run inside a parallel branch can have several, and answering
- * "the" gate would then be a guess — so that case asks rather than picks.
- */
+/** A run to answer a gate on: recent history first, then every parked run, since a gate can wait past the cap. */
+async function runHoldingGate(
+  runId: string
+): Promise<(WorkflowExecution & { workflowName?: string }) | undefined> {
+  const recent = (await listAllWorkflowRuns(undefined, 500)).find((r) => r.runId === runId)
+  if (recent) return recent
+  return (await listRunsWithWaitingGates()).find((r) => r.runId === runId)
+}
+
+// Which gate a decision answers: one waiting node needs no naming, several would make picking a guess.
 export function resolveGateTarget(
   run: Pick<WorkflowExecution, 'nodeStates'>,
   nodeId?: string
@@ -697,7 +712,7 @@ export function registerWorkflowTools(server: McpServer): void {
 
   server.tool(
     'list_workflow_runs',
-    'List workflow execution history. Filter by workflow_id or task_id.',
+    'List workflow execution history. Filter by workflow_id or task_id; with neither, lists the runs parked on an approval gate, each waiting node saying what it asks.',
     {
       workflow_id: V.id.optional().describe('Filter by workflow ID'),
       task_id: V.id.optional().describe('Filter by task ID (runs triggered by this task)'),
@@ -724,10 +739,9 @@ export function registerWorkflowTools(server: McpServer): void {
         const runs = await withGates(await listWorkflowRuns(args.workflow_id, args.limit ?? 20))
         return { content: [{ type: 'text', text: JSON.stringify(runs, null, 2) }] }
       }
-      return {
-        content: [{ type: 'text', text: 'Error: provide either workflow_id or task_id' }],
-        isError: true
-      }
+      // Neither filter: the runs someone has to answer, which no other tool can find.
+      const waiting = await withGates(await listRunsWithWaitingGates())
+      return { content: [{ type: 'text', text: JSON.stringify(waiting, null, 2) }] }
     }
   )
 
@@ -798,15 +812,14 @@ export function registerWorkflowTools(server: McpServer): void {
       node_id: V.id.optional().describe('The waiting node, when a run has more than one gate open')
     },
     async (args) => {
-      // The same reason stop_workflow_run scans: the decision is broadcast, so an
-      // id nothing matches would report success and answer no gate at all.
-      const run = (await listAllWorkflowRuns(undefined, 500)).find((r) => r.runId === args.run_id)
+      // The decision is broadcast, so an id nothing matches would report success and answer no gate at all.
+      const run = await runHoldingGate(args.run_id)
       if (!run) {
         return {
           content: [
             {
               type: 'text',
-              text: `Error: no run "${args.run_id}" in the last 500. Check list_workflow_runs.`
+              text: `Error: no run "${args.run_id}" in the recent history, and none parked on a gate. Check list_workflow_runs.`
             }
           ],
           isError: true
@@ -819,8 +832,7 @@ export function registerWorkflowTools(server: McpServer): void {
               type: 'text',
               text: `Run ${args.run_id} already finished (${run.status}) — no gate to answer.`
             }
-          ],
-          isError: true
+          ]
         }
       }
 
@@ -833,7 +845,8 @@ export function registerWorkflowTools(server: McpServer): void {
       }
 
       const workflow = (await dbListWorkflows()).find((w) => w.id === run.workflowId)
-      const asked = gateMessage(workflow, target.nodeId)
+      const gateNode = approvalNode(workflow, target.nodeId)
+      const asked = askedBy(gateNode)
 
       try {
         await rpcCall('workflow:resolveGate', {
@@ -848,7 +861,7 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      const gate = workflow?.nodes.find((n) => n.id === target.nodeId)?.label ?? target.nodeId
+      const gate = gateNode?.label ?? target.nodeId
       return {
         content: [
           {
