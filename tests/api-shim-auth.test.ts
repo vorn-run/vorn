@@ -280,3 +280,41 @@ describe('a bundle and a server that disagree', () => {
     expect(ready).not.toHaveBeenCalled()
   })
 })
+
+describe('the filter a phone asked for', () => {
+  const sentMethods = (s: FakeSocket): string[] =>
+    s.sent.map((m) => (JSON.parse(m) as { method: string }).method)
+
+  it('is sent again after a reconnect, which opens with only the base topics', async () => {
+    localStorage.setItem('vorn.deviceToken', 'ok')
+    const api = createApiShim('ws://x/ws')
+    sockets[0].open()
+    sockets[0].authOk()
+    await vi.advanceTimersByTimeAsync(0)
+
+    void api.setTopics(['session:*', 'terminal:data#abc']).catch(() => {})
+    expect(sentMethods(sockets[0])).toContain('subscribe:set')
+
+    sockets[0].closeWith(1006)
+    await vi.advanceTimersByTimeAsync(2000)
+    sockets[1].open()
+    sockets[1].authOk()
+    await vi.advanceTimersByTimeAsync(0)
+
+    const resent = sockets[1].sent
+      .map((m) => JSON.parse(m) as { method: string; params?: { topics?: string[] } })
+      .find((m) => m.method === 'subscribe:set')
+    expect(resent?.params?.topics).toEqual(['session:*', 'terminal:data#abc'])
+  })
+
+  it('is not sent on a reconnect when nothing was ever asked for', async () => {
+    createApiShim('ws://x/ws')
+    sockets[0].open()
+    sockets[0].authOk()
+    sockets[0].closeWith(1006)
+    await vi.advanceTimersByTimeAsync(2000)
+    sockets[1].open()
+    sockets[1].authOk()
+    expect(sentMethods(sockets[1])).not.toContain('subscribe:set')
+  })
+})

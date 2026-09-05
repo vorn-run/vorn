@@ -91,6 +91,8 @@ class RpcClient {
    */
   private onAuthRequired: (() => void) | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  /** The filter this socket last asked for. A reconnect opens with only the URL's base set. */
+  private topics: readonly string[] | null = null
 
   constructor(url: string) {
     this.url = url
@@ -193,6 +195,9 @@ class RpcClient {
       // so this — not `onopen` — is what settles `_ready`.
       if (msg.method === 'auth:ok') {
         this._resolveReady()
+        // A fresh socket knows only the URL's base topics; the cards on screen
+        // would otherwise go quiet after every network change until scrolled.
+        if (this.topics) this.notify('subscribe:set', { topics: this.topics })
         return
       }
 
@@ -289,6 +294,12 @@ class RpcClient {
   }
 
   /** Fire-and-forget notification (no response expected) */
+  /** Replaces the socket's filter now, and again on every reconnect. */
+  setTopics(topics: readonly string[]): Promise<void> {
+    this.topics = topics
+    return this.invoke('subscribe:set', { topics }).then(() => undefined)
+  }
+
   notify(method: string, params?: unknown): void {
     const msg = JSON.stringify({ jsonrpc: '2.0', method, params })
     if (this.ws.readyState === WebSocket.OPEN) {
@@ -523,8 +534,7 @@ export function createApiShim(wsUrl: string) {
     getGitDiffStat: (cwd: string) => rpc.invoke('git:diffStat', cwd),
     getGitDiffFull: (req: string | GitDiffRange) => rpc.invoke('git:diffFull', req),
     // Replaces the socket's filter in place; the initial one rides on the URL.
-    setTopics: (topics: readonly string[]) =>
-      rpc.invoke('subscribe:set', { topics }).then(() => undefined),
+    setTopics: (topics: readonly string[]) => rpc.setTopics(topics),
     gitCommit: (payload: unknown) => rpc.invoke('git:commit', payload),
     gitPush: (cwd: string) => rpc.invoke('git:push', cwd),
 
