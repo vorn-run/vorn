@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { ScriptConfig, IPC } from '@vornrun/shared/types'
-import { getLaunchEnv } from './process-utils'
+import { getLaunchDataDir, getLaunchEnv } from './process-utils'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { SECRET_ENV_FIELD, isEnvName } from './connectors/keys'
 import log from './logger'
@@ -57,35 +57,45 @@ export interface ScriptExecutionResult {
 
 export const scriptRunnerEvents = new EventEmitter()
 
-/** The name a script of each type is written under, so its interpreter reads a file it recognises. */
-const SCRIPT_FILE: Record<ScriptConfig['scriptType'], string> = {
-  bash: 'script.sh',
-  powershell: 'script.ps1',
-  python: 'script.py',
-  node: 'script.js'
+interface Interpreter {
+  /** Set only where the program must be a file; the rest read it whole from stdin. */
+  file?: string
+  command: (isWin: boolean) => string
+  args: (file: string) => string[]
 }
 
-/** How each interpreter is asked to run that file; user args follow it as `$1`, `argv` and the like. */
-function invocationFor(
-  scriptType: ScriptConfig['scriptType'],
-  file: string
-): { command: string; args: string[] } {
-  const isWin = process.platform === 'win32'
-  switch (scriptType) {
-    case 'bash':
-      return { command: isWin ? 'bash.exe' : 'bash', args: [file] }
-    case 'powershell':
-      return { command: 'pwsh', args: ['-File', file] }
-    case 'python':
-      return { command: isWin ? 'python' : 'python3', args: [file] }
-    case 'node':
-      return { command: 'node', args: [file] }
-  }
+/**
+ * How each script type is run.
+ *
+ * bash and pwsh read their program as they go, so a script arriving on stdin
+ * loses every line below the first that reads input. node and python read the
+ * whole program before running it, and keep resolving imports against the
+ * working directory only while they are given it on stdin.
+ */
+const INTERPRETERS: Record<string, Interpreter | undefined> = Object.assign(Object.create(null), {
+  bash: {
+    file: 'script.sh',
+    command: (w: boolean) => (w ? 'bash.exe' : 'bash'),
+    args: (f: string) => [f]
+  },
+  powershell: { file: 'script.ps1', command: () => 'pwsh', args: (f: string) => ['-File', f] },
+  python: { command: (w: boolean) => (w ? 'python' : 'python3'), args: () => ['-'] },
+  node: { command: () => 'node', args: () => ['-'] }
+} satisfies Record<ScriptConfig['scriptType'], Interpreter>)
+
+/** Under the data directory rather than a shared one, so nothing another account writes is in reach. */
+async function scriptFileFor(name: string, contents: string): Promise<string> {
+  const root = path.join(getLaunchDataDir() ?? os.tmpdir(), 'scripts')
+  await mkdir(root, { recursive: true, mode: 0o700 })
+  const dir = await mkdtemp(path.join(root, 'run-'))
+  const file = path.join(dir, name)
+  await writeFile(file, contents, { mode: 0o600 })
+  return file
 }
 
 export async function executeScript(config: ScriptConfig): Promise<ScriptExecutionResult> {
-  const fileName = SCRIPT_FILE[config.scriptType]
-  if (!fileName) {
+  const interpreter = INTERPRETERS[config.scriptType]
+  if (!interpreter) {
     return {
       success: false,
       output: '',
@@ -94,38 +104,42 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
   }
 
   const runId = config.runId
-  let dir: string
-  try {
-    // A file rather than stdin, so a step that reads input does not swallow the rest of its own script.
-    dir = await mkdtemp(path.join(os.tmpdir(), 'vorn-script-'))
-    await writeFile(path.join(dir, fileName), config.scriptContent, { mode: 0o600 })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    log.error(`[script-runner] could not write the script: ${message}`)
+  const fail = (message: string, output = ''): ScriptExecutionResult => {
+    log.error(`[script-runner] ${message}`)
     if (runId) {
       scriptRunnerEvents.emit(IPC.SCRIPT_DATA, { runId, data: `Error: ${message}\n` })
       scriptRunnerEvents.emit(IPC.SCRIPT_EXIT, { runId, exitCode: 1 })
     }
-    return { success: false, output: '', error: message }
+    return { success: false, output, error: message }
+  }
+
+  let file = ''
+  if (interpreter.file) {
+    try {
+      file = await scriptFileFor(interpreter.file, config.scriptContent)
+    } catch (err) {
+      return fail(`could not write the script: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   return new Promise((resolve) => {
-    const { command, args } = invocationFor(config.scriptType, path.join(dir, fileName))
-    if (config.args && config.args.length > 0) args.push(...config.args)
+    const command = interpreter.command(process.platform === 'win32')
+    const args = [...interpreter.args(file), ...(config.args ?? [])]
 
     const cwd = config.cwd || config.projectPath || process.cwd()
 
     log.info(`[script-runner] executing ${config.scriptType} script in ${cwd}`)
 
-    /** The script's own copy goes with it, so nothing is left in the temp directory after the answer. */
+    /** The script's own copy goes with it, so nothing is left behind after the answer. */
     const finish = async (result: ScriptExecutionResult): Promise<void> => {
-      await rm(dir, { recursive: true, force: true }).catch(() => {})
+      if (file) await rm(path.dirname(file), { recursive: true, force: true }).catch(() => {})
       resolve(result)
     }
 
     const child = spawn(command, args, {
       cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // A script that came as a file has no use for stdin, and cannot block waiting on it.
+      stdio: [file ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       // Only this child sees them: the secrets are read here rather than held
       // anywhere the definition, a run record or an export could reach.
       env: { ...getLaunchEnv(), ...secretEnvFor(config.secretsFrom) },
@@ -135,29 +149,20 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
     let stdout = ''
     let stderr = ''
 
-    child.stdout.on('data', (data) => {
-      const chunk = data.toString()
+    child.stdout?.on('data', (data) => {
+      const chunk = String(data)
       stdout += chunk
       if (runId) scriptRunnerEvents.emit(IPC.SCRIPT_DATA, { runId, data: chunk })
     })
 
-    child.stderr.on('data', (data) => {
-      const chunk = data.toString()
+    child.stderr?.on('data', (data) => {
+      const chunk = String(data)
       stderr += chunk
       if (runId) scriptRunnerEvents.emit(IPC.SCRIPT_DATA, { runId, data: chunk })
     })
 
     child.on('error', (err) => {
-      log.error(`[script-runner] spawn error: ${err.message}`)
-      if (runId) {
-        scriptRunnerEvents.emit(IPC.SCRIPT_DATA, { runId, data: `Error: ${err.message}\n` })
-        scriptRunnerEvents.emit(IPC.SCRIPT_EXIT, { runId, exitCode: 1 })
-      }
-      void finish({
-        success: false,
-        output: stdout,
-        error: err.message
-      })
+      void finish(fail(err.message, stdout))
     })
 
     child.on('close', (code) => {
@@ -170,5 +175,11 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
         exitCode: code ?? undefined
       })
     })
+
+    if (!file) {
+      child.stdin?.on('error', () => {}) // prevent EPIPE if process exits early
+      child.stdin?.write(config.scriptContent)
+      child.stdin?.end()
+    }
   })
 }

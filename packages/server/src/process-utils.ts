@@ -277,6 +277,11 @@ export function setLaunchDataDir(dir: string): void {
   launchDataDir = dir
 }
 
+/** Null until the server says where its files live, which only a process that never started one can be. */
+export function getLaunchDataDir(): string | null {
+  return launchDataDir
+}
+
 function isWindowsStylePath(p: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('\\\\')
 }

@@ -1,8 +1,28 @@
-import { describe, it, expect } from 'vitest'
-import { existsSync } from 'node:fs'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { executeScript, scriptRunnerEvents } from '../packages/server/src/script-runner'
+import { setLaunchDataDir } from '../packages/server/src/process-utils'
 import { IPC } from '@vornrun/shared/types'
+
+/** Where the server would keep its files, so a script's own copy lands where the real one does. */
+const dataDir = mkdtempSync(path.join(os.tmpdir(), 'vorn-script-test-'))
+
+/** A project with a dependency, to prove a node script still resolves against the directory it runs in. */
+const project = path.join(dataDir, 'project')
+
+beforeAll(() => {
+  setLaunchDataDir(dataDir)
+  const module = path.join(project, 'node_modules', 'vorn-fixture')
+  mkdirSync(module, { recursive: true })
+  writeFileSync(path.join(module, 'package.json'), '{"name":"vorn-fixture","main":"index.js"}')
+  writeFileSync(path.join(module, 'index.js'), 'module.exports = "from the project"')
+})
+
+afterAll(() => {
+  rmSync(dataDir, { recursive: true, force: true })
+})
 
 describe('script-runner streaming', () => {
   it('does not emit when runId is absent', async () => {
@@ -77,8 +97,33 @@ describe('script-runner streaming', () => {
 
     const script = result.output.trim()
     expect(path.basename(script)).toBe('script.sh')
+    // Under this machine's own data directory, not a directory every account can write.
+    expect(script.startsWith(path.join(dataDir, 'scripts'))).toBe(true)
     expect(existsSync(script)).toBe(false)
     expect(existsSync(path.dirname(script))).toBe(false)
+  })
+
+  it('lets a node script require what the directory it runs in provides', async () => {
+    // A file would resolve against wherever it was written, so node keeps reading its program from stdin.
+    const result = await executeScript({
+      scriptType: 'node',
+      scriptContent: 'console.log(require("vorn-fixture"))',
+      cwd: project
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('from the project')
+  })
+
+  it('runs a node script that never reads the input it was handed', async () => {
+    const result = await executeScript({
+      scriptType: 'node',
+      scriptContent: 'console.log(JSON.stringify(process.argv.slice(2)))',
+      args: ['alpha', 'beta']
+    })
+
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('["alpha","beta"]')
   })
 
   it('emits SCRIPT_EXIT with non-zero code on script failure', async () => {
