@@ -398,6 +398,39 @@ describe('run concurrency', () => {
     expect(b.runId).toBe(a.runId)
   })
 
+  it('starts beside a run parked on an approval gate', async () => {
+    // The gate used to hold the workflow's queue position, so a second run
+    // could not begin until someone answered the first.
+    const base = makeWorkflow('wf-gate')
+    const workflow = {
+      ...base,
+      nodes: [
+        base.nodes.find((node) => node.id === 'trigger')!,
+        {
+          id: 'approval',
+          type: 'approval',
+          label: 'Approve',
+          position: { x: 0, y: 1 },
+          config: {}
+        },
+        base.nodes.find((node) => node.id === 'agent')!
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'approval' },
+        { id: 'e2', source: 'approval', target: 'agent' }
+      ]
+    } as unknown as WorkflowDefinition
+    mockState.config.workflows = [workflow]
+
+    const parked = await executeWorkflow(workflow, { inputs: { issue: 'gh-7' } })
+    expect(parked.nodeStates.find((n) => n.nodeId === 'approval')?.status).toBe('waiting')
+
+    const second = await executeWorkflow(workflow, { inputs: { issue: 'gh-8' } })
+
+    expect(second.runId).not.toBe(parked.runId)
+    expect(second.nodeStates.find((n) => n.nodeId === 'approval')?.status).toBe('waiting')
+  })
+
   it('collapses two identical triggers fired at once into a single run', async () => {
     const wf = makeWorkflow()
     const ids: string[] = []

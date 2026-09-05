@@ -1,8 +1,15 @@
 import { describe, it, expect, vi } from 'vitest'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import type { WorkflowDefinition, WorkflowNode, TriggerConfig } from '../src/shared/types'
+
+// The tick lock writes under the home directory, which the scheduler reads once
+// at import; point it somewhere disposable before that happens.
+const lockHome = vi.hoisted(() => {
+  const dir = `${process.env.TMPDIR?.replace(/\/$/, '') ?? '/tmp'}/vorn-scheduler-${process.pid}`
+  process.env.HOME = dir
+  return dir
+})
 
 // Mock dependencies before importing
 vi.mock('node-cron', () => ({
@@ -133,8 +140,7 @@ describe('getNextRun', () => {
 })
 
 describe('firing a workflow', () => {
-  // The tick lock is a file; the directory is the server's own and may not exist yet.
-  const LOCK_DIR = path.join(os.homedir(), '.vorn')
+  const LOCK_DIR = path.join(lockHome, '.vorn')
 
   function clearLocks(workflowId: string): void {
     fs.mkdirSync(LOCK_DIR, { recursive: true })

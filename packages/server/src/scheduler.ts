@@ -106,6 +106,8 @@ class Scheduler extends EventEmitter {
   /** Of those, the ones that do real work here rather than in a renderer. */
   private connectorPollWorkflowIds = new Set<string>()
   private timeouts = new Map<string, NodeJS.Timeout>()
+  /** Polls run server-side, before any run claim, so they serialize here. */
+  private pollsInFlight = new Set<string>()
   private inboxTimer: NodeJS.Timeout | null = null
 
   startInboxWorker(): void {
@@ -239,7 +241,7 @@ class Scheduler extends EventEmitter {
           continue
         }
         try {
-          const task = cron.schedule(trigger.cron, () => this.executeWorkflow(wf.id, 'cron'), {
+          const task = cron.schedule(trigger.cron, () => this.fireScheduled(wf.id), {
             timezone: trigger.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
           })
           this.cronJobs.set(wf.id, task)
@@ -279,7 +281,7 @@ class Scheduler extends EventEmitter {
               this.timeouts.delete(wf.id)
               this.syncSchedules(configManager.loadConfig().workflows ?? [])
             } else {
-              this.executeWorkflow(wf.id, 'cron')
+              this.fireScheduled(wf.id)
             }
           }, safeDelay)
           this.timeouts.set(wf.id, timer)
@@ -288,41 +290,45 @@ class Scheduler extends EventEmitter {
     }
   }
 
-  // Only a tick takes the lock; a repeated manual run is caught by the run claim on its inputs.
-  private executeWorkflow(
-    workflowId: string,
-    source: 'cron' | 'manual',
-    inputs?: Record<string, unknown>
-  ): void {
-    if (source === 'cron' && !acquireTickLock(workflowId)) {
+  /** A schedule reaching its time: one tick, however many instances hear it. */
+  private fireScheduled(workflowId: string): void {
+    this.timeouts.delete(workflowId)
+    if (!acquireTickLock(workflowId)) {
       log.info(`[scheduler] skipping workflow ${workflowId} — already fired this minute`)
-      this.timeouts.delete(workflowId)
       return
     }
+    this.executeWorkflow(workflowId)
+  }
 
+  // Runs of one workflow go side by side; a repeat is caught by the run claim on its inputs.
+  private executeWorkflow(workflowId: string, inputs?: Record<string, unknown>): void {
     // Look up the workflow to decide whether this is a connector-poll fan-out
     // or a normal single-execution fire.
     const workflows = configManager.loadConfig().workflows ?? []
     const wf = workflows.find((w) => w.id === workflowId)
-    if (!wf) {
-      this.timeouts.delete(workflowId)
-      return
-    }
+    if (!wf) return
     const trigger = getTriggerConfig(wf)
 
     if (trigger?.triggerType === 'connectorPoll') {
+      // A poll calls the connector and writes the inbox here, before any run
+      // claim exists to catch a repeat, so one workflow polls one at a time.
+      if (this.pollsInFlight.has(workflowId)) {
+        log.info(`[scheduler] skipping poll for ${workflowId} — one is already in flight`)
+        return
+      }
       // Fire-and-forget — the dispatcher emits N SCHEDULER_EXECUTE events, one
       // per new item. Cursor advance and error recording happen inside.
-      this.dispatchConnectorPoll(workflowId, trigger).catch((err) => {
-        log.error(`[scheduler] connectorPoll dispatch failed for ${workflowId}:`, err)
-      })
-      this.timeouts.delete(workflowId)
+      this.pollsInFlight.add(workflowId)
+      this.dispatchConnectorPoll(workflowId, trigger)
+        .catch((err) => {
+          log.error(`[scheduler] connectorPoll dispatch failed for ${workflowId}:`, err)
+        })
+        .finally(() => this.pollsInFlight.delete(workflowId))
       return
     }
 
     log.info(`[scheduler] executing workflow ${workflowId}`)
     this.emit('client-message', IPC.SCHEDULER_EXECUTE, { workflowId, inputs })
-    this.timeouts.delete(workflowId)
   }
 
   /**
@@ -461,15 +467,9 @@ class Scheduler extends EventEmitter {
     return null
   }
 
-  /**
-   * Trigger a workflow now, bypassing the schedule: the same dispatch path as a
-   * tick, so no hidden logic — just a forced fire.
-   *
-   * `inputs` carries the values a manual run was started with, forwarded to
-   * the renderer so `{{inputs.*}}` resolves the same as a direct run.
-   */
+  /** `inputs` are forwarded to the renderer so `{{inputs.*}}` resolves as it does for a direct run. */
   triggerWorkflow(workflowId: string, inputs?: Record<string, unknown>): void {
-    this.executeWorkflow(workflowId, 'manual', inputs)
+    this.executeWorkflow(workflowId, inputs)
   }
 
   /**

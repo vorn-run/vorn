@@ -396,20 +396,8 @@ export function App() {
         const context = schedulerExecutionContext(connectorItem, inputs)
         try {
           const execution = await runWorkflow(workflow, context, { source: 'scheduler' })
-          // A different run may be parked on an approval gate. It did not
-          // accept this event, so release the row for a short retry instead of
-          // holding its full delivery lease.
+          // The server may have re-leased the row while the run was starting.
           if (
-            connectorInboxId !== undefined &&
-            connectorInboxLeaseToken &&
-            execution.connectorInboxId !== connectorInboxId
-          ) {
-            await window.api.completeConnectorInbox({
-              id: connectorInboxId,
-              leaseToken: connectorInboxLeaseToken,
-              disposition: 'defer'
-            })
-          } else if (
             connectorItem &&
             connectorInboxLeaseToken &&
             execution.connectorInboxLeaseToken !== connectorInboxLeaseToken
