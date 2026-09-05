@@ -52,25 +52,44 @@ describe('isNewerVersion', () => {
   })
 })
 
+/** What the catalog says about a connector a release has published. */
+const listed = (version: string) => ({ version, packUrl: `https://packs.test/acme-${version}.tgz` })
+
 describe('packStateFor', () => {
   it('is absent with nothing installed and nothing running', () => {
     expect(packStateFor({})).toEqual({ kind: 'absent' })
   })
 
   it('reports what is installed, with no update when the catalog matches', () => {
-    expect(packStateFor({ installed: pack(), catalogVersion: '1.2.0' })).toEqual({
+    expect(packStateFor({ installed: pack(), catalogItem: listed('1.2.0') })).toEqual({
       kind: 'installed',
       version: '1.2.0'
     })
   })
 
   it('offers an update only when the catalog publishes something newer', () => {
-    expect(packStateFor({ installed: pack(), catalogVersion: '1.3.0' })).toMatchObject({
+    expect(packStateFor({ installed: pack(), catalogItem: listed('1.3.0') })).toMatchObject({
       availableVersion: '1.3.0'
     })
-    expect(packStateFor({ installed: pack(), catalogVersion: '1.1.0' })).not.toHaveProperty(
+    expect(packStateFor({ installed: pack(), catalogItem: listed('1.1.0') })).not.toHaveProperty(
       'availableVersion'
     )
+  })
+
+  it('says a listed connector is unreleased when no release published a pack', () => {
+    expect(packStateFor({ catalogItem: { version: '1.3.0' } })).toEqual({ kind: 'not-released' })
+  })
+
+  it('offers no update from a catalog entry that names a version but no pack', () => {
+    expect(packStateFor({ installed: pack(), catalogItem: { version: '1.3.0' } })).toEqual({
+      kind: 'installed',
+      version: '1.2.0'
+    })
+  })
+
+  it('leaves a pack the catalog does not carry alone, since it waits on no release', () => {
+    expect(packStateFor({ installed: pack() })).toMatchObject({ kind: 'installed' })
+    expect(packStateFor({})).toEqual({ kind: 'absent' })
   })
 
   it('carries the rollback target when there is one', () => {
@@ -119,6 +138,17 @@ describe('describePackStatus', () => {
       tone: 'idle',
       percent: null,
       action: 'install',
+      busy: false
+    })
+  })
+
+  it('offers nothing for an unreleased entry, and says why in one sentence', () => {
+    expect(describePackStatus({ kind: 'not-released' })).toEqual({
+      label: 'Not released yet',
+      detail: 'Not released yet, so there is nothing to install.',
+      tone: 'idle',
+      percent: null,
+      action: null,
       busy: false
     })
   })
@@ -191,6 +221,12 @@ describe('canAddConnection', () => {
     )
     expect(
       canAddConnection({ kind: 'absent' }, { source: 'catalog', hasLegacyLaunch: false })
+    ).toBe(false)
+  })
+
+  it('refuses an unreleased entry, whose package name would connect to nothing', () => {
+    expect(
+      canAddConnection({ kind: 'not-released' }, { source: 'catalog', hasLegacyLaunch: true })
     ).toBe(false)
   })
 

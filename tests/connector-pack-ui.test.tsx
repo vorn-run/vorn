@@ -20,6 +20,7 @@ const catalogEntry: ConnectorCatalogItem = {
   description: 'Acme tickets',
   packageName: '@vornrun/connector-acme',
   version: '1.3.0',
+  packUrl: 'https://packs.test/acme-1.3.0.vorn.tgz',
   capabilities: ['triggers'],
   category: 'Development',
   launch: { command: 'npx', args: ['-y', '@vornrun/connector-acme'] }

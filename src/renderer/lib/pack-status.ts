@@ -4,6 +4,7 @@ import type { StatusTone } from './status-tone'
 /** A rejection is session state, not persisted: nothing was written to disk. */
 export type PackState =
   | { kind: 'absent' }
+  | { kind: 'not-released' }
   | { kind: 'installing'; phase: ConnectorInstallProgress['phase']; percent?: number }
   | {
       kind: 'installed'
@@ -78,11 +79,13 @@ export function isNewerVersion(candidate: string, current: string): boolean {
 /** A live install outranks a rejection, which outranks what is on disk. */
 export function packStateFor(input: {
   installed?: InstalledConnectorPack | undefined
-  /** Version the catalog publishes, used only to offer an update. */
-  catalogVersion?: string | undefined
+  /** The catalog's own entry: its version offers an update, and it names a pack only once a release published one. */
+  catalogItem?: { version?: string; packUrl?: string } | undefined
   progress?: ConnectorInstallProgress | undefined
 }): PackState {
-  const { installed, catalogVersion, progress } = input
+  const { installed, catalogItem, progress } = input
+  // Only a listed connector can be unreleased; one that brings its own pack has nothing to wait for.
+  const released = !catalogItem || Boolean(catalogItem.packUrl)
 
   if (progress && progress.phase !== 'installed' && progress.phase !== 'failed') {
     return {
@@ -94,13 +97,17 @@ export function packStateFor(input: {
   if (progress?.phase === 'failed') {
     return { kind: 'rejected', error: progress.error ?? 'The pack could not be installed' }
   }
-  if (!installed) return { kind: 'absent' }
+  if (!installed) return released ? { kind: 'absent' } : { kind: 'not-released' }
 
+  // A catalog that names a newer version but no pack has nothing to update from.
+  const publishedVersion = released ? catalogItem?.version : undefined
   return {
     kind: 'installed',
     version: installed.version,
-    ...(catalogVersion &&
-      isNewerVersion(catalogVersion, installed.version) && { availableVersion: catalogVersion }),
+    ...(publishedVersion &&
+      isNewerVersion(publishedVersion, installed.version) && {
+        availableVersion: publishedVersion
+      }),
     ...(installed.previousVersion !== undefined && { previousVersion: installed.previousVersion })
   }
 }
@@ -114,6 +121,16 @@ export function describePackStatus(state: PackState): PackStatusView {
         tone: 'idle',
         percent: null,
         action: 'install',
+        busy: false
+      }
+
+    case 'not-released':
+      return {
+        label: 'Not released yet',
+        detail: 'Not released yet, so there is nothing to install.',
+        tone: 'idle',
+        percent: null,
+        action: null,
         busy: false
       }
 
@@ -168,7 +185,7 @@ export function describePackStatus(state: PackState): PackStatusView {
   }
 }
 
-/** A catalog entry with no pack still launches by name, so it stays reachable. */
+/** Whether a connection can be added: an installed pack, a launch by name, or a catalog entry that has a pack. */
 export function canAddConnection(
   state: PackState,
   route: { source: string; hasLegacyLaunch?: boolean }
@@ -177,5 +194,7 @@ export function canAddConnection(
   // An MCP server is a command, so there is nothing to install before connecting.
   if (route.source === 'mcp') return true
   if (state.kind === 'installed') return true
+  // Nothing was published to install, so there is nothing to connect to either.
+  if (state.kind === 'not-released') return false
   return route.hasLegacyLaunch === true
 }

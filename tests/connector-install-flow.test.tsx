@@ -19,6 +19,7 @@ const CATALOG: ConnectorCatalogItem = {
   name: 'Acme',
   description: 'Acme tickets',
   packageName: '@vornrun/connector-acme',
+  packUrl: 'https://packs.test/acme-1.2.0.vorn.tgz',
   capabilities: ['actions'],
   category: 'Development',
   keywords: [],

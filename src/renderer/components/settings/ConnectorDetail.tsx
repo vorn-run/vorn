@@ -67,11 +67,7 @@ export function ConnectorDetail({
 }) {
   const details = listingDetails(listing, builtIns)
   const entry = listing.catalogItem
-  const state = packStateFor({
-    installed: listing.pack,
-    catalogVersion: entry?.version,
-    progress
-  })
+  const state = packStateFor({ installed: listing.pack, catalogItem: entry, progress })
   const status = describePackStatus(state)
   const busy = Boolean(activity?.phrase)
 
@@ -263,7 +259,8 @@ export function ConnectorDetail({
           </a>
         )}
 
-        {listing.source === 'catalog' && !listing.pack && (
+        {/* An unreleased entry says so in the status line above, and says it once. */}
+        {listing.source === 'catalog' && !listing.pack && state.kind === 'absent' && (
           <span className="text-[11px] text-gray-600 ml-auto">
             Nothing is on disk until you install it.
           </span>

@@ -40,8 +40,8 @@ const CURRENT_FILE = 'current.json'
 
 /**
  * Everything a pack may carry, so nothing else can be reached at run time.
- * `package.json` is tolerated because an npm tarball always has one; it is
- * still held to the dependency and script gates below.
+ * `package.json` is tolerated because a tarball built by a packager carries
+ * one; it is still held to the dependency and script gates below.
  */
 const PACK_FILES = [MANIFEST_FILE, ENTRY_FILE, 'package.json']
 
@@ -203,7 +203,7 @@ export function isSafeArchiveEntry(path: string, type: string): boolean {
   return !path.split(/[/\\]/).includes('..')
 }
 
-/** npm tarballs put everything under `package/`; a `.vorn.tgz` does not. */
+/** A tarball may wrap everything in one directory; a `.vorn.tgz` does not. */
 function packRootOf(dir: string): string {
   if (existsSync(join(dir, MANIFEST_FILE))) return dir
   const entries = readdirSync(dir, { withFileTypes: true })
@@ -228,8 +228,7 @@ async function readSource(
   }
 
   const get = options.fetchImpl ?? fetch
-  const url = source.kind === 'url' ? source.url : await resolveNpmTarball(source.packageName, get)
-  const response = await get(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
+  const response = await get(source.url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
   if (!response.ok) throw new Error(`Downloading the pack failed with HTTP ${response.status}`)
 
   const total = Number(response.headers.get('content-length')) || 0
@@ -249,7 +248,7 @@ async function readSource(
   }
 
   const bytes = Buffer.concat(chunks)
-  if (source.kind === 'url' && source.sha256) {
+  if (source.sha256) {
     const digest = createHash('sha256').update(bytes).digest('hex')
     if (digest !== source.sha256.toLowerCase()) {
       throw new Error('The downloaded pack does not match the checksum the catalog published')
@@ -272,22 +271,6 @@ async function* streamOf(response: Response): AsyncGenerator<Uint8Array> {
   }
 }
 
-async function resolveNpmTarball(packageName: string, get: typeof fetch): Promise<string> {
-  const response = await get(
-    `https://registry.npmjs.org/${encodeURIComponent(packageName).replace('%40', '@')}/latest`,
-    { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) }
-  )
-  if (!response.ok) {
-    throw new Error(`${packageName} could not be looked up (HTTP ${response.status})`)
-  }
-  const metadata = (await response.json()) as { dist?: { tarball?: unknown } }
-  const tarball = metadata?.dist?.tarball
-  if (typeof tarball !== 'string' || tarball === '') {
-    throw new Error(`${packageName} published no tarball to install`)
-  }
-  return tarball
-}
-
 function sizeMessage(bytes: number): string {
   return `The pack is ${Math.round(bytes / 1024)} KB; Vorn installs at most ${MAX_PACK_BYTES / 1024 / 1024} MB`
 }
@@ -297,7 +280,6 @@ function unpackedMessage(bytes: number): string {
 }
 
 function describeSource(source: ConnectorPackSource): string {
-  if (source.kind === 'npm') return source.packageName
   if (source.kind === 'staged') return `a checked pack`
   return source.kind === 'file' ? source.path : source.url
 }

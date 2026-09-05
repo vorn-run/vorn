@@ -194,7 +194,7 @@ export function registerConnectorTools(server: McpServer): void {
 
   server.tool(
     'install_connector',
-    'Install a connector from a pack file, from the catalog, or from an npm package, creating ' +
+    'Install a connector from a pack file, from the catalog, or by a launch command, creating ' +
       'a connection ready to poll. Call list_connectors for catalog ids and ' +
       'inspect_connector_package to see which environment variables are needed. Secrets cannot ' +
       'be set this way — see the error it returns if the connector requires one.',
@@ -202,7 +202,9 @@ export function registerConnectorTools(server: McpServer): void {
       connector_id: V.id
         .optional()
         .describe('Catalog connector id (from list_connectors). Use this or package.'),
-      package: V.shortText.optional().describe('npm package name or launch command'),
+      package: V.shortText
+        .optional()
+        .describe('Launch command the connection runs, or a package name to run with npx'),
       pack_path: V.shortText
         .optional()
         .describe(

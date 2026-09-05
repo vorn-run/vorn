@@ -113,7 +113,9 @@ export function requirementAction(
   // ask about. Settings is where a server gets wired up by hand.
   if (listing.source === 'mcp') return { kind: 'none' }
 
-  const state = packStateFor({ installed: listing.pack })
+  const state = packStateFor({ installed: listing.pack, catalogItem: listing.catalogItem })
+  // No release published a pack, so neither button would do anything.
+  if (state.kind === 'not-released') return { kind: 'none' }
   const route = { source: listing.source, hasLegacyLaunch: !!listing.catalogItem?.packageName }
   return canAddConnection(state, route)
     ? { kind: 'addConnection', listing }

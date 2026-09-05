@@ -261,7 +261,7 @@ export function ConnectorRow({
   const details = listingDetails(listing, builtIns)
   const state = packStateFor({
     installed: listing.pack,
-    catalogVersion: listing.catalogItem?.version,
+    catalogItem: listing.catalogItem,
     progress
   })
   const status = describePackStatus(state)
@@ -323,13 +323,14 @@ export function ConnectorRow({
             </span>
           )}
 
-          {/* The only colour on the row: a rejection, or the dot saying it is on disk. */}
+          {/* The only colour on the row: a rejection, an unreleased entry, or the dot saying it is on disk. */}
           {state.kind !== 'absent' && (
             <span
               className={`flex items-center gap-1.5 text-[11px] mt-1.5 ${TONE_TEXT[status.tone]}`}
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT[status.tone]}`} />
-              {status.detail ?? status.label}
+              {/* A row has room for the label; the whole sentence belongs on the page. */}
+              {state.kind === 'not-released' ? status.label : (status.detail ?? status.label)}
             </span>
           )}
 
