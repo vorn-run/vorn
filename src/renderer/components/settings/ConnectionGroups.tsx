@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Plus, AlertTriangle } from 'lucide-react'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { ConnectionRow } from './ConnectionRow'
+import type { RowActivity } from '../../lib/use-row-action'
 import { groupConnections, type ConnectorListing } from '../../lib/connector-browse'
 import type { ConnectorManifest, SourceConnection, WorkflowDefinition } from '../../../shared/types'
 
@@ -29,8 +30,7 @@ export function ConnectionGroups({
   manifests,
   statuses,
   workflows,
-  runningId,
-  backfillingId,
+  activity,
   backfillResult,
   onAdd,
   onRun,
@@ -45,11 +45,10 @@ export function ConnectionGroups({
   manifests: Record<string, ConnectorManifest | undefined>
   statuses: ConnectorStatus[]
   workflows: WorkflowDefinition[]
-  runningId: string | null
-  backfillingId: string | null
+  activity: RowActivity
   backfillResult: Record<string, { imported: number; updated: number; error?: string }>
   onAdd: (listing: ConnectorListing) => void
-  onRun: (workflowId: string) => void
+  onRun: (workflowId: string, connectionId: string) => void
   onBackfill: (connectionId: string) => void
   onDelete: (connectionId: string) => void
   onResetWorkflow: (connectionId: string, event: string) => void
@@ -111,8 +110,7 @@ export function ConnectionGroups({
                   manifest={manifest}
                   seededWorkflows={seededFor(workflows, conn)}
                   missingEvents={missingFor(workflows, conn, manifest)}
-                  runningId={runningId}
-                  backfillingId={backfillingId}
+                  activity={activity}
                   backfillResult={backfillResult}
                   onRun={onRun}
                   onBackfill={onBackfill}

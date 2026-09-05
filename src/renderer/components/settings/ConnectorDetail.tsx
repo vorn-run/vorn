@@ -18,7 +18,10 @@ import {
   type ConnectorListing
 } from '../../lib/connector-browse'
 import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
+import type { RowState } from '../../lib/use-row-action'
 import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
+import { ActivityLine } from './ActivityLine'
+import { BusyIcon } from './BusyIcon'
 
 /**
  * What a connector does, before anything is downloaded.
@@ -37,6 +40,7 @@ export function ConnectorDetail({
   listing,
   builtIns,
   progress,
+  activity,
   pending,
   onAdd,
   onInstall,
@@ -49,6 +53,8 @@ export function ConnectorDetail({
   builtIns: BuiltInConnector[]
   /** The install running for this connector, when one is. */
   progress?: ConnectorInstallProgress
+  /** What this connector's own actions are doing, and what the last one answered. */
+  activity?: RowState
   /** The confirm sheet for this connector's pack, once it has been verified. */
   pending?: React.ReactNode
   onAdd: () => void
@@ -67,6 +73,7 @@ export function ConnectorDetail({
     progress
   })
   const status = describePackStatus(state)
+  const busy = Boolean(activity?.phrase)
 
   return (
     <div>
@@ -178,6 +185,8 @@ export function ConnectorDetail({
         </p>
       )}
 
+      <ActivityLine {...activity} className="text-[12px] mt-4" />
+
       <div className="flex items-center gap-2 mt-6">
         {/* Nothing to connect: installing it was the whole setup, so the next move is the one it exists for. */}
         {listing.implicitlyConnected ? (
@@ -224,20 +233,22 @@ export function ConnectorDetail({
         {onRollback && state.kind === 'installed' && state.previousVersion && (
           <button
             onClick={onRollback}
+            disabled={busy}
             title={`Go back to v${state.previousVersion}`}
-            className="text-xs text-gray-400 hover:text-gray-200 px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+            className="text-xs text-gray-400 hover:text-gray-200 px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1 disabled:opacity-50"
           >
-            <Undo2 size={12} /> Roll back
+            <BusyIcon busy={busy} icon={Undo2} size={12} /> Roll back
           </button>
         )}
 
         {onRemove && listing.pack && (
           <button
             onClick={onRemove}
+            disabled={busy}
             title="Delete the installed files"
-            className="text-xs text-danger hover:text-danger px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+            className="text-xs text-danger hover:text-danger px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1 disabled:opacity-50"
           >
-            <Trash2 size={12} /> Remove
+            <BusyIcon busy={busy} icon={Trash2} size={12} /> Remove
           </button>
         )}
 

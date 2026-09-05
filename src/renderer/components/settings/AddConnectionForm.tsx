@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '../../stores'
 import { Check, AlertCircle } from 'lucide-react'
+import { BusyIcon } from './BusyIcon'
 import type { ConnectorManifest, TaskStatus } from '../../../shared/types'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { glyphForConnectorId } from '../../lib/use-connections'
@@ -280,9 +281,10 @@ export function AddConnectionForm({
             <button
               onClick={handleSave}
               disabled={saving || !canSave}
-              className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50"
+              className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
             >
-              {saving ? 'Connecting...' : 'Connect'}
+              <BusyIcon busy={saving} size={12} />
+              {saving ? 'Connecting…' : 'Connect'}
             </button>
             <button
               onClick={onCancel}

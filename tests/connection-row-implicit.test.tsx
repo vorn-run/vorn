@@ -36,8 +36,7 @@ function renderRow(filters: Record<string, unknown>) {
       conn={conn}
       seededWorkflows={[]}
       missingEvents={[]}
-      runningId={null}
-      backfillingId={null}
+      activity={{ busy: {}, failed: {}, run: async () => {}, state: () => ({}) }}
       backfillResult={{}}
       onRun={vi.fn()}
       onBackfill={vi.fn()}
