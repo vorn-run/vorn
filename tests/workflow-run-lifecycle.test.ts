@@ -740,6 +740,29 @@ describe('a step that declared its failure survivable', () => {
     expect(execution.status).toBe('success')
     expect(execution.nodeStates.find((n) => n.nodeId === 'agent')?.status).toBe('error')
   })
+
+  it('fails the run for a step the reconciler found no session for, whatever it declared', async () => {
+    // Nothing was recorded of it starting, so "carry on anyway" speaks for a
+    // failure that never happened.
+    mockState.config.workflows = [makeSurvivableWorkflow('wf-abandoned')]
+    const execution: WorkflowExecution = {
+      runId: 'run-abandoned',
+      workflowId: 'wf-abandoned',
+      startedAt: '2026-04-20T10:00:00Z',
+      status: 'running',
+      nodeStates: [
+        { nodeId: 'trigger', status: 'success' },
+        { nodeId: 'agent', status: 'running' }
+      ]
+    }
+
+    await reconcileRunningExecutions([execution], mockState.config.workflows)
+
+    expect(execution.status).toBe('error')
+    const agent = execution.nodeStates.find((n) => n.nodeId === 'agent')
+    expect(agent?.status).toBe('error')
+    expect(agent?.error).toBe('Run abandoned (no session id recorded)')
+  })
 })
 
 describe('connector run recovery', () => {

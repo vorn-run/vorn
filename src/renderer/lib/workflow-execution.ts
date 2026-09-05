@@ -243,7 +243,7 @@ export async function reconcileRunningExecutions(
       const { ns } = probe
       if (probe.kind === 'no-session') {
         ns.status = 'error'
-        ns.error = 'Run abandoned (no session id recorded)'
+        ns.error = ABANDONED
         ns.completedAt = new Date().toISOString()
         dirty = true
         anyResolvedHere = true
@@ -1417,9 +1417,12 @@ export function stopsRunOnError(node: Partial<Pick<WorkflowNode, 'onError'>>): b
   return (node.onError ?? 'stop') === 'stop'
 }
 
+/** A step the engine wrote off rather than ran: the reconciler never saw it start. */
+const ABANDONED = 'Run abandoned (no session id recorded)'
+
 /** A step that never ran, so no policy of its own has anything to say about it. */
 function neverRan(state: NodeExecutionState): boolean {
-  return state.error?.startsWith('Skipped:') === true
+  return state.error?.startsWith('Skipped:') === true || state.error === ABANDONED
 }
 
 /** A step that failed on its own terms, which is what a retry has somewhere to start from. */

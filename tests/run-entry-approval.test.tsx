@@ -5,13 +5,13 @@ import '@testing-library/jest-dom/vitest'
 
 const approve = vi.fn()
 const reject = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
+// The real module but for the calls this asserts, so the retry control is gated
+// by the rule the entry really uses.
+vi.mock('../src/renderer/lib/workflow-execution', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/workflow-execution')>()),
   approveWorkflowGate: (...args: unknown[]) => approve(...args),
   rejectWorkflowGate: (...args: unknown[]) => reject(...args),
   isRunStoppable: (e: { status: string }) => e.status === 'running',
-  // The real rule, so a retry control is exercised the way the pane gates it.
-  hasFailedStep: (e: { nodeStates: Array<{ status: string; error?: string }> }) =>
-    e.nodeStates.some((ns) => ns.status === 'error' && !ns.error?.startsWith('Skipped:')),
   stopWorkflowRun: vi.fn()
 }))
 

@@ -7,12 +7,12 @@ import type { RunListEntry } from '../src/renderer/hooks/useAllWorkflowRuns'
 
 const approveMock = vi.fn()
 const rejectMock = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
+// The real module but for the two calls this asserts, so the retry control is
+// gated by the rule the pane really uses.
+vi.mock('../src/renderer/lib/workflow-execution', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/workflow-execution')>()),
   approveWorkflowGate: (...args: unknown[]) => approveMock(...args),
-  rejectWorkflowGate: (...args: unknown[]) => rejectMock(...args),
-  // The real rule, so a retry control is exercised the way the pane gates it.
-  hasFailedStep: (e: { nodeStates: Array<{ status: string; error?: string }> }) =>
-    e.nodeStates.some((ns) => ns.status === 'error' && !ns.error?.startsWith('Skipped:'))
+  rejectWorkflowGate: (...args: unknown[]) => rejectMock(...args)
 }))
 
 vi.mock('../src/renderer/components/workflow-runs/StopRunButton', () => ({

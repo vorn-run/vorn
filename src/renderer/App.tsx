@@ -171,10 +171,17 @@ export function App() {
       if (!isAtPrompt(getShellInputState(terminalId))) return false
       return focusIntentBar(terminalId)
     })
-    const configLoaded = (async () => {
+    // Held open only until the config is in the store: what waits on it wants the
+    // workflows, not the sessions and panes the rest of this restores.
+    let configIsSet: () => void = () => {}
+    const configReady = new Promise<void>((resolve) => {
+      configIsSet = resolve
+    })
+    void (async () => {
       try {
         const config = await window.api.loadConfig()
         useAppStore.getState().setConfig(config)
+        configIsSet()
         if (config.defaults.fontSize) {
           setDefaultFontSize(config.defaults.fontSize)
         }
@@ -223,6 +230,9 @@ export function App() {
         }
       } catch (err) {
         console.error('[App] startup initialization failed:', err)
+      } finally {
+        // A config that never arrived still lets the rest go; it reads an empty list.
+        configIsSet()
       }
     })()
 
@@ -541,7 +551,7 @@ export function App() {
     // keeps headless agents alive past a renderer reload, but the in-memory
     // exit-promise dies — the run wedges. Reconcile against session_events
     // and close out anything that already exited.
-    configLoaded
+    configReady
       .then(() => window.api.listRunningWorkflowRuns())
       .then((runs) => {
         const store = useAppStore.getState()
