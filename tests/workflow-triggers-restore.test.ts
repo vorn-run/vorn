@@ -55,6 +55,7 @@ function pendingRun(): { promise: Promise<void>; finish: () => void } {
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
 beforeEach(() => {
+  vi.restoreAllMocks()
   executeWorkflow.mockReset()
   executeWorkflow.mockResolvedValue(undefined)
   resetRestoreQueues()
