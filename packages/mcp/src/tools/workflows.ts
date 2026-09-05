@@ -740,7 +740,8 @@ export function registerWorkflowTools(server: McpServer): void {
         return { content: [{ type: 'text', text: JSON.stringify(runs, null, 2) }] }
       }
       // Neither filter: the runs someone has to answer, which no other tool can find.
-      const waiting = await withGates(await listRunsWithWaitingGates())
+      const parked = (await listRunsWithWaitingGates()).slice(0, args.limit ?? 20)
+      const waiting = await withGates(parked)
       return { content: [{ type: 'text', text: JSON.stringify(waiting, null, 2) }] }
     }
   )

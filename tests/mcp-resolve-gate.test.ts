@@ -7,10 +7,14 @@ import type {
   WorkflowExecution
 } from '../packages/shared/src/types'
 
-const rpcCall = vi.fn()
-const listAllWorkflowRuns = vi.fn()
-const listRunsWithWaitingGates = vi.fn()
-const dbListWorkflows = vi.fn()
+const { rpcCall, listAllWorkflowRuns, listRunsWithWaitingGates, dbListWorkflows } = vi.hoisted(
+  () => ({
+    rpcCall: vi.fn(),
+    listAllWorkflowRuns: vi.fn(),
+    listRunsWithWaitingGates: vi.fn(),
+    dbListWorkflows: vi.fn()
+  })
+)
 
 vi.mock('../packages/mcp/src/ws-client', () => ({ rpcCall: (...a: unknown[]) => rpcCall(...a) }))
 vi.mock('../packages/mcp/src/data-access', () => ({
