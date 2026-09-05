@@ -8,6 +8,7 @@ import {
   consumeRestored,
   consumeAllRestored,
   resetRestored,
+  verifyRestored,
   MAX_RESTORED_AGE_MS
 } from '../packages/server/src/restored-sessions'
 
@@ -134,5 +135,60 @@ describe('what a pane is told about one', () => {
     expect(byId.get('torn')).toMatchObject({ replayable: true, partial: true })
     // Nothing was rebuilt for this one, so the pane must not promise a screen.
     expect(byId.get('none')).toMatchObject({ replayable: false, partial: false })
+  })
+})
+
+describe('a machine that went down under it', () => {
+  it('is told apart from a server that stopped: the record predates this boot', () => {
+    seedRestored([session({ savedAt: NOW - 60_000 })], NOW, NOW - 10_000)
+    expect(listRestored()[0].rebooted).toBe(true)
+  })
+
+  it('is not claimed when the record was written after the machine came up', () => {
+    seedRestored([session({ savedAt: NOW - 60_000 })], NOW, NOW - 3_600_000)
+    expect(listRestored()[0].rebooted).toBe(false)
+  })
+
+  it('is not claimed by default, for callers that do not know the boot time', () => {
+    seedRestored([session()], NOW)
+    expect(listRestored()[0].rebooted).toBe(false)
+  })
+})
+
+describe('checking each record against the tree', () => {
+  const probe = {
+    isDirectory: (at: string) => at !== '/gone',
+    branch: () => 'main',
+    head: () => 'cafe0000'
+  }
+
+  it('records what it found beside the record', () => {
+    seedRestored([session({ headCommit: 'cafe0000', branch: 'main' })], NOW)
+    verifyRestored(probe)
+    expect(listRestored()[0].environment).toEqual({
+      worktree: 'ok',
+      branch: { recorded: 'main', actual: 'main' },
+      head: { recorded: 'cafe0000', actual: 'cafe0000' }
+    })
+  })
+
+  it('marks a worktree that is no longer there', () => {
+    seedRestored([session({ worktreePath: '/gone' })], NOW)
+    verifyRestored(probe)
+    expect(listRestored()[0].environment?.worktree).toBe('missing')
+  })
+
+  it('does not let one record that throws take the launch down with it', () => {
+    seedRestored([session({ id: 'bad', projectPath: '/boom' }), session({ id: 'good' })], NOW)
+    verifyRestored({
+      ...probe,
+      isDirectory: (at) => {
+        if (at === '/boom') throw new Error('EACCES')
+        return true
+      }
+    })
+    const byId = new Map(listRestored().map((r) => [r.session.id, r]))
+    expect(byId.get('bad')?.environment).toBeUndefined()
+    expect(byId.get('good')?.environment?.worktree).toBe('ok')
   })
 })

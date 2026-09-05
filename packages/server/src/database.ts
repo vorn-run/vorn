@@ -1082,7 +1082,8 @@ function verifySchema(d: Database.Database): void {
       },
       { column: 'worktree_name', ddl: 'ALTER TABLE sessions ADD COLUMN worktree_name TEXT' },
       { column: 'agent_session_id', ddl: 'ALTER TABLE sessions ADD COLUMN agent_session_id TEXT' },
-      { column: 'shell_cwd', ddl: 'ALTER TABLE sessions ADD COLUMN shell_cwd TEXT' }
+      { column: 'shell_cwd', ddl: 'ALTER TABLE sessions ADD COLUMN shell_cwd TEXT' },
+      { column: 'head_commit', ddl: 'ALTER TABLE sessions ADD COLUMN head_commit TEXT' }
     ],
     agent_commands: [
       {
@@ -1255,6 +1256,8 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     // terminal drew and waits. There is nothing to ask, and leaving it off made
     // the whole thing invisible unless somebody went looking for a toggle.
     reopenSessions: (map.reopenSessions as boolean) ?? true,
+    // Off by default: nothing starts itself because someone installed an app.
+    startAtLogin: (map.startAtLogin as boolean) ?? false,
     // Saving iterates over every key in defaults, but loading is this explicit
     // list — so a key missing here round-trips to nothing and its feature is
     // silently inert.
@@ -3121,8 +3124,8 @@ export function saveSessions(sessions: TerminalSession[]): void {
   const run = d.transaction(() => {
     d.prepare('DELETE FROM sessions').run()
     const insert = d.prepare(
-      `INSERT INTO sessions (id, agent_type, project_name, project_path, status, created_at, pid, display_name, branch, worktree_path, is_worktree, remote_host_id, remote_host_label, hook_session_id, status_source, saved_at, sort_order, worktree_name, agent_session_id, shell_cwd)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO sessions (id, agent_type, project_name, project_path, status, created_at, pid, display_name, branch, worktree_path, is_worktree, remote_host_id, remote_host_label, hook_session_id, status_source, saved_at, sort_order, worktree_name, agent_session_id, shell_cwd, head_commit)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (let i = 0; i < sessions.length; i++) {
       const s = sessions[i]
@@ -3151,7 +3154,8 @@ export function saveSessions(sessions: TerminalSession[]): void {
         i,
         s.worktreeName ?? null,
         s.agentSessionId ?? null,
-        s.shellCwd ?? null
+        s.shellCwd ?? null,
+        s.headCommit ?? null
       )
     }
   })
@@ -3178,6 +3182,7 @@ export function getPreviousSessions(): TerminalSession[] {
     status_source: string | null
     saved_at: number | null
     shell_cwd: string | null
+    head_commit: string | null
     worktree_name: string | null
     agent_session_id: string | null
   }>
@@ -3204,7 +3209,8 @@ export function getPreviousSessions(): TerminalSession[] {
     // Selected since this table was written and dropped on the floor until now.
     // It is the only record of when a run ended.
     ...(r.saved_at != null && { savedAt: r.saved_at }),
-    ...(r.shell_cwd != null && { shellCwd: r.shell_cwd })
+    ...(r.shell_cwd != null && { shellCwd: r.shell_cwd }),
+    ...(r.head_commit != null && { headCommit: r.head_commit })
   }))
 }
 

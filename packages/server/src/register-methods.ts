@@ -23,6 +23,7 @@ import {
 import { clearScreen } from './terminal-screen'
 import { discardHistory } from './history/writer'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
+import { resumeCwdFor } from './resume-cwd'
 import { clearScrollback, readScrollback } from './terminal-scrollback'
 import {
   claimTranscriptFor,
@@ -959,13 +960,14 @@ export function registerAllMethods(): void {
         // that pane could have written it -- and a resume is the one moment it
         // turns into where a process starts. A stale or fabricated path falls
         // back to the project rather than being spawned into.
-        const remembered = previous.shellCwd
-        // One question, asked once, and never allowed to throw. Asking whether it
-        // exists and then whether it is a directory is two questions with a gap
-        // between them: a directory removed in that gap turns a fallback into a
-        // rejected resume, and the fallback is the whole point of asking.
-        const usable = remembered !== undefined && isDirectory(remembered)
-        const cwd = usable ? remembered : (previous.worktreePath ?? previous.projectPath)
+        const landing = resumeCwdFor(previous, isDirectory)
+        if (!landing)
+          return {
+            ok: false as const,
+            reason: 'workspace-gone' as const,
+            message: `${previous.projectPath} is gone`
+          }
+        const cwd = landing.cwd
         // The same id, which is what makes this the same pane rather than a new
         // one beside it: the client keys its terminal by this, so a fresh id
         // would hand back a blank shell and drop the screen being resumed. The
@@ -993,10 +995,26 @@ export function registerAllMethods(): void {
         return { ok: true as const, session }
       }
 
-      transcriptId = claimTranscriptFor(previous, live, id, headlessManager.getActiveSessions())
+      // Checked before anything is claimed: a worktree removed while the machine
+      // was off used to be spawned into as though it were there.
+      const landing = resumeCwdFor(previous, isDirectory)
+      if (!landing)
+        return {
+          ok: false as const,
+          reason: 'workspace-gone' as const,
+          message: `${previous.projectPath} is gone`
+        }
+      // buildRestorePayload reads worktreePath for the cwd, so a gone worktree is cleared from the record.
+      const worktreeGone =
+        previous.worktreePath !== undefined && landing.cwd === previous.projectPath
+      const grounded = worktreeGone
+        ? { ...previous, worktreePath: undefined, isWorktree: false }
+        : previous
+
+      transcriptId = claimTranscriptFor(grounded, live, id, headlessManager.getActiveSessions())
 
       // Same id, same reasons as the shell branch above.
-      const session = ptyManager.createPty(buildRestorePayload(previous, transcriptId), id)
+      const session = ptyManager.createPty(buildRestorePayload(grounded, transcriptId), id)
       // The record names the conversation now, so the claim standing in for it is
       // spent; leaving it would hold an id the session already reports.
       if (session.agentSessionId) releaseSpawningTranscriptsFor(id)
@@ -1222,9 +1240,11 @@ export function registerAllMethods(): void {
     const remote = resolveRemoteHostByPath(cwd)
     return gitUtils.getGitDiffStat(cwd, remote)
   })
-  registerMethod('git:diffFull', (cwd) => {
+  registerMethod('git:diffFull', (req) => {
+    const cwd = typeof req === 'string' ? req : req.cwd
     const remote = resolveRemoteHostByPath(cwd)
-    return gitUtils.getGitDiffFull(cwd, remote)
+    const range = typeof req === 'string' ? undefined : { from: req.from, to: req.to }
+    return gitUtils.getGitDiffFull(cwd, remote, range)
   })
   registerMethod('git:commit', ({ cwd, message, includeUnstaged }) => {
     const remote = resolveRemoteHostByPath(cwd)
@@ -1993,7 +2013,11 @@ export function registerAllMethods(): void {
   // record gone, the next start judged that session's history unreachable and
   // deleted it. Holding them here is what makes a terminal survive more than one
   // restart.
-  sessionManager.startAutoSave(() => [...ptyManager.getActiveSessions(), ...restoredRecords()])
+  sessionManager.startAutoSave(() => {
+    const active = ptyManager.getActiveSessions()
+    ptyManager.heads.refresh(active)
+    return [...active, ...restoredRecords()]
+  })
 
   // ─── Hook server integration ──────────────────────────────────
 

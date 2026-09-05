@@ -1,9 +1,13 @@
+import { rm } from 'node:fs/promises'
 import {
   bundleDependencyFindings,
+  bundledRequireFindings,
   lifecycleScriptFindings,
   packageDirFor,
   packEntryContents,
+  packLaunchFindings,
   readNearestPackageJson,
+  stagePack,
   type BundleOutput,
   type BundleRequest
 } from './packaging'
@@ -49,6 +53,7 @@ export type CheckCode =
   | 'mock-not-observed'
   | 'preflight-failed'
   | 'live-action-failed'
+  | 'pack-launch'
   | 'pack-too-large'
 
 export interface CheckFinding {
@@ -217,8 +222,21 @@ function actionShapeFindings(action: ActionDefinition): CheckFinding[] {
   return found
 }
 
+/** Whether this run can build the bundle the packaging gates are asked of. */
+function bundles(options: CheckOptions): boolean {
+  return Boolean(options.bundle && options.entry !== undefined && options.packageDir !== undefined)
+}
+
+/** Starting it costs a process, so only a mock run — the one that already runs the connector — pays. */
+function launches(options: CheckOptions): boolean {
+  return bundles(options) && options.mock === true
+}
+
 /** What the package says about itself, when a check was pointed at one. */
-async function packageFindings(options: CheckOptions): Promise<CheckFinding[]> {
+async function packageFindings(
+  connector: Connector,
+  options: CheckOptions
+): Promise<CheckFinding[]> {
   if (options.packageDir === undefined) return []
   // The entry's own package, not the directory the command was run from: in a
   // monorepo those are rarely the same, and the root's package.json says
@@ -244,7 +262,16 @@ async function packageFindings(options: CheckOptions): Promise<CheckFinding[]> {
       contents: packEntryContents(options.entry),
       resolveDir: options.packageDir
     })
-    found.push(...bundleDependencyFindings(built.external))
+    found.push(...bundleDependencyFindings(built.external), ...bundledRequireFindings(built.code))
+    // Always, so the receipt's `launch` names a launch that happened rather than one that was skipped.
+    if (options.mock) {
+      const dir = await stagePack(connector, built.code)
+      try {
+        found.push(...(await packLaunchFindings(dir)))
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    }
   }
 
   return found
@@ -542,7 +569,7 @@ export async function checkConnector(
 
   found.push(...authFindings(connector))
   found.push(...secretFindings(connector))
-  found.push(...(await packageFindings(options)))
+  found.push(...(await packageFindings(connector, options)))
   found.push(...(await mockFindings(connector, options)))
   found.push(...(await liveFindings(connector, options)))
 
@@ -667,7 +694,8 @@ export const CHECK_OWNERS: Record<CheckCode, string | null> = {
   'mock-network-escape': 'mock',
   'mock-not-observed': 'mock',
   'preflight-failed': 'live',
-  'live-action-failed': 'live'
+  'live-action-failed': 'live',
+  'pack-launch': 'launch'
 }
 
 /**
@@ -685,7 +713,8 @@ function checksRun(connector: Connector, options: CheckOptions): string[] {
   if (connector.actions.length > 0) names.push('actions')
   if (connector.triggers.length > 0) names.push('dedupe')
   if (options.packageDir !== undefined) names.push('no-lifecycle-scripts', 'keywords')
-  if (options.bundle && options.entry !== undefined) names.push('no-runtime-deps')
+  if (bundles(options)) names.push('no-runtime-deps')
+  if (launches(options)) names.push('launch')
   // Whether the stub was actually reached is the `mock-not-observed` finding's
   // job: it spoils this name for the action that stayed silent.
   if (options.mock && connector.actions.length > 0) names.push('mock')

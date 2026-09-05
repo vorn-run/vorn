@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkConnector, defineConnector } from '../packages/connector-sdk/src/index'
+import { execFile } from 'node:child_process'
+import {
+  bundledRequireFindings,
+  checkConnector,
+  defineConnector,
+  esbuildBundle,
+  runConformance
+} from '../packages/connector-sdk/src/index'
 import type {
   ActionDefinition,
   ConnectorAuth,
@@ -209,5 +216,182 @@ describe('what a check says about the package a connector ships as', () => {
       bundle: async () => ({ code: '', external: [] })
     })
     expect(findings.map((item) => item.code)).not.toContain('runtime-dependencies')
+  })
+})
+
+/** A bundle that serves the MCP handshake Vorn opens with, then waits like a served connector. */
+const SERVES = [
+  "let buffered = ''",
+  "process.stdin.on('data', (chunk) => {",
+  '  buffered += chunk',
+  '  for (;;) {',
+  "    const end = buffered.indexOf('\\n')",
+  '    if (end < 0) return',
+  '    const line = buffered.slice(0, end)',
+  '    buffered = buffered.slice(end + 1)',
+  '    if (!line.trim()) continue',
+  '    const message = JSON.parse(line)',
+  "    if (message.method !== 'initialize') continue",
+  '    const result = {',
+  '      protocolVersion: message.params.protocolVersion,',
+  '      capabilities: {},',
+  "      serverInfo: { name: 'stub', version: '1' }",
+  '    }',
+  "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }) + '\\n')",
+  '  }',
+  '})',
+  ''
+].join('\n')
+
+/** What every connector but one shipped: a require the bundler left for the runtime. */
+const READS_ITS_PACKAGE =
+  'import { createRequire } from "node:module"\ncreateRequire(import.meta.url)("../package.json")\n' +
+  SERVES
+
+/** A bundle that says something cheerful on its way out, which is not an answer. */
+const DIES_ON_LOAD = 'console.log("booting")\nthrow new Error("boom")\n'
+
+/** Answers only from the environment the host would give it: the platform basics, and no ambient secret. */
+const READS_ITS_ENV =
+  'if (!process.env.PATH) throw new Error("started without PATH")\n' +
+  // On this list rather than the transport's, so it proves which one carried it.
+  'if (process.env.LC_ALL !== "C") throw new Error("started without LC_ALL")\n' +
+  'if (process.env.GITHUB_TOKEN) throw new Error("started with an ambient token")\n' +
+  SERVES
+
+describe('what a check says about starting the pack it would ship', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vorn-check-launch-'))
+  writeFileSync(
+    join(dir, 'package.json'),
+    JSON.stringify({ name: 'acme', vorn: { keywords: ['acme'] } })
+  )
+
+  const check = (code: string, over: Record<string, unknown> = {}) =>
+    checkConnector(connector(), {
+      mock: true,
+      packageDir: dir,
+      entry: './index.js',
+      bundle: async () => ({ code, external: [] }),
+      ...over
+    })
+
+  it('starts a bundle that carries everything it needs', async () => {
+    const findings = await check(SERVES)
+    expect(findings.map((item) => item.code)).not.toContain('pack-launch')
+  })
+
+  it('refuses a bundle that starts, says something, and never answers', async () => {
+    const findings = await check(DIES_ON_LOAD)
+    const launch = findings.find((item) => item.code === 'pack-launch')
+    expect(launch?.level).toBe('error')
+    // The line naming the failure, not the banner the connector logged first.
+    expect(launch?.message).toContain('boom')
+  })
+
+  it('starts it with the platform basics and without an ambient secret', async () => {
+    const had = process.env.LC_ALL
+    process.env.LC_ALL = 'C'
+    process.env.GITHUB_TOKEN = 'ghp-never-travels'
+    try {
+      const findings = await check(READS_ITS_ENV)
+      expect(findings.map((item) => item.code)).not.toContain('pack-launch')
+    } finally {
+      delete process.env.GITHUB_TOKEN
+      if (had === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = had
+    }
+  })
+
+  it('refuses a bundle that starts and then serves nothing', async () => {
+    expect(await check('')).toContainEqual(
+      expect.objectContaining({ code: 'pack-launch', level: 'error' })
+    )
+  })
+
+  it('advises about a file only the source tree has, and refuses it for not starting', async () => {
+    const findings = await check(READS_ITS_PACKAGE)
+    // The scan names the suspect; starting the pack is what condemns it.
+    expect(findings).toContainEqual(
+      expect.objectContaining({ code: 'runtime-dependencies', level: 'warn' })
+    )
+    expect(findings).toContainEqual(
+      expect.objectContaining({ code: 'pack-launch', level: 'error' })
+    )
+  })
+
+  it('starts a bundle whose CommonJS dependency asks for a builtin', async () => {
+    // What every connector wrapping a published CJS client hits: esbuild's shim throws unless a real require is in scope.
+    const source = mkdtempSync(join(tmpdir(), 'vorn-check-cjs-'))
+    writeFileSync(
+      join(source, 'legacy.cjs'),
+      'const url = require("url")\nmodule.exports = url.URL\n'
+    )
+    const built = await esbuildBundle({
+      contents: 'import URL from "./legacy.cjs"\nif (!URL) throw new Error("no URL")\n',
+      resolveDir: source
+    })
+    writeFileSync(join(source, 'bundle.mjs'), built.code)
+
+    const ran = await new Promise<number | null>((resolve) => {
+      execFile(process.execPath, [join(source, 'bundle.mjs')], (error) =>
+        resolve(error ? ((error as { code?: number }).code ?? 1) : 0)
+      )
+    })
+
+    expect(ran).toBe(0)
+  })
+
+  it('starts nothing without a mock run, which is where the packaging gates live', async () => {
+    const findings = await check(DIES_ON_LOAD, { mock: false })
+    expect(findings.map((item) => item.code)).not.toContain('pack-launch')
+  })
+
+  it('vouches for the launch only when it happened', async () => {
+    const served = await runConformance(connector(), {
+      mock: true,
+      packageDir: dir,
+      entry: './index.js',
+      bundle: async () => ({ code: SERVES, external: [] })
+    })
+    expect(served.passed).toContain('launch')
+    expect((await runConformance(connector(), { mock: true })).passed).not.toContain('launch')
+  })
+
+  it('names the file a bundle asks for after packing, wherever the require came from', () => {
+    const named = (code: string) => bundledRequireFindings(code)[0]?.message ?? ''
+    expect(named('createRequire(import.meta.url)("../package.json")')).toContain('../package.json')
+    expect(named('require("./schema.json")')).toContain('./schema.json')
+    expect(named('__require("../data/rows.json")')).toContain('../data/rows.json')
+    expect(named('require.resolve("../rows.json")')).toContain('../rows.json')
+    expect(named('await import("./late.js")')).toContain('./late.js')
+    // The helper esbuild emits for bundled CommonJS is not a file left behind.
+    expect(bundledRequireFindings('var __require = createRequire(import.meta.url)')).toEqual([])
+    expect(bundledRequireFindings('const x = require("node:fs")')).toEqual([])
+    expect(bundledRequireFindings('import { join } from "./path.js"')).toEqual([])
+  })
+
+  it('advises rather than refuses, since starting the pack is what settles it', () => {
+    expect(bundledRequireFindings('require("./schema.json")')[0]?.level).toBe('warn')
+  })
+
+  it('counts the files it names', () => {
+    expect(bundledRequireFindings('require("./one.json")')[0]?.message).toContain(
+      './one.json is required'
+    )
+    const two = 'require("./one.json")\nrequire("./two.json")'
+    expect(bundledRequireFindings(two)[0]?.message).toContain('./one.json, ./two.json are required')
+  })
+
+  it('reads a bundle as code, so a dependency that only writes the words is left alone', () => {
+    // What a minified dependency carries: a JSDoc type, an example, a message.
+    expect(bundledRequireFindings('/** @type {import("./get")} */\nvar x = 1')).toEqual([])
+    expect(bundledRequireFindings('// require("./get") is what the old build did\n')).toEqual([])
+    expect(bundledRequireFindings('var hint = "call require(\'./get\') yourself"')).toEqual([])
+    expect(bundledRequireFindings('var hint = `require("./get")`')).toEqual([])
+    // A quote inside a regular expression does not open a string that hides the call after it.
+    const afterRegex = 'var q = text.replace(/"/g, "")\nrequire("./late.js")'
+    expect(bundledRequireFindings(afterRegex)[0]?.message).toContain('./late.js')
+    // A property of that name is not the loader.
+    expect(bundledRequireFindings('loader.require("./get")')).toEqual([])
   })
 })

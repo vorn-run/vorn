@@ -4,6 +4,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
+import { HeadRefresh } from './head-commit'
 import log from './logger'
 import {
   AiAgentType,
@@ -18,6 +19,7 @@ import {
 import { displayNameFromPrompt } from '@vornrun/shared/string-utils'
 import {
   getGitBranch,
+  getGitHead,
   checkoutBranch,
   createWorktree,
   extractWorktreeName,
@@ -78,6 +80,8 @@ type WorktreeSessionCounter = (
 ) => { count: number; sessionIds: string[] }
 
 class PtyManager extends EventEmitter {
+  /** Recorded HEAD per session, refreshed by the save loop. */
+  readonly heads = new HeadRefresh(getGitHead)
   private ptys = new Map<string, pty.IPty>()
   private sessions = new Map<string, TerminalSession>()
   private normalizedPaths = new Map<string, string>()
@@ -308,6 +312,7 @@ class PtyManager extends EventEmitter {
     this.ptys.set(id, ptyProcess)
 
     const branch = effectiveBranch || getGitBranch(effectivePath)
+    const headCommit = getGitHead(effectivePath)
     const session: TerminalSession = {
       id,
       agentType: payload.agentType,
@@ -324,6 +329,7 @@ class PtyManager extends EventEmitter {
           ? { displayName: displayNameFromPrompt(payload.initialPrompt) }
           : {}),
       ...(branch ? { branch } : {}),
+      ...(headCommit ? { headCommit } : {}),
       ...(worktreePath ? { worktreePath, worktreeName, isWorktree: true } : {}),
       // Don't set statusSource: 'hooks' eagerly — promoteToHookStatus() sets it
       // when the first hook event actually arrives. This provides graceful
@@ -893,6 +899,7 @@ class PtyManager extends EventEmitter {
     this.drainBuffer(id)
     this.clearBuffer(id)
     this.sessions.delete(id)
+    this.heads.forget(id)
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
     this.flushSeq.delete(id)
@@ -931,6 +938,7 @@ class PtyManager extends EventEmitter {
     // Delete-then-check pattern: single removal point prevents races.
     const session = this.sessions.get(id)
     this.sessions.delete(id)
+    this.heads.forget(id)
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
     this.flushSeq.delete(id)
@@ -1152,6 +1160,7 @@ class PtyManager extends EventEmitter {
         if (updates.branch !== undefined) s.branch = updates.branch
         if (updates.worktreeName !== undefined) s.worktreeName = updates.worktreeName
         if (updates.worktreePath !== undefined) s.worktreePath = updates.worktreePath
+        this.heads.invalidate(s.id)
         this.emit('client-message', IPC.SESSION_UPDATED, s)
       }
     }

@@ -113,6 +113,8 @@ export interface TerminalSession {
   rows?: number
   /** Shell session only: working directory the PTY was started in. */
   shellCwd?: string
+  /** HEAD where it was working, refreshed as it works, so a restore can tell the tree moved. */
+  headCommit?: string
   /** Shell session only: PTY exit code once the shell has exited. */
   shellExitCode?: number
   /**
@@ -149,6 +151,23 @@ export interface RestoredSession {
    * ordinary quit.
    */
   closedCleanly: boolean
+  /** The machine went down under it: saved before this boot, and never closed. */
+  rebooted: boolean
+  /** What is there now against what was recorded. Absent for remote sessions. */
+  environment?: RestoreEnvironment
+}
+
+export interface RestoreEnvironment {
+  worktree: 'ok' | 'missing'
+  branch: { recorded: string | null; actual: string | null }
+  head: { recorded: string | null; actual: string | null }
+}
+
+/** Both commits known and different. Unknown on either side is not a move. */
+export function headMoved(env: RestoreEnvironment | undefined): boolean {
+  if (!env) return false
+  const { recorded, actual } = env.head
+  return recorded !== null && actual !== null && recorded !== actual
 }
 
 export type AuthMethod = 'key-file' | 'key-stored' | 'password' | 'agent'
@@ -1219,6 +1238,8 @@ export interface AppConfig {
     notifications?: NotificationConfig
     hasSeenOnboarding?: boolean | number
     reopenSessions?: boolean
+    // Open Vorn at sign-in. Off until asked; a no-op on Linux.
+    startAtLogin?: boolean
     widgetEnabled?: boolean
     taskViewMode?: TaskViewMode
     layoutMode?: 'grid' | 'tabs'
@@ -1414,6 +1435,13 @@ export interface GitFileDiff {
 export interface GitDiffResult {
   stat: GitDiffStat
   files: GitFileDiff[]
+}
+
+/** Two commits rather than the working tree against HEAD. */
+export interface GitDiffRange {
+  cwd: string
+  from: string
+  to: string
 }
 
 export interface GitCommitPayload {
@@ -2124,7 +2152,7 @@ export type ConnectorPackPreview =
 /** `id` is the connector's once its manifest is read, and the source label until then. */
 export interface ConnectorInstallProgress {
   id: string
-  phase: 'downloading' | 'verifying' | 'installing' | 'installed' | 'failed'
+  phase: 'checking' | 'downloading' | 'verifying' | 'installing' | 'installed' | 'failed'
   /** Download completion, absent when the size was not advertised. */
   percent?: number
   version?: string

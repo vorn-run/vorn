@@ -1,4 +1,5 @@
 import { useAppStore } from '../stores'
+import { endedFromRestored } from './ended-from-restored'
 import { toast } from '../components/Toast'
 
 /**
@@ -21,17 +22,7 @@ export async function showEndedSession(id: string): Promise<void> {
   const carried = await window.api.getRestoredSessions()
   const one = carried.find((r) => r.session.id === id)
   if (!one) return
-  useAppStore.getState().addTerminal(one.session, {
-    // The record says which ending this was; `board-sync` reads it and this did
-    // not. Taking the banner's offer after an ordinary quit therefore produced a
-    // pane reporting that the server had stopped unexpectedly -- a fault report
-    // for closing an app.
-    reason: one.closedCleanly ? 'app-closed' : 'server-stopped',
-    at: one.endedAt,
-    replayed: one.replayable,
-    partial: one.partial,
-    ...(one.session.shellCwd !== undefined && { cwd: one.session.shellCwd })
-  })
+  useAppStore.getState().addTerminal(one.session, endedFromRestored(one))
 }
 
 /**

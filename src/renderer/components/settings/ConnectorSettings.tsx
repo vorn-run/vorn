@@ -83,9 +83,22 @@ export function ConnectorSettings() {
     error: fileInstallError,
     installing: installingPending
   } = install
-  const handleInstall = install.inspect
+  // The row and the page both show the version, the sign-in and the receipt, so a pack that matches needs no sheet.
+  const handleInstall = useCallback(
+    (listing: ConnectorListing) => install.inspect(listing, { direct: true }),
+    [install]
+  )
   const handleInstallFile = install.inspectFile
   const handleConfirmPending = install.confirm
+  // One sheet, shown wherever the install was asked for.
+  const pendingSheet = pendingPack && (
+    <PackInstallConfirm
+      preview={pendingPack.preview}
+      busy={installingPending}
+      onConfirm={handleConfirmPending}
+      onCancel={install.cancel}
+    />
+  )
 
   const handleRollback = useCallback(
     async (id: string) => {
@@ -233,16 +246,7 @@ export function ConnectorSettings() {
           onInstallFile={handleInstallFile}
           onPickFile={() => window.api.openFileDialog()}
           installError={fileInstallError}
-          {...(pendingPack && {
-            pending: (
-              <PackInstallConfirm
-                preview={pendingPack.preview}
-                busy={installingPending}
-                onConfirm={handleConfirmPending}
-                onCancel={install.cancel}
-              />
-            )
-          })}
+          pending={pendingPack ? { sheet: pendingSheet, rowKey: pendingPack.rowKey } : undefined}
         />
       )}
 
@@ -254,6 +258,7 @@ export function ConnectorSettings() {
             progress: installProgress[selectedListing.id]
           })}
           activity={activity.state(selectedListing.id, ['rollback', 'remove'])}
+          pending={pendingPack?.rowKey === selectedListing.key ? pendingSheet : null}
           onAdd={() => setAdding(selectedListing)}
           onUse={() => openWorkflowEditor(null)}
           onInstall={() => handleInstall(selectedListing)}

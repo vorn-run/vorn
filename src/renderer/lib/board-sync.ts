@@ -1,4 +1,5 @@
 import type { RestoredSession, TerminalSession } from '../../shared/types'
+import { endedFromRestored } from './ended-from-restored'
 import { useAppStore } from '../stores'
 import { coldSessions } from './session-utils'
 import { resumeEndedSession } from './session-resume'
@@ -76,16 +77,13 @@ async function reconcile(options: { showCold: boolean; resume: boolean }): Promi
     if (live.has(id) || term.ended) continue
     const held = heldById.get(id)
     justEnded.push(id)
+    // Without a record the best available answer is when this pane last saw
+    // anything, and there is no rebuilt screen behind it.
+    const base = held
+      ? endedFromRestored(held)
+      : { reason: 'server-stopped' as const, at: term.lastOutputTimestamp, replayed: false }
     useAppStore.getState().markEnded(id, {
-      reason: held?.closedCleanly ? 'app-closed' : 'server-stopped',
-      // A held record knows when its run ended. Without one the best available
-      // answer is when this pane last saw anything.
-      at: held?.endedAt ?? term.lastOutputTimestamp,
-      // Whether there is a rebuilt screen behind it. False means the pane is
-      // showing what it happens to still have in its own buffer and nothing
-      // more, which the strip says out loud.
-      replayed: held?.replayable ?? false,
-      ...(held?.partial !== undefined && { partial: held.partial }),
+      ...base,
       ...(term.session.shellCwd !== undefined && { cwd: term.session.shellCwd })
     })
   }
@@ -95,13 +93,7 @@ async function reconcile(options: { showCold: boolean; resume: boolean }): Promi
     for (const one of coldSessions(active, carried)) {
       if (useAppStore.getState().terminals.has(one.session.id)) continue
       justEnded.push(one.session.id)
-      useAppStore.getState().addTerminal(one.session, {
-        reason: one.closedCleanly ? 'app-closed' : 'server-stopped',
-        at: one.endedAt,
-        replayed: one.replayable,
-        partial: one.partial,
-        ...(one.session.shellCwd !== undefined && { cwd: one.session.shellCwd })
-      })
+      useAppStore.getState().addTerminal(one.session, endedFromRestored(one))
     }
 
   // Everything the server has, running or ended -- not what the board ended up

@@ -10,6 +10,7 @@ import type {
   FileStamp,
   GitDiffStat,
   GitDiffResult,
+  GitDiffRange,
   WorkflowDefinition,
   WorkflowExecution,
   ScriptConfig,
@@ -562,7 +563,7 @@ export interface RequestMethods {
     params: { id: string }
     result: /** `boundTo` names the session already writing this conversation, when one was. */
       | { ok: true; session: TerminalSession; boundTo?: string }
-      | { ok: false; reason: 'gone' | 'failed'; message?: string }
+      | { ok: false; reason: 'gone' | 'failed' | 'workspace-gone'; message?: string }
   }
   'sessions:clear': { params: void; result: void }
   'sessions:getRecent': { params: string | undefined; result: RecentSession[] }
@@ -624,7 +625,7 @@ export interface RequestMethods {
     result: Array<{ path: string; branch: string; isMain: boolean; name: string }>
   }
   'git:diffStat': { params: string; result: GitDiffStat | null }
-  'git:diffFull': { params: string; result: GitDiffResult | null }
+  'git:diffFull': { params: string | GitDiffRange; result: GitDiffResult | null }
   'git:commit': {
     params: { cwd: string; message: string; includeUnstaged: boolean }
     result: { success: boolean; error?: string }

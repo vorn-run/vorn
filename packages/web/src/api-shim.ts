@@ -1,6 +1,6 @@
 import { CLOSE_CREDENTIAL_REJECTED, RUNTIME_PROTOCOL_VERSION } from '@vornrun/shared/protocol'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
-import type { AppConfig } from '@vornrun/shared/types'
+import type { GitDiffRange, AppConfig } from '@vornrun/shared/types'
 /**
  * WebSocket RPC shim that implements the same surface as the Electron preload `window.api`.
  * Components and stores call window.api.* exactly as they do in Electron,
@@ -521,7 +521,7 @@ export function createApiShim(wsUrl: string) {
     deleteBranches: (projectPath: string, branches: string[], force?: boolean) =>
       rpc.invoke('git:deleteBranches', { projectPath, branches, force }),
     getGitDiffStat: (cwd: string) => rpc.invoke('git:diffStat', cwd),
-    getGitDiffFull: (cwd: string) => rpc.invoke('git:diffFull', cwd),
+    getGitDiffFull: (req: string | GitDiffRange) => rpc.invoke('git:diffFull', req),
     gitCommit: (payload: unknown) => rpc.invoke('git:commit', payload),
     gitPush: (cwd: string) => rpc.invoke('git:push', cwd),
 

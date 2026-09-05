@@ -98,6 +98,24 @@ export function GeneralSettings() {
           />
         </SettingRow>
 
+        {/* Start at login: above Reopen Sessions because it changes what that one does */}
+        {isElectron && (
+          <SettingRow
+            label="Start Vorn When I Sign In"
+            description="Vorn opens with the machine, so a restart puts you back where you were."
+            note={
+              config.defaults.reopenSessions !== false
+                ? 'With Reopen Sessions on, your agents start again at sign-in rather than when you next open Vorn.'
+                : undefined
+            }
+          >
+            <ToggleSwitch
+              checked={config.defaults.startAtLogin === true}
+              onChange={(startAtLogin) => updateDefaults({ startAtLogin })}
+            />
+          </SettingRow>
+        )}
+
         {/* Reopen Sessions */}
         <SettingRow
           label="Reopen Sessions on Startup"

@@ -1,22 +1,29 @@
-import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, rm, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { checkConnector, type CheckCode, type CheckFinding } from './check'
 import {
   bundleDependencyFindings,
+  bundledRequireFindings,
   esbuildBundle,
   lifecycleScriptFindings,
   packageDirFor,
   packEntryContents,
+  packLaunchFindings,
   readNearestPackageJson,
+  stagePack,
   MAX_PACK_BYTES,
   type BundleOutput,
   type BundleRequest
 } from './packaging'
-import { connectorManifest } from './setup'
 import type { Connector } from './types'
 
-export { bundleDependencyFindings, lifecycleScriptFindings, readNearestPackageJson, MAX_PACK_BYTES }
+export {
+  bundleDependencyFindings,
+  bundledRequireFindings,
+  lifecycleScriptFindings,
+  readNearestPackageJson,
+  MAX_PACK_BYTES
+}
 export type { BundleOutput, BundleRequest }
 
 export interface PackOptions {
@@ -32,6 +39,8 @@ export interface PackOptions {
   maxBytes?: number
   /** Replaced in tests so packing does not shell out to a bundler. */
   bundle?(request: BundleRequest): Promise<BundleOutput>
+  /** Replaced in tests whose subject is the archive rather than the launch; defaults to starting it for real. */
+  launch?(dir: string): Promise<CheckFinding[]>
 }
 
 export interface PackResult {
@@ -66,20 +75,17 @@ export async function packConnector(
   const contents = packEntryContents(options.entry, options.sdkModule)
   const bundle = options.bundle ?? esbuildBundle
   const built = await bundle({ contents, resolveDir })
-  findings.push(...bundleDependencyFindings(built.external))
+  findings.push(...bundleDependencyFindings(built.external), ...bundledRequireFindings(built.code))
   if (findings.some((item) => item.level === 'error')) return { findings }
 
   const outDir = resolve(options.outDir ?? process.cwd())
   await mkdir(outDir, { recursive: true })
   const file = join(outDir, packFileName(connector))
-  const staging = await mkdtemp(join(tmpdir(), 'vorn-pack-'))
+  const staging = await stagePack(connector, built.code)
   try {
-    await writeFile(join(staging, 'index.js'), built.code, 'utf8')
-    await writeFile(
-      join(staging, 'manifest.json'),
-      `${JSON.stringify(connectorManifest(connector), null, 2)}\n`,
-      'utf8'
-    )
+    // Asked of the staged files themselves: an artifact that cannot start is not one to ship.
+    findings.push(...(await (options.launch ?? packLaunchFindings)(staging)))
+    if (findings.some((item) => item.level === 'error')) return { findings }
     const { create } = await import('tar')
     await create({ gzip: true, file, cwd: staging }, ['manifest.json', 'index.js'])
   } finally {

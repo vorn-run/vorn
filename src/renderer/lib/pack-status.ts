@@ -119,6 +119,7 @@ export function describePackStatus(state: PackState): PackStatusView {
 
     case 'installing': {
       const labels: Record<ConnectorInstallProgress['phase'], string> = {
+        checking: 'Checking',
         downloading: 'Downloading',
         verifying: 'Verifying',
         installing: 'Installing',

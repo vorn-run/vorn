@@ -3,7 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { existsSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { formatFindings, runConformance } from './check'
+import { formatFindings, runConformance, type CheckFinding } from './check'
 import { resolveConfig } from './define'
 import { packConnector } from './pack'
 import { esbuildBundle, type BundleOutput, type BundleRequest } from './packaging'
@@ -42,6 +42,8 @@ export interface CliDeps {
   cwd?: string
   /** Replaced in tests so pack does not shell out to a bundler. */
   bundle?(request: BundleRequest): Promise<BundleOutput>
+  /** Replaced in tests so pack does not start the staged bundle. */
+  launch?(dir: string): Promise<CheckFinding[]>
   /** Writes a scaffold file or a receipt; replaced in tests so nothing touches disk. */
   writeFile?(path: string, contents: string): Promise<void>
   /** Replaced in tests beside writeFile. */
@@ -204,7 +206,8 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         entry: modulePath,
         ...(flags.out !== undefined && { outDir: flags.out }),
         ...(deps.cwd !== undefined && { resolveDir: deps.cwd }),
-        ...(deps.bundle !== undefined && { bundle: deps.bundle })
+        ...(deps.bundle !== undefined && { bundle: deps.bundle }),
+        ...(deps.launch !== undefined && { launch: deps.launch })
       })
       if (result.findings.length > 0) deps.write(formatFindings(result.findings))
       const errors = result.findings.filter((item) => item.level === 'error')
