@@ -82,9 +82,13 @@ const INTERPRETERS: Record<string, Interpreter | undefined> = Object.assign(Obje
 
 /** Under the data directory rather than a shared one, so nothing another account writes is in reach. */
 async function scriptFileFor(name: string, contents: string): Promise<string> {
-  const root = path.join(getLaunchDataDir() ?? os.tmpdir(), 'scripts')
-  await mkdir(root, { recursive: true, mode: 0o700 })
-  const dir = await mkdtemp(path.join(root, 'run-'))
+  const dataDir = getLaunchDataDir()
+  let root = os.tmpdir()
+  if (dataDir) {
+    root = path.join(dataDir, 'scripts')
+    await mkdir(root, { recursive: true, mode: 0o700 })
+  }
+  const dir = await mkdtemp(path.join(root, 'vorn-script-'))
   const file = path.join(dir, name)
   try {
     await writeFile(file, contents, { mode: 0o600 })
@@ -95,13 +99,20 @@ async function scriptFileFor(name: string, contents: string): Promise<string> {
   return file
 }
 
-export async function executeScript(config: ScriptConfig): Promise<ScriptExecutionResult> {
-  const known = INTERPRETERS[config.scriptType]
+/** How a script type is run here, or nothing when it is not one this host knows. */
+export function interpreterFor(
+  scriptType: string,
+  isWin: boolean = process.platform === 'win32'
+): Interpreter | undefined {
+  const known = INTERPRETERS[scriptType]
   // On Windows bash.exe is usually the WSL launcher, which cannot open a Windows path, so bash keeps stdin there.
-  const interpreter =
-    known && config.scriptType === 'bash' && process.platform === 'win32'
-      ? { ...known, file: undefined, args: () => ['-s'] }
-      : known
+  if (known && scriptType === 'bash' && isWin)
+    return { ...known, file: undefined, args: () => ['-s'] }
+  return known
+}
+
+export async function executeScript(config: ScriptConfig): Promise<ScriptExecutionResult> {
+  const interpreter = interpreterFor(config.scriptType)
   if (!interpreter) {
     return {
       success: false,
@@ -143,15 +154,22 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
       resolve(result)
     }
 
-    const child = spawn(command, args, {
-      cwd,
-      // A script that came as a file has no use for stdin, and cannot block waiting on it.
-      stdio: [file ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-      // Only this child sees them: the secrets are read here rather than held
-      // anywhere the definition, a run record or an export could reach.
-      env: { ...getLaunchEnv(), ...secretEnvFor(config.secretsFrom) },
-      windowsHide: true
-    })
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(command, args, {
+        cwd,
+        // A script that came as a file has no use for stdin, and cannot block waiting on it.
+        stdio: [file ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+        // Only this child sees them: the secrets are read here rather than held
+        // anywhere the definition, a run record or an export could reach.
+        env: { ...getLaunchEnv(), ...secretEnvFor(config.secretsFrom) },
+        windowsHide: true
+      })
+    } catch (err) {
+      // A bad cwd throws here rather than answering on 'error', and the copy still has to go.
+      void finish(fail(err instanceof Error ? err.message : String(err)))
+      return
+    }
 
     let stdout = ''
     let stderr = ''
