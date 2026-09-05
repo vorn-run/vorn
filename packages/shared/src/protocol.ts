@@ -1115,6 +1115,7 @@ export interface ServerNotifications {
   'config:changed': AppConfig
   /** How far a connector pack install has got, while it runs. */
   'connector:installProgress': ConnectorInstallProgress
+  'connector:catalogChanged': ConnectorCatalogSnapshot
   'widget:status-update': WidgetAgentInfo[]
   'widget:permission-request': PermissionRequestInfo
   'widget:permission-cancelled': string

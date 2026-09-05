@@ -779,6 +779,8 @@ export function createApiShim(wsUrl: string) {
     listConnectorPacks: () => rpc.invoke('connector:listPacks'),
     onConnectorInstallProgress: (cb: (progress: unknown) => void) =>
       rpc.on('connector:installProgress', cb),
+    onConnectorCatalogChanged: (cb: (snapshot: unknown) => void) =>
+      rpc.on('connector:catalogChanged', cb),
     detectRepo: (projectPath: string) => rpc.invoke('connector:detectRepo', projectPath),
     seedConnectorWorkflow: (connectionId: string, event: string) =>
       rpc.invoke('connector:seedWorkflow', { connectionId, event }),

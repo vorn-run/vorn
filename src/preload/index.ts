@@ -939,6 +939,19 @@ const api = {
     import('../../packages/shared/src/types').InstalledConnectorPack[]
   > => ipcRenderer.invoke(IPC.CONNECTOR_LIST_PACKS),
 
+  onConnectorCatalogChanged: (
+    callback: (snapshot: import('../../packages/shared/src/types').ConnectorCatalogSnapshot) => void
+  ) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      snapshot: import('../../packages/shared/src/types').ConnectorCatalogSnapshot
+    ): void => callback(snapshot)
+    ipcRenderer.on(IPC.CONNECTOR_CATALOG_CHANGED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.CONNECTOR_CATALOG_CHANGED, listener)
+    }
+  },
+
   onConnectorInstallProgress: (
     callback: (progress: import('../../packages/shared/src/types').ConnectorInstallProgress) => void
   ) => {

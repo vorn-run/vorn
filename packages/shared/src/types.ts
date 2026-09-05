@@ -1844,7 +1844,8 @@ export const IPC = {
   CONNECTOR_REMOVE_PACK: 'connector:removePack',
   CONNECTOR_ROLLBACK_PACK: 'connector:rollbackPack',
   CONNECTOR_LIST_PACKS: 'connector:listPacks',
-  CONNECTOR_INSTALL_PROGRESS: 'connector:installProgress'
+  CONNECTOR_INSTALL_PROGRESS: 'connector:installProgress',
+  CONNECTOR_CATALOG_CHANGED: 'connector:catalogChanged'
 } as const
 
 /**

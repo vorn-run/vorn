@@ -18,6 +18,7 @@
  * needs is still read by probing the installed package, so nothing here is
  * trusted once a connector is actually being set up.
  */
+import { EventEmitter } from 'node:events'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import os from 'os'
@@ -33,6 +34,7 @@ import type {
   McpServerCatalogEntry,
   WorkflowTemplate
 } from '@vornrun/shared/types'
+import { IPC } from '@vornrun/shared/types'
 import {
   PORTABLE_FORMAT_VERSION,
   type PortableRequirement,
@@ -505,6 +507,27 @@ let resolved: ConnectorCatalogItem[] | undefined
 let resolvedTemplates: WorkflowTemplate[] | undefined
 let resolvedMcpServers: McpServerCatalogEntry[] | undefined
 let resolvedAt: number | undefined
+let resolvedSignature: string | undefined
+
+// Says when a background refresh brought back a different catalog, so a list already on screen can re-read it.
+export const catalogEvents = new EventEmitter()
+
+/** Hold a catalog as the resolved one, with whether it differs from the one held before. */
+function adopt(
+  connectors: ConnectorCatalogEntry[],
+  templates: WorkflowTemplate[],
+  mcpServers: McpServerCatalogEntry[],
+  at: number | undefined
+): { items: ConnectorCatalogItem[]; changed: boolean } {
+  resolved = withLaunch(connectors)
+  resolvedTemplates = templates.length > 0 ? templates : TEMPLATE_SEED
+  resolvedMcpServers = mcpServers
+  resolvedAt = at
+  const signature = JSON.stringify([connectors, resolvedTemplates, mcpServers])
+  const changed = resolvedSignature !== signature
+  resolvedSignature = signature
+  return { items: resolved, changed }
+}
 
 /**
  * The catalog as the UI consumes it.
@@ -518,13 +541,14 @@ export function catalogItems(options: CatalogOptions = {}): ConnectorCatalogItem
   if (!resolved) {
     const now = options.now ?? Date.now()
     const cache = readCache(options.cachePath ?? CACHE_PATH)
-    resolved = withLaunch(cache?.connectors ?? CONNECTOR_CATALOG)
-    // A cached document that predates templates falls back to the seed rather
-    // than to nothing, so the start-from list is never empty on an old cache.
-    resolvedTemplates = cache?.templates?.length ? cache.templates : TEMPLATE_SEED
-    resolvedMcpServers = cache?.mcpServers ?? []
-    resolvedAt = cache?.fetchedAt
+    const { items } = adopt(
+      cache?.connectors ?? CONNECTOR_CATALOG,
+      cache?.templates ?? [],
+      cache?.mcpServers ?? [],
+      cache?.fetchedAt
+    )
     if (!cache || now - cache.fetchedAt > MAX_AGE_MS) void refreshCatalog(options)
+    return items
   }
   return resolved
 }
@@ -569,10 +593,9 @@ export async function refreshCatalog(options: CatalogOptions = {}): Promise<bool
   if (!document) return false
   const now = options.now ?? Date.now()
   writeCache(options.cachePath ?? CACHE_PATH, document, now)
-  resolved = withLaunch(document.connectors)
-  resolvedTemplates = document.templates.length > 0 ? document.templates : TEMPLATE_SEED
-  resolvedMcpServers = document.mcpServers
-  resolvedAt = now
+  if (adopt(document.connectors, document.templates, document.mcpServers, now).changed) {
+    catalogEvents.emit(IPC.CONNECTOR_CATALOG_CHANGED)
+  }
   return true
 }
 
@@ -586,4 +609,5 @@ export function resetCatalogCache(): void {
   resolvedTemplates = undefined
   resolvedMcpServers = undefined
   resolvedAt = undefined
+  resolvedSignature = undefined
 }
