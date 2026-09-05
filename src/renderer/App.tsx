@@ -52,7 +52,8 @@ import {
   initGlobalDataListener,
   disposeGlobalDataListener,
   setKeyRedirectHandler,
-  setNotLiveReporter
+  setNotLiveReporter,
+  setLiveReporter
 } from './lib/terminal-registry'
 import {
   setCwdReporter,
@@ -76,7 +77,7 @@ import { GridContextMenu } from './components/GridContextMenu'
 import { WindowControls } from './components/WindowControls'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from './lib/platform'
 import { useIsMobile } from './hooks/useIsMobile'
-import { syncBoard } from './lib/board-sync'
+import { syncBoard, reportWarmAttach } from './lib/board-sync'
 import { shouldNotifyBell, sendAgentNotification } from './lib/notifications'
 import { restoreDevicePanes } from './lib/device-restore'
 import { markPaneEnded } from './lib/session-resume'
@@ -153,6 +154,7 @@ export function App() {
     // terminal learns it is looking at a photograph. Start-up reconciliation
     // cannot tell it: the session was not there when this client started.
     setNotLiveReporter(markPaneEnded)
+    setLiveReporter(reportWarmAttach)
     // The capture path has to know before any command finishes, so it is read
     // from config rather than passed down through the view tree.
     setDomBlockRendering(useAppStore.getState().config?.defaults.domBlockRendering ?? true)

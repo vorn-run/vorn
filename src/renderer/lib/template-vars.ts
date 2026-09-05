@@ -94,6 +94,7 @@ export const TEMPLATE_VARIABLES: TemplateVariable[] = [
   { key: '{{task.projectName}}', label: 'Project', category: 'task' },
   { key: '{{trigger.fromStatus}}', label: 'Previous Status', category: 'trigger' },
   { key: '{{trigger.toStatus}}', label: 'New Status', category: 'trigger' },
+  { key: '{{trigger.restore}}', label: 'Cold or Warm', category: 'trigger' },
   { key: '{{trigger.body}}', label: 'Request Body', category: 'trigger' },
   { key: '{{trigger.headers}}', label: 'Request Headers', category: 'trigger' },
   { key: '{{trigger.query}}', label: 'Query Parameters', category: 'trigger' },
@@ -140,6 +141,10 @@ export function getAvailableContextVars(opts: {
     if (isTaskTrigger && v.category === 'task') return true
     if (isTaskTrigger && v.category === 'trigger' && opts.triggerType === 'taskStatusChanged') {
       return v.key.includes('Status')
+    }
+    if (opts.triggerType === 'sessionRestored') {
+      if (v.category === 'context') return true
+      if (v.category === 'trigger') return v.key.includes('trigger.restore')
     }
     if (opts.triggerType === 'webhook' && v.category === 'trigger') {
       return (

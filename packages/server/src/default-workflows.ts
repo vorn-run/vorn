@@ -6,12 +6,15 @@ import type {
   ConnectorManifest,
   ConnectorPollTriggerConfig,
   CreateTaskFromItemConfig,
-  TaskStatus
+  TaskStatus,
+  SessionRestoredTriggerConfig,
+  ScriptConfig
 } from '@vornrun/shared/types'
 import { connectorSeededWorkflowId } from '@vornrun/shared/types'
 
 /** Stable id of the seeded "Default Task Workflow". */
 export const DEFAULT_TASK_WORKFLOW_ID = 'system:default-task-workflow'
+export const DEV_SERVER_WORKFLOW_ID = 'system:dev-server-on-restore'
 
 /**
  * Factory for the default task workflow seeded on first launch.
@@ -147,5 +150,43 @@ export function buildConnectorSeededWorkflow(
       }
     ],
     edges: [{ id: 'e1', source: 'trigger-1', target: 'create-1' }]
+  }
+}
+
+/**
+ * A restore workflow to edit rather than to write: disabled until somebody
+ * turns it on, so a person with no interest in it sees no new behaviour.
+ */
+export function buildDevServerWorkflow(): WorkflowDefinition {
+  const triggerConfig: SessionRestoredTriggerConfig = { triggerType: 'sessionRestored' }
+  const scriptConfig: ScriptConfig = {
+    scriptType: 'bash',
+    scriptContent: 'yarn dev',
+    cwd: '{{context.projectPath}}'
+  }
+  return {
+    id: DEV_SERVER_WORKFLOW_ID,
+    name: 'Bring the dev server back',
+    icon: 'RotateCcw',
+    iconColor: '#c9972a',
+    enabled: false,
+    workspaceId: 'personal',
+    nodes: [
+      {
+        id: 'trigger-1',
+        type: 'trigger',
+        label: 'When a session is restored',
+        position: { x: 0, y: 0 },
+        config: triggerConfig
+      },
+      {
+        id: 'script-1',
+        type: 'script',
+        label: 'Start the dev server',
+        position: { x: 0, y: 120 },
+        config: scriptConfig
+      }
+    ],
+    edges: [{ id: 'e1', source: 'trigger-1', target: 'script-1' }]
   }
 }

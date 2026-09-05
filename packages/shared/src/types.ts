@@ -678,6 +678,9 @@ export interface WorkflowExecutionContext {
     type: TriggerConfig['triggerType']
     fromStatus?: TaskStatus
     toStatus?: TaskStatus
+    /** Restore runs: how the session came back, and what the reboot check found. */
+    restore?: 'cold' | 'warm'
+    environment?: RestoreEnvironment
     /** Webhook runs: the received request, for {{trigger.body.*}} / {{trigger.headers.*}}. */
     body?: unknown
     headers?: Record<string, string>
@@ -789,6 +792,18 @@ export interface TaskStatusChangedTriggerConfig {
   fromStatus?: TaskStatus
   toStatus?: TaskStatus
 }
+/**
+ * Fires when a session comes back: after a quit, a crash or a reboot. It
+ * describes what happened and decides nothing; the workflow decides.
+ */
+export interface SessionRestoredTriggerConfig {
+  triggerType: 'sessionRestored'
+  projectFilter?: string
+  /** Cold: a process started again. Warm: a pane attached to one still running. Default cold. */
+  restore?: 'cold' | 'any'
+  /** One run per project at a time, so eight sessions do not race for one dev-server port. Default perProject. */
+  concurrency?: 'perProject' | 'unbounded'
+}
 /** Polls a connector on cron. Scheduler calls connector.poll(), updates the
  *  connection's cursor, and fires one workflow execution per new item. */
 export interface ConnectorPollTriggerConfig {
@@ -812,6 +827,7 @@ export type TriggerConfig =
   | RecurringTriggerConfig
   | TaskCreatedTriggerConfig
   | TaskStatusChangedTriggerConfig
+  | SessionRestoredTriggerConfig
   | ConnectorPollTriggerConfig
   | WebhookTriggerConfig
 
@@ -1128,6 +1144,8 @@ export interface WorkflowExecution {
   status: 'running' | 'success' | 'error' | 'cancelled'
   nodeStates: NodeExecutionState[]
   triggerTaskId?: string
+  /** Set for restore-triggered runs, so the row can say which session and how it came back. */
+  triggerSession?: { id: string; label: string; restore: 'cold' | 'warm' }
   /**
    * What this run was triggered *with* — a connector item id, a task id, or
    * `'manual'`. Two runs of one workflow are duplicates only when this matches
@@ -1326,6 +1344,7 @@ export interface AppConfig {
      * the next launch.
      */
     hasSeededDefaultTaskWorkflow?: boolean
+    hasSeededDevServerWorkflow?: boolean
     /** Which worktrees the manager treats as stale, and what counts as build output. */
     worktreeRetention?: WorktreeRetentionConfig
   }

@@ -6,7 +6,8 @@ import {
   ArrowRightLeft,
   Plug,
   Globe,
-  type LucideIcon
+  type LucideIcon,
+  RotateCcw
 } from 'lucide-react'
 import type {
   TriggerConfig,
@@ -31,6 +32,7 @@ const TRIGGER_ICONS: Record<string, LucideIcon> = {
   recurring: Clock,
   taskCreated: ListPlus,
   taskStatusChanged: ArrowRightLeft,
+  sessionRestored: RotateCcw,
   connectorPoll: Plug,
   webhook: Globe
 }
@@ -70,6 +72,8 @@ function getSubtitle(config: TriggerConfig): string {
       const project = config.projectFilter ? ` · ${config.projectFilter}` : ''
       return transition + project
     }
+    case 'sessionRestored':
+      return `${config.restore === 'any' ? 'cold or warm' : 'cold'}${config.projectFilter ? ` · ${config.projectFilter}` : ' · any project'}`
     case 'connectorPoll':
       return `${config.event} · ${config.cron}`
     case 'webhook':

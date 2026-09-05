@@ -3,6 +3,8 @@ import {
   TriggerConfig,
   TaskConfig,
   TaskStatus,
+  TerminalSession,
+  RestoreEnvironment,
   WorkflowExecutionContext
 } from '../../shared/types'
 import { executeWorkflow } from './workflow-execution'
@@ -73,4 +75,49 @@ export function fireTaskStatusChangedTrigger(
       console.error(`[triggers] executeWorkflow error:`, err)
     )
   }
+}
+
+/** One chain per project. Serialized because a dev server has one port. */
+const restoreQueues = new Map<string, Promise<unknown>>()
+
+/**
+ * Called after a session comes back. Cold: the server started its process
+ * again. Warm: this client attached to one the server never stopped.
+ *
+ * The trigger reports which; the workflow chooses. A workflow set to cold, the
+ * default, hears nothing about a phone opening a live card.
+ */
+export function fireSessionRestoredTrigger(
+  session: TerminalSession,
+  how: { restore: 'cold' | 'warm'; environment?: RestoreEnvironment }
+): void {
+  const workflows = (useAppStore.getState().config?.workflows || []).filter((wf) => wf.enabled)
+
+  for (const wf of workflows) {
+    const trigger = getTriggerConfig(wf)
+    if (!trigger || trigger.triggerType !== 'sessionRestored') continue
+    if (trigger.projectFilter && trigger.projectFilter !== session.projectName) continue
+    if ((trigger.restore ?? 'cold') === 'cold' && how.restore === 'warm') continue
+
+    const context: WorkflowExecutionContext = {
+      source: session,
+      trigger: { type: 'sessionRestored', restore: how.restore, environment: how.environment }
+    }
+    const start = (): Promise<unknown> =>
+      executeWorkflow(wf, context).catch((err) =>
+        console.error(`[triggers] executeWorkflow error:`, err)
+      )
+    if (trigger.concurrency === 'unbounded') {
+      void start()
+      continue
+    }
+    const key = session.projectName
+    const next = (restoreQueues.get(key) ?? Promise.resolve()).then(start)
+    restoreQueues.set(key, next)
+  }
+}
+
+/** Test-only. */
+export function resetRestoreQueues(): void {
+  restoreQueues.clear()
 }

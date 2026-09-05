@@ -518,3 +518,24 @@ describe('liveNodeStatus', () => {
     ).toBeUndefined()
   })
 })
+
+describe('a run started by a session coming back', () => {
+  it('names restore, whether it was cold or warm, and the session', () => {
+    const nodes = [node('t', 'trigger', 'Restored', { triggerType: 'sessionRestored' })]
+    const p = describeRun(
+      run({
+        triggerSession: { id: 'abc123def', label: 'attach what you can see', restore: 'cold' }
+      }),
+      { name: 'Bring the dev server back', nodes }
+    )
+    expect(p.title).toBe('Bring the dev server back')
+    expect(p.subtitle).toBe('restore · cold · attach what you can see')
+    expect(p.source).toBe('restore')
+    expect(p.sourceLabel).toBe('restore')
+  })
+
+  it('reads the source from the trigger node when the run predates the session field', () => {
+    const nodes = [node('t', 'trigger', 'Restored', { triggerType: 'sessionRestored' })]
+    expect(describeRun(run(), { name: 'x', nodes }).source).toBe('restore')
+  })
+})

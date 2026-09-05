@@ -6,6 +6,7 @@ import {
   ArrowRightLeft,
   Plug,
   Globe,
+  RotateCcw,
   Copy,
   Check
 } from 'lucide-react'
@@ -57,6 +58,12 @@ const TRIGGER_TYPES = [
     label: 'Status Change',
     icon: ArrowRightLeft,
     hint: "Fires when a task's status changes"
+  },
+  {
+    type: 'sessionRestored' as const,
+    label: 'Session Restored',
+    icon: RotateCcw,
+    hint: 'Fires when a session comes back after a quit, a crash or a reboot'
   },
   {
     type: 'connectorPoll' as const,
@@ -243,6 +250,48 @@ export function TriggerConfigForm({ config, onChange, onOpenLibrary }: Props) {
         <ConnectorPollTriggerForm config={config} onChange={onChange} />
       )}
 
+      {config.triggerType === 'sessionRestored' && (
+        <>
+          <div>
+            <label className="text-[13px] text-gray-400 font-medium block mb-2">
+              Project Filter
+            </label>
+            <ProjectPicker
+              currentProject={config.projectFilter || ''}
+              projects={projects}
+              onChange={(name) => onChange({ ...config, projectFilter: name || undefined })}
+              variant="form"
+              allowNone
+            />
+            <p className="text-[11px] text-gray-500 mt-1">
+              Without one, this fires in every project on every start-up
+            </p>
+          </div>
+          <Segmented
+            label="Which restores"
+            value={config.restore ?? 'cold'}
+            options={[
+              { value: 'cold', label: 'Cold only' },
+              { value: 'any', label: 'Warm too' }
+            ]}
+            onChange={(v) => onChange({ ...config, restore: v === 'any' ? 'any' : undefined })}
+            hint="Cold: a process started again. Warm: a pane attached to one still running."
+          />
+          <Segmented
+            label="At a time"
+            value={config.concurrency ?? 'perProject'}
+            options={[
+              { value: 'perProject', label: 'One per project' },
+              { value: 'unbounded', label: 'Any number' }
+            ]}
+            onChange={(v) =>
+              onChange({ ...config, concurrency: v === 'unbounded' ? 'unbounded' : undefined })
+            }
+            hint="Eight sessions in one project make one run, then the next"
+          />
+        </>
+      )}
+
       {config.triggerType === 'webhook' && (
         <WebhookTriggerFields config={config} onChange={onChange} />
       )}
@@ -365,5 +414,42 @@ function WebhookTriggerFields({
         </p>
       </div>
     </>
+  )
+}
+
+function Segmented({
+  label,
+  value,
+  options,
+  onChange,
+  hint
+}: {
+  label: string
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (value: string) => void
+  hint?: string
+}) {
+  return (
+    <div>
+      <label className="text-[13px] text-gray-400 font-medium block mb-2">{label}</label>
+      <div className="flex rounded-lg border border-white/[0.06] overflow-hidden text-[12px]">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            className={`flex-1 px-2 py-1.5 transition-colors ${
+              o.value === value
+                ? 'bg-white/[0.1] text-gray-200'
+                : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.04]'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      {hint && <p className="text-[11px] text-gray-500 mt-1">{hint}</p>}
+    </div>
   )
 }

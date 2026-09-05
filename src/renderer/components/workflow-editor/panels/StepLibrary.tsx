@@ -13,7 +13,8 @@ import {
   Clock,
   Calendar,
   ListPlus,
-  ArrowRightLeft
+  ArrowRightLeft,
+  RotateCcw
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type {
@@ -62,6 +63,7 @@ const TRIGGER_ITEMS: {
   { triggerType: 'once', label: 'Schedule once', icon: Calendar },
   { triggerType: 'taskCreated', label: 'Task created', icon: ListPlus },
   { triggerType: 'taskStatusChanged', label: 'Task moved', icon: ArrowRightLeft },
+  { triggerType: 'sessionRestored', label: 'Session restored', icon: RotateCcw },
   { triggerType: 'webhook', label: 'Webhook', icon: Globe }
 ]
 
