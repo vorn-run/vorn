@@ -37,11 +37,11 @@ const INBOX_BATCH_SIZE = 50
 const MAX_POLL_PAGES_PER_TICK = 20
 
 /**
- * Try to acquire an execution lock for a workflow run.
+ * Try to acquire a tick lock for a workflow's schedule.
  * Uses exclusive file creation (wx flag) keyed by the current minute
- * so it's atomic across processes and auto-expires for the next run.
+ * so it's atomic across processes and auto-expires for the next tick.
  */
-function acquireExecutionLock(workflowId: string): boolean {
+function acquireTickLock(workflowId: string): boolean {
   // Key by current minute so the lock naturally expires for the next scheduled run
   const minuteKey = Math.floor(Date.now() / 60_000)
   const lockFile = path.join(LOCK_DIR, `scheduler-${workflowId}-${minuteKey}.lock`)
@@ -239,7 +239,7 @@ class Scheduler extends EventEmitter {
           continue
         }
         try {
-          const task = cron.schedule(trigger.cron, () => this.executeWorkflow(wf.id), {
+          const task = cron.schedule(trigger.cron, () => this.executeWorkflow(wf.id, 'cron'), {
             timezone: trigger.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
           })
           this.cronJobs.set(wf.id, task)
@@ -279,7 +279,7 @@ class Scheduler extends EventEmitter {
               this.timeouts.delete(wf.id)
               this.syncSchedules(configManager.loadConfig().workflows ?? [])
             } else {
-              this.executeWorkflow(wf.id)
+              this.executeWorkflow(wf.id, 'cron')
             }
           }, safeDelay)
           this.timeouts.set(wf.id, timer)
@@ -288,9 +288,15 @@ class Scheduler extends EventEmitter {
     }
   }
 
-  private executeWorkflow(workflowId: string, inputs?: Record<string, unknown>): void {
-    if (!acquireExecutionLock(workflowId)) {
-      log.info(`[scheduler] skipping workflow ${workflowId} — already executed by another instance`)
+  // Only a tick takes the lock: two runs someone asked for are two runs, and the duplicate an
+  // impatient click makes is caught where the run is claimed, by its inputs rather than its minute.
+  private executeWorkflow(
+    workflowId: string,
+    source: 'cron' | 'manual',
+    inputs?: Record<string, unknown>
+  ): void {
+    if (source === 'cron' && !acquireTickLock(workflowId)) {
+      log.info(`[scheduler] skipping workflow ${workflowId} — already fired this minute`)
       this.timeouts.delete(workflowId)
       return
     }
@@ -457,16 +463,14 @@ class Scheduler extends EventEmitter {
   }
 
   /**
-   * Trigger a workflow manually, bypassing the cron tick. Used by "Run now"
-   * in settings for connector-seeded workflows: the same dispatch path as
-   * cron, so no hidden logic — just a forced tick. The minute-key lock still
-   * applies so repeated clicks within the same minute fold into one run.
+   * Trigger a workflow now, bypassing the schedule: the same dispatch path as a
+   * tick, so no hidden logic — just a forced fire.
    *
    * `inputs` carries the values a manual run was started with, forwarded to
    * the renderer so `{{inputs.*}}` resolves the same as a direct run.
    */
   triggerWorkflow(workflowId: string, inputs?: Record<string, unknown>): void {
-    this.executeWorkflow(workflowId, inputs)
+    this.executeWorkflow(workflowId, 'manual', inputs)
   }
 
   /**
