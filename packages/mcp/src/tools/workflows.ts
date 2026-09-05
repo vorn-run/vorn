@@ -497,7 +497,7 @@ export function annotateWaitingGates<T extends WorkflowExecution>(
 }
 
 /** A run to answer a gate on: recent history first, then every parked run, since a gate can wait past the cap. */
-async function runHoldingGate(
+async function runById(
   runId: string
 ): Promise<(WorkflowExecution & { workflowName?: string }) | undefined> {
   const recent = (await listAllWorkflowRuns(undefined, 500)).find((r) => r.runId === runId)
@@ -755,7 +755,7 @@ export function registerWorkflowTools(server: McpServer): void {
       // Scanning recent runs beats broadcasting a typo that nothing answers:
       // the stop is fire-and-forget, so an id that matches nothing would
       // otherwise report success and do nothing at all.
-      const run = (await listAllWorkflowRuns(undefined, 500)).find((r) => r.runId === args.run_id)
+      const run = await runById(args.run_id)
       if (!run) {
         return {
           content: [
@@ -813,7 +813,7 @@ export function registerWorkflowTools(server: McpServer): void {
     },
     async (args) => {
       // The decision is broadcast, so an id nothing matches would report success and answer no gate at all.
-      const run = await runHoldingGate(args.run_id)
+      const run = await runById(args.run_id)
       if (!run) {
         return {
           content: [
