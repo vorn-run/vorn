@@ -275,7 +275,7 @@ export function NodeConfigPanel({
             <p className="text-[10px] text-gray-600 mt-1.5">
               {(node.onError ?? 'stop') === 'stop'
                 ? 'Everything downstream is skipped and the run ends as failed.'
-                : 'Later steps run as if this one had succeeded — for a step whose failure does not invalidate the rest.'}
+                : 'Later steps run as if this one had succeeded, and the run still counts as successful — for a step whose failure does not invalidate the rest.'}
             </p>
           </div>
         )}

@@ -606,6 +606,111 @@ describe('a step that declared its failure survivable', () => {
     expect(execution.status).toBe('error')
   })
 
+  it('still fails the run for a step that never ran, whatever policy it declared', async () => {
+    // "Carry on anyway" speaks for a failure. A step left unreachable never
+    // failed, so nothing it declared has anything to say about the run.
+    const wf = makeWorkflow('wf-orphan')
+    const orphan = {
+      ...wf.nodes[1],
+      id: 'orphan',
+      label: 'Orphan',
+      onError: 'continue'
+    } as WorkflowDefinition['nodes'][number]
+    const withOrphan = { ...wf, nodes: [...wf.nodes, orphan] } as WorkflowDefinition
+    onSessionCreated = (id) => {
+      onSessionCreated = null
+      emitExit(id, 0)
+    }
+
+    const execution = await executeWorkflow(withOrphan)
+
+    expect(execution.status).toBe('error')
+    const left = execution.nodeStates.find((n) => n.nodeId === 'orphan')
+    expect(left?.error).toMatch(/^Skipped:/)
+  })
+
+  it('fails the run when a loop that carries on holds a step that does not', async () => {
+    // The loop excuses its own failure; the body step that stopped still had
+    // the last word about the run.
+    const wf = makeWorkflow('wf-loop')
+    const body = {
+      ...wf.nodes[1],
+      id: 'body',
+      label: 'Body'
+    } as WorkflowDefinition['nodes'][number]
+    const loop = {
+      id: 'loop',
+      type: 'loop',
+      label: 'Until it is clean',
+      position: { x: 0, y: 1 },
+      onError: 'continue',
+      config: { nodeType: 'loop', bodyNodeIds: ['body'], maxIterations: 1 }
+    } as unknown as WorkflowDefinition['nodes'][number]
+    const looping = {
+      ...wf,
+      nodes: [wf.nodes[0], loop, body],
+      edges: [{ id: 'e1', source: 'trigger', target: 'loop' }]
+    } as unknown as WorkflowDefinition
+    onSessionCreated = (id) => {
+      onSessionCreated = null
+      emitExit(id, 1)
+    }
+
+    const execution = await executeWorkflow(looping)
+
+    expect(execution.status).toBe('error')
+    expect(execution.nodeStates.find((n) => n.nodeId === 'loop')?.status).toBe('error')
+    expect(execution.nodeStates.find((n) => n.nodeId === 'body')?.status).toBe('error')
+  })
+
+  it('takes neither branch of a condition that failed', async () => {
+    const wf = makeWorkflow('wf-condition')
+    const agent = wf.nodes[1]
+    const condition = {
+      id: 'condition',
+      type: 'condition',
+      label: 'Is it clean',
+      position: { x: 0, y: 1 },
+      onError: 'continue',
+      // A definition that arrived malformed: resolving this throws, so the
+      // condition answers nothing.
+      config: {
+        nodeType: 'condition',
+        variable: 1 as unknown as string,
+        operator: 'equals',
+        value: 'x'
+      }
+    } as unknown as WorkflowDefinition['nodes'][number]
+    const branching = {
+      ...wf,
+      nodes: [
+        wf.nodes[0],
+        condition,
+        { ...agent, id: 'yes', label: 'Yes' },
+        { ...agent, id: 'no', label: 'No' }
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'condition' },
+        { id: 'e2', source: 'condition', target: 'yes', conditionBranch: 'true' },
+        { id: 'e3', source: 'condition', target: 'no', conditionBranch: 'false' }
+      ]
+    } as unknown as WorkflowDefinition
+    let launched = 0
+    // Exits whatever starts, so a branch taken by mistake fails the assertion
+    // rather than hanging the run.
+    onSessionCreated = (id) => {
+      launched += 1
+      emitExit(id, 0)
+    }
+
+    const execution = await executeWorkflow(branching)
+
+    expect(execution.nodeStates.find((n) => n.nodeId === 'condition')?.status).toBe('error')
+    expect(execution.nodeStates.find((n) => n.nodeId === 'yes')?.status).toBe('skipped')
+    expect(execution.nodeStates.find((n) => n.nodeId === 'no')?.status).toBe('skipped')
+    expect(launched).toBe(0)
+  })
+
   it('reads the same way for a run closed after a reload', async () => {
     mockState.config.workflows = [makeSurvivableWorkflow('wf-reloaded')]
     const execution: WorkflowExecution = {
@@ -630,7 +735,7 @@ describe('a step that declared its failure survivable', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ) as any
 
-    await reconcileRunningExecutions([execution])
+    await reconcileRunningExecutions([execution], mockState.config.workflows)
 
     expect(execution.status).toBe('success')
     expect(execution.nodeStates.find((n) => n.nodeId === 'agent')?.status).toBe('error')
@@ -650,7 +755,7 @@ describe('connector run recovery', () => {
       nodeStates: [{ nodeId: 'agent', status: 'success' }]
     }
 
-    await reconcileRunningExecutions([execution])
+    await reconcileRunningExecutions([execution], [])
 
     expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
       id: 101,

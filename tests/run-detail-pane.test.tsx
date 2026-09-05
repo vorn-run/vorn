@@ -9,7 +9,10 @@ const approveMock = vi.fn()
 const rejectMock = vi.fn()
 vi.mock('../src/renderer/lib/workflow-execution', () => ({
   approveWorkflowGate: (...args: unknown[]) => approveMock(...args),
-  rejectWorkflowGate: (...args: unknown[]) => rejectMock(...args)
+  rejectWorkflowGate: (...args: unknown[]) => rejectMock(...args),
+  // The real rule, so a retry control is exercised the way the pane gates it.
+  hasFailedStep: (e: { nodeStates: Array<{ status: string; error?: string }> }) =>
+    e.nodeStates.some((ns) => ns.status === 'error' && !ns.error?.startsWith('Skipped:'))
 }))
 
 vi.mock('../src/renderer/components/workflow-runs/StopRunButton', () => ({
