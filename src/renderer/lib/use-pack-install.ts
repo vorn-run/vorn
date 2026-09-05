@@ -141,8 +141,11 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       setPending(null)
       // Busy from the press itself, so the button cannot be pressed twice while the server is still silent.
       const source = sourceFor(listing)
-      // Nothing to fetch until a release publishes one, so the row never says it is working.
-      if (!source) return
+      // Nothing to fetch until a release publishes one; whatever an earlier press left on the row goes too.
+      if (!source) {
+        forget(listing.id)
+        return
+      }
       setProgress((current) => ({
         ...current,
         [listing.id]: { id: listing.id, phase: 'checking' }

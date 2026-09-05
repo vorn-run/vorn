@@ -185,7 +185,7 @@ export function describePackStatus(state: PackState): PackStatusView {
   }
 }
 
-/** A catalog entry with no pack still launches by name, so it stays reachable. */
+/** Whether a connection can be added: an installed pack, a launch by name, or a catalog entry that has a pack. */
 export function canAddConnection(
   state: PackState,
   route: { source: string; hasLegacyLaunch?: boolean }
