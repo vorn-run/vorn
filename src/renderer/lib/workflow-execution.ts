@@ -267,9 +267,7 @@ export async function reconcileRunningExecutions(
         }
         execution.status = 'error'
       } else {
-        execution.status = execution.nodeStates.some((ns) => ns.status === 'error')
-          ? 'error'
-          : 'success'
+        execution.status = runEndedInError(execution, nodesOfRun(execution)) ? 'error' : 'success'
       }
       execution.completedAt = new Date().toISOString()
       dirty = true
@@ -1411,6 +1409,28 @@ export function stopsRunOnError(node: Partial<Pick<WorkflowNode, 'onError'>>): b
   return (node.onError ?? 'stop') === 'stop'
 }
 
+// Whether the run failed, rather than merely holding a step that failed and said so survivably.
+export function runEndedInError(
+  execution: WorkflowExecution,
+  nodes: Map<string, WorkflowNode>,
+  skipped?: ReadonlySet<string>
+): boolean {
+  return execution.nodeStates.some(
+    (ns) =>
+      ns.status === 'error' &&
+      !skipped?.has(ns.nodeId) &&
+      stopsRunOnError(nodes.get(ns.nodeId) ?? {})
+  )
+}
+
+/** The nodes of a run's workflow, so a failure can be read against its own policy. */
+function nodesOfRun(execution: WorkflowExecution): Map<string, WorkflowNode> {
+  const workflow = (useAppStore.getState().config?.workflows || []).find(
+    (w) => w.id === execution.workflowId
+  )
+  return new Map((workflow?.nodes ?? []).map((n) => [n.id, n]))
+}
+
 export function buildGraph(edges: readonly { source: string; target: string }[]): {
   successors: Map<string, string[]>
   predecessors: Map<string, string[]>
@@ -1985,10 +2005,7 @@ async function runExecution(
       persistExecution(execution)
     }
 
-    const hasErrors = execution.nodeStates.some(
-      (ns) => ns.status === 'error' && !skippedByCondition.has(ns.nodeId)
-    )
-    execution.status = hasErrors ? 'error' : 'success'
+    execution.status = runEndedInError(execution, nodeMap, skippedByCondition) ? 'error' : 'success'
     execution.completedAt = new Date().toISOString()
   } catch (err) {
     console.error(`[workflow] execution error:`, err)

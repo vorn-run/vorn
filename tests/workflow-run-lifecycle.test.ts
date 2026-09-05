@@ -571,6 +571,72 @@ describe('rejecting an approval gate', () => {
   })
 })
 
+describe('a step that declared its failure survivable', () => {
+  /** The same workflow, with the agent free to fail without ending the run. */
+  function makeSurvivableWorkflow(id = 'wf-1'): WorkflowDefinition {
+    const wf = makeWorkflow(id)
+    const agent = wf.nodes.find((n) => n.id === 'agent')!
+    return { ...wf, nodes: [wf.nodes[0], { ...agent, onError: 'continue' }] } as WorkflowDefinition
+  }
+
+  it('leaves the run successful, and the step itself failed', async () => {
+    const wf = makeSurvivableWorkflow()
+    onSessionCreated = (id) => {
+      onSessionCreated = null
+      emitExit(id, 1)
+    }
+
+    const execution = await executeWorkflow(wf)
+
+    expect(execution.status).toBe('success')
+    const agent = execution.nodeStates.find((n) => n.nodeId === 'agent')
+    expect(agent?.status).toBe('error')
+    expect(agent?.error).toBe('Exit code 1')
+  })
+
+  it('still ends the run when the step says a failure stops it', async () => {
+    const wf = makeWorkflow()
+    onSessionCreated = (id) => {
+      onSessionCreated = null
+      emitExit(id, 1)
+    }
+
+    const execution = await executeWorkflow(wf)
+
+    expect(execution.status).toBe('error')
+  })
+
+  it('reads the same way for a run closed after a reload', async () => {
+    mockState.config.workflows = [makeSurvivableWorkflow('wf-reloaded')]
+    const execution: WorkflowExecution = {
+      runId: 'run-reloaded',
+      workflowId: 'wf-reloaded',
+      startedAt: '2026-04-20T10:00:00Z',
+      status: 'running',
+      nodeStates: [
+        { nodeId: 'trigger', status: 'success' },
+        { nodeId: 'agent', status: 'running', sessionId: 'sess-reloaded' }
+      ]
+    }
+    globalThis.window.api.listSessionEventsBySession = vi.fn(
+      () =>
+        Promise.resolve([
+          {
+            eventType: 'exited',
+            timestamp: '2026-04-20T10:01:00Z',
+            metadata: { exitCode: 1 }
+          }
+        ])
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ) as any
+
+    await reconcileRunningExecutions([execution])
+
+    expect(execution.status).toBe('success')
+    expect(execution.nodeStates.find((n) => n.nodeId === 'agent')?.status).toBe('error')
+  })
+})
+
 describe('connector run recovery', () => {
   it('acknowledges a terminal run restored after persistence', async () => {
     const execution: WorkflowExecution = {
