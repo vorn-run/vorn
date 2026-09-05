@@ -72,6 +72,19 @@ describe('RunEntry — approval gate controls', () => {
     expect(reject).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'wf-1' }), 'gate')
   })
 
+  it('offers a retry from the failed step when a step failed but the run went on', () => {
+    const onRetryRun = vi.fn()
+    const execution = makeExec({
+      status: 'success',
+      nodeStates: [{ nodeId: 'gate', status: 'error', error: 'boom' }]
+    })
+    const { getByLabelText } = render(
+      <RunEntry execution={execution} nodes={[approvalNode]} onRetryRun={onRetryRun} />
+    )
+    fireEvent.click(getByLabelText('Retry from failed step'))
+    expect(onRetryRun).toHaveBeenCalledWith(execution)
+  })
+
   it('does not render approval controls for non-approval waiting nodes', () => {
     const nonApproval: WorkflowNode = {
       id: 'gate',
