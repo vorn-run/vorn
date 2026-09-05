@@ -4,8 +4,11 @@ import { ServerBridge } from '../src/main/server/server-bridge'
 
 const servers: WebSocketServer[] = []
 const bridges: ServerBridge[] = []
+const timers: NodeJS.Timeout[] = []
 
 afterEach(() => {
+  for (const timer of timers) clearTimeout(timer)
+  timers.length = 0
   for (const bridge of bridges) bridge.close()
   bridges.length = 0
   for (const server of servers) server.close()
@@ -18,9 +21,11 @@ async function bridgeTo(answerAfterMs: number): Promise<ServerBridge> {
   server.on('connection', (socket) => {
     socket.on('message', (raw) => {
       const { id } = JSON.parse(raw.toString()) as { id: number }
-      setTimeout(
-        () => socket.send(JSON.stringify({ jsonrpc: '2.0', id, result: 'done' })),
-        answerAfterMs
+      timers.push(
+        setTimeout(
+          () => socket.send(JSON.stringify({ jsonrpc: '2.0', id, result: 'done' })),
+          answerAfterMs
+        )
       )
     })
   })
