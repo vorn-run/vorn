@@ -10,7 +10,8 @@ vi.mock('../src/renderer/lib/use-connections', () => ({
   // A step with no connection draws its node-type glyph instead.
   connectorLookFor: () => undefined
 }))
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
+vi.mock('../src/renderer/lib/workflow-execution', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/workflow-execution')>()),
   isRunStoppable: () => false,
   stopWorkflowRun: vi.fn(),
   approveWorkflowGate: vi.fn(),

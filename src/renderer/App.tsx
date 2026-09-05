@@ -173,10 +173,17 @@ export function App() {
       if (!isAtPrompt(getShellInputState(terminalId))) return false
       return focusIntentBar(terminalId)
     })
-    ;(async () => {
+    // Held open only until the config is in the store: what waits on it wants the
+    // workflows, not the sessions and panes the rest of this restores.
+    let configIsSet: () => void = () => {}
+    const configReady = new Promise<void>((resolve) => {
+      configIsSet = resolve
+    })
+    void (async () => {
       try {
         const config = await window.api.loadConfig()
         useAppStore.getState().setConfig(config)
+        configIsSet()
         if (config.defaults.fontSize) {
           setDefaultFontSize(config.defaults.fontSize)
         }
@@ -225,6 +232,9 @@ export function App() {
         }
       } catch (err) {
         console.error('[App] startup initialization failed:', err)
+      } finally {
+        // A config that never arrived still lets the rest go; it reads an empty list.
+        configIsSet()
       }
     })()
 
@@ -379,7 +389,7 @@ export function App() {
         if (existingExecution && connectorItem) {
           await adoptConnectorInboxLease(existingExecution, connectorItem)
           rescheduleWaitingGateTimers([existingExecution], [workflow])
-          await reconcileRunningExecutions([existingExecution])
+          await reconcileRunningExecutions([existingExecution], [workflow])
           return
         }
 
@@ -543,8 +553,8 @@ export function App() {
     // keeps headless agents alive past a renderer reload, but the in-memory
     // exit-promise dies — the run wedges. Reconcile against session_events
     // and close out anything that already exited.
-    window.api
-      .listRunningWorkflowRuns()
+    configReady
+      .then(() => window.api.listRunningWorkflowRuns())
       .then((runs) => {
         const store = useAppStore.getState()
         for (const run of runs) {
@@ -552,7 +562,8 @@ export function App() {
             store.setWorkflowExecution(run.runId, run)
           }
         }
-        return reconcileRunningExecutions(runs)
+        // After the config, so a step that said its failure was survivable is read that way.
+        return reconcileRunningExecutions(runs, store.config?.workflows ?? [])
       })
       .catch((err) => console.error('[App] failed to reconcile running runs:', err))
 

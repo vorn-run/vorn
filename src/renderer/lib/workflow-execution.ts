@@ -107,7 +107,10 @@ function monitorRestoredConnectorExecution(execution: WorkflowExecution): void {
   const timer = setInterval(() => {
     if (reconciling) return
     reconciling = true
-    void reconcileRunningExecutions([execution]).finally(() => {
+    void reconcileRunningExecutions(
+      [execution],
+      useAppStore.getState().config?.workflows ?? []
+    ).finally(() => {
       reconciling = false
     })
   }, RESTORED_CONNECTOR_POLL_INTERVAL_MS)
@@ -196,8 +199,13 @@ function scheduleGateTimeout(
  * the user can re-run.
  */
 export async function reconcileRunningExecutions(
-  executions: Iterable<WorkflowExecution>
+  executions: Iterable<WorkflowExecution>,
+  workflows: WorkflowDefinition[]
 ): Promise<void> {
+  const nodesOf = (execution: WorkflowExecution): Map<string, WorkflowNode> =>
+    new Map(
+      (workflows.find((w) => w.id === execution.workflowId)?.nodes ?? []).map((n) => [n.id, n])
+    )
   for (const execution of executions) {
     if (execution.completedAt && execution.status !== 'running') {
       stopConnectorLeaseHeartbeat(execution.runId)
@@ -235,7 +243,7 @@ export async function reconcileRunningExecutions(
       const { ns } = probe
       if (probe.kind === 'no-session') {
         ns.status = 'error'
-        ns.error = 'Run abandoned (no session id recorded)'
+        ns.error = ABANDONED
         ns.completedAt = new Date().toISOString()
         dirty = true
         anyResolvedHere = true
@@ -267,9 +275,7 @@ export async function reconcileRunningExecutions(
         }
         execution.status = 'error'
       } else {
-        execution.status = execution.nodeStates.some((ns) => ns.status === 'error')
-          ? 'error'
-          : 'success'
+        execution.status = runEndedInError(execution, nodesOf(execution)) ? 'error' : 'success'
       }
       execution.completedAt = new Date().toISOString()
       dirty = true
@@ -1411,6 +1417,38 @@ export function stopsRunOnError(node: Partial<Pick<WorkflowNode, 'onError'>>): b
   return (node.onError ?? 'stop') === 'stop'
 }
 
+/** A step the engine wrote off rather than ran: the reconciler never saw it start. */
+const ABANDONED = 'Run abandoned (no session id recorded)'
+
+/** A step that never ran, so no policy of its own has anything to say about it. */
+function neverRan(state: NodeExecutionState): boolean {
+  return state.error?.startsWith('Skipped:') === true || state.error === ABANDONED
+}
+
+/** A step that failed on its own terms, which is what a retry has somewhere to start from. */
+export function hasFailedStep(execution: WorkflowExecution): boolean {
+  return execution.nodeStates.some((ns) => ns.status === 'error' && !neverRan(ns))
+}
+
+// Whether the run failed, rather than merely holding a step that failed and said so survivably.
+function runEndedInError(
+  execution: WorkflowExecution,
+  nodes: Map<string, WorkflowNode>,
+  skipped?: ReadonlySet<string>
+): boolean {
+  return execution.nodeStates.some((ns) => {
+    if (ns.status !== 'error' || skipped?.has(ns.nodeId)) return false
+    if (neverRan(ns)) return true
+    const node = nodes.get(ns.nodeId)
+    return !node || stopsRunOnError(node)
+  })
+}
+
+/** The definition a run came from, which the store holds once the config has loaded. */
+function workflowById(id: string): WorkflowDefinition | undefined {
+  return (useAppStore.getState().config?.workflows || []).find((w) => w.id === id)
+}
+
 export function buildGraph(edges: readonly { source: string; target: string }[]): {
   successors: Map<string, string[]>
   predecessors: Map<string, string[]>
@@ -1763,9 +1801,7 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
 
   // Release immediately rather than at the dedupe window's expiry, so stopping
   // a run and starting it again is not blocked by the run just stopped.
-  const workflow = (useAppStore.getState().config?.workflows || []).find(
-    (w) => w.id === execution.workflowId
-  )
+  const workflow = workflowById(execution.workflowId)
   await Promise.allSettled([
     window.api.releaseWorkflowRun({
       workflowId: execution.workflowId,
@@ -1943,6 +1979,22 @@ async function runExecution(
           return
         }
 
+        // A condition that failed answered nothing, so neither branch is the one it chose.
+        if (node.type === 'condition' && postState?.status === 'error') {
+          for (const edge of workflow.edges) {
+            if (edge.source === node.id && edge.conditionBranch) markSkippedBranch(edge.target)
+          }
+          for (const skippedId of skippedByCondition) {
+            updateNodeState(execution, skippedId, {
+              status: 'skipped',
+              skipReason: 'branch',
+              completedAt: new Date().toISOString()
+            })
+          }
+          persistExecution(execution)
+          return
+        }
+
         // After a condition node completes, skip the non-matching branch
         if (node.type === 'condition') {
           const condState = execution.nodeStates.find((s) => s.nodeId === node.id)
@@ -1993,10 +2045,7 @@ async function runExecution(
       persistExecution(execution)
     }
 
-    const hasErrors = execution.nodeStates.some(
-      (ns) => ns.status === 'error' && !skippedByCondition.has(ns.nodeId)
-    )
-    execution.status = hasErrors ? 'error' : 'success'
+    execution.status = runEndedInError(execution, nodeMap, skippedByCondition) ? 'error' : 'success'
     execution.completedAt = new Date().toISOString()
   } catch (err) {
     console.error(`[workflow] execution error:`, err)
@@ -2159,9 +2208,7 @@ function resolveWaitingGate(
   nodeId: string,
   caller: 'approve' | 'reject'
 ): { workflow: WorkflowDefinition } | null {
-  const workflow = (useAppStore.getState().config?.workflows || []).find(
-    (w) => w.id === execution.workflowId
-  )
+  const workflow = workflowById(execution.workflowId)
   if (!workflow) {
     console.warn(`[workflow] ${caller}WorkflowGate: workflow ${execution.workflowId} not found`)
     return null

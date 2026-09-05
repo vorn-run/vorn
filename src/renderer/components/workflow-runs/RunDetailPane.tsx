@@ -16,7 +16,8 @@ import {
   approveWorkflowGate,
   rejectWorkflowGate,
   retryRunFromFailure,
-  rerunWorkflowRun
+  rerunWorkflowRun,
+  hasFailedStep
 } from '../../lib/workflow-execution'
 import { RunStepsList, StatusDot } from '../workflow-editor/RunEntry'
 import { RunIcon } from './RunIcon'
@@ -113,7 +114,7 @@ export function RunDetailPane({
             </span>
           )}
           <span className="flex-1" />
-          {run.status === 'error' && fullWorkflow && (
+          {hasFailedStep(run) && fullWorkflow && (
             <button
               aria-label="Retry from failed step"
               title="Retry from failed step"

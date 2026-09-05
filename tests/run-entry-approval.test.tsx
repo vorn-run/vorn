@@ -5,7 +5,10 @@ import '@testing-library/jest-dom/vitest'
 
 const approve = vi.fn()
 const reject = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
+// The real module but for the calls this asserts, so the retry control is gated
+// by the rule the entry really uses.
+vi.mock('../src/renderer/lib/workflow-execution', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/workflow-execution')>()),
   approveWorkflowGate: (...args: unknown[]) => approve(...args),
   rejectWorkflowGate: (...args: unknown[]) => reject(...args),
   isRunStoppable: (e: { status: string }) => e.status === 'running',
@@ -67,6 +70,19 @@ describe('RunEntry — approval gate controls', () => {
     const { getByText } = render(<RunEntry execution={makeExec()} nodes={[approvalNode]} />)
     fireEvent.click(getByText('Reject'))
     expect(reject).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'wf-1' }), 'gate')
+  })
+
+  it('offers a retry from the failed step when a step failed but the run went on', () => {
+    const onRetryRun = vi.fn()
+    const execution = makeExec({
+      status: 'success',
+      nodeStates: [{ nodeId: 'gate', status: 'error', error: 'boom' }]
+    })
+    const { getByLabelText } = render(
+      <RunEntry execution={execution} nodes={[approvalNode]} onRetryRun={onRetryRun} />
+    )
+    fireEvent.click(getByLabelText('Retry from failed step'))
+    expect(onRetryRun).toHaveBeenCalledWith(execution)
   })
 
   it('does not render approval controls for non-approval waiting nodes', () => {

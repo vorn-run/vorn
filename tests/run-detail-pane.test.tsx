@@ -4,10 +4,14 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
 import type { RunListEntry } from '../src/renderer/hooks/useAllWorkflowRuns'
+import { useAppStore } from '../src/renderer/stores'
 
 const approveMock = vi.fn()
 const rejectMock = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
+// The real module but for the two calls this asserts, so the retry control is
+// gated by the rule the pane really uses.
+vi.mock('../src/renderer/lib/workflow-execution', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/workflow-execution')>()),
   approveWorkflowGate: (...args: unknown[]) => approveMock(...args),
   rejectWorkflowGate: (...args: unknown[]) => rejectMock(...args)
 }))
@@ -111,6 +115,19 @@ describe('RunDetailPane', () => {
     expect(screen.getByRole('heading', { name: 'PR #309' })).toBeInTheDocument()
     expect(screen.getByText('clean branches')).toBeInTheDocument()
     expect(screen.getByText('refactor: split workflow runs panel')).toBeInTheDocument()
+  })
+
+  it('offers a retry from the failed step when a step failed but the run went on', () => {
+    useAppStore.setState({
+      config: {
+        ...(useAppStore.getState().config ?? {}),
+        workflows: [{ id: 'wf-a', name: 'clean branches', nodes: NODES, edges: [] }]
+      }
+    } as never)
+    renderPane(
+      makeRun({ status: 'success', nodeStates: [{ nodeId: 'n1', status: 'error', error: 'boom' }] })
+    )
+    expect(screen.getByLabelText('Retry from failed step')).toBeInTheDocument()
   })
 
   it('summarises a run that finished every stage without pausing', () => {

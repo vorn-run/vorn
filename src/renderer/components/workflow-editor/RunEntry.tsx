@@ -14,7 +14,11 @@ import {
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
-import { approveWorkflowGate, rejectWorkflowGate } from '../../lib/workflow-execution'
+import {
+  approveWorkflowGate,
+  hasFailedStep,
+  rejectWorkflowGate
+} from '../../lib/workflow-execution'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { connectorLookFor, useConnections, type ConnectorLook } from '../../lib/use-connections'
@@ -532,7 +536,7 @@ export function RunEntry({
             {formatRunDuration(execution.startedAt, execution.completedAt)}
           </span>
         </button>
-        {execution.status === 'error' && onRetryRun && (
+        {hasFailedStep(execution) && onRetryRun && (
           <span className="shrink-0">
             <Tooltip label="Retry from failed step" position="top">
               <button
