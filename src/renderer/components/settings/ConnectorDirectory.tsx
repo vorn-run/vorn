@@ -15,7 +15,12 @@ import {
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
-import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
+import {
+  canAddConnection,
+  describePackStatus,
+  isReleased,
+  packStateFor
+} from '../../lib/pack-status'
 import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
 
 /**
@@ -262,7 +267,8 @@ export function ConnectorRow({
   const state = packStateFor({
     installed: listing.pack,
     catalogVersion: listing.catalogItem?.version,
-    progress
+    progress,
+    released: isReleased(listing)
   })
   const status = describePackStatus(state)
   // An MCP server is a command this machine runs, so there is no pack to install.

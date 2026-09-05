@@ -223,10 +223,6 @@ function unusableSource(source: ConnectorPackSource): string {
   switch (source.kind) {
     case 'file':
       return typeof source.path === 'string' && source.path !== '' ? '' : 'That file path is empty'
-    case 'npm':
-      return typeof source.packageName === 'string' && source.packageName !== ''
-        ? ''
-        : 'That package name is empty'
     case 'staged':
       return typeof source.token === 'string' && source.token !== '' ? '' : 'That pack has expired'
     case 'url': {

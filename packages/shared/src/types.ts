@@ -2120,7 +2120,6 @@ export interface InstalledConnectorPack {
 export type ConnectorPackSource =
   | { kind: 'file'; path: string }
   | { kind: 'url'; url: string; sha256?: string }
-  | { kind: 'npm'; packageName: string }
   | { kind: 'staged'; token: string }
 
 export type ConnectorPackResult =

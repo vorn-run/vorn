@@ -44,16 +44,11 @@ export interface PackInstall {
   report: (message: string) => void
 }
 
-/** Where a listing's pack comes from when the caller does not name a source. */
-function sourceFor(listing: ConnectorListing): ConnectorPackSource {
-  if (listing.catalogItem?.packUrl) {
-    return {
-      kind: 'url',
-      url: listing.catalogItem.packUrl,
-      ...(listing.catalogItem.sha256 && { sha256: listing.catalogItem.sha256 })
-    } as ConnectorPackSource
-  }
-  return { kind: 'npm', packageName: listing.catalogItem?.packageName ?? listing.id } as const
+/** Where a listing's pack comes from, or nothing when no release published one. */
+function sourceFor(listing: ConnectorListing): ConnectorPackSource | undefined {
+  const entry = listing.catalogItem
+  if (!entry?.packUrl) return undefined
+  return { kind: 'url', url: entry.packUrl, ...(entry.sha256 && { sha256: entry.sha256 }) }
 }
 
 /** Check a source, answering a refusal rather than throwing one. */
@@ -145,11 +140,14 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
       setError(null)
       setPending(null)
       // Busy from the press itself, so the button cannot be pressed twice while the server is still silent.
+      const source = sourceFor(listing)
+      // Nothing to fetch until a release publishes one, so the row never says it is working.
+      if (!source) return
       setProgress((current) => ({
         ...current,
         [listing.id]: { id: listing.id, phase: 'checking' }
       }))
-      const result = await stage(sourceFor(listing))
+      const result = await stage(source)
       if (!result.ok) {
         // Keyed by the row that asked, which is the row that shows the refusal.
         setProgress((current) => ({

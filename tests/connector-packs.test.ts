@@ -351,7 +351,7 @@ describe('installPack', () => {
     expect(again.ok && again.pack.previousVersion).toBe('1.0.0')
   })
 
-  it('unwraps an npm tarball that puts everything under package/', async () => {
+  it('unwraps a tarball that puts everything under one directory', async () => {
     const root = tempDir()
     const file = await buildArchive(goodFiles(), 'package')
     const result = await installPack({ kind: 'file', path: file }, { root })
@@ -561,36 +561,6 @@ describe('installPack over the network', () => {
     )
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error).toMatch(/HTTP 404/)
-  })
-
-  it('resolves an npm package to its published tarball', async () => {
-    const bytes = await archiveBytes(goodFiles())
-    const asked: string[] = []
-    const fetchImpl = (async (url: string) => {
-      asked.push(url)
-      return url.endsWith('/latest')
-        ? Response.json({ dist: { tarball: 'https://registry.test/acme.tgz' } })
-        : respond(bytes)
-    }) as unknown as typeof fetch
-
-    const result = await installPack(
-      { kind: 'npm', packageName: '@vornrun/connector-acme' },
-      { root: tempDir(), fetchImpl }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(asked[0]).toContain('@vornrun%2Fconnector-acme/latest')
-    expect(asked[1]).toBe('https://registry.test/acme.tgz')
-  })
-
-  it('says so when an npm package publishes no tarball', async () => {
-    const fetchImpl = (async () => Response.json({ dist: {} })) as unknown as typeof fetch
-    const result = await installPack(
-      { kind: 'npm', packageName: 'acme' },
-      { root: tempDir(), fetchImpl }
-    )
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/published no tarball/)
   })
 
   it('stops a download that grows past the size ceiling', async () => {

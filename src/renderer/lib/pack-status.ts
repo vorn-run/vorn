@@ -4,6 +4,7 @@ import type { StatusTone } from './status-tone'
 /** A rejection is session state, not persisted: nothing was written to disk. */
 export type PackState =
   | { kind: 'absent' }
+  | { kind: 'not-released' }
   | { kind: 'installing'; phase: ConnectorInstallProgress['phase']; percent?: number }
   | {
       kind: 'installed'
@@ -75,14 +76,24 @@ export function isNewerVersion(candidate: string, current: string): boolean {
   return false
 }
 
+/** A catalog entry names a pack only once a release has published one. */
+export function isReleased(listing: {
+  source: string
+  catalogItem?: { packUrl?: string } | undefined
+}): boolean {
+  return listing.source !== 'catalog' || Boolean(listing.catalogItem?.packUrl)
+}
+
 /** A live install outranks a rejection, which outranks what is on disk. */
 export function packStateFor(input: {
   installed?: InstalledConnectorPack | undefined
   /** Version the catalog publishes, used only to offer an update. */
   catalogVersion?: string | undefined
   progress?: ConnectorInstallProgress | undefined
+  /** False when the catalog names this connector but no release published a pack. */
+  released?: boolean
 }): PackState {
-  const { installed, catalogVersion, progress } = input
+  const { installed, catalogVersion, progress, released = true } = input
 
   if (progress && progress.phase !== 'installed' && progress.phase !== 'failed') {
     return {
@@ -94,7 +105,7 @@ export function packStateFor(input: {
   if (progress?.phase === 'failed') {
     return { kind: 'rejected', error: progress.error ?? 'The pack could not be installed' }
   }
-  if (!installed) return { kind: 'absent' }
+  if (!installed) return released ? { kind: 'absent' } : { kind: 'not-released' }
 
   return {
     kind: 'installed',
@@ -114,6 +125,16 @@ export function describePackStatus(state: PackState): PackStatusView {
         tone: 'idle',
         percent: null,
         action: 'install',
+        busy: false
+      }
+
+    case 'not-released':
+      return {
+        label: 'Not released yet',
+        detail: null,
+        tone: 'idle',
+        percent: null,
+        action: null,
         busy: false
       }
 

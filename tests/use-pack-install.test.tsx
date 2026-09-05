@@ -129,17 +129,18 @@ describe('installing a pack from wherever it was asked for', () => {
     expect(screen.getByTestId('pending')).toHaveTextContent('none')
   })
 
-  it('falls back to the package a catalog entry was built from', async () => {
-    const byName = { ...LISTING, catalogItem: { ...LISTING.catalogItem, packUrl: undefined } }
-    render(<Probe listing={byName as ConnectorListing} />)
+  it('asks for nothing when no release has published a pack', async () => {
+    const unreleased: ConnectorListing = {
+      ...LISTING,
+      catalogItem: { ...LISTING.catalogItem, packUrl: undefined } as ConnectorListing['catalogItem']
+    }
+    render(<Probe listing={unreleased} />)
+
     fireEvent.click(screen.getByText('inspect'))
 
-    await waitFor(() =>
-      expect(inspectConnectorPack).toHaveBeenCalledWith({
-        kind: 'npm',
-        packageName: '@vornrun/connector-slack'
-      })
-    )
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('none'))
+    expect(inspectConnectorPack).not.toHaveBeenCalled()
+    expect(screen.getByTestId('pending')).toHaveTextContent('none')
   })
 
   it('follows an install the server is reporting on', async () => {

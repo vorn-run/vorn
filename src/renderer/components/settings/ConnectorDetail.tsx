@@ -17,7 +17,12 @@ import {
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
-import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
+import {
+  canAddConnection,
+  describePackStatus,
+  isReleased,
+  packStateFor
+} from '../../lib/pack-status'
 import type { RowState } from '../../lib/use-row-action'
 import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
 import { ActivityLine } from './ActivityLine'
@@ -70,7 +75,8 @@ export function ConnectorDetail({
   const state = packStateFor({
     installed: listing.pack,
     catalogVersion: entry?.version,
-    progress
+    progress,
+    released: isReleased(listing)
   })
   const status = describePackStatus(state)
   const busy = Boolean(activity?.phrase)
@@ -265,7 +271,9 @@ export function ConnectorDetail({
 
         {listing.source === 'catalog' && !listing.pack && (
           <span className="text-[11px] text-gray-600 ml-auto">
-            Nothing is on disk until you install it.
+            {state.kind === 'not-released'
+              ? 'Not released yet, so there is nothing to install.'
+              : 'Nothing is on disk until you install it.'}
           </span>
         )}
       </div>

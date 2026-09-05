@@ -17,6 +17,7 @@ const ADO: ConnectorCatalogItem = {
   description: 'Trigger workflows from the work items a WIQL query returns.',
   packageName: '@vornrun/connector-ado',
   version: '0.1.0',
+  packUrl: 'https://packs.test/ado-0.1.0.vorn.tgz',
   capabilities: ['triggers'],
   category: 'Development',
   keywords: ['boards', 'tfs'],
@@ -42,6 +43,7 @@ const KUSTO: ConnectorCatalogItem = {
   description: 'Trigger workflows from the rows a KQL query returns.',
   packageName: '@vornrun/connector-kusto',
   version: '0.6.0',
+  packUrl: 'https://packs.test/kusto-0.6.0.vorn.tgz',
   capabilities: ['triggers', 'actions'],
   category: 'Data & observability',
   keywords: ['kql'],
@@ -49,6 +51,14 @@ const KUSTO: ConnectorCatalogItem = {
   triggers: [{ type: 'queryResult', label: 'Query returns a row' }],
   actions: [{ type: 'runQuery', label: 'Run a KQL query' }],
   env: [{ name: 'KUSTO_CLUSTER', required: true }]
+}
+
+/** A catalog entry no release has published a pack for yet. */
+const UNRELEASED: ConnectorCatalogItem = {
+  ...KUSTO,
+  id: 'gitlab',
+  name: 'GitLab',
+  packUrl: undefined
 }
 
 const listings = (): ConnectorListing[] => buildConnectorListings([], [ADO, KUSTO], [])
@@ -64,6 +74,21 @@ describe('the connector list', () => {
     )
     return { ...utils, onSelect, onAdd }
   }
+
+  it('says a connector no release has published yet is not installable', () => {
+    const { getByText, queryByText } = render(
+      <ConnectorDirectory
+        listings={buildConnectorListings([], [UNRELEASED], [])}
+        builtIns={[]}
+        onSelect={vi.fn()}
+        onAdd={vi.fn()}
+        onInstall={vi.fn()}
+      />
+    )
+
+    expect(getByText('Not released yet')).toBeInTheDocument()
+    expect(queryByText('Install')).not.toBeInTheDocument()
+  })
 
   it('calls connecting to an MCP server adding a server, and offers no install', () => {
     const server = { id: 'playwright', name: 'Playwright', command: 'npx', args: [] }
@@ -236,6 +261,24 @@ describe('where a verified pack asks to be kept', () => {
 
     expect(getByText('Install')).toBeInTheDocument()
     expect(order(container, 'Keep this pack?')).toBeGreaterThan(order(container, 'Install'))
+  })
+})
+
+describe('a connector page for something not released', () => {
+  it('offers no install, and says why', () => {
+    const listing = buildConnectorListings([], [UNRELEASED], [])[0]
+    const { getByText, queryByText } = render(
+      <ConnectorDetail
+        listing={listing}
+        builtIns={[]}
+        onAdd={vi.fn()}
+        onClose={vi.fn()}
+        onInstall={vi.fn()}
+      />
+    )
+
+    expect(getByText(/Not released yet/)).toBeInTheDocument()
+    expect(queryByText('Install')).not.toBeInTheDocument()
   })
 })
 
