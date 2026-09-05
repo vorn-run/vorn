@@ -6,9 +6,7 @@ import type { ConnectorCatalogSnapshot } from '../src/shared/types'
 
 const listConnectorCatalog = vi.fn()
 const onConnectorCatalogChanged = vi.fn()
-let announce: ((snapshot: ConnectorCatalogSnapshot | undefined) => void) | undefined
-const unsubscribe = vi.fn()
-
+let announce: ((snapshot: ConnectorCatalogSnapshot) => void) | undefined
 ;(window as unknown as { api: unknown }).api = {
   listConnectorCatalog,
   onConnectorCatalogChanged
@@ -44,7 +42,7 @@ beforeEach(() => {
   listConnectorCatalog.mockResolvedValue(snapshot('slack'))
   onConnectorCatalogChanged.mockImplementation((cb: typeof announce) => {
     announce = cb
-    return unsubscribe
+    return () => {}
   })
 })
 
@@ -58,16 +56,6 @@ describe('a catalog the server refreshed on its own', () => {
     expect(screen.getByTestId('ids')).toHaveTextContent('gitlab')
     // The list came with the news, so nothing had to be asked for it again.
     expect(listConnectorCatalog).toHaveBeenCalledTimes(1)
-  })
-
-  it('asks again when the news arrives without a catalog', async () => {
-    render(<Probe />)
-    await waitFor(() => expect(screen.getByTestId('ids')).toHaveTextContent('slack'))
-    listConnectorCatalog.mockResolvedValue(snapshot('postgres'))
-
-    await act(async () => announce?.(undefined))
-
-    await waitFor(() => expect(screen.getByTestId('ids')).toHaveTextContent('postgres'))
   })
 
   it('subscribes once however many panels are open', async () => {

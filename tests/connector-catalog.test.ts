@@ -336,11 +336,12 @@ describe('refreshCatalog', () => {
           )) as unknown as typeof fetch
 
       // The first catalog this process holds: nobody is holding an older one to tell.
+      // The first list this process ever downloads is news to a client holding the seed.
       expect(await refreshCatalog({ fetchImpl: serve('one'), cachePath, now: 1 })).toBe(true)
-      expect(announced).toHaveLength(0)
+      expect(announced).toHaveLength(1)
 
       expect(await refreshCatalog({ fetchImpl: serve('two'), cachePath, now: 2 })).toBe(true)
-      expect(announced).toHaveLength(1)
+      expect(announced).toHaveLength(2)
     } finally {
       catalogEvents.off(IPC.CONNECTOR_CATALOG_CHANGED, listener)
     }
@@ -349,6 +350,7 @@ describe('refreshCatalog', () => {
   it('stays quiet when the published catalog is the one already held', async () => {
     resetCatalogCache()
     const cachePath = emptyCache()
+    catalogItems({ cachePath, now: 0 })
     const announced: unknown[] = []
     const listener = () => announced.push(1)
     catalogEvents.on(IPC.CONNECTOR_CATALOG_CHANGED, listener)
@@ -359,10 +361,10 @@ describe('refreshCatalog', () => {
         )) as unknown as typeof fetch
 
       await refreshCatalog({ fetchImpl, cachePath, now: 1 })
-      // A second check an hour later that finds the same list is not news.
+      // The first check replaced the seed; a second that finds the same list is not news.
       await refreshCatalog({ fetchImpl, cachePath, now: 2 })
 
-      expect(announced).toHaveLength(0)
+      expect(announced).toHaveLength(1)
     } finally {
       catalogEvents.off(IPC.CONNECTOR_CATALOG_CHANGED, listener)
     }

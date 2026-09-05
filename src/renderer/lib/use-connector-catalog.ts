@@ -58,11 +58,7 @@ function watchForChanges(): void {
     // Newer than any read in flight, which must not overwrite it.
     generation += 1
     inFlight = undefined
-    if (next) publish(next)
-    else {
-      cache = undefined
-      void load()
-    }
+    publish(next)
   })
 }
 
@@ -90,10 +86,12 @@ export function useConnectorCatalog(enabled: boolean = true): CatalogSnapshot {
 // "Check now": ask the publisher again rather than re-read the copy this process holds.
 export async function refreshConnectorCatalog(): Promise<CatalogSnapshot> {
   cache = undefined
-  generation += 1
+  const started = ++generation
   const fetched = await Promise.resolve(window.api?.refreshConnectorCatalog?.()).catch(
     () => undefined
   )
+  // A broadcast that landed meanwhile is newer than this answer.
+  if (started !== generation) return cache ?? load()
   return fetched ? publish(fetched) : load()
 }
 

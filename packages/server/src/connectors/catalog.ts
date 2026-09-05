@@ -524,8 +524,7 @@ function adopt(
   resolvedMcpServers = mcpServers
   resolvedAt = at
   const signature = JSON.stringify([connectors, resolvedTemplates, mcpServers])
-  // Nothing was held before, so there is nobody holding the old one to tell.
-  const changed = resolvedSignature !== undefined && resolvedSignature !== signature
+  const changed = resolvedSignature !== signature
   resolvedSignature = signature
   return { items: resolved, changed }
 }
@@ -542,8 +541,6 @@ export function catalogItems(options: CatalogOptions = {}): ConnectorCatalogItem
   if (!resolved) {
     const now = options.now ?? Date.now()
     const cache = readCache(options.cachePath ?? CACHE_PATH)
-    // A cached document that predates templates falls back to the seed rather
-    // than to nothing, so the start-from list is never empty on an old cache.
     const { items } = adopt(
       cache?.connectors ?? CONNECTOR_CATALOG,
       cache?.templates ?? [],
