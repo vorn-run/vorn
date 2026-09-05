@@ -64,21 +64,18 @@ interface Interpreter {
   args: (file: string) => string[]
 }
 
-/**
- * How each script type is run.
- *
- * bash and pwsh read their program as they go, so a script arriving on stdin
- * loses every line below the first that reads input. node and python read the
- * whole program before running it, and keep resolving imports against the
- * working directory only while they are given it on stdin.
- */
+// bash and pwsh read their program as they go, so they get a file; node and python read it whole from stdin and keep cwd resolution.
 const INTERPRETERS: Record<string, Interpreter | undefined> = Object.assign(Object.create(null), {
   bash: {
     file: 'script.sh',
     command: (w: boolean) => (w ? 'bash.exe' : 'bash'),
     args: (f: string) => [f]
   },
-  powershell: { file: 'script.ps1', command: () => 'pwsh', args: (f: string) => ['-File', f] },
+  powershell: {
+    file: 'script.ps1',
+    command: () => 'pwsh',
+    args: (f: string) => ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', f]
+  },
   python: { command: (w: boolean) => (w ? 'python' : 'python3'), args: () => ['-'] },
   node: { command: () => 'node', args: () => ['-'] }
 } satisfies Record<ScriptConfig['scriptType'], Interpreter>)
@@ -89,12 +86,22 @@ async function scriptFileFor(name: string, contents: string): Promise<string> {
   await mkdir(root, { recursive: true, mode: 0o700 })
   const dir = await mkdtemp(path.join(root, 'run-'))
   const file = path.join(dir, name)
-  await writeFile(file, contents, { mode: 0o600 })
+  try {
+    await writeFile(file, contents, { mode: 0o600 })
+  } catch (err) {
+    await rm(dir, { recursive: true, force: true }).catch(() => {})
+    throw err
+  }
   return file
 }
 
 export async function executeScript(config: ScriptConfig): Promise<ScriptExecutionResult> {
-  const interpreter = INTERPRETERS[config.scriptType]
+  const known = INTERPRETERS[config.scriptType]
+  // On Windows bash.exe is usually the WSL launcher, which cannot open a Windows path, so bash keeps stdin there.
+  const interpreter =
+    known && config.scriptType === 'bash' && process.platform === 'win32'
+      ? { ...known, file: undefined, args: () => ['-s'] }
+      : known
   if (!interpreter) {
     return {
       success: false,
