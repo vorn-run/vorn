@@ -1,20 +1,16 @@
-import { describe, it, expect, afterAll, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { WorkflowDefinition, WorkflowNode, TriggerConfig } from '../src/shared/types'
 
 // The tick lock writes under the home directory, which the scheduler reads once
 // at import; point it somewhere disposable before that happens.
-const lockHome = vi.hoisted(() => {
-  const dir = `${process.env.TMPDIR?.replace(/\/$/, '') ?? '/tmp'}/vorn-scheduler-${process.pid}`
-  const real = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE }
-  process.env.HOME = dir
-  process.env.USERPROFILE = dir
-  return { dir, real }
-})
-afterAll(() => {
-  process.env.HOME = lockHome.real.HOME
-  process.env.USERPROFILE = lockHome.real.USERPROFILE
+const lockHome = vi.hoisted(
+  () => `${process.env.TMPDIR?.replace(/\/$/, '') ?? '/tmp'}/vorn-scheduler-${process.pid}`
+)
+vi.mock('node:os', async (importOriginal) => {
+  const os = await importOriginal<typeof import('node:os')>()
+  return { ...os, default: { ...os, homedir: () => lockHome }, homedir: () => lockHome }
 })
 
 // Mock dependencies before importing
@@ -146,7 +142,7 @@ describe('getNextRun', () => {
 })
 
 describe('firing a workflow', () => {
-  const LOCK_DIR = path.join(lockHome.dir, '.vorn')
+  const LOCK_DIR = path.join(lockHome, '.vorn')
 
   function clearLocks(workflowId: string): void {
     fs.mkdirSync(LOCK_DIR, { recursive: true })
