@@ -288,8 +288,7 @@ class Scheduler extends EventEmitter {
     }
   }
 
-  // Only a tick takes the lock: two runs someone asked for are two runs, and the duplicate an
-  // impatient click makes is caught where the run is claimed, by its inputs rather than its minute.
+  // Only a tick takes the lock; a repeated manual run is caught by the run claim on its inputs.
   private executeWorkflow(
     workflowId: string,
     source: 'cron' | 'manual',
