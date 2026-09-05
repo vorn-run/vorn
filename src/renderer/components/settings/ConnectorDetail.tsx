@@ -17,12 +17,7 @@ import {
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
-import {
-  canAddConnection,
-  describePackStatus,
-  isReleased,
-  packStateFor
-} from '../../lib/pack-status'
+import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
 import type { RowState } from '../../lib/use-row-action'
 import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
 import { ActivityLine } from './ActivityLine'
@@ -72,12 +67,7 @@ export function ConnectorDetail({
 }) {
   const details = listingDetails(listing, builtIns)
   const entry = listing.catalogItem
-  const state = packStateFor({
-    installed: listing.pack,
-    catalogVersion: entry?.version,
-    progress,
-    released: isReleased(listing)
-  })
+  const state = packStateFor({ installed: listing.pack, catalogItem: entry, progress })
   const status = describePackStatus(state)
   const busy = Boolean(activity?.phrase)
 
@@ -269,11 +259,10 @@ export function ConnectorDetail({
           </a>
         )}
 
-        {listing.source === 'catalog' && !listing.pack && (
+        {/* An unreleased entry says so in the status line above, and says it once. */}
+        {listing.source === 'catalog' && !listing.pack && state.kind === 'absent' && (
           <span className="text-[11px] text-gray-600 ml-auto">
-            {state.kind === 'not-released'
-              ? 'Not released yet, so there is nothing to install.'
-              : 'Nothing is on disk until you install it.'}
+            Nothing is on disk until you install it.
           </span>
         )}
       </div>

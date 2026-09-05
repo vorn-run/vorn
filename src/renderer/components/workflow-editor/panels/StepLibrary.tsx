@@ -34,7 +34,7 @@ import { connectionConnectorId } from '../../../lib/connection-icon'
 import { HTTP_PROFILE_CONNECTOR } from '../../../../shared/workflow-portability'
 import { ConnectorIcon } from '../../ConnectorIcon'
 import { NODE_GLYPH } from '../node-visuals'
-import { canAddConnection, packStateFor } from '../../../lib/pack-status'
+import { packStateFor } from '../../../lib/pack-status'
 import type { AddableNodeType } from '../WorkflowCanvas'
 import type { LibraryPick } from '../../../lib/library-pick'
 
@@ -300,16 +300,15 @@ export function StepLibrary({
             )
         if (actions.length === 0) continue
         // Say the step someone is about to take: a connector already on disk only wants connecting.
-        const state = packStateFor({ installed: packs.find((pack) => pack.id === entry.id) })
-        const connectable = canAddConnection(state, {
-          source: 'catalog',
-          hasLegacyLaunch: Boolean(entry.packageName)
+        const state = packStateFor({
+          installed: packs.find((pack) => pack.id === entry.id),
+          catalogItem: entry
         })
         const detail =
-          state.kind !== 'installed' && entry.packUrl
-            ? 'install on add'
-            : connectable
-              ? 'add connection'
+          state.kind === 'installed'
+            ? 'add connection'
+            : state.kind === 'not-released'
+              ? 'not released yet'
               : 'install on add'
         const into = entry.verified ? vouched : unvouched
         for (const action of actions) {

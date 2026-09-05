@@ -58,6 +58,8 @@ const UNRELEASED: ConnectorCatalogItem = {
   ...KUSTO,
   id: 'gitlab',
   name: 'GitLab',
+  packageName: '@vornrun/connector-gitlab',
+  launch: { command: 'npx', args: ['-y', '@vornrun/connector-gitlab'] },
   packUrl: undefined
 }
 
