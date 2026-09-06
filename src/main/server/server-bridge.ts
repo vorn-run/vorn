@@ -7,7 +7,7 @@ import log from '../logger'
 interface PendingRequest {
   resolve: (value: unknown) => void
   reject: (error: Error) => void
-  timeout: NodeJS.Timeout
+  timeout: NodeJS.Timeout | undefined
   method: string
 }
 
@@ -183,10 +183,14 @@ export class ServerBridge extends EventEmitter {
 
     const id = ++this.nextId
     return new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error(`Request timed out: ${method} (id=${id})`))
-      }, timeoutMs)
+      // A zero deadline waits as long as the server takes; a disconnect still rejects.
+      const timeout =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              this.pending.delete(id)
+              reject(new Error(`Request timed out: ${method} (id=${id})`))
+            }, timeoutMs)
+          : undefined
 
       this.pending.set(id, {
         resolve: resolve as (v: unknown) => void,
