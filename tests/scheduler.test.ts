@@ -1,5 +1,17 @@
 import { describe, it, expect, vi } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 import type { WorkflowDefinition, WorkflowNode, TriggerConfig } from '../src/shared/types'
+
+// The tick lock writes under the home directory, which the scheduler reads once
+// at import; point it somewhere disposable before that happens.
+const lockHome = vi.hoisted(
+  () => `${process.env.TMPDIR?.replace(/\/$/, '') ?? '/tmp'}/vorn-scheduler-${process.pid}`
+)
+vi.mock('node:os', async (importOriginal) => {
+  const os = await importOriginal<typeof import('node:os')>()
+  return { ...os, default: { ...os, homedir: () => lockHome }, homedir: () => lockHome }
+})
 
 // Mock dependencies before importing
 vi.mock('node-cron', () => ({
@@ -17,7 +29,9 @@ vi.mock('../packages/server/src/schedule-log', () => ({
   scheduleLogManager: { addEntry: vi.fn() }
 }))
 
+import cron from 'node-cron'
 import { scheduler } from '../packages/server/src/scheduler'
+import { configManager } from '../packages/server/src/config-manager'
 
 function makeTriggerNode(config: TriggerConfig): WorkflowNode {
   return {
@@ -124,6 +138,65 @@ describe('getNextRun', () => {
   it('returns null for manual schedule', () => {
     const wf = makeWorkflow({ triggerConfig: { triggerType: 'manual' } })
     expect(scheduler.getNextRun('wf-1', [wf])).toBeNull()
+  })
+})
+
+describe('firing a workflow', () => {
+  const LOCK_DIR = path.join(lockHome, '.vorn')
+
+  function clearLocks(workflowId: string): void {
+    fs.mkdirSync(LOCK_DIR, { recursive: true })
+    for (const f of fs.readdirSync(LOCK_DIR)) {
+      if (f.startsWith(`scheduler-${workflowId}-`) && f.endsWith('.lock')) {
+        fs.unlinkSync(path.join(LOCK_DIR, f))
+      }
+    }
+  }
+
+  function watch(): { seen: unknown[]; stop: () => void } {
+    const seen: unknown[] = []
+    const listener = (method: string, params: unknown): void => {
+      if (method === 'scheduler:execute') seen.push(params)
+    }
+    scheduler.on('client-message', listener)
+    return { seen, stop: () => scheduler.off('client-message', listener) }
+  }
+
+  it('runs a workflow as often as it is asked to, within one minute', () => {
+    const wf = makeWorkflow({ id: 'wf-asked', triggerConfig: { triggerType: 'manual' } })
+    vi.mocked(configManager.loadConfig).mockReturnValue({ workflows: [wf] } as never)
+    const { seen, stop } = watch()
+
+    scheduler.triggerWorkflow('wf-asked', { which: 'first' })
+    scheduler.triggerWorkflow('wf-asked', { which: 'second' })
+
+    stop()
+    expect(seen).toEqual([
+      { workflowId: 'wf-asked', inputs: { which: 'first' } },
+      { workflowId: 'wf-asked', inputs: { which: 'second' } }
+    ])
+  })
+
+  // Every server holding the schedule wakes on the same minute; only one may fire it.
+  it('fires a schedule once a minute, however many servers hold it', () => {
+    clearLocks('wf-tick')
+    const wf = makeWorkflow({
+      id: 'wf-tick',
+      triggerConfig: { triggerType: 'recurring', cron: '* * * * *' }
+    })
+    vi.mocked(configManager.loadConfig).mockReturnValue({ workflows: [wf] } as never)
+    scheduler.syncSchedules([wf])
+    const tick = vi.mocked(cron.schedule).mock.calls.at(-1)?.[1] as () => void
+    const { seen, stop } = watch()
+
+    vi.useFakeTimers({ toFake: ['Date'] })
+    tick()
+    tick()
+    vi.useRealTimers()
+
+    stop()
+    clearLocks('wf-tick')
+    expect(seen).toEqual([{ workflowId: 'wf-tick', inputs: undefined }])
   })
 })
 

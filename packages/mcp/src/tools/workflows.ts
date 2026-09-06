@@ -748,7 +748,7 @@ export function registerWorkflowTools(server: McpServer): void {
 
   server.tool(
     'stop_workflow_run',
-    'Stop a workflow run that is still going, including one parked on an approval gate. Kills the agents it started, marks its unfinished nodes, and closes the run as cancelled. Requires the Vorn app to be running. A workflow will not start a new run while an old one sits waiting for approval, so this is how you clear that.',
+    'Stop a workflow run that is still going, including one parked on an approval gate. Kills the agents it started, marks its unfinished nodes, and closes the run as cancelled. Requires the Vorn app to be running.',
     {
       run_id: V.id.describe('Run ID (from list_workflow_runs)')
     },
@@ -919,7 +919,7 @@ export function registerWorkflowTools(server: McpServer): void {
 
   server.tool(
     'execute_workflow',
-    "Run a workflow now, as if triggered manually. Supply values for any parameters the workflow declares (see the trigger node's inputs); declared defaults fill in anything omitted. Requires the Vorn app to be running. Returns as soon as the run is queued — poll list_workflow_runs for the outcome.",
+    "Run a workflow now, as if triggered manually. Supply values for any parameters the workflow declares (see the trigger node's inputs); declared defaults fill in anything omitted. Requires the Vorn app to be running. Returns as soon as the run is queued — poll list_workflow_runs for the outcome. Runs of one workflow go side by side; only a run repeating one started in the last ten seconds with the same inputs is refused as a duplicate.",
     {
       workflow_id: V.id.describe('Workflow ID (from list_workflows)'),
       inputs: z

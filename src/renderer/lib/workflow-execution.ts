@@ -1544,18 +1544,6 @@ export async function executeWorkflow(
     }
   }
 
-  // A run parked on an approval gate still owns the workflow's queue position —
-  // starting another now would race two runs through the same gate.
-  const waiting = runsForWorkflow(workflow.id).find((e) =>
-    e.nodeStates.some((ns) => ns.status === 'waiting')
-  )
-  if (waiting) {
-    console.warn(
-      `[workflow] skipping execution of "${workflow.name}" — existing run is waiting for approval`
-    )
-    return waiting
-  }
-
   // Ask the core, not this window, whether we own this trigger. Every instance
   // hears the same scheduler tick; only the one granted the claim runs it.
   const dedupeParams = options?.targetNodeId
