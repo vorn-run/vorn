@@ -514,7 +514,7 @@ const output = (await response.json()).result
 ```ts
 panes: [
   { id: 'report', title: 'Report', web: 'web/report/index.html' },
-  { id: 'git', title: 'Git', command: ['tig'], when: { agent: ['shell'] } }
+  { id: 'log', title: 'Log', command: ['./bin/log'], when: { agent: ['shell'] } }
 ]
 ```
 

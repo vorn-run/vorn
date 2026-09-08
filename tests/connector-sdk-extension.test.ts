@@ -95,7 +95,7 @@ describe('defineExtension', () => {
       /nothing to run/
     )
     expect(() =>
-      extension({ panes: [{ id: 'git', title: 'Git', command: ['lazygit', ''] }] })
+      extension({ panes: [{ id: 'git', title: 'Git', command: ['viewer', ''] }] })
     ).toThrow(/empty argument/)
   })
 
@@ -177,7 +177,7 @@ describe("the manifest an extension's pack carries", () => {
         activates: { workspaceContains: ['package.json'], platform: ['darwin'] },
         panes: [
           { id: 'report', title: 'Report', web: 'web/report/index.html' },
-          { id: 'git', title: 'Git', command: ['tig'], when: { agent: ['shell'] } }
+          { id: 'log', title: 'Log', command: ['./bin/log'], when: { agent: ['shell'] } }
         ],
         linkHandlers: [
           {
@@ -199,7 +199,7 @@ describe("the manifest an extension's pack carries", () => {
     })
     expect(manifest.contributes?.panes).toEqual([
       { id: 'report', title: 'Report', web: 'web/report/index.html' },
-      { id: 'git', title: 'Git', command: ['tig'], when: { agent: ['shell'] } }
+      { id: 'log', title: 'Log', command: ['./bin/log'], when: { agent: ['shell'] } }
     ])
     expect(manifest.contributes?.footers).toEqual([
       { id: 'checks', title: 'Checks', description: 'What the last commands said', every: 30 }

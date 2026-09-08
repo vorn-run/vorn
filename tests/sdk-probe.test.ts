@@ -633,7 +633,7 @@ describe('what a probed extension contributes', () => {
         panes: [
           { id: 'escape', title: 'Escape', web: '../outside/index.html' },
           { id: 'absolute', title: 'Absolute', web: '/etc/passwd.html' },
-          { id: 'empty', title: 'Empty', command: ['lazygit', ''] },
+          { id: 'empty', title: 'Empty', command: ['viewer', ''] },
           { id: 'report', title: 'Report', web: 'web/report/index.html' }
         ],
         footers: [
