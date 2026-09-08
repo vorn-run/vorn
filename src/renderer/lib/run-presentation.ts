@@ -272,14 +272,17 @@ export type { RunOutcomeTone } from './workflow-status'
 export { outcomeToneClass } from './workflow-status'
 
 export interface RunOutcome {
-  label: string
+  /** Absent when the status dot already says it. Only a gate's own question or
+   *  the agent's verdict earns a line, since the colour carries the state. */
+  label?: string
   tone: RunOutcomeTone
 }
 
 /**
- * The one line that says how a run ended. A paused gate outranks everything —
- * it is the only state that needs the user — and a finished run prefers the
- * agent's own verdict over a generic "completed".
+ * What a run says beyond its status colour. A paused gate outranks everything —
+ * it is the only state that needs the user — and a finished run offers the
+ * agent's own verdict. Every other outcome is left to the dot, which already
+ * says running, failed or stopped without spending a line on the word.
  */
 export function describeOutcome(execution: WorkflowExecution, nodes: WorkflowNode[]): RunOutcome {
   const gate = execution.nodeStates.find((ns) => ns.status === 'waiting')
@@ -291,10 +294,10 @@ export function describeOutcome(execution: WorkflowExecution, nodes: WorkflowNod
       tone: 'waiting'
     }
   }
-  if (execution.status === 'running') return { label: 'in progress', tone: 'running' }
-  if (execution.status === 'error') return { label: 'run failed', tone: 'error' }
-  if (execution.status === 'cancelled') return { label: 'stopped', tone: 'neutral' }
-  return { label: verdictOf(execution) ?? 'completed', tone: 'success' }
+  if (execution.status === 'running') return { tone: 'running' }
+  if (execution.status === 'error') return { tone: 'error' }
+  if (execution.status === 'cancelled') return { tone: 'neutral' }
+  return { label: verdictOf(execution), tone: 'success' }
 }
 
 /** True when no step ever paused for a human. */

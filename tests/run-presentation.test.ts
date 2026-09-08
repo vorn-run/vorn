@@ -273,11 +273,11 @@ describe('describeOutcome', () => {
     expect(outcome.label).toBe('needs review')
   })
 
-  it('maps run statuses to human labels', () => {
-    expect(describeOutcome(run({ status: 'running' }), []).label).toBe('in progress')
-    expect(describeOutcome(run({ status: 'error' }), []).label).toBe('run failed')
-    expect(describeOutcome(run({ status: 'cancelled' }), []).label).toBe('stopped')
-    expect(describeOutcome(run({ status: 'success' }), []).label).toBe('completed')
+  it('leaves a plain status to the dot and only carries the tone', () => {
+    expect(describeOutcome(run({ status: 'running' }), [])).toEqual({ tone: 'running' })
+    expect(describeOutcome(run({ status: 'error' }), [])).toEqual({ tone: 'error' })
+    expect(describeOutcome(run({ status: 'cancelled' }), [])).toEqual({ tone: 'neutral' })
+    expect(describeOutcome(run({ status: 'success' }), []).label).toBeUndefined()
   })
 
   it("prefers a finished run's structured verdict over the generic label", () => {
@@ -302,7 +302,7 @@ describe('describeOutcome', () => {
       }),
       []
     )
-    expect(outcome.label).toBe('completed')
+    expect(outcome.label).toBeUndefined()
   })
 })
 

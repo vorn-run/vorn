@@ -158,11 +158,13 @@ export function RunDetailPane({
         <div className="rounded-md border border-white/[0.06] bg-white/[0.02] px-4 py-3">
           <div className="flex items-center gap-2">
             <StatusDot status={waitingGate ? 'waiting' : run.status} />
-            <span
-              className={`text-[12.5px] ${waitingGate ? WORKFLOW_STATUS_TEXT.waiting : WORKFLOW_STATUS_TEXT[run.status]}`}
-            >
-              {waitingGate ? 'waiting for approval' : outcome.label}
-            </span>
+            {(waitingGate || outcome.label) && (
+              <span
+                className={`text-[12.5px] ${waitingGate ? WORKFLOW_STATUS_TEXT.waiting : WORKFLOW_STATUS_TEXT[run.status]}`}
+              >
+                {waitingGate ? 'waiting for approval' : outcome.label}
+              </span>
+            )}
           </div>
           <p className="mt-1 text-[11px] text-gray-500 font-mono">
             {done === stages.length && stages.length > 0
