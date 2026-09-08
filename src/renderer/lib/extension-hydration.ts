@@ -32,7 +32,8 @@ export async function hydrateExtensions(
   const store = getStore()
   // A session closed while the host was answering keeps nothing: the store
   // prunes on removal, and writing here afterwards would put it back.
-  if (!store.terminals.has(sessionId)) {
+  // A host that did not know the session yet is asked again when it announces it.
+  if (!store.terminals.has(sessionId) || (!states && !readings)) {
     hydrated.delete(sessionId)
     return
   }

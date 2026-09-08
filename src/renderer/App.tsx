@@ -56,6 +56,7 @@ import {
   setLiveReporter
 } from './lib/terminal-registry'
 import { listenForSelectionRequests } from './lib/extension-selection'
+import { hydrateExtensions } from './lib/extension-hydration'
 import {
   setCwdReporter,
   getShellInputState,
@@ -347,6 +348,7 @@ export function App() {
 
     const removeSessionCreatedListener = window.api.onSessionCreated((session) => {
       const state = useAppStore.getState()
+      void hydrateExtensions(session.id, useAppStore.getState)
       if (!state.terminals.has(session.id)) {
         state.addTerminal(session)
         if (session.projectPath) {
@@ -480,6 +482,7 @@ export function App() {
       const store = useAppStore.getState()
       const existing = store.terminals.get(session.id)
       if (existing) {
+        void hydrateExtensions(session.id, useAppStore.getState)
         if (session.status !== existing.status) {
           store.updateStatus(session.id, session.status)
         }

@@ -117,4 +117,16 @@ describe('asking the host what a card already holds', () => {
     expect(useAppStore.getState().extensionFooters.has('t1')).toBe(false)
     expect(useAppStore.getState().extensionActivation.has('t1')).toBe(false)
   })
+
+  it('asks again once the host knows a session it did not know at first', async () => {
+    askedActivation.mockRejectedValueOnce(new Error('Session not found'))
+    askedFooters.mockRejectedValueOnce(new Error('Session not found'))
+    act(() => useAppStore.setState({ terminals: new Map([['t1', { id: 't1' }]]) as never }))
+
+    await hydrateExtensions('t1')
+    await hydrateExtensions('t1')
+
+    expect(askedActivation).toHaveBeenCalledTimes(2)
+    expect(useAppStore.getState().extensionFooters.has('t1')).toBe(true)
+  })
 })
