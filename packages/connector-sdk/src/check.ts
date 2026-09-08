@@ -1,4 +1,6 @@
+import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import { resolve, sep } from 'node:path'
 import {
   bundleDependencyFindings,
   bundledRequireFindings,
@@ -11,7 +13,8 @@ import {
   type BundleOutput,
   type BundleRequest
 } from './packaging'
-import { escapedMockHttp, withMockHttp, type MockRoute } from './harness'
+import { escapedMockHttp, mockExtensionHost, withMockHttp, type MockRoute } from './harness'
+import { PermissionDeniedError } from './host'
 import { runAction, runPoll, type PollPage } from './runtime'
 import type {
   ActionDefinition,
@@ -19,6 +22,8 @@ import type {
   Connector,
   ConnectorConfig,
   DedupeStrategy,
+  ExtensionHost,
+  ExtensionPermission,
   TriggerDefinition
 } from './types'
 
@@ -55,6 +60,13 @@ export type CheckCode =
   | 'live-action-failed'
   | 'pack-launch'
   | 'pack-too-large'
+  | 'web-entry-missing'
+  | 'web-entry-outside-package'
+  | 'footer-failed'
+  | 'footer-items-invalid'
+  | 'handler-failed'
+  | 'permission-undeclared'
+  | 'permission-unused'
 
 export interface CheckFinding {
   /** `error` means the connector will misbehave in Vorn; `warn` is advisory. */
@@ -265,7 +277,11 @@ async function packageFindings(
     found.push(...bundleDependencyFindings(built.external), ...bundledRequireFindings(built.code))
     // Always, so the receipt's `launch` names a launch that happened rather than one that was skipped.
     if (options.mock) {
-      const dir = await stagePack(connector, built.code)
+      const dir = await stagePack(
+        connector,
+        built.code,
+        packageDirFor(options.packageDir, options.entry)
+      )
       try {
         found.push(...(await packLaunchFindings(dir)))
       } finally {
@@ -367,6 +383,167 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
     }
   }
 
+  return found
+}
+
+/** The session a contribution is run for when the check runs it, named so a fixture can expect it. */
+const CHECK_SESSION = {
+  sessionId: 'check',
+  worktreePath: process.cwd(),
+  agent: 'claude' as const
+}
+
+/** A reading a band can actually draw: two strings, and a tone it knows. */
+function invalidItem(item: unknown): string | undefined {
+  if (!item || typeof item !== 'object') return 'is not an object'
+  const reading = item as Record<string, unknown>
+  if (typeof reading.label !== 'string' || reading.label === '') return 'has no label'
+  if (typeof reading.value !== 'string') return 'has no value'
+  if (reading.tone !== undefined && !FOOTER_TONES.includes(reading.tone as string)) {
+    return `has unknown tone ${JSON.stringify(reading.tone)}`
+  }
+  return undefined
+}
+
+const FOOTER_TONES = ['default', 'ok', 'danger']
+
+/**
+ * Run every contribution once against a host that answers from fixtures.
+ *
+ * Two things are being asked, and neither can be answered by reading the
+ * definition. That a footer or a handler runs at all — until now nothing ever
+ * called one — and that it reaches only what its manifest declared, which is
+ * the whole weight behind showing someone a permission before they install.
+ *
+ * The stub refuses an undeclared permission exactly as the real host will, so
+ * an extension meets that rule here rather than in front of a person.
+ */
+async function contributionFindings(connector: Connector): Promise<CheckFinding[]> {
+  const contributes = connector.contributes
+  if (!contributes) return []
+  const found: CheckFinding[] = []
+  const declared = connector.permissions ?? []
+  const spent = new Set<ExtensionPermission>()
+
+  const ran = async (
+    kind: string,
+    id: string,
+    code: CheckCode,
+    body: (host: ExtensionHost) => Promise<unknown>
+  ): Promise<unknown> => {
+    const { host, used } = mockExtensionHost(declared)
+    try {
+      return await body(host)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      found.push(
+        finding(
+          'error',
+          error instanceof PermissionDeniedError ? 'permission-undeclared' : code,
+          `${kind} ${id}`,
+          error instanceof PermissionDeniedError
+            ? `asked the host for something this extension does not declare: ${reason}`
+            : `threw: ${reason}`
+        )
+      )
+      return undefined
+    } finally {
+      for (const permission of used) spent.add(permission)
+    }
+  }
+
+  for (const footer of contributes.footers ?? []) {
+    const items = await ran('footer', footer.id, 'footer-failed', (host) =>
+      Promise.resolve(footer.run({ ...CHECK_SESSION, host, now: () => new Date().toISOString() }))
+    )
+    if (items === undefined) continue
+    if (!Array.isArray(items)) {
+      found.push(
+        finding(
+          'error',
+          'footer-items-invalid',
+          `footer ${footer.id}`,
+          'returned something that is not a list of readings'
+        )
+      )
+      continue
+    }
+    for (const item of items) {
+      const wrong = invalidItem(item)
+      if (wrong) {
+        found.push(
+          finding(
+            'error',
+            'footer-items-invalid',
+            `footer ${footer.id}`,
+            `returned a reading that ${wrong}`
+          )
+        )
+      }
+    }
+  }
+
+  for (const handler of contributes.linkHandlers ?? []) {
+    // A pattern it cannot match is a handler nothing would ever reach it through.
+    const sample = new RegExp(handler.pattern).source
+    await ran('link handler', handler.id, 'handler-failed', (host) =>
+      Promise.resolve(
+        handler.run({
+          ...CHECK_SESSION,
+          host,
+          now: () => new Date().toISOString(),
+          url: `https://example.test/${encodeURIComponent(sample).slice(0, 32)}`
+        })
+      )
+    )
+  }
+
+  for (const permission of declared) {
+    if (!spent.has(permission)) {
+      found.push(
+        finding(
+          'warn',
+          'permission-unused',
+          `${connector.id} permissions`,
+          `asks for ${permission} but nothing this run exercised used it; ask only for what it spends`
+        )
+      )
+    }
+  }
+
+  return found
+}
+
+/** A pane's page has to be in the package, or the pack ships a pane that cannot open. */
+function paneFindings(connector: Connector, packageDir: string | undefined): CheckFinding[] {
+  if (packageDir === undefined) return []
+  const root = resolve(packageDir)
+  const found: CheckFinding[] = []
+  for (const pane of connector.contributes?.panes ?? []) {
+    if (pane.web === undefined) continue
+    const full = resolve(root, pane.web)
+    if (full !== root && !full.startsWith(`${root}${sep}`)) {
+      found.push(
+        finding(
+          'error',
+          'web-entry-outside-package',
+          `pane ${pane.id}`,
+          `declares the page "${pane.web}", which resolves outside the package`
+        )
+      )
+      continue
+    }
+    if (!existsSync(full)) {
+      found.push(
+        finding(
+          'error',
+          'web-entry-missing',
+          `pane ${pane.id}`,
+          `declares the page "${pane.web}", which the package does not carry`
+        )
+      )
+    }
+  }
   return found
 }
 
@@ -567,8 +744,11 @@ export async function checkConnector(
     )
   }
 
-  found.push(...authFindings(connector))
+  // An extension's credential is the host's own token, so there is no rung to check.
+  if (connector.kind !== 'extension') found.push(...authFindings(connector))
   found.push(...secretFindings(connector))
+  found.push(...paneFindings(connector, options.packageDir))
+  found.push(...(await contributionFindings(connector)))
   found.push(...(await packageFindings(connector, options)))
   found.push(...(await mockFindings(connector, options)))
   found.push(...(await liveFindings(connector, options)))
@@ -695,7 +875,14 @@ export const CHECK_OWNERS: Record<CheckCode, string | null> = {
   'mock-not-observed': 'mock',
   'preflight-failed': 'live',
   'live-action-failed': 'live',
-  'pack-launch': 'launch'
+  'pack-launch': 'launch',
+  'web-entry-missing': 'contributes',
+  'web-entry-outside-package': 'contributes',
+  'footer-failed': 'footers',
+  'footer-items-invalid': 'footers',
+  'handler-failed': 'handlers',
+  'permission-undeclared': 'permissions',
+  'permission-unused': 'permissions'
 }
 
 /**
@@ -708,7 +895,13 @@ export const CHECK_OWNERS: Record<CheckCode, string | null> = {
  * than a long one.
  */
 function checksRun(connector: Connector, options: CheckOptions): string[] {
-  const names = ['manifest', 'auth']
+  const names = ['manifest']
+  if (connector.kind !== 'extension') names.push('auth')
+  const contributes = connector.contributes
+  if (contributes?.panes?.length && options.packageDir !== undefined) names.push('contributes')
+  if (contributes?.footers?.length) names.push('footers')
+  if (contributes?.linkHandlers?.length) names.push('handlers')
+  if (connector.permissions !== undefined) names.push('permissions')
   if (connector.config.length > 0) names.push('secrets')
   if (connector.actions.length > 0) names.push('actions')
   if (connector.triggers.length > 0) names.push('dedupe')

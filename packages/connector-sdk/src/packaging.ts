@@ -1,6 +1,6 @@
 import { builtinModules } from 'node:module'
-import { readFileSync } from 'node:fs'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
+import { cp, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { CheckCode, CheckFinding } from './check'
@@ -261,8 +261,20 @@ export function packEntryContents(entry: string, sdkModule = '@vornrun/connector
   ].join('\n')
 }
 
-/** A directory holding nothing but the two files a pack carries, for tarring or for launching. */
-export async function stagePack(connector: Connector, code: string): Promise<string> {
+/** The directory a pane's page is served from, carried verbatim so the manifest's path still resolves. */
+export const WEB_DIR = 'web'
+
+/** Whether this pack ships pages, which is what makes `web/` part of it. */
+export function carriesWeb(connector: Connector): boolean {
+  return (connector.contributes?.panes ?? []).some((pane) => pane.web !== undefined)
+}
+
+/** A directory holding nothing but what a pack carries, for tarring or for launching. */
+export async function stagePack(
+  connector: Connector,
+  code: string,
+  packageDir?: string
+): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'vorn-pack-'))
   await writeFile(join(dir, 'index.js'), code, 'utf8')
   await writeFile(
@@ -270,6 +282,12 @@ export async function stagePack(connector: Connector, code: string): Promise<str
     `${JSON.stringify(connectorManifest(connector), null, 2)}\n`,
     'utf8'
   )
+  // Copied whole rather than per pane: the manifest names a path inside `web/`,
+  // so the pack has to hold the stylesheet and the script that page asks for too.
+  if (packageDir !== undefined && carriesWeb(connector)) {
+    const from = join(resolve(packageDir), WEB_DIR)
+    if (existsSync(from)) await cp(from, join(dir, WEB_DIR), { recursive: true })
+  }
   return dir
 }
 

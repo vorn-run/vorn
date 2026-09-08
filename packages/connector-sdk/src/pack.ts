@@ -4,6 +4,7 @@ import { checkConnector, type CheckCode, type CheckFinding } from './check'
 import {
   bundleDependencyFindings,
   bundledRequireFindings,
+  carriesWeb,
   esbuildBundle,
   lifecycleScriptFindings,
   packageDirFor,
@@ -12,6 +13,7 @@ import {
   readNearestPackageJson,
   stagePack,
   MAX_PACK_BYTES,
+  WEB_DIR,
   type BundleOutput,
   type BundleRequest
 } from './packaging'
@@ -81,13 +83,17 @@ export async function packConnector(
   const outDir = resolve(options.outDir ?? process.cwd())
   await mkdir(outDir, { recursive: true })
   const file = join(outDir, packFileName(connector))
-  const staging = await stagePack(connector, built.code)
+  const staging = await stagePack(connector, built.code, entryDir)
   try {
     // Asked of the staged files themselves: an artifact that cannot start is not one to ship.
     findings.push(...(await (options.launch ?? packLaunchFindings)(staging)))
     if (findings.some((item) => item.level === 'error')) return { findings }
     const { create } = await import('tar')
-    await create({ gzip: true, file, cwd: staging }, ['manifest.json', 'index.js'])
+    await create({ gzip: true, file, cwd: staging }, [
+      'manifest.json',
+      'index.js',
+      ...(carriesWeb(connector) ? [WEB_DIR] : [])
+    ])
   } finally {
     await rm(staging, { recursive: true, force: true })
   }

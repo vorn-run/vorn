@@ -45,6 +45,15 @@ const CURRENT_FILE = 'current.json'
  */
 const PACK_FILES = [MANIFEST_FILE, ENTRY_FILE, 'package.json']
 
+/**
+ * Where an extension's pane pages live, served to a pane rather than run.
+ *
+ * A directory rather than named files: a page needs its stylesheet and its
+ * script beside it, and neither the manifest nor this gate can name them all
+ * ahead of time. It is still one named directory, so nothing else is reachable.
+ */
+const WEB_PREFIX = 'web/'
+
 interface CurrentPack {
   version: string
   previousVersion?: string
@@ -183,10 +192,10 @@ export function verifyPackDir(dir: string): SdkConnectorManifest {
 
   // An allowlist rather than a script headcount: a `.cjs`, `.node` or `.wasm`
   // beside the entry is code the entry can reach, so it is code Vorn installed.
-  const strays = files.filter((file) => !PACK_FILES.includes(file))
+  const strays = files.filter((file) => !PACK_FILES.includes(file) && !file.startsWith(WEB_PREFIX))
   if (strays.length > 0) {
     throw new Error(
-      `The pack carries ${strays.join(', ')}; a pack is ${MANIFEST_FILE} and ${ENTRY_FILE} and nothing else`
+      `The pack carries ${strays.join(', ')}; a pack is ${MANIFEST_FILE}, ${ENTRY_FILE} and what an extension serves under ${WEB_PREFIX}`
     )
   }
 
