@@ -153,11 +153,6 @@ select:focus:not(:focus-visible) {
   cursor: grabbing;
 }
 
-/* Traffic-light dots (hidden in web — no Electron titlebar) */
-.traffic-light-dot {
-  display: none;
-}
-
 /* Titlebar drag regions (no-op in web) */
 .titlebar-drag {
   /* no -webkit-app-region in browser */

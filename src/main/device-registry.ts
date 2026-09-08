@@ -52,9 +52,6 @@ const exec = promisify(execFile)
 /** How many elements one `read_screen` returns before handing back a cursor. */
 const SCREEN_BUDGET = 200
 
-/** Ring buffer depth for captured device logs, per session. */
-const LOG_BUFFER = 500
-
 /**
  * How close to a bezel a stroke may start before iOS claims it.
  *
@@ -798,14 +795,6 @@ export async function logsFor(params: {
 }): Promise<{ lines: string[] }> {
   const entry = deviceFor(params.sessionId)
   return { lines: entry.logs.slice(-(params.limit ?? 100)) }
-}
-
-/** Appends to the bounded log buffer. */
-export function pushLog(sessionId: string, line: string): void {
-  const entry = entries.get(sessionId)
-  if (!entry) return
-  entry.logs.push(line)
-  if (entry.logs.length > LOG_BUFFER) entry.logs.splice(0, entry.logs.length - LOG_BUFFER)
 }
 
 // ---------------------------------------------------------------------------

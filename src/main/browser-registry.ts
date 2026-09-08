@@ -355,11 +355,6 @@ export function detach(sessionId: string): void {
   }
 }
 
-/** Every attached session. Used to reconcile on window teardown. */
-export function attachedSessions(): string[] {
-  return Array.from(entries.keys())
-}
-
 // ─── Reads ──────────────────────────────────────────────────────
 
 export interface AXNode {

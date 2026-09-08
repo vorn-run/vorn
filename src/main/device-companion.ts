@@ -257,10 +257,6 @@ export function stopAllCompanions(): void {
   for (const udid of [...running.keys()]) stopCompanion(udid)
 }
 
-export function runningCompanion(udid: string): CompanionHandle | undefined {
-  return running.get(udid)
-}
-
 let quitHookInstalled = false
 /** Registered once from main's setup; a stranded companion outlives the app. */
 export function installCompanionQuitHook(): void {
