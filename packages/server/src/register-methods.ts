@@ -40,9 +40,10 @@ import { browserBridge } from './browser-bridge'
 import { activationFor, subjectOf } from './extensions/activation'
 import { footerReadings, stopFooters, syncFooters } from './extensions/footers'
 import { matchLinks, runHandler } from './extensions/handlers'
-import { installedExtensions, stopHostsForExtension } from './extensions/hosts'
+import { installedExtensions, stopHostsForExtension, stopHostsForProject } from './extensions/hosts'
 import {
   closePane,
+  closePaneForTerminal,
   closePanesForExtension,
   closePanesForSession,
   openPane
@@ -604,10 +605,34 @@ export function syncExtensionsFor(session: TerminalSession): void {
   }
 }
 
-/** Everything held for a session, released when it ends. */
-export function releaseExtensionsFor(sessionId: string): void {
-  stopFooters(sessionId)
-  closePanesForSession(sessionId)
+/**
+ * Record a rename an extension made, the way a person's rename is recorded.
+ *
+ * The bridge has already changed the name in the manager; what is left is what
+ * `terminal:rename` does afterwards, and doing less than it would mean a name
+ * that no window outside the asking one sees and that a restart forgets.
+ */
+export function extensionRenamedSession(sessionId: string, displayName: string): void {
+  logSessionEvent(sessionId, 'renamed', { displayName })
+  sessionManager.scheduleSave()
+  broadcastWidgetUpdate()
+}
+
+/**
+ * Everything held for a session, released when it ends.
+ *
+ * The project's child goes too once nothing is left that could ask it anything:
+ * an extension is started for the sessions of a project, so a project with no
+ * sessions has no reason to be running one.
+ */
+export function releaseExtensionsFor(session: TerminalSession): void {
+  stopFooters(session.id)
+  closePanesForSession(session.id)
+  closePaneForTerminal(session.id)
+  const stillOpen = ptyManager
+    .getLiveSessions()
+    .some((other) => other.id !== session.id && other.projectPath === session.projectPath)
+  if (!stillOpen) void stopHostsForProject(session.projectPath)
 }
 
 /** After a pack changed, no child keeps running its old files and every card is settled again. */
@@ -698,7 +723,8 @@ export function registerAllMethods(): void {
   })
   registerMethod('terminal:listActive', () => ptyManager.getActiveSessions())
   registerMethod('terminal:rename', ({ id, displayName }) => {
-    ptyManager.renameSession(id, displayName)
+    // Asked for by a person, so an extension may not overrule it afterwards.
+    ptyManager.renameSession(id, displayName, true)
     logSessionEvent(id, 'renamed', { displayName })
     sessionManager.scheduleSave()
     broadcastWidgetUpdate()
@@ -2207,7 +2233,7 @@ export function registerAllMethods(): void {
     // A session that died early holds nothing; without this its conversation
     // stays unreachable for the rest of the spawn window.
     releaseSpawningTranscriptsFor(session.id)
-    releaseExtensionsFor(session.id)
+    releaseExtensionsFor(session)
     const inst = copilotInstallations.get(session.id)
     if (inst) {
       uninstallCopilotHooks(inst)

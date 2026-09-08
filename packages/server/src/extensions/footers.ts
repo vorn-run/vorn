@@ -27,6 +27,8 @@ interface Poller {
   timer: NodeJS.Timeout
   everyMs: number
   failing: boolean
+  /** What the running timer was built from, so an upgraded pack replaces it. */
+  declared: { everyMs: number; title: string; version: string }
 }
 
 const pollers = new Map<string, Poller>()
@@ -132,6 +134,9 @@ async function runFooter(
 }
 
 function publish(sessionId: string, key: string, reading: ExtensionFooterReading): void {
+  // A run that was in flight when its session ended has nothing to say about it,
+  // and storing what it computed would leave a reading nothing will ever clear.
+  if (!pollers.has(key)) return
   if (same(readings.get(key), reading)) return
   readings.set(key, reading)
   clientRegistry.broadcast(
@@ -155,7 +160,7 @@ function restart(
   const everyMs = failing ? existing.everyMs * FAILURE_BACKOFF : existing.everyMs / FAILURE_BACKOFF
   const timer = setInterval(() => void runFooter(pack, footerId, title, session), everyMs)
   timer.unref?.()
-  pollers.set(key, { timer, everyMs, failing })
+  pollers.set(key, { timer, everyMs, failing, declared: existing.declared })
 }
 
 /** Start what this session's activation says shows, and stop what no longer does. */
@@ -170,14 +175,27 @@ export function syncFooters(session: TerminalSession): void {
       if (!activation.footers.includes(footer.id)) continue
       const key = keyOf(session.id, pack.id, footer.id)
       wanted.add(key)
-      if (pollers.has(key)) continue
       const everyMs = Math.max(footer.every, 5) * 1000
+      const declared = { everyMs, title: footer.title, version: pack.version }
+      const running = pollers.get(key)
+      // An upgraded pack is a different footer, so what is running is replaced
+      // rather than left declaring the version it started at.
+      if (running) {
+        if (
+          running.declared.everyMs === declared.everyMs &&
+          running.declared.title === declared.title &&
+          running.declared.version === declared.version
+        ) {
+          continue
+        }
+        clearInterval(running.timer)
+      }
       const timer = setInterval(
         () => void runFooter(pack, footer.id, footer.title, session),
         everyMs
       )
       timer.unref?.()
-      pollers.set(key, { timer, everyMs, failing: false })
+      pollers.set(key, { timer, everyMs, failing: false, declared })
       // Once now, so a card shows a reading rather than an empty band for the first interval.
       void runFooter(pack, footer.id, footer.title, session)
     }

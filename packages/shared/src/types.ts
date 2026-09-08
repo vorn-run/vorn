@@ -111,6 +111,14 @@ export interface TerminalSession {
    */
   cols?: number
   rows?: number
+  /**
+   * Whether a person named this card, rather than it being named for them.
+   *
+   * Most sessions arrive with a name already filled in, so "has a name" cannot
+   * tell the two apart -- and an extension that renames cards must not take one
+   * a person chose. Only a rename a person asked for sets this.
+   */
+  renamedByPerson?: boolean
   /** Shell session only: working directory the PTY was started in. */
   shellCwd?: string
   /** HEAD where it was working, refreshed as it works, so a restore can tell the tree moved. */

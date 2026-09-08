@@ -20,9 +20,14 @@ import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
 import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
-import { reconcileImplicitConnections, registerAllMethods, setServerPort } from './register-methods'
+import {
+  extensionRenamedSession,
+  reconcileImplicitConnections,
+  registerAllMethods,
+  setServerPort
+} from './register-methods'
 import { registerWebhookRoute } from './webhook-trigger'
-import { registerExtensionBridge } from './extensions/bridge'
+import { registerExtensionBridge, type ExtensionRouteDeps } from './extensions/bridge'
 import { setExtensionBridgeOrigin, stopAllHosts } from './extensions/hosts'
 import { startExtensionPageServer, stopExtensionPageServer } from './extensions/page-server'
 import { stopAllFooters } from './extensions/footers'
@@ -109,6 +114,19 @@ function resolveBuildChannel(): 'dev' | 'packaged' {
   const declared = process.env.VORN_BUILD_CHANNEL
   if (declared === 'dev' || declared === 'packaged') return declared
   return process.argv[1]?.endsWith('.ts') ? 'dev' : 'packaged'
+}
+
+/**
+ * Origins that may frame a pane's page, filled in once this server has a port.
+ *
+ * The pages are on their own origin, so the app's is not implied; naming it here
+ * is what lets a window frame one at all.
+ */
+let extensionFrameAncestors: string[] = []
+
+const extensionRouteDeps: ExtensionRouteDeps = {
+  frameAncestors: () => extensionFrameAncestors,
+  sessionRenamed: extensionRenamedSession
 }
 
 export async function startServer(
@@ -243,7 +261,7 @@ export async function startServer(
   // An extension's own bridge, which its child process reaches with the token it
   // was started with. The pages its panes are drawn from are served on their own
   // origin instead, so a page shares neither storage nor a socket with the app.
-  registerExtensionBridge(app)
+  registerExtensionBridge(app, extensionRouteDeps)
 
   /**
    * Pairing, the phone's half.
@@ -457,10 +475,9 @@ export async function startServer(
   // are the only ones allowed to; a page that fails to start costs its panes, not
   // the server.
   const appOrigins = [`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`]
+  extensionFrameAncestors = [...appOrigins, ...(options.extensionFrameAncestors ?? [])]
   try {
-    await startExtensionPageServer({
-      frameAncestors: () => [...appOrigins, ...(options.extensionFrameAncestors ?? [])]
-    })
+    await startExtensionPageServer(extensionRouteDeps)
   } catch (err) {
     log.warn({ err }, '[extensions] pane pages have no origin; panes will not open')
   }

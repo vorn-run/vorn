@@ -1,4 +1,4 @@
-import { getTerminalSelection } from './terminal-registry'
+import { getTerminalSelection, hasTerminal } from './terminal-registry'
 
 /**
  * Answer what is selected in a terminal, which only this window knows.
@@ -10,6 +10,9 @@ import { getTerminalSelection } from './terminal-registry'
  */
 export function listenForSelectionRequests(): () => void {
   const stop = window.api.onExtensionSelectionRequest?.(({ requestId, sessionId }) => {
+    // Answering for a terminal this window never drew would win the race with an
+    // empty string and silence the window that has the selection.
+    if (!hasTerminal(sessionId)) return
     window.api.sendExtensionSelection?.(requestId, getTerminalSelection(sessionId))
   })
   return stop ?? ((): void => {})

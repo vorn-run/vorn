@@ -393,7 +393,8 @@ function createSchema(): void {
       saved_at INTEGER,
       sort_order INTEGER NOT NULL DEFAULT 0,
       worktree_name TEXT,
-      agent_session_id TEXT
+      agent_session_id TEXT,
+      renamed_by_person INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS schedule_log (
@@ -1099,7 +1100,11 @@ function verifySchema(d: Database.Database): void {
       { column: 'worktree_name', ddl: 'ALTER TABLE sessions ADD COLUMN worktree_name TEXT' },
       { column: 'agent_session_id', ddl: 'ALTER TABLE sessions ADD COLUMN agent_session_id TEXT' },
       { column: 'shell_cwd', ddl: 'ALTER TABLE sessions ADD COLUMN shell_cwd TEXT' },
-      { column: 'head_commit', ddl: 'ALTER TABLE sessions ADD COLUMN head_commit TEXT' }
+      { column: 'head_commit', ddl: 'ALTER TABLE sessions ADD COLUMN head_commit TEXT' },
+      {
+        column: 'renamed_by_person',
+        ddl: 'ALTER TABLE sessions ADD COLUMN renamed_by_person INTEGER'
+      }
     ],
     agent_commands: [
       {
@@ -3143,8 +3148,8 @@ export function saveSessions(sessions: TerminalSession[]): void {
   const run = d.transaction(() => {
     d.prepare('DELETE FROM sessions').run()
     const insert = d.prepare(
-      `INSERT INTO sessions (id, agent_type, project_name, project_path, status, created_at, pid, display_name, branch, worktree_path, is_worktree, remote_host_id, remote_host_label, hook_session_id, status_source, saved_at, sort_order, worktree_name, agent_session_id, shell_cwd, head_commit)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO sessions (id, agent_type, project_name, project_path, status, created_at, pid, display_name, branch, worktree_path, is_worktree, remote_host_id, remote_host_label, hook_session_id, status_source, saved_at, sort_order, worktree_name, agent_session_id, shell_cwd, head_commit, renamed_by_person)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (let i = 0; i < sessions.length; i++) {
       const s = sessions[i]
@@ -3174,7 +3179,8 @@ export function saveSessions(sessions: TerminalSession[]): void {
         s.worktreeName ?? null,
         s.agentSessionId ?? null,
         s.shellCwd ?? null,
-        s.headCommit ?? null
+        s.headCommit ?? null,
+        s.renamedByPerson ? 1 : 0
       )
     }
   })
@@ -3204,6 +3210,7 @@ export function getPreviousSessions(): TerminalSession[] {
     head_commit: string | null
     worktree_name: string | null
     agent_session_id: string | null
+    renamed_by_person: number | null
   }>
   return rows.map((r) => ({
     id: r.id,
@@ -3229,7 +3236,8 @@ export function getPreviousSessions(): TerminalSession[] {
     // It is the only record of when a run ended.
     ...(r.saved_at != null && { savedAt: r.saved_at }),
     ...(r.shell_cwd != null && { shellCwd: r.shell_cwd }),
-    ...(r.head_commit != null && { headCommit: r.head_commit })
+    ...(r.head_commit != null && { headCommit: r.head_commit }),
+    ...(r.renamed_by_person != null && r.renamed_by_person !== 0 && { renamedByPerson: true })
   }))
 }
 

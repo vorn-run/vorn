@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TerminalSession } from '@vornrun/shared/types'
@@ -72,6 +72,30 @@ describe('what a session has spent', () => {
 
   it('says nothing when there is no conversation on disk', () => {
     expect(usageFor(session(), home())).toEqual({})
+  })
+
+  // The newest turn is at the end, so a long conversation is read from the end.
+  it('reads the newest turn without reading the whole conversation', () => {
+    const root = home()
+    const dir = join(root, '.claude', 'projects', '-Users-someone-dev-vorn')
+    mkdirSync(dir, { recursive: true })
+    const filler = JSON.stringify({ type: 'user', message: { content: 'x'.repeat(4000) } })
+    const lines = Array.from({ length: 200 }, () => filler)
+    lines.push(JSON.stringify(turn({ input_tokens: 5, cache_read_input_tokens: 95 })))
+    const path = join(dir, 'abc-123.jsonl')
+    writeFileSync(path, lines.join('\n'))
+    expect(statSync(path).size).toBeGreaterThan(600 * 1024)
+    expect(usageFor(session(), root)).toEqual({ contextTokens: 100, cacheHitRate: 0.95 })
+  })
+
+  // A conversation's id names a file, so an id that is a path names nothing here.
+  it('reads nothing for an id that is not a name', () => {
+    const root = home()
+    writeTranscript(root, '/Users/someone/dev/vorn', 'abc-123', [
+      turn({ input_tokens: 1, cache_read_input_tokens: 99 })
+    ])
+    expect(usageFor(session({ agentSessionId: '../../../etc/passwd' }), root)).toEqual({})
+    expect(usageFor(session({ agentSessionId: 'a/b' }), root)).toEqual({})
   })
 
   it('skips a half-written line rather than failing on it', () => {

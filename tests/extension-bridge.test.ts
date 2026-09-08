@@ -17,7 +17,8 @@ const grants = new Map<
 >()
 const sessions: TerminalSession[] = []
 const wrote: Array<{ id: string; data: string }> = []
-const renamed: Array<{ id: string; name: string }> = []
+const renamed: Array<{ id: string; name: string; byPerson: boolean }> = []
+const saved: Array<{ id: string; name: string }> = []
 let output: string[] = ['$ yarn test', 'ok']
 
 vi.mock('../packages/server/src/connectors/packs', async (importOriginal) => ({
@@ -54,7 +55,8 @@ vi.mock('../packages/server/src/pty-manager', () => ({
     getLiveSessions: () => sessions,
     getOutput: () => output,
     writeToPty: (id: string, data: string) => wrote.push({ id, data }),
-    renameSession: (id: string, name: string) => renamed.push({ id, name })
+    renameSession: (id: string, name: string, byPerson = true) =>
+      renamed.push({ id, name, byPerson })
   }
 }))
 
@@ -118,14 +120,19 @@ beforeEach(async () => {
   sessions.push(session())
   wrote.length = 0
   renamed.length = 0
+  saved.length = 0
   output = ['$ yarn test', 'ok']
 
+  const deps = {
+    frameAncestors: () => ['http://127.0.0.1:7777'],
+    sessionRenamed: (id: string, name: string) => saved.push({ id, name })
+  }
   app = Fastify()
-  registerExtensionBridge(app)
+  registerExtensionBridge(app, deps)
   await app.ready()
   // Pages live on their own origin, so they are registered on their own instance.
   pages = Fastify()
-  registerExtensionPages(pages, { frameAncestors: () => ['http://127.0.0.1:7777'] })
+  registerExtensionPages(pages, deps)
   await pages.ready()
 })
 
@@ -244,6 +251,22 @@ describe('what the bridge answers with', () => {
     const text = answer.json<{ result: string }>().result
     expect(text.length).toBe(256 * 1024)
     expect(text.endsWith('the last line')).toBe(true)
+  })
+
+  // Most cards arrive with a name filled in, so only a rename a person asked for counts.
+  it('renames a card, and refuses one its person named', async () => {
+    pack.current!.permissions = [...(pack.current!.permissions ?? []), 'card.rename']
+
+    const allowed = await call('rename', { sessionId: 's1', name: 'Checks' })
+    expect(allowed.statusCode).toBe(204)
+    expect(renamed).toEqual([{ id: 's1', name: 'Checks', byPerson: false }])
+    expect(saved).toEqual([{ id: 's1', name: 'Checks' }])
+
+    sessions[0].renamedByPerson = true
+    const refused = await call('rename', { sessionId: 's1', name: 'Something else' })
+    expect(refused.statusCode).toBe(403)
+    expect(refused.body).toContain('named by the person')
+    expect(renamed).toHaveLength(1)
   })
 
   it('refuses a write missing what it writes', async () => {

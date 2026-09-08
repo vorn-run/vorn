@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { TerminalSession } from '@vornrun/shared/types'
@@ -29,9 +29,21 @@ function transcriptDir(cwd: string): string {
   return cwd.replace(/[^A-Za-z0-9]/g, '-')
 }
 
+/** A conversation's id names a file, so it may only be what a file name may be. */
+const TRANSCRIPT_ID = /^[A-Za-z0-9._-]+$/
+
+/**
+ * As much of the end of a conversation as the newest turn can need.
+ *
+ * A conversation runs to tens of megabytes and is read on a footer's interval,
+ * so reading it whole would put a file that size through this loop every few
+ * seconds. The turn being read is the last one, and it is at the end.
+ */
+const TAIL_BYTES = 256 * 1024
+
 function transcriptPath(session: TerminalSession, home: string): string | undefined {
   const id = session.agentSessionId
-  if (!id) return undefined
+  if (!id || !TRANSCRIPT_ID.test(id)) return undefined
   for (const cwd of [session.worktreePath, session.projectPath]) {
     if (!cwd) continue
     const path = join(home, '.claude', 'projects', transcriptDir(cwd), `${id}.jsonl`)
@@ -42,6 +54,20 @@ function transcriptPath(session: TerminalSession, home: string): string | undefi
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
+
+/** The end of a file, and never more of it than that. */
+function readTail(path: string): string {
+  const handle = openSync(path, 'r')
+  try {
+    const size = fstatSync(handle).size
+    const length = Math.min(size, TAIL_BYTES)
+    const buffer = Buffer.allocUnsafe(length)
+    readSync(handle, buffer, 0, length, size - length)
+    return buffer.toString('utf8')
+  } finally {
+    closeSync(handle)
+  }
+}
 
 /** The usage of the newest assistant turn; earlier ones are already counted in its cache read. */
 function lastUsage(contents: string): TranscriptUsage | undefined {
@@ -72,7 +98,7 @@ export function usageFor(
   if (!path) return {}
   let usage: TranscriptUsage | undefined
   try {
-    usage = lastUsage(readFileSync(path, 'utf8'))
+    usage = lastUsage(readTail(path))
   } catch {
     // A conversation being written to, or one this process cannot read, tells us nothing.
     return {}

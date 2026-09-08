@@ -61,6 +61,9 @@ const PAGE_TYPES: Record<string, string> = Object.fromEntries(
   WEB_FILE_TYPES.map((type) => [`.${type}`, MEDIA_TYPES[type] ?? 'application/octet-stream'])
 )
 
+/** A refusal the caller cannot argue with, rather than a failure it should retry. */
+class RefusedError extends Error {}
+
 const DEFAULT_OUTPUT_LINES = 200
 const MAX_OUTPUT_LINES = 5000
 /** A line has no length of its own, so the reply is held to bytes as well as lines. */
@@ -102,7 +105,8 @@ function refuse(reply: FastifyReply, code: number, reason: string): FastifyReply
 async function answer(
   method: string,
   session: TerminalSession,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  deps: ExtensionRouteDeps
 ): Promise<{ result?: unknown }> {
   const worktreePath = session.worktreePath ?? session.projectPath
   switch (method) {
@@ -130,7 +134,13 @@ async function answer(
       if (typeof name !== 'string' || name.trim() === '') {
         throw new Error('rename takes the name to show')
       }
-      ptyManager.renameSession(session.id, name.trim())
+      if (session.renamedByPerson) {
+        throw new RefusedError('that card was named by the person using it')
+      }
+      ptyManager.renameSession(session.id, name.trim(), false)
+      // Named the way the rename method does, so the name survives a restart and
+      // every window sees it rather than only the one that asked.
+      deps.sessionRenamed(session.id, name.trim())
       return {}
     }
     case 'usage':
@@ -162,6 +172,8 @@ function pageFile(pack: InstalledConnectorPack, paneId: string, rest: string): s
 export interface ExtensionRouteDeps {
   /** Origins the app is served from, which are the only ones that may frame a pane. */
   frameAncestors: () => string[]
+  /** Saves a rename and tells every window, exactly as the rename method does. */
+  sessionRenamed: (sessionId: string, displayName: string) => void
 }
 
 /** One handler for both ways in; only how the caller proved itself differs. */
@@ -170,6 +182,7 @@ async function serve(
   method: string,
   body: unknown,
   reply: FastifyReply,
+  deps: ExtensionRouteDeps,
   boundSessionId?: string
 ): Promise<FastifyReply> {
   if (!caller) return refuse(reply, 401, 'This bridge does not know that caller')
@@ -194,18 +207,19 @@ async function serve(
   }
 
   try {
-    const answered = await answer(method, session, params)
+    const answered = await answer(method, session, params, deps)
     if (!('result' in answered)) return reply.code(204).send()
     return reply.code(200).send({ result: answered.result })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    if (err instanceof RefusedError) return refuse(reply, 403, message)
     log.warn(`[extensions] ${caller.extensionId} ${method} failed: ${message}`)
     return refuse(reply, 500, message)
   }
 }
 
 /** The extension's own process, which holds the token it was started with. */
-export function registerExtensionBridge(app: FastifyInstance): void {
+export function registerExtensionBridge(app: FastifyInstance, deps: ExtensionRouteDeps): void {
   app.post('/extensions/:id/bridge/:method', async (req, reply) => {
     if (!isLoopbackAddress(req.ip)) return refuse(reply, 403, 'Local machine only')
     if (fromElsewhere(req)) return refuse(reply, 403, 'That request came from another site')
@@ -215,7 +229,7 @@ export function registerExtensionBridge(app: FastifyInstance): void {
     const caller = host
       ? { extensionId: host.extensionId, projectPath: host.projectPath }
       : undefined
-    return serve(caller, method, req.body, reply)
+    return serve(caller, method, req.body, reply, deps)
   })
   log.info('[extensions] bridge route registered')
 }
@@ -243,7 +257,7 @@ export function registerExtensionPages(app: FastifyInstance, deps: ExtensionRout
         ? { extensionId: grant.extensionId, projectPath: grant.projectPath }
         : undefined
     // The session comes from the grant, not the body: a page speaks for the one pane it was opened as.
-    return serve(caller, method, req.body, reply, grant?.sessionId)
+    return serve(caller, method, req.body, reply, deps, grant?.sessionId)
   })
 
   app.get('/extensions/:id/pane/:paneId/:nonce/*', async (req, reply) => {
