@@ -424,6 +424,90 @@ reads the manifest.
 Paths are filled with `currentColor`, so the icon picks up the surrounding
 text color instead of fighting the theme.
 
+## Extensions
+
+A connector polls a service. An **extension** contributes to a session card
+instead: a footer band under the status bar, a pane beside the terminal, or a
+handler offered when a link in the terminal is clicked. It is the same pack —
+same manifest, same check, same receipt, same catalog — declared with
+`defineExtension` rather than `defineConnector`.
+
+```ts
+import { defineExtension } from '@vornrun/connector-sdk'
+
+export const connector = defineExtension({
+  id: 'review',
+  name: 'Review',
+  description: 'Reads the session',
+  permissions: ['terminal.read'],
+  activates: { workspaceContains: ['package.json'] },
+  footers: [
+    {
+      id: 'checks',
+      title: 'Checks',
+      every: 30,
+      async run(context) {
+        const output = await context.host.output({ lines: 200 })
+        return [{ label: 'tests', value: /FAIL/.test(output) ? 'failing' : 'passing' }]
+      }
+    }
+  ],
+  panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }]
+})
+```
+
+Start one with `vorn-connector new review --extension`.
+
+### What it may ask the host for
+
+Every method of `context.host` costs one permission, and the manifest has to
+declare it. A call outside what was declared is refused rather than answered —
+by `check` against its stub host, and by Vorn at run time — so what a person
+agreed to when installing is what the extension can reach.
+
+| Permission           | Host method          | What it grants                       |
+| -------------------- | -------------------- | ------------------------------------ |
+| `git.read`           | `diff()`, `status()` | The worktree's diff and status       |
+| `terminal.read`      | `output()`           | The session's recent terminal output |
+| `terminal.selection` | `selection()`        | The text selected in the terminal    |
+| `terminal.send`      | `send(text)`         | Typing into the session's terminal   |
+| `card.rename`        | `rename(name)`       | Naming the session card              |
+| `agent.usage`        | `usage()`            | Context and provider allowance       |
+
+Ask for only what the extension spends: `check` names a permission that was
+declared and never used.
+
+### Where it shows
+
+`activates` on the extension, and `when` on any one contribution, narrow where
+it appears. Every declared field has to hold, and each is satisfied by any one
+of its values, so an extension is simply absent where it has nothing to say.
+
+```ts
+activates: {
+  workspaceContains: ['Cargo.toml'],   // paths relative to the worktree
+  remoteHost: ['github.com'],
+  agent: ['claude', 'shell'],
+  platform: ['darwin', 'linux']
+}
+```
+
+### What a pane is drawn from
+
+A pane is either a page the pack carries or a program it runs. A page lives
+under `web/` in the package and is carried into the pack as it stands, so its
+stylesheet and script travel with it; Vorn serves it a bridge in
+`window.vorn` — `host`, `token` and `sessionId` — granting exactly the declared
+permissions. A program is argv, run in the session's worktree and drawn as a
+terminal.
+
+```ts
+panes: [
+  { id: 'report', title: 'Report', web: 'web/report/index.html' },
+  { id: 'git', title: 'Git', command: ['lazygit'], when: { agent: ['shell'] } }
+]
+```
+
 ## CLI
 
 ```
@@ -436,9 +520,10 @@ vorn-connector pack <module>              Build an installable .vorn.tgz pack
 vorn-connector serve <module>             Serve on stdio (what Vorn runs)
 ```
 
-`new` accepts `--out <dir>`, `--name "Display Name"`, and `--repo-conventions`,
+`new` accepts `--out <dir>`, `--name "Display Name"`, `--repo-conventions`,
 which shapes the package the way the connectors repository expects it (scoped
-name, changelog, compiler and test settings); `pack` accepts `--out <dir>`.
+name, changelog, compiler and test settings), and `--extension`, which
+scaffolds an extension rather than a connector; `pack` accepts `--out <dir>`.
 
 `poll` accepts `--since <iso>` and `--limit <n>`, and reads the connector's
 declared config from your shell environment — the fastest way to confirm
