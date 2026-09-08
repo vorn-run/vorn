@@ -19,6 +19,7 @@ import { FilesCard } from './FilesCard'
 import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
+import { ExtensionPaneCard } from './ExtensionPaneCard'
 import { TerminalsCard } from './TerminalsCard'
 import { parsePaneId } from '../lib/pane-id'
 import { isMac } from '../lib/platform'
@@ -68,6 +69,9 @@ export function FocusedTerminal() {
   const hasEditorPane = useAppStore((s) => (effectiveId ? s.editorPanes.has(effectiveId) : false))
   const hasBrowserPane = useAppStore((s) => (effectiveId ? s.browserPanes.has(effectiveId) : false))
   const hasDevicePane = useAppStore((s) => (effectiveId ? s.devicePanes.has(effectiveId) : false))
+  const hasExtensionPane = useAppStore((s) =>
+    effectiveId ? s.extensionPanes.has(effectiveId) : false
+  )
   const hasTerminalsPane = useAppStore((s) =>
     effectiveId ? s.terminalsPanes.has(effectiveId) : false
   )
@@ -94,6 +98,7 @@ export function FocusedTerminal() {
     (maximizedKind === 'editor' && hasEditorPane) ||
     (maximizedKind === 'browser' && hasBrowserPane) ||
     (maximizedKind === 'device' && hasDevicePane) ||
+    (maximizedKind === 'extension' && hasExtensionPane) ||
     (maximizedKind === 'terminals' && hasTerminalsPane)
 
   const handleContract = (): void => {
@@ -314,6 +319,11 @@ export function FocusedTerminal() {
               {hasDevicePane && (
                 <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'device'}>
                   <DeviceCard sessionId={effectiveId} />
+                </PaneSlot>
+              )}
+              {hasExtensionPane && (
+                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'extension'}>
+                  <ExtensionPaneCard sessionId={effectiveId} />
                 </PaneSlot>
               )}
               {hasTerminalsPane && (

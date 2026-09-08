@@ -7,6 +7,7 @@ import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
 import { TerminalsCard } from './TerminalsCard'
+import { ExtensionPaneCard } from './ExtensionPaneCard'
 import { SplitDivider } from './SplitDivider'
 import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
 
@@ -54,12 +55,24 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
     setDragWeights(null)
   }
 
+  // Exhaustive on purpose. This was a chain of `if`s falling through to the
+  // device pane, so a kind added to `PaneChildKind` and forgotten here drew a
+  // device pane instead — silently, for a pane nobody opened.
   const render = (entry: ColumnEntry): ReactNode => {
-    if (entry.kind === 'files') return <FilesCard sessionId={sessionId} />
-    if (entry.kind === 'editor') return <EditorCard sessionId={sessionId} />
-    if (entry.kind === 'browser') return <BrowserCard sessionId={sessionId} />
-    if (entry.kind === 'terminals') return <TerminalsCard sessionId={sessionId} />
-    return <DeviceCard sessionId={sessionId} />
+    switch (entry.kind) {
+      case 'files':
+        return <FilesCard sessionId={sessionId} />
+      case 'editor':
+        return <EditorCard sessionId={sessionId} />
+      case 'browser':
+        return <BrowserCard sessionId={sessionId} />
+      case 'device':
+        return <DeviceCard sessionId={sessionId} />
+      case 'extension':
+        return <ExtensionPaneCard sessionId={sessionId} />
+      case 'terminals':
+        return <TerminalsCard sessionId={sessionId} />
+    }
   }
 
   return (
