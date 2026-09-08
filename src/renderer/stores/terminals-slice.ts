@@ -213,6 +213,8 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       const seen = new Set<string>()
       const order = mapped.filter((id) => !seen.has(id) && seen.add(id))
       window.api.notifyWidgetStatus()
+      forgetExtensionHydration(previousId)
+      void hydrateExtensions(session.id, get)
       return {
         terminals: next,
         terminalOrder: seen.has(session.id) ? order : [...order, session.id]
