@@ -40,7 +40,7 @@ describe('the files a new connector starts as', () => {
     expect(pkg.scripts.pack).toBe('vorn-connector pack src/index.ts')
     // Names a prerelease because that is all there is: a bare `^0.7.0` matches
     // no prerelease, so a scaffold pinned to it would install nothing.
-    expect(pkg.dependencies['@vornrun/connector-sdk']).toBe('^0.7.0-beta.9')
+    expect(pkg.dependencies['@vornrun/connector-sdk']).toBe('^0.7.0-beta.14')
     expect(pkg.vorn.keywords).toContain('acme-tickets')
   })
 
@@ -152,6 +152,73 @@ describe('a scaffold shaped for the connectors repository', () => {
   })
 })
 
+describe('the files a new extension starts as', () => {
+  const extensionMap = (id = 'review') =>
+    new Map(scaffoldFiles({ id, kind: 'extension' }).map((file) => [file.path, file.contents]))
+
+  it('writes the definition, the page a pane is drawn from, and a test for the footer', () => {
+    expect([...extensionMap().keys()]).toEqual([
+      'package.json',
+      'src/extension.ts',
+      'src/entry.ts',
+      'src/index.ts',
+      'src/extension.test.ts',
+      'src/entry.test.ts',
+      'web/report/index.html',
+      'README.md',
+      'tsconfig.json'
+    ])
+  })
+
+  it('starts from defineExtension, with one footer, one pane and the permission it spends', () => {
+    const source = extensionMap().get('src/extension.ts') as string
+    expect(source).toContain('defineExtension')
+    expect(source).toContain("permissions: ['terminal.read']")
+    expect(source).toContain("web: 'web/report/index.html'")
+    expect(source).toContain('every: 30')
+    expect(source).toContain('activates:')
+    // Nothing about signing in: an extension's credential is the host's own token.
+    expect(source).not.toContain('auth:')
+  })
+
+  it('publishes the page beside the bundle, and files itself as an extension', () => {
+    const pkg = JSON.parse(extensionMap().get('package.json') as string) as {
+      name: string
+      files: string[]
+      vorn: { kind?: string; auth?: string }
+    }
+
+    expect(pkg.name).toBe('vorn-extension-review')
+    expect(pkg.files).toContain('web')
+    expect(pkg.vorn.kind).toBe('extension')
+    expect(pkg.vorn.auth).toBeUndefined()
+  })
+
+  it('carries a page that asks the host only through the bridge it was given', () => {
+    const page = extensionMap().get('web/report/index.html') as string
+    expect(page).toContain('window.vorn.token')
+    expect(page).toContain('window.vorn.host')
+  })
+
+  it('starts with a test that runs the footer against the stub host', () => {
+    const test = extensionMap().get('src/extension.test.ts') as string
+    expect(test).toContain('mockExtensionHost')
+    expect(test).toContain("footer('checks'")
+  })
+
+  it('takes the scoped name in the repository, and its own module', () => {
+    const files = new Map(
+      scaffoldFiles({ id: 'review', kind: 'extension', repoConventions: true }).map((file) => [
+        file.path,
+        file.contents
+      ])
+    )
+    expect(files.get('package.json')).toContain('"@vornrun/extension-review"')
+    expect(files.get('src/index.ts')).toContain("from './extension'")
+    expect(files.get('src/entry.ts')).toContain("from './extension'")
+  })
+})
+
 describe('vorn-connector new', () => {
   const capture = () => {
     const lines: string[] = []
@@ -219,10 +286,34 @@ describe('vorn-connector new', () => {
     ).rejects.toThrow(/must start with a letter/)
   })
 
+  it('scaffolds an extension when asked, and a connector otherwise', async () => {
+    const written = new Map<string, string>()
+    const writeFile = async (path: string, contents: string) => {
+      written.set(path, contents)
+    }
+    await runCli(['new', 'review', '--extension', '--out', '/tmp/work'], {
+      load,
+      write: capture().write,
+      writeFile
+    })
+    expect([...written.keys()]).toContain('/tmp/work/review/src/extension.ts')
+    expect([...written.keys()]).toContain('/tmp/work/review/web/report/index.html')
+
+    written.clear()
+    await runCli(['new', 'review', '--out', '/tmp/work'], {
+      load,
+      write: capture().write,
+      writeFile
+    })
+    expect([...written.keys()]).toContain('/tmp/work/review/src/connector.ts')
+    expect([...written.keys()]).not.toContain('/tmp/work/review/src/extension.ts')
+  })
+
   it('is listed in the usage text', async () => {
     const help = capture()
     await runCli(['help'], { load, write: help.write })
     expect(help.lines.join('\n')).toContain('new <id>')
     expect(help.lines.join('\n')).toContain('--repo-conventions')
+    expect(help.lines.join('\n')).toContain('--extension')
   })
 })

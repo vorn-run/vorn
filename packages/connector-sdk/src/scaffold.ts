@@ -20,7 +20,7 @@ const ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
  * `^0.7.0` matches no prerelease at all — a scaffold pinned to it installs
  * nothing. Bumped with the SDK's own version until a stable one exists.
  */
-const SDK_DEPENDENCY_RANGE = '^0.7.0-beta.9'
+const SDK_DEPENDENCY_RANGE = '^0.7.0-beta.14'
 
 /** What a scaffold starts at, in the package and in the changelog section that must match it. */
 const SCAFFOLD_VERSION = '0.1.0'
@@ -37,6 +37,8 @@ export interface ScaffoldOptions {
   description?: string
   /** Emit the shape the connectors repository expects of a package inside it. */
   repoConventions?: boolean
+  /** What to start: a connector that polls a service, or an extension that contributes to a card. */
+  kind?: 'connector' | 'extension'
 }
 
 export interface ScaffoldFile {
@@ -54,17 +56,29 @@ export function titleCase(id: string): string {
     .join(' ')
 }
 
-function packageJson(id: string, description: string, inRepo: boolean): string {
+function packageJson(
+  id: string,
+  description: string,
+  inRepo: boolean,
+  kind: 'connector' | 'extension'
+): string {
+  const scoped = kind === 'extension' ? 'extension' : 'connector'
   return jsonFile({
-    name: inRepo ? `@vornrun/connector-${id}` : `vorn-connector-${id}`,
+    name: inRepo ? `@vornrun/${scoped}-${id}` : `vorn-${scoped}-${id}`,
     version: SCAFFOLD_VERSION,
     description,
     type: 'module',
     license: 'MIT',
-    bin: { [`vorn-connector-${id}`]: 'dist/index.js' },
+    bin: { [`vorn-${scoped}-${id}`]: 'dist/index.js' },
     main: './dist/index.js',
     types: './dist/index.d.ts',
-    files: ['dist', 'README.md', ...(inRepo ? ['CHANGELOG.md'] : [])],
+    // A pane's page ships beside the bundle, so `web` is published like `dist`.
+    files: [
+      'dist',
+      'README.md',
+      ...(kind === 'extension' ? ['web'] : []),
+      ...(inRepo ? ['CHANGELOG.md'] : [])
+    ],
     ...(inRepo && {
       repository: {
         type: 'git',
@@ -87,11 +101,12 @@ function packageJson(id: string, description: string, inRepo: boolean): string {
       typescript: '^6.0.3',
       vitest: VITEST_RANGE
     },
-    // Read by the catalog build: how this connector is filed, found, and what it asks of you.
+    // Read by the catalog build: how this is filed, found, and what it asks of you.
     vorn: {
-      category: 'Other',
+      category: kind === 'extension' ? 'Extensions' : 'Other',
       keywords: [id],
-      ...(inRepo && { auth: 'Say in one line what signing in takes.' })
+      ...(kind === 'extension' && { kind: 'extension' }),
+      ...(inRepo && kind === 'connector' && { auth: 'Say in one line what signing in takes.' })
     }
   })
 }
@@ -219,11 +234,149 @@ export const connector = defineConnector({
 `
 }
 
-function entrySource(): string {
+function extensionSource(id: string, name: string, description: string): string {
+  return `import { defineExtension } from '@vornrun/connector-sdk'
+// Bundled at build time: a pack is one file, so a version read from disk is not there to read.
+import pkg from '../package.json'
+
+export const connector = defineExtension({
+  id: ${JSON.stringify(id)},
+  name: ${JSON.stringify(name)},
+  description: ${JSON.stringify(description)},
+  version: pkg.version,
+  // Only what this actually spends: the check names one it declared and never used.
+  permissions: ['terminal.read'],
+  // Absent where none of these hold, rather than showing a band with nothing in it.
+  activates: { workspaceContains: ['package.json'] },
+  footers: [
+    {
+      id: 'checks',
+      title: 'Checks',
+      description: 'What the last commands in this session said',
+      every: 30,
+      async run(context) {
+        const output = await context.host.output({ lines: 200 })
+        const failed = /\\b(FAIL|failed|error)\\b/i.test(output)
+        return [
+          {
+            label: 'tests',
+            value: failed ? 'failing' : 'passing',
+            tone: failed ? 'danger' : 'ok'
+          }
+        ]
+      }
+    }
+  ],
+  panes: [
+    {
+      id: 'report',
+      title: 'Report',
+      description: 'The reading, in full, beside the terminal',
+      // Served from the pack; everything the page needs lives under web/.
+      web: 'web/report/index.html'
+    }
+  ]
+})
+`
+}
+
+function extensionPage(name: string): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${name}</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 12px;
+        font: 12px ui-sans-serif, system-ui, sans-serif;
+        color: #faf9f7;
+        background: #101012;
+      }
+      h1 {
+        font-size: 13px;
+        font-weight: 500;
+        margin: 0 0 8px;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        color: rgba(255, 255, 255, 0.55);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>${name}</h1>
+    <pre id="output">Reading the session…</pre>
+    <script type="module">
+      // Vorn answers on this bridge with exactly the permissions the manifest declared.
+      const ask = async (method, body = {}) => {
+        const response = await fetch(new URL(method, window.vorn.host), {
+          method: 'POST',
+          headers: { authorization: 'Bearer ' + window.vorn.token, 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId: window.vorn.sessionId, ...body })
+        })
+        if (!response.ok) throw new Error(method + ' answered ' + response.status)
+        return (await response.json()).result
+      }
+
+      const node = document.getElementById('output')
+      try {
+        node.textContent = await ask('output', { lines: 200 })
+      } catch (error) {
+        node.textContent = String(error)
+      }
+    </script>
+  </body>
+</html>
+`
+}
+
+function extensionTestSource(name: string): string {
+  return `import { describe, expect, it } from 'vitest'
+import { mockExtensionHost } from '@vornrun/connector-sdk'
+import { connector } from './extension'
+
+/** Runs one footer the way the host will, against a stub that enforces the manifest. */
+async function footer(id: string, output: string) {
+  const { host } = mockExtensionHost(connector.permissions ?? [], { output: async () => output })
+  const declared = connector.contributes?.footers?.find((entry) => entry.id === id)
+  if (!declared) throw new Error('no footer ' + id)
+  return declared.run({
+    sessionId: 'test',
+    worktreePath: process.cwd(),
+    agent: 'claude',
+    host,
+    now: () => '2026-01-01T00:00:00.000Z'
+  })
+}
+
+describe(${JSON.stringify(name)}, () => {
+  it('reads the session as passing when nothing failed', async () => {
+    expect(await footer('checks', 'Test Files  1 passed (1)')).toEqual([
+      { label: 'tests', value: 'passing', tone: 'ok' }
+    ])
+  })
+
+  it('reads it as failing when the output says so', async () => {
+    expect(await footer('checks', 'FAIL src/index.test.ts')).toEqual([
+      { label: 'tests', value: 'failing', tone: 'danger' }
+    ])
+  })
+
+  it('asks for nothing it did not declare', () => {
+    expect(connector.permissions).toEqual(['terminal.read'])
+  })
+})
+`
+}
+
+function entrySource(module: string): string {
   return `import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { serveConnector } from '@vornrun/connector-sdk'
-import { connector } from './connector'
+import { connector } from './${module}'
 
 /** True when this file was run directly rather than imported. */
 export function isEntryPoint(moduleUrl: string, argv = process.argv): boolean {
@@ -293,8 +446,8 @@ describe('the packaged connector', () => {
 `
 }
 
-function indexSource(): string {
-  return `import { connector } from './connector'
+function indexSource(module: string): string {
+  return `import { connector } from './${module}'
 import { serveIfEntryPoint } from './entry'
 
 export { connector }
@@ -402,23 +555,79 @@ really talks to; the shapes here are a starting point, not a rule.
 `
 }
 
-/** Every file a new connector starts with, ready to build, check and pack. */
+function extensionReadme(id: string, name: string, description: string): string {
+  return `# ${name}
+
+${description}
+
+## Build and check
+
+\`\`\`sh
+yarn install
+yarn build
+yarn check      # verifies the extension against Vorn's contract
+yarn test
+yarn pack       # writes ${id}-${SCAFFOLD_VERSION}.vorn.tgz, installable in Vorn
+\`\`\`
+
+## What it contributes
+
+| Kind | Name | What it does |
+| --- | --- | --- |
+| Footer | Checks | A band under the card's status bar, recomputed every 30s |
+| Pane | Report | A page beside the terminal, served from \`web/report\` |
+
+## What it asks for
+
+| Permission | What it grants |
+| --- | --- |
+| \`terminal.read\` | The session's recent terminal output |
+
+Ask for only what the extension spends: \`check\` names a permission that was
+declared and never used.
+
+## Where it shows
+
+Sessions whose worktree has a \`package.json\`. Widen or narrow that in
+\`activates\`, and narrow one contribution further with its own \`when\`.
+`
+}
+
+/** Every file a new connector or extension starts with, ready to build, check and pack. */
 export function scaffoldFiles(options: ScaffoldOptions): ScaffoldFile[] {
+  const kind = options.kind ?? 'connector'
   if (!ID_PATTERN.test(options.id ?? '')) {
-    throw new Error(`Connector id "${options.id}" must start with a letter and be url-safe`)
+    throw new Error(
+      `${kind === 'extension' ? 'Extension' : 'Connector'} id "${options.id}" must start with a letter and be url-safe`
+    )
   }
   const name = options.name?.trim() || titleCase(options.id)
-  const description = options.description?.trim() || `${name} connector for Vorn`
+  const description = options.description?.trim() || `${name} ${kind} for Vorn`
   const inRepo = options.repoConventions ?? false
+  const module = kind === 'extension' ? 'extension' : 'connector'
 
   return [
-    { path: 'package.json', contents: packageJson(options.id, description, inRepo) },
-    { path: 'src/connector.ts', contents: connectorSource(options.id, name, description) },
-    { path: 'src/entry.ts', contents: entrySource() },
-    { path: 'src/index.ts', contents: indexSource() },
-    { path: 'src/connector.test.ts', contents: testSource(name) },
+    { path: 'package.json', contents: packageJson(options.id, description, inRepo, kind) },
+    kind === 'extension'
+      ? { path: 'src/extension.ts', contents: extensionSource(options.id, name, description) }
+      : { path: 'src/connector.ts', contents: connectorSource(options.id, name, description) },
+    { path: 'src/entry.ts', contents: entrySource(module) },
+    { path: 'src/index.ts', contents: indexSource(module) },
+    kind === 'extension'
+      ? { path: 'src/extension.test.ts', contents: extensionTestSource(name) }
+      : { path: 'src/connector.test.ts', contents: testSource(name) },
     { path: 'src/entry.test.ts', contents: entryTestSource() },
-    { path: 'README.md', contents: readme(options.id, name, description) },
+    // The page a pane is drawn from, carried into the pack as it stands here.
+    ...(kind === 'extension'
+      ? [{ path: 'web/report/index.html', contents: extensionPage(name) }]
+      : []),
+    {
+      path: 'README.md',
+      contents:
+        kind === 'extension'
+          ? extensionReadme(options.id, name, description)
+          : readme(options.id, name, description)
+    },
     // Everywhere: the generated source imports its package.json, which needs resolveJsonModule to compile.
     { path: 'tsconfig.json', contents: tsconfig(inRepo) },
     ...(inRepo
