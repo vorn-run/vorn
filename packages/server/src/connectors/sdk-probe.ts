@@ -325,7 +325,7 @@ const WEB_ENTRY_PATTERN = /^web\/[A-Za-z0-9._/-]+\.html$/
 const MIN_FOOTER_SECONDS = 5
 
 /** Permissions this build can enforce; one it cannot is dropped rather than granted. */
-function toPermissions(value: unknown): ExtensionPermission[] | undefined {
+export function toPermissions(value: unknown): ExtensionPermission[] | undefined {
   if (!Array.isArray(value)) return undefined
   const kept = value.filter((entry): entry is ExtensionPermission =>
     EXTENSION_PERMISSIONS.includes(entry as ExtensionPermission)
@@ -340,7 +340,7 @@ function toPermissions(value: unknown): ExtensionPermission[] | undefined {
  * contribution shows rather than hiding it — the safe direction for a
  * narrowing rule, since the alternative is an extension nobody can find.
  */
-function toActivation(value: unknown): ExtensionActivation | undefined {
+export function toActivation(value: unknown): ExtensionActivation | undefined {
   if (!isRecord(value)) return undefined
   const workspaceContains = strings(value.workspaceContains).filter(
     (glob) => !glob.startsWith('/') && !glob.split('/').includes('..')
@@ -375,7 +375,7 @@ function toContribution(raw: unknown): ExtensionContributionSummary | undefined 
  * a handler whose pattern is not a regular expression: each is dropped on its
  * own, so one bad contribution costs its own row rather than the extension.
  */
-function toContributes(value: unknown): ExtensionContributions | undefined {
+export function toContributes(value: unknown): ExtensionContributions | undefined {
   if (!isRecord(value)) return undefined
 
   const panes = (Array.isArray(value.panes) ? value.panes : []).flatMap((raw) => {

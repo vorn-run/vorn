@@ -1969,6 +1969,11 @@ export interface ConnectorCatalogEntry {
   id: string
   name: string
   description: string
+  /**
+   * Whether this polls a service or contributes to a session card. Absent on an
+   * older catalog, which reads as a connector because that is all there was.
+   */
+  kind?: ConnectorKind
   /** npm package the connector is published as. */
   packageName: string
   /** Published version, so a listing can say what would be installed. */
@@ -2002,6 +2007,14 @@ export interface ConnectorCatalogEntry {
   triggers?: ConnectorCatalogSummary[]
   actions?: ConnectorCatalogAction[]
   env?: Array<{ name: string; required: boolean; description?: string }>
+  /**
+   * What an extension adds, what it may touch, and where it shows — so the
+   * directory can answer all three before anything is downloaded. Present only
+   * on an extension.
+   */
+  contributes?: ExtensionContributions
+  permissions?: ExtensionPermission[]
+  activates?: ExtensionActivation
 }
 
 /**
