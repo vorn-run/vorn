@@ -70,20 +70,21 @@ export function extensionPanes(
 }
 
 /**
- * What to call a pane, from whatever this window has already read.
+ * What to call a pane, reading the list first if this window has not yet.
  *
- * Falls back to the ids rather than refusing: a pane opened by a handler can
- * arrive before anything has needed the list, and a pane with an awkward title
- * beats a pane that will not open.
+ * The menu has always read it by the time anyone can click a row, but a pane
+ * can also be opened by a link handler with only ids in hand, and a pane titled
+ * `report` by its own id is a pane nobody put a name on. Falls back to the ids
+ * rather than refusing: an awkward title beats a pane that will not open.
  */
-export function paneLabel(
+export async function paneLabel(
   extensionId: string,
-  paneId: string,
-  extensionName?: string
-): { title: string; extensionName: string } {
-  const pack = cache?.find((p) => p.id === extensionId)
+  paneId: string
+): Promise<{ title: string; extensionName: string }> {
+  const packs = cache ?? (await load())
+  const pack = packs.find((p) => p.id === extensionId)
   const pane = pack?.contributes?.panes?.find((p) => p.id === paneId)
-  return { title: pane?.title ?? paneId, extensionName: extensionName ?? pack?.name ?? extensionId }
+  return { title: pane?.title ?? paneId, extensionName: pack?.name ?? extensionId }
 }
 
 /** Test seam: forget what this process has read. */

@@ -7,6 +7,7 @@ import {
   devicePaneId,
   terminalsPaneId,
   paneIdFor,
+  extensionPaneId,
   promotedCardId,
   isPromotedCardId,
   isLayoutCellId,
@@ -66,12 +67,20 @@ describe('pane-id', () => {
     // The pane column carries kinds, not ids, so it needs the inverse of
     // parsePaneId — and the two have to agree, or a promoted pane would be
     // skipped in the column under one id and drawn in the grid under another.
-    for (const kind of ['files', 'editor', 'browser', 'device', 'terminals'] as const) {
+    for (const kind of [
+      'files',
+      'editor',
+      'browser',
+      'device',
+      'extension',
+      'terminals'
+    ] as const) {
       const id = paneIdFor(kind, 'abc')
       expect(parsePaneId(id)).toEqual({ kind, sessionId: 'abc' })
     }
     expect(paneIdFor('device', 'abc')).toBe(devicePaneId('abc'))
     expect(paneIdFor('terminals', 'abc')).toBe(terminalsPaneId('abc'))
+    expect(paneIdFor('extension', 'abc')).toBe(extensionPaneId('abc'))
   })
 
   it('reads a card id back to the session it was popped out of', () => {
@@ -131,6 +140,10 @@ describe('pane-id', () => {
     const weird = 'host:1234'
     expect(parsePaneId(weird)).toEqual({ kind: 'terminal', sessionId: weird })
     expect(parsePaneId(filesPaneId(weird))).toEqual({ kind: 'files', sessionId: weird })
+    // The extension pane names only its owner for exactly this reason: an id
+    // carrying the extension and the contribution too would put three fields in
+    // front of a session id that already has a colon in it.
+    expect(parsePaneId(extensionPaneId(weird))).toEqual({ kind: 'extension', sessionId: weird })
     expect(paneOwnerId(editorPaneId(weird))).toBe(weird)
     expect(paneOwnerId(browserPaneId(weird))).toBe(weird)
   })

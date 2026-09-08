@@ -1367,7 +1367,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     // frame put up first would point at a URL nobody has authorised yet.
     const open = await window.api.openExtensionPane?.(extensionId, paneId, sessionId)
     if (!open) return
-    const label = paneLabel(extensionId, paneId)
+    const label = await paneLabel(extensionId, paneId)
     // A card holds one, so whatever was showing hands its grant back. Read after
     // the await -- the pane could have changed while the host was answering.
     get().closeExtensionPane(sessionId)
