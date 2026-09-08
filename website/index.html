@@ -782,133 +782,114 @@
         }
       }
 
-      /* ═══════ THE PLATES — FEATURES ═══════ */
+      /* ═══════ THE STUDIES — FEATURES ═══════ */
 
-      .plates {
-        display: flex;
-        flex-direction: column;
-      }
-
-      /* A row draws its own edges, so reordering the plates cannot double a rule. */
-      .plate-row {
+      .study {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        border-top: 0.5px solid var(--border);
+        grid-template-columns: 2.4fr 1fr;
+        gap: clamp(32px, 4vw, 56px);
+        align-items: center;
+        margin-bottom: clamp(72px, 9vw, 120px);
       }
 
-      .plates > .plate-row:first-child {
-        border-top: none;
+      .study:last-child {
+        margin-bottom: 0;
       }
 
-      .plate {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        min-width: 0;
-        grid-column: span var(--span, 1);
-        padding: clamp(26px, 3vw, 44px);
+      /* Default: picture first (left), words second (right) */
+      .study .study-media {
+        order: 1;
+      }
+      .study .study-text {
+        order: 2;
       }
 
-      .span-6 {
-        --span: 6;
+      .study.reverse {
+        grid-template-columns: 1fr 2.4fr;
       }
-      .span-4 {
-        --span: 4;
+      .study.reverse .study-text {
+        order: 1;
       }
-      .span-3 {
-        --span: 3;
-      }
-      .span-2 {
-        --span: 2;
+      .study.reverse .study-media {
+        order: 2;
       }
 
-      .plate-row > .plate + .plate {
-        border-left: 0.5px solid var(--border);
-      }
-      .plate-row > .plate:first-child {
-        padding-left: 0;
-      }
-      .plate-row > .plate:last-child {
-        padding-right: 0;
-      }
-      .plates > .plate-row:first-child > .plate {
-        padding-top: 0;
+      /* A portrait shot in a landscape column: hold it to a phone's width
+         rather than letting the row stretch to its height. */
+      .study-media.is-tall .study-frame {
+        max-width: 340px;
+        margin: 0 auto;
       }
 
-      .plate-eyebrow {
+      .study-annotation {
         font-family: var(--mono);
-        font-size: 11.5px;
+        font-size: 13px;
         font-weight: 500;
         letter-spacing: 0.2em;
         text-transform: uppercase;
-        color: rgba(201, 151, 42, 0.6);
+        color: rgba(201, 151, 42, 0.55);
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
       }
 
-      .plate-media {
+      .study-annotation::before {
+        content: '';
+        width: 20px;
+        height: 0.5px;
+        background: rgba(201, 151, 42, 0.3);
+      }
+
+      .study-text h3 {
+        font-family: var(--display);
+        font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+        font-weight: 400;
+        line-height: 1.25;
+        color: var(--parchment);
+        margin-bottom: 16px;
+        letter-spacing: 0.01em;
+      }
+
+      .study-text p {
+        font-size: clamp(16px, 1.7vw, 18px);
+        color: rgba(237, 229, 204, 0.72);
+        line-height: 1.8;
+      }
+
+      .study-frame {
         position: relative;
-        transform-style: preserve-3d;
-        transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
         overflow: hidden;
-        border-radius: 4px;
+        border-radius: 6px;
         border: 0.5px solid var(--border);
         background: var(--obsidian);
+        transform-style: preserve-3d;
+        transition: transform 0.5s var(--ease);
       }
 
-      .plate-media.is-tall {
-        margin: 0 auto;
-        max-width: 320px;
-      }
-
-      .plate h3 {
-        font-family: var(--display);
-        font-size: clamp(1.35rem, 2.2vw, 1.75rem);
-        font-weight: 400;
-        line-height: 1.28;
-        letter-spacing: 0.01em;
-        color: var(--parchment);
-      }
-
-      .plate p {
-        font-size: 17px;
-        line-height: 1.75;
-        color: var(--parchment-dim);
-      }
-
-      /* The lead plate sets its heading beside the line, not above it. */
-      .plate-text-split {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: clamp(24px, 4vw, 56px);
-        align-items: baseline;
-      }
-
-      .plate-text-split h3 {
-        font-size: clamp(1.7rem, 3vw, 2.3rem);
+      .study-frame img {
+        display: block;
+        width: 100%;
+        height: auto;
       }
 
       @media (max-width: 900px) {
-        .plate-row {
+        .study,
+        .study.reverse {
           grid-template-columns: 1fr;
-          border-top: none;
+          gap: 26px;
+          margin-bottom: 64px;
         }
-        .plate {
-          --span: 1;
-          padding-left: 0;
-          padding-right: 0;
-          border-top: 0.5px solid var(--border);
+        .study .study-media,
+        .study.reverse .study-media {
+          order: 1;
         }
-        .plate-row > .plate + .plate {
-          border-left: none;
+        .study .study-text,
+        .study.reverse .study-text {
+          order: 2;
         }
-        .plates > .plate-row:first-child > .plate:first-child {
-          border-top: none;
-        }
-        .plate-text-split {
-          grid-template-columns: 1fr;
-          gap: 10px;
-        }
-        .plate-media.is-tall {
-          max-width: 260px;
+        .study-media.is-tall .study-frame {
+          max-width: 280px;
         }
       }
 
@@ -1750,104 +1731,108 @@
             <div class="section-label">The work</div>
           </div>
 
-          <div class="plates">
-            <div class="plate-row">
-              <div class="plate span-6 reveal">
-                <div class="plate-eyebrow">Sessions</div>
-                <div class="plate-media">
-                  <img
-                    src="assets/plate-durability-3024.webp"
-                    srcset="
-                      assets/plate-durability-1200.webp 1200w,
-                      assets/plate-durability-3024.webp 3024w
-                    "
-                    sizes="(max-width: 900px) 100vw, 1600px"
-                    width="1600"
-                    height="900"
-                    alt="The server detaches from the window, so a quit, a crash and an update all leave the session running. A reboot does not, and the strip that greets you says so."
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </div>
-                <div class="plate-text-split">
-                  <h3>Quit it. The agent keeps going.</h3>
-                  <p>
-                    The server detaches from the window, so a quit, a crash and an update all leave
-                    the session running. A reboot does not, and the strip that greets you says so.
-                  </p>
-                </div>
+          <div class="study reveal">
+            <div class="study-media">
+              <div class="study-frame">
+                <img
+                  src="assets/plate-durability-3024.webp"
+                  srcset="
+                    assets/plate-durability-1200.webp 1200w,
+                    assets/plate-durability-3024.webp 3024w
+                  "
+                  sizes="(max-width: 900px) 100vw, 1600px"
+                  width="1600"
+                  height="900"
+                  alt="The server detaches from the window, so a quit, a crash and an update all leave the session running. A reboot does not, and the strip that greets you says so."
+                  loading="lazy"
+                  decoding="async"
+                />
               </div>
             </div>
-            <div class="plate-row">
-              <div class="plate span-4 reveal">
-                <div class="plate-eyebrow">Workflows</div>
-                <div class="plate-media">
-                  <img
-                    src="assets/plate-workflows-1800.webp"
-                    srcset="
-                      assets/plate-workflows-900.webp   900w,
-                      assets/plate-workflows-1800.webp 1800w
-                    "
-                    sizes="(max-width: 900px) 100vw, 1200px"
-                    width="1200"
-                    height="675"
-                    alt="Steps drag out of a docked library onto free canvas: webhooks, schedules, conditions, loops, approvals. Connectors install as versioned packs that run offline and borrow the login your machine already has."
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </div>
-                <h3>Draw the pipeline, and let it reach your tools</h3>
-                <p>
-                  Steps drag out of a docked library onto free canvas: webhooks, schedules,
-                  conditions, loops, approvals. Connectors install as versioned packs that run
-                  offline and borrow the login your machine already has.
-                </p>
-              </div>
-              <div class="plate span-2 reveal">
-                <div class="plate-eyebrow">Mobile</div>
-                <div class="plate-media is-tall">
-                  <img
-                    src="assets/plate-mobile-560.webp"
-                    srcset="assets/plate-mobile-560.webp 560w, assets/plate-mobile-1200.webp 1200w"
-                    sizes="(max-width: 900px) 100vw, 560px"
-                    width="560"
-                    height="827"
-                    alt="The phone joins the same server over your own network and takes the session from there, keyboard and all."
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </div>
-                <h3>Pair a phone by showing it a code</h3>
-                <p>
-                  The phone joins the same server over your own network and takes the session from
-                  there, keyboard and all.
-                </p>
+            <div class="study-text">
+              <div class="study-annotation">Sessions</div>
+              <h3>Quit it. The agent keeps going.</h3>
+              <p>
+                The server detaches from the window, so a quit, a crash and an update all leave the
+                session running. A reboot does not, and the strip that greets you says so.
+              </p>
+            </div>
+          </div>
+          <div class="study reverse reveal">
+            <div class="study-media">
+              <div class="study-frame">
+                <img
+                  src="assets/plate-workflows-1800.webp"
+                  srcset="
+                    assets/plate-workflows-900.webp   900w,
+                    assets/plate-workflows-1800.webp 1800w
+                  "
+                  sizes="(max-width: 900px) 100vw, 1200px"
+                  width="1200"
+                  height="675"
+                  alt="Steps drag out of a docked library onto free canvas: webhooks, schedules, conditions, loops, approvals. Connectors install as versioned packs that run offline and borrow the login your machine already has."
+                  loading="lazy"
+                  decoding="async"
+                />
               </div>
             </div>
-            <div class="plate-row">
-              <div class="plate span-6 reveal">
-                <div class="plate-eyebrow">Tasks</div>
-                <div class="plate-media">
-                  <img
-                    src="assets/plate-tasks-3024.webp"
-                    srcset="assets/plate-tasks-1200.webp 1200w, assets/plate-tasks-3024.webp 3024w"
-                    sizes="(max-width: 900px) 100vw, 1600px"
-                    width="1600"
-                    height="900"
-                    alt="A board for every project, with markdown, attachments and a branch on each card. Start one and it opens as a session in its own worktree, so parallel work never shares a tree."
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </div>
-                <div class="plate-text-split">
-                  <h3>A board per project, and a branch per card</h3>
-                  <p>
-                    A board for every project, with markdown, attachments and a branch on each card.
-                    Start one and it opens as a session in its own worktree, so parallel work never
-                    shares a tree.
-                  </p>
-                </div>
+            <div class="study-text">
+              <div class="study-annotation">Workflows</div>
+              <h3>Draw the pipeline, and let it reach your tools</h3>
+              <p>
+                Steps drag out of a docked library onto free canvas: webhooks, schedules,
+                conditions, loops, approvals. Connectors install as versioned packs that run offline
+                and borrow the login your machine already has.
+              </p>
+            </div>
+          </div>
+          <div class="study reveal">
+            <div class="study-media is-tall">
+              <div class="study-frame">
+                <img
+                  src="assets/plate-mobile-560.webp"
+                  srcset="assets/plate-mobile-560.webp 560w, assets/plate-mobile-1200.webp 1200w"
+                  sizes="(max-width: 900px) 100vw, 560px"
+                  width="560"
+                  height="827"
+                  alt="The phone joins the same server over your own network and takes the session from there, keyboard and all."
+                  loading="lazy"
+                  decoding="async"
+                />
               </div>
+            </div>
+            <div class="study-text">
+              <div class="study-annotation">Mobile</div>
+              <h3>Pair a phone by showing it a code</h3>
+              <p>
+                The phone joins the same server over your own network and takes the session from
+                there, keyboard and all.
+              </p>
+            </div>
+          </div>
+          <div class="study reverse reveal">
+            <div class="study-media">
+              <div class="study-frame">
+                <img
+                  src="assets/plate-tasks-3024.webp"
+                  srcset="assets/plate-tasks-1200.webp 1200w, assets/plate-tasks-3024.webp 3024w"
+                  sizes="(max-width: 900px) 100vw, 1600px"
+                  width="1600"
+                  height="900"
+                  alt="A board for every project, with markdown, attachments and a branch on each card. Start one and it opens as a session in its own worktree, so parallel work never shares a tree."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+            </div>
+            <div class="study-text">
+              <div class="study-annotation">Tasks</div>
+              <h3>A board per project, and a branch per card</h3>
+              <p>
+                A board for every project, with markdown, attachments and a branch on each card.
+                Start one and it opens as a session in its own worktree, so parallel work never
+                shares a tree.
+              </p>
             </div>
           </div>
         </div>
@@ -2549,7 +2534,7 @@
         tiltScript.src =
           'https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.8.1/vanilla-tilt.min.js'
         tiltScript.onload = function () {
-          VanillaTilt.init(document.querySelectorAll('.plate-media, .hero-screenshot'), {
+          VanillaTilt.init(document.querySelectorAll('.study-frame, .hero-screenshot'), {
             max: 6,
             speed: 500,
             glare: false,
