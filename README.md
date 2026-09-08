@@ -28,7 +28,7 @@
 ---
 
 <p align="center">
-  <img src="docs/screenshots/hero.png" alt="Vorn screenshot" width="800" />
+  <img src="docs/screenshots/hero.gif" alt="Four agents running side by side in Vorn, each streaming its own output" width="800" />
 </p>
 
 ## Why Vorn?
