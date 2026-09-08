@@ -129,11 +129,29 @@ describe('verifyPackDir', () => {
     ).toThrow(/missing an id or a name/)
   })
 
+  it('carries what an extension serves under web/, and nothing beside it', () => {
+    const withPage = verifyPackDir(
+      dirWith({
+        ...goodFiles(),
+        'web/report/index.html': '<!doctype html>',
+        'web/report/report.css': 'body { margin: 0 }'
+      })
+    )
+    expect(withPage.id).toBe('acme')
+
+    // One named directory, so a `.node` smuggled in beside the entry is still refused.
+    expect(() => verifyPackDir(dirWith({ ...goodFiles(), 'webhook.js': '' }))).toThrow(
+      /carries webhook.js/
+    )
+  })
+
   it('refuses a pack with no entry or with more than one', () => {
     expect(() =>
       verifyPackDir(dirWith({ 'manifest.json': JSON.stringify(manifestFor('acme', '1.0.0')) }))
     ).toThrow(/no entry to run/)
-    expect(() => verifyPackDir(dirWith({ ...goodFiles(), 'other.js': '' }))).toThrow(/nothing else/)
+    expect(() => verifyPackDir(dirWith({ ...goodFiles(), 'other.js': '' }))).toThrow(
+      /carries other.js/
+    )
   })
 
   it('refuses a package that would need an install step', () => {

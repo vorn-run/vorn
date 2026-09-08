@@ -573,3 +573,93 @@ describe('what a probed action returns', () => {
     ])
   })
 })
+
+describe('what a probed extension contributes', () => {
+  const extensionManifest = (overrides: Record<string, unknown> = {}) => ({
+    id: 'review',
+    name: 'Review',
+    version: '0.1.0',
+    kind: 'extension',
+    permissions: ['terminal.read'],
+    activates: { workspaceContains: ['package.json'] },
+    contributes: {
+      footers: [{ id: 'checks', title: 'Checks', every: 30 }],
+      panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }],
+      linkHandlers: [{ id: 'pr', title: 'Pull request', pattern: 'github\\.com' }]
+    },
+    ...overrides
+  })
+
+  const probeExtension = async (overrides: Record<string, unknown> = {}) => {
+    const { probeSdkConnector } = await importProbe()
+    callTool.mockResolvedValue({ structuredContent: extensionManifest(overrides) })
+    return probeSdkConnector({ command: 'npx', args: [] })
+  }
+
+  it('reads an extension that has no triggers and no actions', async () => {
+    const result = await probeExtension()
+    if (!result.ok) throw new Error(result.error)
+
+    expect(result.manifest.kind).toBe('extension')
+    expect(result.manifest.triggers).toEqual([])
+    expect(result.manifest.actions).toEqual([])
+    expect(result.manifest.permissions).toEqual(['terminal.read'])
+    expect(result.manifest.activates).toEqual({ workspaceContains: ['package.json'] })
+    expect(result.manifest.contributes?.footers?.[0]).toEqual({
+      id: 'checks',
+      title: 'Checks',
+      every: 30
+    })
+  })
+
+  it('refuses an extension that contributes nothing, the way a connector with no triggers is refused', async () => {
+    const result = await probeExtension({ contributes: {} })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toMatch(/contributes/)
+  })
+
+  it('drops a permission this build cannot enforce rather than granting it', async () => {
+    const result = await probeExtension({
+      permissions: ['terminal.read', 'filesystem.write', 'terminal.read']
+    })
+    if (!result.ok) throw new Error(result.error)
+    expect(result.manifest.permissions).toEqual(['terminal.read'])
+  })
+
+  it('drops a contribution the app could not draw, and keeps the rest', async () => {
+    const result = await probeExtension({
+      contributes: {
+        panes: [
+          { id: 'escape', title: 'Escape', web: '../outside/index.html' },
+          { id: 'absolute', title: 'Absolute', web: '/etc/passwd.html' },
+          { id: 'empty', title: 'Empty', command: ['lazygit', ''] },
+          { id: 'report', title: 'Report', web: 'web/report/index.html' }
+        ],
+        footers: [
+          { id: 'spin', title: 'Spin', every: 1 },
+          { id: 'checks', title: 'Checks', every: 30 }
+        ],
+        linkHandlers: [
+          { id: 'broken', title: 'Broken', pattern: '([' },
+          { id: 'pr', title: 'Pull request', pattern: 'github\\.com' }
+        ]
+      }
+    })
+    if (!result.ok) throw new Error(result.error)
+
+    expect(result.manifest.contributes?.panes?.map((pane) => pane.id)).toEqual(['report'])
+    expect(result.manifest.contributes?.footers?.map((footer) => footer.id)).toEqual(['checks'])
+    expect(result.manifest.contributes?.linkHandlers?.map((entry) => entry.id)).toEqual(['pr'])
+  })
+
+  it('reads a manifest with no kind as the connector it was written as', async () => {
+    const { probeSdkConnector } = await importProbe()
+    callTool.mockResolvedValue({ structuredContent: manifest() })
+    const result = await probeSdkConnector({ command: 'npx', args: [] })
+    if (!result.ok) throw new Error(result.error)
+
+    expect(result.manifest.kind).toBe('connector')
+    expect(result.manifest.contributes).toBeUndefined()
+  })
+})
