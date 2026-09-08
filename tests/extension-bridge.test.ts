@@ -151,6 +151,15 @@ const call = (method: string, body: unknown = { sessionId: 's1' }, token = 'righ
     remoteAddress: '127.0.0.1'
   })
 
+// The server cannot import the SDK at runtime, so the two tables are compared here.
+describe('what each method costs', () => {
+  it('charges what the SDK gates on, method for method', async () => {
+    const { METHOD_PERMISSIONS } = await import('../packages/server/src/extensions/bridge')
+    const { HOST_PERMISSIONS } = await import('../packages/connector-sdk/src/define')
+    expect(METHOD_PERMISSIONS).toEqual(HOST_PERMISSIONS)
+  })
+})
+
 describe('who the bridge answers', () => {
   it('refuses a caller it has no token for', async () => {
     const answer = await call('status', { sessionId: 's1' }, 'wrong-token')

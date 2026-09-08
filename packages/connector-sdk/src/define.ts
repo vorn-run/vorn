@@ -69,6 +69,64 @@ const MIN_FOOTER_SECONDS = 5
 /** A pattern is matched against clicked text on a person's keystroke, so it stays small enough to bound. */
 const MAX_PATTERN_LENGTH = 256
 
+/** How a group opens, including the forms that are not a capture. */
+const GROUP_OPEN = /^\((\?(:|=|!|<=|<!|<[A-Za-z_$][\w$]*>))?/
+
+/**
+ * Whether a quantifier is applied to a group that already holds one.
+ *
+ * `(a+)+` and its shapes are what make a match cost exponential time on text
+ * that nearly fits, and a link pattern is matched on a click. Refused where the
+ * author can see why rather than bounded where a person would only feel it.
+ *
+ * Deliberately shape-based: it asks whether the pattern is written that way, not
+ * whether that particular pattern is slow, so it refuses a little more than it
+ * must and never less.
+ */
+export function hasNestedQuantifier(pattern: string): boolean {
+  // An index past the end is not a quantifier; `includes('')` would say it is.
+  const quantifierAt = (at: number): boolean => {
+    const ch = pattern[at]
+    return ch !== undefined && '*+?{'.includes(ch)
+  }
+  // One flag per open group: whether anything inside it is quantified.
+  const quantified: boolean[] = []
+  let inClass = false
+
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]
+    if (ch === '\\') {
+      i++
+      continue
+    }
+    if (inClass) {
+      if (ch === ']') inClass = false
+      continue
+    }
+    if (ch === '[') {
+      inClass = true
+      continue
+    }
+    if (ch === '(') {
+      quantified.push(false)
+      i += (GROUP_OPEN.exec(pattern.slice(i))?.[0].length ?? 1) - 1
+      continue
+    }
+    if (ch === ')') {
+      const heldOne = quantified.pop() ?? false
+      const repeated = quantifierAt(i + 1)
+      if (heldOne && repeated) return true
+      // Whatever this group holds or does, its parent holds a quantifier too.
+      if ((heldOne || repeated) && quantified.length > 0) {
+        quantified[quantified.length - 1] = true
+      }
+      continue
+    }
+    if (quantifierAt(i) && quantified.length > 0) quantified[quantified.length - 1] = true
+  }
+  return false
+}
+
 /** A declared request goes somewhere the connector named: a real URL, … */
 const ABSOLUTE_URL_PATTERN = /^https?:\/\//i
 /** … or one built on a value from its own settings. */
@@ -443,6 +501,12 @@ export function defineExtension(definition: ExtensionDefinition): Connector {
       throw new Error(
         `Extension ${id} link handler ${handler.id} has a pattern longer than ` +
           `${MAX_PATTERN_LENGTH} characters; it is matched on every click`
+      )
+    }
+    if (hasNestedQuantifier(handler.pattern)) {
+      throw new Error(
+        `Extension ${id} link handler ${handler.id} has a pattern that repeats a group which ` +
+          `already repeats; matching it can take exponential time on a click`
       )
     }
     let matcher: RegExp

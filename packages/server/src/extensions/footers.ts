@@ -7,6 +7,7 @@ import type {
 import { IPC } from '@vornrun/shared/types'
 import { clientRegistry } from '../broadcast'
 import { activationFor, subjectOf } from './activation'
+import { footerToolName } from '../connectors/sdk-tools'
 import { getOrStartHost, installedExtensions } from './hosts'
 import log from '../logger'
 
@@ -95,7 +96,7 @@ async function runFooter(
   try {
     const client = await getOrStartHost(pack.id, session.projectPath)
     const answered = await client.callTool({
-      name: `vorn_footer_${footerId}`,
+      name: footerToolName(footerId),
       arguments: {
         sessionId: session.id,
         worktreePath: session.worktreePath ?? session.projectPath,

@@ -99,6 +99,28 @@ describe('defineExtension', () => {
     ).toThrow(/empty argument/)
   })
 
+  // `(a+)+` on text that nearly fits is exponential, and this runs on a click.
+  it('refuses a link handler that repeats a group which already repeats', () => {
+    const nested = (pattern: string) => () =>
+      extension({
+        linkHandlers: [{ id: 'pr', title: 'Pull request', pattern, example: 'aaa', run: () => {} }]
+      })
+    expect(nested('(a+)+$')).toThrow(/exponential time/)
+    expect(nested('(?:x*)*')).toThrow(/exponential time/)
+    expect(nested('(a|a?)+')).toThrow(/exponential time/)
+    expect(nested('((a+))+')).toThrow(/exponential time/)
+  })
+
+  it('takes a pattern that repeats a group holding no quantifier of its own', () => {
+    const accepted = (pattern: string, example: string) =>
+      extension({
+        linkHandlers: [{ id: 'pr', title: 'Pull request', pattern, example, run: () => {} }]
+      })
+    expect(() => accepted('(?:ab)+', 'abab')).not.toThrow()
+    expect(() => accepted('github\\.com/(.+)/pull/(\\d+)', 'github.com/a/pull/1')).not.toThrow()
+    expect(() => accepted('[a+]+', 'aaa')).not.toThrow()
+  })
+
   it('refuses a link handler whose pattern is not a regular expression', () => {
     expect(() =>
       extension({

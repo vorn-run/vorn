@@ -1,5 +1,6 @@
 import type { ExtensionLinkMatch, TerminalSession } from '@vornrun/shared/types'
 import { activationFor, subjectOf } from './activation'
+import { handlerToolName } from '../connectors/sdk-tools'
 import { getOrStartHost, installedExtensions } from './hosts'
 import { openPane, type OpenPane } from './panes'
 import log from '../logger'
@@ -7,9 +8,10 @@ import log from '../logger'
 /**
  * The extensions that offer themselves for a piece of clicked text.
  *
- * Patterns are compiled per call and matched against a bounded string: the
- * manifest reader caps a pattern's length, and this caps the text, so a
- * pathological pattern costs a keystroke rather than the window.
+ * What a pattern may be is decided before it gets here: the manifest reader caps
+ * its length and refuses one that repeats a group which already repeats, which
+ * is the shape that costs exponential time. This caps the text as well, so what
+ * is matched is bounded on both sides.
  */
 
 /** Longer than any link worth clicking, short enough that a bad pattern cannot chew on it. */
@@ -53,7 +55,7 @@ export async function runHandler(
 ): Promise<{ openedPane?: OpenPane }> {
   const client = await getOrStartHost(extensionId, session.projectPath)
   const answered = await client.callTool({
-    name: `vorn_handler_${handlerId}`,
+    name: handlerToolName(handlerId),
     arguments: {
       sessionId: session.id,
       worktreePath: session.worktreePath ?? session.projectPath,
