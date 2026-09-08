@@ -1,6 +1,6 @@
 import { builtinModules } from 'node:module'
-import { readFileSync } from 'node:fs'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
+import { cp, mkdtemp, readdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { CheckCode, CheckFinding } from './check'
@@ -17,6 +17,9 @@ import type { Connector } from './types'
 
 /** Largest pack Vorn will install, matched by the server's own verification. */
 export const MAX_PACK_BYTES = 8 * 1024 * 1024
+
+/** Largest the same pack may unpack to, matched by the server's own verification. */
+export const MAX_UNPACKED_BYTES = 32 * 1024 * 1024
 
 /** Scripts npm would run at install time, which a pack must never carry. */
 const LIFECYCLE_SCRIPTS = [
@@ -245,6 +248,23 @@ export function readNearestPackageJson(fromDir: string): Record<string, unknown>
 }
 
 /**
+ * The package's own root, which is where `web/` sits.
+ *
+ * `packageDirFor` answers where to *start looking* for a package.json, and for
+ * a built entry that is `dist/`. A page is authored beside the package rather
+ * than beside the bundle, so finding it means finishing that walk.
+ */
+export function packageRootFor(fromDir: string): string {
+  let current = resolve(fromDir)
+  for (;;) {
+    if (existsSync(join(current, 'package.json'))) return current
+    const parent = dirname(current)
+    if (parent === current) return resolve(fromDir)
+    current = parent
+  }
+}
+
+/**
  * The stdio entry a pack is built from.
  *
  * `check` bundles exactly this too: a gate that asked a different question than
@@ -261,8 +281,41 @@ export function packEntryContents(entry: string, sdkModule = '@vornrun/connector
   ].join('\n')
 }
 
-/** A directory holding nothing but the two files a pack carries, for tarring or for launching. */
-export async function stagePack(connector: Connector, code: string): Promise<string> {
+/** The directory a pane's page is served from, carried verbatim so the manifest's path still resolves. */
+export const WEB_DIR = 'web'
+
+/** What a staged pack weighs on disk, which is what the host's unpacked ceiling measures. */
+export async function directoryBytes(dir: string): Promise<number> {
+  let total = 0
+  for (const entry of await readdir(dir, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile()) continue
+    total += (await stat(join(entry.parentPath, entry.name))).size
+  }
+  return total
+}
+
+/** The directory each declared page sits in, relative to the package, without repeats. */
+function webDirectories(connector: Connector): string[] {
+  const dirs = (connector.contributes?.panes ?? [])
+    .map((pane) => pane.web)
+    .filter((web): web is string => web !== undefined)
+    .map((web) => dirname(web))
+  return [...new Set(dirs)]
+}
+
+/**
+ * A directory holding nothing but what a pack carries, for tarring or launching.
+ *
+ * `packageRoot` is the package's own root, already resolved by the caller.
+ * Pages are copied per declared pane rather than as one `web/` sweep: a page
+ * needs the stylesheet and script beside it, but nothing an author merely left
+ * in the tree is something the pack should publish.
+ */
+export async function stagePack(
+  connector: Connector,
+  code: string,
+  packageRoot?: string
+): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'vorn-pack-'))
   await writeFile(join(dir, 'index.js'), code, 'utf8')
   await writeFile(
@@ -270,6 +323,12 @@ export async function stagePack(connector: Connector, code: string): Promise<str
     `${JSON.stringify(connectorManifest(connector), null, 2)}\n`,
     'utf8'
   )
+  if (packageRoot !== undefined) {
+    for (const relative of webDirectories(connector)) {
+      const from = join(packageRoot, relative)
+      if (existsSync(from)) await cp(from, join(dir, relative), { recursive: true })
+    }
+  }
   return dir
 }
 

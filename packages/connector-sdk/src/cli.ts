@@ -32,7 +32,8 @@ Options:
   --receipt <file>              Where check writes what it verified, as JSON
   --out <dir>                   Directory new and pack write to
   --name <name>                 Display name for a new connector
-  --repo-conventions            Scaffold a package shaped for the connectors repository`
+  --repo-conventions            Scaffold a package shaped for the connectors repository
+  --extension                   Scaffold an extension — footers, panes and link handlers`
 
 export interface CliDeps {
   load(modulePath: string): Promise<unknown>
@@ -51,7 +52,7 @@ export interface CliDeps {
 }
 
 /** Flags that stand alone; everything else must be followed by a value. */
-const BOOLEAN_FLAGS = new Set(['live', 'mock', 'repo-conventions'])
+const BOOLEAN_FLAGS = new Set(['live', 'mock', 'repo-conventions', 'extension'])
 
 /**
  * Split arguments into flags and positionals in one pass, so a flag's value is
@@ -91,7 +92,7 @@ function pickConnector(loaded: unknown, modulePath: string): Connector {
   const connector = candidate as Connector | undefined
   if (!connector || typeof connector !== 'object' || !Array.isArray(connector.triggers)) {
     throw new Error(
-      `${modulePath} does not export a connector built with defineConnector() (default or named "connector")`
+      `${modulePath} does not export a connector built with defineConnector() or defineExtension() (default or named "connector")`
     )
   }
   return connector
@@ -118,7 +119,8 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     const files = scaffoldFiles({
       id: modulePath,
       ...(flags.name !== undefined && { name: flags.name }),
-      ...(flags['repo-conventions'] === 'true' && { repoConventions: true })
+      ...(flags['repo-conventions'] === 'true' && { repoConventions: true }),
+      ...(flags.extension === 'true' && { kind: 'extension' as const })
     })
     const root = join(flags.out ?? deps.cwd ?? '.', modulePath)
     if ((deps.exists ?? existsSync)(root)) {

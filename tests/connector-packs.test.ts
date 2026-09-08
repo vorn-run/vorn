@@ -81,6 +81,25 @@ function goodFiles(version = '1.2.0', id = 'acme'): Record<string, string> {
   }
 }
 
+/** An extension pack, whose manifest is what says which pages it may carry. */
+function extensionFiles(panes: Array<Record<string, unknown>>): Record<string, string> {
+  return {
+    'manifest.json': JSON.stringify({
+      id: 'review',
+      name: 'Review',
+      version: '0.1.0',
+      kind: 'extension',
+      permissions: ['terminal.read'],
+      contributes: { panes },
+      triggers: [],
+      actions: []
+    }),
+    'index.js': 'process.stdin.resume()\n'
+  }
+}
+
+const reportPane = [{ id: 'report', title: 'Report', web: 'web/report/index.html' }]
+
 describe('archive entry safety', () => {
   it('accepts ordinary files and directories', () => {
     expect(isSafeArchiveEntry('index.js', 'File')).toBe(true)
@@ -129,11 +148,52 @@ describe('verifyPackDir', () => {
     ).toThrow(/missing an id or a name/)
   })
 
+  it("carries the pages an extension's own panes name", () => {
+    const withPage = verifyPackDir(
+      dirWith({
+        ...extensionFiles(reportPane),
+        'web/report/index.html': '<!doctype html>',
+        'web/report/report.css': 'body { margin: 0 }',
+        'web/report/report.js': 'export {}'
+      })
+    )
+    expect(withPage.id).toBe('review')
+    expect(withPage.kind).toBe('extension')
+  })
+
+  it('refuses pages no pane asked for, and code dressed as one', () => {
+    // A connector has no panes, so `web/` is a directory it has no reason to carry.
+    expect(() =>
+      verifyPackDir(dirWith({ ...goodFiles(), 'web/report/index.html': '<!doctype html>' }))
+    ).toThrow(/carries web\/report\/index.html/)
+
+    // An extension, but a directory none of its panes names.
+    expect(() =>
+      verifyPackDir(
+        dirWith({ ...extensionFiles(reportPane), 'web/other/index.html': '<!doctype html>' })
+      )
+    ).toThrow(/carries web\/other\/index.html/)
+
+    // The right directory, but code the entry could reach rather than a page.
+    for (const smuggled of ['web/report/native.node', 'web/report/hook.cjs', 'web/report/x.wasm']) {
+      expect(() =>
+        verifyPackDir(dirWith({ ...extensionFiles(reportPane), [smuggled]: '' }))
+      ).toThrow(/carries /)
+    }
+
+    // One named directory, so a `.node` smuggled in beside the entry is still refused.
+    expect(() => verifyPackDir(dirWith({ ...goodFiles(), 'webhook.js': '' }))).toThrow(
+      /carries webhook.js/
+    )
+  })
+
   it('refuses a pack with no entry or with more than one', () => {
     expect(() =>
       verifyPackDir(dirWith({ 'manifest.json': JSON.stringify(manifestFor('acme', '1.0.0')) }))
     ).toThrow(/no entry to run/)
-    expect(() => verifyPackDir(dirWith({ ...goodFiles(), 'other.js': '' }))).toThrow(/nothing else/)
+    expect(() => verifyPackDir(dirWith({ ...goodFiles(), 'other.js': '' }))).toThrow(
+      /carries other.js/
+    )
   })
 
   it('refuses a package that would need an install step', () => {

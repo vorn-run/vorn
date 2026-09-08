@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { checkConnector, type CheckCode, type CheckFinding } from './check'
@@ -7,11 +8,15 @@ import {
   esbuildBundle,
   lifecycleScriptFindings,
   packageDirFor,
+  packageRootFor,
   packEntryContents,
   packLaunchFindings,
   readNearestPackageJson,
   stagePack,
+  directoryBytes,
   MAX_PACK_BYTES,
+  MAX_UNPACKED_BYTES,
+  WEB_DIR,
   type BundleOutput,
   type BundleRequest
 } from './packaging'
@@ -22,7 +27,8 @@ export {
   bundledRequireFindings,
   lifecycleScriptFindings,
   readNearestPackageJson,
-  MAX_PACK_BYTES
+  MAX_PACK_BYTES,
+  MAX_UNPACKED_BYTES
 }
 export type { BundleOutput, BundleRequest }
 
@@ -37,6 +43,8 @@ export interface PackOptions {
   sdkModule?: string
   /** Size ceiling for the written archive; defaults to `MAX_PACK_BYTES`. */
   maxBytes?: number
+  /** Size ceiling for what the archive unpacks to; defaults to `MAX_UNPACKED_BYTES`. */
+  maxUnpackedBytes?: number
   /** Replaced in tests so packing does not shell out to a bundler. */
   bundle?(request: BundleRequest): Promise<BundleOutput>
   /** Replaced in tests whose subject is the archive rather than the launch; defaults to starting it for real. */
@@ -67,8 +75,10 @@ export async function packConnector(
 ): Promise<PackResult> {
   const resolveDir = resolve(options.resolveDir ?? process.cwd())
   const entryDir = packageDirFor(resolveDir, options.entry)
+  // Resolved once, so the gate and the archive never judge different packages.
+  const packageRoot = packageRootFor(entryDir)
 
-  const findings = await checkConnector(connector)
+  const findings = await checkConnector(connector, { packageDir: packageRoot })
   findings.push(...lifecycleScriptFindings(readNearestPackageJson(entryDir)))
   if (findings.some((item) => item.level === 'error')) return { findings }
 
@@ -81,13 +91,35 @@ export async function packConnector(
   const outDir = resolve(options.outDir ?? process.cwd())
   await mkdir(outDir, { recursive: true })
   const file = join(outDir, packFileName(connector))
-  const staging = await stagePack(connector, built.code)
+  const staging = await stagePack(connector, built.code, packageRoot)
   try {
     // Asked of the staged files themselves: an artifact that cannot start is not one to ship.
     findings.push(...(await (options.launch ?? packLaunchFindings)(staging)))
     if (findings.some((item) => item.level === 'error')) return { findings }
+
+    // Pages compress well, so a small archive can still unpack past what Vorn writes.
+    const unpacked = await directoryBytes(staging)
+    const maxUnpacked = options.maxUnpackedBytes ?? MAX_UNPACKED_BYTES
+    if (unpacked > maxUnpacked) {
+      return {
+        findings: [
+          ...findings,
+          finding(
+            'pack-too-large',
+            'bundle',
+            `The pack unpacks to ${Math.round(unpacked / 1024)} KB; Vorn unpacks at most ${Math.round(maxUnpacked / 1024)} KB`
+          )
+        ]
+      }
+    }
+
     const { create } = await import('tar')
-    await create({ gzip: true, file, cwd: staging }, ['manifest.json', 'index.js'])
+    // What was staged, not what was declared; tarring a missing name fails with a path.
+    await create({ gzip: true, file, cwd: staging }, [
+      'manifest.json',
+      'index.js',
+      ...(existsSync(join(staging, WEB_DIR)) ? [WEB_DIR] : [])
+    ])
   } finally {
     await rm(staging, { recursive: true, force: true })
   }

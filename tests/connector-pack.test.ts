@@ -6,6 +6,7 @@ import { extract, list } from 'tar'
 import {
   bundleDependencyFindings,
   defineConnector,
+  defineExtension,
   lifecycleScriptFindings,
   packConnector,
   packFileName,
@@ -248,6 +249,147 @@ describe('packConnector', () => {
     await extract({ file: result.file as string, cwd: unpacked })
     expect(readFileSync(join(unpacked, 'index.js'), 'utf8')).toContain('StdioServerTransport')
   }, 60_000)
+})
+
+describe('packing an extension', () => {
+  const extension = defineExtension({
+    id: 'review',
+    name: 'Review',
+    version: '0.1.0',
+    description: 'Reads the session',
+    permissions: [],
+    panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }]
+  })
+
+  /** A package carrying the page, and the stylesheet beside it that the page asks for. */
+  function packageWithPage(): string {
+    const dir = tempDir()
+    mkdirSync(join(dir, 'web', 'report'), { recursive: true })
+    writeFileSync(join(dir, 'web', 'report', 'index.html'), '<!doctype html><link href=x.css>')
+    writeFileSync(join(dir, 'web', 'report', 'x.css'), 'body { margin: 0 }')
+    return dir
+  }
+
+  it('carries the page a pane names, and everything beside it', async () => {
+    const out = tempDir()
+    const result = await packConnector(extension, {
+      entry: './extension.js',
+      resolveDir: packageWithPage(),
+      outDir: out,
+      bundle: cleanBundle,
+      launch: starts
+    })
+
+    expect(result.findings.some((item) => item.level === 'error')).toBe(false)
+    const entries: string[] = []
+    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
+    expect(entries.sort()).toEqual([
+      'index.js',
+      'manifest.json',
+      'web/',
+      'web/report/',
+      'web/report/index.html',
+      'web/report/x.css'
+    ])
+
+    const unpacked = tempDir()
+    await extract({ file: result.file as string, cwd: unpacked })
+    const manifest = JSON.parse(readFileSync(join(unpacked, 'manifest.json'), 'utf8'))
+    // The manifest's path resolves inside the pack, because the directory was carried as it stood.
+    expect(manifest.kind).toBe('extension')
+    expect(readFileSync(join(unpacked, manifest.contributes.panes[0].web), 'utf8')).toContain(
+      'doctype'
+    )
+  })
+
+  it('finds the page beside the package when the entry is the built bundle', async () => {
+    // What the CLI really passes: `./dist/index.js`, whose directory holds no `web/`.
+    const dir = packageWithPage()
+    mkdirSync(join(dir, 'dist'), { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'review' }))
+
+    const result = await packConnector(extension, {
+      entry: './dist/index.js',
+      resolveDir: dir,
+      outDir: tempDir(),
+      bundle: cleanBundle,
+      launch: starts
+    })
+
+    expect(result.findings.some((item) => item.level === 'error')).toBe(false)
+    const entries: string[] = []
+    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
+    expect(entries).toContain('web/report/index.html')
+  })
+
+  it('packs nothing when a pane names a page the package does not carry', async () => {
+    const result = await packConnector(extension, {
+      entry: './extension.js',
+      resolveDir: tempDir(),
+      outDir: tempDir(),
+      bundle: cleanBundle,
+      launch: starts
+    })
+
+    expect(result.file).toBeUndefined()
+    expect(result.findings.map((item) => item.code)).toContain('web-entry-missing')
+  })
+
+  it('carries only what a pane names, not everything left under web/', async () => {
+    const dir = packageWithPage()
+    // An unrelated build, a scratch page, a stray env file: in the tree, not in the pack.
+    mkdirSync(join(dir, 'web', 'scratch'), { recursive: true })
+    writeFileSync(join(dir, 'web', 'scratch', 'index.html'), '<!doctype html>')
+    writeFileSync(join(dir, 'web', 'notes.txt'), 'todo')
+
+    const result = await packConnector(extension, {
+      entry: './extension.js',
+      resolveDir: dir,
+      outDir: tempDir(),
+      bundle: cleanBundle,
+      launch: starts
+    })
+
+    const entries: string[] = []
+    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
+    expect(entries).not.toContain('web/scratch/index.html')
+    expect(entries).not.toContain('web/notes.txt')
+    expect(entries).toContain('web/report/index.html')
+  })
+
+  it('refuses a pack that unpacks past what Vorn will write, however well it compresses', async () => {
+    const dir = packageWithPage()
+    // Pages compress well, so the archive can sit under its own ceiling while
+    // the tree it unpacks to does not.
+    writeFileSync(join(dir, 'web', 'report', 'big.txt'), 'a'.repeat(4 * 1024 * 1024))
+
+    const result = await packConnector(extension, {
+      entry: './extension.js',
+      resolveDir: dir,
+      outDir: tempDir(),
+      bundle: cleanBundle,
+      launch: starts,
+      maxUnpackedBytes: 1024 * 1024
+    })
+
+    expect(result.file).toBeUndefined()
+    expect(result.findings.map((item) => item.code)).toContain('pack-too-large')
+    expect(result.findings.at(-1)?.message).toContain('unpacks to')
+  })
+
+  it('carries no web directory for a connector, which has no pages', async () => {
+    const result = await packConnector(connector, {
+      entry: './connector.js',
+      resolveDir: tempDir(),
+      outDir: tempDir(),
+      bundle: cleanBundle,
+      launch: starts
+    })
+
+    const entries: string[] = []
+    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
+    expect(entries.sort()).toEqual(['index.js', 'manifest.json'])
+  })
 })
 
 describe('vorn-connector pack command', () => {

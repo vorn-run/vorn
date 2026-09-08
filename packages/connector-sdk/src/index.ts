@@ -1,4 +1,13 @@
-export { defineConnector, resolveConfig, envNameFor } from './define'
+export {
+  defineConnector,
+  defineExtension,
+  resolveConfig,
+  envNameFor,
+  EXTENSION_PERMISSIONS,
+  HOST_PERMISSIONS
+} from './define'
+export { createExtensionHost, PermissionDeniedError, HOST_URL_ENV, HOST_TOKEN_ENV } from './host'
+export type { HostBridgeOptions } from './host'
 export { checkConnector, formatFindings, runConformance, CHECK_OWNERS } from './check'
 export type {
   CheckCode,
@@ -26,12 +35,14 @@ export type { RetryPolicy, ResilientFetchOptions } from './resilience'
 export {
   connectionSetup,
   connectorManifest,
+  footerToolName,
+  handlerToolName,
   pollToolName,
   MANIFEST_TOOL,
   OPTIONS_TOOL,
   PREFLIGHT_TOOL
 } from './setup'
-export type { ConnectionSetup, ConnectorManifest } from './setup'
+export type { ConnectionSetup, ConnectorManifest, ManifestContributions } from './setup'
 export { packConnector, packFileName } from './pack'
 export type { PackOptions, PackResult } from './pack'
 export {
@@ -50,10 +61,19 @@ export type { ScaffoldOptions, ScaffoldFile } from './scaffold'
 export {
   createConnectorHarness,
   escapedMockHttp,
+  mockExtensionHost,
   withMockHttp,
   MockRouteMissError
 } from './harness'
-export type { ConnectorHarness, HarnessOptions, MockCall, MockRoute, MockRun } from './harness'
+export type {
+  ConnectorHarness,
+  HarnessOptions,
+  MockCall,
+  MockHostAnswers,
+  MockHostRun,
+  MockRoute,
+  MockRun
+} from './harness'
 export type {
   ActionContext,
   ActionDefinition,
@@ -82,5 +102,23 @@ export type {
   PreflightResult,
   TriggerDefinition,
   StatusSuggestion,
-  DefaultWorkflow
+  DefaultWorkflow,
+  ActivationPredicate,
+  ConnectorKind,
+  ExtensionAgent,
+  ExtensionContext,
+  ExtensionContributions,
+  ExtensionDefinition,
+  ExtensionHost,
+  ExtensionHostMethod,
+  ExtensionPermission,
+  ExtensionPlatform,
+  ExtensionUsage,
+  ExtensionUsageWindow,
+  FooterContribution,
+  FooterItem,
+  LinkContext,
+  LinkHandled,
+  LinkHandlerContribution,
+  PaneContribution
 } from './types'

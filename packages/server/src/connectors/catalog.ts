@@ -31,10 +31,12 @@ import type {
   ConnectorCatalogItem,
   ConnectorCatalogSummary,
   ConnectorCatalogVerification,
+  ConnectorKind,
   McpServerCatalogEntry,
   WorkflowTemplate
 } from '@vornrun/shared/types'
 import { IPC } from '@vornrun/shared/types'
+import { toActivation, toContributes, toPermissions } from './sdk-probe'
 import {
   PORTABLE_FORMAT_VERSION,
   type PortableRequirement,
@@ -275,11 +277,30 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
   }
 
   // A conditional spread cannot remove a key the raw entry already carries.
-  const { packUrl, sha256, authRung, verified, ...rest } = entry
+  const {
+    packUrl,
+    sha256,
+    authRung,
+    verified,
+    kind,
+    contributes,
+    permissions,
+    activates,
+    ...rest
+  } = entry
   const rung = AUTH_RUNGS.includes(authRung as ConnectorAuthRung)
     ? (authRung as ConnectorAuthRung)
     : undefined
   const receipt = normalizeVerification(verified)
+  // The same repair the host applies to a pack's own manifest: what the
+  // directory promises before an install has to be what the install honours.
+  const extension = kind === 'extension'
+  const adds = extension ? toContributes(contributes) : undefined
+  const asks = extension ? toPermissions(permissions) : undefined
+  const shows = extension ? toActivation(activates) : undefined
+  // An extension is what it contributes, and the install refuses one that
+  // contributes nothing — so listing it would advertise a row nobody can use.
+  if (extension && adds === undefined) return undefined
 
   return {
     ...rest,
@@ -288,6 +309,10 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
     packageName: entry.packageName,
     description: typeof entry.description === 'string' ? entry.description : '',
     capabilities: list(entry.capabilities) as ConnectorCatalogEntry['capabilities'],
+    ...(extension && { kind: 'extension' as ConnectorKind }),
+    ...(adds !== undefined && { contributes: adds }),
+    ...(asks !== undefined && { permissions: asks }),
+    ...(shows !== undefined && { activates: shows }),
     ...(typeof packUrl === 'string' && packUrl !== '' && { packUrl }),
     ...(typeof sha256 === 'string' && sha256 !== '' && { sha256 }),
     ...(rung !== undefined && { authRung: rung }),

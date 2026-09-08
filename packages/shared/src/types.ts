@@ -1969,6 +1969,11 @@ export interface ConnectorCatalogEntry {
   id: string
   name: string
   description: string
+  /**
+   * Whether this polls a service or contributes to a session card. Absent on an
+   * older catalog, which reads as a connector because that is all there was.
+   */
+  kind?: ConnectorKind
   /** npm package the connector is published as. */
   packageName: string
   /** Published version, so a listing can say what would be installed. */
@@ -2002,6 +2007,14 @@ export interface ConnectorCatalogEntry {
   triggers?: ConnectorCatalogSummary[]
   actions?: ConnectorCatalogAction[]
   env?: Array<{ name: string; required: boolean; description?: string }>
+  /**
+   * What an extension adds, what it may touch, and where it shows — so the
+   * directory can answer all three before anything is downloaded. Present only
+   * on an extension.
+   */
+  contributes?: ExtensionContributions
+  permissions?: ExtensionPermission[]
+  activates?: ExtensionActivation
 }
 
 /**
@@ -2102,10 +2115,85 @@ export interface SdkAction {
   outputs?: Array<{ key: string; type?: string; description?: string }>
 }
 
+/**
+ * What a pack is. A connector polls a service; an extension contributes to a
+ * session card. Absent on a pack built before extensions, which reads as a
+ * connector because that is all there was.
+ */
+export type ConnectorKind = 'connector' | 'extension'
+
+/** Session types an extension can name; `shell` is a plain terminal. */
+export type ExtensionAgent = 'claude' | 'copilot' | 'codex' | 'opencode' | 'gemini' | 'shell'
+
+export type ExtensionPlatform = 'darwin' | 'linux' | 'win32'
+
+/** What an extension may ask the host for, shown before anyone installs it. */
+export type ExtensionPermission =
+  | 'git.read'
+  | 'terminal.read'
+  | 'terminal.selection'
+  | 'terminal.send'
+  | 'card.rename'
+  | 'agent.usage'
+
+/**
+ * Where a contribution shows.
+ *
+ * Every declared field has to hold, and each is satisfied by any one of its
+ * values — so an extension is simply absent where it has nothing to say,
+ * rather than showing an empty band.
+ */
+export interface ExtensionActivation {
+  /** Paths relative to the session's worktree; any one existing is enough. */
+  workspaceContains?: string[]
+  remoteHost?: string[]
+  agent?: ExtensionAgent[]
+  platform?: ExtensionPlatform[]
+}
+
+/** What every contribution says about itself, whatever kind it is. */
+export interface ExtensionContributionSummary {
+  id: string
+  title: string
+  description?: string
+  /** Narrows where this one shows, inside where the extension is active at all. */
+  when?: ExtensionActivation
+}
+
+/** A pane an extension adds: a page it ships, or a program it runs. */
+export interface ExtensionPaneContribution extends ExtensionContributionSummary {
+  /** Page inside the pack, under `web/`. Set on a pane Vorn renders. */
+  web?: string
+  /** Argv run in the worktree. Set on a pane drawn as a terminal. */
+  command?: string[]
+}
+
+/** A band under the card's status bar, recomputed on its own interval. */
+export interface ExtensionFooterContribution extends ExtensionContributionSummary {
+  /** Seconds between calls; the host polls no faster than this. */
+  every: number
+}
+
+/** Offers the extension when clicked text in a terminal matches. */
+export interface ExtensionLinkHandlerContribution extends ExtensionContributionSummary {
+  /** Matched as a regular expression against clicked text, under a bound the app sets. */
+  pattern: string
+  /** A link this handler is for, which its pattern matches. */
+  example?: string
+}
+
+export interface ExtensionContributions {
+  panes?: ExtensionPaneContribution[]
+  footers?: ExtensionFooterContribution[]
+  linkHandlers?: ExtensionLinkHandlerContribution[]
+}
+
 export interface SdkConnectorManifest {
   id: string
   name: string
   version: string
+  /** Absent on a pack built before extensions, which reads as a connector. */
+  kind?: ConnectorKind
   description?: string
   icon?: SdkConnectorIcon
   /** Absent on a connector built before rungs existed, which reads as unknown. */
@@ -2114,6 +2202,12 @@ export interface SdkConnectorManifest {
   actions: SdkAction[]
   /** Union of the environment variables the connector reads. */
   env: SdkEnvVar[]
+  /** What an extension adds to a card. Present only on an extension. */
+  contributes?: ExtensionContributions
+  /** What an extension may ask the host for. Present only on an extension. */
+  permissions?: ExtensionPermission[]
+  /** Where an extension shows at all. Present only on an extension. */
+  activates?: ExtensionActivation
 }
 
 /** A connector installed on disk, where `version` is what runs rather than what was asked for. */

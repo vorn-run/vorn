@@ -142,6 +142,74 @@ describe('parseCatalog', () => {
     expect(parseCatalog({ version: 1, connectors: [packed] })?.[0]).toEqual(packed)
   })
 
+  it('keeps what an extension adds, asks for and shows on', () => {
+    const extension = {
+      ...entry,
+      kind: 'extension',
+      capabilities: [],
+      permissions: ['terminal.read'],
+      activates: { workspaceContains: ['package.json'] },
+      contributes: {
+        footers: [{ id: 'checks', title: 'Checks', every: 30 }],
+        panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }]
+      }
+    }
+    expect(parseCatalog({ version: 1, connectors: [extension] })?.[0]).toEqual(extension)
+  })
+
+  it('drops what it could not honour, so the listing promises only what an install gives', () => {
+    const overreaching = parseCatalog({
+      version: 1,
+      connectors: [
+        {
+          ...entry,
+          kind: 'extension',
+          permissions: ['terminal.read', 'filesystem.write'],
+          contributes: {
+            panes: [
+              { id: 'escape', title: 'Escape', web: '../outside/index.html' },
+              { id: 'report', title: 'Report', web: 'web/report/index.html' }
+            ]
+          }
+        }
+      ]
+    })?.[0]
+
+    expect(overreaching?.permissions).toEqual(['terminal.read'])
+    expect(overreaching?.contributes?.panes?.map((pane) => pane.id)).toEqual(['report'])
+  })
+
+  it('drops an extension whose contributions it could not honour at all', () => {
+    // The install refuses one that contributes nothing, so listing it would
+    // advertise a row whose Install button cannot work.
+    const listed = parseCatalog({
+      version: 1,
+      connectors: [
+        {
+          ...entry,
+          id: 'unusable',
+          kind: 'extension',
+          contributes: { panes: [{ id: 'escape', title: 'Escape', web: '../outside/index.html' }] }
+        },
+        { ...entry, id: 'silent', kind: 'extension' },
+        entry
+      ]
+    })
+
+    expect(listed?.map((row) => row.id)).toEqual([entry.id])
+  })
+
+  it('reads an entry with no kind as the connector it was published as', () => {
+    const read = parseCatalog({
+      version: 1,
+      connectors: [{ ...entry, contributes: { footers: [{ id: 'x', title: 'X', every: 30 }] } }]
+    })?.[0]
+
+    expect(read).not.toHaveProperty('kind')
+    // Only an extension contributes, so a connector claiming to is not read as one.
+    expect(read).not.toHaveProperty('contributes')
+  })
+
   it('drops a pack url that is empty or the wrong kind of value', () => {
     const broken = parseCatalog({
       version: 1,

@@ -1,16 +1,29 @@
 import { envNameFor } from './define'
 import type {
   ActionInputOption,
+  ActivationPredicate,
   Connector,
   ConnectorAuth,
   ConnectorIcon,
+  ConnectorKind,
   DefaultWorkflow,
+  ExtensionPermission,
   StatusSuggestion
 } from './types'
 
 /** MCP tool name a trigger is served under. */
 export function pollToolName(triggerType: string): string {
   return `poll_${triggerType}`
+}
+
+/** MCP tool name a footer is recomputed under. */
+export function footerToolName(footerId: string): string {
+  return `vorn_footer_${footerId}`
+}
+
+/** MCP tool name a link handler is run under. */
+export function handlerToolName(handlerId: string): string {
+  return `vorn_handler_${handlerId}`
 }
 
 /** Tool that reports the connector's manifest and setup hints. */
@@ -91,14 +104,36 @@ export function connectionSetup(connector: Connector, triggerType: string): Conn
   }
 }
 
+/** A contribution as the manifest carries it: everything but the code that runs it. */
+interface ManifestContribution {
+  id: string
+  title: string
+  description?: string
+  when?: ActivationPredicate
+}
+
+export interface ManifestContributions {
+  panes?: Array<ManifestContribution & { web?: string; command?: string[] }>
+  footers?: Array<ManifestContribution & { every: number }>
+  linkHandlers?: Array<ManifestContribution & { pattern: string; example: string }>
+}
+
 export interface ConnectorManifest {
   id: string
   name: string
   version: string
+  /** Absent on a manifest written before extensions, which reads as a connector. */
+  kind?: ConnectorKind
   description?: string
   icon?: ConnectorIcon
   /** How the connector signs in, so the app can say so before installing it. */
   auth?: ConnectorAuth
+  /** What an extension adds to a card. Present only on an extension. */
+  contributes?: ManifestContributions
+  /** What an extension may ask the host for. Present only on an extension. */
+  permissions?: ExtensionPermission[]
+  /** Where an extension shows at all. Present only on an extension. */
+  activates?: ActivationPredicate
   triggers: Array<{
     type: string
     label: string
@@ -134,15 +169,51 @@ export interface ConnectorManifest {
   }>
 }
 
+/** Strip the running code off a contribution, leaving what a manifest can carry. */
+function manifestContributions(connector: Connector): ManifestContributions | undefined {
+  const contributes = connector.contributes
+  if (!contributes) return undefined
+  const shared = (contribution: ManifestContribution): ManifestContribution => ({
+    id: contribution.id,
+    title: contribution.title,
+    ...(contribution.description !== undefined && { description: contribution.description }),
+    ...(contribution.when !== undefined && { when: contribution.when })
+  })
+  return {
+    ...(contributes.panes !== undefined && {
+      panes: contributes.panes.map((pane) => ({
+        ...shared(pane),
+        ...(pane.web !== undefined && { web: pane.web }),
+        ...(pane.command !== undefined && { command: pane.command })
+      }))
+    }),
+    ...(contributes.footers !== undefined && {
+      footers: contributes.footers.map((footer) => ({ ...shared(footer), every: footer.every }))
+    }),
+    ...(contributes.linkHandlers !== undefined && {
+      linkHandlers: contributes.linkHandlers.map((handler) => ({
+        ...shared(handler),
+        pattern: handler.pattern,
+        example: handler.example
+      }))
+    })
+  }
+}
+
 /** Full machine-readable description of a connector, served over MCP and printed by the CLI. */
 export function connectorManifest(connector: Connector): ConnectorManifest {
+  const contributes = manifestContributions(connector)
   return {
     id: connector.id,
     name: connector.name,
     version: connector.version,
+    kind: connector.kind,
     ...(connector.description !== undefined && { description: connector.description }),
     ...(connector.icon !== undefined && { icon: connector.icon }),
     ...(connector.auth !== undefined && { auth: connector.auth }),
+    ...(contributes !== undefined && { contributes }),
+    ...(connector.permissions !== undefined && { permissions: connector.permissions }),
+    ...(connector.activates !== undefined && { activates: connector.activates }),
     triggers: connector.triggers.map((trigger) => ({
       type: trigger.type,
       label: trigger.label,

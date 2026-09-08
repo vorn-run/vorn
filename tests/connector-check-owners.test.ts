@@ -6,6 +6,7 @@ import {
   CHECK_OWNERS,
   checkConnector,
   defineConnector,
+  defineExtension,
   packConnector,
   runConformance
 } from '../packages/connector-sdk/src/index'
@@ -269,6 +270,85 @@ async function everyCodeAnyRunEmits(): Promise<Set<string>> {
     )
   )
 
+  // An extension: a page nobody shipped, a contribution that throws, and a permission
+  // asked for and never spent.
+  collect(
+    await checkConnector(
+      defineExtension({
+        id: 'reaching',
+        name: 'Reaching',
+        description: 'Reaching',
+        permissions: ['terminal.read', 'card.rename'],
+        panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }],
+        footers: [
+          {
+            id: 'checks',
+            title: 'Checks',
+            description: 'Asks for more than it declared',
+            every: 30,
+            async run(context) {
+              await context.host.diff()
+              return 'not a list' as never
+            }
+          }
+        ],
+        linkHandlers: [
+          {
+            id: 'pr',
+            title: 'Pull request',
+            pattern: 'example',
+            example: 'https://example.test/example',
+            run: () => {
+              throw new Error('nothing to open')
+            }
+          }
+        ]
+      }),
+      { packageDir: dir }
+    )
+  )
+
+  // The reading itself, wrong in a way only a run can see.
+  collect(
+    await checkConnector(
+      defineExtension({
+        id: 'mislabelled',
+        name: 'Mislabelled',
+        description: 'Mislabelled',
+        permissions: ['terminal.read'],
+        footers: [
+          {
+            id: 'checks',
+            title: 'Checks',
+            description: 'Returns a reading with no label',
+            every: 30,
+            async run(context) {
+              await context.host.output()
+              return [{ value: 'passing' }] as never
+            }
+          }
+        ]
+      })
+    )
+  )
+
+  // A page that resolves outside the package, which only a hand-built pack reaches.
+  collect(
+    await checkConnector(
+      {
+        ...defineExtension({
+          id: 'escaping',
+          name: 'Escaping',
+          description: 'Escaping',
+          permissions: [],
+          panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }]
+        }),
+        contributes: { panes: [{ id: 'report', title: 'Report', web: '../outside/index.html' }] }
+      },
+      { packageDir: dir }
+    )
+  )
+
   const big = await packConnector(
     defineConnector({
       id: 'big',
@@ -318,6 +398,10 @@ describe('every finding a run can make', () => {
       'launch',
       'mock',
       'live',
+      'contributes',
+      'footers',
+      'handlers',
+      'permissions',
       null
     ])
     for (const owner of Object.values(CHECK_OWNERS)) {

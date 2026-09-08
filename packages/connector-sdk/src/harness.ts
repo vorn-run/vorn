@@ -1,6 +1,15 @@
+import { HOST_PERMISSIONS } from './define'
+import { PermissionDeniedError } from './host'
 import { drainPoll, runAction, runPoll, type PollPage, type RunPollOptions } from './runtime'
 import { connectorManifest, type ConnectorManifest } from './setup'
-import type { Connector, ConnectorConfig, NormalizedItem } from './types'
+import type {
+  Connector,
+  ConnectorConfig,
+  ExtensionHost,
+  ExtensionHostMethod,
+  ExtensionPermission,
+  NormalizedItem
+} from './types'
 
 export interface HarnessOptions {
   config?: ConnectorConfig
@@ -210,4 +219,62 @@ export function createConnectorHarness(
     },
     withMockHttp
   }
+}
+
+/** Answers a footer or handler from fixtures, and refuses what the manifest never asked for. */
+export interface MockHostRun {
+  host: ExtensionHost
+  /** Permissions the run actually spent, so a declared-but-unused one can be named. */
+  used: Set<ExtensionPermission>
+}
+
+/** Replaces what the stub answers, for a test whose subject is the reading rather than the plumbing. */
+export type MockHostAnswers = Partial<{
+  [K in ExtensionHostMethod]: ExtensionHost[K]
+}>
+
+const HOST_FIXTURES: ExtensionHost = {
+  diff: async () =>
+    'diff --git a/src/index.ts b/src/index.ts\n@@ -1 +1 @@\n-const a = 1\n+const a = 2\n',
+  status: async () => ' M src/index.ts\n',
+  output: async () => '$ yarn test\n  Test Files  1 passed (1)\n',
+  selection: async () => '',
+  send: async () => {},
+  rename: async () => {},
+  usage: async () => ({
+    contextTokens: 130_000,
+    contextWindow: 1_000_000,
+    cacheHitRate: 0.93,
+    limits: [{ window: '5h', remaining: 0.72 }]
+  })
+}
+
+/**
+ * A host that answers from fixtures and enforces the manifest.
+ *
+ * The check runs every footer and handler against this rather than a real
+ * session, which is what lets a conformance run catch an extension reaching
+ * for something it never declared — before a person is asked to grant it.
+ */
+export function mockExtensionHost(
+  granted: readonly ExtensionPermission[],
+  answers: MockHostAnswers = {}
+): MockHostRun {
+  const allowed = new Set(granted)
+  const used = new Set<ExtensionPermission>()
+  const host = {} as Record<ExtensionHostMethod, unknown>
+
+  for (const name of Object.keys(HOST_FIXTURES) as ExtensionHostMethod[]) {
+    const permission = HOST_PERMISSIONS[name]
+    host[name] = async (...args: unknown[]) => {
+      used.add(permission)
+      if (!allowed.has(permission)) {
+        throw new PermissionDeniedError(name, `this extension does not ask for ${permission}`)
+      }
+      const answer = (answers[name] ?? HOST_FIXTURES[name]) as (...rest: unknown[]) => unknown
+      return answer(...args)
+    }
+  }
+
+  return { host: host as unknown as ExtensionHost, used }
 }

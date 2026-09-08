@@ -1,9 +1,16 @@
 import type {
+  ActivationPredicate,
   AuthRung,
   Connector,
   ConnectorConfig,
   ConnectorDefinition,
-  DedupeStrategy
+  DedupeStrategy,
+  ExtensionAgent,
+  ExtensionDefinition,
+  ExtensionHostMethod,
+  ExtensionPermission,
+  ExtensionPlatform,
+  PaneContribution
 } from './types'
 
 const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
@@ -20,6 +27,47 @@ const PATH_DATA_PATTERN = /^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$/
 const VIEW_BOX_PATTERN = /^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$/
 const DEDUPE_STRATEGIES: DedupeStrategy[] = ['timestamp', 'lastItem']
 const AUTH_RUNGS: AuthRung[] = ['none', 'cli', 'key', 'oauth']
+
+/** Everything an extension may ask the host for; anything else is not grantable. */
+export const EXTENSION_PERMISSIONS: ExtensionPermission[] = [
+  'git.read',
+  'terminal.read',
+  'terminal.selection',
+  'terminal.send',
+  'card.rename',
+  'agent.usage'
+]
+
+/** What each host method costs, read by the bridge that grants it and the check that gates it. */
+export const HOST_PERMISSIONS: Record<ExtensionHostMethod, ExtensionPermission> = {
+  diff: 'git.read',
+  status: 'git.read',
+  output: 'terminal.read',
+  selection: 'terminal.selection',
+  send: 'terminal.send',
+  rename: 'card.rename',
+  usage: 'agent.usage'
+}
+
+/** Session types an extension may name, so a manifest cannot invent one. */
+export const EXTENSION_AGENTS: ExtensionAgent[] = [
+  'claude',
+  'copilot',
+  'codex',
+  'opencode',
+  'gemini',
+  'shell'
+]
+export const EXTENSION_PLATFORMS: ExtensionPlatform[] = ['darwin', 'linux', 'win32']
+
+/** A pane's page lives under `web/` in the package, so a pack carries one named directory. */
+const WEB_ENTRY_PATTERN = /^web\/[A-Za-z0-9._/-]+\.html$/
+
+/** Slower than this and a footer is a poller; faster and it is a spinner. */
+const MIN_FOOTER_SECONDS = 5
+
+/** A pattern is matched against clicked text on a person's keystroke, so it stays small enough to bound. */
+const MAX_PATTERN_LENGTH = 256
 
 /** A declared request goes somewhere the connector named: a real URL, … */
 const ABSOLUTE_URL_PATTERN = /^https?:\/\//i
@@ -81,6 +129,36 @@ function assertAuth(definition: ConnectorDefinition): void {
   }
 }
 
+/** The id, name and glyph every pack declares, whichever kind it is. */
+function assertIdentity(
+  kind: string,
+  definition: { id?: string; name?: string; icon?: ConnectorDefinition['icon'] }
+): void {
+  if (!KEY_PATTERN.test(definition.id ?? '')) {
+    throw new Error(`${kind} id "${definition.id}" must start with a letter and be url-safe`)
+  }
+  if (!definition.name?.trim()) {
+    throw new Error(`${kind} ${definition.id} is missing a name`)
+  }
+  if (!definition.icon) return
+
+  const { viewBox, paths } = definition.icon
+  if (!Array.isArray(paths) || paths.length === 0) {
+    throw new Error(`${kind} ${definition.id} has an icon with no paths`)
+  }
+  for (const path of paths) {
+    if (typeof path !== 'string' || !PATH_DATA_PATTERN.test(path)) {
+      throw new Error(
+        `${kind} ${definition.id} has an icon path that is not SVG path data. ` +
+          `Only path data is accepted, not markup.`
+      )
+    }
+  }
+  if (viewBox !== undefined && !VIEW_BOX_PATTERN.test(viewBox)) {
+    throw new Error(`${kind} ${definition.id} has an icon viewBox that is not four numbers`)
+  }
+}
+
 /** Environment variable a config field reads from, e.g. `apiToken` → `API_TOKEN`. */
 export function envNameFor(key: string, explicit?: string): string {
   if (explicit) return explicit
@@ -98,30 +176,7 @@ export function envNameFor(key: string, explicit?: string): string {
  * MCP tool once the connector is already installed in someone's app.
  */
 export function defineConnector(definition: ConnectorDefinition): Connector {
-  if (!KEY_PATTERN.test(definition.id ?? '')) {
-    throw new Error(`Connector id "${definition.id}" must start with a letter and be url-safe`)
-  }
-  if (!definition.name?.trim()) {
-    throw new Error(`Connector ${definition.id} is missing a name`)
-  }
-
-  if (definition.icon) {
-    const { viewBox, paths } = definition.icon
-    if (!Array.isArray(paths) || paths.length === 0) {
-      throw new Error(`Connector ${definition.id} has an icon with no paths`)
-    }
-    for (const path of paths) {
-      if (typeof path !== 'string' || !PATH_DATA_PATTERN.test(path)) {
-        throw new Error(
-          `Connector ${definition.id} has an icon path that is not SVG path data. ` +
-            `Only path data is accepted, not markup.`
-        )
-      }
-    }
-    if (viewBox !== undefined && !VIEW_BOX_PATTERN.test(viewBox)) {
-      throw new Error(`Connector ${definition.id} has an icon viewBox that is not four numbers`)
-    }
-  }
+  assertIdentity('Connector', definition)
 
   const triggers = definition.triggers ?? []
   const actions = definition.actions ?? []
@@ -226,10 +281,214 @@ export function defineConnector(definition: ConnectorDefinition): Connector {
 
   return {
     ...definition,
+    kind: 'connector',
     version: definition.version ?? '0.0.0',
     config: definition.config ?? [],
     triggers,
     actions
+  }
+}
+
+/** Each declared value has to be one this build knows, or the predicate silently never matches. */
+function assertPredicate(id: string, where: string, predicate?: ActivationPredicate): void {
+  if (!predicate) return
+  const lists: Array<[string, unknown]> = [
+    ['workspaceContains', predicate.workspaceContains],
+    ['remoteHost', predicate.remoteHost],
+    ['agent', predicate.agent],
+    ['platform', predicate.platform]
+  ]
+  for (const [field, value] of lists) {
+    if (value === undefined) continue
+    if (!Array.isArray(value) || value.length === 0) {
+      throw new Error(`Extension ${id} ${where} declares "${field}" with nothing in it`)
+    }
+    for (const entry of value) {
+      if (typeof entry !== 'string' || entry.trim() === '') {
+        throw new Error(`Extension ${id} ${where} declares an empty "${field}" value`)
+      }
+    }
+  }
+  for (const glob of predicate.workspaceContains ?? []) {
+    // Resolved against the session's worktree, so a path leaving it names a file no session owns.
+    if (glob.startsWith('/') || glob.split('/').includes('..')) {
+      throw new Error(
+        `Extension ${id} ${where} looks for "${glob}", which is not inside the worktree`
+      )
+    }
+  }
+  for (const agent of predicate.agent ?? []) {
+    if (!EXTENSION_AGENTS.includes(agent)) {
+      throw new Error(
+        `Extension ${id} ${where} names unknown agent ${JSON.stringify(agent)}; ` +
+          `expected ${EXTENSION_AGENTS.join(', ')}`
+      )
+    }
+  }
+  for (const platform of predicate.platform ?? []) {
+    if (!EXTENSION_PLATFORMS.includes(platform)) {
+      throw new Error(
+        `Extension ${id} ${where} names unknown platform ${JSON.stringify(platform)}; ` +
+          `expected ${EXTENSION_PLATFORMS.join(', ')}`
+      )
+    }
+  }
+}
+
+/** A pane is a page the pack carries or a program it runs, and the two are told apart here. */
+function assertPane(id: string, pane: PaneContribution): void {
+  const loose = pane as { web?: unknown; command?: unknown }
+  const page = loose.web !== undefined
+  const program = loose.command !== undefined
+  if (page && program) {
+    throw new Error(`Extension ${id} pane ${pane.id} declares both a web page and a command`)
+  }
+  if (!page && !program) {
+    throw new Error(`Extension ${id} pane ${pane.id} declares neither a web page nor a command`)
+  }
+  if (page) {
+    const web = loose.web
+    if (typeof web !== 'string' || !WEB_ENTRY_PATTERN.test(web) || web.split('/').includes('..')) {
+      throw new Error(
+        `Extension ${id} pane ${pane.id} declares the page ${JSON.stringify(web)}; ` +
+          `a page is an .html file under web/ in the package`
+      )
+    }
+    return
+  }
+  const command = loose.command
+  if (!Array.isArray(command) || command.length === 0) {
+    throw new Error(`Extension ${id} pane ${pane.id} declares a command with nothing to run`)
+  }
+  for (const arg of command) {
+    if (typeof arg !== 'string' || arg === '') {
+      throw new Error(`Extension ${id} pane ${pane.id} declares a command with an empty argument`)
+    }
+  }
+}
+
+/**
+ * Validate an extension and fill in its defaults.
+ *
+ * An extension is a pack like a connector, so it goes through the same
+ * manifest, pack, check and catalog; what differs is that it contributes to a
+ * session card rather than polling a service. Failing here — at import time —
+ * keeps a mistyped permission or an unreachable page from reaching a card.
+ */
+export function defineExtension(definition: ExtensionDefinition): Connector {
+  assertIdentity('Extension', definition)
+  const id = definition.id
+
+  const panes = definition.panes ?? []
+  const footers = definition.footers ?? []
+  const linkHandlers = definition.linkHandlers ?? []
+  if (panes.length === 0 && footers.length === 0 && linkHandlers.length === 0) {
+    throw new Error(`Extension ${id} contributes nothing`)
+  }
+
+  const permissions = definition.permissions ?? []
+  if (!Array.isArray(permissions)) {
+    throw new Error(`Extension ${id} declares permissions that are not a list`)
+  }
+  for (const permission of permissions) {
+    if (!EXTENSION_PERMISSIONS.includes(permission)) {
+      throw new Error(
+        `Extension ${id} asks for unknown permission ${JSON.stringify(permission)}; ` +
+          `expected ${EXTENSION_PERMISSIONS.join(', ')}`
+      )
+    }
+  }
+  assertUnique('permission', permissions)
+
+  const contributions = [...panes, ...footers, ...linkHandlers]
+  for (const contribution of contributions) {
+    if (!KEY_PATTERN.test(contribution.id ?? '')) {
+      throw new Error(
+        `Contribution id "${contribution.id}" must start with a letter and be url-safe`
+      )
+    }
+    if (!contribution.title?.trim()) {
+      throw new Error(`Extension ${id} contribution ${contribution.id} is missing a title`)
+    }
+    assertPredicate(id, `contribution ${contribution.id}`, contribution.when)
+  }
+  // One namespace: a pane and a footer sharing an id would be two things the host addresses alike.
+  assertUnique(
+    'contribution',
+    contributions.map((contribution) => contribution.id)
+  )
+  assertPredicate(id, 'activates', definition.activates)
+
+  for (const pane of panes) assertPane(id, pane)
+
+  for (const footer of footers) {
+    if (typeof footer.run !== 'function') {
+      throw new Error(`Extension ${id} footer ${footer.id} is missing a run() implementation`)
+    }
+    if (!Number.isFinite(footer.every) || footer.every < MIN_FOOTER_SECONDS) {
+      throw new Error(
+        `Extension ${id} footer ${footer.id} asks to run every ${footer.every}s; ` +
+          `${MIN_FOOTER_SECONDS}s is the shortest interval a footer may ask for`
+      )
+    }
+  }
+
+  for (const handler of linkHandlers) {
+    if (typeof handler.run !== 'function') {
+      throw new Error(
+        `Extension ${id} link handler ${handler.id} is missing a run() implementation`
+      )
+    }
+    if (typeof handler.pattern !== 'string' || handler.pattern.length > MAX_PATTERN_LENGTH) {
+      throw new Error(
+        `Extension ${id} link handler ${handler.id} has a pattern longer than ` +
+          `${MAX_PATTERN_LENGTH} characters; it is matched on every click`
+      )
+    }
+    let matcher: RegExp
+    try {
+      matcher = new RegExp(handler.pattern)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      throw new Error(
+        `Extension ${id} link handler ${handler.id} has a pattern that is not a regular expression: ${reason}`,
+        { cause: error }
+      )
+    }
+    // The example is what `check` runs the handler on, so a pattern it does not
+    // match would prove the handler against a link it will never be offered for.
+    if (typeof handler.example !== 'string' || handler.example.trim() === '') {
+      throw new Error(
+        `Extension ${id} link handler ${handler.id} names no example link its pattern matches`
+      )
+    }
+    if (!matcher.test(handler.example)) {
+      throw new Error(
+        `Extension ${id} link handler ${handler.id} has the example ${JSON.stringify(handler.example)}, ` +
+          `which its own pattern ${JSON.stringify(handler.pattern)} does not match`
+      )
+    }
+  }
+
+  return {
+    id,
+    name: definition.name,
+    ...(definition.description !== undefined && { description: definition.description }),
+    ...(definition.icon !== undefined && { icon: definition.icon }),
+    kind: 'extension',
+    version: definition.version ?? '0.0.0',
+    // Its credential is the host's own token, so there is nothing to sign in to.
+    auth: { rung: 'none' },
+    config: [],
+    triggers: [],
+    actions: [],
+    permissions,
+    ...(definition.activates !== undefined && { activates: definition.activates }),
+    contributes: {
+      ...(panes.length > 0 && { panes }),
+      ...(footers.length > 0 && { footers }),
+      ...(linkHandlers.length > 0 && { linkHandlers })
+    }
   }
 }
 
