@@ -15,7 +15,7 @@ import { toWebp } from './lib.mjs'
 
 const TAKES = new URL('../release-videos/', import.meta.url).pathname
 const LOOPS = new URL('../assets/loops/', import.meta.url).pathname
-const INDEX = new URL('../index.html', import.meta.url).pathname
+const PAGES = ['../index.html', '../demos.html'].map((p) => new URL(p, import.meta.url).pathname)
 
 const PLATE_BUDGET_KB = 900
 const HERO_BUDGET_KB = 1800
@@ -25,7 +25,7 @@ const BITRATE_AT_1600 = 6000
 const attr = (tag, name) => new RegExp(`${name}="([^"]*)"`).exec(tag)?.[1]
 
 function videosInMarkup() {
-  const html = readFileSync(INDEX, 'utf8')
+  const html = PAGES.map((p) => readFileSync(p, 'utf8')).join('\n')
   return [...html.matchAll(/<video\b[^>]*>/g)]
     .map((m) => m[0])
     .map((tag) => {

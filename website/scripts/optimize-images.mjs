@@ -8,7 +8,9 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { ASSETS, toWebp } from './lib.mjs'
 
-const PAGES = ['../index.html', '../404.html'].map((p) => new URL(p, import.meta.url).pathname)
+const PAGES = ['../index.html', '../404.html', '../demos.html'].map(
+  (p) => new URL(p, import.meta.url).pathname
+)
 
 function size(file) {
   const out = execFileSync('sips', ['-g', 'pixelWidth', '-g', 'pixelHeight', file]).toString()
@@ -34,10 +36,14 @@ for (const page of PAGES) {
   }
 }
 
+const missing = []
 for (const [name, widths] of wanted) {
   const src = source(name)
-  // No raster behind it means another script owns the file — a loop poster, say.
-  if (!src) continue
+  // A page asking for a raster with no source is a still nobody has shot yet.
+  if (!src) {
+    missing.push(name)
+    continue
+  }
   const { w, h } = size(src)
   const out = [...widths]
     .sort((a, b) => a - b)
@@ -49,3 +55,5 @@ for (const [name, widths] of wanted) {
     })
   console.log(`${name} ${w}x${h} -> ${out.join(', ')}`)
 }
+
+if (missing.length) console.log(`no source yet: ${missing.join(', ')}`)

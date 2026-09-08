@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Demos. Vorn.</title>
+    <meta
+      name="description"
+      content="Short recordings of Vorn doing the thing: several agents at once, workflows on a canvas, connectors, and a phone that pairs."
+    />
+    <link rel="canonical" href="https://vorn.run/demos" />
+    <meta property="og:title" content="Demos. Vorn." />
+    <meta
+      property="og:description"
+      content="Short recordings of Vorn doing the thing, at full quality."
+    />
+    <meta property="og:image" content="https://vorn.run/assets/og.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://vorn.run/demos" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="/assets/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Courier+Prime:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --museum-black: #0c0b09;
+        --obsidian: #0a0907;
+        --parchment: #ede5cc;
+        --parchment-dim: rgba(237, 229, 204, 0.6);
+        --bronze: #c9972a;
+        --border: rgba(237, 229, 204, 0.08);
+        --display: 'Cinzel', Garamond, serif;
+        --serif: 'EB Garamond', Georgia, serif;
+        --mono: 'Courier Prime', 'Courier New', monospace;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--museum-black);
+        color: var(--parchment-dim);
+        font-family: var(--serif);
+        line-height: 1.75;
+        -webkit-font-smoothing: antialiased;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+      }
+
+      .wrap {
+        max-width: 1300px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 26px;
+        padding: 7px 0;
+        border-bottom: 0.5px solid var(--border);
+      }
+      .nav .home {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--display);
+        font-size: 20px;
+        letter-spacing: 0.15em;
+        text-transform: lowercase;
+        color: var(--parchment);
+      }
+      .nav .spacer {
+        flex: 1;
+      }
+      .nav a.link {
+        font-family: var(--display);
+        font-size: 15px;
+        color: rgba(237, 229, 204, 0.5);
+      }
+      .nav a.link:hover {
+        color: var(--parchment);
+      }
+
+      header.page {
+        padding: clamp(48px, 8vw, 90px) 0 clamp(28px, 4vw, 44px);
+        text-align: center;
+      }
+      .label {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: rgba(201, 151, 42, 0.6);
+      }
+      header.page h1 {
+        font-family: var(--display);
+        font-weight: 400;
+        font-size: clamp(2rem, 5vw, 3.2rem);
+        line-height: 1.2;
+        color: var(--parchment);
+        margin-top: 14px;
+        letter-spacing: 0.01em;
+      }
+      header.page p {
+        font-size: 18px;
+        color: rgba(237, 229, 204, 0.55);
+        margin: 12px auto 0;
+        max-width: 60ch;
+      }
+
+      .demo {
+        padding: clamp(36px, 5vw, 64px) 0;
+        border-top: 0.5px solid var(--border);
+      }
+      .demo:first-of-type {
+        border-top: none;
+      }
+      .demo-eyebrow {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: rgba(201, 151, 42, 0.6);
+      }
+      .demo h2 {
+        font-family: var(--display);
+        font-weight: 400;
+        font-size: clamp(1.5rem, 3vw, 2.1rem);
+        line-height: 1.28;
+        color: var(--parchment);
+        margin: 10px 0;
+        letter-spacing: 0.01em;
+      }
+      .demo p.blurb {
+        font-size: 17.5px;
+        max-width: 62ch;
+        margin-bottom: 22px;
+      }
+
+      .frame {
+        position: relative;
+        border: 0.5px solid var(--border);
+        border-radius: 5px;
+        overflow: hidden;
+        background: var(--obsidian);
+      }
+      .frame video {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .play {
+        position: absolute;
+        left: 14px;
+        bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 8px 14px;
+        border: 0.5px solid rgba(237, 229, 204, 0.2);
+        border-radius: 2px;
+        background: color-mix(in srgb, var(--obsidian) 74%, transparent);
+        color: rgba(237, 229, 204, 0.82);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: border-color 0.25s ease;
+      }
+      .play:hover,
+      .play:focus-visible {
+        border-color: rgba(201, 151, 42, 0.65);
+        color: var(--parchment);
+      }
+      .frame.is-playing .play {
+        visibility: hidden;
+      }
+      .play .time {
+        color: rgba(237, 229, 204, 0.4);
+      }
+
+      .soon {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 0 36px;
+        padding: clamp(30px, 4vw, 52px) 0 clamp(60px, 8vw, 100px);
+        border-top: 0.5px solid var(--border);
+      }
+      .soon-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 14px 0;
+        border-bottom: 0.5px solid var(--border);
+      }
+      .soon-name {
+        font-size: 17.5px;
+        color: rgba(237, 229, 204, 0.78);
+      }
+      .soon-note {
+        font-size: 15px;
+        color: rgba(237, 229, 204, 0.4);
+        line-height: 1.6;
+      }
+
+      footer {
+        border-top: 0.5px solid var(--border);
+        padding: 26px 0 44px;
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        letter-spacing: 0.08em;
+        color: rgba(237, 229, 204, 0.38);
+      }
+      footer a:hover {
+        color: var(--parchment);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <nav class="nav">
+        <a class="home" href="/">
+          <img src="/assets/vorn-mark-152.webp" alt="" width="38" height="18" />
+          <span>vorn</span>
+        </a>
+        <span class="spacer"></span>
+        <a class="link" href="/#features">Features</a>
+        <a class="link" href="/#agents">Agents</a>
+        <a class="link" href="/#install">Install</a>
+      </nav>
+
+      <header class="page">
+        <div class="label">Demos</div>
+        <h1>Watch it work</h1>
+        <p>
+          Short recordings, at the quality a screen full of text actually needs. Nothing sped up.
+        </p>
+      </header>
+
+      <section class="demo">
+        <div class="demo-eyebrow">Sessions</div>
+        <h2>Four agents at once, each in its own worktree</h2>
+        <p class="blurb">
+          One workflow launches Claude, Codex, Copilot and OpenCode together, each on its own branch
+          in its own tree, all reading the same repository at the same time. Nothing here is staged
+          except the questions they were asked.
+        </p>
+        <div class="frame">
+          <video
+            data-src="assets/loops/grid"
+            data-ladder="900,1200,1600"
+            loop
+            muted
+            playsinline
+            preload="none"
+            poster="assets/loops/grid-1600.webp"
+            width="1600"
+            height="900"
+            aria-label="Four agent sessions running side by side in Vorn, each streaming its own output."
+          ></video>
+          <button class="play" type="button">
+            <svg viewBox="0 0 10 12" width="10" height="12" aria-hidden="true">
+              <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
+            </svg>
+            Play
+            <span class="time">6s</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="soon">
+        <div class="soon-row">
+          <span class="soon-name">Durability</span>
+          <span class="soon-note">Quit the app, come back, the agent is still working.</span>
+        </div>
+        <div class="soon-row">
+          <span class="soon-name">Workflows</span>
+          <span class="soon-note">A pipeline drawn on canvas, run, and stopped at a gate.</span>
+        </div>
+        <div class="soon-row">
+          <span class="soon-name">Connectors</span>
+          <span class="soon-note">A pack installed offline, signed in with the login you had.</span>
+        </div>
+        <div class="soon-row">
+          <span class="soon-name">Mobile</span>
+          <span class="soon-note">A phone paired by code, holding the running session.</span>
+        </div>
+      </section>
+
+      <footer>
+        <a href="/">Home</a>
+        <a href="/#install">Install</a>
+        <a href="https://github.com/vorn-run/vorn" target="_blank" rel="noopener">GitHub</a>
+        <span style="margin-left: auto">MIT License</span>
+      </footer>
+    </div>
+
+    <script>
+      // A demo fetches nothing until it is asked for, then takes the rung that
+      // matches the width it is actually drawn at.
+      ;(function initDemos() {
+        const calm = window.matchMedia('(prefers-reduced-motion: reduce)')
+
+        document.querySelectorAll('.frame').forEach(function (frame) {
+          const video = frame.querySelector('video')
+          const button = frame.querySelector('.play')
+          if (!video || !button) return
+
+          function attach() {
+            const base = video.getAttribute('data-src')
+            const ladder = video.getAttribute('data-ladder')
+            if (!base || !ladder || video.currentSrc) return
+            const wanted = video.getBoundingClientRect().width * (window.devicePixelRatio || 1)
+            const rungs = ladder.split(',').map(Number)
+            const rung = rungs.find(function (w) {
+              return w >= wanted
+            })
+            video.src = base + '-' + (rung || rungs[rungs.length - 1]) + '.mp4'
+          }
+
+          button.addEventListener('click', function () {
+            attach()
+            const started = video.play()
+            if (started) started.catch(function () {})
+            frame.classList.add('is-playing')
+          })
+
+          video.addEventListener('click', function () {
+            video.pause()
+            frame.classList.remove('is-playing')
+          })
+
+          calm.addEventListener('change', function () {
+            if (!calm.matches) return
+            video.pause()
+            frame.classList.remove('is-playing')
+          })
+        })
+      })()
+    </script>
+  </body>
+</html>
