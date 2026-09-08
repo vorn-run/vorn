@@ -2,7 +2,8 @@
 import { execFileSync } from 'node:child_process'
 
 export const ASSETS = new URL('../assets/', import.meta.url).pathname
-export const QUALITY = '82'
+/** Screenshots of dense UI text, not photographs: 82 smears glyph edges. */
+export const QUALITY = '96'
 
 export function toWebp(src, width, out, quality = QUALITY) {
   execFileSync('cwebp', ['-quiet', '-q', quality, '-resize', String(width), '0', src, '-o', out])

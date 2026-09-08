@@ -6,7 +6,10 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { ASSETS, toWebp } from './lib.mjs'
+import { ASSETS, QUALITY, toWebp } from './lib.mjs'
+
+/** A screenshot is read; the marginalia are only looked at. */
+const SCREENSHOT = /^(hero|plate-)/
 
 const PAGES = ['../index.html', '../404.html', '../demos.html'].map(
   (p) => new URL(p, import.meta.url).pathname
@@ -50,7 +53,7 @@ for (const [name, widths] of wanted) {
     .filter((width) => width <= w)
     .map((width) => {
       const file = `${name}-${width}.webp`
-      toWebp(src, width, join(ASSETS, file))
+      toWebp(src, width, join(ASSETS, file), SCREENSHOT.test(name) ? QUALITY : '82')
       return `${file} ${(statSync(join(ASSETS, file)).size / 1024).toFixed(0)}K`
     })
   console.log(`${name} ${w}x${h} -> ${out.join(', ')}`)
