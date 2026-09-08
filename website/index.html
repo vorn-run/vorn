@@ -6,12 +6,12 @@
     <title>Vorn. The Agent Command Center.</title>
     <meta
       name="description"
-      content="Vorn is an agentic IDE and agent command center. Orchestrate Claude Code, GitHub Copilot, OpenAI Codex, OpenCode, and Gemini CLI in one desktop app. Multi-agent grid, task queue, workflow automation, headless execution. Free and open source."
+      content="Vorn runs your coding agents and keeps them running: quit the app and the session survives. Workflows on a canvas, connectors that borrow the login you already have."
     />
     <meta property="og:title" content="Vorn. The Agent Command Center." />
     <meta
       property="og:description"
-      content="The agent command center for AI coding. Run Claude, Copilot, Codex, OpenCode, and Gemini from one desktop app. Interactive or autonomous, everything local."
+      content="Quit the app and the agent keeps working. A desktop command center for Claude, Copilot, Codex, OpenCode and Gemini, with workflows, connectors and a phone that pairs."
     />
     <meta property="og:image" content="https://vorn.run/assets/og.png" />
     <meta property="og:image:width" content="1200" />
@@ -22,12 +22,12 @@
     <meta name="twitter:title" content="Vorn. The Agent Command Center." />
     <meta
       name="twitter:description"
-      content="Orchestrate every AI coding agent from one desktop app. Free and open source."
+      content="Quit the app and the agent keeps working. Workflows on a canvas, connectors as offline packs, a phone that pairs to any session."
     />
     <meta name="twitter:image" content="https://vorn.run/assets/og.png" />
     <meta
       name="keywords"
-      content="agentic IDE, agent command center, AI coding agents, vibe coding, vibecoding, Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, OpenCode, multi-agent, workflow automation, terminal manager, developer tools, AI pair programming, autonomous coding, headless agents, open source"
+      content="agentic IDE, agent command center, AI coding agents, durable agent sessions, detached terminal sessions, Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, OpenCode, multi-agent, workflow automation, webhook triggers, connectors, MCP server, browser pane, iOS simulator, terminal manager, developer tools, headless agents, open source"
     />
     <meta name="author" content="Javier Canizalez" />
     <meta name="robots" content="index, follow" />
@@ -779,133 +779,158 @@
         }
       }
 
-      /* ═══════ THE STUDIES — FEATURES ═══════ */
+      /* ═══════ THE PLATES — FEATURES ═══════ */
 
-      .study {
+      .plates {
         display: grid;
-        grid-template-columns: 3fr 1fr;
-        gap: clamp(32px, 4vw, 48px);
-        align-items: center;
-        margin-bottom: clamp(80px, 10vw, 130px);
+        grid-template-columns: repeat(6, 1fr);
       }
 
-      .study:last-child {
-        margin-bottom: 0;
+      .plate {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        min-width: 0;
+        padding: clamp(26px, 3vw, 44px);
+        border-top: 0.5px solid var(--border);
+        border-left: 0.5px solid var(--border);
       }
 
-      /* Default: image first (left), text second (right) */
-      .study .study-media {
-        order: 1;
+      .plate.span-6 {
+        grid-column: span 6;
       }
-      .study .study-text {
-        order: 2;
+      .plate.span-4 {
+        grid-column: span 4;
       }
-
-      /* Reverse: text first (left), image second (right) */
-      .study.reverse {
-        grid-template-columns: 1fr 3fr;
+      .plate.span-3 {
+        grid-column: span 3;
       }
-      .study.reverse .study-text {
-        order: 1;
-      }
-      .study.reverse .study-media {
-        order: 2;
+      .plate.span-2 {
+        grid-column: span 2;
       }
 
-      .study-annotation {
+      /* The plate that opens a row owns the left edge, so no rule doubles up. */
+      .plate.row-start {
+        border-left: none;
+        padding-left: 0;
+      }
+      .plate.row-end {
+        padding-right: 0;
+      }
+      .plates > .plate:first-child {
+        border-top: none;
+        padding-top: 0;
+      }
+
+      .plate-eyebrow {
         font-family: var(--mono);
-        font-size: 13px;
+        font-size: 11.5px;
         font-weight: 500;
         letter-spacing: 0.2em;
         text-transform: uppercase;
-        color: rgba(201, 151, 42, 0.55);
-        margin-bottom: 16px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
+        color: rgba(201, 151, 42, 0.6);
       }
 
-      .study-annotation::before {
-        content: '';
-        width: 20px;
-        height: 0.5px;
-        background: rgba(201, 151, 42, 0.3);
-      }
-
-      .study-text h3 {
-        font-family: var(--display);
-        font-size: clamp(1.6rem, 3.5vw, 2.4rem);
-        font-weight: 400;
-        line-height: 1.25;
-        color: var(--parchment);
-        margin-bottom: 16px;
-        letter-spacing: 0.01em;
-      }
-
-      .study-text p {
-        font-size: clamp(17px, 1.8vw, 20px);
-        color: rgba(237, 229, 204, 0.72);
-        line-height: 1.85;
-      }
-
-      .study-media {
-        position: relative;
-      }
-
-      .study-media img {
-        display: block;
-        width: 100%;
-        transition: transform 0.6s var(--ease);
-      }
-
-      .study-frame {
+      .plate-media {
         position: relative;
         overflow: hidden;
-        border-radius: 10px;
-        transition: transform 0.5s var(--ease);
-        border: none;
-        outline: none;
+        border-radius: 4px;
+        border: 0.5px solid var(--border);
+        background: var(--obsidian);
       }
 
-      .study-frame .js-tilt-glare {
-        border: none !important;
-        outline: none !important;
-        border-radius: 0 !important;
+      .plate-media.is-tall {
+        margin: 0 auto;
+        max-width: 320px;
       }
 
-      .study-frame .js-tilt-glare-inner {
-        border: none !important;
-        outline: none !important;
-        border-radius: 0 !important;
+      .plate-loop {
+        display: block;
+        width: 100%;
+        height: auto;
       }
 
-      .study-fig {
-        font-family: var(--serif);
-        font-size: 14px;
-        font-style: italic;
-        color: rgba(237, 229, 204, 0.45);
-        margin-top: 16px;
-        text-align: center;
-        letter-spacing: 0.04em;
+      .plate-play {
+        position: absolute;
+        left: 12px;
+        bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+        border-radius: 2px;
+        border: 0.5px solid rgba(237, 229, 204, 0.2);
+        background: rgba(10, 9, 7, 0.72);
+        color: rgba(237, 229, 204, 0.8);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        transition: border-color 0.25s var(--ease);
       }
 
-      @media (max-width: 768px) {
-        .study,
-        .study.reverse {
+      .plate-play:hover,
+      .plate-play:focus-visible {
+        border-color: rgba(201, 151, 42, 0.6);
+        color: var(--parchment);
+      }
+
+      .plate-media.is-playing .plate-play {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .plate-play-time {
+        color: rgba(237, 229, 204, 0.4);
+      }
+
+      .plate h3 {
+        font-family: var(--display);
+        font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+        font-weight: 400;
+        line-height: 1.28;
+        letter-spacing: 0.01em;
+        color: var(--parchment);
+      }
+
+      .plate p {
+        font-size: 17px;
+        line-height: 1.75;
+        color: rgba(237, 229, 204, 0.6);
+      }
+
+      /* The lead plate sets its heading beside the line, not above it. */
+      .plate-lead-text {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: clamp(24px, 4vw, 56px);
+        align-items: baseline;
+      }
+
+      .plate-lead-text h3 {
+        font-size: clamp(1.7rem, 3vw, 2.3rem);
+      }
+
+      @media (max-width: 900px) {
+        .plates {
           grid-template-columns: 1fr;
-          gap: 28px;
         }
-        .study .study-media,
-        .study.reverse .study-media {
-          order: 1;
-          width: 100%;
+        .plate,
+        .plate.span-6,
+        .plate.span-4,
+        .plate.span-3,
+        .plate.span-2 {
+          grid-column: span 1;
+          border-left: none;
+          padding-left: 0;
+          padding-right: 0;
         }
-        .study .study-text,
-        .study.reverse .study-text {
-          order: 2;
+        .plate-lead-text {
+          grid-template-columns: 1fr;
+          gap: 10px;
         }
-        .study-frame {
-          width: 100%;
+        .plate-media.is-tall {
+          max-width: 260px;
         }
       }
 
@@ -984,61 +1009,45 @@
         }
       }
 
-      /* ═══════ SECONDARY FEATURES ═══════ */
+      /* ═══════ THE INDEX — EVERYTHING ELSE ═══════ */
 
-      .secondary-grid {
+      .index-grid {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 0.5px;
-        background: var(--border);
-        border: 0.5px solid var(--border);
+        grid-template-columns: repeat(3, 1fr);
+        column-gap: clamp(28px, 4vw, 56px);
       }
 
-      .secondary-card {
-        background: var(--obsidian);
-        padding: 32px;
-        transition: background 0.4s ease;
+      .index-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 15px 0;
+        border-bottom: 0.5px solid var(--border);
       }
 
-      .secondary-card:hover {
-        background: #0d0c09;
+      .index-col:last-child .index-row:last-child {
+        border-bottom: 0.5px solid var(--border);
       }
 
-      .secondary-icon {
-        width: 22px;
-        height: 22px;
-        margin-bottom: 18px;
-        color: rgba(201, 151, 42, 0.4);
-      }
-
-      .secondary-icon svg {
-        width: 100%;
-        height: 100%;
-      }
-
-      .secondary-card h4 {
-        font-family: var(--display);
+      .index-name {
         font-size: 18px;
-        font-weight: 400;
-        color: var(--parchment);
-        margin-bottom: 8px;
-        letter-spacing: 0.02em;
+        color: rgba(237, 229, 204, 0.82);
       }
 
-      .secondary-card p {
-        font-size: 16px;
-        color: rgba(237, 229, 204, 0.68);
-        line-height: 1.75;
+      .index-note {
+        font-size: 15.5px;
+        line-height: 1.6;
+        color: rgba(237, 229, 204, 0.42);
       }
 
-      @media (max-width: 768px) {
-        .secondary-grid {
+      @media (max-width: 860px) {
+        .index-grid {
           grid-template-columns: 1fr 1fr;
         }
       }
 
-      @media (max-width: 500px) {
-        .secondary-grid {
+      @media (max-width: 560px) {
+        .index-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -1763,173 +1772,171 @@
         </svg>
         <div class="container">
           <div class="section-header reveal">
-            <div class="section-label">Features</div>
-            <h2 class="section-heading">Run every agent, your way</h2>
-            <p class="section-sub">
-              A complete environment for running parallel agent sessions, automating multi-step
-              workflows, and keeping everything organized.
-            </p>
+            <div class="section-label">The work</div>
+            <h2 class="section-heading">Five things it does that nothing else does</h2>
+            <p class="section-sub">Each one recorded in the app, at the version on the badge.</p>
           </div>
 
-          <div class="study reveal">
-            <div class="study-text">
-              <div class="study-annotation">Study I</div>
-              <h3>Many minds, one grid</h3>
-              <p>
-                Run Claude, Copilot, Codex, OpenCode, and Gemini simultaneously. Resize, reorder,
-                minimize. Real-time status detection for every agent.
-              </p>
-            </div>
-            <div class="study-media">
-              <div class="study-frame">
-                <img
-                  src="assets/hero-1400.webp"
-                  srcset="assets/hero-1400.webp 900w, assets/hero-2400.webp 1600w"
-                  sizes="(max-width: 900px) 100vw, 640px"
-                  width="3024"
-                  height="1764"
-                  alt="Multi-agent grid layout"
-                  loading="lazy"
-                  decoding="async"
-                />
+          <div class="plates">
+            <div class="plate span-6 row-start row-end reveal">
+              <div class="plate-eyebrow">0.7 &middot; Durability</div>
+              <div class="plate-media">
+                <video
+                  class="plate-loop"
+                  data-lead
+                  loop
+                  muted
+                  playsinline
+                  preload="metadata"
+                  poster="assets/durability-1600.webp"
+                  width="1600"
+                  height="700"
+                  aria-label="The server detaches from the window, so a quit, a crash and an update all leave the session running. A reboot does not, and the strip that greets you says so."
+                >
+                  <source src="assets/durability.webm" type="video/webm" />
+                  <source src="assets/durability.mp4" type="video/mp4" />
+                </video>
               </div>
-              <p class="study-fig">Fig. II &middot; Multi-Agent Grid</p>
-            </div>
-          </div>
-
-          <div class="study reverse reveal">
-            <div class="study-text">
-              <div class="study-annotation">Study II</div>
-              <h3>Every task, accounted for</h3>
-              <p>
-                Per-project kanban boards with markdown support, image attachments, git branch
-                targeting, and worktree isolation for clean parallel work.
-              </p>
-            </div>
-            <div class="study-media">
-              <div class="study-frame">
-                <img
-                  src="assets/tasks-1600.webp"
-                  srcset="assets/tasks-900.webp 900w, assets/tasks-1600.webp 1600w"
-                  sizes="(max-width: 900px) 100vw, 640px"
-                  width="3020"
-                  height="1644"
-                  alt="Task queue and kanban board"
-                  loading="lazy"
-                  decoding="async"
-                />
+              <div class="plate-lead-text">
+                <h3>Quit it. The agent keeps going.</h3>
+                <p>
+                  The server detaches from the window, so a quit, a crash and an update all leave
+                  the session running. A reboot does not, and the strip that greets you says so.
+                </p>
               </div>
-              <p class="study-fig">Fig. III &middot; Task Queue &amp; Kanban</p>
             </div>
-          </div>
-
-          <div class="study reveal">
-            <div class="study-text">
-              <div class="study-annotation">Study III</div>
-              <h3>Workflow automation</h3>
-              <p>
-                Create multi-step workflows that chain agent launches, script executions, and task
-                operations. Schedule manually or on a cron.
-              </p>
-            </div>
-            <div class="study-media">
-              <div class="study-frame">
-                <img
-                  src="assets/workflows-1600.webp"
-                  srcset="assets/workflows-900.webp 900w, assets/workflows-1600.webp 1600w"
-                  sizes="(max-width: 900px) 100vw, 640px"
-                  width="2786"
-                  height="1734"
-                  alt="Visual workflow editor"
-                  loading="lazy"
-                  decoding="async"
-                />
+            <div class="plate span-4 row-start reveal">
+              <div class="plate-eyebrow">0.7 &middot; Workflows</div>
+              <div class="plate-media">
+                <video
+                  class="plate-loop"
+                  loop
+                  muted
+                  playsinline
+                  preload="none"
+                  poster="assets/workflows-1200.webp"
+                  width="1200"
+                  height="675"
+                  aria-label="Steps drag out of a docked library onto free canvas. Webhooks, schedules, conditions, loops, approvals, and a call to any API. Every node carries what its last run did."
+                >
+                  <source src="assets/workflows.webm" type="video/webm" />
+                  <source src="assets/workflows.mp4" type="video/mp4" />
+                </video>
+                <button class="plate-play" type="button">
+                  <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
+                    <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
+                  </svg>
+                  <span class="plate-play-label">Play</span>
+                  <span class="plate-play-time">6s</span>
+                </button>
               </div>
-              <p class="study-fig">Fig. IV &middot; Workflow Automation</p>
-            </div>
-          </div>
-
-          <div class="study reverse reveal">
-            <div class="study-text">
-              <div class="study-annotation">Study IV</div>
-              <h3>Run agents headless</h3>
-              <p>
-                Run agents without a visible terminal. Full output capture for later review. Stagger
-                delays for sequential orchestration.
-              </p>
-            </div>
-            <div class="study-media">
-              <div class="study-frame">
-                <img
-                  src="assets/headless-1600.webp"
-                  srcset="assets/headless-900.webp 900w, assets/headless-1600.webp 1600w"
-                  sizes="(max-width: 900px) 100vw, 640px"
-                  width="2786"
-                  height="1734"
-                  alt="Headless execution interface"
-                  loading="lazy"
-                  decoding="async"
-                />
+              <div class="plate-text">
+                <h3>Draw the pipeline on a canvas</h3>
+                <p>
+                  Steps drag out of a docked library onto free canvas. Webhooks, schedules,
+                  conditions, loops, approvals, and a call to any API. Every node carries what its
+                  last run did.
+                </p>
               </div>
-              <p class="study-fig">Fig. V &middot; Headless Execution</p>
             </div>
-          </div>
-
-          <div class="study reveal">
-            <div class="study-text">
-              <div class="study-annotation">Study V</div>
-              <h3>Find anything instantly</h3>
-              <p>
-                Fuzzy search for actions, terminals, sessions, projects, and workflows. Launch
-                agents instantly from anywhere.
-              </p>
-            </div>
-            <div class="study-media">
-              <div class="study-frame">
-                <img
-                  src="assets/command-palette-1600.webp"
-                  srcset="
-                    assets/command-palette-900.webp   900w,
-                    assets/command-palette-1600.webp 1600w
-                  "
-                  sizes="(max-width: 900px) 100vw, 640px"
-                  width="3020"
-                  height="1644"
-                  alt="Command palette"
-                  loading="lazy"
-                  decoding="async"
-                />
+            <div class="plate span-2 row-end reveal">
+              <div class="plate-eyebrow">0.7 &middot; Phone</div>
+              <div class="plate-media is-tall">
+                <video
+                  class="plate-loop"
+                  loop
+                  muted
+                  playsinline
+                  preload="none"
+                  poster="assets/phone-560.webp"
+                  width="560"
+                  height="827"
+                  aria-label="The phone joins the same server over your own network and takes the session from there."
+                >
+                  <source src="assets/phone.webm" type="video/webm" />
+                  <source src="assets/phone.mp4" type="video/mp4" />
+                </video>
+                <button class="plate-play" type="button">
+                  <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
+                    <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
+                  </svg>
+                  <span class="plate-play-label">Play</span>
+                  <span class="plate-play-time">7s</span>
+                </button>
               </div>
-              <p class="study-fig">Fig. VI &middot; Command Palette</p>
-            </div>
-          </div>
-
-          <div class="study reverse reveal">
-            <div class="study-text">
-              <div class="study-annotation">Study VI</div>
-              <h3>Pick up where you left off</h3>
-              <p>
-                Restore previous agent sessions on restart with accurate session matching and full
-                history tracking across projects.
-              </p>
-            </div>
-            <div class="study-media">
-              <div class="study-frame">
-                <img
-                  src="assets/resume-sessions-1600.webp"
-                  srcset="
-                    assets/resume-sessions-900.webp   900w,
-                    assets/resume-sessions-1600.webp 1600w
-                  "
-                  sizes="(max-width: 900px) 100vw, 640px"
-                  width="2786"
-                  height="1734"
-                  alt="Session persistence"
-                  loading="lazy"
-                  decoding="async"
-                />
+              <div class="plate-text">
+                <h3>Pair a phone by showing it a code</h3>
+                <p>
+                  The phone joins the same server over your own network and takes the session from
+                  there.
+                </p>
               </div>
-              <p class="study-fig">Fig. VII &middot; Session Persistence</p>
+            </div>
+            <div class="plate span-3 row-start reveal">
+              <div class="plate-eyebrow">0.7 &middot; Connectors</div>
+              <div class="plate-media">
+                <video
+                  class="plate-loop"
+                  loop
+                  muted
+                  playsinline
+                  preload="none"
+                  poster="assets/connectors-900.webp"
+                  width="900"
+                  height="540"
+                  aria-label="Connectors install as versioned packs that run offline and carry a receipt of the checks that ran. Where a CLI on the machine is already signed in, Vorn uses that."
+                >
+                  <source src="assets/connectors.webm" type="video/webm" />
+                  <source src="assets/connectors.mp4" type="video/mp4" />
+                </video>
+                <button class="plate-play" type="button">
+                  <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
+                    <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
+                  </svg>
+                  <span class="plate-play-label">Play</span>
+                  <span class="plate-play-time">5s</span>
+                </button>
+              </div>
+              <div class="plate-text">
+                <h3>It borrows the login you already have</h3>
+                <p>
+                  Connectors install as versioned packs that run offline and carry a receipt of the
+                  checks that ran. Where a CLI on the machine is already signed in, Vorn uses that.
+                </p>
+              </div>
+            </div>
+            <div class="plate span-3 row-end reveal">
+              <div class="plate-eyebrow">0.7 &middot; Panes</div>
+              <div class="plate-media">
+                <video
+                  class="plate-loop"
+                  loop
+                  muted
+                  playsinline
+                  preload="none"
+                  poster="assets/panes-900.webp"
+                  width="900"
+                  height="540"
+                  aria-label="A session can open a browser pane and an iOS simulator beside its terminal, and the agent drives both to check its own work."
+                >
+                  <source src="assets/panes.webm" type="video/webm" />
+                  <source src="assets/panes.mp4" type="video/mp4" />
+                </video>
+                <button class="plate-play" type="button">
+                  <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
+                    <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
+                  </svg>
+                  <span class="plate-play-label">Play</span>
+                  <span class="plate-play-time">6s</span>
+                </button>
+              </div>
+              <div class="plate-text">
+                <h3>The agent gets a browser and a simulator</h3>
+                <p>
+                  A session can open a browser pane and an iOS simulator beside its terminal, and
+                  the agent drives both to check its own work.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -2156,96 +2163,63 @@
       <section>
         <div class="container">
           <div class="section-header reveal">
-            <div class="section-label">And More</div>
-            <h2 class="section-heading">Ship faster with less context-switching</h2>
+            <div class="section-label">Also in the box</div>
+            <h2 class="section-heading">The rest of it, in one page</h2>
           </div>
-          <div class="secondary-grid stagger">
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M12 3v18" />
-                  <path d="M5 12h14" />
-                  <path d="M5 7l3 0" />
-                  <path d="M5 17l3 0" />
-                  <path d="M16 7l3 0" />
-                  <path d="M16 17l3 0" />
-                </svg>
+          <div class="index-grid">
+            <div class="index-col">
+              <div class="index-row reveal">
+                <span class="index-name">Multi-agent grid</span>
+                <span class="index-note">Run several agents side by side.</span>
               </div>
-              <h4>Inline diff review</h4>
-              <p>
-                Review git changes inline, add comments to specific lines, and send structured
-                feedback directly to your agents.
-              </p>
+              <div class="index-row reveal">
+                <span class="index-name">Task board per project</span>
+                <span class="index-note">Kanban, with worktree isolation.</span>
+              </div>
+              <div class="index-row reveal">
+                <span class="index-name">Command palette</span>
+                <span class="index-note">Every action, one keystroke.</span>
+              </div>
+              <div class="index-row reveal">
+                <span class="index-name">Headless runs</span>
+                <span class="index-note">No terminal, and the output still kept.</span>
+              </div>
             </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                  <path d="M6 2v2" />
-                  <path d="M6 20v2" />
-                  <path d="M18 2v2" />
-                  <path d="M18 20v2" />
-                  <path d="M2 6h2" />
-                  <path d="M20 6h2" />
-                  <path d="M2 18h2" />
-                  <path d="M20 18h2" />
-                </svg>
+            <div class="index-col">
+              <div class="index-row reveal">
+                <span class="index-name">Inline diff review</span>
+                <span class="index-note">Comment on a line, send it back.</span>
               </div>
-              <h4>Floating widget</h4>
-              <p>Always-on-top overlay showing real-time agent status across your desktop.</p>
+              <div class="index-row reveal">
+                <span class="index-name">MCP server</span>
+                <span class="index-note">Agents drive Vorn itself.</span>
+              </div>
+              <div class="index-row reveal">
+                <span class="index-name">Keys in one place</span>
+                <span class="index-note">Borrowed by a script when it asks.</span>
+              </div>
+              <div class="index-row reveal">
+                <span class="index-name">Editor and file panes</span>
+                <span class="index-note">Read and edit beside the terminal.</span>
+              </div>
             </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path
-                    d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"
-                  />
-                  <path d="M12 6v6l4 2" />
-                </svg>
+            <div class="index-col">
+              <div class="index-row reveal">
+                <span class="index-name">Floating widget</span>
+                <span class="index-note">Status while Vorn is behind something.</span>
               </div>
-              <h4>MCP server</h4>
-              <p>
-                Agents can create tasks, trigger workflows, launch other agents, and query project
-                state.
-              </p>
-            </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M4 17l6-6-6-6" />
-                  <path d="M12 19h8" />
-                </svg>
+              <div class="index-row reveal">
+                <span class="index-name">Remote SSH</span>
+                <span class="index-note">Terminals on another machine.</span>
               </div>
-              <h4>Remote SSH</h4>
-              <p>Launch terminals on remote machines and manage agents over SSH.</p>
+              <div class="index-row reveal">
+                <span class="index-name">Worktree isolation</span>
+                <span class="index-note">Parallel work, clean trees.</span>
+              </div>
+              <div class="index-row reveal">
+                <span class="index-name">Updates itself</span>
+                <span class="index-note">And takes its server with it.</span>
+              </div>
             </div>
           </div>
         </div>
@@ -2660,22 +2634,41 @@
         .catch(() => {})
 
       // ═══════════════════════════════════════
-      // VANILLA TILT — 3D hover on images
+      // THE PLATE LOOPS — lead plays itself, the rest play on ask
       // ═══════════════════════════════════════
-      const tiltScript = document.createElement('script')
-      tiltScript.src =
-        'https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.8.1/vanilla-tilt.min.js'
-      tiltScript.onload = function () {
-        if (window.innerWidth > 768) {
-          VanillaTilt.init(document.querySelectorAll('.study-frame'), {
-            max: 6,
-            speed: 500,
-            glare: false,
-            perspective: 1200
+      ;(function initLoops() {
+        const calm = window.matchMedia('(prefers-reduced-motion: reduce)')
+        document.querySelectorAll('.plate-media').forEach(function (media) {
+          const video = media.querySelector('video')
+          if (!video) return
+          const button = media.querySelector('.plate-play')
+
+          function play() {
+            const started = video.play()
+            if (started) started.catch(function () {})
+            media.classList.add('is-playing')
+          }
+          function pause() {
+            video.pause()
+            media.classList.remove('is-playing')
+          }
+
+          if (video.hasAttribute('data-lead')) {
+            // The lead loop starts on its own, and never against a stated preference.
+            if (!calm.matches) play()
+            calm.addEventListener('change', function (e) {
+              e.matches ? pause() : play()
+            })
+            return
+          }
+
+          if (!button) return
+          button.addEventListener('click', function () {
+            video.paused ? play() : pause()
           })
-        }
-      }
-      document.body.appendChild(tiltScript)
+          video.addEventListener('click', pause)
+        })
+      })()
 
       // ═══════════════════════════════════════
       // ROTATING QUOTES — live cycle with fade
