@@ -302,6 +302,39 @@ describe('packing an extension', () => {
     )
   })
 
+  it('finds the page beside the package when the entry is the built bundle', async () => {
+    // What the CLI really passes: `./dist/index.js`, whose directory holds no `web/`.
+    const dir = packageWithPage()
+    mkdirSync(join(dir, 'dist'), { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'review' }))
+
+    const result = await packConnector(extension, {
+      entry: './dist/index.js',
+      resolveDir: dir,
+      outDir: tempDir(),
+      bundle: cleanBundle,
+      launch: starts
+    })
+
+    expect(result.findings.some((item) => item.level === 'error')).toBe(false)
+    const entries: string[] = []
+    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
+    expect(entries).toContain('web/report/index.html')
+  })
+
+  it('packs nothing when a pane names a page the package does not carry', async () => {
+    const result = await packConnector(extension, {
+      entry: './extension.js',
+      resolveDir: tempDir(),
+      outDir: tempDir(),
+      bundle: cleanBundle,
+      launch: starts
+    })
+
+    expect(result.file).toBeUndefined()
+    expect(result.findings.map((item) => item.code)).toContain('web-entry-missing')
+  })
+
   it('carries no web directory for a connector, which has no pages', async () => {
     const result = await packConnector(connector, {
       entry: './connector.js',

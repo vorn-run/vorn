@@ -1,13 +1,14 @@
+import { existsSync } from 'node:fs'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { checkConnector, type CheckCode, type CheckFinding } from './check'
 import {
   bundleDependencyFindings,
   bundledRequireFindings,
-  carriesWeb,
   esbuildBundle,
   lifecycleScriptFindings,
   packageDirFor,
+  packageRootFor,
   packEntryContents,
   packLaunchFindings,
   readNearestPackageJson,
@@ -70,7 +71,9 @@ export async function packConnector(
   const resolveDir = resolve(options.resolveDir ?? process.cwd())
   const entryDir = packageDirFor(resolveDir, options.entry)
 
-  const findings = await checkConnector(connector)
+  // Told where the package is, so a pane naming a page nothing ships is caught
+  // here rather than as a missing file at the moment of tarring.
+  const findings = await checkConnector(connector, { packageDir: packageRootFor(entryDir) })
   findings.push(...lifecycleScriptFindings(readNearestPackageJson(entryDir)))
   if (findings.some((item) => item.level === 'error')) return { findings }
 
@@ -89,10 +92,12 @@ export async function packConnector(
     findings.push(...(await (options.launch ?? packLaunchFindings)(staging)))
     if (findings.some((item) => item.level === 'error')) return { findings }
     const { create } = await import('tar')
+    // What was staged, not what was declared: the two agree, and tarring a name
+    // that is not there fails with a path rather than with a sentence.
     await create({ gzip: true, file, cwd: staging }, [
       'manifest.json',
       'index.js',
-      ...(carriesWeb(connector) ? [WEB_DIR] : [])
+      ...(existsSync(join(staging, WEB_DIR)) ? [WEB_DIR] : [])
     ])
   } finally {
     await rm(staging, { recursive: true, force: true })

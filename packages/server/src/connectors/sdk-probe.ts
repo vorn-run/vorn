@@ -21,6 +21,7 @@ import type {
   ExtensionActivation,
   ExtensionContributions,
   ExtensionContributionSummary,
+  ExtensionPaneContribution,
   ExtensionPermission,
   SdkActionInput,
   SdkConnectorAuth,
@@ -378,18 +379,20 @@ function toContribution(raw: unknown): ExtensionContributionSummary | undefined 
 export function toContributes(value: unknown): ExtensionContributions | undefined {
   if (!isRecord(value)) return undefined
 
-  const panes = (Array.isArray(value.panes) ? value.panes : []).flatMap((raw) => {
-    const base = toContribution(raw)
-    if (!base || !isRecord(raw)) return []
-    const web = str(raw.web).trim()
-    const command = strings(raw.command)
-    if (web !== '' && WEB_ENTRY_PATTERN.test(web) && !web.split('/').includes('..')) {
-      return [{ ...base, web }]
+  const panes = (Array.isArray(value.panes) ? value.panes : []).flatMap(
+    (raw): ExtensionPaneContribution[] => {
+      const base = toContribution(raw)
+      if (!base || !isRecord(raw)) return []
+      const web = str(raw.web).trim()
+      const command = strings(raw.command)
+      if (web !== '' && WEB_ENTRY_PATTERN.test(web) && !web.split('/').includes('..')) {
+        return [{ ...base, web }]
+      }
+      // Argv, so an empty element would run something the extension did not name.
+      if (command.length > 0 && command.every((arg) => arg !== '')) return [{ ...base, command }]
+      return []
     }
-    // Argv, so an empty element would run something the extension did not name.
-    if (command.length > 0 && command.every((arg) => arg !== '')) return [{ ...base, command }]
-    return []
-  })
+  )
 
   const footers = (Array.isArray(value.footers) ? value.footers : []).flatMap((raw) => {
     const base = toContribution(raw)

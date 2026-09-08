@@ -245,6 +245,23 @@ export function readNearestPackageJson(fromDir: string): Record<string, unknown>
 }
 
 /**
+ * The package's own root, which is where `web/` sits.
+ *
+ * `packageDirFor` answers where to *start looking* for a package.json, and for
+ * a built entry that is `dist/`. A page is authored beside the package rather
+ * than beside the bundle, so finding it means finishing that walk.
+ */
+export function packageRootFor(fromDir: string): string {
+  let current = resolve(fromDir)
+  for (;;) {
+    if (existsSync(join(current, 'package.json'))) return current
+    const parent = dirname(current)
+    if (parent === current) return resolve(fromDir)
+    current = parent
+  }
+}
+
+/**
  * The stdio entry a pack is built from.
  *
  * `check` bundles exactly this too: a gate that asked a different question than
@@ -285,7 +302,7 @@ export async function stagePack(
   // Copied whole rather than per pane: the manifest names a path inside `web/`,
   // so the pack has to hold the stylesheet and the script that page asks for too.
   if (packageDir !== undefined && carriesWeb(connector)) {
-    const from = join(resolve(packageDir), WEB_DIR)
+    const from = join(packageRootFor(packageDir), WEB_DIR)
     if (existsSync(from)) await cp(from, join(dir, WEB_DIR), { recursive: true })
   }
   return dir
