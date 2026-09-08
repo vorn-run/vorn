@@ -194,4 +194,43 @@ describe('a footer band', () => {
     footers.stopFooters('s1')
     expect(footers.footerReadings('s1')).toEqual([])
   })
+
+  // Otherwise the reading arrives after the card is gone and nothing ever clears it.
+  it('says nothing about a session that ended while it was computing', async () => {
+    let release: (() => void) | undefined
+    answer = () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({ structuredContent: { items: [{ label: 'tests', value: 'passing' }] } })
+      })
+    footers.syncFooters(session())
+    await settle()
+    footers.stopFooters('s1')
+    broadcasts.length = 0
+
+    release?.()
+    await settle()
+    expect(footers.footerReadings('s1')).toEqual([])
+    expect(broadcasts.filter((one) => one.method === IPC.EXTENSION_FOOTER_ITEMS)).toEqual([])
+  })
+
+  // An upgraded pack is a different footer; leaving the old timer would keep the old interval.
+  it('starts again when the pack it came from changed', async () => {
+    footers.syncFooters(session())
+    await settle()
+    expect(calls).toHaveLength(1)
+
+    // Same footer, same interval, so nothing should be restarted.
+    footers.syncFooters(session())
+    await settle()
+    expect(calls).toHaveLength(1)
+
+    packs[0] = extension({
+      version: '0.2.0',
+      contributes: { footers: [{ id: 'checks', title: 'Checks', every: 30 }] }
+    })
+    footers.syncFooters(session())
+    await settle()
+    expect(calls).toHaveLength(2)
+  })
 })
