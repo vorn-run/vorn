@@ -572,6 +572,19 @@ function activationStates(sessionId: string): ExtensionActivationState[] {
 }
 
 /**
+ * Say a session exists, and settle what the extensions show on it.
+ *
+ * Both halves together because they are one event. Sessions are created from
+ * several places -- a shell, an agent, a restore -- and a site that told the
+ * windows but not the extensions would show a card with no bands and no way to
+ * tell why.
+ */
+export function announceSession(session: TerminalSession): void {
+  clientRegistry.broadcast(IPC.SESSION_CREATED, session)
+  syncExtensionsFor(session)
+}
+
+/**
  * Settle what an extension shows on a session, and tell the windows drawing it.
  *
  * Called when a session appears and when its packs change, which are the two
@@ -931,7 +944,7 @@ export function registerAllMethods(): void {
   registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.getOutput(id, lines))
   registerMethod('shell:create', (cwd) => {
     const session = ptyManager.createShellPty(cwd)
-    clientRegistry.broadcast(IPC.SESSION_CREATED, session)
+    announceSession(session)
     logSessionEvent(session.id, 'created', {
       agentType: session.agentType,
       projectName: session.projectName,
@@ -1050,7 +1063,7 @@ export function registerAllMethods(): void {
         })
         // Synchronously, so it is in the buffer before the shell's first byte.
         ptyManager.injectOutput(session.id, BETWEEN_RUNS)
-        clientRegistry.broadcast(IPC.SESSION_CREATED, session)
+        announceSession(session)
         sessionManager.scheduleSave()
         return { ok: true as const, session }
       }
@@ -2068,9 +2081,8 @@ export function registerAllMethods(): void {
       const p = payload as { id: string; exitCode: number }
       logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })
     }
-    // A card that just appeared, or whose worktree moved, gets whatever the
-    // extensions say about it — which for most sessions is nothing at all.
-    if (channel === IPC.SESSION_CREATED || channel === IPC.SESSION_UPDATED) {
+    // A session whose worktree or agent moved shows different extensions than it did.
+    if (channel === IPC.SESSION_UPDATED) {
       const session = payload as TerminalSession | null
       if (session?.id) syncExtensionsFor(session)
     }
@@ -2120,7 +2132,7 @@ export function registerAllMethods(): void {
 
   // Handle new terminal sessions: broadcast to UI + Copilot hook setup
   ptyManager.on('session-created', (session, payload) => {
-    clientRegistry.broadcast(IPC.SESSION_CREATED, session)
+    announceSession(session)
     logSessionEvent(session.id, 'created', {
       agentType: session.agentType,
       projectName: session.projectName,
