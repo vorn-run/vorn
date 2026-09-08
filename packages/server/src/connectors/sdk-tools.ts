@@ -21,6 +21,16 @@ export function pollToolName(triggerType: string): string {
   return `poll_${triggerType}`
 }
 
+/** MCP tool name an extension's footer is recomputed under. */
+export function footerToolName(footerId: string): string {
+  return `vorn_footer_${footerId}`
+}
+
+/** MCP tool name an extension's link handler is run under. */
+export function handlerToolName(handlerId: string): string {
+  return `vorn_handler_${handlerId}`
+}
+
 /**
  * Whether a tool is plumbing rather than something a workflow step can call.
  *
@@ -30,6 +40,8 @@ export function pollToolName(triggerType: string): string {
  */
 export function isReservedSdkTool(name: string, triggerTypes?: readonly string[]): boolean {
   if (name === MANIFEST_TOOL || name === PREFLIGHT_TOOL || name === OPTIONS_TOOL) return true
+  // A contribution is called by the app on its own schedule, never by a step.
+  if (name.startsWith(footerToolName('')) || name.startsWith(handlerToolName(''))) return true
   return triggerTypes
     ? triggerTypes.some((type) => name === pollToolName(type))
     : name.startsWith(pollToolName(''))

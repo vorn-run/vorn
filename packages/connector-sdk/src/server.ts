@@ -2,15 +2,26 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z, type ZodTypeAny } from 'zod'
 import { resolveConfig } from './define'
+import { createExtensionHost } from './host'
 import { runAction, runOptions, runPoll } from './runtime'
 import {
   MANIFEST_TOOL,
   OPTIONS_TOOL,
   PREFLIGHT_TOOL,
   connectorManifest,
+  footerToolName,
+  handlerToolName,
   pollToolName
 } from './setup'
-import type { ActionInputField, ActionOutputField, Connector, ConnectorConfig } from './types'
+import type {
+  ActionInputField,
+  ActionOutputField,
+  Connector,
+  ConnectorConfig,
+  ExtensionAgent,
+  ExtensionContext,
+  ExtensionHost
+} from './types'
 
 function json(value: Record<string, unknown>): {
   content: Array<{ type: 'text'; text: string }>
@@ -95,6 +106,8 @@ export interface ConnectorServerOptions {
   /** Resolved connector configuration. Defaults to reading `process.env`. */
   config?: ConnectorConfig
   now?: () => string
+  /** The host an extension's contributions talk to; defaults to the bridge Vorn served. */
+  host?(sessionId: string): ExtensionHost
 }
 
 /**
@@ -229,6 +242,78 @@ export function createConnectorServer(
               ...(options.now && { now: options.now })
             })) as unknown as Record<string, unknown>
           )
+        } catch (error) {
+          return failure(error)
+        }
+      }
+    )
+  }
+
+  // An extension's contributions are served the same way a trigger is: one tool
+  // each, called by the host on its own schedule or when someone clicks.
+  const sessionShape = {
+    sessionId: z.string().describe('The session this is being computed for'),
+    worktreePath: z.string().describe("Where the session's work is"),
+    agent: z.string().describe('Which agent runs in the session')
+  }
+  const sessionContext = (
+    args: { sessionId: string; worktreePath: string; agent: string },
+    host: ExtensionHost
+  ): ExtensionContext => ({
+    sessionId: args.sessionId,
+    worktreePath: args.worktreePath,
+    agent: args.agent as ExtensionAgent,
+    host,
+    now: options.now ?? (() => new Date().toISOString())
+  })
+  const hostFor = (sessionId: string): ExtensionHost =>
+    options.host?.(sessionId) ?? createExtensionHost({ sessionId })
+
+  for (const footer of connector.contributes?.footers ?? []) {
+    server.registerTool(
+      footerToolName(footer.id),
+      {
+        title: footer.title,
+        description: footer.description ?? `Recompute ${footer.title} for one session`,
+        inputSchema: sessionShape,
+        outputSchema: z.looseObject({
+          items: z
+            .array(z.looseObject({ label: z.string(), value: z.string() }))
+            .describe('The readings to show in the band')
+        })
+      },
+      async (args) => {
+        try {
+          const items = await footer.run(sessionContext(args, hostFor(args.sessionId)))
+          return json({ items })
+        } catch (error) {
+          return failure(error)
+        }
+      }
+    )
+  }
+
+  for (const handler of connector.contributes?.linkHandlers ?? []) {
+    server.registerTool(
+      handlerToolName(handler.id),
+      {
+        title: handler.title,
+        description: handler.description ?? `Open ${handler.title} for a clicked link`,
+        inputSchema: {
+          ...sessionShape,
+          url: z.string().describe('The clicked text, which matched this handler')
+        },
+        outputSchema: z.looseObject({
+          openPane: z.string().optional().describe("Id of one of this extension's panes to open")
+        })
+      },
+      async (args) => {
+        try {
+          const handled = await handler.run({
+            ...sessionContext(args, hostFor(args.sessionId)),
+            url: args.url
+          })
+          return json({ ...handled })
         } catch (error) {
           return failure(error)
         }
