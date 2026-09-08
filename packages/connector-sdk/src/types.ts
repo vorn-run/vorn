@@ -468,10 +468,197 @@ export interface ConnectorDefinition {
   preflight?(): Promise<PreflightResult> | PreflightResult
 }
 
+/** What a pack is: a connector polls a service, an extension contributes to a session card. */
+export type ConnectorKind = 'connector' | 'extension'
+
 /** A validated definition. Every accessor below is guaranteed non-null. */
 export interface Connector extends ConnectorDefinition {
   readonly version: string
   readonly config: ConnectorConfigField[]
   readonly triggers: TriggerDefinition[]
   readonly actions: ActionDefinition[]
+  readonly kind: ConnectorKind
+  /** What an extension adds to a card. Absent on a connector. */
+  readonly contributes?: ExtensionContributions
+  /** What an extension may ask the host for. Absent on a connector. */
+  readonly permissions?: ExtensionPermission[]
+  /** Where an extension shows at all. Absent on a connector. */
+  readonly activates?: ActivationPredicate
+}
+
+/**
+ * What an extension may ask the host for, named by what it grants rather than
+ * by the method that spends it.
+ *
+ * A closed set on purpose: a permission is shown to a person before they
+ * install, so every one of them has to be a sentence someone can weigh.
+ */
+export type ExtensionPermission =
+  | 'git.read'
+  | 'terminal.read'
+  | 'terminal.selection'
+  | 'terminal.send'
+  | 'card.rename'
+  | 'agent.usage'
+
+/** Session types an extension can name; `shell` is a plain terminal. */
+export type ExtensionAgent = 'claude' | 'copilot' | 'codex' | 'opencode' | 'gemini' | 'shell'
+
+export type ExtensionPlatform = 'darwin' | 'linux' | 'win32'
+
+/**
+ * Where a contribution shows.
+ *
+ * Every declared field must hold for it to show, and each is satisfied by any
+ * one of its values: a Rust footer says `workspaceContains: ['Cargo.toml']`
+ * and is simply absent everywhere else, rather than reporting nothing.
+ */
+export interface ActivationPredicate {
+  /** Paths relative to the session's worktree; any one of them existing is enough. */
+  workspaceContains?: string[]
+  /** Host of the worktree's git remote, e.g. `github.com`. */
+  remoteHost?: string[]
+  agent?: ExtensionAgent[]
+  platform?: ExtensionPlatform[]
+}
+
+interface ContributionBase {
+  /** Stable within the extension; the host addresses the contribution by it. */
+  id: string
+  title: string
+  description?: string
+  /** Narrows where this one shows, inside where the extension is active at all. */
+  when?: ActivationPredicate
+}
+
+/**
+ * A pane the extension adds beside the terminal: either a page it ships or a
+ * program it runs, never both — a union, so the invalid pair is a type error
+ * while the extension is being written.
+ */
+export type PaneContribution = ContributionBase &
+  (
+    | {
+        /** Page inside the pack, under `web/`, rendered in a pane. */
+        web: string
+        command?: never
+      }
+    | {
+        /** Argv run in the session's worktree, drawn as a terminal. */
+        command: string[]
+        web?: never
+      }
+  )
+
+/** One reading in a footer band: a label, its value, and how the value reads. */
+export interface FooterItem {
+  label: string
+  value: string
+  /** `ok` and `danger` colour the value; anything else is ordinary text. */
+  tone?: 'default' | 'ok' | 'danger'
+  /** Opened when the item is clicked, for a reading that points somewhere. */
+  href?: string
+}
+
+/** What the agent's provider says is left, for the windows it publishes. */
+export interface ExtensionUsageWindow {
+  /** The window's own name, e.g. `5h`. */
+  window: string
+  /** How much of the allowance is left, 0 to 1. */
+  remaining: number
+  resetsAt?: string
+}
+
+export interface ExtensionUsage {
+  contextTokens?: number
+  contextWindow?: number
+  /** Session-cumulative prompt-cache hit rate, 0 to 1. */
+  cacheHitRate?: number
+  limits?: ExtensionUsageWindow[]
+}
+
+/**
+ * The host, as an extension sees it.
+ *
+ * Every method costs exactly one permission — `HOST_PERMISSIONS` says which —
+ * and calling one the manifest did not declare is refused rather than ignored,
+ * so an extension cannot quietly reach past what a person agreed to.
+ */
+export interface ExtensionHost {
+  /** The worktree's diff against its base. */
+  diff(): Promise<string>
+  /** Porcelain status of the worktree. */
+  status(): Promise<string>
+  /** The session's recent terminal output, newest last. */
+  output(options?: { lines?: number }): Promise<string>
+  /** The text selected in the terminal, empty when nothing is selected. */
+  selection(): Promise<string>
+  /** Type text into the session's terminal, as a person would. */
+  send(text: string): Promise<void>
+  /** Name the session card, until a person names it themselves. */
+  rename(name: string): Promise<void>
+  /** Context and provider allowance for the session's agent. */
+  usage(): Promise<ExtensionUsage>
+}
+
+/** Every method of the host, so the table naming what each one costs stays complete. */
+export type ExtensionHostMethod = keyof ExtensionHost
+
+/** What a contribution is told about the session it is running for. */
+export interface ExtensionContext {
+  sessionId: string
+  /** Where the session's work is, so a contribution reads the tree it is about. */
+  worktreePath: string
+  agent: ExtensionAgent
+  host: ExtensionHost
+  /** Injectable clock so tests are deterministic. */
+  now(): string
+}
+
+/** What a link handler is told, on top of the session it was clicked in. */
+export interface LinkContext extends ExtensionContext {
+  /** The clicked text, which matched this handler's pattern. */
+  url: string
+}
+
+/** What a link handler asks the app to do once it has run. */
+export interface LinkHandled {
+  /** Id of one of this extension's panes, opened for the session. */
+  openPane?: string
+}
+
+/** A band under the card's status bar, recomputed on its own interval. */
+export interface FooterContribution extends ContributionBase {
+  /** Seconds between calls; the host polls no faster than this. */
+  every: number
+  run(context: ExtensionContext): Promise<FooterItem[]> | FooterItem[]
+}
+
+/** Offers this extension when the clicked text in a terminal matches. */
+export interface LinkHandlerContribution extends ContributionBase {
+  /** Matched against the clicked text as a regular expression. */
+  pattern: string
+  run(context: LinkContext): Promise<LinkHandled | void> | LinkHandled | void
+}
+
+export interface ExtensionContributions {
+  panes?: PaneContribution[]
+  footers?: FooterContribution[]
+  linkHandlers?: LinkHandlerContribution[]
+}
+
+export interface ExtensionDefinition {
+  /** Stable extension id, e.g. `review`. */
+  id: string
+  name: string
+  version?: string
+  description?: string
+  icon?: ConnectorIcon
+  /** Everything this extension may ask the host for, declared rather than inferred. */
+  permissions: ExtensionPermission[]
+  /** Where the extension shows at all; absent means every session. */
+  activates?: ActivationPredicate
+  panes?: PaneContribution[]
+  footers?: FooterContribution[]
+  linkHandlers?: LinkHandlerContribution[]
 }
