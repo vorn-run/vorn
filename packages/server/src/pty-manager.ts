@@ -563,6 +563,51 @@ class PtyManager extends EventEmitter {
     return session
   }
 
+  /**
+   * A terminal running an extension's own program, in the worktree it is about.
+   *
+   * Its own spawn rather than `createShellPty` with arguments: this runs one
+   * named program instead of a login shell, so it takes none of the shell
+   * integration, and it carries the extension's bridge names so the program can
+   * ask the host the same things a footer can.
+   */
+  createExtensionPty(params: {
+    command: string
+    args: string[]
+    cwd: string
+    displayName: string
+    env: Record<string, string>
+  }): TerminalSession {
+    const id = crypto.randomUUID()
+    const ptyProcess = pty.spawn(params.command, params.args, {
+      name: 'xterm-256color',
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
+      cwd: params.cwd,
+      env: { ...getSafeEnv(), ...params.env, VORN_SESSION_ID: id }
+    })
+    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
+    this.ptys.set(id, ptyProcess)
+
+    const session: TerminalSession = {
+      id,
+      agentType: 'shell',
+      projectName: path.basename(params.cwd) || 'extension',
+      projectPath: params.cwd,
+      status: 'running',
+      createdAt: Date.now(),
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
+      pid: ptyProcess.pid,
+      displayName: params.displayName,
+      shellCwd: params.cwd
+    }
+    this.sessions.set(id, session)
+    this.sessionOrder.push(id)
+    this.normalizedPaths.set(id, normalizePath(params.cwd))
+    return session
+  }
+
   private static readonly BUFFER_FLUSH_MS = 8
 
   /**

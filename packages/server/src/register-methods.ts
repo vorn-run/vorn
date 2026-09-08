@@ -37,6 +37,17 @@ import {
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
 import { browserBridge } from './browser-bridge'
+import { activationFor, subjectOf } from './extensions/activation'
+import { footerReadings, stopFooters, syncFooters } from './extensions/footers'
+import { matchLinks, runHandler } from './extensions/handlers'
+import { installedExtensions, stopHostsForExtension } from './extensions/hosts'
+import {
+  closePane,
+  closePanesForExtension,
+  closePanesForSession,
+  openPane
+} from './extensions/panes'
+import { resolveSelection } from './extensions/selection'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
 import { installHooks } from './hook-installer'
@@ -60,8 +71,10 @@ import type {
   TaskStatus,
   ConnectorConfigField,
   ConnectorManifest,
+  ExtensionActivationState,
   ExternalItem,
   ProjectConfig,
+  TerminalSession,
   WorktreeRetentionConfig
 } from '@vornrun/shared/types'
 import { connectionConnectorId, DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
@@ -377,6 +390,7 @@ export function reconcileImplicitConnections(): void {
  * action would keep being offered until someone refreshed the row by hand.
  */
 async function onPackChanged(connectorId: string): Promise<void> {
+  await syncExtensionsAfterPackChange(connectorId)
   await stopClientsForConnector(connectorId)
   // Before the ids are read, so a connector that just connected itself is discovered too.
   syncImplicitConnection(
@@ -538,6 +552,56 @@ function logSessionEvent(
 let serverPort = 0
 export function setServerPort(port: number): void {
   serverPort = port
+}
+
+/** An extension answers about a running session or not at all. */
+function liveSession(sessionId: string): TerminalSession {
+  const session = ptyManager.getLiveSessions().find((one) => one.id === sessionId)
+  if (!session) throw new Error(`Session not found: ${sessionId}`)
+  return session
+}
+
+/** What every installed extension shows on one session's card. */
+function activationStates(sessionId: string): ExtensionActivationState[] {
+  const subject = subjectOf(liveSession(sessionId))
+  return installedExtensions().map((pack) => ({
+    extensionId: pack.id,
+    extensionName: pack.name,
+    ...activationFor(pack, subject)
+  }))
+}
+
+/**
+ * Settle what an extension shows on a session, and tell the windows drawing it.
+ *
+ * Called when a session appears and when its packs change, which are the two
+ * ways the answer moves. A footer already running for a contribution that no
+ * longer shows is stopped by the same call.
+ */
+export function syncExtensionsFor(session: TerminalSession): void {
+  try {
+    syncFooters(session)
+    clientRegistry.broadcast(
+      IPC.EXTENSION_ACTIVATION,
+      { sessionId: session.id, states: activationStates(session.id) },
+      session.id
+    )
+  } catch (err) {
+    log.warn(`[extensions] could not settle ${session.id}: ${err}`)
+  }
+}
+
+/** Everything held for a session, released when it ends. */
+export function releaseExtensionsFor(sessionId: string): void {
+  stopFooters(sessionId)
+  closePanesForSession(sessionId)
+}
+
+/** After a pack changed, no child keeps running its old files and every card is settled again. */
+export async function syncExtensionsAfterPackChange(extensionId: string): Promise<void> {
+  closePanesForExtension(extensionId)
+  await stopHostsForExtension(extensionId)
+  for (const session of ptyManager.getLiveSessions()) syncExtensionsFor(session)
 }
 
 /**
@@ -1776,6 +1840,32 @@ export function registerAllMethods(): void {
 
   registerMethod('connector:listPacks', () => listInstalledPacks())
 
+  registerMethod('extension:list', () => installedExtensions())
+
+  registerMethod('extension:activation', ({ sessionId }) => activationStates(sessionId))
+
+  registerMethod('extension:footerItems', ({ sessionId }) => footerReadings(sessionId))
+
+  registerMethod('extension:openPane', async ({ extensionId, paneId, sessionId }) => {
+    const session = liveSession(sessionId)
+    return openPane(extensionId, paneId, session)
+  })
+
+  registerMethod('extension:closePane', ({ nonce }) => ({ closed: closePane(nonce) }))
+
+  registerMethod('extension:runHandler', async ({ extensionId, handlerId, sessionId, url }) => {
+    const session = liveSession(sessionId)
+    return runHandler(extensionId, handlerId, session, url)
+  })
+
+  registerMethod('extension:matchLinks', ({ sessionId, text }) =>
+    matchLinks(liveSession(sessionId), text)
+  )
+
+  registerNotification('extension:selectionResult', ({ requestId, text }) =>
+    resolveSelection(requestId, text)
+  )
+
   /**
    * One-shot backfill for a connection. Calls listItems() (not poll()) so it
    * bypasses the "since now" cursor and pulls everything matching the current
@@ -1978,6 +2068,12 @@ export function registerAllMethods(): void {
       const p = payload as { id: string; exitCode: number }
       logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })
     }
+    // A card that just appeared, or whose worktree moved, gets whatever the
+    // extensions say about it — which for most sessions is nothing at all.
+    if (channel === IPC.SESSION_CREATED || channel === IPC.SESSION_UPDATED) {
+      const session = payload as TerminalSession | null
+      if (session?.id) syncExtensionsFor(session)
+    }
   })
   headlessManager.on('client-message', (channel: string, payload: unknown) => {
     clientRegistry.broadcast(channel, payload, terminalScope(payload))
@@ -2099,6 +2195,7 @@ export function registerAllMethods(): void {
     // A session that died early holds nothing; without this its conversation
     // stays unreachable for the rest of the spawn window.
     releaseSpawningTranscriptsFor(session.id)
+    releaseExtensionsFor(session.id)
     const inst = copilotInstallations.get(session.id)
     if (inst) {
       uninstallCopilotHooks(inst)

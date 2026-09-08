@@ -1845,7 +1845,18 @@ export const IPC = {
   CONNECTOR_ROLLBACK_PACK: 'connector:rollbackPack',
   CONNECTOR_LIST_PACKS: 'connector:listPacks',
   CONNECTOR_INSTALL_PROGRESS: 'connector:installProgress',
-  CONNECTOR_CATALOG_CHANGED: 'connector:catalogChanged'
+  CONNECTOR_CATALOG_CHANGED: 'connector:catalogChanged',
+
+  // Extensions
+  EXTENSION_LIST: 'extension:list',
+  EXTENSION_ACTIVATION: 'extension:activation',
+  EXTENSION_FOOTER_ITEMS: 'extension:footerItems',
+  EXTENSION_OPEN_PANE: 'extension:openPane',
+  EXTENSION_CLOSE_PANE: 'extension:closePane',
+  EXTENSION_RUN_HANDLER: 'extension:runHandler',
+  EXTENSION_MATCH_LINKS: 'extension:matchLinks',
+  EXTENSION_SELECTION_REQUEST: 'extension:selectionRequest',
+  EXTENSION_SELECTION_RESULT: 'extension:selectionResult'
 } as const
 
 /**
@@ -2234,6 +2245,57 @@ export interface InstalledConnectorPack {
   contributes?: ExtensionContributions
   permissions?: ExtensionPermission[]
   activates?: ExtensionActivation
+}
+
+/** One reading in a footer band, as the card draws it. */
+export interface ExtensionFooterItem {
+  label: string
+  value: string
+  /** `ok` and `danger` colour the value; anything else is ordinary text. */
+  tone?: 'default' | 'ok' | 'danger'
+  href?: string
+}
+
+/** What one footer currently says for one session, or why it says nothing. */
+export interface ExtensionFooterReading {
+  extensionId: string
+  extensionName: string
+  footerId: string
+  title: string
+  items: ExtensionFooterItem[]
+  /** Set when the last run failed; the band shows the extension's name and this. */
+  error?: string
+  computedAt: string
+}
+
+/** Which of an installed extension's contributions show on one session's card. */
+export interface ExtensionActivationState {
+  extensionId: string
+  extensionName: string
+  active: boolean
+  panes: string[]
+  footers: string[]
+  linkHandlers: string[]
+}
+
+/** A pane an extension opened: a page to frame, or a terminal already drawing. */
+export interface ExtensionOpenPane {
+  extensionId: string
+  paneId: string
+  sessionId: string
+  /** Set on a page pane; same-origin, and the only thing that proves the page. */
+  url?: string
+  /** Set on a program pane; the terminal to draw. */
+  terminalId?: string
+  nonce: string
+}
+
+/** A handler whose pattern matched clicked text, offered beside the built-in choices. */
+export interface ExtensionLinkMatch {
+  extensionId: string
+  extensionName: string
+  handlerId: string
+  title: string
 }
 
 /** Where a pack is read from; `staged` is one an inspection already verified. */

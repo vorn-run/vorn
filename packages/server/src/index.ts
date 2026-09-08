@@ -22,6 +22,9 @@ import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { reconcileImplicitConnections, registerAllMethods, setServerPort } from './register-methods'
 import { registerWebhookRoute } from './webhook-trigger'
+import { registerExtensionRoutes } from './extensions/bridge'
+import { setExtensionBridgeOrigin, stopAllHosts } from './extensions/hosts'
+import { stopAllFooters } from './extensions/footers'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
@@ -228,6 +231,12 @@ export async function startServer(
 
   registerWebhookRoute(app, () => scheduler.deliverPendingConnectorInbox())
 
+  // An extension's own bridge, and the pages its panes are drawn from. Both are
+  // loopback-only and prove themselves per call, so neither widens what the
+  // socket already admits. `'self'` is the web client at `/app/`; the desktop
+  // adds its own origin when it starts framing a pane.
+  registerExtensionRoutes(app, { frameAncestors: () => ["'self'"] })
+
   /**
    * Pairing, the phone's half.
    *
@@ -433,6 +442,8 @@ export async function startServer(
 
   // Store port for RPC methods (e.g. tailscale:status needs it)
   setServerPort(actualPort)
+  // The address the extension children are given, known only once a port is won.
+  setExtensionBridgeOrigin(`http://127.0.0.1:${actualPort}`)
 
   // Enable hot-rebind when network access / Tailscale state changes
   initRebind(app.server, host, actualPort)
@@ -545,6 +556,8 @@ export async function startServer(
     scheduler.stopAll()
     headlessManager.killAll()
     ptyManager.killAll()
+    stopAllFooters()
+    await stopAllHosts()
     const { stopAllMcpClients } = await import('./connectors')
     await stopAllMcpClients()
     configManager.close()

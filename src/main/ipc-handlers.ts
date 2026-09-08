@@ -391,6 +391,25 @@ export function registerIpcHandlers(): void {
     requireBridge().request(IPC.CONNECTOR_ROLLBACK_PACK, id)
   )
   safeHandle(IPC.CONNECTOR_LIST_PACKS, () => requireBridge().request(IPC.CONNECTOR_LIST_PACKS))
+  safeHandle(IPC.EXTENSION_LIST, () => requireBridge().request(IPC.EXTENSION_LIST))
+  safeHandle(IPC.EXTENSION_ACTIVATION, (_, params) =>
+    requireBridge().request(IPC.EXTENSION_ACTIVATION, params)
+  )
+  safeHandle(IPC.EXTENSION_FOOTER_ITEMS, (_, params) =>
+    requireBridge().request(IPC.EXTENSION_FOOTER_ITEMS, params)
+  )
+  safeHandle(IPC.EXTENSION_OPEN_PANE, (_, params) =>
+    requireBridge().request(IPC.EXTENSION_OPEN_PANE, params)
+  )
+  safeHandle(IPC.EXTENSION_CLOSE_PANE, (_, params) =>
+    requireBridge().request(IPC.EXTENSION_CLOSE_PANE, params)
+  )
+  safeHandle(IPC.EXTENSION_RUN_HANDLER, (_, params) =>
+    requireBridge().request(IPC.EXTENSION_RUN_HANDLER, params)
+  )
+  safeHandle(IPC.EXTENSION_MATCH_LINKS, (_, params) =>
+    requireBridge().request(IPC.EXTENSION_MATCH_LINKS, params)
+  )
   safeHandle(IPC.CONNECTION_GET_SOURCE_LINK, (_, taskId) =>
     requireBridge().request(IPC.CONNECTION_GET_SOURCE_LINK, taskId)
   )
@@ -554,6 +573,9 @@ export function registerIpcHandlers(): void {
 
   // ─── Fire-and-forget → bridge notifications ────────────────────
 
+  ipcMain.on(IPC.EXTENSION_SELECTION_RESULT, (_, payload: { requestId: number; text: string }) =>
+    bridge?.notify(IPC.EXTENSION_SELECTION_RESULT, payload)
+  )
   ipcMain.on(IPC.TERMINAL_WRITE, (_, { id, data }: { id: string; data: string }) =>
     bridge?.notify(IPC.TERMINAL_WRITE, { id, data })
   )

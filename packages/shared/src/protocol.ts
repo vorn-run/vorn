@@ -56,6 +56,10 @@ import type {
   ConnectorPackPreview,
   ConnectorPackResult,
   ConnectorPackSource,
+  ExtensionActivationState,
+  ExtensionFooterReading,
+  ExtensionLinkMatch,
+  ExtensionOpenPane,
   InstalledConnectorPack,
   SdkProbeRequest,
   SdkProbeResult,
@@ -323,6 +327,24 @@ export interface RequestMethods {
   }
   'connector:rollbackPack': { params: string; result: ConnectorPackResult }
   'connector:listPacks': { params: void; result: InstalledConnectorPack[] }
+
+  // Extensions
+  'extension:list': { params: void; result: InstalledConnectorPack[] }
+  'extension:activation': { params: { sessionId: string }; result: ExtensionActivationState[] }
+  'extension:footerItems': { params: { sessionId: string }; result: ExtensionFooterReading[] }
+  'extension:openPane': {
+    params: { extensionId: string; paneId: string; sessionId: string }
+    result: ExtensionOpenPane
+  }
+  'extension:closePane': { params: { nonce: string }; result: { closed: boolean } }
+  'extension:runHandler': {
+    params: { extensionId: string; handlerId: string; sessionId: string; url: string }
+    result: { openedPane?: ExtensionOpenPane }
+  }
+  'extension:matchLinks': {
+    params: { sessionId: string; text: string }
+    result: ExtensionLinkMatch[]
+  }
 
   // Workflow runs
   'workflowRun:claim': {
@@ -1155,6 +1177,12 @@ export interface ServerNotifications {
    */
   'pairing:collected': { requestId: string }
   'database:corruption-recovered': { message: string }
+  /** A footer recomputed; scoped by session, so a phone asks only for the card on screen. */
+  'extension:footerItems': { sessionId: string; readings: ExtensionFooterReading[] }
+  /** What an extension shows on a session changed, because its worktree or its packs did. */
+  'extension:activation': { sessionId: string; states: ExtensionActivationState[] }
+  /** Only the window drawing the terminal knows what is selected in it. */
+  'extension:selectionRequest': { requestId: number; sessionId: string }
 }
 
 // ─── Client Notifications (client → server, fire-and-forget) ────
@@ -1177,6 +1205,8 @@ export interface ClientNotifications {
    * this message can only take effect after the socket is already receiving.
    */
   'subscribe:set': { topics?: readonly string[] }
+  /** The answer to `extension:selectionRequest`, from the window that drew the terminal. */
+  'extension:selectionResult': { requestId: number; text: string }
 }
 
 // ─── Typed helpers ──────────────────────────────────────────────

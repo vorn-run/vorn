@@ -939,6 +939,100 @@ const api = {
     import('../../packages/shared/src/types').InstalledConnectorPack[]
   > => ipcRenderer.invoke(IPC.CONNECTOR_LIST_PACKS),
 
+  // ── Extensions ──
+  listExtensions: (): Promise<import('../../packages/shared/src/types').InstalledConnectorPack[]> =>
+    ipcRenderer.invoke(IPC.EXTENSION_LIST),
+
+  extensionActivation: (
+    sessionId: string
+  ): Promise<import('../../packages/shared/src/types').ExtensionActivationState[]> =>
+    ipcRenderer.invoke(IPC.EXTENSION_ACTIVATION, { sessionId }),
+
+  extensionFooterItems: (
+    sessionId: string
+  ): Promise<import('../../packages/shared/src/types').ExtensionFooterReading[]> =>
+    ipcRenderer.invoke(IPC.EXTENSION_FOOTER_ITEMS, { sessionId }),
+
+  openExtensionPane: (
+    extensionId: string,
+    paneId: string,
+    sessionId: string
+  ): Promise<import('../../packages/shared/src/types').ExtensionOpenPane> =>
+    ipcRenderer.invoke(IPC.EXTENSION_OPEN_PANE, { extensionId, paneId, sessionId }),
+
+  closeExtensionPane: (nonce: string): Promise<{ closed: boolean }> =>
+    ipcRenderer.invoke(IPC.EXTENSION_CLOSE_PANE, { nonce }),
+
+  runExtensionHandler: (
+    extensionId: string,
+    handlerId: string,
+    sessionId: string,
+    url: string
+  ): Promise<{
+    openedPane?: import('../../packages/shared/src/types').ExtensionOpenPane
+  }> => ipcRenderer.invoke(IPC.EXTENSION_RUN_HANDLER, { extensionId, handlerId, sessionId, url }),
+
+  matchExtensionLinks: (
+    sessionId: string,
+    text: string
+  ): Promise<import('../../packages/shared/src/types').ExtensionLinkMatch[]> =>
+    ipcRenderer.invoke(IPC.EXTENSION_MATCH_LINKS, { sessionId, text }),
+
+  onExtensionFooterItems: (
+    callback: (payload: {
+      sessionId: string
+      readings: import('../../packages/shared/src/types').ExtensionFooterReading[]
+    }) => void
+  ) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      payload: {
+        sessionId: string
+        readings: import('../../packages/shared/src/types').ExtensionFooterReading[]
+      }
+    ): void => callback(payload)
+    ipcRenderer.on(IPC.EXTENSION_FOOTER_ITEMS, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.EXTENSION_FOOTER_ITEMS, listener)
+    }
+  },
+
+  onExtensionActivation: (
+    callback: (payload: {
+      sessionId: string
+      states: import('../../packages/shared/src/types').ExtensionActivationState[]
+    }) => void
+  ) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      payload: {
+        sessionId: string
+        states: import('../../packages/shared/src/types').ExtensionActivationState[]
+      }
+    ): void => callback(payload)
+    ipcRenderer.on(IPC.EXTENSION_ACTIVATION, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.EXTENSION_ACTIVATION, listener)
+    }
+  },
+
+  onExtensionSelectionRequest: (
+    callback: (payload: { requestId: number; sessionId: string }) => void
+  ) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      payload: { requestId: number; sessionId: string }
+    ): void => callback(payload)
+    ipcRenderer.on(IPC.EXTENSION_SELECTION_REQUEST, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.EXTENSION_SELECTION_REQUEST, listener)
+    }
+  },
+
+  /** The window that drew the terminal answers; nothing else knows the selection. */
+  sendExtensionSelection: (requestId: number, text: string): void =>
+    ipcRenderer.send(IPC.EXTENSION_SELECTION_RESULT, { requestId, text }),
+
   onConnectorCatalogChanged: (
     callback: (snapshot: import('../../packages/shared/src/types').ConnectorCatalogSnapshot) => void
   ) => {
