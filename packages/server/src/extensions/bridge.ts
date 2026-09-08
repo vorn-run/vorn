@@ -131,14 +131,16 @@ function pageFile(pack: InstalledConnectorPack, paneId: string, rest: string): s
   const root = resolve(pack.path, dirname(pane.web))
   const wanted = rest === '' || rest.endsWith('/') ? `${rest}index.html` : rest
   const candidate = resolve(root, wanted)
-  // Resolved both ways before anything is read: `..` in the path and a symlink
-  // out of the directory are the same escape, and only the second survives resolve().
-  if (candidate !== root && !candidate.startsWith(root + sep)) return undefined
+  if (!candidate.startsWith(root + sep)) return undefined
   if (!existsSync(candidate) || !statSync(candidate).isFile()) return undefined
-  if (realpathSync(candidate) !== candidate && !realpathSync(candidate).startsWith(root + sep)) {
+  if (!PAGE_TYPES[extname(candidate).toLowerCase()]) return undefined
+  // Compared as real paths on both sides: a link out of the directory survives
+  // `resolve`, and the pack's own directory may itself sit under one.
+  try {
+    return realpathSync(candidate).startsWith(realpathSync(root) + sep) ? candidate : undefined
+  } catch {
     return undefined
   }
-  return PAGE_TYPES[extname(candidate).toLowerCase()] ? candidate : undefined
 }
 
 export interface ExtensionRouteDeps {
