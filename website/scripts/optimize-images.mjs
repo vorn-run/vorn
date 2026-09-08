@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { ASSETS, QUALITY, toWebp } from './lib.mjs'
 
 /** A screenshot is read; the marginalia are only looked at. */
-const SCREENSHOT = /^(hero|plate-)/
+const DRAWING = /^(davinci|vitruvian|vorn-mark)/
 
 const PAGES = ['../index.html', '../404.html', '../demos.html'].map(
   (p) => new URL(p, import.meta.url).pathname
@@ -53,7 +53,7 @@ for (const [name, widths] of wanted) {
     .filter((width) => width <= w)
     .map((width) => {
       const file = `${name}-${width}.webp`
-      toWebp(src, width, join(ASSETS, file), SCREENSHOT.test(name) ? QUALITY : '82')
+      toWebp(src, width, join(ASSETS, file), DRAWING.test(name) ? '82' : QUALITY)
       return `${file} ${(statSync(join(ASSETS, file)).size / 1024).toFixed(0)}K`
     })
   console.log(`${name} ${w}x${h} -> ${out.join(', ')}`)
