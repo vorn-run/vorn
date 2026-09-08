@@ -102,6 +102,8 @@ export async function openPane(
   if (!pane.web) throw new Error(`The pane "${paneId}" has neither a page nor a program`)
   // A page needs the extension answering before it loads, or its first read fails.
   await getOrStartHost(extensionId, projectPath)
+  const origin = extensionPageOrigin()
+  if (origin === '') throw new Error('the page server is not running, so no pane can be served')
   const nonce = randomBytes(32).toString('base64url')
   const grant: OpenPane = {
     nonce,
@@ -110,7 +112,7 @@ export async function openPane(
     sessionId: session.id,
     projectPath,
     // Its own origin, so a page shares nothing with the window that frames it.
-    url: `${extensionPageOrigin()}/extensions/${extensionId}/pane/${paneId}/${nonce}/`,
+    url: `${origin}/extensions/${extensionId}/pane/${paneId}/${nonce}/`,
     expires: Date.now() + GRANT_IDLE_MS
   }
   open.set(nonce, grant)

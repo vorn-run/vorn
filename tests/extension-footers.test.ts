@@ -162,7 +162,16 @@ describe('a footer band', () => {
     })
     footers.syncFooters(session())
     await settle()
-    expect(footers.footerReadings('s1')[0].error).toBeDefined()
+    expect(footers.footerReadings('s1')[0].error).toMatch(/http or https/)
+  })
+
+  it('names the rule when an item links to something that is not a URL', async () => {
+    answer = () => ({
+      structuredContent: { items: [{ label: 'ci', value: 'green', href: 'not a url' }] }
+    })
+    footers.syncFooters(session())
+    await settle()
+    expect(footers.footerReadings('s1')[0].error).toMatch(/http or https/)
   })
 
   it('draws nothing for a footer whose rule excludes this session', async () => {

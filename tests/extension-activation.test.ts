@@ -80,6 +80,9 @@ describe('where a contribution shows', () => {
     expect(matches({ workspaceContains: ['/etc/hosts'] }, subject({ worktreePath: dir }))).toBe(
       false
     )
+    expect(
+      matches({ workspaceContains: ['..\\package.json'] }, subject({ worktreePath: dir }))
+    ).toBe(false)
   })
 
   it('matches the agent and the platform by name', () => {

@@ -36,8 +36,9 @@ vi.mock('../packages/server/src/extensions/hosts', () => ({
   extensionBridgeOrigin: () => 'http://127.0.0.1:5000'
 }))
 
+let pageOrigin = 'http://127.0.0.1:6000'
 vi.mock('../packages/server/src/extensions/page-server', () => ({
-  extensionPageOrigin: () => 'http://127.0.0.1:6000'
+  extensionPageOrigin: () => pageOrigin
 }))
 
 vi.mock('../packages/server/src/pty-manager', () => ({
@@ -124,6 +125,15 @@ describe('opening a pane', () => {
 
   it('opens no pane the extension does not contribute', async () => {
     await expect(panes.openPane('review', 'nothing', session())).rejects.toThrow(/contributes no/)
+  })
+
+  it('refuses to mint a page URL while the page server is not running', async () => {
+    pageOrigin = ''
+    try {
+      await expect(panes.openPane('review', 'report', session())).rejects.toThrow(/page server/)
+    } finally {
+      pageOrigin = 'http://127.0.0.1:6000'
+    }
   })
 })
 

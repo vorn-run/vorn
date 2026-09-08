@@ -61,7 +61,7 @@ export function subjectOf(session: TerminalSession): ActivationSubject {
 /** A listed path exists under the worktree; `..` and absolutes were refused when the manifest was read. */
 function containsAny(worktreePath: string, paths: string[]): boolean {
   return paths.some((entry) => {
-    if (entry === '' || isAbsolute(entry) || entry.split('/').includes('..')) return false
+    if (entry === '' || isAbsolute(entry) || entry.split(/[\\/]/).includes('..')) return false
     return existsSync(join(worktreePath, entry))
   })
 }

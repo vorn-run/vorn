@@ -63,8 +63,8 @@ function readItems(value: unknown): ExtensionFooterItem[] {
     }
     let href: string | undefined
     if (typeof item.href === 'string' && item.href !== '') {
-      const parsed = new URL(item.href)
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      const parsed = URL.canParse(item.href) ? new URL(item.href) : undefined
+      if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
         throw new Error('an item links to http or https, or to nothing')
       }
       href = item.href
