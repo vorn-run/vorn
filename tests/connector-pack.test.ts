@@ -335,6 +335,48 @@ describe('packing an extension', () => {
     expect(result.findings.map((item) => item.code)).toContain('web-entry-missing')
   })
 
+  it('carries only what a pane names, not everything left under web/', async () => {
+    const dir = packageWithPage()
+    // An unrelated build, a scratch page, a stray env file: in the tree, not in the pack.
+    mkdirSync(join(dir, 'web', 'scratch'), { recursive: true })
+    writeFileSync(join(dir, 'web', 'scratch', 'index.html'), '<!doctype html>')
+    writeFileSync(join(dir, 'web', 'notes.txt'), 'todo')
+
+    const result = await packConnector(extension, {
+      entry: './extension.js',
+      resolveDir: dir,
+      outDir: tempDir(),
+      bundle: cleanBundle,
+      launch: starts
+    })
+
+    const entries: string[] = []
+    await list({ file: result.file as string, onReadEntry: (entry) => entries.push(entry.path) })
+    expect(entries).not.toContain('web/scratch/index.html')
+    expect(entries).not.toContain('web/notes.txt')
+    expect(entries).toContain('web/report/index.html')
+  })
+
+  it('refuses a pack that unpacks past what Vorn will write, however well it compresses', async () => {
+    const dir = packageWithPage()
+    // Pages compress well, so the archive can sit under its own ceiling while
+    // the tree it unpacks to does not.
+    writeFileSync(join(dir, 'web', 'report', 'big.txt'), 'a'.repeat(4 * 1024 * 1024))
+
+    const result = await packConnector(extension, {
+      entry: './extension.js',
+      resolveDir: dir,
+      outDir: tempDir(),
+      bundle: cleanBundle,
+      launch: starts,
+      maxUnpackedBytes: 1024 * 1024
+    })
+
+    expect(result.file).toBeUndefined()
+    expect(result.findings.map((item) => item.code)).toContain('pack-too-large')
+    expect(result.findings.at(-1)?.message).toContain('unpacks to')
+  })
+
   it('carries no web directory for a connector, which has no pages', async () => {
     const result = await packConnector(connector, {
       entry: './connector.js',

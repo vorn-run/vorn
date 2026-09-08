@@ -179,6 +179,26 @@ describe('parseCatalog', () => {
     expect(overreaching?.contributes?.panes?.map((pane) => pane.id)).toEqual(['report'])
   })
 
+  it('drops an extension whose contributions it could not honour at all', () => {
+    // The install refuses one that contributes nothing, so listing it would
+    // advertise a row whose Install button cannot work.
+    const listed = parseCatalog({
+      version: 1,
+      connectors: [
+        {
+          ...entry,
+          id: 'unusable',
+          kind: 'extension',
+          contributes: { panes: [{ id: 'escape', title: 'Escape', web: '../outside/index.html' }] }
+        },
+        { ...entry, id: 'silent', kind: 'extension' },
+        entry
+      ]
+    })
+
+    expect(listed?.map((row) => row.id)).toEqual([entry.id])
+  })
+
   it('reads an entry with no kind as the connector it was published as', () => {
     const read = parseCatalog({
       version: 1,

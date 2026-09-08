@@ -146,6 +146,91 @@ describe('checking an extension', () => {
     expect(codes(found)).toContain('handler-failed')
   })
 
+  it('runs a handler on its own example, so a real pattern is not a failure', async () => {
+    const pullRequest = 'https://github\\.com/[^/]+/[^/]+/pull/(\\d+)'
+    const found = await checkConnector(
+      extension({
+        linkHandlers: [
+          {
+            id: 'pr',
+            title: 'Pull request',
+            pattern: pullRequest,
+            example: 'https://github.com/vorn-run/vorn/pull/42',
+            run: (context) => {
+              // What a real handler does: read the capture its own pattern declares.
+              const matched = new RegExp(pullRequest).exec(context.url)
+              if (!matched) throw new Error(`${context.url} is not a pull request`)
+              return { openPane: 'report' }
+            }
+          }
+        ]
+      })
+    )
+
+    expect(codes(found)).toEqual([])
+  })
+
+  it('names a reading whose link is not one a card can open', async () => {
+    const withHref = (href: string) =>
+      extension({
+        footers: [
+          {
+            id: 'checks',
+            title: 'Checks',
+            description: 'Links somewhere',
+            every: 30,
+            async run(context) {
+              await context.host.output()
+              return [{ label: 'ci', value: 'green', href }]
+            }
+          }
+        ]
+      })
+
+    expect(codes(await checkConnector(withHref('javascript:alert(1)')))).toContain(
+      'footer-items-invalid'
+    )
+    expect(codes(await checkConnector(withHref('file:///etc/passwd')))).toContain(
+      'footer-items-invalid'
+    )
+    expect(codes(await checkConnector(withHref('not a url')))).toContain('footer-items-invalid')
+    expect(codes(await checkConnector(withHref('https://example.test/ci')))).toEqual([])
+  })
+
+  it('says nothing about permissions a page spends, since this run cannot watch it', async () => {
+    // Declared, never touched by the footer — but the page is where it is spent.
+    const withPage = await checkConnector(
+      extension({
+        permissions: ['terminal.read', 'git.read'],
+        panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }]
+      }),
+      { packageDir: packageWithPage() }
+    )
+    expect(codes(withPage)).toEqual([])
+
+    // The same extension without a page: nothing spends it, and the check says so.
+    const withoutPage = await checkConnector(
+      extension({ permissions: ['terminal.read', 'git.read'] })
+    )
+    expect(codes(withoutPage)).toEqual(['permission-unused'])
+  })
+
+  it('finds a page from wherever the check was run', async () => {
+    const dir = packageWithPage()
+    const withPage = extension({
+      panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }]
+    })
+
+    // The entry is under dist/ and the command was run from the parent, which is
+    // what `pack` and a monorepo script both do.
+    const found = await checkConnector(withPage, {
+      packageDir: join(dir, '..'),
+      entry: join(dir, 'dist', 'index.js')
+    })
+
+    expect(codes(found)).toEqual([])
+  })
+
   it('names a page the package does not carry, and one that resolves outside it', async () => {
     const dir = packageWithPage()
 

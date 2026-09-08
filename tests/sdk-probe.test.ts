@@ -653,6 +653,86 @@ describe('what a probed extension contributes', () => {
     expect(result.manifest.contributes?.linkHandlers?.map((entry) => entry.id)).toEqual(['pr'])
   })
 
+  it('drops an agent or a platform this build cannot evaluate', async () => {
+    const result = await probeExtension({
+      activates: {
+        agent: ['claude', '<img src=x onerror=1>', 'nope'],
+        platform: ['darwin', 'plan9'],
+        remoteHost: ['github.com']
+      }
+    })
+    if (!result.ok) throw new Error(result.error)
+
+    expect(result.manifest.activates).toEqual({
+      remoteHost: ['github.com'],
+      agent: ['claude'],
+      platform: ['darwin']
+    })
+  })
+
+  it('keeps a predicate naming nothing this build knows from narrowing to nothing', async () => {
+    const result = await probeExtension({ activates: { agent: ['emacs'], platform: ['plan9'] } })
+    if (!result.ok) throw new Error(result.error)
+    expect(result.manifest.activates).toBeUndefined()
+  })
+
+  it('holds what it reads to a length a card can draw', async () => {
+    const result = await probeExtension({
+      contributes: {
+        footers: [
+          { id: 'checks', title: 'T'.repeat(5_000), description: 'D'.repeat(5_000), every: 30 }
+        ]
+      }
+    })
+    if (!result.ok) throw new Error(result.error)
+
+    const footer = result.manifest.contributes?.footers?.[0]
+    expect(footer?.title.length).toBe(500)
+    expect(footer?.description?.length).toBe(500)
+  })
+
+  it('reads at most a screenful of contributions of each kind', async () => {
+    const many = (kind: 'panes' | 'footers') =>
+      Array.from({ length: 50 }, (_, index) => ({
+        id: `c${index}`,
+        title: `C${index}`,
+        ...(kind === 'panes' ? { web: 'web/report/index.html' } : { every: 30 })
+      }))
+    const result = await probeExtension({
+      contributes: { panes: many('panes'), footers: many('footers') }
+    })
+    if (!result.ok) throw new Error(result.error)
+
+    expect(result.manifest.contributes?.panes).toHaveLength(32)
+    expect(result.manifest.contributes?.footers).toHaveLength(32)
+  })
+
+  it('drops a pattern too long to match on every click, and keeps the example of one that is not', async () => {
+    const result = await probeExtension({
+      contributes: {
+        linkHandlers: [
+          { id: 'long', title: 'Long', pattern: 'a'.repeat(257) },
+          {
+            id: 'pr',
+            title: 'Pull request',
+            pattern: 'github\\.com',
+            example: 'https://github.com/vorn-run/vorn/pull/1'
+          }
+        ]
+      }
+    })
+    if (!result.ok) throw new Error(result.error)
+
+    expect(result.manifest.contributes?.linkHandlers).toEqual([
+      {
+        id: 'pr',
+        title: 'Pull request',
+        pattern: 'github\\.com',
+        example: 'https://github.com/vorn-run/vorn/pull/1'
+      }
+    ])
+  })
+
   it('reads a manifest with no kind as the connector it was written as', async () => {
     const { probeSdkConnector } = await importProbe()
     callTool.mockResolvedValue({ structuredContent: manifest() })

@@ -41,8 +41,8 @@ export interface HostBridgeOptions {
 /** Long enough for a git read on a large tree, short enough to fail a wedged host. */
 const HOST_TIMEOUT_MS = 15_000
 
-/** The bridge is served on this machine, so a token never leaves it. */
-const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '::1']
+/** The bridge is served on this machine, so a token never leaves it; a URL keeps IPv6 in brackets. */
+const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '[::1]']
 
 function endpoint(env: NodeJS.ProcessEnv): { url: string; token: string } {
   const url = env[HOST_URL_ENV]?.trim()

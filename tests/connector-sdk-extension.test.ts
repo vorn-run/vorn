@@ -109,6 +109,46 @@ describe('defineExtension', () => {
     ).toThrow(/not a regular expression/)
   })
 
+  it('refuses a link handler whose example its own pattern does not match', () => {
+    expect(() =>
+      extension({
+        linkHandlers: [
+          {
+            id: 'pr',
+            title: 'Pull request',
+            pattern: 'github\\.com/.+/pull/',
+            example: 'https://example.test/nothing',
+            run: () => {}
+          }
+        ]
+      })
+    ).toThrow(/does not match/)
+
+    expect(() =>
+      extension({
+        linkHandlers: [
+          { id: 'pr', title: 'Pull request', pattern: 'x', example: '  ', run: () => {} }
+        ]
+      })
+    ).toThrow(/names no example link/)
+  })
+
+  it('refuses a pattern too long to match on every click', () => {
+    expect(() =>
+      extension({
+        linkHandlers: [
+          {
+            id: 'pr',
+            title: 'Pull request',
+            pattern: `${'a'.repeat(257)}`,
+            example: 'a',
+            run: () => {}
+          }
+        ]
+      })
+    ).toThrow(/longer than 256/)
+  })
+
   it('refuses a footer asking to run faster than the host will poll', () => {
     expect(() =>
       extension({
