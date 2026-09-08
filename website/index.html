@@ -910,14 +910,14 @@
       }
 
       /* The lead plate sets its heading beside the line, not above it. */
-      .plate-lead-text {
+      .plate-text-split {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: clamp(24px, 4vw, 56px);
         align-items: baseline;
       }
 
-      .plate-lead-text h3 {
+      .plate-text-split h3 {
         font-size: clamp(1.7rem, 3vw, 2.3rem);
       }
 
@@ -938,7 +938,7 @@
         .plates > .plate-row:first-child > .plate:first-child {
           border-top: none;
         }
-        .plate-lead-text {
+        .plate-text-split {
           grid-template-columns: 1fr;
           gap: 10px;
         }
@@ -1782,14 +1782,12 @@
         <div class="container">
           <div class="section-header reveal">
             <div class="section-label">The work</div>
-            <h2 class="section-heading">Five things it does that nothing else does</h2>
-            <p class="section-sub">Each one recorded in the app, at the version on the badge.</p>
           </div>
 
           <div class="plates">
             <div class="plate-row">
               <div class="plate span-6 reveal">
-                <div class="plate-eyebrow">0.7 &middot; Durability</div>
+                <div class="plate-eyebrow">Sessions</div>
                 <div class="plate-media">
                   <video
                     class="plate-loop"
@@ -1798,27 +1796,28 @@
                     muted
                     playsinline
                     preload="metadata"
-                    poster="assets/loops/durability-1600.webp"
+                    poster="assets/loops/sessions-1600.webp"
                     width="1600"
                     height="700"
-                    aria-label="The server detaches from the window, so a quit, a crash and an update all leave the session running. A reboot does not, and the strip that greets you says so."
+                    aria-label="Run Claude, Codex, Copilot, OpenCode and Gemini side by side, each with its own terminal, browser and simulator. The server detaches from the window, so a quit, a crash and an update leave them all still working."
                   >
-                    <source src="assets/loops/durability.webm" type="video/webm" />
-                    <source src="assets/loops/durability.mp4" type="video/mp4" />
+                    <source src="assets/loops/sessions.webm" type="video/webm" />
+                    <source src="assets/loops/sessions.mp4" type="video/mp4" />
                   </video>
                 </div>
-                <div class="plate-lead-text">
-                  <h3>Quit it. The agent keeps going.</h3>
+                <div class="plate-text-split">
+                  <h3>Every agent on one canvas, and none of them stop</h3>
                   <p>
-                    The server detaches from the window, so a quit, a crash and an update all leave
-                    the session running. A reboot does not, and the strip that greets you says so.
+                    Run Claude, Codex, Copilot, OpenCode and Gemini side by side, each with its own
+                    terminal, browser and simulator. The server detaches from the window, so a quit,
+                    a crash and an update leave them all still working.
                   </p>
                 </div>
               </div>
             </div>
             <div class="plate-row">
               <div class="plate span-4 reveal">
-                <div class="plate-eyebrow">0.7 &middot; Workflows</div>
+                <div class="plate-eyebrow">Workflows</div>
                 <div class="plate-media">
                   <video
                     class="plate-loop"
@@ -1829,7 +1828,7 @@
                     poster="assets/loops/workflows-1200.webp"
                     width="1200"
                     height="675"
-                    aria-label="Steps drag out of a docked library onto free canvas. Webhooks, schedules, conditions, loops, approvals, and a call to any API. Every node carries what its last run did."
+                    aria-label="Steps drag out of a docked library onto free canvas: webhooks, schedules, conditions, loops, approvals. Connectors install as versioned packs that run offline and borrow the login your machine already has."
                   >
                     <source src="assets/loops/workflows.webm" type="video/webm" />
                     <source src="assets/loops/workflows.mp4" type="video/mp4" />
@@ -1842,15 +1841,15 @@
                     <span class="plate-play-time">6s</span>
                   </button>
                 </div>
-                <h3>Draw the pipeline on a canvas</h3>
+                <h3>Draw the pipeline, and let it reach your tools</h3>
                 <p>
-                  Steps drag out of a docked library onto free canvas. Webhooks, schedules,
-                  conditions, loops, approvals, and a call to any API. Every node carries what its
-                  last run did.
+                  Steps drag out of a docked library onto free canvas: webhooks, schedules,
+                  conditions, loops, approvals. Connectors install as versioned packs that run
+                  offline and borrow the login your machine already has.
                 </p>
               </div>
               <div class="plate span-2 reveal">
-                <div class="plate-eyebrow">0.7 &middot; Phone</div>
+                <div class="plate-eyebrow">Mobile</div>
                 <div class="plate-media is-tall">
                   <video
                     class="plate-loop"
@@ -1858,13 +1857,13 @@
                     muted
                     playsinline
                     preload="none"
-                    poster="assets/loops/phone-560.webp"
+                    poster="assets/loops/mobile-560.webp"
                     width="560"
                     height="827"
-                    aria-label="The phone joins the same server over your own network and takes the session from there."
+                    aria-label="The phone joins the same server over your own network and takes the session from there, keyboard and all."
                   >
-                    <source src="assets/loops/phone.webm" type="video/webm" />
-                    <source src="assets/loops/phone.mp4" type="video/mp4" />
+                    <source src="assets/loops/mobile.webm" type="video/webm" />
+                    <source src="assets/loops/mobile.mp4" type="video/mp4" />
                   </video>
                   <button class="plate-play" type="button">
                     <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
@@ -1877,13 +1876,13 @@
                 <h3>Pair a phone by showing it a code</h3>
                 <p>
                   The phone joins the same server over your own network and takes the session from
-                  there.
+                  there, keyboard and all.
                 </p>
               </div>
             </div>
             <div class="plate-row">
-              <div class="plate span-3 reveal">
-                <div class="plate-eyebrow">0.7 &middot; Connectors</div>
+              <div class="plate span-6 reveal">
+                <div class="plate-eyebrow">Tasks</div>
                 <div class="plate-media">
                   <video
                     class="plate-loop"
@@ -1891,13 +1890,13 @@
                     muted
                     playsinline
                     preload="none"
-                    poster="assets/loops/connectors-900.webp"
-                    width="900"
-                    height="540"
-                    aria-label="Connectors install as versioned packs that run offline and carry a receipt of the checks that ran. Where a CLI on the machine is already signed in, Vorn uses that."
+                    poster="assets/loops/tasks-1600.webp"
+                    width="1600"
+                    height="620"
+                    aria-label="A board for every project, with markdown, attachments and a branch on each card. Start one and it opens as a session in its own worktree, so parallel work never shares a tree."
                   >
-                    <source src="assets/loops/connectors.webm" type="video/webm" />
-                    <source src="assets/loops/connectors.mp4" type="video/mp4" />
+                    <source src="assets/loops/tasks.webm" type="video/webm" />
+                    <source src="assets/loops/tasks.mp4" type="video/mp4" />
                   </video>
                   <button class="plate-play" type="button">
                     <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
@@ -1907,42 +1906,14 @@
                     <span class="plate-play-time">5s</span>
                   </button>
                 </div>
-                <h3>It borrows the login you already have</h3>
-                <p>
-                  Connectors install as versioned packs that run offline and carry a receipt of the
-                  checks that ran. Where a CLI on the machine is already signed in, Vorn uses that.
-                </p>
-              </div>
-              <div class="plate span-3 reveal">
-                <div class="plate-eyebrow">0.7 &middot; Panes</div>
-                <div class="plate-media">
-                  <video
-                    class="plate-loop"
-                    loop
-                    muted
-                    playsinline
-                    preload="none"
-                    poster="assets/loops/panes-900.webp"
-                    width="900"
-                    height="540"
-                    aria-label="A session can open a browser pane and an iOS simulator beside its terminal, and the agent drives both to check its own work."
-                  >
-                    <source src="assets/loops/panes.webm" type="video/webm" />
-                    <source src="assets/loops/panes.mp4" type="video/mp4" />
-                  </video>
-                  <button class="plate-play" type="button">
-                    <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
-                      <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
-                    </svg>
-                    <span class="plate-play-label">Play</span>
-                    <span class="plate-play-time">6s</span>
-                  </button>
+                <div class="plate-text-split">
+                  <h3>A board per project, and a branch per card</h3>
+                  <p>
+                    A board for every project, with markdown, attachments and a branch on each card.
+                    Start one and it opens as a session in its own worktree, so parallel work never
+                    shares a tree.
+                  </p>
                 </div>
-                <h3>The agent gets a browser and a simulator</h3>
-                <p>
-                  A session can open a browser pane and an iOS simulator beside its terminal, and
-                  the agent drives both to check its own work.
-                </p>
               </div>
             </div>
           </div>
@@ -2176,14 +2147,6 @@
           <div class="index-grid">
             <div class="index-col">
               <div class="index-row reveal">
-                <span class="index-name">Multi-agent grid</span>
-                <span class="index-note">Run several agents side by side.</span>
-              </div>
-              <div class="index-row reveal">
-                <span class="index-name">Task board per project</span>
-                <span class="index-note">Kanban, with worktree isolation.</span>
-              </div>
-              <div class="index-row reveal">
                 <span class="index-name">Command palette</span>
                 <span class="index-note">Every action, one keystroke.</span>
               </div>
@@ -2191,12 +2154,12 @@
                 <span class="index-name">Headless runs</span>
                 <span class="index-note">No terminal, and the output still kept.</span>
               </div>
-            </div>
-            <div class="index-col">
               <div class="index-row reveal">
                 <span class="index-name">Inline diff review</span>
                 <span class="index-note">Comment on a line, send it back.</span>
               </div>
+            </div>
+            <div class="index-col">
               <div class="index-row reveal">
                 <span class="index-name">MCP server</span>
                 <span class="index-note">Agents drive Vorn itself.</span>
@@ -2218,10 +2181,6 @@
               <div class="index-row reveal">
                 <span class="index-name">Remote SSH</span>
                 <span class="index-note">Terminals on another machine.</span>
-              </div>
-              <div class="index-row reveal">
-                <span class="index-name">Worktree isolation</span>
-                <span class="index-note">Parallel work, clean trees.</span>
               </div>
               <div class="index-row reveal">
                 <span class="index-name">Updates itself</span>
