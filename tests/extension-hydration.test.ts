@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, waitFor } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
 import {
-  hydrateExtensions,
+  hydrateExtensions as hydrate,
   __resetExtensionHydrationForTests
 } from '../src/renderer/lib/extension-hydration'
 import type {
@@ -29,6 +29,10 @@ const activation: ExtensionActivationState = {
   footers: ['checks'],
   linkHandlers: []
 }
+
+/** The store, as the slice hands it in. */
+const hydrateExtensions = (sessionId: string): Promise<void> =>
+  hydrate(sessionId, () => useAppStore.getState())
 
 const session = (id: string): TerminalSession =>
   ({

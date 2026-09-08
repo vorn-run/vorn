@@ -12,7 +12,7 @@ import { releaseFromPanels, saveTerminalPanels } from './ui-slice'
 import { clearDirty } from '../lib/editor-dirty'
 import { forgetExtensionHydration, hydrateExtensions } from '../lib/extension-hydration'
 
-export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set) => ({
+export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set, get) => ({
   terminals: new Map(),
 
   addTerminal: (session, ended) =>
@@ -36,7 +36,7 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       // The one funnel a session appears through, whichever brought it: a fresh
       // launch, the board sync, a restore. The host only pushes what changes, so
       // a card that arrives after the last change would otherwise stay blank.
-      void hydrateExtensions(session.id)
+      void hydrateExtensions(session.id, get)
       return { terminals: next, terminalOrder: order }
     }),
 

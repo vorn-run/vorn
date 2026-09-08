@@ -1,4 +1,4 @@
-import { useAppStore } from '../stores'
+import type { AppStore } from '../stores/types'
 
 /**
  * Ask the host what this session's extensions say, once.
@@ -12,20 +12,27 @@ import { useAppStore } from '../stores'
  * Kept out of the card. A component asking on mount would ask again on every
  * remount — a maximize, a tab switch, a drag between cells — and each answer
  * would rewrite a map every card reads.
+ *
+ * The store is handed in rather than imported: this is called from inside the
+ * store, and importing it back would be a cycle that leaves whichever slice
+ * loads second undefined.
  */
 const hydrated = new Set<string>()
 
-export async function hydrateExtensions(sessionId: string): Promise<void> {
+export async function hydrateExtensions(
+  sessionId: string,
+  getStore: () => AppStore
+): Promise<void> {
   if (hydrated.has(sessionId)) return
   hydrated.add(sessionId)
-  const store = useAppStore.getState()
   const [states, readings] = await Promise.all([
     Promise.resolve(window.api.extensionActivation?.(sessionId)).catch(() => undefined),
     Promise.resolve(window.api.extensionFooterItems?.(sessionId)).catch(() => undefined)
   ])
+  const store = getStore()
   // A session closed while the host was answering keeps nothing: the store
   // prunes on removal, and writing here afterwards would put it back.
-  if (!useAppStore.getState().terminals.has(sessionId)) {
+  if (!store.terminals.has(sessionId)) {
     hydrated.delete(sessionId)
     return
   }
