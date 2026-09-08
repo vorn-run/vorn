@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * A pane's program is a PTY, and nothing else about it is a session.
@@ -38,49 +38,56 @@ vi.mock('../packages/server/src/logger', () => ({
 
 const { ptyManager } = await import('../packages/server/src/pty-manager')
 
+// Only what this file made: the manager is a singleton, and sweeping it would
+// take another suite's terminals with it.
+const opened: string[] = []
+
 beforeEach(() => {
   spawnMock.mockClear()
-  for (const session of ptyManager.getActiveSessions()) ptyManager.killPty(session.id)
 })
+
+afterEach(() => {
+  while (opened.length > 0) {
+    try {
+      ptyManager.killPty(opened.pop() as string)
+    } catch {
+      /* already gone */
+    }
+  }
+})
+
+function pane(over: { args?: string[]; env?: Record<string, string> } = {}) {
+  const session = ptyManager.createExtensionPty({
+    command: 'lazygit',
+    args: over.args ?? [],
+    cwd: process.cwd(),
+    displayName: 'Git',
+    env: over.env ?? {}
+  })
+  opened.push(session.id)
+  return session
+}
 
 describe('a pane program', () => {
   it('is not one of the sessions the app is told about', () => {
-    const pane = ptyManager.createExtensionPty({
-      command: 'lazygit',
-      args: [],
-      cwd: process.cwd(),
-      displayName: 'Git',
-      env: { VORN_EXTENSION_TOKEN: 'the-token' }
-    })
+    const drawn = pane({ env: { VORN_EXTENSION_TOKEN: 'the-token' } })
 
-    expect(ptyManager.isExtensionPty(pane.id)).toBe(true)
-    expect(ptyManager.getActiveSessions().map((s) => s.id)).not.toContain(pane.id)
-    expect(ptyManager.getLiveSessions().map((s) => s.id)).not.toContain(pane.id)
+    expect(ptyManager.isExtensionPty(drawn.id)).toBe(true)
+    expect(ptyManager.getActiveSessions().map((s) => s.id)).not.toContain(drawn.id)
+    expect(ptyManager.getLiveSessions().map((s) => s.id)).not.toContain(drawn.id)
   })
 
   it('still answers to everything a terminal has to answer to', () => {
-    const pane = ptyManager.createExtensionPty({
-      command: 'lazygit',
-      args: [],
-      cwd: process.cwd(),
-      displayName: 'Git',
-      env: {}
-    })
+    const drawn = pane()
 
-    expect(() => ptyManager.writeToPty(pane.id, 'q')).not.toThrow()
-    expect(ptyManager.hasLivePty(pane.id)).toBe(true)
-    expect(() => ptyManager.killPty(pane.id)).not.toThrow()
-    expect(ptyManager.isExtensionPty(pane.id)).toBe(false)
+    expect(() => ptyManager.writeToPty(drawn.id, 'q')).not.toThrow()
+    expect(ptyManager.hasLivePty(drawn.id)).toBe(true)
+    expect(() => ptyManager.killPty(drawn.id)).not.toThrow()
+    expect(ptyManager.isExtensionPty(drawn.id)).toBe(false)
   })
 
   it('is spawned with what the extension gave it', () => {
-    ptyManager.createExtensionPty({
-      command: 'lazygit',
-      args: ['--path', '.'],
-      cwd: process.cwd(),
-      displayName: 'Git',
-      env: { VORN_EXTENSION_TOKEN: 'the-token' }
-    })
+    pane({ args: ['--path', '.'], env: { VORN_EXTENSION_TOKEN: 'the-token' } })
 
     const [command, args, options] = spawnMock.mock.calls.at(-1) as unknown as [
       string,
