@@ -12,7 +12,15 @@
  * untouched — only the components that *render* a pane need to branch on kind.
  */
 
-export type PaneKind = 'terminal' | 'files' | 'editor' | 'browser' | 'device' | 'terminals' | 'card'
+export type PaneKind =
+  | 'terminal'
+  | 'files'
+  | 'editor'
+  | 'browser'
+  | 'device'
+  | 'terminals'
+  | 'extension'
+  | 'card'
 
 /** Pane kinds a session stacks inside its own card, i.e. all but those two. */
 export type PaneChildKind = Exclude<PaneKind, 'terminal' | 'card'>
@@ -22,6 +30,7 @@ const EDITOR_PREFIX = 'editor:'
 const BROWSER_PREFIX = 'browser:'
 const DEVICE_PREFIX = 'device:'
 const TERMINALS_PREFIX = 'terminals:'
+const EXTENSION_PREFIX = 'extension:'
 const CARD_PREFIX = 'card:'
 
 /** Id of the file-tree pane owned by `sessionId`. */
@@ -61,6 +70,19 @@ export function devicePaneId(sessionId: string): string {
 }
 
 /**
+ * Id of the extension pane owned by `sessionId`.
+ *
+ * A session shows one extension pane at a time — which extension and which of
+ * its contributions is the pane's own state — so, like its browser, the owner
+ * id names it. That also keeps the id readable from the left: an id carrying
+ * the extension and the contribution as well would have three fields in front
+ * of a session id that may itself contain a colon.
+ */
+export function extensionPaneId(sessionId: string): string {
+  return `${EXTENSION_PREFIX}${sessionId}`
+}
+
+/**
  * Id of the pane of `kind` owned by `sessionId` — the inverse of `parsePaneId`.
  *
  * For code that already holds a kind as data (the pane column, which builds its
@@ -78,6 +100,8 @@ export function paneIdFor(kind: PaneChildKind, sessionId: string): string {
       return devicePaneId(sessionId)
     case 'terminals':
       return terminalsPaneId(sessionId)
+    case 'extension':
+      return extensionPaneId(sessionId)
   }
 }
 
@@ -144,6 +168,9 @@ export function parsePaneId(paneId: string): { kind: PaneKind; sessionId: string
   if (paneId.startsWith(TERMINALS_PREFIX)) {
     return { kind: 'terminals', sessionId: paneId.slice(TERMINALS_PREFIX.length) }
   }
+  if (paneId.startsWith(EXTENSION_PREFIX)) {
+    return { kind: 'extension', sessionId: paneId.slice(EXTENSION_PREFIX.length) }
+  }
   return { kind: 'terminal', sessionId: paneId }
 }
 
@@ -155,6 +182,7 @@ export function paneKind(paneId: string): PaneKind {
   if (paneId.startsWith(BROWSER_PREFIX)) return 'browser'
   if (paneId.startsWith(DEVICE_PREFIX)) return 'device'
   if (paneId.startsWith(TERMINALS_PREFIX)) return 'terminals'
+  if (paneId.startsWith(EXTENSION_PREFIX)) return 'extension'
   return 'terminal'
 }
 

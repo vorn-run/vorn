@@ -15,7 +15,10 @@ import {
   TaskStatus,
   MobileProject,
   UpdateStatus,
-  DeviceClaimFailure
+  DeviceClaimFailure,
+  ExtensionActivationState,
+  ExtensionFooterReading,
+  ExtensionOpenPane
 } from '../../shared/types'
 import type { PortableRequirement } from '../../shared/workflow-portability'
 
@@ -210,6 +213,22 @@ export interface DevicePaneState {
   udid: string
   /** Display name, for the pane title. */
   name: string
+}
+
+/**
+ * State of a session's extension pane — the page or program an extension opened.
+ *
+ * Never persisted. The grant behind it is a nonce the server minted for this
+ * pane and forgets when it stops, so a restored entry would frame a URL that
+ * answers 404 with nothing on screen to say the pane is already dead.
+ */
+export interface ExtensionPaneState {
+  /** What the server handed back: the page URL or the terminal, and the grant. */
+  open: ExtensionOpenPane
+  /** The contribution's title, for the pane header. */
+  title: string
+  /** Which extension it belongs to, shown beside the title. */
+  extensionName: string
 }
 
 /**
@@ -424,6 +443,15 @@ export interface UISlice {
    */
   terminalsPanes: Map<string, TerminalsPaneState>
   /**
+   * Session id → the extension pane it is showing. One per session, like its
+   * device: a card has room for one more column, and the menu says which.
+   */
+  extensionPanes: Map<string, ExtensionPaneState>
+  /** Session id → what its active footers currently read, as the band draws them. */
+  extensionFooters: Map<string, ExtensionFooterReading[]>
+  /** Session id → which extensions show on it, and which of their contributions. */
+  extensionActivation: Map<string, ExtensionActivationState[]>
+  /**
    * Pane id currently maximized, or null. At most one app-wide. A maximized
    * pane covers only its owner session's footprint — other sessions are
    * unaffected, which is what makes it usable for side-by-side comparison.
@@ -587,6 +615,20 @@ export interface UISlice {
    */
   restoreDevicePanes: () => Promise<DeviceRestoreRefusal[]>
   closeDevicePane: (sessionId: string) => void
+  /**
+   * Ask the host for a pane and show what it hands back.
+   *
+   * The server mints the grant, so the pane cannot exist before that answer:
+   * committing first would frame a URL nobody has authorised. A session already
+   * showing one gives it up, because a card holds one at a time.
+   */
+  openExtensionPane: (sessionId: string, extensionId: string, paneId: string) => Promise<void>
+  /** Close it and hand the grant back. */
+  closeExtensionPane: (sessionId: string) => void
+  /** Open it, or close it when this contribution is the one already showing. */
+  toggleExtensionPane: (sessionId: string, extensionId: string, paneId: string) => Promise<void>
+  setExtensionFooters: (sessionId: string, readings: ExtensionFooterReading[]) => void
+  setExtensionActivation: (sessionId: string, states: ExtensionActivationState[]) => void
   /**
    * Show the session's terminals panel, adding `terminalId` to it if given.
    *

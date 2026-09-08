@@ -1,5 +1,9 @@
 import { StateCreator } from 'zustand'
-import { TerminalSession } from '../../shared/types'
+import {
+  TerminalSession,
+  type ExtensionActivationState,
+  type ExtensionFooterReading
+} from '../../shared/types'
 import {
   AppStore,
   UISlice,
@@ -11,6 +15,7 @@ import {
   BrowserTabState,
   DevicePaneState,
   DeviceRestoreRefusal,
+  ExtensionPaneState,
   TerminalsPaneState,
   CardSplit,
   isPromotedPane,
@@ -22,6 +27,7 @@ import {
   browserPaneId,
   devicePaneId,
   terminalsPaneId,
+  extensionPaneId,
   isTerminalPane,
   paneOwnerId,
   promotedCardSeq,
@@ -33,6 +39,7 @@ import { pruneDrafts } from '../lib/editor-drafts'
 import { pruneIntentDrafts } from '../lib/intent-drafts'
 import { confirmDiscard, confirmDiscardAll, clearDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
+import { paneLabel } from '../lib/use-extensions'
 
 const EMPTY_SESSIONS: TerminalSession[] = []
 const WORKTREE_CACHE_TTL = 5_000
@@ -440,6 +447,9 @@ function reconcilePanes(
   browserPanes: Map<string, BrowserPaneState>,
   browserMemory: Map<string, BrowserPaneState>,
   devicePanes: Map<string, DevicePaneState>,
+  extensionPanes: Map<string, ExtensionPaneState>,
+  extensionFooters: Map<string, ExtensionFooterReading[]>,
+  extensionActivation: Map<string, ExtensionActivationState[]>,
   terminalsPanes: Map<string, TerminalsPaneState>,
   cardSplits: Record<string, CardSplit>,
   liveSessionIds: Set<string>
@@ -449,6 +459,9 @@ function reconcilePanes(
   browserPanes: Map<string, BrowserPaneState>
   browserMemory: Map<string, BrowserPaneState>
   devicePanes: Map<string, DevicePaneState>
+  extensionPanes: Map<string, ExtensionPaneState>
+  extensionFooters: Map<string, ExtensionFooterReading[]>
+  extensionActivation: Map<string, ExtensionActivationState[]>
   terminalsPanes: Map<string, TerminalsPaneState>
   cardSplits: Record<string, CardSplit>
 } | null {
@@ -471,6 +484,12 @@ function reconcilePanes(
   // card mounted against a device nobody can drive — the same leak, minus the
   // localStorage growth.
   const nextDevices = new Map([...devicePanes].filter(([id]) => liveSessionIds.has(id)))
+  // Extension state is in-memory too, and leaks the same way: a dead session's
+  // pane keeps a grant the host will never be asked to release, and its footer
+  // readings keep saying what the branch looked like when it went.
+  const nextExtensionPanes = new Map([...extensionPanes].filter(([id]) => liveSessionIds.has(id)))
+  const nextFooters = new Map([...extensionFooters].filter(([id]) => liveSessionIds.has(id)))
+  const nextActivation = new Map([...extensionActivation].filter(([id]) => liveSessionIds.has(id)))
   // A panel goes with its owner, and its remaining shells go with it — they are
   // sessions too, so a dead session's list would otherwise keep ids that hide
   // terminals which no longer exist.
@@ -504,6 +523,9 @@ function reconcilePanes(
     nextBrowsers.size === browserPanes.size &&
     nextMemory.size === browserMemory.size &&
     nextDevices.size === devicePanes.size &&
+    nextExtensionPanes.size === extensionPanes.size &&
+    nextFooters.size === extensionFooters.size &&
+    nextActivation.size === extensionActivation.size &&
     !panelsChanged &&
     !splitsChanged
   ) {
@@ -518,6 +540,9 @@ function reconcilePanes(
     browserPanes: nextBrowsers,
     browserMemory: nextMemory,
     devicePanes: nextDevices,
+    extensionPanes: nextExtensionPanes,
+    extensionFooters: nextFooters,
+    extensionActivation: nextActivation,
     terminalsPanes: nextPanels,
     cardSplits: nextSplits
   }
@@ -608,6 +633,9 @@ function pruneAgainstKnown(state: AppStore): Partial<AppStore> | null {
     state.browserPanes,
     state.browserMemory,
     state.devicePanes,
+    state.extensionPanes,
+    state.extensionFooters,
+    state.extensionActivation,
     state.terminalsPanes,
     state.cardSplits,
     live
@@ -848,6 +876,11 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   // Not part of loadPanes: a claim lives in main and dies with the app, so a
   // device pane restored from disk would frame a simulator nobody holds.
   devicePanes: new Map(),
+  // Not persisted either: the grant behind a pane is a nonce the server forgets
+  // when it stops, so a restored one would frame a page that answers 404.
+  extensionPanes: new Map(),
+  extensionFooters: new Map(),
+  extensionActivation: new Map(),
   terminalsPanes: loadTerminalPanels(),
   maximizedPaneId: loadView().maximizedPaneId,
   sessionDockCollapsed: false,
@@ -1329,6 +1362,72 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       }
     }),
 
+  openExtensionPane: async (sessionId, extensionId, paneId) => {
+    // Asked for before anything is committed: the grant is the pane, and a
+    // frame put up first would point at a URL nobody has authorised yet.
+    const open = await window.api.openExtensionPane?.(extensionId, paneId, sessionId)
+    if (!open) return
+    const label = paneLabel(extensionId, paneId)
+    // A card holds one, so whatever was showing hands its grant back. Read after
+    // the await -- the pane could have changed while the host was answering.
+    get().closeExtensionPane(sessionId)
+    set((state) => {
+      const next = new Map(state.extensionPanes)
+      next.set(sessionId, { open, ...label })
+      return { extensionPanes: next }
+    })
+  },
+
+  closeExtensionPane: (sessionId) =>
+    set((state) => {
+      const showing = state.extensionPanes.get(sessionId)
+      if (!showing) return {}
+      // Fire-and-forget, as the device release is: a grant the host refuses to
+      // drop must not trap the pane open, and it releases on session teardown
+      // regardless.
+      try {
+        void window.api.closeExtensionPane?.(showing.open.nonce)?.catch(() => {})
+      } catch {
+        // A release that throws synchronously still must not hold the pane.
+      }
+      const next = new Map(state.extensionPanes)
+      next.delete(sessionId)
+      return {
+        extensionPanes: next,
+        ...clearPlacement(state, extensionPaneId(sessionId))
+      }
+    }),
+
+  toggleExtensionPane: async (sessionId, extensionId, paneId) => {
+    const showing = get().extensionPanes.get(sessionId)?.open
+    if (showing && showing.extensionId === extensionId && showing.paneId === paneId) {
+      get().closeExtensionPane(sessionId)
+      return
+    }
+    await get().openExtensionPane(sessionId, extensionId, paneId)
+  },
+
+  setExtensionFooters: (sessionId, readings) =>
+    set((state) => {
+      // An empty answer for a session with nothing stored is the ordinary case
+      // on a card with no extensions; writing it would rebuild the map on every
+      // poll of every session.
+      if (readings.length === 0 && !state.extensionFooters.has(sessionId)) return {}
+      const next = new Map(state.extensionFooters)
+      if (readings.length === 0) next.delete(sessionId)
+      else next.set(sessionId, readings)
+      return { extensionFooters: next }
+    }),
+
+  setExtensionActivation: (sessionId, states) =>
+    set((state) => {
+      if (states.length === 0 && !state.extensionActivation.has(sessionId)) return {}
+      const next = new Map(state.extensionActivation)
+      if (states.length === 0) next.delete(sessionId)
+      else next.set(sessionId, states)
+      return { extensionActivation: next }
+    }),
+
   openTerminalsPane: (sessionId, terminalId) =>
     set((state) => {
       const next = new Map(state.terminalsPanes)
@@ -1783,7 +1882,12 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 export function selectPaneFlags(
   s: Pick<
     AppStore,
-    'filesPanes' | 'editorPanes' | 'browserPanes' | 'devicePanes' | 'terminalsPanes'
+    | 'filesPanes'
+    | 'editorPanes'
+    | 'browserPanes'
+    | 'devicePanes'
+    | 'extensionPanes'
+    | 'terminalsPanes'
   >,
   sessionId: string | null
 ): {
@@ -1791,6 +1895,7 @@ export function selectPaneFlags(
   editor: boolean
   browser: boolean
   device: boolean
+  extension: boolean
   terminals: boolean
   any: boolean
 } {
@@ -1798,13 +1903,15 @@ export function selectPaneFlags(
   const editor = sessionId ? s.editorPanes.has(sessionId) : false
   const browser = sessionId ? s.browserPanes.has(sessionId) : false
   const device = sessionId ? s.devicePanes.has(sessionId) : false
+  const extension = sessionId ? s.extensionPanes.has(sessionId) : false
   const terminals = sessionId ? s.terminalsPanes.has(sessionId) : false
   return {
     files,
     editor,
     browser,
     device,
+    extension,
     terminals,
-    any: files || editor || browser || device || terminals
+    any: files || editor || browser || device || extension || terminals
   }
 }

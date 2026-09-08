@@ -110,6 +110,16 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       // session no longer holds, and block a later pane from opening.
       const devicePanes = new Map(state.devicePanes)
       devicePanes.delete(id)
+      // The host releases an extension's grants when the session ends, so this
+      // is only the viewer -- but a pane left behind would frame a page whose
+      // nonce is already gone, and its footers would keep reading out the last
+      // thing a dead branch said.
+      const extensionPanes = new Map(state.extensionPanes)
+      extensionPanes.delete(id)
+      const extensionFooters = new Map(state.extensionFooters)
+      extensionFooters.delete(id)
+      const extensionActivation = new Map(state.extensionActivation)
+      extensionActivation.delete(id)
       // How this card divided its interior dies with it too; a recycled id
       // would otherwise inherit a divider position from a different session.
       const cardSplits = { ...state.cardSplits }
@@ -143,6 +153,9 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         browserPanes,
         browserMemory,
         devicePanes,
+        extensionPanes,
+        extensionFooters,
+        extensionActivation,
         cardSplits,
         gitDiffStats,
         ...(maxOwned ? { maximizedPaneId: null } : {}),
