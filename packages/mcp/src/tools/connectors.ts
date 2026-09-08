@@ -244,6 +244,20 @@ export function registerConnectorTools(server: McpServer): void {
         installed = outcome.pack
       }
 
+      // An extension contributes to the card rather than polling a service, so
+      // installing it is the whole of connecting it: there is no trigger to pick.
+      if (installed?.kind === 'extension') {
+        return json({
+          installed: installed.name,
+          kind: 'extension',
+          version: installed.version,
+          path: installed.path,
+          contributes: installed.contributes ?? {},
+          permissions: installed.permissions ?? [],
+          note: 'Extensions have no connection: they show on the cards their activation names.'
+        })
+      }
+
       const target = installed ? packLaunch(installed) : (entry?.launch ?? args.package)
       if (!target) return failure('Provide either connector_id, package, or pack_path.')
 

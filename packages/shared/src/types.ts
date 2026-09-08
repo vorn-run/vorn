@@ -2215,6 +2215,8 @@ export interface InstalledConnectorPack {
   id: string
   name: string
   version: string
+  /** Absent on a pack built before extensions, which reads as a connector. */
+  kind?: ConnectorKind
   description?: string
   icon?: SdkConnectorIcon
   /** How this connector signs in, read from the manifest that was installed. */
@@ -2228,6 +2230,10 @@ export interface InstalledConnectorPack {
   triggers: SdkTrigger[]
   actions: SdkAction[]
   env: SdkEnvVar[]
+  /** What an extension adds to a card, so the host can run it without reopening the manifest. */
+  contributes?: ExtensionContributions
+  permissions?: ExtensionPermission[]
+  activates?: ExtensionActivation
 }
 
 /** Where a pack is read from; `staged` is one an inspection already verified. */
@@ -2245,6 +2251,8 @@ export interface ConnectorPackSummary {
   id: string
   name: string
   version: string
+  /** Absent on a pack built before extensions, which reads as a connector. */
+  kind?: ConnectorKind
   description?: string
   icon?: SdkConnectorIcon
   /** What signing in will ask for, said before any of this is kept. */
@@ -2252,6 +2260,10 @@ export interface ConnectorPackSummary {
   triggers: SdkTrigger[]
   actions: SdkAction[]
   env: SdkEnvVar[]
+  /** What an extension would add to a card, said on the sheet that asks to keep it. */
+  contributes?: ExtensionContributions
+  permissions?: ExtensionPermission[]
+  activates?: ExtensionActivation
   /** The version already on disk, when this would replace one. */
   installedVersion?: string
   /** Handle to the verified files, so confirming installs exactly what was shown. */
