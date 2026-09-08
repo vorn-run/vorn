@@ -102,7 +102,9 @@ describe('defineExtension', () => {
   it('refuses a link handler whose pattern is not a regular expression', () => {
     expect(() =>
       extension({
-        linkHandlers: [{ id: 'pr', title: 'Pull request', pattern: '([', run: () => {} }]
+        linkHandlers: [
+          { id: 'pr', title: 'Pull request', pattern: '([', example: 'x', run: () => {} }
+        ]
       })
     ).toThrow(/not a regular expression/)
   })
@@ -135,10 +137,16 @@ describe("the manifest an extension's pack carries", () => {
         activates: { workspaceContains: ['package.json'], platform: ['darwin'] },
         panes: [
           { id: 'report', title: 'Report', web: 'web/report/index.html' },
-          { id: 'git', title: 'Git', command: ['lazygit'], when: { agent: ['shell'] } }
+          { id: 'git', title: 'Git', command: ['tig'], when: { agent: ['shell'] } }
         ],
         linkHandlers: [
-          { id: 'pr', title: 'Pull request', pattern: 'github\\.com/.+/pull/', run: () => {} }
+          {
+            id: 'pr',
+            title: 'Pull request',
+            pattern: 'github\\.com/.+/pull/',
+            example: 'https://github.com/vorn-run/vorn/pull/1',
+            run: () => {}
+          }
         ]
       })
     )
@@ -151,13 +159,18 @@ describe("the manifest an extension's pack carries", () => {
     })
     expect(manifest.contributes?.panes).toEqual([
       { id: 'report', title: 'Report', web: 'web/report/index.html' },
-      { id: 'git', title: 'Git', command: ['lazygit'], when: { agent: ['shell'] } }
+      { id: 'git', title: 'Git', command: ['tig'], when: { agent: ['shell'] } }
     ])
     expect(manifest.contributes?.footers).toEqual([
       { id: 'checks', title: 'Checks', description: 'What the last commands said', every: 30 }
     ])
     expect(manifest.contributes?.linkHandlers).toEqual([
-      { id: 'pr', title: 'Pull request', pattern: 'github\\.com/.+/pull/' }
+      {
+        id: 'pr',
+        title: 'Pull request',
+        pattern: 'github\\.com/.+/pull/',
+        example: 'https://github.com/vorn-run/vorn/pull/1'
+      }
     ])
     // The code stays in the process that runs it; a manifest is what is written to disk.
     expect(JSON.stringify(manifest)).not.toContain('"run"')

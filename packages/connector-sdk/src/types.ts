@@ -636,8 +636,10 @@ export interface FooterContribution extends ContributionBase {
 
 /** Offers this extension when the clicked text in a terminal matches. */
 export interface LinkHandlerContribution extends ContributionBase {
-  /** Matched against the clicked text as a regular expression. */
+  /** Matched as a regular expression against clicked text, under a bound the app sets. */
   pattern: string
+  /** A link this handler is for, which its pattern must match; `check` runs the handler on it. */
+  example: string
   run(context: LinkContext): Promise<LinkHandled | void> | LinkHandled | void
 }
 

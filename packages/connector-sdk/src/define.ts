@@ -49,7 +49,8 @@ export const HOST_PERMISSIONS: Record<ExtensionHostMethod, ExtensionPermission> 
   usage: 'agent.usage'
 }
 
-const EXTENSION_AGENTS: ExtensionAgent[] = [
+/** Session types an extension may name, so a manifest cannot invent one. */
+export const EXTENSION_AGENTS: ExtensionAgent[] = [
   'claude',
   'copilot',
   'codex',
@@ -57,13 +58,16 @@ const EXTENSION_AGENTS: ExtensionAgent[] = [
   'gemini',
   'shell'
 ]
-const EXTENSION_PLATFORMS: ExtensionPlatform[] = ['darwin', 'linux', 'win32']
+export const EXTENSION_PLATFORMS: ExtensionPlatform[] = ['darwin', 'linux', 'win32']
 
 /** A pane's page lives under `web/` in the package, so a pack carries one named directory. */
 const WEB_ENTRY_PATTERN = /^web\/[A-Za-z0-9._/-]+\.html$/
 
 /** Slower than this and a footer is a poller; faster and it is a spinner. */
 const MIN_FOOTER_SECONDS = 5
+
+/** A pattern is matched against clicked text on a person's keystroke, so it stays small enough to bound. */
+const MAX_PATTERN_LENGTH = 256
 
 /** A declared request goes somewhere the connector named: a real URL, … */
 const ABSOLUTE_URL_PATTERN = /^https?:\/\//i
@@ -435,13 +439,33 @@ export function defineExtension(definition: ExtensionDefinition): Connector {
         `Extension ${id} link handler ${handler.id} is missing a run() implementation`
       )
     }
+    if (typeof handler.pattern !== 'string' || handler.pattern.length > MAX_PATTERN_LENGTH) {
+      throw new Error(
+        `Extension ${id} link handler ${handler.id} has a pattern longer than ` +
+          `${MAX_PATTERN_LENGTH} characters; it is matched on every click`
+      )
+    }
+    let matcher: RegExp
     try {
-      new RegExp(handler.pattern)
+      matcher = new RegExp(handler.pattern)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       throw new Error(
         `Extension ${id} link handler ${handler.id} has a pattern that is not a regular expression: ${reason}`,
         { cause: error }
+      )
+    }
+    // The example is what `check` runs the handler on, so a pattern it does not
+    // match would prove the handler against a link it will never be offered for.
+    if (typeof handler.example !== 'string' || handler.example.trim() === '') {
+      throw new Error(
+        `Extension ${id} link handler ${handler.id} names no example link its pattern matches`
+      )
+    }
+    if (!matcher.test(handler.example)) {
+      throw new Error(
+        `Extension ${id} link handler ${handler.id} has the example ${JSON.stringify(handler.example)}, ` +
+          `which its own pattern ${JSON.stringify(handler.pattern)} does not match`
       )
     }
   }

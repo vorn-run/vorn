@@ -134,6 +134,7 @@ describe('checking an extension', () => {
             id: 'pr',
             title: 'Pull request',
             pattern: 'github\\.com',
+            example: 'https://github.com/vorn-run/vorn/pull/1',
             run: () => {
               throw new Error('nothing to open')
             }
@@ -180,7 +181,15 @@ describe("the receipt an extension's check writes", () => {
     const run = await runConformance(
       extension({
         panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }],
-        linkHandlers: [{ id: 'pr', title: 'Pull request', pattern: 'github\\.com', run: () => {} }]
+        linkHandlers: [
+          {
+            id: 'pr',
+            title: 'Pull request',
+            pattern: 'github\\.com',
+            example: 'https://github.com/vorn-run/vorn/pull/1',
+            run: () => {}
+          }
+        ]
       }),
       { packageDir: packageWithPage() }
     )

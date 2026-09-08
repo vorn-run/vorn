@@ -1,6 +1,6 @@
 import { builtinModules } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
-import { cp, mkdtemp, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { CheckCode, CheckFinding } from './check'
@@ -17,6 +17,9 @@ import type { Connector } from './types'
 
 /** Largest pack Vorn will install, matched by the server's own verification. */
 export const MAX_PACK_BYTES = 8 * 1024 * 1024
+
+/** Largest the same pack may unpack to, matched by the server's own verification. */
+export const MAX_UNPACKED_BYTES = 32 * 1024 * 1024
 
 /** Scripts npm would run at install time, which a pack must never carry. */
 const LIFECYCLE_SCRIPTS = [
@@ -281,16 +284,37 @@ export function packEntryContents(entry: string, sdkModule = '@vornrun/connector
 /** The directory a pane's page is served from, carried verbatim so the manifest's path still resolves. */
 export const WEB_DIR = 'web'
 
-/** Whether this pack ships pages, which is what makes `web/` part of it. */
-export function carriesWeb(connector: Connector): boolean {
-  return (connector.contributes?.panes ?? []).some((pane) => pane.web !== undefined)
+/** What a staged pack weighs on disk, which is what the host's unpacked ceiling measures. */
+export async function directoryBytes(dir: string): Promise<number> {
+  let total = 0
+  for (const entry of await readdir(dir, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile()) continue
+    total += (await stat(join(entry.parentPath, entry.name))).size
+  }
+  return total
 }
 
-/** A directory holding nothing but what a pack carries, for tarring or for launching. */
+/** The directory each declared page sits in, relative to the package, without repeats. */
+export function webDirectories(connector: Connector): string[] {
+  const dirs = (connector.contributes?.panes ?? [])
+    .map((pane) => pane.web)
+    .filter((web): web is string => web !== undefined)
+    .map((web) => dirname(web))
+  return [...new Set(dirs)]
+}
+
+/**
+ * A directory holding nothing but what a pack carries, for tarring or launching.
+ *
+ * `packageRoot` is the package's own root, already resolved by the caller.
+ * Pages are copied per declared pane rather than as one `web/` sweep: a page
+ * needs the stylesheet and script beside it, but nothing an author merely left
+ * in the tree is something the pack should publish.
+ */
 export async function stagePack(
   connector: Connector,
   code: string,
-  packageDir?: string
+  packageRoot?: string
 ): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'vorn-pack-'))
   await writeFile(join(dir, 'index.js'), code, 'utf8')
@@ -299,11 +323,11 @@ export async function stagePack(
     `${JSON.stringify(connectorManifest(connector), null, 2)}\n`,
     'utf8'
   )
-  // Copied whole rather than per pane: the manifest names a path inside `web/`,
-  // so the pack has to hold the stylesheet and the script that page asks for too.
-  if (packageDir !== undefined && carriesWeb(connector)) {
-    const from = join(packageRootFor(packageDir), WEB_DIR)
-    if (existsSync(from)) await cp(from, join(dir, WEB_DIR), { recursive: true })
+  if (packageRoot !== undefined) {
+    for (const relative of webDirectories(connector)) {
+      const from = join(packageRoot, relative)
+      if (existsSync(from)) await cp(from, join(dir, relative), { recursive: true })
+    }
   }
   return dir
 }

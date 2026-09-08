@@ -310,12 +310,13 @@ function extensionPage(name: string): string {
     <h1>${name}</h1>
     <pre id="output">Reading the session…</pre>
     <script type="module">
-      // Vorn answers on this bridge with exactly the permissions the manifest declared.
+      // Same origin, so the page carries no credential: Vorn knows which pane is
+      // asking and grants exactly the permissions the manifest declared.
       const ask = async (method, body = {}) => {
-        const response = await fetch(new URL(method, window.vorn.host), {
+        const response = await fetch('bridge/' + method, {
           method: 'POST',
-          headers: { authorization: 'Bearer ' + window.vorn.token, 'content-type': 'application/json' },
-          body: JSON.stringify({ sessionId: window.vorn.sessionId, ...body })
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body)
         })
         if (!response.ok) throw new Error(method + ' answered ' + response.status)
         return (await response.json()).result

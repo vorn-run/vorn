@@ -2122,6 +2122,11 @@ export interface SdkAction {
  */
 export type ConnectorKind = 'connector' | 'extension'
 
+/** Session types an extension can name; `shell` is a plain terminal. */
+export type ExtensionAgent = 'claude' | 'copilot' | 'codex' | 'opencode' | 'gemini' | 'shell'
+
+export type ExtensionPlatform = 'darwin' | 'linux' | 'win32'
+
 /** What an extension may ask the host for, shown before anyone installs it. */
 export type ExtensionPermission =
   | 'git.read'
@@ -2142,8 +2147,8 @@ export interface ExtensionActivation {
   /** Paths relative to the session's worktree; any one existing is enough. */
   workspaceContains?: string[]
   remoteHost?: string[]
-  agent?: string[]
-  platform?: string[]
+  agent?: ExtensionAgent[]
+  platform?: ExtensionPlatform[]
 }
 
 /** What every contribution says about itself, whatever kind it is. */
@@ -2171,7 +2176,10 @@ export interface ExtensionFooterContribution extends ExtensionContributionSummar
 
 /** Offers the extension when clicked text in a terminal matches. */
 export interface ExtensionLinkHandlerContribution extends ExtensionContributionSummary {
+  /** Matched as a regular expression against clicked text, under a bound the app sets. */
   pattern: string
+  /** A link this handler is for, which its pattern matches. */
+  example?: string
 }
 
 export interface ExtensionContributions {

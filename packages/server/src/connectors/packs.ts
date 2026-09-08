@@ -50,9 +50,50 @@ const PACK_FILES = [MANIFEST_FILE, ENTRY_FILE, 'package.json']
  *
  * A directory rather than named files: a page needs its stylesheet and its
  * script beside it, and neither the manifest nor this gate can name them all
- * ahead of time. It is still one named directory, so nothing else is reachable.
+ * ahead of time. What bounds it instead is the manifest — only the directories
+ * its own panes name, and only file types a page is drawn from.
  */
 const WEB_PREFIX = 'web/'
+
+/**
+ * What a page may be made of.
+ *
+ * The reason the allowlist exists at all is that a `.cjs`, `.node` or `.wasm`
+ * is code the entry can reach; putting it under `web/` does not make it a page.
+ */
+const WEB_FILE_TYPES = [
+  'html',
+  'css',
+  'js',
+  'mjs',
+  'json',
+  'svg',
+  'png',
+  'jpg',
+  'jpeg',
+  'webp',
+  'gif',
+  'woff',
+  'woff2',
+  'txt',
+  'md'
+]
+
+/** The directories this manifest's own pages sit in, each with its trailing slash. */
+function webDirectories(manifest: SdkConnectorManifest): string[] {
+  if (manifest.kind !== 'extension') return []
+  const pages = (manifest.contributes?.panes ?? [])
+    .map((pane) => pane.web)
+    .filter((web): web is string => typeof web === 'string' && web.startsWith(WEB_PREFIX))
+  return [...new Set(pages.map((web) => `${web.slice(0, web.lastIndexOf('/'))}/`))]
+}
+
+/** Whether a file is a page asset this manifest actually asked to carry. */
+function servesAPage(file: string, directories: string[]): boolean {
+  if (!directories.some((dir) => file.startsWith(dir))) return false
+  const suffix = file.slice(file.lastIndexOf('.') + 1).toLowerCase()
+  return file.includes('.') && WEB_FILE_TYPES.includes(suffix)
+}
 
 interface CurrentPack {
   version: string
@@ -190,19 +231,26 @@ export function verifyPackDir(dir: string): SdkConnectorManifest {
     }
   }
 
+  // Read before the allowlist rather than after it: what a pack may carry under
+  // `web/` is exactly what its own manifest says it draws a pane from.
+  const manifest = readManifest(dir)
+  const directories = webDirectories(manifest)
+
   // An allowlist rather than a script headcount: a `.cjs`, `.node` or `.wasm`
   // beside the entry is code the entry can reach, so it is code Vorn installed.
-  const strays = files.filter((file) => !PACK_FILES.includes(file) && !file.startsWith(WEB_PREFIX))
+  const strays = files.filter(
+    (file) => !PACK_FILES.includes(file) && !servesAPage(file, directories)
+  )
   if (strays.length > 0) {
     throw new Error(
-      `The pack carries ${strays.join(', ')}; a pack is ${MANIFEST_FILE}, ${ENTRY_FILE} and what an extension serves under ${WEB_PREFIX}`
+      `The pack carries ${strays.join(', ')}; a pack is ${MANIFEST_FILE}, ${ENTRY_FILE} and the pages an extension's own panes name under ${WEB_PREFIX}`
     )
   }
 
   const bytes = directoryBytes(dir)
   if (bytes > MAX_UNPACKED_BYTES) throw new Error(unpackedMessage(bytes))
 
-  return readManifest(dir)
+  return manifest
 }
 
 /** Stated rather than inherited from tar: being wrong here writes outside the data dir. */

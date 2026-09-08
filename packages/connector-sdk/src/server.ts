@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z, type ZodTypeAny } from 'zod'
-import { resolveConfig } from './define'
+import { EXTENSION_AGENTS, resolveConfig } from './define'
 import { createExtensionHost } from './host'
 import { runAction, runOptions, runPoll } from './runtime'
 import {
@@ -254,15 +254,15 @@ export function createConnectorServer(
   const sessionShape = {
     sessionId: z.string().describe('The session this is being computed for'),
     worktreePath: z.string().describe("Where the session's work is"),
-    agent: z.string().describe('Which agent runs in the session')
+    agent: z.enum(EXTENSION_AGENTS).describe('Which agent runs in the session')
   }
   const sessionContext = (
-    args: { sessionId: string; worktreePath: string; agent: string },
+    args: { sessionId: string; worktreePath: string; agent: ExtensionAgent },
     host: ExtensionHost
   ): ExtensionContext => ({
     sessionId: args.sessionId,
     worktreePath: args.worktreePath,
-    agent: args.agent as ExtensionAgent,
+    agent: args.agent,
     host,
     now: options.now ?? (() => new Date().toISOString())
   })

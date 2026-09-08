@@ -6,6 +6,7 @@ import {
   bundledRequireFindings,
   lifecycleScriptFindings,
   packageDirFor,
+  packageRootFor,
   packEntryContents,
   packLaunchFindings,
   readNearestPackageJson,
@@ -245,6 +246,18 @@ function launches(options: CheckOptions): boolean {
 }
 
 /** What the package says about itself, when a check was pointed at one. */
+/**
+ * The package's own root, or nothing when the check was not told where it is.
+ *
+ * A page is authored beside `package.json` while the entry is under `dist/`,
+ * and the command may have been run from anywhere, so every question about
+ * files on disk is asked of this one directory.
+ */
+function packageRootOf(options: CheckOptions): string | undefined {
+  if (options.packageDir === undefined) return undefined
+  return packageRootFor(packageDirFor(options.packageDir, options.entry))
+}
+
 async function packageFindings(
   connector: Connector,
   options: CheckOptions
@@ -277,11 +290,7 @@ async function packageFindings(
     found.push(...bundleDependencyFindings(built.external), ...bundledRequireFindings(built.code))
     // Always, so the receipt's `launch` names a launch that happened rather than one that was skipped.
     if (options.mock) {
-      const dir = await stagePack(
-        connector,
-        built.code,
-        packageDirFor(options.packageDir, options.entry)
-      )
+      const dir = await stagePack(connector, built.code, packageRootOf(options))
       try {
         found.push(...(await packLaunchFindings(dir)))
       } finally {
@@ -393,7 +402,12 @@ const CHECK_SESSION = {
   agent: 'claude' as const
 }
 
-/** A reading a band can actually draw: two strings, and a tone it knows. */
+const FOOTER_TONES = ['default', 'ok', 'danger']
+
+/** A reading is clicked, so where it points has to be somewhere a browser will go. */
+const FOOTER_HREF_PROTOCOLS = ['http:', 'https:']
+
+/** A reading a band can actually draw: two strings, a tone it knows, and a link it can open. */
 function invalidItem(item: unknown): string | undefined {
   if (!item || typeof item !== 'object') return 'is not an object'
   const reading = item as Record<string, unknown>
@@ -402,10 +416,19 @@ function invalidItem(item: unknown): string | undefined {
   if (reading.tone !== undefined && !FOOTER_TONES.includes(reading.tone as string)) {
     return `has unknown tone ${JSON.stringify(reading.tone)}`
   }
+  if (reading.href === undefined) return undefined
+  if (typeof reading.href !== 'string') return 'has a link that is not text'
+  let protocol: string
+  try {
+    protocol = new URL(reading.href).protocol
+  } catch {
+    return `has the link ${JSON.stringify(reading.href)}, which is not a URL`
+  }
+  if (!FOOTER_HREF_PROTOCOLS.includes(protocol)) {
+    return `has the link ${JSON.stringify(reading.href)}; a reading links to ${FOOTER_HREF_PROTOCOLS.join(' or ')} and nothing else`
+  }
   return undefined
 }
-
-const FOOTER_TONES = ['default', 'ok', 'danger']
 
 /**
  * Run every contribution once against a host that answers from fixtures.
@@ -484,22 +507,25 @@ async function contributionFindings(connector: Connector): Promise<CheckFinding[
   }
 
   for (const handler of contributes.linkHandlers ?? []) {
-    // A pattern it cannot match is a handler nothing would ever reach it through.
-    const sample = new RegExp(handler.pattern).source
+    // The author's own example, so the handler is run on a link it will really
+    // be offered for — a URL built from the pattern matches nothing it expects.
     await ran('link handler', handler.id, 'handler-failed', (host) =>
       Promise.resolve(
         handler.run({
           ...CHECK_SESSION,
           host,
           now: () => new Date().toISOString(),
-          url: `https://example.test/${encodeURIComponent(sample).slice(0, 32)}`
+          url: handler.example
         })
       )
     )
   }
 
+  // A page spends its permissions in the browser, where this run cannot watch it.
+  const observable = !(contributes.panes ?? []).some((pane) => pane.web !== undefined)
+
   for (const permission of declared) {
-    if (!spent.has(permission)) {
+    if (observable && !spent.has(permission)) {
       found.push(
         finding(
           'warn',
@@ -515,9 +541,9 @@ async function contributionFindings(connector: Connector): Promise<CheckFinding[
 }
 
 /** A pane's page has to be in the package, or the pack ships a pane that cannot open. */
-function paneFindings(connector: Connector, packageDir: string | undefined): CheckFinding[] {
-  if (packageDir === undefined) return []
-  const root = resolve(packageDir)
+function paneFindings(connector: Connector, packageRoot: string | undefined): CheckFinding[] {
+  if (packageRoot === undefined) return []
+  const root = resolve(packageRoot)
   const found: CheckFinding[] = []
   for (const pane of connector.contributes?.panes ?? []) {
     if (pane.web === undefined) continue
@@ -747,7 +773,7 @@ export async function checkConnector(
   // An extension's credential is the host's own token, so there is no rung to check.
   if (connector.kind !== 'extension') found.push(...authFindings(connector))
   found.push(...secretFindings(connector))
-  found.push(...paneFindings(connector, options.packageDir))
+  found.push(...paneFindings(connector, packageRootOf(options)))
   found.push(...(await contributionFindings(connector)))
   found.push(...(await packageFindings(connector, options)))
   found.push(...(await mockFindings(connector, options)))

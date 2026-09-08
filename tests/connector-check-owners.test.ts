@@ -297,6 +297,7 @@ async function everyCodeAnyRunEmits(): Promise<Set<string>> {
             id: 'pr',
             title: 'Pull request',
             pattern: 'example',
+            example: 'https://example.test/example',
             run: () => {
               throw new Error('nothing to open')
             }

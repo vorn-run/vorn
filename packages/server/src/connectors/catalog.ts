@@ -298,6 +298,9 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
   const adds = extension ? toContributes(contributes) : undefined
   const asks = extension ? toPermissions(permissions) : undefined
   const shows = extension ? toActivation(activates) : undefined
+  // An extension is what it contributes, and the install refuses one that
+  // contributes nothing — so listing it would advertise a row nobody can use.
+  if (extension && adds === undefined) return undefined
 
   return {
     ...rest,

@@ -115,7 +115,7 @@ interface ManifestContribution {
 export interface ManifestContributions {
   panes?: Array<ManifestContribution & { web?: string; command?: string[] }>
   footers?: Array<ManifestContribution & { every: number }>
-  linkHandlers?: Array<ManifestContribution & { pattern: string }>
+  linkHandlers?: Array<ManifestContribution & { pattern: string; example: string }>
 }
 
 export interface ConnectorManifest {
@@ -193,7 +193,8 @@ function manifestContributions(connector: Connector): ManifestContributions | un
     ...(contributes.linkHandlers !== undefined && {
       linkHandlers: contributes.linkHandlers.map((handler) => ({
         ...shared(handler),
-        pattern: handler.pattern
+        pattern: handler.pattern,
+        example: handler.example
       }))
     })
   }

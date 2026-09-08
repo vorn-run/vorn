@@ -495,16 +495,47 @@ activates: {
 ### What a pane is drawn from
 
 A pane is either a page the pack carries or a program it runs. A page lives
-under `web/` in the package and is carried into the pack as it stands, so its
-stylesheet and script travel with it; Vorn serves it a bridge in
-`window.vorn` — `host`, `token` and `sessionId` — granting exactly the declared
-permissions. A program is argv, run in the session's worktree and drawn as a
-terminal.
+under `web/` in the package, and the directory it sits in is carried into the
+pack, so its stylesheet and script travel with it. Vorn serves the page and
+answers `bridge/<method>` beside it, on the page's own origin: the page holds no
+token, and Vorn grants the call exactly the permissions the manifest declared,
+knowing from the origin which pane is asking. A program is argv, run in the
+session's worktree and drawn as a terminal.
+
+```js
+const response = await fetch('bridge/output', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ lines: 200 })
+})
+const output = (await response.json()).result
+```
 
 ```ts
 panes: [
   { id: 'report', title: 'Report', web: 'web/report/index.html' },
-  { id: 'git', title: 'Git', command: ['lazygit'], when: { agent: ['shell'] } }
+  { id: 'git', title: 'Git', command: ['tig'], when: { agent: ['shell'] } }
+]
+```
+
+### What a link handler is offered for
+
+A handler names the pattern it matches against clicked text, and one example
+link it is for. The example is what `check` runs the handler on, so a handler is
+proved against a link it will really be offered for rather than a made-up one.
+
+```ts
+linkHandlers: [
+  {
+    id: 'pull-request',
+    title: 'Pull request',
+    pattern: 'https://github\\.com/[^/]+/[^/]+/pull/\\d+',
+    example: 'https://github.com/vorn-run/vorn/pull/1',
+    async run(context) {
+      await context.host.send(`Look at ${context.url}`)
+      return { openPane: 'report' }
+    }
+  }
 ]
 ```
 

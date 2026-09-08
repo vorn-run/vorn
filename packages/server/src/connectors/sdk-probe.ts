@@ -19,6 +19,8 @@ import type {
   ConnectorAuthRung,
   ConnectorKind,
   ExtensionActivation,
+  ExtensionAgent,
+  ExtensionPlatform,
   ExtensionContributions,
   ExtensionContributionSummary,
   ExtensionPaneContribution,
@@ -319,11 +321,42 @@ const EXTENSION_PERMISSIONS: ExtensionPermission[] = [
   'agent.usage'
 ]
 
+const EXTENSION_AGENTS: ExtensionAgent[] = [
+  'claude',
+  'copilot',
+  'codex',
+  'opencode',
+  'gemini',
+  'shell'
+]
+const EXTENSION_PLATFORMS: ExtensionPlatform[] = ['darwin', 'linux', 'win32']
+
 /** A page inside the pack, under `web/`; anything else names a file the pack does not carry. */
 const WEB_ENTRY_PATTERN = /^web\/[A-Za-z0-9._/-]+\.html$/
 
+/** Same shape the SDK enforces, checked again because a manifest is a file anyone can write. */
+const CONTRIBUTION_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+
 /** Slowest a footer may be asked for, so a manifest cannot ask for a poll every second. */
 const MIN_FOOTER_SECONDS = 5
+
+/** Matched against clicked text on a keystroke, so what a manifest may ask for stays small. */
+const MAX_PATTERN_LENGTH = 256
+
+/** Enough of a title or a path to be worth showing; past this it is not one. */
+const MAX_TEXT_LENGTH = 500
+
+/** Enough contributions to be an extension; past this it is a list nobody reads. */
+const MAX_CONTRIBUTIONS = 32
+
+/** Kept to a length the app can draw, so a manifest cannot push a wall of text into a card. */
+const text = (value: unknown, fallback = ''): string =>
+  str(value, fallback).slice(0, MAX_TEXT_LENGTH)
+
+const boundedStrings = (raw: unknown): string[] =>
+  strings(raw)
+    .slice(0, MAX_CONTRIBUTIONS)
+    .map((entry) => entry.slice(0, MAX_TEXT_LENGTH))
 
 /** Permissions this build can enforce; one it cannot is dropped rather than granted. */
 export function toPermissions(value: unknown): ExtensionPermission[] | undefined {
@@ -343,14 +376,21 @@ export function toPermissions(value: unknown): ExtensionPermission[] | undefined
  */
 export function toActivation(value: unknown): ExtensionActivation | undefined {
   if (!isRecord(value)) return undefined
-  const workspaceContains = strings(value.workspaceContains).filter(
+  const workspaceContains = boundedStrings(value.workspaceContains).filter(
     (glob) => !glob.startsWith('/') && !glob.split('/').includes('..')
+  )
+  const remoteHost = boundedStrings(value.remoteHost)
+  const agent = boundedStrings(value.agent).filter((entry): entry is ExtensionAgent =>
+    EXTENSION_AGENTS.includes(entry as ExtensionAgent)
+  )
+  const platform = boundedStrings(value.platform).filter((entry): entry is ExtensionPlatform =>
+    EXTENSION_PLATFORMS.includes(entry as ExtensionPlatform)
   )
   const activation: ExtensionActivation = {
     ...(workspaceContains.length > 0 && { workspaceContains }),
-    ...(strings(value.remoteHost).length > 0 && { remoteHost: strings(value.remoteHost) }),
-    ...(strings(value.agent).length > 0 && { agent: strings(value.agent) }),
-    ...(strings(value.platform).length > 0 && { platform: strings(value.platform) })
+    ...(remoteHost.length > 0 && { remoteHost }),
+    ...(agent.length > 0 && { agent }),
+    ...(platform.length > 0 && { platform })
   }
   return Object.keys(activation).length > 0 ? activation : undefined
 }
@@ -359,12 +399,12 @@ export function toActivation(value: unknown): ExtensionActivation | undefined {
 function toContribution(raw: unknown): ExtensionContributionSummary | undefined {
   if (!isRecord(raw)) return undefined
   const id = str(raw.id).trim()
-  if (!id || !/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(id)) return undefined
+  if (!id || !CONTRIBUTION_ID_PATTERN.test(id)) return undefined
   const when = toActivation(raw.when)
   return {
     id,
-    title: str(raw.title, id),
-    ...(typeof raw.description === 'string' && { description: raw.description }),
+    title: text(raw.title, id),
+    ...(typeof raw.description === 'string' && { description: text(raw.description) }),
     ...(when && { when })
   }
 }
@@ -379,22 +419,24 @@ function toContribution(raw: unknown): ExtensionContributionSummary | undefined 
 export function toContributes(value: unknown): ExtensionContributions | undefined {
   if (!isRecord(value)) return undefined
 
-  const panes = (Array.isArray(value.panes) ? value.panes : []).flatMap(
-    (raw): ExtensionPaneContribution[] => {
-      const base = toContribution(raw)
-      if (!base || !isRecord(raw)) return []
-      const web = str(raw.web).trim()
-      const command = strings(raw.command)
-      if (web !== '' && WEB_ENTRY_PATTERN.test(web) && !web.split('/').includes('..')) {
-        return [{ ...base, web }]
-      }
-      // Argv, so an empty element would run something the extension did not name.
-      if (command.length > 0 && command.every((arg) => arg !== '')) return [{ ...base, command }]
-      return []
-    }
-  )
+  /** Each kind is read from at most this many entries, so one manifest cannot flood a card. */
+  const declared = (raw: unknown): unknown[] =>
+    Array.isArray(raw) ? raw.slice(0, MAX_CONTRIBUTIONS) : []
 
-  const footers = (Array.isArray(value.footers) ? value.footers : []).flatMap((raw) => {
+  const panes = declared(value.panes).flatMap((raw): ExtensionPaneContribution[] => {
+    const base = toContribution(raw)
+    if (!base || !isRecord(raw)) return []
+    const web = text(raw.web).trim()
+    const command = boundedStrings(raw.command)
+    if (web !== '' && WEB_ENTRY_PATTERN.test(web) && !web.split('/').includes('..')) {
+      return [{ ...base, web }]
+    }
+    // Argv, so an empty element would run something the extension did not name.
+    if (command.length > 0 && command.every((arg) => arg !== '')) return [{ ...base, command }]
+    return []
+  })
+
+  const footers = declared(value.footers).flatMap((raw) => {
     const base = toContribution(raw)
     if (!base || !isRecord(raw)) return []
     const every = Number(raw.every)
@@ -402,21 +444,20 @@ export function toContributes(value: unknown): ExtensionContributions | undefine
     return [{ ...base, every }]
   })
 
-  const linkHandlers = (Array.isArray(value.linkHandlers) ? value.linkHandlers : []).flatMap(
-    (raw) => {
-      const base = toContribution(raw)
-      if (!base || !isRecord(raw)) return []
-      const pattern = str(raw.pattern)
-      if (pattern === '') return []
-      try {
-        new RegExp(pattern)
-      } catch {
-        // Offered on every click or on none; either way it is not this pattern.
-        return []
-      }
-      return [{ ...base, pattern }]
+  const linkHandlers = declared(value.linkHandlers).flatMap((raw) => {
+    const base = toContribution(raw)
+    if (!base || !isRecord(raw)) return []
+    const pattern = str(raw.pattern)
+    if (pattern === '' || pattern.length > MAX_PATTERN_LENGTH) return []
+    try {
+      new RegExp(pattern)
+    } catch {
+      // Offered on every click or on none; either way it is not this pattern.
+      return []
     }
-  )
+    const example = text(raw.example).trim()
+    return [{ ...base, pattern, ...(example !== '' && { example }) }]
+  })
 
   const contributes: ExtensionContributions = {
     ...(panes.length > 0 && { panes }),
