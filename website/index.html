@@ -13,7 +13,10 @@
       property="og:description"
       content="The agent command center for AI coding. Run Claude, Copilot, Codex, OpenCode, and Gemini from one desktop app. Interactive or autonomous, everything local."
     />
-    <meta property="og:image" content="assets/hero.png" />
+    <meta property="og:image" content="https://vorn.run/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Vorn. The agent command center." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Vorn. The Agent Command Center." />
@@ -21,7 +24,7 @@
       name="twitter:description"
       content="Orchestrate every AI coding agent from one desktop app. Free and open source."
     />
-    <meta name="twitter:image" content="assets/hero.png" />
+    <meta name="twitter:image" content="https://vorn.run/assets/og.png" />
     <meta
       name="keywords"
       content="agentic IDE, agent command center, AI coding agents, vibe coding, vibecoding, Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, OpenCode, multi-agent, workflow automation, terminal manager, developer tools, AI pair programming, autonomous coding, headless agents, open source"
@@ -29,8 +32,24 @@
     <meta name="author" content="Javier Canizalez" />
     <meta name="robots" content="index, follow" />
     <meta property="og:site_name" content="Vorn" />
-    <meta property="og:url" content="https://vorn.dev" />
+    <meta property="og:url" content="https://vorn.run/" />
+    <link rel="canonical" href="https://vorn.run/" />
     <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Vorn",
+        "url": "https://vorn.run/",
+        "description": "The agent command center: run Claude Code, GitHub Copilot, OpenAI Codex, OpenCode and Gemini CLI from one desktop app, interactively or autonomously, everything local.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Windows, Linux",
+        "downloadUrl": "https://github.com/vorn-run/vorn/releases",
+        "license": "https://opensource.org/license/mit",
+        "author": { "@type": "Person", "name": "Javier Canizalez" },
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -105,6 +124,26 @@
       }
       ul {
         list-style: none;
+      }
+
+      /* ═══════ SKIP LINK ═══════ */
+
+      .skip-link {
+        position: absolute;
+        left: 16px;
+        top: -60px;
+        z-index: 300;
+        padding: 10px 16px;
+        background: var(--parchment);
+        color: var(--museum-black);
+        font-family: var(--mono);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        border-radius: 2px;
+      }
+      .skip-link:focus {
+        top: 16px;
       }
 
       /* ═══════ ATMOSPHERIC OVERLAYS ═══════ */
@@ -949,7 +988,7 @@
 
       .secondary-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 0.5px;
         background: var(--border);
         border: 0.5px solid var(--border);
@@ -1527,6 +1566,7 @@
     </style>
   </head>
   <body>
+    <a href="#main" class="skip-link">Skip to content</a>
     <!-- ═══════ ATMOSPHERIC OVERLAYS ═══════ -->
     <div class="overlay-vignette" aria-hidden="true"></div>
 
@@ -1576,13 +1616,15 @@
       <a href="#install" class="nav-cta">Download</a>
     </div>
 
-    <main>
+    <main id="main">
       <!-- ═══════ ROOM I — THE PROLOGUE ═══════ -->
       <section class="hero">
         <!-- Vitruvian Man — clean line art from EPS vector source -->
         <img
-          src="assets/vitruvian-lines.png"
+          src="assets/vitruvian-lines-1200.webp"
           alt=""
+          width="1200"
+          height="1200"
           loading="lazy"
           class="hero-vitruvian"
           aria-hidden="true"
@@ -1616,7 +1658,7 @@
 
         <div class="hero-content container">
           <div class="hero-badge hero-enter" id="version-badge">
-            <span class="dot"></span> v0.1.0
+            <span class="dot"></span> v0.6.1
           </div>
           <h1 class="hero-title hero-enter">Vorn</h1>
           <p class="hero-subtitle hero-enter">The <em>agent command center.</em></p>
@@ -1655,7 +1697,11 @@
           </div>
           <div class="hero-screenshot hero-enter">
             <img
-              src="assets/hero.png"
+              src="assets/hero-1400.webp"
+              srcset="assets/hero-1400.webp 1400w, assets/hero-2400.webp 2400w"
+              sizes="(max-width: 1448px) 100vw, 1400px"
+              width="3024"
+              height="1764"
               alt="Vorn agentic IDE showing multi-agent grid with Claude Code, Copilot, and Codex"
               decoding="async"
               fetchpriority="high"
@@ -1737,13 +1783,17 @@
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/hero.png"
+                  src="assets/hero-1400.webp"
+                  srcset="assets/hero-1400.webp 900w, assets/hero-2400.webp 1600w"
+                  sizes="(max-width: 900px) 100vw, 640px"
+                  width="3024"
+                  height="1764"
                   alt="Multi-agent grid layout"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. II &mdash; Multi-Agent Grid</p>
+              <p class="study-fig">Fig. II &middot; Multi-Agent Grid</p>
             </div>
           </div>
 
@@ -1759,13 +1809,17 @@
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/tasks.png"
+                  src="assets/tasks-1600.webp"
+                  srcset="assets/tasks-900.webp 900w, assets/tasks-1600.webp 1600w"
+                  sizes="(max-width: 900px) 100vw, 640px"
+                  width="3020"
+                  height="1644"
                   alt="Task queue and kanban board"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. III &mdash; Task Queue &amp; Kanban</p>
+              <p class="study-fig">Fig. III &middot; Task Queue &amp; Kanban</p>
             </div>
           </div>
 
@@ -1781,13 +1835,17 @@
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/workflows.png"
+                  src="assets/workflows-1600.webp"
+                  srcset="assets/workflows-900.webp 900w, assets/workflows-1600.webp 1600w"
+                  sizes="(max-width: 900px) 100vw, 640px"
+                  width="2786"
+                  height="1734"
                   alt="Visual workflow editor"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. IV &mdash; Workflow Automation</p>
+              <p class="study-fig">Fig. IV &middot; Workflow Automation</p>
             </div>
           </div>
 
@@ -1803,13 +1861,17 @@
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/headless.png"
+                  src="assets/headless-1600.webp"
+                  srcset="assets/headless-900.webp 900w, assets/headless-1600.webp 1600w"
+                  sizes="(max-width: 900px) 100vw, 640px"
+                  width="2786"
+                  height="1734"
                   alt="Headless execution interface"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. V &mdash; Headless Execution</p>
+              <p class="study-fig">Fig. V &middot; Headless Execution</p>
             </div>
           </div>
 
@@ -1825,13 +1887,20 @@
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/command-palette.png"
+                  src="assets/command-palette-1600.webp"
+                  srcset="
+                    assets/command-palette-900.webp   900w,
+                    assets/command-palette-1600.webp 1600w
+                  "
+                  sizes="(max-width: 900px) 100vw, 640px"
+                  width="3020"
+                  height="1644"
                   alt="Command palette"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. VI &mdash; Command Palette</p>
+              <p class="study-fig">Fig. VI &middot; Command Palette</p>
             </div>
           </div>
 
@@ -1847,13 +1916,20 @@
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/resume-sessions.png"
+                  src="assets/resume-sessions-1600.webp"
+                  srcset="
+                    assets/resume-sessions-900.webp   900w,
+                    assets/resume-sessions-1600.webp 1600w
+                  "
+                  sizes="(max-width: 900px) 100vw, 640px"
+                  width="2786"
+                  height="1734"
                   alt="Session persistence"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. VII &mdash; Session Persistence</p>
+              <p class="study-fig">Fig. VII &middot; Session Persistence</p>
             </div>
           </div>
         </div>
@@ -2164,41 +2240,6 @@
                   stroke-linecap="round"
                   stroke-linejoin="round"
                 >
-                  <rect x="2" y="3" width="20" height="14" rx="2" />
-                  <path d="M8 21h8" />
-                  <path d="M12 17v4" />
-                </svg>
-              </div>
-              <h4>Cross-platform</h4>
-              <p>Native builds for macOS, Windows, and Linux with automatic updates.</p>
-            </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                  <path d="M21 3v5h-5" />
-                </svg>
-              </div>
-              <h4>Auto-update</h4>
-              <p>Built-in update checking keeps you on the latest version effortlessly.</p>
-            </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
                   <path d="M4 17l6-6-6-6" />
                   <path d="M12 19h8" />
                 </svg>
@@ -2216,7 +2257,9 @@
           <div class="section-header reveal">
             <div class="section-label">Install</div>
             <h2 class="section-heading">Install in seconds</h2>
-            <p class="section-sub">Install Vorn with a single command on any platform.</p>
+            <p class="section-sub">
+              One command on macOS, Windows or Linux. Vorn updates itself after that.
+            </p>
           </div>
           <div class="install-wrapper reveal">
             <div class="terminal">
@@ -2259,7 +2302,7 @@
                 <a
                   class="os-btn"
                   data-os="mac"
-                  href="https://github.com/vorn-run/vorn/releases"
+                  href="https://github.com/vorn-run/vorn/releases/download/v0.6.1/Vorn-0.6.1-arm64.dmg"
                   target="_blank"
                   rel="noopener"
                 >
@@ -2279,7 +2322,7 @@
                 <a
                   class="os-btn"
                   data-os="win"
-                  href="https://github.com/vorn-run/vorn/releases"
+                  href="https://github.com/vorn-run/vorn/releases/download/v0.6.1/Vorn-Setup-0.6.1.exe"
                   target="_blank"
                   rel="noopener"
                 >
@@ -2299,7 +2342,7 @@
                 <a
                   class="os-btn"
                   data-os="linux"
-                  href="https://github.com/vorn-run/vorn/releases"
+                  href="https://github.com/vorn-run/vorn/releases/download/v0.6.1/Vorn-0.6.1.AppImage"
                   target="_blank"
                   rel="noopener"
                 >
@@ -2440,8 +2483,7 @@
         const platform = navigator.platform || ''
         if (/Mac|iPhone|iPad|iPod/.test(platform) || /Macintosh/.test(ua)) return 'mac'
         if (/Win/.test(platform) || /Windows/.test(ua)) return 'win'
-        if (/Android|CrOS/.test(ua)) return 'mac'
-        if (/Linux/.test(ua)) return 'linux'
+        if (/Android|CrOS|Linux/.test(ua)) return 'linux'
         return 'mac'
       }
       const detectedOS = detectOS()
@@ -2643,12 +2685,12 @@
           {
             text: 'Where the spirit does not work with the hand, there is no art.',
             attr: 'Leonardo da Vinci',
-            bg: 'assets/davinci-embryo.jpg'
+            bg: 'assets/davinci-embryo-900.webp'
           },
           {
             text: 'Study the science of art. Study the art of science.',
             attr: 'Leonardo da Vinci',
-            bg: 'assets/davinci-embryo-alt.jpg'
+            bg: 'assets/davinci-embryo-alt-900.webp'
           }
         ]
         const quoteEl = document.getElementById('rotating-quote')
