@@ -248,7 +248,7 @@
         left: 0;
         right: 0;
         z-index: 200;
-        padding: 24px 0;
+        padding: 7px 0;
         transition:
           background 0.5s ease,
           border-color 0.5s ease,
@@ -261,7 +261,7 @@
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border-bottom-color: var(--border);
-        padding: 16px 0;
+        padding: 5px 0;
       }
 
       .nav-inner {
@@ -281,7 +281,7 @@
 
       .nav-logo span {
         font-family: var(--display);
-        font-size: 28px;
+        font-size: 20px;
         font-weight: 400;
         letter-spacing: 0.15em;
         text-transform: lowercase;
@@ -291,12 +291,12 @@
       .nav-links {
         display: flex;
         align-items: center;
-        gap: 40px;
+        gap: 26px;
       }
 
       .nav-links a {
         font-family: var(--display);
-        font-size: 18px;
+        font-size: 15px;
         font-weight: 500;
         letter-spacing: 0.08em;
         color: rgba(237, 229, 204, 0.5);
@@ -501,9 +501,13 @@
         opacity: 0.8;
       }
 
-      .hero-screenshot img {
+      .hero-screenshot img,
+      .hero-screenshot .hero-loop {
         position: relative;
         width: 100%;
+        /* Without this the height attribute sets the box and the frame
+           letterboxes inside it, banding the hero with dead space. */
+        height: auto;
         display: block;
         z-index: 1;
         border-radius: 10px;
@@ -1714,16 +1718,21 @@
             </a>
           </div>
           <div class="hero-screenshot hero-enter">
-            <img
-              src="assets/hero-1400.webp"
-              srcset="assets/hero-1400.webp 1400w, assets/hero-2400.webp 2400w"
-              sizes="(max-width: 1448px) 100vw, 1400px"
-              width="3024"
-              height="1764"
-              alt="Vorn agentic IDE showing multi-agent grid with Claude Code, Copilot, and Codex"
-              decoding="async"
-              fetchpriority="high"
-            />
+            <video
+              class="hero-loop"
+              data-lead
+              data-ladder="900,1200,1600"
+              data-src="assets/loops/grid"
+              role="img"
+              loop
+              muted
+              playsinline
+              preload="none"
+              poster="assets/loops/grid-1600.webp"
+              width="1600"
+              height="900"
+              aria-label="Four agent sessions running side by side in Vorn, each streaming its own output."
+            ></video>
           </div>
         </div>
       </section>
@@ -1795,18 +1804,18 @@
                     loop
                     muted
                     playsinline
-                    preload="metadata"
-                    poster="assets/loops/sessions-1600.webp"
+                    preload="none"
+                    poster="assets/loops/durability-1600.webp"
                     width="1600"
-                    height="700"
-                    aria-label="Run Claude, Codex, Copilot, OpenCode and Gemini side by side, each with its own terminal, browser and simulator. The server detaches from the window, so a quit, a crash and an update leave them all still working."
+                    height="900"
+                    aria-label="The server detaches from the window, so a quit, a crash and an update all leave the session running. A reboot does not, and the strip that greets you says so."
                   >
-                    <source src="assets/loops/sessions.webm" type="video/webm" />
-                    <source src="assets/loops/sessions.mp4" type="video/mp4" />
+                    <source src="assets/loops/durability.webm" type="video/webm" />
+                    <source src="assets/loops/durability.mp4" type="video/mp4" />
                   </video>
                 </div>
                 <div class="plate-text-split">
-                  <h3>Every agent on one canvas, and none of them stop</h3>
+                  <h3>Quit it. The agent keeps going.</h3>
                   <p>
                     Run Claude, Codex, Copilot, OpenCode and Gemini side by side, each with its own
                     terminal, browser and simulator. The server detaches from the window, so a quit,
@@ -2611,8 +2620,25 @@
       ;(function initLoops() {
         const calm = window.matchMedia('(prefers-reduced-motion: reduce)')
 
+        // A laddered video carries no source until it is wanted: the rung is
+        // chosen from the width it will actually be drawn at, so a phone never
+        // fetches the desktop cut.
+        function attach(video) {
+          const base = video.getAttribute('data-src')
+          const ladder = video.getAttribute('data-ladder')
+          if (!base || !ladder || video.currentSrc) return
+          const wanted = video.getBoundingClientRect().width * (window.devicePixelRatio || 1)
+          const rungs = ladder.split(',').map(Number)
+          const rung = rungs.find(function (w) {
+            return w >= wanted
+          })
+          video.src = base + '-' + (rung || rungs[rungs.length - 1]) + '.mp4'
+        }
+
         function play(media) {
-          const started = media.querySelector('video').play()
+          const video = media.querySelector('video')
+          attach(video)
+          const started = video.play()
           if (started) started.catch(function () {})
           media.classList.add('is-playing')
         }
@@ -2623,7 +2649,9 @@
         }
 
         const leads = []
-        document.querySelectorAll('.plate-media').forEach(function (media) {
+        // The hero slab and the plates are the same kind of thing here: a frame
+        // holding one loop. Anything that holds a video answers to this.
+        document.querySelectorAll('.plate-media, .hero-screenshot').forEach(function (media) {
           const video = media.querySelector('video')
           if (!video) return
           if (video.hasAttribute('data-lead')) {
