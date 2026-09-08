@@ -698,6 +698,11 @@ export function focusTerminal(terminalId: string): void {
   registry.get(terminalId)?.term.focus()
 }
 
+/** Whether this window is the one drawing that terminal, and so can speak for it. */
+export function hasTerminal(terminalId: string): boolean {
+  return registry.has(terminalId)
+}
+
 export function getTerminalSelection(terminalId: string): string {
   const entry = registry.get(terminalId)
   if (!entry || !entry.term.hasSelection()) return ''

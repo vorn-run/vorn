@@ -84,6 +84,16 @@ class PtyManager extends EventEmitter {
   readonly heads = new HeadRefresh(getGitHead)
   private ptys = new Map<string, pty.IPty>()
   private sessions = new Map<string, TerminalSession>()
+  /**
+   * PTYs an extension's pane is drawing, which are not sessions.
+   *
+   * They need everything a session's PTY needs — bytes in, bytes out, a resize,
+   * a kill — so they live in the same maps. What they are not is work a person
+   * started: no window is told about them, nothing persists them, and nothing
+   * that walks the sessions of a project should find one and start settling
+   * extensions onto it.
+   */
+  private extensionPtys = new Set<string>()
   private normalizedPaths = new Map<string, string>()
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
   private remoteHosts: RemoteHost[] = []
@@ -563,6 +573,56 @@ class PtyManager extends EventEmitter {
     return session
   }
 
+  /**
+   * A terminal running an extension's own program, in the worktree it is about.
+   *
+   * Its own spawn rather than `createShellPty` with arguments: this runs one
+   * named program instead of a login shell, so it takes none of the shell
+   * integration, and it carries the extension's bridge names so the program can
+   * ask the host the same things a footer can.
+   */
+  createExtensionPty(params: {
+    command: string
+    args: string[]
+    cwd: string
+    displayName: string
+    env: Record<string, string>
+  }): TerminalSession {
+    const id = crypto.randomUUID()
+    const ptyProcess = pty.spawn(params.command, params.args, {
+      name: 'xterm-256color',
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
+      cwd: params.cwd,
+      env: { ...getSafeEnv(), ...params.env, VORN_SESSION_ID: id }
+    })
+    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
+    this.ptys.set(id, ptyProcess)
+
+    const session: TerminalSession = {
+      id,
+      agentType: 'shell',
+      projectName: path.basename(params.cwd) || 'extension',
+      projectPath: params.cwd,
+      status: 'running',
+      createdAt: Date.now(),
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
+      pid: ptyProcess.pid,
+      displayName: params.displayName,
+      shellCwd: params.cwd
+    }
+    this.sessions.set(id, session)
+    this.extensionPtys.add(id)
+    this.normalizedPaths.set(id, normalizePath(params.cwd))
+    return session
+  }
+
+  /** Whether this PTY is an extension's pane rather than a session someone started. */
+  isExtensionPty(id: string): boolean {
+    return this.extensionPtys.has(id)
+  }
+
   private static readonly BUFFER_FLUSH_MS = 8
 
   /**
@@ -684,6 +744,7 @@ class PtyManager extends EventEmitter {
     this.outputLines.delete(id)
     this.outputPartials.delete(id)
     this.statusContexts.delete(id)
+    this.extensionPtys.delete(id)
     const idleTimer = this.idleTimers.get(id)
     if (idleTimer) clearTimeout(idleTimer)
     this.idleTimers.delete(id)
@@ -1059,20 +1120,22 @@ class PtyManager extends EventEmitter {
   }
 
   getActiveSessions(): TerminalSession[] {
+    // An extension's pane PTY is deliberately absent: this list is what the app
+    // is told about and what is persisted, and a pane is neither.
     if (this.sessionOrder.length === 0) {
-      return Array.from(this.sessions.values())
+      return Array.from(this.sessions.values()).filter((s) => !this.extensionPtys.has(s.id))
     }
     const ordered: TerminalSession[] = []
     const seen = new Set<string>()
     for (const id of this.sessionOrder) {
       const s = this.sessions.get(id)
-      if (s) {
+      if (s && !this.extensionPtys.has(id)) {
         ordered.push(s)
         seen.add(id)
       }
     }
     for (const s of this.sessions.values()) {
-      if (!seen.has(s.id)) ordered.push(s)
+      if (!seen.has(s.id) && !this.extensionPtys.has(s.id)) ordered.push(s)
     }
     return ordered
   }
@@ -1113,10 +1176,12 @@ class PtyManager extends EventEmitter {
     }
   }
 
-  renameSession(id: string, displayName: string): void {
+  /** `byPerson` records who chose the name, which is what an extension may not overrule. */
+  renameSession(id: string, displayName: string, byPerson = true): void {
     const session = this.sessions.get(id)
     if (!session) throw new Error(`Session not found: ${id}`)
     session.displayName = displayName
+    if (byPerson) session.renamedByPerson = true
     this.emit('client-message', IPC.SESSION_UPDATED, session)
   }
 

@@ -642,6 +642,7 @@ describe('what a probed extension contributes', () => {
         ],
         linkHandlers: [
           { id: 'broken', title: 'Broken', pattern: '([' },
+          { id: 'chewy', title: 'Chewy', pattern: '(a+)+$' },
           { id: 'pr', title: 'Pull request', pattern: 'github\\.com' }
         ]
       }

@@ -111,6 +111,14 @@ export interface TerminalSession {
    */
   cols?: number
   rows?: number
+  /**
+   * Whether a person named this card, rather than it being named for them.
+   *
+   * Most sessions arrive with a name already filled in, so "has a name" cannot
+   * tell the two apart -- and an extension that renames cards must not take one
+   * a person chose. Only a rename a person asked for sets this.
+   */
+  renamedByPerson?: boolean
   /** Shell session only: working directory the PTY was started in. */
   shellCwd?: string
   /** HEAD where it was working, refreshed as it works, so a restore can tell the tree moved. */
@@ -1845,7 +1853,18 @@ export const IPC = {
   CONNECTOR_ROLLBACK_PACK: 'connector:rollbackPack',
   CONNECTOR_LIST_PACKS: 'connector:listPacks',
   CONNECTOR_INSTALL_PROGRESS: 'connector:installProgress',
-  CONNECTOR_CATALOG_CHANGED: 'connector:catalogChanged'
+  CONNECTOR_CATALOG_CHANGED: 'connector:catalogChanged',
+
+  // Extensions
+  EXTENSION_LIST: 'extension:list',
+  EXTENSION_ACTIVATION: 'extension:activation',
+  EXTENSION_FOOTER_ITEMS: 'extension:footerItems',
+  EXTENSION_OPEN_PANE: 'extension:openPane',
+  EXTENSION_CLOSE_PANE: 'extension:closePane',
+  EXTENSION_RUN_HANDLER: 'extension:runHandler',
+  EXTENSION_MATCH_LINKS: 'extension:matchLinks',
+  EXTENSION_SELECTION_REQUEST: 'extension:selectionRequest',
+  EXTENSION_SELECTION_RESULT: 'extension:selectionResult'
 } as const
 
 /**
@@ -2215,6 +2234,8 @@ export interface InstalledConnectorPack {
   id: string
   name: string
   version: string
+  /** Absent on a pack built before extensions, which reads as a connector. */
+  kind?: ConnectorKind
   description?: string
   icon?: SdkConnectorIcon
   /** How this connector signs in, read from the manifest that was installed. */
@@ -2228,6 +2249,61 @@ export interface InstalledConnectorPack {
   triggers: SdkTrigger[]
   actions: SdkAction[]
   env: SdkEnvVar[]
+  /** What an extension adds to a card, so the host can run it without reopening the manifest. */
+  contributes?: ExtensionContributions
+  permissions?: ExtensionPermission[]
+  activates?: ExtensionActivation
+}
+
+/** One reading in a footer band, as the card draws it. */
+export interface ExtensionFooterItem {
+  label: string
+  value: string
+  /** `ok` and `danger` colour the value; anything else is ordinary text. */
+  tone?: 'default' | 'ok' | 'danger'
+  href?: string
+}
+
+/** What one footer currently says for one session, or why it says nothing. */
+export interface ExtensionFooterReading {
+  extensionId: string
+  extensionName: string
+  footerId: string
+  title: string
+  items: ExtensionFooterItem[]
+  /** Set when the last run failed; the band shows the extension's name and this. */
+  error?: string
+  computedAt: string
+}
+
+/** Which of an installed extension's contributions show on one session's card. */
+export interface ExtensionActivationState {
+  extensionId: string
+  extensionName: string
+  active: boolean
+  panes: string[]
+  footers: string[]
+  linkHandlers: string[]
+}
+
+/** A pane an extension opened: a page to frame, or a terminal already drawing. */
+export interface ExtensionOpenPane {
+  extensionId: string
+  paneId: string
+  sessionId: string
+  /** Set on a page pane; same-origin, and the only thing that proves the page. */
+  url?: string
+  /** Set on a program pane; the terminal to draw. */
+  terminalId?: string
+  nonce: string
+}
+
+/** A handler whose pattern matched clicked text, offered beside the built-in choices. */
+export interface ExtensionLinkMatch {
+  extensionId: string
+  extensionName: string
+  handlerId: string
+  title: string
 }
 
 /** Where a pack is read from; `staged` is one an inspection already verified. */
@@ -2245,6 +2321,8 @@ export interface ConnectorPackSummary {
   id: string
   name: string
   version: string
+  /** Absent on a pack built before extensions, which reads as a connector. */
+  kind?: ConnectorKind
   description?: string
   icon?: SdkConnectorIcon
   /** What signing in will ask for, said before any of this is kept. */
@@ -2252,6 +2330,10 @@ export interface ConnectorPackSummary {
   triggers: SdkTrigger[]
   actions: SdkAction[]
   env: SdkEnvVar[]
+  /** What an extension would add to a card, said on the sheet that asks to keep it. */
+  contributes?: ExtensionContributions
+  permissions?: ExtensionPermission[]
+  activates?: ExtensionActivation
   /** The version already on disk, when this would replace one. */
   installedVersion?: string
   /** Handle to the verified files, so confirming installs exactly what was shown. */

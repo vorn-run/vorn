@@ -12,7 +12,6 @@
  * pushes via `credentials:setDecrypted`.
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import {
   SDK_FILTER_KEYS,
   connectionConnectorId,
@@ -24,18 +23,9 @@ import { localLaunchSpec } from './catalog'
 import { installedLaunch } from './packs'
 import { borrowedSecrets } from './auth-rung'
 import { resolveConnectorAuth } from './connector-auth'
-import { getSafeEnv } from '../process-utils'
-import log from '../logger'
+import { createStdioClientCache } from './stdio-clients'
 
-interface LiveClient {
-  client: Client
-  transport: StdioClientTransport
-}
-
-const clients = new Map<string, LiveClient>()
-// In-flight startups, so two concurrent `getOrStartClient` calls for the
-// same connection share one spawn instead of racing two children.
-const pending = new Map<string, Promise<Client>>()
+const clients = createStdioClientCache<{ connectionId: string }>('mcp-clients')
 
 function tryParseJson<T>(raw: unknown, guard: (v: unknown) => v is T, fallback: T): T {
   if (typeof raw !== 'string' || raw === '') return fallback
@@ -107,77 +97,20 @@ export async function buildSpawnConfig(conn: SourceConnection): Promise<SpawnCon
 }
 
 export async function getOrStartClient(conn: SourceConnection): Promise<Client> {
-  const existing = clients.get(conn.id)
-  if (existing) return existing.client
-  const inFlight = pending.get(conn.id)
-  if (inFlight) return inFlight
-
-  // Recorded before anything can suspend, so a second caller joins this startup; nothing is awaited above.
-  const startup = startClient(conn).finally(() => {
-    pending.delete(conn.id)
+  return clients.getOrStart(conn.id, async () => {
+    // The spawn config carries the connection's own environment, which wins over
+    // the sanitized base every child starts from.
+    const { command, args, env } = await buildSpawnConfig(conn)
+    return { config: { command, args, env }, meta: { connectionId: conn.id } }
   })
-  pending.set(conn.id, startup)
-  return startup
-}
-
-async function startClient(conn: SourceConnection): Promise<Client> {
-  const { command, args, env } = await buildSpawnConfig(conn)
-  // Inherit PATH and friends from the parent via getSafeEnv() — same
-  // sanitization the rest of the server uses for child processes — so
-  // GH/Linear/NPM tokens etc. don't leak into arbitrary MCP servers
-  // the user adds. Explicit per-connection env still wins over the base.
-  const transport = new StdioClientTransport({
-    command,
-    args,
-    env: { ...getSafeEnv(), ...env }
-  })
-
-  const client = new Client({ name: 'vorn', version: '0.1.0' }, { capabilities: {} })
-
-  try {
-    await client.connect(transport)
-  } catch (err) {
-    // Transport already spawned the child; close it so we don't leak.
-    try {
-      await transport.close()
-    } catch {
-      /* ignore */
-    }
-    throw err
-  }
-
-  const live: LiveClient = { client, transport }
-  clients.set(conn.id, live)
-
-  // If the child exits, drop it from the cache so the next call respawns.
-  transport.onclose = () => {
-    const current = clients.get(conn.id)
-    if (current === live) {
-      clients.delete(conn.id)
-      log.info(`[mcp-clients] ${conn.id} transport closed, will respawn on next call`)
-    }
-  }
-  transport.onerror = (err) => {
-    log.warn(`[mcp-clients] ${conn.id} transport error: ${err}`)
-  }
-
-  return client
 }
 
 export async function stopClient(connectionId: string): Promise<void> {
-  const live = clients.get(connectionId)
-  if (!live) return
-  clients.delete(connectionId)
-  try {
-    await live.client.close()
-  } catch (err) {
-    log.warn(`[mcp-clients] ${connectionId} close failed: ${err}`)
-  }
+  await clients.stop(connectionId)
 }
 
 export async function stopAllClients(): Promise<void> {
-  const ids = [...clients.keys()]
-  await Promise.allSettled(ids.map(stopClient))
+  await clients.stopAll()
 }
 
 export function hasClient(connectionId: string): boolean {

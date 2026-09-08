@@ -343,6 +343,59 @@ const MIN_FOOTER_SECONDS = 5
 /** Matched against clicked text on a keystroke, so what a manifest may ask for stays small. */
 const MAX_PATTERN_LENGTH = 256
 
+/** How a group opens, including the forms that are not a capture. */
+const GROUP_OPEN = /^\((\?(:|=|!|<=|<!|<[A-Za-z_$][\w$]*>))?/
+
+/**
+ * Whether a quantifier is applied to a group that already holds one.
+ *
+ * The same rule the SDK enforces when an extension declares a handler, checked
+ * again because a manifest is a file anyone can write: `(a+)+` costs
+ * exponential time on text that nearly fits, and this is matched on a click.
+ */
+function hasNestedQuantifier(pattern: string): boolean {
+  // An index past the end is not a quantifier; `includes('')` would say it is.
+  const quantifierAt = (at: number): boolean => {
+    const ch = pattern[at]
+    return ch !== undefined && '*+?{'.includes(ch)
+  }
+  const quantified: boolean[] = []
+  let inClass = false
+
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]
+    if (ch === '\\') {
+      i++
+      continue
+    }
+    if (inClass) {
+      if (ch === ']') inClass = false
+      continue
+    }
+    if (ch === '[') {
+      inClass = true
+      continue
+    }
+    if (ch === '(') {
+      quantified.push(false)
+      i += (GROUP_OPEN.exec(pattern.slice(i))?.[0].length ?? 1) - 1
+      continue
+    }
+    if (ch === ')') {
+      const heldOne = quantified.pop() ?? false
+      const repeated = quantifierAt(i + 1)
+      if (heldOne && repeated) return true
+      // Whatever this group holds or does, its parent holds a quantifier too.
+      if ((heldOne || repeated) && quantified.length > 0) {
+        quantified[quantified.length - 1] = true
+      }
+      continue
+    }
+    if (quantifierAt(i) && quantified.length > 0) quantified[quantified.length - 1] = true
+  }
+  return false
+}
+
 /** Enough of a title or a path to be worth showing; past this it is not one. */
 const MAX_TEXT_LENGTH = 500
 
@@ -455,6 +508,8 @@ export function toContributes(value: unknown): ExtensionContributions | undefine
     if (!base || !isRecord(raw)) return []
     const pattern = str(raw.pattern)
     if (pattern === '' || pattern.length > MAX_PATTERN_LENGTH) return []
+    // A pattern that could chew on a click is dropped, like one that does not compile.
+    if (hasNestedQuantifier(pattern)) return []
     try {
       new RegExp(pattern)
     } catch {

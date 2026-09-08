@@ -9,6 +9,7 @@
 export const PHONE_BASE_TOPICS: readonly string[] = [
   'config:*',
   'connector:*',
+  'extension:*',
   'headless:*',
   'pairing:*',
   'scheduler:*',

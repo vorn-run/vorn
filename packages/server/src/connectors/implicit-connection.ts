@@ -30,7 +30,8 @@ export function syncImplicitConnection(
 ): SourceConnection | undefined {
   const existing = deps.list().filter((conn) => connectionConnectorId(conn) === connectorId)
 
-  if (!pack || pack.auth?.rung !== 'none') {
+  // An extension is connected by being installed; it polls nothing and answers no workflow step.
+  if (!pack || pack.kind === 'extension' || pack.auth?.rung !== 'none') {
     const implicit = existing.filter(isImplicitConnection)
     for (const conn of implicit) deps.remove(conn.id)
     if (implicit.length > 0) deps.changed()

@@ -20,8 +20,18 @@ import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
 import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
-import { reconcileImplicitConnections, registerAllMethods, setServerPort } from './register-methods'
+import {
+  extensionRenamedSession,
+  reconcileImplicitConnections,
+  registerAllMethods,
+  setServerPort
+} from './register-methods'
 import { registerWebhookRoute } from './webhook-trigger'
+import { registerExtensionBridge, type ExtensionRouteDeps } from './extensions/bridge'
+import { setExtensionBridgeOrigin, stopAllHosts } from './extensions/hosts'
+import { startExtensionPageServer, stopExtensionPageServer } from './extensions/page-server'
+import { stopAllFooters } from './extensions/footers'
+import { abandonSelections } from './extensions/selection'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
@@ -106,8 +116,28 @@ function resolveBuildChannel(): 'dev' | 'packaged' {
   return process.argv[1]?.endsWith('.ts') ? 'dev' : 'packaged'
 }
 
+/**
+ * Origins that may frame a pane's page, filled in once this server has a port.
+ *
+ * The pages are on their own origin, so the app's is not implied; naming it here
+ * is what lets a window frame one at all.
+ */
+let extensionFrameAncestors: string[] = []
+
+const extensionRouteDeps: ExtensionRouteDeps = {
+  frameAncestors: () => extensionFrameAncestors,
+  sessionRenamed: extensionRenamedSession
+}
+
 export async function startServer(
-  options: { host?: string; port?: number; dataDir?: string; idleShutdown?: boolean } = {}
+  options: {
+    host?: string
+    port?: number
+    dataDir?: string
+    idleShutdown?: boolean
+    /** Origins beyond this server's own that may frame a pane, such as the desktop's. */
+    extensionFrameAncestors?: string[]
+  } = {}
 ) {
   // Initialize database + config. This resolves the data directory for the whole
   // process; everything else reads it back with getDataDir() rather than
@@ -227,6 +257,11 @@ export async function startServer(
   app.get('/health', async () => ({ status: 'ok' }))
 
   registerWebhookRoute(app, () => scheduler.deliverPendingConnectorInbox())
+
+  // An extension's own bridge, which its child process reaches with the token it
+  // was started with. The pages its panes are drawn from are served on their own
+  // origin instead, so a page shares neither storage nor a socket with the app.
+  registerExtensionBridge(app, extensionRouteDeps)
 
   /**
    * Pairing, the phone's half.
@@ -433,6 +468,19 @@ export async function startServer(
 
   // Store port for RPC methods (e.g. tailscale:status needs it)
   setServerPort(actualPort)
+  // The address the extension children are given, known only once a port is won.
+  setExtensionBridgeOrigin(`http://127.0.0.1:${actualPort}`)
+
+  // Pane pages, on a port of their own. The app frames them, so the app's origins
+  // are the only ones allowed to; a page that fails to start costs its panes, not
+  // the server.
+  const appOrigins = [`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`]
+  extensionFrameAncestors = [...appOrigins, ...(options.extensionFrameAncestors ?? [])]
+  try {
+    await startExtensionPageServer(extensionRouteDeps)
+  } catch (err) {
+    log.warn({ err }, '[extensions] pane pages have no origin; panes will not open')
+  }
 
   // Enable hot-rebind when network access / Tailscale state changes
   initRebind(app.server, host, actualPort)
@@ -545,6 +593,10 @@ export async function startServer(
     scheduler.stopAll()
     headlessManager.killAll()
     ptyManager.killAll()
+    stopAllFooters()
+    abandonSelections()
+    await stopExtensionPageServer()
+    await stopAllHosts()
     const { stopAllMcpClients } = await import('./connectors')
     await stopAllMcpClients()
     configManager.close()

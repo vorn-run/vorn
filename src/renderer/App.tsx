@@ -55,6 +55,7 @@ import {
   setNotLiveReporter,
   setLiveReporter
 } from './lib/terminal-registry'
+import { listenForSelectionRequests } from './lib/extension-selection'
 import {
   setCwdReporter,
   getShellInputState,
@@ -284,6 +285,9 @@ export function App() {
     // bytes for a terminal it has attached, so a bell hung off that reached you
     // for the sessions you were already looking at and missed the one ringing
     // out of view -- which is the only one worth interrupting anybody for.
+    // Only this window knows what is highlighted in a terminal it drew.
+    const stopSelectionAnswers = listenForSelectionRequests()
+
     const removeBellListener = window.api.onTerminalBell?.(({ id }) => {
       const state = useAppStore.getState()
       const terminal = state.terminals.get(id)
@@ -567,6 +571,7 @@ export function App() {
       removeReplacedListener?.()
       removeLocalServerListener?.()
       removeBellListener?.()
+      stopSelectionAnswers()
       removeExitListener()
       removeSessionCreatedListener()
       removeConfigListener()

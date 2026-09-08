@@ -61,7 +61,7 @@ const WEB_PREFIX = 'web/'
  * The reason the allowlist exists at all is that a `.cjs`, `.node` or `.wasm`
  * is code the entry can reach; putting it under `web/` does not make it a page.
  */
-const WEB_FILE_TYPES = [
+export const WEB_FILE_TYPES = [
   'html',
   'css',
   'js',
@@ -86,6 +86,19 @@ function webDirectories(manifest: SdkConnectorManifest): string[] {
     .map((pane) => pane.web)
     .filter((web): web is string => typeof web === 'string' && web.startsWith(WEB_PREFIX))
   return [...new Set(pages.map((web) => `${web.slice(0, web.lastIndexOf('/'))}/`))]
+}
+
+/** What an extension adds and asks for, carried on every description of the pack. */
+function extensionFacts(
+  manifest: SdkConnectorManifest
+): Pick<InstalledConnectorPack, 'kind' | 'contributes' | 'permissions' | 'activates'> {
+  if (manifest.kind !== 'extension') return {}
+  return {
+    kind: 'extension',
+    ...(manifest.contributes !== undefined && { contributes: manifest.contributes }),
+    ...(manifest.permissions !== undefined && { permissions: manifest.permissions }),
+    ...(manifest.activates !== undefined && { activates: manifest.activates })
+  }
 }
 
 /** Whether a file is a page asset this manifest actually asked to carry. */
@@ -460,6 +473,7 @@ export async function inspectPack(
         ...(manifest.icon !== undefined && { icon: manifest.icon }),
         // What this will ask of you belongs on the sheet that asks to keep it.
         ...(manifest.auth !== undefined && { auth: manifest.auth }),
+        ...extensionFacts(manifest),
         triggers: manifest.triggers,
         actions: manifest.actions,
         env: manifest.env,
@@ -593,6 +607,7 @@ export function describePack(
     ...(manifest.description !== undefined && { description: manifest.description }),
     ...(manifest.icon !== undefined && { icon: manifest.icon }),
     ...(manifest.auth !== undefined && { auth: manifest.auth }),
+    ...extensionFacts(manifest),
     path,
     ...(current.previousVersion !== undefined && { previousVersion: current.previousVersion }),
     installedAt: current.installedAt,

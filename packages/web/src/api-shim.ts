@@ -782,6 +782,24 @@ export function createApiShim(wsUrl: string) {
     onConnectorCatalogChanged: (cb: (snapshot: unknown) => void) =>
       rpc.on('connector:catalogChanged', cb),
     detectRepo: (projectPath: string) => rpc.invoke('connector:detectRepo', projectPath),
+
+    // ── Extensions ──
+    listExtensions: () => rpc.invoke('extension:list'),
+    extensionActivation: (sessionId: string) => rpc.invoke('extension:activation', { sessionId }),
+    extensionFooterItems: (sessionId: string) => rpc.invoke('extension:footerItems', { sessionId }),
+    openExtensionPane: (extensionId: string, paneId: string, sessionId: string) =>
+      rpc.invoke('extension:openPane', { extensionId, paneId, sessionId }),
+    closeExtensionPane: (nonce: string) => rpc.invoke('extension:closePane', { nonce }),
+    runExtensionHandler: (extensionId: string, handlerId: string, sessionId: string, url: string) =>
+      rpc.invoke('extension:runHandler', { extensionId, handlerId, sessionId, url }),
+    matchExtensionLinks: (sessionId: string, text: string) =>
+      rpc.invoke('extension:matchLinks', { sessionId, text }),
+    onExtensionFooterItems: (cb: (payload: unknown) => void) => rpc.on('extension:footerItems', cb),
+    onExtensionActivation: (cb: (payload: unknown) => void) => rpc.on('extension:activation', cb),
+    onExtensionSelectionRequest: (cb: (payload: unknown) => void) =>
+      rpc.on('extension:selectionRequest', cb),
+    sendExtensionSelection: (requestId: number, text: string) =>
+      rpc.notify('extension:selectionResult', { requestId, text }),
     seedConnectorWorkflow: (connectionId: string, event: string) =>
       rpc.invoke('connector:seedWorkflow', { connectionId, event }),
 

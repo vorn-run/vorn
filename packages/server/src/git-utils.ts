@@ -36,6 +36,9 @@ function gitExec(
   }).trim()
 }
 
+/** As much diff as a reader can use; past this it is a file to open, not a thing to read. */
+const MAX_DIFF_TEXT_BYTES = 500 * 1024
+
 const EXEC_OPTS = {
   encoding: 'utf-8' as const,
   stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe']
@@ -300,6 +303,49 @@ export function createWorktree(
   }
 
   return { worktreePath: worktreeDir, branch, name }
+}
+
+/**
+ * The host of a project's `origin`, whatever forge it points at.
+ *
+ * `detectRepoSlug` answers only for one forge because a connection there needs
+ * an owner and a repo. An activation rule needs neither, and refusing every
+ * other host would hide an extension on the repositories it was written for.
+ */
+export function remoteHostOf(projectPath: string): string | null {
+  let url: string
+  try {
+    url = gitExec(['remote', 'get-url', 'origin'], projectPath, { timeout: 3000 })
+  } catch {
+    // No repo, no origin, or no git; all of them mean the rule has nothing to match.
+    return null
+  }
+  const trimmed = url.trim()
+  if (!trimmed) return null
+  const scp = trimmed.match(/^(?:[^@/\s]+@)?([A-Za-z0-9._-]+):(?!\/)/)
+  if (scp) return scp[1].toLowerCase()
+  try {
+    return new URL(trimmed).hostname.toLowerCase() || null
+  } catch {
+    return null
+  }
+}
+
+/** What `git status` says, in the form a machine reads. */
+export function getGitStatusPorcelain(worktreePath: string, remote?: RemoteHost): string {
+  return gitExec(['status', '--porcelain'], worktreePath, { timeout: 5000, remote })
+}
+
+/** The working tree's diff as git prints it, for a reader that wants the text rather than the shape. */
+export function getGitDiffText(worktreePath: string, remote?: RemoteHost): string {
+  const raw = gitExec(['diff', '-U3'], worktreePath, {
+    timeout: 15000,
+    maxBuffer: MAX_DIFF_TEXT_BYTES * 2,
+    remote
+  })
+  return raw.length > MAX_DIFF_TEXT_BYTES
+    ? `${raw.slice(0, MAX_DIFF_TEXT_BYTES)}\n\n... diff truncated (too large) ...\n`
+    : raw
 }
 
 export function isWorktreeDirty(worktreePath: string, remote?: RemoteHost): boolean {
