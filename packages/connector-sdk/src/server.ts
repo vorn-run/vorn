@@ -313,7 +313,7 @@ export function createConnectorServer(
             ...sessionContext(args, hostFor(args.sessionId)),
             url: args.url
           })
-          return json({ ...handled })
+          return json({ ...(handled ?? {}) })
         } catch (error) {
           return failure(error)
         }

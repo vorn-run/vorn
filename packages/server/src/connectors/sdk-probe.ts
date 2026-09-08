@@ -358,6 +358,12 @@ const boundedStrings = (raw: unknown): string[] =>
     .slice(0, MAX_CONTRIBUTIONS)
     .map((entry) => entry.slice(0, MAX_TEXT_LENGTH))
 
+/** A list of names: trimmed, and a blank one dropped rather than kept to match nothing. */
+const boundedNames = (raw: unknown): string[] =>
+  boundedStrings(raw)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
+
 /** Permissions this build can enforce; one it cannot is dropped rather than granted. */
 export function toPermissions(value: unknown): ExtensionPermission[] | undefined {
   if (!Array.isArray(value)) return undefined
@@ -376,14 +382,14 @@ export function toPermissions(value: unknown): ExtensionPermission[] | undefined
  */
 export function toActivation(value: unknown): ExtensionActivation | undefined {
   if (!isRecord(value)) return undefined
-  const workspaceContains = boundedStrings(value.workspaceContains).filter(
+  const workspaceContains = boundedNames(value.workspaceContains).filter(
     (glob) => !glob.startsWith('/') && !glob.split('/').includes('..')
   )
-  const remoteHost = boundedStrings(value.remoteHost)
-  const agent = boundedStrings(value.agent).filter((entry): entry is ExtensionAgent =>
+  const remoteHost = boundedNames(value.remoteHost)
+  const agent = boundedNames(value.agent).filter((entry): entry is ExtensionAgent =>
     EXTENSION_AGENTS.includes(entry as ExtensionAgent)
   )
-  const platform = boundedStrings(value.platform).filter((entry): entry is ExtensionPlatform =>
+  const platform = boundedNames(value.platform).filter((entry): entry is ExtensionPlatform =>
     EXTENSION_PLATFORMS.includes(entry as ExtensionPlatform)
   )
   const activation: ExtensionActivation = {

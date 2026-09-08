@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { SourceConnection } from '../packages/shared/src/types'
-import { createConnectorServer, defineConnector } from '../packages/connector-sdk/src/index'
+import {
+  createConnectorServer,
+  defineConnector,
+  defineExtension
+} from '../packages/connector-sdk/src/index'
 
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -214,5 +218,40 @@ describe('an SDK connector behind Vorn’s MCP connector', () => {
     expect(second.events.map((event) => event.id)).toEqual(['r-2'])
 
     await client.close()
+  })
+})
+
+describe('a served link handler', () => {
+  it('answers with an empty result when the handler returns nothing', async () => {
+    const extension = defineExtension({
+      id: 'links',
+      name: 'Links',
+      permissions: [],
+      linkHandlers: [
+        {
+          id: 'pr',
+          title: 'Pull request',
+          pattern: 'github\\.com/.+/pull/\\d+',
+          example: 'https://github.com/vorn-run/vorn/pull/1',
+          run: () => {}
+        }
+      ]
+    })
+    const server = createConnectorServer(extension, { config: {}, now: () => NOW })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'vorn', version: '1.0.0' })
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
+
+    const result = await client.callTool({
+      name: 'vorn_handler_pr',
+      arguments: {
+        sessionId: 's1',
+        worktreePath: '/tmp/w',
+        agent: 'claude',
+        url: 'https://github.com/vorn-run/vorn/pull/1'
+      }
+    })
+    expect(result.isError ?? false).toBe(false)
+    expect(result.structuredContent).toEqual({})
   })
 })

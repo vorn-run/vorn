@@ -670,6 +670,14 @@ describe('what a probed extension contributes', () => {
     })
   })
 
+  it('trims a host name and drops one that is only whitespace', async () => {
+    const result = await probeExtension({
+      activates: { remoteHost: [' github.com ', '   ', ''] }
+    })
+    if (!result.ok) throw new Error(result.error)
+    expect(result.manifest.activates).toEqual({ remoteHost: ['github.com'] })
+  })
+
   it('keeps a predicate naming nothing this build knows from narrowing to nothing', async () => {
     const result = await probeExtension({ activates: { agent: ['emacs'], platform: ['plan9'] } })
     if (!result.ok) throw new Error(result.error)
