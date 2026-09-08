@@ -455,6 +455,20 @@ export function App() {
       useAppStore.getState().openDevicePane(sessionId, { udid, name })
     })
 
+    // Pushed only when a reading moves or an extension starts or stops showing;
+    // what a card holds at the moment it appears is hydrated separately.
+    const removeExtensionFooterListener = window.api.onExtensionFooterItems?.(
+      ({ sessionId, readings }) => {
+        useAppStore.getState().setExtensionFooters(sessionId, readings)
+      }
+    )
+
+    const removeExtensionActivationListener = window.api.onExtensionActivation?.(
+      ({ sessionId, states }) => {
+        useAppStore.getState().setExtensionActivation(sessionId, states)
+      }
+    )
+
     const removeBrowserTabListener = window.api.onBrowserTabCommand((cmd) => {
       const store = useAppStore.getState()
       if (cmd.action === 'add') store.addBrowserTab(cmd.sessionId, cmd.url, { trusted: true })
@@ -581,6 +595,8 @@ export function App() {
       removeUpdateListener()
       removeBrowserOpenListener()
       removeDeviceOpenListener()
+      removeExtensionFooterListener?.()
+      removeExtensionActivationListener?.()
       removeBrowserTabListener()
       removeSessionUpdatedListener()
       removeHeadlessExitListener()

@@ -103,6 +103,21 @@ function resolveIdleWindowMs(): number {
 }
 
 /**
+ * Origins the app that spawned this server draws its windows from.
+ *
+ * A desktop window is not served by this server — it is a `file:` page, or a
+ * dev server's — so it cannot be inferred from a port the way the web client's
+ * origin is. Only the launcher knows, and it says so here; a server started
+ * from the CLI has no such window and names none.
+ */
+function resolveAppFrameAncestors(): string[] {
+  return (process.env.VORN_APP_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+}
+
+/**
  * `dev` or `packaged`, preferring what the launcher told us.
  *
  * The fallback reads the entry point rather than NODE_ENV: NODE_ENV is set to
@@ -475,7 +490,11 @@ export async function startServer(
   // are the only ones allowed to; a page that fails to start costs its panes, not
   // the server.
   const appOrigins = [`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`]
-  extensionFrameAncestors = [...appOrigins, ...(options.extensionFrameAncestors ?? [])]
+  extensionFrameAncestors = [
+    ...appOrigins,
+    ...resolveAppFrameAncestors(),
+    ...(options.extensionFrameAncestors ?? [])
+  ]
   try {
     await startExtensionPageServer(extensionRouteDeps)
   } catch (err) {

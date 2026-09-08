@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, Workflow, Terminal } from 'lucide-react'
+import { ChevronRight, Workflow, Terminal, PanelRight } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { type AiAgentType, getProjectRemoteHostId } from '../../shared/types'
 import { AgentIcon } from './AgentIcon'
@@ -11,6 +11,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { useWorkspaceWorkflows } from '../hooks/useWorkspaceWorkflows'
 import { buildWorkflowMenuItems } from '../lib/workflow-menu-items'
 import { createShellInProject } from '../lib/session-utils'
+import { useExtensions, extensionPanes } from '../lib/use-extensions'
 
 interface Props {
   terminalId: string
@@ -45,6 +46,10 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
   const config = useAppStore((s) => s.config)
   const isMobile = useIsMobile()
   const workspaceWorkflows = useWorkspaceWorkflows()
+  const packs = useExtensions()
+  const activation = useAppStore((s) => s.extensionActivation.get(terminalId))
+  const showingPane = useAppStore((s) => s.extensionPanes.get(terminalId)?.open)
+  const toggleExtensionPane = useAppStore((s) => s.toggleExtensionPane)
   const { status: agentInstallStatus } = useAgentInstallStatus()
 
   const [hoveredSubmenu, setHoveredSubmenu] = useState<number | null>(null)
@@ -157,6 +162,35 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
       iconElement: <Workflow size={14} className="text-gray-500" />,
       label: 'Run workflow',
       submenu: workflowMenuItems
+    })
+  }
+
+  // What each active extension puts on this card. Activation carries ids;
+  // titles belong to the pack, so the two are read together.
+  const paneSubmenuItems: SubmenuItem[] = (activation ?? [])
+    .filter((state) => state.active && state.panes.length > 0)
+    .flatMap((state) =>
+      extensionPanes(packs, state.extensionId)
+        .filter((pane) => state.panes.includes(pane.id))
+        .map((pane) => {
+          const open =
+            showingPane?.extensionId === state.extensionId && showingPane?.paneId === pane.id
+          return {
+            label: open ? `Close ${pane.title}` : pane.title,
+            detail: state.extensionName,
+            onClick: () => {
+              onClose()
+              void toggleExtensionPane(terminalId, state.extensionId, pane.id)
+            }
+          }
+        })
+    )
+
+  if (paneSubmenuItems.length > 0) {
+    items.push({
+      iconElement: <PanelRight size={14} className="text-gray-500" />,
+      label: 'Open pane',
+      submenu: paneSubmenuItems
     })
   }
 
@@ -281,14 +315,11 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
               >
                 {sub.iconElement}
                 <span className="flex-1 text-left font-mono truncate">{sub.label}</span>
+                {/* Plain. This used to colour any detail that was not the word
+                    "idle", which reads a status out of a string and spends
+                    colour on a name — an extension's, here — that is not one. */}
                 {sub.detail && (
-                  <span
-                    className={`text-[10px] ml-auto shrink-0 ${
-                      sub.detail !== 'idle' ? 'text-green-400/70' : 'text-gray-600'
-                    }`}
-                  >
-                    {sub.detail}
-                  </span>
+                  <span className="text-[10px] ml-auto shrink-0 text-gray-600">{sub.detail}</span>
                 )}
               </button>
             </div>

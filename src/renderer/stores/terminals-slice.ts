@@ -5,10 +5,12 @@ import {
   editorPaneId,
   browserPaneId,
   devicePaneId,
+  extensionPaneId,
   terminalsPaneId
 } from '../lib/pane-id'
 import { releaseFromPanels, saveTerminalPanels } from './ui-slice'
 import { clearDirty } from '../lib/editor-dirty'
+import { forgetExtensionHydration, hydrateExtensions } from '../lib/extension-hydration'
 
 export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set) => ({
   terminals: new Map(),
@@ -31,6 +33,10 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         ? state.terminalOrder
         : [...state.terminalOrder, session.id]
       window.api.notifyWidgetStatus()
+      // The one funnel a session appears through, whichever brought it: a fresh
+      // launch, the board sync, a restore. The host only pushes what changes, so
+      // a card that arrives after the last change would otherwise stay blank.
+      void hydrateExtensions(session.id)
       return { terminals: next, terminalOrder: order }
     }),
 
@@ -45,11 +51,18 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       const order = state.terminalOrder.filter((tid) => tid !== id && !held.has(tid))
       // A session owns its file-tree, editor, browser and device panes: they
       // die with it, and so does any maximized state pointing at them.
-      const childIds = [filesPaneId(id), editorPaneId(id), browserPaneId(id), devicePaneId(id)]
+      const childIds = [
+        filesPaneId(id),
+        editorPaneId(id),
+        browserPaneId(id),
+        devicePaneId(id),
+        extensionPaneId(id)
+      ]
       // The dirty registry lives outside the store, so it needs explicit
       // teardown — otherwise a session closed with unsaved edits leaves a flag
       // that a recycled id would inherit.
       clearDirty(id)
+      forgetExtensionHydration(id)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(id)
       for (const childId of childIds) minimized.delete(childId)
