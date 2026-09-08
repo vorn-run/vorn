@@ -194,10 +194,13 @@ describe('the files a new extension starts as', () => {
     expect(pkg.vorn.auth).toBeUndefined()
   })
 
-  it('carries a page that asks the host only through the bridge it was given', () => {
+  it('carries a page that asks on its own origin and holds no credential', () => {
     const page = extensionMap().get('web/report/index.html') as string
-    expect(page).toContain('window.vorn.token')
-    expect(page).toContain('window.vorn.host')
+
+    expect(page).toContain("fetch('bridge/' + method")
+    // A token in the page is a token every script the page loads inherits.
+    expect(page).not.toContain('token')
+    expect(page).not.toContain('authorization')
   })
 
   it('starts with a test that runs the footer against the stub host', () => {

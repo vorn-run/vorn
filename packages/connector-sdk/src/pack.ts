@@ -75,8 +75,7 @@ export async function packConnector(
 ): Promise<PackResult> {
   const resolveDir = resolve(options.resolveDir ?? process.cwd())
   const entryDir = packageDirFor(resolveDir, options.entry)
-  // Resolved once and asked of everything below, so the gate and the archive
-  // never judge one package and ship another.
+  // Resolved once, so the gate and the archive never judge different packages.
   const packageRoot = packageRootFor(entryDir)
 
   const findings = await checkConnector(connector, { packageDir: packageRoot })
@@ -98,8 +97,7 @@ export async function packConnector(
     findings.push(...(await (options.launch ?? packLaunchFindings)(staging)))
     if (findings.some((item) => item.level === 'error')) return { findings }
 
-    // Pages compress well, so an archive Vorn accepts can still unpack past what
-    // it will write; the ceiling that refuses the install is the one to hold to.
+    // Pages compress well, so a small archive can still unpack past what Vorn writes.
     const unpacked = await directoryBytes(staging)
     const maxUnpacked = options.maxUnpackedBytes ?? MAX_UNPACKED_BYTES
     if (unpacked > maxUnpacked) {

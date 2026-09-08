@@ -295,7 +295,7 @@ export async function directoryBytes(dir: string): Promise<number> {
 }
 
 /** The directory each declared page sits in, relative to the package, without repeats. */
-export function webDirectories(connector: Connector): string[] {
+function webDirectories(connector: Connector): string[] {
   const dirs = (connector.contributes?.panes ?? [])
     .map((pane) => pane.web)
     .filter((web): web is string => web !== undefined)
