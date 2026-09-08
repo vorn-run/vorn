@@ -7,7 +7,6 @@ import type {
   TerminalSession
 } from '@vornrun/shared/types'
 import { installedPack } from '../connectors/packs'
-import { constantTimeEqual } from '../token-manager'
 import { getGitDiffFull, getGitStatusPorcelain } from '../git-utils'
 import { ptyManager } from '../pty-manager'
 import { grantFor } from './panes'
@@ -86,7 +85,6 @@ function refuse(reply: FastifyReply, code: number, reason: string): FastifyReply
 /** The extension's own reads, once the caller and the session are settled. */
 async function answer(
   method: string,
-  pack: InstalledConnectorPack,
   session: TerminalSession,
   body: Record<string, unknown>
 ): Promise<{ result?: unknown }> {
@@ -179,7 +177,7 @@ export function registerExtensionRoutes(app: FastifyInstance, deps: ExtensionRou
     }
 
     try {
-      const answered = await answer(method, pack, session, params)
+      const answered = await answer(method, session, params)
       if (!('result' in answered)) return reply.code(204).send()
       return reply.code(200).send({ result: answered.result })
     } catch (err) {
@@ -195,12 +193,9 @@ export function registerExtensionRoutes(app: FastifyInstance, deps: ExtensionRou
     const { id, method } = req.params as { id: string; method: string }
     const token = bearer(req.headers.authorization)
     const host = token ? hostByToken(id, token) : undefined
-    // Compared in constant time even though the map lookup already matched, so a
-    // near-miss token costs the same as any other.
-    const caller =
-      host && constantTimeEqual(Buffer.from(host.token, 'utf8'), Buffer.from(token, 'utf8'))
-        ? { extensionId: host.extensionId, projectPath: host.projectPath }
-        : undefined
+    const caller = host
+      ? { extensionId: host.extensionId, projectPath: host.projectPath }
+      : undefined
     return serve(caller, method, req.body, reply)
   })
 
