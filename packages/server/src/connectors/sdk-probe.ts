@@ -17,6 +17,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type {
   ConnectorAuthRung,
+  ConnectorKind,
+  ExtensionActivation,
+  ExtensionContributions,
+  ExtensionContributionSummary,
+  ExtensionPermission,
   SdkActionInput,
   SdkConnectorAuth,
   SdkConnectorIcon,
@@ -304,6 +309,120 @@ function toAuth(value: unknown): SdkConnectorAuth | undefined {
   }
 }
 
+const EXTENSION_PERMISSIONS: ExtensionPermission[] = [
+  'git.read',
+  'terminal.read',
+  'terminal.selection',
+  'terminal.send',
+  'card.rename',
+  'agent.usage'
+]
+
+/** A page inside the pack, under `web/`; anything else names a file the pack does not carry. */
+const WEB_ENTRY_PATTERN = /^web\/[A-Za-z0-9._/-]+\.html$/
+
+/** Slowest a footer may be asked for, so a manifest cannot ask for a poll every second. */
+const MIN_FOOTER_SECONDS = 5
+
+/** Permissions this build can enforce; one it cannot is dropped rather than granted. */
+function toPermissions(value: unknown): ExtensionPermission[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const kept = value.filter((entry): entry is ExtensionPermission =>
+    EXTENSION_PERMISSIONS.includes(entry as ExtensionPermission)
+  )
+  return [...new Set(kept)]
+}
+
+/**
+ * Where a contribution shows.
+ *
+ * A predicate this build cannot evaluate is dropped, which widens where the
+ * contribution shows rather than hiding it — the safe direction for a
+ * narrowing rule, since the alternative is an extension nobody can find.
+ */
+function toActivation(value: unknown): ExtensionActivation | undefined {
+  if (!isRecord(value)) return undefined
+  const workspaceContains = strings(value.workspaceContains).filter(
+    (glob) => !glob.startsWith('/') && !glob.split('/').includes('..')
+  )
+  const activation: ExtensionActivation = {
+    ...(workspaceContains.length > 0 && { workspaceContains }),
+    ...(strings(value.remoteHost).length > 0 && { remoteHost: strings(value.remoteHost) }),
+    ...(strings(value.agent).length > 0 && { agent: strings(value.agent) }),
+    ...(strings(value.platform).length > 0 && { platform: strings(value.platform) })
+  }
+  return Object.keys(activation).length > 0 ? activation : undefined
+}
+
+/** The id, title and where-it-shows every contribution carries, or nothing when it has no id. */
+function toContribution(raw: unknown): ExtensionContributionSummary | undefined {
+  if (!isRecord(raw)) return undefined
+  const id = str(raw.id).trim()
+  if (!id || !/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(id)) return undefined
+  const when = toActivation(raw.when)
+  return {
+    id,
+    title: str(raw.title, id),
+    ...(typeof raw.description === 'string' && { description: raw.description }),
+    ...(when && { when })
+  }
+}
+
+/**
+ * Read what an extension contributes, keeping only what the app could draw.
+ *
+ * A pane naming a page outside the pack, a footer asking to run every second,
+ * a handler whose pattern is not a regular expression: each is dropped on its
+ * own, so one bad contribution costs its own row rather than the extension.
+ */
+function toContributes(value: unknown): ExtensionContributions | undefined {
+  if (!isRecord(value)) return undefined
+
+  const panes = (Array.isArray(value.panes) ? value.panes : []).flatMap((raw) => {
+    const base = toContribution(raw)
+    if (!base || !isRecord(raw)) return []
+    const web = str(raw.web).trim()
+    const command = strings(raw.command)
+    if (web !== '' && WEB_ENTRY_PATTERN.test(web) && !web.split('/').includes('..')) {
+      return [{ ...base, web }]
+    }
+    // Argv, so an empty element would run something the extension did not name.
+    if (command.length > 0 && command.every((arg) => arg !== '')) return [{ ...base, command }]
+    return []
+  })
+
+  const footers = (Array.isArray(value.footers) ? value.footers : []).flatMap((raw) => {
+    const base = toContribution(raw)
+    if (!base || !isRecord(raw)) return []
+    const every = Number(raw.every)
+    if (!Number.isFinite(every) || every < MIN_FOOTER_SECONDS) return []
+    return [{ ...base, every }]
+  })
+
+  const linkHandlers = (Array.isArray(value.linkHandlers) ? value.linkHandlers : []).flatMap(
+    (raw) => {
+      const base = toContribution(raw)
+      if (!base || !isRecord(raw)) return []
+      const pattern = str(raw.pattern)
+      if (pattern === '') return []
+      try {
+        new RegExp(pattern)
+      } catch {
+        // Offered on every click or on none; either way it is not this pattern.
+        return []
+      }
+      return [{ ...base, pattern }]
+    }
+  )
+
+  const contributes: ExtensionContributions = {
+    ...(panes.length > 0 && { panes }),
+    ...(footers.length > 0 && { footers }),
+    ...(linkHandlers.length > 0 && { linkHandlers })
+  }
+  return Object.keys(contributes).length > 0 ? contributes : undefined
+}
+
 /**
  * Validate the manifest into the shape the UI relies on.
  *
@@ -412,24 +531,39 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
     }))
     .filter((action) => action.type !== '')
 
-  if (triggers.length === 0 && actions.length === 0) {
+  const kind: ConnectorKind = payload.kind === 'extension' ? 'extension' : 'connector'
+  const contributes = kind === 'extension' ? toContributes(payload.contributes) : undefined
+
+  // An extension is what it contributes, so that is what it must have something of.
+  if (kind === 'extension' && !contributes) {
+    throw new Error(`Extension ${name} reports nothing it contributes`)
+  }
+  if (kind === 'connector' && triggers.length === 0 && actions.length === 0) {
     throw new Error(`Connector ${name} reports no triggers and no actions`)
   }
 
   const icon = toIcon(payload.icon)
   const auth = toAuth(payload.auth)
+  const permissions = kind === 'extension' ? toPermissions(payload.permissions) : undefined
+  const activates = kind === 'extension' ? toActivation(payload.activates) : undefined
 
-  log.info(`[sdk-probe] ${id}@${str(payload.version, '0.0.0')}: ${triggers.length} trigger(s)`)
+  log.info(
+    `[sdk-probe] ${id}@${str(payload.version, '0.0.0')}: ${kind === 'extension' ? `${(contributes?.panes?.length ?? 0) + (contributes?.footers?.length ?? 0) + (contributes?.linkHandlers?.length ?? 0)} contribution(s)` : `${triggers.length} trigger(s)`}`
+  )
 
   return {
     id,
     name,
     version: str(payload.version, '0.0.0'),
+    kind,
     ...(typeof payload.description === 'string' && { description: payload.description }),
     ...(icon && { icon }),
     ...(auth && { auth }),
     triggers,
     actions,
-    env: [...env.values()]
+    env: [...env.values()],
+    ...(contributes && { contributes }),
+    ...(permissions && { permissions }),
+    ...(activates && { activates })
   }
 }
