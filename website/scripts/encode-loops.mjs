@@ -1,20 +1,22 @@
-// Each raw take in release-videos/ becomes a webm, an mp4 and a poster the plate can stand on.
+// Each take in release-videos/ becomes a webm, an mp4 and the poster its plate stands on.
+// The plate markup in index.html says which loops exist and how wide they ship, so the
+// two cannot drift: a poster this writes is the one the page already asks for.
 // Usage: node scripts/encode-loops.mjs   (needs ffmpeg and cwebp on PATH)
 import { execFileSync } from 'node:child_process'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { toWebp } from './lib.mjs'
 
-const ASSETS = new URL('../assets/', import.meta.url).pathname
 const TAKES = new URL('../release-videos/', import.meta.url).pathname
+const LOOPS = new URL('../assets/loops/', import.meta.url).pathname
+const INDEX = new URL('../index.html', import.meta.url).pathname
+const BUDGET_KB = 400
 
-// Delivery width per plate, and the byte budget a loop may not exceed.
-const LOOPS = [
-  { name: 'durability', width: 1600, budget: 400 },
-  { name: 'workflows', width: 1200, budget: 400 },
-  { name: 'connectors', width: 900, budget: 400 },
-  { name: 'phone', width: 560, budget: 400 },
-  { name: 'panes', width: 900, budget: 400 }
-]
+const loops = [
+  ...readFileSync(INDEX, 'utf8').matchAll(
+    /poster="assets\/loops\/([a-z-]+)-(\d+)\.webp"\s+width="(\d+)"\s+height="(\d+)"/g
+  )
+].map(([, name, width, , height]) => ({ name, width: Number(width), height: Number(height) }))
 
 const ff = (args) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args])
 const kb = (file) => statSync(file).size / 1024
@@ -38,82 +40,44 @@ function probe(file) {
 }
 
 const rows = []
-const over = []
-for (const { name, width, budget, crop } of LOOPS) {
+const wrong = []
+for (const { name, width, height } of loops) {
   const src = join(TAKES, `${name}.mov`)
   if (!existsSync(src)) {
     rows.push(`${name} — no take yet`)
     continue
   }
   const { w, h } = probe(src)
-  // Height rounded to an even number so both encoders accept it.
+  // Height rounded to an even number, which both encoders require.
   const scaled = Math.round(((h / w) * width) / 2) * 2
-  const filter = [crop ? `crop=${crop}` : null, `scale=${width}:${scaled}`, 'fps=30']
-    .filter(Boolean)
-    .join(',')
+  if (scaled !== height) {
+    wrong.push(`${name} encodes to ${width}x${scaled}, but the plate reserves ${width}x${height}`)
+  }
+  const filter = `scale=${width}:${scaled},fps=30`
 
-  const webm = join(ASSETS, `${name}.webm`)
-  const mp4 = join(ASSETS, `${name}.mp4`)
-  ff([
-    '-i',
-    src,
-    '-vf',
-    filter,
-    '-an',
-    '-c:v',
-    'libvpx-vp9',
-    '-b:v',
-    '0',
-    '-crf',
-    '34',
-    '-row-mt',
-    '1',
-    webm
-  ])
-  ff([
-    '-i',
-    src,
-    '-vf',
-    filter,
-    '-an',
-    '-c:v',
-    'libx264',
-    '-crf',
-    '26',
-    '-pix_fmt',
-    'yuv420p',
-    '-movflags',
-    '+faststart',
-    mp4
-  ])
+  const webm = join(LOOPS, `${name}.webm`)
+  const mp4 = join(LOOPS, `${name}.mp4`)
+  // prettier-ignore
+  ff(['-i', src, '-vf', filter, '-an', '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '34', '-row-mt', '1', webm])
+  // prettier-ignore
+  ff(['-i', src, '-vf', filter, '-an', '-c:v', 'libx264', '-crf', '26', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4])
 
   const frame = join(TAKES, `${name}-poster.png`)
-  ff(['-ss', '0', '-i', src, '-frames:v', '1', ...(crop ? ['-vf', `crop=${crop}`] : []), frame])
-  const posters = [...new Set([900, width])].filter((x) => x <= w)
-  for (const pw of posters) {
-    execFileSync('cwebp', [
-      '-quiet',
-      '-q',
-      '82',
-      '-resize',
-      String(pw),
-      '0',
-      frame,
-      '-o',
-      join(ASSETS, `${name}-${pw}.webp`)
-    ])
-  }
+  ff(['-ss', '0', '-i', src, '-frames:v', '1', frame])
+  const poster = toWebp(frame, width, join(LOOPS, `${name}-${width}.webp`))
 
   const heaviest = Math.max(kb(webm), kb(mp4))
-  if (heaviest > budget) over.push(`${name} ${heaviest.toFixed(0)}K over the ${budget}K budget`)
+  if (heaviest > BUDGET_KB) {
+    wrong.push(`${name} is ${heaviest.toFixed(0)}K, over the ${BUDGET_KB}K a loop may weigh`)
+  }
   rows.push(
-    `${name} ${w}x${h} -> ${width}x${scaled} · webm ${kb(webm).toFixed(0)}K · mp4 ${kb(mp4).toFixed(0)}K · ` +
-      `poster ${posters.map((p) => `${p}w ${kb(join(ASSETS, `${name}-${p}.webp`)).toFixed(0)}K`).join(', ')}`
+    `${name} ${w}x${h} -> ${width}x${scaled} · webm ${kb(webm).toFixed(0)}K · ` +
+      `mp4 ${kb(mp4).toFixed(0)}K · poster ${kb(poster).toFixed(0)}K`
   )
 }
 
 for (const row of rows) console.log(row)
-if (over.length) {
-  console.error(`\n${over.join('\n')}`)
+if (wrong.length) {
+  console.error(`\n${wrong.join('\n')}`)
   process.exit(1)
 }

@@ -782,8 +782,19 @@
       /* ═══════ THE PLATES — FEATURES ═══════ */
 
       .plates {
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* A row draws its own edges, so reordering the plates cannot double a rule. */
+      .plate-row {
         display: grid;
         grid-template-columns: repeat(6, 1fr);
+        border-top: 0.5px solid var(--border);
+      }
+
+      .plates > .plate-row:first-child {
+        border-top: none;
       }
 
       .plate {
@@ -791,34 +802,33 @@
         flex-direction: column;
         gap: 16px;
         min-width: 0;
+        grid-column: span var(--span, 1);
         padding: clamp(26px, 3vw, 44px);
-        border-top: 0.5px solid var(--border);
+      }
+
+      .span-6 {
+        --span: 6;
+      }
+      .span-4 {
+        --span: 4;
+      }
+      .span-3 {
+        --span: 3;
+      }
+      .span-2 {
+        --span: 2;
+      }
+
+      .plate-row > .plate + .plate {
         border-left: 0.5px solid var(--border);
       }
-
-      .plate.span-6 {
-        grid-column: span 6;
-      }
-      .plate.span-4 {
-        grid-column: span 4;
-      }
-      .plate.span-3 {
-        grid-column: span 3;
-      }
-      .plate.span-2 {
-        grid-column: span 2;
-      }
-
-      /* The plate that opens a row owns the left edge, so no rule doubles up. */
-      .plate.row-start {
-        border-left: none;
+      .plate-row > .plate:first-child {
         padding-left: 0;
       }
-      .plate.row-end {
+      .plate-row > .plate:last-child {
         padding-right: 0;
       }
-      .plates > .plate:first-child {
-        border-top: none;
+      .plates > .plate-row:first-child > .plate {
         padding-top: 0;
       }
 
@@ -860,7 +870,7 @@
         padding: 7px 12px;
         border-radius: 2px;
         border: 0.5px solid rgba(237, 229, 204, 0.2);
-        background: rgba(10, 9, 7, 0.72);
+        background: color-mix(in srgb, var(--obsidian) 72%, transparent);
         color: rgba(237, 229, 204, 0.8);
         font-family: var(--mono);
         font-size: 11px;
@@ -896,7 +906,7 @@
       .plate p {
         font-size: 17px;
         line-height: 1.75;
-        color: rgba(237, 229, 204, 0.6);
+        color: var(--parchment-dim);
       }
 
       /* The lead plate sets its heading beside the line, not above it. */
@@ -912,18 +922,21 @@
       }
 
       @media (max-width: 900px) {
-        .plates {
+        .plate-row {
           grid-template-columns: 1fr;
+          border-top: none;
         }
-        .plate,
-        .plate.span-6,
-        .plate.span-4,
-        .plate.span-3,
-        .plate.span-2 {
-          grid-column: span 1;
-          border-left: none;
+        .plate {
+          --span: 1;
           padding-left: 0;
           padding-right: 0;
+          border-top: 0.5px solid var(--border);
+        }
+        .plate-row > .plate + .plate {
+          border-left: none;
+        }
+        .plates > .plate-row:first-child > .plate:first-child {
+          border-top: none;
         }
         .plate-lead-text {
           grid-template-columns: 1fr;
@@ -1022,10 +1035,6 @@
         flex-direction: column;
         gap: 2px;
         padding: 15px 0;
-        border-bottom: 0.5px solid var(--border);
-      }
-
-      .index-col:last-child .index-row:last-child {
         border-bottom: 0.5px solid var(--border);
       }
 
@@ -1583,7 +1592,7 @@
     <nav class="nav" id="nav">
       <div class="nav-inner">
         <a href="/" class="nav-logo">
-          <img src="assets/vorn-mark.png" alt="" width="38" height="18" />
+          <img src="assets/vorn-mark-152.webp" alt="" width="38" height="18" />
           <span>vorn</span>
         </a>
         <div class="nav-links">
@@ -1778,59 +1787,61 @@
           </div>
 
           <div class="plates">
-            <div class="plate span-6 row-start row-end reveal">
-              <div class="plate-eyebrow">0.7 &middot; Durability</div>
-              <div class="plate-media">
-                <video
-                  class="plate-loop"
-                  data-lead
-                  loop
-                  muted
-                  playsinline
-                  preload="metadata"
-                  poster="assets/durability-1600.webp"
-                  width="1600"
-                  height="700"
-                  aria-label="The server detaches from the window, so a quit, a crash and an update all leave the session running. A reboot does not, and the strip that greets you says so."
-                >
-                  <source src="assets/durability.webm" type="video/webm" />
-                  <source src="assets/durability.mp4" type="video/mp4" />
-                </video>
-              </div>
-              <div class="plate-lead-text">
-                <h3>Quit it. The agent keeps going.</h3>
-                <p>
-                  The server detaches from the window, so a quit, a crash and an update all leave
-                  the session running. A reboot does not, and the strip that greets you says so.
-                </p>
+            <div class="plate-row">
+              <div class="plate span-6 reveal">
+                <div class="plate-eyebrow">0.7 &middot; Durability</div>
+                <div class="plate-media">
+                  <video
+                    class="plate-loop"
+                    data-lead
+                    loop
+                    muted
+                    playsinline
+                    preload="metadata"
+                    poster="assets/loops/durability-1600.webp"
+                    width="1600"
+                    height="700"
+                    aria-label="The server detaches from the window, so a quit, a crash and an update all leave the session running. A reboot does not, and the strip that greets you says so."
+                  >
+                    <source src="assets/loops/durability.webm" type="video/webm" />
+                    <source src="assets/loops/durability.mp4" type="video/mp4" />
+                  </video>
+                </div>
+                <div class="plate-lead-text">
+                  <h3>Quit it. The agent keeps going.</h3>
+                  <p>
+                    The server detaches from the window, so a quit, a crash and an update all leave
+                    the session running. A reboot does not, and the strip that greets you says so.
+                  </p>
+                </div>
               </div>
             </div>
-            <div class="plate span-4 row-start reveal">
-              <div class="plate-eyebrow">0.7 &middot; Workflows</div>
-              <div class="plate-media">
-                <video
-                  class="plate-loop"
-                  loop
-                  muted
-                  playsinline
-                  preload="none"
-                  poster="assets/workflows-1200.webp"
-                  width="1200"
-                  height="675"
-                  aria-label="Steps drag out of a docked library onto free canvas. Webhooks, schedules, conditions, loops, approvals, and a call to any API. Every node carries what its last run did."
-                >
-                  <source src="assets/workflows.webm" type="video/webm" />
-                  <source src="assets/workflows.mp4" type="video/mp4" />
-                </video>
-                <button class="plate-play" type="button">
-                  <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
-                    <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
-                  </svg>
-                  <span class="plate-play-label">Play</span>
-                  <span class="plate-play-time">6s</span>
-                </button>
-              </div>
-              <div class="plate-text">
+            <div class="plate-row">
+              <div class="plate span-4 reveal">
+                <div class="plate-eyebrow">0.7 &middot; Workflows</div>
+                <div class="plate-media">
+                  <video
+                    class="plate-loop"
+                    loop
+                    muted
+                    playsinline
+                    preload="none"
+                    poster="assets/loops/workflows-1200.webp"
+                    width="1200"
+                    height="675"
+                    aria-label="Steps drag out of a docked library onto free canvas. Webhooks, schedules, conditions, loops, approvals, and a call to any API. Every node carries what its last run did."
+                  >
+                    <source src="assets/loops/workflows.webm" type="video/webm" />
+                    <source src="assets/loops/workflows.mp4" type="video/mp4" />
+                  </video>
+                  <button class="plate-play" type="button">
+                    <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
+                      <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
+                    </svg>
+                    <span class="plate-play-label">Play</span>
+                    <span class="plate-play-time">6s</span>
+                  </button>
+                </div>
                 <h3>Draw the pipeline on a canvas</h3>
                 <p>
                   Steps drag out of a docked library onto free canvas. Webhooks, schedules,
@@ -1838,33 +1849,31 @@
                   last run did.
                 </p>
               </div>
-            </div>
-            <div class="plate span-2 row-end reveal">
-              <div class="plate-eyebrow">0.7 &middot; Phone</div>
-              <div class="plate-media is-tall">
-                <video
-                  class="plate-loop"
-                  loop
-                  muted
-                  playsinline
-                  preload="none"
-                  poster="assets/phone-560.webp"
-                  width="560"
-                  height="827"
-                  aria-label="The phone joins the same server over your own network and takes the session from there."
-                >
-                  <source src="assets/phone.webm" type="video/webm" />
-                  <source src="assets/phone.mp4" type="video/mp4" />
-                </video>
-                <button class="plate-play" type="button">
-                  <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
-                    <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
-                  </svg>
-                  <span class="plate-play-label">Play</span>
-                  <span class="plate-play-time">7s</span>
-                </button>
-              </div>
-              <div class="plate-text">
+              <div class="plate span-2 reveal">
+                <div class="plate-eyebrow">0.7 &middot; Phone</div>
+                <div class="plate-media is-tall">
+                  <video
+                    class="plate-loop"
+                    loop
+                    muted
+                    playsinline
+                    preload="none"
+                    poster="assets/loops/phone-560.webp"
+                    width="560"
+                    height="827"
+                    aria-label="The phone joins the same server over your own network and takes the session from there."
+                  >
+                    <source src="assets/loops/phone.webm" type="video/webm" />
+                    <source src="assets/loops/phone.mp4" type="video/mp4" />
+                  </video>
+                  <button class="plate-play" type="button">
+                    <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
+                      <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
+                    </svg>
+                    <span class="plate-play-label">Play</span>
+                    <span class="plate-play-time">7s</span>
+                  </button>
+                </div>
                 <h3>Pair a phone by showing it a code</h3>
                 <p>
                   The phone joins the same server over your own network and takes the session from
@@ -1872,65 +1881,63 @@
                 </p>
               </div>
             </div>
-            <div class="plate span-3 row-start reveal">
-              <div class="plate-eyebrow">0.7 &middot; Connectors</div>
-              <div class="plate-media">
-                <video
-                  class="plate-loop"
-                  loop
-                  muted
-                  playsinline
-                  preload="none"
-                  poster="assets/connectors-900.webp"
-                  width="900"
-                  height="540"
-                  aria-label="Connectors install as versioned packs that run offline and carry a receipt of the checks that ran. Where a CLI on the machine is already signed in, Vorn uses that."
-                >
-                  <source src="assets/connectors.webm" type="video/webm" />
-                  <source src="assets/connectors.mp4" type="video/mp4" />
-                </video>
-                <button class="plate-play" type="button">
-                  <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
-                    <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
-                  </svg>
-                  <span class="plate-play-label">Play</span>
-                  <span class="plate-play-time">5s</span>
-                </button>
-              </div>
-              <div class="plate-text">
+            <div class="plate-row">
+              <div class="plate span-3 reveal">
+                <div class="plate-eyebrow">0.7 &middot; Connectors</div>
+                <div class="plate-media">
+                  <video
+                    class="plate-loop"
+                    loop
+                    muted
+                    playsinline
+                    preload="none"
+                    poster="assets/loops/connectors-900.webp"
+                    width="900"
+                    height="540"
+                    aria-label="Connectors install as versioned packs that run offline and carry a receipt of the checks that ran. Where a CLI on the machine is already signed in, Vorn uses that."
+                  >
+                    <source src="assets/loops/connectors.webm" type="video/webm" />
+                    <source src="assets/loops/connectors.mp4" type="video/mp4" />
+                  </video>
+                  <button class="plate-play" type="button">
+                    <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
+                      <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
+                    </svg>
+                    <span class="plate-play-label">Play</span>
+                    <span class="plate-play-time">5s</span>
+                  </button>
+                </div>
                 <h3>It borrows the login you already have</h3>
                 <p>
                   Connectors install as versioned packs that run offline and carry a receipt of the
                   checks that ran. Where a CLI on the machine is already signed in, Vorn uses that.
                 </p>
               </div>
-            </div>
-            <div class="plate span-3 row-end reveal">
-              <div class="plate-eyebrow">0.7 &middot; Panes</div>
-              <div class="plate-media">
-                <video
-                  class="plate-loop"
-                  loop
-                  muted
-                  playsinline
-                  preload="none"
-                  poster="assets/panes-900.webp"
-                  width="900"
-                  height="540"
-                  aria-label="A session can open a browser pane and an iOS simulator beside its terminal, and the agent drives both to check its own work."
-                >
-                  <source src="assets/panes.webm" type="video/webm" />
-                  <source src="assets/panes.mp4" type="video/mp4" />
-                </video>
-                <button class="plate-play" type="button">
-                  <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
-                    <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
-                  </svg>
-                  <span class="plate-play-label">Play</span>
-                  <span class="plate-play-time">6s</span>
-                </button>
-              </div>
-              <div class="plate-text">
+              <div class="plate span-3 reveal">
+                <div class="plate-eyebrow">0.7 &middot; Panes</div>
+                <div class="plate-media">
+                  <video
+                    class="plate-loop"
+                    loop
+                    muted
+                    playsinline
+                    preload="none"
+                    poster="assets/loops/panes-900.webp"
+                    width="900"
+                    height="540"
+                    aria-label="A session can open a browser pane and an iOS simulator beside its terminal, and the agent drives both to check its own work."
+                  >
+                    <source src="assets/loops/panes.webm" type="video/webm" />
+                    <source src="assets/loops/panes.mp4" type="video/mp4" />
+                  </video>
+                  <button class="plate-play" type="button">
+                    <svg viewBox="0 0 10 12" aria-hidden="true" width="10" height="12">
+                      <path d="M0 0 L10 6 L0 12 Z" fill="currentColor" />
+                    </svg>
+                    <span class="plate-play-label">Play</span>
+                    <span class="plate-play-time">6s</span>
+                  </button>
+                </div>
                 <h3>The agent gets a browser and a simulator</h3>
                 <p>
                   A session can open a browser pane and an iOS simulator beside its terminal, and
@@ -2398,7 +2405,13 @@
       <div class="container">
         <div class="footer-inner">
           <div class="footer-left">
-            <img src="assets/vorn-mark.png" alt="" width="20" height="9" style="opacity: 0.3" />
+            <img
+              src="assets/vorn-mark-152.webp"
+              alt=""
+              width="20"
+              height="9"
+              style="opacity: 0.3"
+            />
             <span>MIT License</span>
           </div>
           <div class="footer-links">
@@ -2638,35 +2651,65 @@
       // ═══════════════════════════════════════
       ;(function initLoops() {
         const calm = window.matchMedia('(prefers-reduced-motion: reduce)')
+
+        function play(media) {
+          const started = media.querySelector('video').play()
+          if (started) started.catch(function () {})
+          media.classList.add('is-playing')
+        }
+
+        function pause(media) {
+          media.querySelector('video').pause()
+          media.classList.remove('is-playing')
+        }
+
+        const leads = []
         document.querySelectorAll('.plate-media').forEach(function (media) {
           const video = media.querySelector('video')
           if (!video) return
-          const button = media.querySelector('.plate-play')
-
-          function play() {
-            const started = video.play()
-            if (started) started.catch(function () {})
-            media.classList.add('is-playing')
-          }
-          function pause() {
-            video.pause()
-            media.classList.remove('is-playing')
-          }
-
           if (video.hasAttribute('data-lead')) {
-            // The lead loop starts on its own, and never against a stated preference.
-            if (!calm.matches) play()
-            calm.addEventListener('change', function (e) {
-              e.matches ? pause() : play()
+            leads.push(media)
+            return
+          }
+          const button = media.querySelector('.plate-play')
+          if (!button) return
+          button.addEventListener('click', function () {
+            video.paused ? play(media) : pause(media)
+          })
+          video.addEventListener('click', function () {
+            pause(media)
+          })
+        })
+
+        // A lead fetches nothing until it is nearly in view, so a visitor who
+        // never reaches the plates never pays for the loop.
+        const watch = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              entry.isIntersecting && !calm.matches ? play(entry.target) : pause(entry.target)
+            })
+          },
+          { rootMargin: '200px' }
+        )
+        leads.forEach(function (media) {
+          watch.observe(media)
+        })
+
+        // One place decides whether this page moves, for every video on it.
+        calm.addEventListener('change', function () {
+          if (calm.matches) {
+            document.querySelectorAll('video').forEach(function (video) {
+              video.pause()
+            })
+            document.querySelectorAll('.plate-media').forEach(function (media) {
+              media.classList.remove('is-playing')
             })
             return
           }
-
-          if (!button) return
-          button.addEventListener('click', function () {
-            video.paused ? play() : pause()
+          leads.forEach(function (media) {
+            watch.unobserve(media)
+            watch.observe(media)
           })
-          video.addEventListener('click', pause)
         })
       })()
 
