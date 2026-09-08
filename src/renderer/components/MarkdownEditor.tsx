@@ -144,19 +144,3 @@ export function MarkdownEditor({
     </div>
   )
 }
-
-export function MarkdownPreview({
-  content,
-  className = ''
-}: {
-  content: string
-  className?: string
-}) {
-  if (!content.trim()) return null
-  return (
-    <div
-      className={`text-xs text-gray-400 leading-relaxed ${className}`}
-      dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-    />
-  )
-}

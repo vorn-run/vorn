@@ -64,17 +64,6 @@ select,
   .group-hover\:opacity-100 {
     opacity: 1 !important;
   }
-
-  /* Bigger traffic lights on touch devices */
-  .traffic-light-dot {
-    width: 22px;
-    height: 22px;
-  }
-
-  /* Bigger traffic light gap on touch */
-  .traffic-light-dot + .traffic-light-dot {
-    margin-left: 2px;
-  }
 }
 
 /* ── Mobile typography: readable body text ── */
@@ -199,25 +188,6 @@ select:focus:not(:focus-visible) {
 }
 .titlebar-no-drag {
   -webkit-app-region: no-drag;
-}
-
-/* Traffic-light dots */
-.traffic-light-dot {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: filter 0.15s ease;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.traffic-light-inactive .traffic-light-dot {
-  background-color: rgba(255, 255, 255, 0.12) !important;
 }
 
 /* Drag handle */

@@ -263,10 +263,6 @@ export function setDomBlockRendering(enabled: boolean): void {
   domBlocksEnabled = enabled
 }
 
-export function isDomBlockRendering(): boolean {
-  return domBlocksEnabled
-}
-
 function bufferOf(term: Terminal): BufferLike {
   return { getLine: (y) => term.buffer.active.getLine(y) as unknown as LineLike | undefined }
 }
