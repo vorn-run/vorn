@@ -1,18 +1,20 @@
 import { createReadStream, existsSync, realpathSync, statSync } from 'node:fs'
 import { dirname, extname, resolve, sep } from 'node:path'
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type {
   ExtensionPermission,
   InstalledConnectorPack,
   TerminalSession
 } from '@vornrun/shared/types'
-import { installedPack } from '../connectors/packs'
-import { getGitDiffFull, getGitStatusPorcelain } from '../git-utils'
+import { WEB_FILE_TYPES, installedPack } from '../connectors/packs'
+import { getGitDiffText, getGitStatusPorcelain } from '../git-utils'
 import { ptyManager } from '../pty-manager'
 import { grantFor } from './panes'
 import { hostByToken } from './hosts'
 import { requestSelection } from './selection'
 import { usageFor } from './usage'
+import { isLoopbackAddress } from '../ws-handler'
+import { bearerFrom } from '../ws-auth'
 import log from '../logger'
 
 /**
@@ -36,34 +38,48 @@ const METHOD_PERMISSIONS: Record<string, ExtensionPermission> = {
   usage: 'agent.usage'
 }
 
-/** What a page may be made of, matching what the pack gate allowed to be carried. */
-const PAGE_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.txt': 'text/plain; charset=utf-8',
-  '.md': 'text/plain; charset=utf-8'
+/** How each carried file type is served; the set of them is the pack gate's, so the two cannot drift. */
+const MEDIA_TYPES: Record<string, string> = {
+  html: 'text/html; charset=utf-8',
+  css: 'text/css; charset=utf-8',
+  js: 'text/javascript; charset=utf-8',
+  mjs: 'text/javascript; charset=utf-8',
+  json: 'application/json; charset=utf-8',
+  svg: 'image/svg+xml',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  woff: 'font/woff',
+  woff2: 'font/woff2',
+  txt: 'text/plain; charset=utf-8',
+  md: 'text/plain; charset=utf-8'
 }
+
+const PAGE_TYPES: Record<string, string> = Object.fromEntries(
+  WEB_FILE_TYPES.map((type) => [`.${type}`, MEDIA_TYPES[type] ?? 'application/octet-stream'])
+)
 
 const DEFAULT_OUTPUT_LINES = 200
+const MAX_OUTPUT_LINES = 5000
+/** A line has no length of its own, so the reply is held to bytes as well as lines. */
+const MAX_OUTPUT_BYTES = 256 * 1024
 
-function isLoopback(ip: string | undefined): boolean {
-  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
-}
-
-function bearer(header: string | undefined): string {
-  const value = header ?? ''
-  return value.startsWith('Bearer ') ? value.slice(7).trim() : ''
+/**
+ * Whether a browser has told us this came from somewhere else.
+ *
+ * The extension's own process sends neither header, so it is unaffected; a page
+ * sends both, and the only page entitled to speak here is the one this origin
+ * served. A form post from a hostile page cannot forge either.
+ */
+function fromElsewhere(req: FastifyRequest): boolean {
+  const site = req.headers['sec-fetch-site']
+  if (typeof site === 'string' && site !== '' && site !== 'same-origin' && site !== 'none') {
+    return true
+  }
+  const origin = req.headers.origin
+  return typeof origin === 'string' && origin !== '' && origin !== `http://${req.headers.host}`
 }
 
 /** Who is calling: the extension's own process by its token, or a pane's page by its nonce. */
@@ -91,13 +107,15 @@ async function answer(
   const worktreePath = session.worktreePath ?? session.projectPath
   switch (method) {
     case 'diff':
-      return { result: getGitDiffFull(worktreePath) }
+      return { result: getGitDiffText(worktreePath) }
     case 'status':
       return { result: getGitStatusPorcelain(worktreePath) }
     case 'output': {
       const asked = typeof body.lines === 'number' ? body.lines : DEFAULT_OUTPUT_LINES
-      const lines = Math.min(Math.max(Math.trunc(asked), 1), 5000)
-      return { result: ptyManager.getOutput(session.id, lines).join('\n') }
+      const lines = Math.min(Math.max(Math.trunc(asked), 1), MAX_OUTPUT_LINES)
+      const text = ptyManager.getOutput(session.id, lines).join('\n')
+      // Trimmed from the front: a reader asking for output wants how it ended.
+      return { result: text.length > MAX_OUTPUT_BYTES ? text.slice(-MAX_OUTPUT_BYTES) : text }
     }
     case 'selection':
       return { result: await requestSelection(session.id) }
@@ -146,62 +164,73 @@ export interface ExtensionRouteDeps {
   frameAncestors: () => string[]
 }
 
-export function registerExtensionRoutes(app: FastifyInstance, deps: ExtensionRouteDeps): void {
-  /** One handler for both ways in; only how the caller proved itself differs. */
-  const serve = async (
-    caller: Caller | undefined,
-    method: string,
-    body: unknown,
-    reply: FastifyReply,
-    boundSessionId?: string
-  ): Promise<FastifyReply> => {
-    if (!caller) return refuse(reply, 401, 'This bridge does not know that caller')
-    const pack = installedPack(caller.extensionId)
-    if (!pack || pack.kind !== 'extension') {
-      return refuse(reply, 404, `No extension "${caller.extensionId}" is installed`)
-    }
-    const permission = METHOD_PERMISSIONS[method]
-    if (!permission) return refuse(reply, 404, `The host serves no method "${method}"`)
-    if (!(pack.permissions ?? []).includes(permission)) {
-      // The same sentence the check's stub gives, so an extension meets one rule rather than two.
-      return refuse(reply, 403, `this extension does not ask for ${permission}`)
-    }
-
-    const params = (body ?? {}) as Record<string, unknown>
-    const sessionId = boundSessionId ?? params.sessionId
-    const session = sessionOf(sessionId)
-    if (!session) return refuse(reply, 404, 'That session is not running')
-    // A project's extension answers about that project's sessions and no others.
-    if (session.projectPath !== caller.projectPath) {
-      return refuse(reply, 403, 'That session belongs to another project')
-    }
-
-    try {
-      const answered = await answer(method, session, params)
-      if (!('result' in answered)) return reply.code(204).send()
-      return reply.code(200).send({ result: answered.result })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      log.warn(`[extensions] ${caller.extensionId} ${method} failed: ${message}`)
-      return refuse(reply, 500, message)
-    }
+/** One handler for both ways in; only how the caller proved itself differs. */
+async function serve(
+  caller: Caller | undefined,
+  method: string,
+  body: unknown,
+  reply: FastifyReply,
+  boundSessionId?: string
+): Promise<FastifyReply> {
+  if (!caller) return refuse(reply, 401, 'This bridge does not know that caller')
+  const pack = installedPack(caller.extensionId)
+  if (!pack || pack.kind !== 'extension') {
+    return refuse(reply, 404, `No extension "${caller.extensionId}" is installed`)
+  }
+  const permission = METHOD_PERMISSIONS[method]
+  if (!permission) return refuse(reply, 404, `The host serves no method "${method}"`)
+  if (!(pack.permissions ?? []).includes(permission)) {
+    // The same sentence the check's stub gives, so an extension meets one rule rather than two.
+    return refuse(reply, 403, `this extension does not ask for ${permission}`)
   }
 
-  // The extension's own process, which holds the token it was started with.
+  const params = (body ?? {}) as Record<string, unknown>
+  const sessionId = boundSessionId ?? params.sessionId
+  const session = sessionOf(sessionId)
+  if (!session) return refuse(reply, 404, 'That session is not running')
+  // A project's extension answers about that project's sessions and no others.
+  if (session.projectPath !== caller.projectPath) {
+    return refuse(reply, 403, 'That session belongs to another project')
+  }
+
+  try {
+    const answered = await answer(method, session, params)
+    if (!('result' in answered)) return reply.code(204).send()
+    return reply.code(200).send({ result: answered.result })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log.warn(`[extensions] ${caller.extensionId} ${method} failed: ${message}`)
+    return refuse(reply, 500, message)
+  }
+}
+
+/** The extension's own process, which holds the token it was started with. */
+export function registerExtensionBridge(app: FastifyInstance): void {
   app.post('/extensions/:id/bridge/:method', async (req, reply) => {
-    if (!isLoopback(req.ip)) return refuse(reply, 403, 'Local machine only')
+    if (!isLoopbackAddress(req.ip)) return refuse(reply, 403, 'Local machine only')
+    if (fromElsewhere(req)) return refuse(reply, 403, 'That request came from another site')
     const { id, method } = req.params as { id: string; method: string }
-    const token = bearer(req.headers.authorization)
+    const token = bearerFrom(req.headers.authorization)
     const host = token ? hostByToken(id, token) : undefined
     const caller = host
       ? { extensionId: host.extensionId, projectPath: host.projectPath }
       : undefined
     return serve(caller, method, req.body, reply)
   })
+  log.info('[extensions] bridge route registered')
+}
 
-  // A pane's page, which holds only the nonce its own URL carries.
+/**
+ * A pane's pages, and the bridge those pages call.
+ *
+ * Registered on an origin of their own rather than beside the app: a page here
+ * shares no storage and no socket with the web client, so a page that is fed a
+ * hostile script still holds nothing but the nonce in its own URL.
+ */
+export function registerExtensionPages(app: FastifyInstance, deps: ExtensionRouteDeps): void {
   app.post('/extensions/:id/pane/:paneId/:nonce/bridge/:method', async (req, reply) => {
-    if (!isLoopback(req.ip)) return refuse(reply, 403, 'Local machine only')
+    if (!isLoopbackAddress(req.ip)) return refuse(reply, 403, 'Local machine only')
+    if (fromElsewhere(req)) return refuse(reply, 403, 'That request came from another site')
     const { id, paneId, nonce, method } = req.params as {
       id: string
       paneId: string
@@ -218,7 +247,7 @@ export function registerExtensionRoutes(app: FastifyInstance, deps: ExtensionRou
   })
 
   app.get('/extensions/:id/pane/:paneId/:nonce/*', async (req, reply) => {
-    if (!isLoopback(req.ip)) return refuse(reply, 403, 'Local machine only')
+    if (!isLoopbackAddress(req.ip)) return refuse(reply, 403, 'Local machine only')
     const { id, paneId, nonce } = req.params as { id: string; paneId: string; nonce: string }
     const rest = ((req.params as Record<string, string>)['*'] ?? '').replace(/^\/+/, '')
     const grant = grantFor(nonce)
@@ -234,6 +263,9 @@ export function registerExtensionRoutes(app: FastifyInstance, deps: ExtensionRou
     reply.header('Content-Type', PAGE_TYPES[extname(file).toLowerCase()])
     reply.header('X-Content-Type-Options', 'nosniff')
     reply.header('Cache-Control', 'private, no-store')
+    // A path carries the nonce, so nothing may take it to another site.
+    reply.header('Referrer-Policy', 'no-referrer')
+    reply.header('Cross-Origin-Opener-Policy', 'same-origin')
     // Its own files and its own bridge, framed by the app and by nothing else.
     reply.header(
       'Content-Security-Policy',
@@ -242,7 +274,7 @@ export function registerExtensionRoutes(app: FastifyInstance, deps: ExtensionRou
     return reply.send(createReadStream(file))
   })
 
-  log.info('[extensions] bridge and pane routes registered')
+  log.info('[extensions] pane page routes registered')
 }
 
 export { METHOD_PERMISSIONS }

@@ -22,9 +22,11 @@ import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { reconcileImplicitConnections, registerAllMethods, setServerPort } from './register-methods'
 import { registerWebhookRoute } from './webhook-trigger'
-import { registerExtensionRoutes } from './extensions/bridge'
+import { registerExtensionBridge } from './extensions/bridge'
 import { setExtensionBridgeOrigin, stopAllHosts } from './extensions/hosts'
+import { startExtensionPageServer, stopExtensionPageServer } from './extensions/page-server'
 import { stopAllFooters } from './extensions/footers'
+import { abandonSelections } from './extensions/selection'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
@@ -110,7 +112,14 @@ function resolveBuildChannel(): 'dev' | 'packaged' {
 }
 
 export async function startServer(
-  options: { host?: string; port?: number; dataDir?: string; idleShutdown?: boolean } = {}
+  options: {
+    host?: string
+    port?: number
+    dataDir?: string
+    idleShutdown?: boolean
+    /** Origins beyond this server's own that may frame a pane, such as the desktop's. */
+    extensionFrameAncestors?: string[]
+  } = {}
 ) {
   // Initialize database + config. This resolves the data directory for the whole
   // process; everything else reads it back with getDataDir() rather than
@@ -231,11 +240,10 @@ export async function startServer(
 
   registerWebhookRoute(app, () => scheduler.deliverPendingConnectorInbox())
 
-  // An extension's own bridge, and the pages its panes are drawn from. Both are
-  // loopback-only and prove themselves per call, so neither widens what the
-  // socket already admits. `'self'` is the web client at `/app/`; the desktop
-  // adds its own origin when it starts framing a pane.
-  registerExtensionRoutes(app, { frameAncestors: () => ["'self'"] })
+  // An extension's own bridge, which its child process reaches with the token it
+  // was started with. The pages its panes are drawn from are served on their own
+  // origin instead, so a page shares neither storage nor a socket with the app.
+  registerExtensionBridge(app)
 
   /**
    * Pairing, the phone's half.
@@ -445,6 +453,18 @@ export async function startServer(
   // The address the extension children are given, known only once a port is won.
   setExtensionBridgeOrigin(`http://127.0.0.1:${actualPort}`)
 
+  // Pane pages, on a port of their own. The app frames them, so the app's origins
+  // are the only ones allowed to; a page that fails to start costs its panes, not
+  // the server.
+  const appOrigins = [`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`]
+  try {
+    await startExtensionPageServer({
+      frameAncestors: () => [...appOrigins, ...(options.extensionFrameAncestors ?? [])]
+    })
+  } catch (err) {
+    log.warn({ err }, '[extensions] pane pages have no origin; panes will not open')
+  }
+
   // Enable hot-rebind when network access / Tailscale state changes
   initRebind(app.server, host, actualPort)
 
@@ -557,6 +577,8 @@ export async function startServer(
     headlessManager.killAll()
     ptyManager.killAll()
     stopAllFooters()
+    abandonSelections()
+    await stopExtensionPageServer()
     await stopAllHosts()
     const { stopAllMcpClients } = await import('./connectors')
     await stopAllMcpClients()

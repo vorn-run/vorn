@@ -18,8 +18,12 @@ const grants = new Map<
 const sessions: TerminalSession[] = []
 const wrote: Array<{ id: string; data: string }> = []
 const renamed: Array<{ id: string; name: string }> = []
+let output: string[] = ['$ yarn test', 'ok']
 
-vi.mock('../packages/server/src/connectors/packs', () => ({
+vi.mock('../packages/server/src/connectors/packs', async (importOriginal) => ({
+  // The page file types come from the pack gate itself, so the two cannot drift.
+  WEB_FILE_TYPES: (await importOriginal<typeof import('../packages/server/src/connectors/packs')>())
+    .WEB_FILE_TYPES,
   installedPack: (id: string) => (pack.current?.id === id ? pack.current : undefined)
 }))
 
@@ -41,23 +45,25 @@ vi.mock('../packages/server/src/extensions/usage', () => ({
 }))
 
 vi.mock('../packages/server/src/git-utils', () => ({
-  getGitDiffFull: () => 'diff --git a/x b/x\n',
+  getGitDiffText: () => 'diff --git a/x b/x\n',
   getGitStatusPorcelain: () => ' M src/index.ts\n'
 }))
 
 vi.mock('../packages/server/src/pty-manager', () => ({
   ptyManager: {
     getLiveSessions: () => sessions,
-    getOutput: () => ['$ yarn test', 'ok'],
+    getOutput: () => output,
     writeToPty: (id: string, data: string) => wrote.push({ id, data }),
     renameSession: (id: string, name: string) => renamed.push({ id, name })
   }
 }))
 
-const { registerExtensionRoutes } = await import('../packages/server/src/extensions/bridge')
+const { registerExtensionBridge, registerExtensionPages } =
+  await import('../packages/server/src/extensions/bridge')
 
 const temps: string[] = []
 let app: FastifyInstance
+let pages: FastifyInstance
 
 function packDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'vorn-bridge-pack-'))
@@ -112,14 +118,20 @@ beforeEach(async () => {
   sessions.push(session())
   wrote.length = 0
   renamed.length = 0
+  output = ['$ yarn test', 'ok']
 
   app = Fastify()
-  registerExtensionRoutes(app, { frameAncestors: () => ["'self'"] })
+  registerExtensionBridge(app)
   await app.ready()
+  // Pages live on their own origin, so they are registered on their own instance.
+  pages = Fastify()
+  registerExtensionPages(pages, { frameAncestors: () => ['http://127.0.0.1:7777'] })
+  await pages.ready()
 })
 
 afterEach(async () => {
   await app.close()
+  await pages.close()
   while (temps.length > 0) rmSync(temps.pop() as string, { recursive: true, force: true })
 })
 
@@ -172,6 +184,36 @@ describe('who the bridge answers', () => {
   it('serves no method it does not have', async () => {
     expect((await call('exec')).statusCode).toBe(404)
   })
+
+  // Neither header is one a page can forge, and the extension's own process sends neither.
+  it('refuses a call a browser says came from another site', async () => {
+    const bySite = await app.inject({
+      method: 'POST',
+      url: '/extensions/review/bridge/status',
+      headers: {
+        authorization: 'Bearer right-token',
+        'content-type': 'application/json',
+        'sec-fetch-site': 'cross-site'
+      },
+      payload: { sessionId: 's1' },
+      remoteAddress: '127.0.0.1'
+    })
+    expect(bySite.statusCode).toBe(403)
+    expect(bySite.body).toContain('another site')
+
+    const byOrigin = await app.inject({
+      method: 'POST',
+      url: '/extensions/review/bridge/status',
+      headers: {
+        authorization: 'Bearer right-token',
+        'content-type': 'application/json',
+        origin: 'https://elsewhere.example'
+      },
+      payload: { sessionId: 's1' },
+      remoteAddress: '127.0.0.1'
+    })
+    expect(byOrigin.statusCode).toBe(403)
+  })
 })
 
 describe('what the bridge answers with', () => {
@@ -195,6 +237,15 @@ describe('what the bridge answers with', () => {
     expect(wrote).toEqual([{ id: 's1', data: 'yarn test\r' }])
   })
 
+  // A line has no length of its own, so a cap counted in lines is no cap at all.
+  it('answers output held to a size a reader can take, keeping the end', async () => {
+    output = ['x'.repeat(400 * 1024), 'the last line']
+    const answer = await call('output')
+    const text = answer.json<{ result: string }>().result
+    expect(text.length).toBe(256 * 1024)
+    expect(text.endsWith('the last line')).toBe(true)
+  })
+
   it('refuses a write missing what it writes', async () => {
     expect((await call('send', { sessionId: 's1' })).statusCode).toBe(500)
     expect(wrote).toEqual([])
@@ -203,7 +254,7 @@ describe('what the bridge answers with', () => {
 
 describe('a pane page and the nonce that proves it', () => {
   const page = (path: string, nonce = 'nonce-1') =>
-    app.inject({
+    pages.inject({
       method: 'GET',
       url: `/extensions/review/pane/report/${nonce}/${path}`,
       remoteAddress: '127.0.0.1'
@@ -214,7 +265,11 @@ describe('a pane page and the nonce that proves it', () => {
     expect(answer.statusCode).toBe(200)
     expect(answer.body).toBe('<h1>Report</h1>')
     expect(answer.headers['content-type']).toContain('text/html')
-    expect(answer.headers['content-security-policy']).toContain("frame-ancestors 'self'")
+    expect(answer.headers['content-security-policy']).toContain(
+      'frame-ancestors http://127.0.0.1:7777'
+    )
+    expect(answer.headers['referrer-policy']).toBe('no-referrer')
+    expect(answer.headers['cross-origin-opener-policy']).toBe('same-origin')
     expect(answer.headers['x-content-type-options']).toBe('nosniff')
   })
 
@@ -248,7 +303,7 @@ describe('a pane page and the nonce that proves it', () => {
   // A page speaks for the pane it was opened as, never for a session it names itself.
   it('answers a page on its own pane session, not the one it asks for', async () => {
     sessions.push(session({ id: 's2', projectPath: '/work/vorn' }))
-    const answer = await app.inject({
+    const answer = await pages.inject({
       method: 'POST',
       url: '/extensions/review/pane/report/nonce-1/bridge/send',
       headers: { 'content-type': 'application/json' },
@@ -259,9 +314,18 @@ describe('a pane page and the nonce that proves it', () => {
     expect(wrote).toEqual([{ id: 's1', data: 'hello' }])
   })
 
+  it('is served by nothing on the origin the app is on', async () => {
+    const onApp = await app.inject({
+      method: 'GET',
+      url: '/extensions/review/pane/report/nonce-1/',
+      remoteAddress: '127.0.0.1'
+    })
+    expect(onApp.statusCode).toBe(404)
+  })
+
   it('refuses a page bridge call once the pane has closed', async () => {
     grants.delete('nonce-1')
-    const answer = await app.inject({
+    const answer = await pages.inject({
       method: 'POST',
       url: '/extensions/review/pane/report/nonce-1/bridge/status',
       headers: { 'content-type': 'application/json' },

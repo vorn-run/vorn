@@ -2,7 +2,8 @@ import { randomBytes } from 'node:crypto'
 import type { ExtensionPaneContribution, TerminalSession } from '@vornrun/shared/types'
 import { installedPack } from '../connectors/packs'
 import { ptyManager } from '../pty-manager'
-import { getOrStartHost, tokenFor } from './hosts'
+import { extensionBridgeOrigin, getOrStartHost, tokenFor } from './hosts'
+import { extensionPageOrigin } from './page-server'
 import log from '../logger'
 
 /**
@@ -25,13 +26,31 @@ export interface OpenPane {
   terminalId?: string
   /** What closes it, and what a page proves itself with. */
   nonce: string
+  /** When this stops meaning anything, pushed back by every use. */
+  expires: number
 }
+
+/**
+ * How long a grant outlives its last use.
+ *
+ * A pane the app forgot to close should not leave authority lying around for
+ * the life of the server, and a pane in use should never expire under its own
+ * page — so the clock is reset on every call rather than started once.
+ */
+const GRANT_IDLE_MS = 12 * 60 * 60 * 1000
 
 const open = new Map<string, OpenPane>()
 
 /** What a nonce entitles, or nothing when it names no open pane. */
 export function grantFor(nonce: string): OpenPane | undefined {
-  return open.get(nonce)
+  const grant = open.get(nonce)
+  if (!grant) return undefined
+  if (grant.expires <= Date.now()) {
+    closePane(nonce)
+    return undefined
+  }
+  grant.expires = Date.now() + GRANT_IDLE_MS
+  return grant
 }
 
 function paneOf(extensionId: string, paneId: string): ExtensionPaneContribution | undefined {
@@ -60,9 +79,11 @@ export async function openPane(
       args,
       cwd: worktreePath,
       displayName: pane.title,
+      // A program is the extension's own code, so it holds the process token and
+      // needs the address that token is good at, exactly as the child does.
       env: {
         ...(token && { VORN_EXTENSION_TOKEN: token }),
-        VORN_EXTENSION_SESSION: session.id
+        VORN_EXTENSION_HOST: `${extensionBridgeOrigin()}/extensions/${extensionId}/bridge`
       }
     })
     const grant: OpenPane = {
@@ -71,7 +92,8 @@ export async function openPane(
       paneId,
       sessionId: session.id,
       projectPath,
-      terminalId: terminal.id
+      terminalId: terminal.id,
+      expires: Date.now() + GRANT_IDLE_MS
     }
     open.set(grant.nonce, grant)
     return grant
@@ -87,7 +109,9 @@ export async function openPane(
     paneId,
     sessionId: session.id,
     projectPath,
-    url: `/extensions/${extensionId}/pane/${paneId}/${nonce}/`
+    // Its own origin, so a page shares nothing with the window that frames it.
+    url: `${extensionPageOrigin()}/extensions/${extensionId}/pane/${paneId}/${nonce}/`,
+    expires: Date.now() + GRANT_IDLE_MS
   }
   open.set(nonce, grant)
   return grant
@@ -120,6 +144,11 @@ export function closePanesForExtension(extensionId: string): void {
   }
 }
 
-export function openPanesForSession(sessionId: string): OpenPane[] {
-  return [...open.values()].filter((grant) => grant.sessionId === sessionId)
+/** A program that exited takes its pane's authority with it, however it ended. */
+export function closePaneForTerminal(terminalId: string): void {
+  for (const grant of [...open.values()]) {
+    if (grant.terminalId === terminalId) {
+      open.delete(grant.nonce)
+    }
+  }
 }

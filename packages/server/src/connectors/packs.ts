@@ -61,7 +61,7 @@ const WEB_PREFIX = 'web/'
  * The reason the allowlist exists at all is that a `.cjs`, `.node` or `.wasm`
  * is code the entry can reach; putting it under `web/` does not make it a page.
  */
-const WEB_FILE_TYPES = [
+export const WEB_FILE_TYPES = [
   'html',
   'css',
   'js',
