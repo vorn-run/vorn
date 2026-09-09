@@ -1463,6 +1463,14 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
     log.warn(`[workflow] stopWorkflowRun: no run ${runId}`)
     return
   }
+  // A run that has already ended is not stoppable, and rewriting it as
+  // cancelled would rewrite its history. Reachable now that the lookup reads
+  // the database and finds every run rather than only the live ones.
+  if (execution && execution.status !== 'running') {
+    log.info({ runId, status: execution.status }, '[workflow] stop: the run already ended')
+    return
+  }
+
   handle?.abort.abort()
 
   // Kill from the node states as well as the handle: a run rehydrated after a
