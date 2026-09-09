@@ -3,9 +3,10 @@ import { defineConfig } from 'tsup'
 
 const { version } = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
-// Prepended to both entries. `cli.cjs` is the `vorn-server` binary, and Yarn
-// links a bin as a plain symlink — without this the shell runs it as sh and it
-// dies with a syntax error partway through the bundle. It has to live in the
+// Prepended to both entries. `cli.cjs` is what both bins point at -- `vorn` and
+// the `vorn-server` alias -- and Yarn links a bin as a plain symlink: without
+// this the shell runs it as sh and it dies partway through the bundle with a
+// syntax error. It has to live in the
 // banner rather than at the top of `src/cli.ts`, because the banner is emitted
 // first and a shebang is only honoured on line 1. Node ignores it in
 // `index.cjs`, which is required rather than executed.

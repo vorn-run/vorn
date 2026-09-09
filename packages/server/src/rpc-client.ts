@@ -79,7 +79,7 @@ function connection(): { url: string; options: { headers: Record<string, string>
     // Narrowed through the union rather than reaching for `.reason` directly,
     // which only exists on the failure arm.
     const reason = 'reason' in result ? result.reason : 'missing'
-    throw new Error(reason === 'invalid' ? PORT_FILE_INVALID_MSG : PORT_FILE_MISSING_MSG)
+    throw new Error(reason === 'invalid' ? portFileInvalidMessage() : portFileMissingMessage())
   }
   return {
     url: `ws://127.0.0.1:${result.port}/ws`,
@@ -90,24 +90,32 @@ const TIMEOUT_MS = 10_000
 
 const IS_WIN = process.platform === 'win32'
 
-const PORT_FILE_MISSING_MSG = IS_WIN
-  ? `Vorn port file not found (~/.vorn/ws-port).
+// Both name the file that was actually read: with --data-dir it is not the one
+// under ~/.vorn, and a fix-it line pointing at the wrong path is worse than none.
+function portFileMissingMessage(): string {
+  const file = portFile()
+  return IS_WIN
+    ? `Vorn port file not found (${file}).
 The app may be running but the port file was deleted (e.g. by another instance shutting down).
 To fix, find the Vorn process and its listening port:
   powershell -c "Get-NetTCPConnection -State Listen -OwningProcess (Get-Process Vorn).Id | Select LocalPort"
 Then write the WS port to the file:
-  echo {"port":<PORT>,"pid":<PID>} > %USERPROFILE%\\.vorn\\ws-port
+  echo {"port":<PORT>,"pid":<PID>} > ${file}
 Or restart Vorn to regenerate it.`
-  : `Vorn port file not found (~/.vorn/ws-port).
+    : `Vorn port file not found (${file}).
 The app may be running but the port file was deleted (e.g. by another instance shutting down).
 To fix, run:  lsof -iTCP -sTCP:LISTEN -P | grep Vorn
 Then write the WS port (the one on *:<port>) to the file:
-  echo '{"port":<PORT>,"pid":<PID>}' > ~/.vorn/ws-port
+  echo '{"port":<PORT>,"pid":<PID>}' > ${file}
 Or restart Vorn to regenerate it.`
+}
 
-const PORT_FILE_INVALID_MSG = `Vorn port file exists but contains invalid data (~/.vorn/ws-port).
+function portFileInvalidMessage(): string {
+  const file = portFile()
+  return `Vorn port file exists but contains invalid data (${file}).
 Delete it and restart Vorn, or overwrite it with the correct port:
-  ${IS_WIN ? 'del %USERPROFILE%\\.vorn\\ws-port' : 'rm ~/.vorn/ws-port'}`
+  ${IS_WIN ? `del ${file}` : `rm ${file}`}`
+}
 
 /**
  * A socket that closed before the call was answered.
@@ -286,7 +294,10 @@ export function rpcCall<T = unknown>(
   params?: unknown,
   timeoutMs?: number
 ): Promise<T>
-export function rpcCall<T = unknown>(
+// `async` on the implementation, so a failure before the socket opens -- no port
+// file, no credential -- arrives as a rejection like every other failure, rather
+// than as a synchronous throw past a caller's `.catch`.
+export async function rpcCall<T = unknown>(
   method: string,
   params?: unknown,
   /**

@@ -82,6 +82,16 @@ describe('finding the server', () => {
     expect(writeFileSync).not.toHaveBeenCalled()
   })
 
+  it('points at the port file it actually looked for, not the default one', async () => {
+    noPortFile()
+    const { useDataDir, rpcCall } = await load()
+
+    useDataDir('/tmp/elsewhere')
+    await expect(rpcCall('terminal:listActive')).rejects.toThrow(
+      path.join('/tmp/elsewhere', 'ws-port')
+    )
+  })
+
   it('treats VORN_DATA_DIR the same way', async () => {
     noPortFile()
     process.env.VORN_DATA_DIR = '/tmp/env-dir'
