@@ -730,15 +730,7 @@ function clearPlacementAll(
   return cleared
 }
 
-/**
- * Everything an open pane holds outside the store.
- *
- * The grant goes back fire-and-forget, as a device claim does: one the host
- * refuses to drop must not trap the pane open, and it releases the lot on
- * session teardown regardless. A program pane's terminal is this window's to
- * destroy -- left registered it keeps an xterm and a GPU context alive, and
- * every frame goes on measuring it.
- */
+/** Everything an open pane holds outside the store: its grant, and its terminal. */
 function releaseExtensionPane(pane: ExtensionPaneState, opts?: { release?: boolean }): void {
   if (opts?.release !== false) {
     try {
@@ -1455,8 +1447,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     }),
 
   setExtensionActivation: (sessionId, states) => {
-    // An extension that no longer shows here has had its grants dropped by the
-    // host already; the frame left behind would point at a nonce that is gone.
+    // The host drops the grants of an extension that no longer shows here.
     const showing = get().extensionPanes.get(sessionId)
     if (
       showing &&

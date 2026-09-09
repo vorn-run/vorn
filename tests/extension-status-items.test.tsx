@@ -53,13 +53,7 @@ function seed(readings: ExtensionFooterReading[]): void {
   })
 }
 
-/**
- * A bar with room for `chips` of them.
- *
- * jsdom lays nothing out, so the measurement the component steps down from has
- * to be supplied: a chip is one unit wide, and the bar holds as many as it is
- * told to. Restored per test, because it is a prototype-wide stub.
- */
+/** A bar with room for `chips` of them: jsdom lays nothing out, so it is told. */
 function room(chips: number): () => void {
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
   const scroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth')

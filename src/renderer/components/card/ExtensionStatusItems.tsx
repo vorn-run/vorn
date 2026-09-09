@@ -14,22 +14,11 @@ interface Fit {
 
 const WIDEST: Fit = { collapsed: false, hidden: 0 }
 
-/**
- * What an extension's footers say about this session, in the card's status bar.
- *
- * In the bar rather than under it: a reading is the same kind of fact as the
- * branch or the last command, and a band of its own costs every card 22px per
- * installed extension — a price the grid pays whether or not anyone is reading.
- *
- * The colour rule is the bar's. A reading that is fine recedes; only something
- * wrong takes colour, so a row of passing checks cannot drown the one that failed.
- */
+/** What an extension's footers say, in the bar rather than a band costing every card 22px. */
 export function ExtensionStatusItems({ terminalId }: { terminalId: string }): ReactNode {
   const readings = useAppStore((s) => s.extensionFooters.get(terminalId) ?? NO_READINGS)
 
-  // Sorted here rather than at the source: readings arrive one footer at a time
-  // from processes the host started in whatever order it got to them, and chips
-  // that reorder themselves as their neighbours report are unreadable.
+  // Sorted here: readings arrive in whatever order the host got to their processes.
   const ordered = useMemo(
     () =>
       [...readings].sort(
@@ -43,16 +32,13 @@ export function ExtensionStatusItems({ terminalId }: { terminalId: string }): Re
   const [fit, setFit] = useState<Fit>(WIDEST)
   const [fitted, setFitted] = useState(ordered)
 
-  // Widest again during the render that brings new readings, rather than in an
-  // effect: an effect would batch with the step-down below into no change at
-  // all, and the bar would keep whatever width it first measured.
+  // In render, not an effect: an effect batches with the step-down into no change at all.
   if (fitted !== ordered) {
     setFitted(ordered)
     setFit(WIDEST)
   }
 
-  // The bar is watched, not this box: this one narrows as it gives things up,
-  // which would be a size change of its own and a measurement that never settles.
+  // The bar is watched, not this box, which narrows as it gives things up.
   useEffect(() => {
     const bar = box.current?.parentElement
     if (!bar || typeof ResizeObserver === 'undefined') return
@@ -66,9 +52,7 @@ export function ExtensionStatusItems({ terminalId }: { terminalId: string }): Re
     return () => observer.disconnect()
   }, [])
 
-  // One step narrower per pass, measured after each: every footer collapses to a
-  // single chip first, and only then are they dropped, so what is given up is the
-  // least that can be. It ends because each step is strictly narrower than the last.
+  // One step narrower per pass, so what is given up is the least that can be.
   useLayoutEffect(() => {
     const el = box.current
     if (!el || el.scrollWidth <= el.clientWidth) return
@@ -123,8 +107,7 @@ function Item({
   )
   const href = item.href
 
-  // Opened outside rather than framed: an item names something that lives on
-  // the web -- a run, an issue -- and the host has already held it to http.
+  // Opened outside rather than framed; the host has already held it to http.
   return (
     <Tooltip label={source(reading)}>
       {href ? (
@@ -178,13 +161,7 @@ function CollapsedFooter({ reading }: { reading: ExtensionFooterReading }): Reac
   )
 }
 
-/**
- * Which footer of whose extension, and when it last said so.
- *
- * The clock time rather than an age: a chip is redrawn when its reading moves
- * and not otherwise, so "12s ago" would freeze at whatever it said when the
- * value last changed and quietly claim a stalled footer was current.
- */
+/** Which footer of whose extension: a clock time, since "12s ago" would freeze when it stalled. */
 function source(reading: ExtensionFooterReading): string {
   const head = `${reading.title} · ${reading.extensionName}`
   const when = new Date(reading.computedAt)

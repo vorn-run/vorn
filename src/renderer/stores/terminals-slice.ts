@@ -124,12 +124,8 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       // session no longer holds, and block a later pane from opening.
       const devicePanes = new Map(state.devicePanes)
       devicePanes.delete(id)
-      // The host releases an extension's grants when the session ends, so this
-      // is only the viewer -- but a pane left behind would frame a page whose
-      // nonce is already gone, and its footers would keep reading out the last
-      // thing a dead branch said. A program pane's terminal is this window's to
-      // destroy: left registered it holds an xterm and a GPU context for a
-      // session nobody can reach.
+      // Only the viewer -- the host drops the grants -- but the terminal a program
+      // pane drew is this window's to destroy, or it holds a GPU context for nobody.
       const extensionPanes = new Map(state.extensionPanes)
       const showing = extensionPanes.get(id)
       if (showing?.open.terminalId) destroyTerminal(showing.open.terminalId)
