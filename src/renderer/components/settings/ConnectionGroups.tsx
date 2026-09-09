@@ -4,6 +4,7 @@ import { ConnectorIcon } from '../ConnectorIcon'
 import { ConnectionRow } from './ConnectionRow'
 import type { RowActivity } from '../../lib/use-row-action'
 import { groupConnections, type ConnectorListing } from '../../lib/connector-browse'
+import { count } from '../../lib/extension-copy'
 import type { ConnectorManifest, SourceConnection, WorkflowDefinition } from '../../../shared/types'
 
 export interface ConnectorStatus {
@@ -56,6 +57,15 @@ export function ConnectionGroups({
   onRefresh: () => void
 }) {
   const groups = groupConnections(connections, listings)
+  // A connector on disk with nothing connected has no group of its own, and
+  // without this the only sign it is installed is the tab next door.
+  const unconnected = listings.filter(
+    (listing) =>
+      listing.pack &&
+      listing.kind === 'connector' &&
+      listing.connectedCount === 0 &&
+      !listing.implicitlyConnected
+  )
 
   return (
     <div className="space-y-5">
@@ -124,6 +134,42 @@ export function ConnectionGroups({
           </div>
         )
       })}
+
+      {unconnected.length > 0 && (
+        <div>
+          <h3 className="text-[10px] uppercase tracking-[0.08em] text-gray-600 pb-1">
+            Installed, no connection yet
+          </h3>
+          {unconnected.map((listing) => (
+            <div
+              key={listing.key}
+              className="flex items-center gap-3 py-2.5 border-t border-white/[0.06]"
+            >
+              <span className="w-8 h-8 shrink-0 flex items-center justify-center bg-white/[0.04] rounded-sm">
+                <ConnectorIcon
+                  connectorId={listing.id}
+                  icon={listing.catalogItem?.icon ?? listing.icon}
+                  size={17}
+                  className="text-gray-200"
+                />
+              </span>
+              <div className="min-w-0">
+                <div className="text-[13.5px] text-gray-200 font-medium">{listing.name}</div>
+                <div className="text-[11px] text-gray-600">
+                  {listing.pack && `v${listing.pack.version}`}
+                </div>
+              </div>
+              <button
+                onClick={() => onAdd(listing)}
+                title="Connect this connector to an account"
+                className="ml-auto text-[11px] text-gray-500 hover:text-gray-200 px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+              >
+                <Plus size={11} /> Add connection
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -149,10 +195,6 @@ function missingFor(
   return (manifest?.defaultWorkflows ?? []).filter(
     (e) => !seeded.some((w) => w.id === `connector:${conn.id}:${e.event}`)
   )
-}
-
-function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
 
 /**

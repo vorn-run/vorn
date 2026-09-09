@@ -51,6 +51,7 @@ export function ConnectorDetail({
   activity,
   pending,
   cards,
+  backLabel,
   onAdd,
   onInstall,
   onRollback,
@@ -60,6 +61,8 @@ export function ConnectorDetail({
 }: {
   listing: ConnectorListing
   builtIns: BuiltInConnector[]
+  /** Where closing goes back to, named after the tab this was opened from. */
+  backLabel?: string
   /** The install running for this connector, when one is. */
   progress?: ConnectorInstallProgress
   /** Open cards this extension is active on, and how many are open at all. */
@@ -88,7 +91,7 @@ export function ConnectorDetail({
         onClick={onClose}
         className="flex items-center gap-1.5 text-[12px] text-gray-500 hover:text-gray-300 transition-colors mb-4"
       >
-        <ArrowLeft size={12} /> All connectors
+        <ArrowLeft size={12} /> {backLabel ?? 'All connectors'}
       </button>
 
       <div className="flex items-start gap-3">
