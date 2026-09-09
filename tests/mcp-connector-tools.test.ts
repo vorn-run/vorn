@@ -498,3 +498,134 @@ describe('list_connector_actions', () => {
     expect(text(result)).toMatch(/discovery/i)
   })
 })
+
+describe('extensions over the wire', () => {
+  const EXTENSION = {
+    id: 'review',
+    name: 'Review',
+    description: 'Read the diff beside the terminal.',
+    kind: 'extension',
+    packageName: '@vornrun/extension-review',
+    version: '0.1.0',
+    packUrl: 'https://packs.test/review-0.1.0.vorn.tgz',
+    capabilities: [],
+    contributes: {
+      panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }],
+      footers: [{ id: 'checks', title: 'Checks', every: 30 }]
+    },
+    permissions: ['git.read'],
+    activates: { workspaceContains: ['package.json'] },
+    launch: { command: 'node', args: ['/packs/review/index.js'] }
+  }
+
+  const withExtension = (overrides: Record<string, unknown> = {}) =>
+    server({
+      'connector:catalog': { ...CATALOG, items: [...CATALOG.items, EXTENSION] },
+      ...overrides
+    })
+
+  it('says which listings are extensions, and what each adds', async () => {
+    withExtension()
+    const rows = parsed(await tools.get('list_connectors')!({}))
+    const review = rows.find((row: { id: string }) => row.id === 'review')
+
+    expect(review.kind).toBe('extension')
+    expect(review.contributes.panes).toEqual([{ id: 'report', title: 'Report' }])
+    expect(review.contributes.footers).toEqual([{ id: 'checks', title: 'Checks' }])
+    expect(review.permissions).toEqual(['git.read'])
+    expect(review.activates).toEqual({ workspaceContains: ['package.json'] })
+    expect(rows.find((row: { id: string }) => row.id === 'kusto').kind).toBe('connector')
+  })
+
+  it('narrows to one kind when asked', async () => {
+    withExtension()
+    const rows = parsed(await tools.get('list_connectors')!({ kind: 'extension' }))
+    expect(rows.map((row: { id: string }) => row.id)).toEqual(['review'])
+  })
+
+  it('reports what is on disk, and lets the pack answer for its kind', async () => {
+    withExtension({
+      'connector:listPacks': [{ id: 'review', name: 'Review', version: '0.2.0', kind: 'extension' }]
+    })
+    const rows = parsed(await tools.get('list_connectors')!({}))
+    expect(rows.find((row: { id: string }) => row.id === 'review').installed).toBe('0.2.0')
+  })
+
+  // An extension has no connections to count, so "not set up yet" can only
+  // mean it is not installed.
+  it('counts an extension as set up once it is installed, not once it is connected', async () => {
+    withExtension()
+    const before = parsed(await tools.get('list_connectors')!({ installable_only: true }))
+    expect(before.map((row: { id: string }) => row.id)).toContain('review')
+
+    withExtension({
+      'connector:listPacks': [{ id: 'review', name: 'Review', version: '0.1.0', kind: 'extension' }]
+    })
+    const after = parsed(await tools.get('list_connectors')!({ installable_only: true }))
+    expect(after.map((row: { id: string }) => row.id)).not.toContain('review')
+  })
+
+  it('installs a catalog extension from its pack and makes no connection', async () => {
+    withExtension({
+      'connector:installPack': {
+        ok: true,
+        pack: {
+          id: 'review',
+          name: 'Review',
+          version: '0.1.0',
+          kind: 'extension',
+          path: '/packs/review',
+          contributes: EXTENSION.contributes,
+          permissions: EXTENSION.permissions,
+          activates: EXTENSION.activates
+        }
+      }
+    })
+
+    const result = parsed(await tools.get('install_connector')!({ connector_id: 'review' }))
+
+    expect(rpcCall).toHaveBeenCalledWith('connector:installPack', {
+      kind: 'url',
+      url: 'https://packs.test/review-0.1.0.vorn.tgz'
+    })
+    expect(rpcCall).not.toHaveBeenCalledWith('connection:create', expect.anything())
+    expect(result.kind).toBe('extension')
+    expect(result.path).toBe('/packs/review')
+  })
+
+  it('says it ignored what only a poll would use', async () => {
+    withExtension({
+      'connector:installPack': {
+        ok: true,
+        pack: {
+          id: 'review',
+          name: 'Review',
+          version: '0.1.0',
+          kind: 'extension',
+          path: '/packs/review'
+        }
+      }
+    })
+
+    const result = parsed(
+      await tools.get('install_connector')!({
+        connector_id: 'review',
+        trigger: 'nothing',
+        sync_interval_minutes: 5
+      })
+    )
+    expect(result.note).toContain('Ignored trigger and sync_interval_minutes')
+  })
+
+  it('refuses an extension no release has published a pack for', async () => {
+    withExtension({
+      'connector:catalog': {
+        ...CATALOG,
+        items: [{ ...EXTENSION, packUrl: undefined }]
+      }
+    })
+    const result = await tools.get('install_connector')!({ connector_id: 'review' })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('no release has published a pack')
+  })
+})

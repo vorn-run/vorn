@@ -206,6 +206,26 @@ describe('canAddConnection', () => {
     expect(canAddConnection({ kind: 'absent' }, { source: 'builtin' })).toBe(true)
   })
 
+  // An extension shows on the cards its activation names; the form behind an
+  // Add button would ask for a connection nothing consumes.
+  it('refuses an extension, installed or not', () => {
+    expect(
+      canAddConnection(
+        { kind: 'installed', version: '1.0.0' },
+        { source: 'catalog', kind: 'extension' }
+      )
+    ).toBe(false)
+    expect(
+      canAddConnection(
+        { kind: 'installed', version: '1.0.0' },
+        { source: 'installed', kind: 'extension' }
+      )
+    ).toBe(false)
+    expect(canAddConnection({ kind: 'absent' }, { source: 'builtin', kind: 'extension' })).toBe(
+      false
+    )
+  })
+
   it('arms a packaged connector once its files are on disk', () => {
     expect(canAddConnection({ kind: 'installed', version: '1.0.0' }, { source: 'catalog' })).toBe(
       true

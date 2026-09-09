@@ -63,6 +63,44 @@ const UNRELEASED: ConnectorCatalogItem = {
   packUrl: undefined
 }
 
+/** An extension: it adds to a card rather than firing a workflow. */
+const REVIEW: ConnectorCatalogItem = {
+  id: 'review',
+  name: 'Review',
+  description: 'Read the diff beside the terminal.',
+  kind: 'extension',
+  packageName: '@vornrun/extension-review',
+  version: '0.1.0',
+  packUrl: 'https://packs.test/review-0.1.0.vorn.tgz',
+  capabilities: [],
+  category: 'Development',
+  keywords: [],
+  launch: { command: 'node', args: ['/packs/review/index.js'] },
+  contributes: {
+    panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }],
+    footers: [{ id: 'checks', title: 'Checks', every: 30 }]
+  },
+  permissions: ['git.read', 'terminal.send'],
+  activates: { workspaceContains: ['package.json'] }
+}
+
+/** The same extension, once its files are on disk. */
+const REVIEW_PACK = {
+  id: 'review',
+  name: 'Review',
+  version: '0.1.0',
+  kind: 'extension' as const,
+  path: '/packs/review',
+  installedAt: 0,
+  bytes: 1,
+  triggers: [],
+  actions: [],
+  env: [],
+  contributes: REVIEW.contributes,
+  permissions: REVIEW.permissions,
+  activates: REVIEW.activates
+}
+
 const listings = (): ConnectorListing[] => buildConnectorListings([], [ADO, KUSTO], [])
 
 const find = (id: string) => listings().find((listing) => listing.id === id)!
@@ -518,5 +556,151 @@ describe('a connector that signs in with nothing', () => {
     expect(queryByText('Add another')).not.toBeInTheDocument()
     expect(getByText('no sign-in')).toBeInTheDocument()
     expect(getByText(/ready/)).toBeInTheDocument()
+  })
+})
+
+describe('an extension in the directory', () => {
+  const shown = () => buildConnectorListings([], [REVIEW], [])
+
+  it('marks it as an extension and counts what it adds', () => {
+    const { getByText } = render(
+      <ConnectorDirectory listings={shown()} builtIns={[]} onSelect={vi.fn()} onAdd={vi.fn()} />
+    )
+    expect(getByText('extension')).toBeInTheDocument()
+    expect(getByText('Development · 1 pane, 1 footer · v0.1.0')).toBeInTheDocument()
+  })
+
+  // Its Add button led to a form asking for a connection nothing consumes.
+  it('offers installing it and nothing to connect', () => {
+    const { getByText, queryByText } = render(
+      <ConnectorDirectory
+        listings={shown()}
+        builtIns={[]}
+        onSelect={vi.fn()}
+        onAdd={vi.fn()}
+        onInstall={vi.fn()}
+      />
+    )
+    expect(getByText('Install')).toBeInTheDocument()
+    expect(queryByText('Add')).not.toBeInTheDocument()
+  })
+
+  it('says which cards it is on once it is installed', () => {
+    const { getByText } = render(
+      <ConnectorDirectory
+        listings={buildConnectorListings([], [REVIEW], [], [REVIEW_PACK])}
+        builtIns={[]}
+        activeCards={{ review: 2 }}
+        onSelect={vi.fn()}
+        onAdd={vi.fn()}
+      />
+    )
+    expect(getByText(/on 2 cards/)).toBeInTheDocument()
+  })
+
+  it('offers no kind filter when everything listed is the same kind', () => {
+    const { queryByLabelText } = render(
+      <ConnectorDirectory listings={shown()} builtIns={[]} onSelect={vi.fn()} onAdd={vi.fn()} />
+    )
+    expect(queryByLabelText('Filter by kind')).not.toBeInTheDocument()
+  })
+
+  it('narrows to one kind when both are listed', () => {
+    const { getByLabelText, getByText, queryByText } = render(
+      <ConnectorDirectory
+        listings={buildConnectorListings([], [ADO, REVIEW], [])}
+        builtIns={[]}
+        onSelect={vi.fn()}
+        onAdd={vi.fn()}
+      />
+    )
+    expect(getByText('Azure DevOps')).toBeInTheDocument()
+    fireEvent.change(getByLabelText('Filter by kind'), { target: { value: 'extension' } })
+    expect(getByText('Review')).toBeInTheDocument()
+    expect(queryByText('Azure DevOps')).not.toBeInTheDocument()
+  })
+})
+
+describe("an extension's page", () => {
+  const listing = (installed = false) =>
+    buildConnectorListings([], [REVIEW], [], installed ? [REVIEW_PACK] : [])[0]
+
+  it('says what it adds, what it asks for, and where it shows', () => {
+    const { getByText } = render(
+      <ConnectorDetail listing={listing()} builtIns={[]} onAdd={vi.fn()} onClose={vi.fn()} />
+    )
+
+    expect(getByText('Contributes')).toBeInTheDocument()
+    expect(getByText('Report · pane')).toBeInTheDocument()
+    expect(getByText('Checks · footer')).toBeInTheDocument()
+    expect(getByText('every 30s')).toBeInTheDocument()
+
+    expect(getByText('Asks to')).toBeInTheDocument()
+    expect(getByText(/the worktree's diff and status/)).toBeInTheDocument()
+    expect(getByText(/text into the session's terminal/)).toBeInTheDocument()
+
+    expect(getByText('Shows when')).toBeInTheDocument()
+    expect(getByText('projects with package.json')).toBeInTheDocument()
+  })
+
+  // A grant reads as small only against the list it was drawn from.
+  it('names what it did not ask for', () => {
+    const { getByText } = render(
+      <ConnectorDetail listing={listing()} builtIns={[]} onAdd={vi.fn()} onClose={vi.fn()} />
+    )
+    expect(getByText(/Not asked:/)).toHaveTextContent('the text selected in the terminal')
+  })
+
+  it('says it signs in with nothing rather than leaving it unanswered', () => {
+    const { getByText } = render(
+      <ConnectorDetail listing={listing()} builtIns={[]} onAdd={vi.fn()} onClose={vi.fn()} />
+    )
+    expect(getByText('Nothing. It only reads what the session already has.')).toBeInTheDocument()
+  })
+
+  it('counts the cards it is on against the cards this window has', () => {
+    const { getByText } = render(
+      <ConnectorDetail
+        listing={listing(true)}
+        builtIns={[]}
+        activeCards={1}
+        openCards={3}
+        onAdd={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+    expect(getByText('on 1 of 3 open cards')).toBeInTheDocument()
+  })
+
+  it('offers uninstalling it, and nothing to connect', () => {
+    const onRemove = vi.fn()
+    const { getByText, queryByText } = render(
+      <ConnectorDetail
+        listing={listing(true)}
+        builtIns={[]}
+        onAdd={vi.fn()}
+        onRemove={onRemove}
+        onClose={vi.fn()}
+      />
+    )
+    expect(queryByText('Add a connection')).not.toBeInTheDocument()
+    fireEvent.click(getByText('Uninstall'))
+    expect(onRemove).toHaveBeenCalled()
+  })
+
+  it('leaves uninstall alone while one of its own actions is running', () => {
+    const onRemove = vi.fn()
+    const { getByText } = render(
+      <ConnectorDetail
+        listing={listing(true)}
+        builtIns={[]}
+        activity={{ phrase: 'Removing…' }}
+        onAdd={vi.fn()}
+        onRemove={onRemove}
+        onClose={vi.fn()}
+      />
+    )
+    fireEvent.click(getByText('Uninstall'))
+    expect(onRemove).not.toHaveBeenCalled()
   })
 })
