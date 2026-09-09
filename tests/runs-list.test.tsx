@@ -253,6 +253,7 @@ describe('RunsList', () => {
       <RunsList runs={runs} workflowsById={wfById} filter="all" selectedId={null} onSelect={noop} />
     )
     expect(container.querySelectorAll('[title$="· success"]')).toHaveLength(3)
-    expect(screen.getByText('completed')).toBeInTheDocument()
+    // A plain success has no word of its own: the dot already says it.
+    expect(screen.queryByText('completed')).toBeNull()
   })
 })

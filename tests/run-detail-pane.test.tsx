@@ -185,6 +185,20 @@ describe('RunDetailPane', () => {
     expect(screen.getByTestId('run-steps-list').getAttribute('data-include-trigger')).toBe('true')
   })
 
+  it('says nothing beside the dot for a plain success', () => {
+    renderPane(makeRun())
+    expect(screen.queryByText('completed')).not.toBeInTheDocument()
+  })
+
+  it('shows the verdict a successful step wrote, in the success colour', () => {
+    renderPane(
+      makeRun({
+        nodeStates: [{ nodeId: 'n1', status: 'success', structuredOutput: { verdict: 'approve' } }]
+      })
+    )
+    expect(screen.getByText('approve')).toBeInTheDocument()
+  })
+
   it('hides the approval actions when nothing is waiting', () => {
     renderPane(makeRun())
     expect(screen.queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument()

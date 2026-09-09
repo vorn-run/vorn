@@ -107,9 +107,11 @@ function RunListRowImpl({
 
       <span className="flex items-center gap-2 mt-2 min-w-0">
         <StageBar stages={stages} />
-        <span className={`text-[11px] truncate min-w-0 ${outcomeToneClass(outcome.tone)}`}>
-          {outcome.label}
-        </span>
+        {outcome.label && (
+          <span className={`text-[11px] truncate min-w-0 ${outcomeToneClass(outcome.tone)}`}>
+            {outcome.label}
+          </span>
+        )}
       </span>
     </button>
   )
