@@ -64,6 +64,12 @@ function summarize(entry: ConnectorCatalogSummary): { type: string; label: strin
 }
 
 /** What an extension adds, named by id so an agent can open a pane it reads about. */
+/** "a, b and c" — a list read aloud rather than joined. */
+function andList(values: string[]): string {
+  if (values.length <= 1) return values[0] ?? ''
+  return `${values.slice(0, -1).join(', ')} and ${values[values.length - 1]}`
+}
+
 function contributionSummary(contributes: ExtensionContributions | undefined): {
   panes: Array<{ id: string; title: string }>
   footers: Array<{ id: string; title: string }>
@@ -143,9 +149,15 @@ export function registerConnectorTools(server: McpServer): void {
             ...(entry.triggers && { triggers: entry.triggers.map(summarize) }),
             ...(entry.actions && { actions: entry.actions.map(summarize) }),
             ...(entry.env && { env: entry.env.map((e) => e.name) }),
+            // Only what was stated: an empty list would read as "adds nothing",
+            // which is a claim an older catalog never made.
             ...(kind === 'extension' && {
-              contributes: contributionSummary(pack?.contributes ?? entry.contributes),
-              permissions: pack?.permissions ?? entry.permissions ?? [],
+              ...((pack?.contributes ?? entry.contributes) && {
+                contributes: contributionSummary(pack?.contributes ?? entry.contributes)
+              }),
+              ...((pack?.permissions ?? entry.permissions) && {
+                permissions: pack?.permissions ?? entry.permissions
+              }),
               ...((pack?.activates ?? entry.activates) && {
                 activates: pack?.activates ?? entry.activates
               })
@@ -313,7 +325,10 @@ export function registerConnectorTools(server: McpServer): void {
       if (installed?.kind === 'extension') {
         const ignored = [
           args.trigger !== undefined && 'trigger',
-          args.sync_interval_minutes !== undefined && 'sync_interval_minutes'
+          args.sync_interval_minutes !== undefined && 'sync_interval_minutes',
+          args.env !== undefined && 'env',
+          args.name !== undefined && 'name',
+          args.project !== undefined && 'project'
         ].filter(Boolean) as string[]
         return json({
           installed: installed.name,
@@ -325,7 +340,9 @@ export function registerConnectorTools(server: McpServer): void {
           ...(installed.activates && { activates: installed.activates }),
           note:
             'Extensions have no connection: they show on the cards their activation names.' +
-            (ignored.length > 0 ? ` Ignored ${ignored.join(' and ')}, which only a poll uses.` : '')
+            (ignored.length > 0
+              ? ` Ignored ${andList(ignored)}, which only a connection uses.`
+              : '')
         })
       }
 

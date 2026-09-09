@@ -537,6 +537,19 @@ describe('extensions over the wire', () => {
     expect(rows.find((row: { id: string }) => row.id === 'kusto').kind).toBe('connector')
   })
 
+  // An empty list is a claim; a catalog published before these fields said nothing.
+  it('says nothing about what an older entry never stated', async () => {
+    const { contributes: _c, permissions: _p, activates: _a, ...silent } = EXTENSION
+    server({ 'connector:catalog': { ...CATALOG, items: [silent] } })
+    const rows = parsed(await tools.get('list_connectors')!({}))
+    const review = rows.find((row: { id: string }) => row.id === 'review')
+
+    expect(review.kind).toBe('extension')
+    expect('contributes' in review).toBe(false)
+    expect('permissions' in review).toBe(false)
+    expect('activates' in review).toBe(false)
+  })
+
   it('narrows to one kind when asked', async () => {
     withExtension()
     const rows = parsed(await tools.get('list_connectors')!({ kind: 'extension' }))
@@ -615,6 +628,33 @@ describe('extensions over the wire', () => {
       })
     )
     expect(result.note).toContain('Ignored trigger and sync_interval_minutes')
+  })
+
+  // Every one of these configures a connection, and an extension makes none.
+  it('names each argument it had no use for', async () => {
+    withExtension({
+      'connector:installPack': {
+        ok: true,
+        pack: {
+          id: 'review',
+          name: 'Review',
+          version: '0.1.0',
+          kind: 'extension',
+          path: '/packs/review'
+        }
+      }
+    })
+
+    const result = parsed(
+      await tools.get('install_connector')!({
+        connector_id: 'review',
+        env: { REVIEW_TOKEN: 'x' },
+        name: 'mine',
+        project: 'vorn'
+      })
+    )
+    expect(result.note).toContain('Ignored env, name and project')
+    expect(result.note).toContain('which only a connection uses')
   })
 
   it('refuses an extension no release has published a pack for', async () => {
