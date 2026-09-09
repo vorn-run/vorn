@@ -144,6 +144,9 @@ registerCapability('auth', 1)
 // one. Without the check, an older server silently drops `subscribe:set` and the
 // client believes it is filtered while receiving everything.
 registerCapability('subscribe', 1)
+// Terminal output as bytes, for a client that asks. A JSON string carries every
+// escape as six characters and costs both ends an encode the emulator undoes.
+registerCapability('terminalBytes', 1)
 
 /**
  * Register a method handler. Called during server startup to wire up
@@ -445,8 +448,8 @@ export function handleConnection(
     // `registerNotification` because it is the socket that is being configured,
     // and a registered handler is given only its params.
     if (method === 'subscribe:set') {
-      const topics = (params as { topics?: readonly string[] } | undefined)?.topics
-      clientRegistry.setTopics(ws, topics)
+      const options = params as { topics?: readonly string[]; terminalBytes?: boolean } | undefined
+      clientRegistry.setTopics(ws, options?.topics, options?.terminalBytes)
       if (id !== undefined && id !== null) {
         ws.send(JSON.stringify(createResponse(id, { ok: true })))
       }

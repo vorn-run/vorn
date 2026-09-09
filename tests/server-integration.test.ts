@@ -207,7 +207,11 @@ describe('server integration', () => {
       })
 
       expect(JSON.parse(first).method).toBe('server:hello')
-      expect(JSON.parse(first).params.capabilities).toEqual({ auth: 1, subscribe: 1 })
+      expect(JSON.parse(first).params.capabilities).toEqual({
+        auth: 1,
+        subscribe: 1,
+        terminalBytes: 1
+      })
       ws.close()
     })
 
@@ -418,6 +422,53 @@ describe('server integration', () => {
       ws.close()
       return methods
     }
+
+    it('sends terminal output as bytes to a socket that asked, and text to one that did not', async () => {
+      const { decodeTerminalFrame } = await import('../packages/shared/src/terminal-frame')
+      const open = (ws: WebSocket): Promise<void> => new Promise((r) => ws.on('open', () => r()))
+      const bytes = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
+      const text = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
+      await Promise.all([open(bytes), open(text)])
+
+      const answered = new Promise<void>((resolve) => {
+        bytes.on('message', (raw, isBinary) => {
+          if (!isBinary && JSON.parse(raw.toString()).id === 7) resolve()
+        })
+      })
+      bytes.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 7,
+          method: 'subscribe:set',
+          params: { terminalBytes: true }
+        })
+      )
+      await answered
+
+      const frame = new Promise<{ raw: Buffer; isBinary: boolean }>((resolve) => {
+        bytes.on('message', (raw, isBinary) => {
+          if (isBinary) resolve({ raw: raw as Buffer, isBinary })
+        })
+      })
+      const json = new Promise<string>((resolve) => {
+        text.on('message', (raw) => {
+          const parsed = JSON.parse(raw.toString())
+          if (parsed.method === 'terminal:data') resolve(parsed.params.data)
+        })
+      })
+      const { clientRegistry } = await import('../packages/server/src/broadcast')
+      clientRegistry.broadcastTerminalData({ id: 'a', data: '\u001b[32mok\u001b[0m', seq: 3 })
+
+      const received = await frame
+      expect(decodeTerminalFrame(received.raw)).toEqual({
+        id: 'a',
+        seq: 3,
+        data: new TextEncoder().encode('\u001b[32mok\u001b[0m')
+      })
+      expect(await json).toBe('\u001b[32mok\u001b[0m')
+      bytes.close()
+      text.close()
+    })
 
     it('still receives everything when it asks for nothing', async () => {
       expect(await notificationsFor('')).toEqual(['terminal:data', 'session:updated'])

@@ -1,5 +1,6 @@
 import type { WebSocket } from 'ws'
 import { createNotification } from '@vornrun/shared/protocol'
+import { encodeTerminalFrame } from '@vornrun/shared/terminal-frame'
 import log from './logger'
 
 /**
@@ -86,12 +87,25 @@ export function parseTopics(query: unknown): readonly string[] | undefined {
   return topics.length > 0 ? topics : undefined
 }
 
+interface Client {
+  subscription: Subscription | null
+  /** Terminal output as a binary frame rather than a JSON string. */
+  terminalBytes: boolean
+}
+
+/** What `terminal:data` carries before it is put on the wire. */
+export interface TerminalDataPayload {
+  id: string
+  data: string
+  seq: number
+}
+
 export class ClientRegistry {
-  private clients = new Map<WebSocket, Subscription | null>()
+  private clients = new Map<WebSocket, Client>()
   private lastActivity = Date.now()
 
   add(ws: WebSocket, topics?: TopicFilter): void {
-    this.clients.set(ws, subscriptionFrom(topics))
+    this.clients.set(ws, { subscription: subscriptionFrom(topics), terminalBytes: false })
     log.info(`[ws] client connected (total: ${this.clients.size})`)
   }
 
@@ -133,9 +147,13 @@ export class ClientRegistry {
    * Ignored for a socket that was never admitted, so this cannot be used to add
    * an unauthenticated connection to the broadcast set.
    */
-  setTopics(ws: WebSocket, topics: TopicFilter): void {
-    if (!this.clients.has(ws)) return
-    this.clients.set(ws, subscriptionFrom(topics))
+  setTopics(ws: WebSocket, topics: TopicFilter, terminalBytes?: boolean): void {
+    const client = this.clients.get(ws)
+    if (!client) return
+    client.subscription = subscriptionFrom(topics)
+    // Left as it was when not mentioned: the web client resets its topics on
+    // every scroll, and should not have to say "bytes, still" each time.
+    if (terminalBytes !== undefined) client.terminalBytes = terminalBytes
   }
 
   /**
@@ -148,11 +166,41 @@ export class ClientRegistry {
     // filtered client attached, an unwanted notification now costs a map walk
     // instead of a full JSON encode of the payload.
     let msg: string | undefined
-    for (const [ws, subscription] of this.clients) {
+    for (const [ws, { subscription }] of this.clients) {
       if (ws.readyState !== ws.OPEN) continue
       if (subscription && !subscription.wants(method, scope)) continue
       msg ??= JSON.stringify(createNotification(method, params))
       ws.send(msg)
+    }
+  }
+
+  /**
+   * Terminal output, in whichever form each socket asked for.
+   *
+   * The one notification with a second wire form. A socket that asked for
+   * bytes gets the frame; every other gets the JSON it always did, so a client
+   * that never heard of frames -- a phone on last month's build -- sees no
+   * change. Each form is built at most once per flush, and only if somebody
+   * wants it.
+   */
+  broadcastTerminalData(payload: TerminalDataPayload): void {
+    const scope = payload.id
+    let text: string | undefined
+    let frame: Uint8Array | undefined
+    for (const [ws, { subscription, terminalBytes }] of this.clients) {
+      if (ws.readyState !== ws.OPEN) continue
+      if (subscription && !subscription.wants('terminal:data', scope)) continue
+      if (terminalBytes) {
+        frame ??= encodeTerminalFrame({
+          id: payload.id,
+          seq: payload.seq,
+          data: Buffer.from(payload.data, 'utf-8')
+        })
+        ws.send(Buffer.from(frame.buffer, frame.byteOffset, frame.byteLength))
+      } else {
+        text ??= JSON.stringify(createNotification('terminal:data', payload))
+        ws.send(text)
+      }
     }
   }
 

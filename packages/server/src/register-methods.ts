@@ -2195,7 +2195,11 @@ export function registerAllMethods(): void {
     // client subscribe to one terminal rather than to all of them. Read
     // generically rather than per channel: every id-bearing payload here means
     // the same thing by it.
-    clientRegistry.broadcast(channel, payload, terminalScope(payload))
+    if (channel === IPC.TERMINAL_DATA) {
+      clientRegistry.broadcastTerminalData(payload as { id: string; data: string; seq: number })
+    } else {
+      clientRegistry.broadcast(channel, payload, terminalScope(payload))
+    }
     if (channel === IPC.TERMINAL_EXIT) {
       const p = payload as { id: string; exitCode: number }
       logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })

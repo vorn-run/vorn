@@ -1200,7 +1200,8 @@ export interface ServerNotifications {
    * a client subscribes first, buffers, and then applies only the chunks
    * numbered above what it was handed.
    */
-  'terminal:data': { id: string; data: string; seq: number }
+  /** Bytes for a socket that asked for them with `subscribe:set`; text for every other. */
+  'terminal:data': { id: string; data: string | Uint8Array; seq: number }
   /**
    * A terminal rang. Broadcast rather than read off `terminal:data`, so a
    * session nobody has open still reaches whoever is meant to be interrupted.
@@ -1291,7 +1292,11 @@ export interface ClientNotifications {
    * Prefer the `topics` query parameter on the socket URL for the initial set:
    * this message can only take effect after the socket is already receiving.
    */
-  'subscribe:set': { topics?: readonly string[] }
+  'subscribe:set': {
+    topics?: readonly string[]
+    /** Terminal output as a binary frame rather than a JSON string. Kept until set again. */
+    terminalBytes?: boolean
+  }
   /** The answer to `extension:selectionRequest`, from the window that drew the terminal. */
   'extension:selectionResult': { requestId: number; text: string }
 }
