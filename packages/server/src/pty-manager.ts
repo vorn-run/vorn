@@ -639,7 +639,10 @@ class PtyManager extends EventEmitter {
     return this.extensionPtys.has(id)
   }
 
+  /** How long a stream is held so its many small reads go out as one flush. */
   private static readonly BUFFER_FLUSH_MS = 8
+  /** When each session last flushed, to tell a lone echo from a stream. */
+  private lastFlushAt = new Map<string, number>()
 
   /**
    * Put bytes into a session's output as though the process had written them.
@@ -665,13 +668,20 @@ class PtyManager extends EventEmitter {
   private bufferData(id: string, data: string): void {
     const existing = this.dataBuffers.get(id)
     this.dataBuffers.set(id, existing ? existing + data : data)
+    if (this.flushTimers.has(id)) return
 
-    if (!this.flushTimers.has(id)) {
-      this.flushTimers.set(
-        id,
-        setTimeout(() => this.flushBuffer(id), PtyManager.BUFFER_FLUSH_MS)
-      )
+    // The first read after a quiet spell goes out at once: that is a typed character's echo, and
+    // holding it for company that never comes is what a keystroke feels as lag. Reads that follow
+    // within the hold are a stream, and those are coalesced.
+    const quietFor = Date.now() - (this.lastFlushAt.get(id) ?? 0)
+    if (quietFor >= PtyManager.BUFFER_FLUSH_MS) {
+      this.flushBuffer(id)
+      return
     }
+    this.flushTimers.set(
+      id,
+      setTimeout(() => this.flushBuffer(id), PtyManager.BUFFER_FLUSH_MS)
+    )
   }
 
   /**
@@ -703,6 +713,7 @@ class PtyManager extends EventEmitter {
     if (data) {
       const seq = this.lastFlushSeq(id) + 1
       this.flushSeq.set(id, seq)
+      this.lastFlushAt.set(id, Date.now())
 
       // Clients first, always. What follows models the screen for nobody who is
       // waiting; this line is a person watching their terminal, and it must not
@@ -872,6 +883,7 @@ class PtyManager extends EventEmitter {
       this.deleteTempKey(id)
       this.clearSessionTracking(id)
       this.flushSeq.delete(id)
+      this.lastFlushAt.delete(id)
       clearScrollback(id)
       // Beside the scrollback it belongs to: the PTY is gone and nothing will
       // draw into it again. The session record survives so the card can show an
@@ -1172,6 +1184,7 @@ class PtyManager extends EventEmitter {
       clearTimeout(timer)
     }
     this.dataBuffers.clear()
+    this.lastFlushAt.clear()
     this.flushTimers.clear()
     this.flushSeq.clear()
 
