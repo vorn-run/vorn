@@ -28,6 +28,10 @@ function writeTask(
   if (!after || !before) return undefined
 
   configManager.saveConfig({ ...config, tasks })
+  // Saving writes; telling everyone is a separate step, and the one that makes
+  // the board move. The renderer's `config:save` method does both, and this
+  // path does not go through it.
+  configManager.notifyChanged()
   return { task: after, from: before }
 }
 

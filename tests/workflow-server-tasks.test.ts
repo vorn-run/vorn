@@ -10,13 +10,15 @@ const config = {
   tasks: [] as TaskConfig[]
 } as unknown as AppConfig
 
+const notifyChanged = vi.hoisted(() => vi.fn())
 vi.mock('../packages/server/src/config-manager', () => ({
   configManager: {
     loadConfig: () => config,
     saveConfig: (next: AppConfig) => {
       saved.push(next)
       config.tasks = next.tasks ?? []
-    }
+    },
+    notifyChanged
   }
 }))
 
@@ -49,6 +51,7 @@ beforeEach(() => {
   saved.length = 0
   config.tasks = [task()]
   fireTaskStatusChangedTrigger.mockClear()
+  notifyChanged.mockClear()
 })
 
 describe('a step taking a task on', () => {
@@ -62,6 +65,12 @@ describe('a step taking a task on', () => {
       assignedAgent: 'claude',
       worktreePath: '/worktree'
     })
+  })
+
+  it('tells everyone, so the board moves while the step holds the task', () => {
+    startTask('t1', 'sess-1', 'claude')
+
+    expect(notifyChanged).toHaveBeenCalled()
   })
 
   it('fires the status-changed trigger, because another workflow may be waiting', () => {
