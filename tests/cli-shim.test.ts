@@ -1,11 +1,28 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/Applications/Vorn.app/Contents/MacOS/Vorn' }
 }))
+
+// Which directories exist and are writable is the machine's business, not the test's.
+const writable = vi.hoisted(() => new Set<string>())
+vi.mock('node:fs', () => ({
+  default: {
+    accessSync: (dir: string) => {
+      if (!writable.has(dir)) throw new Error('not writable')
+    },
+    constants: { W_OK: 2 },
+    existsSync: () => false,
+    mkdirSync: () => undefined,
+    writeFileSync: () => undefined,
+    chmodSync: () => undefined
+  }
+}))
 vi.mock('../src/main/logger', () => ({ default: { warn: () => {}, error: () => {} } }))
 
-import { shimScript } from '../src/main/cli-shim'
+import os from 'node:os'
+import path from 'node:path'
+import { shimDirectory, shimScript } from '../src/main/cli-shim'
 
 const MAC = {
   exe: '/Applications/Vorn.app/Contents/MacOS/Vorn',
@@ -53,5 +70,39 @@ describe('the vorn command the app writes', () => {
     expect(script).toContain('if "%~1"=="" (')
     expect(script).toContain('set "ELECTRON_RUN_AS_NODE=1"')
     expect(script).toContain('%*')
+  })
+})
+
+describe('where the command goes', () => {
+  const userBin = path.join(os.homedir(), '.local', 'bin')
+  const originalPath = process.env.PATH
+
+  beforeEach(() => {
+    writable.clear()
+  })
+
+  afterEach(() => {
+    process.env.PATH = originalPath
+  })
+
+  it('prefers a writable directory the shell already searches', () => {
+    writable.add('/usr/local/bin')
+    writable.add(userBin)
+    process.env.PATH = `${userBin}:/usr/bin`
+
+    expect(shimDirectory()).toBe(userBin)
+  })
+
+  it('takes a writable directory over none when the shell searches neither', () => {
+    writable.add('/usr/local/bin')
+    process.env.PATH = '/usr/bin'
+
+    expect(shimDirectory()).toBe('/usr/local/bin')
+  })
+
+  it('falls back to the one directory it may always create', () => {
+    process.env.PATH = '/usr/bin'
+
+    expect(shimDirectory()).toBe(userBin)
   })
 })

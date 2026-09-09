@@ -13,18 +13,36 @@ import log from './logger'
  * that is actually running, so it points at wherever this copy lives.
  */
 
-/** Where the command can go: a directory already on PATH, or the per-user one. */
+function isWritable(dir: string): boolean {
+  try {
+    fs.accessSync(dir, fs.constants.W_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Whether a shell would find a command in this directory. */
+export function onPath(dir: string): boolean {
+  return (process.env.PATH ?? '')
+    .split(path.delimiter)
+    .some((entry) => entry !== '' && path.resolve(entry) === path.resolve(dir))
+}
+
+/**
+ * Where the command can go.
+ *
+ * A writable directory the shell already searches, first -- a command installed
+ * anywhere else is a file, not a command. `~/.local/bin` is the fallback even
+ * when it is neither: it is the one place this process may always create, and
+ * the caller says so rather than claiming the command is ready to run.
+ */
 export function shimDirectory(): string {
   if (process.platform === 'win32') return path.dirname(app.getPath('exe'))
-  for (const dir of ['/usr/local/bin', path.join(os.homedir(), '.local', 'bin')]) {
-    try {
-      fs.accessSync(dir, fs.constants.W_OK)
-      return dir
-    } catch {
-      // Not writable, or not there. The per-user directory is created below.
-    }
-  }
-  return path.join(os.homedir(), '.local', 'bin')
+
+  const userBin = path.join(os.homedir(), '.local', 'bin')
+  const candidates = ['/usr/local/bin', userBin].filter(isWritable)
+  return candidates.find(onPath) ?? candidates[0] ?? userBin
 }
 
 export function shimPath(): string {
@@ -109,11 +127,18 @@ export interface ShimStatus {
   available: boolean
   installed: boolean
   path: string
+  /** Whether a shell would find it there, which decides what the UI can promise. */
+  onPath: boolean
 }
 
 export function cliShimStatus(): ShimStatus {
   const target = shimPath()
-  return { available: app.isPackaged, installed: fs.existsSync(target), path: target }
+  return {
+    available: app.isPackaged,
+    installed: fs.existsSync(target),
+    path: target,
+    onPath: onPath(path.dirname(target))
+  }
 }
 
 export function installCliShim(): { ok: true; path: string } | { ok: false; error: string } {

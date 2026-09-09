@@ -51,7 +51,8 @@ describe('the command line tool row', () => {
     cliCommandStatus.mockResolvedValue({
       available: true,
       installed: false,
-      path: '/usr/local/bin/vorn'
+      path: '/usr/local/bin/vorn',
+      onPath: true
     })
     installCliCommand.mockResolvedValue({ ok: true, path: '/usr/local/bin/vorn' })
 
@@ -68,7 +69,8 @@ describe('the command line tool row', () => {
     cliCommandStatus.mockResolvedValue({
       available: true,
       installed: false,
-      path: '/usr/local/bin/vorn'
+      path: '/usr/local/bin/vorn',
+      onPath: true
     })
     installCliCommand.mockResolvedValue({ ok: false, error: 'EACCES: permission denied' })
 
@@ -79,8 +81,25 @@ describe('the command line tool row', () => {
     expect(screen.getByRole('button', { name: 'Install' })).toBeInTheDocument()
   })
 
+  it('says when the command would land somewhere the shell does not look', async () => {
+    cliCommandStatus.mockResolvedValue({
+      available: true,
+      installed: false,
+      path: '/Users/j/.local/bin/vorn',
+      onPath: false
+    })
+
+    render(<GeneralSettings />)
+    expect(await screen.findByText(/add its directory to your PATH/)).toBeInTheDocument()
+  })
+
   it('stays out of the way while running from source', async () => {
-    cliCommandStatus.mockResolvedValue({ available: false, installed: false, path: '' })
+    cliCommandStatus.mockResolvedValue({
+      available: false,
+      installed: false,
+      path: '',
+      onPath: false
+    })
 
     render(<GeneralSettings />)
     expect(await screen.findByRole('button', { name: 'Install' })).toBeDisabled()

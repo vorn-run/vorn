@@ -708,7 +708,8 @@ export function createApiShim(wsUrl: string) {
 
     // ── The vorn command ──
     // A browser has no PATH to put it on, and says so rather than pretending.
-    cliCommandStatus: () => Promise.resolve({ available: false, installed: false, path: '' }),
+    cliCommandStatus: () =>
+      Promise.resolve({ available: false, installed: false, path: '', onPath: false }),
     installCliCommand: unsupportedInWeb('Installing the command line tool'),
 
     // ── Shells ──

@@ -25,7 +25,8 @@ choose_bin_dir() {
 }
 
 path_hint() {
-  if ! echo ":$PATH:" | grep -q ":$1:"; then
+  # -F: a directory holding a dot -- ~/.local/bin, say -- is not a regex.
+  if ! echo ":$PATH:" | grep -qF ":$1:"; then
     echo ""
     echo "Add ${1} to your PATH:"
     echo "  export PATH=\"${1}:\$PATH\""
