@@ -59,9 +59,43 @@ const readyCallbacks = new Map<string, Set<() => void>>()
 
 // --- Write batching: single global listener + requestAnimationFrame ---
 interface Chunk {
-  data: string
+  /** Bytes from a server that sends them, text from one that does not. */
+  data: string | Uint8Array
   /** Which flush of that session this came from. See `PtyManager.flushSeq`. */
   seq: number
+}
+
+/**
+ * Chunks into the terminal, in order, with as few writes as their forms allow.
+ *
+ * xterm takes either form but not both in one call. Runs of the same form are
+ * joined, since each `write` queues a task; a change of form starts a new run.
+ * Text meets bytes only around a seed, which is text from `attachTerminal`
+ * while live output is bytes.
+ */
+function writeChunks(term: Terminal, chunks: readonly Chunk[]): void {
+  let run: Chunk['data'][] = []
+  const flush = (): void => {
+    if (!run.length) return
+    if (typeof run[0] === 'string') term.write(run.length === 1 ? run[0] : run.join(''))
+    else if (run.length === 1) term.write(run[0])
+    else {
+      const parts = run as Uint8Array[]
+      const joined = new Uint8Array(parts.reduce((n, part) => n + part.length, 0))
+      let offset = 0
+      for (const part of parts) {
+        joined.set(part, offset)
+        offset += part.length
+      }
+      term.write(joined)
+    }
+    run = []
+  }
+  for (const chunk of chunks) {
+    if (run.length && typeof run[0] !== typeof chunk.data) flush()
+    run.push(chunk.data)
+  }
+  flush()
 }
 
 const pendingWrites = new Map<string, Chunk[]>()
@@ -101,9 +135,8 @@ function flushWrites(): void {
       for (const chunk of chunks) hydration.held.push(chunk)
       continue
     }
-    const data = chunks.length === 1 ? chunks[0].data : chunks.map((c) => c.data).join('')
     const entry = registry.get(id)
-    if (entry) entry.term.write(data)
+    if (entry) writeChunks(entry.term, chunks)
   }
   pendingWrites.clear()
 }
@@ -185,8 +218,7 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
         !Number.isFinite(chunk.seq) || !Number.isFinite(above) || (chunk.seq as number) > above
     )
     if (!kept.length) return
-    const data = kept.map((chunk) => chunk.data).join('')
-    entry.term.write(data)
+    writeChunks(entry.term, kept)
   }
 
   /**
@@ -903,7 +935,7 @@ export function destroyTerminal(terminalId: string): void {
   // checks, and writes `[object Object]` instead of the output it exists to save.
   const chunks = pendingWrites.get(terminalId)
   if (chunks) {
-    entry.term.write(chunks.map((chunk) => chunk.data).join(''))
+    writeChunks(entry.term, chunks)
     pendingWrites.delete(terminalId)
   }
   // A seed still in flight would otherwise resolve and write into a terminal
