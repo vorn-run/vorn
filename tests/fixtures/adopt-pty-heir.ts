@@ -19,41 +19,42 @@ adopted.onExit(() => {
   exited = true
 })
 
-const until = (match: RegExp, ms = 30_000): Promise<boolean> =>
+const born = Date.now()
+/** Resolves with the match, or undefined after `ms`, saying what was seen so a CI log explains itself. */
+const until = (match: RegExp, ms = 30_000): Promise<RegExpExecArray | undefined> =>
   new Promise((resolve) => {
     const started = Date.now()
     const tick = setInterval(() => {
-      if (match.test(seen)) {
+      const found = match.exec(seen)
+      if (found) {
         clearInterval(tick)
-        resolve(true)
+        resolve(found)
       } else if (Date.now() - started > ms) {
         clearInterval(tick)
-        resolve(false)
+        process.stderr.write(
+          `[heir] ${match} not seen after ${ms}ms (t+${Date.now() - born}ms); seen=${JSON.stringify(seen)}\n`
+        )
+        resolve(undefined)
       }
     }, 25)
   })
 
 async function main(): Promise<void> {
-  // Readiness before anything is typed. Bracketed paste going on means readline
-  // is waiting for input; the fallback covers a shell that never enables it.
-  // eslint-disable-next-line no-control-regex
-  if (!(await until(/\x1b\[\?2004h/, 10_000))) await until(/\S/, 10_000)
-
-  const read = await (async () => {
-    adopted.write('echo ADOPTED_READ\r')
-    return until(/ADOPTED_READ\r?\n/)
-  })()
+  // No readiness wait: the parent handed the pty over only after the shell had
+  // printed its prompt, and it kept that chunk, so nothing arrives here until typed.
+  adopted.write('echo ADOPTED_READ\r')
+  const read = (await until(/ADOPTED_READ\r?\n/)) !== undefined
 
   // `tput cols` asks the tty itself, so the answer proves TIOCSWINSZ landed here.
   adopted.resize(120, 40)
   seen = ''
   adopted.write('tput cols\r')
-  await until(/\b120\b/)
-  const cols = /(?:^|\D)(\d{2,4})\r?\n/.exec(seen)?.[1] ?? 'none'
+  const cols = (await until(/(?:^|\D)(\d{2,4})\r?\n/))?.[1] ?? 'none'
 
   seen = ''
   adopted.write('exit\r')
-  await until(/never/, 3_000)
+  const asked = Date.now()
+  while (!exited && Date.now() - asked < 3_000) await new Promise((r) => setTimeout(r, 25))
 
   // Always, not only under a flag: this runs in a process the test does not own,
   // and a bare "expected true" tells whoever reads CI nothing at all.
