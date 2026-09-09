@@ -893,6 +893,43 @@
         }
       }
 
+      /* A row of phones that becomes a swipe when the row runs out of width. */
+      .phones {
+        display: flex;
+        gap: 14px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        padding-bottom: 6px;
+        scrollbar-width: none;
+      }
+
+      .phones::-webkit-scrollbar {
+        display: none;
+      }
+
+      .phone {
+        flex: 0 0 auto;
+        width: 210px;
+        margin: 0;
+        scroll-snap-align: start;
+        border-radius: 14px;
+        overflow: hidden;
+        border: 0.5px solid var(--border);
+        background: var(--obsidian);
+      }
+
+      .phone img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      @media (max-width: 900px) {
+        .phone {
+          width: 168px;
+        }
+      }
+
       /* ═══════ THE INSTRUMENTS — AGENTS ═══════ */
 
       .instruments-row {
@@ -1842,29 +1879,73 @@
           </div>
           <div class="study reveal">
             <div class="study-media">
-              <div class="study-frame">
-                <img
-                  src="assets/resume-sessions-2786.webp"
-                  srcset="
-                    assets/resume-sessions-1200.webp 1200w,
-                    assets/resume-sessions-2786.webp 2786w
-                  "
-                  sizes="(max-width: 900px) 100vw, 900px"
-                  width="2786"
-                  height="1734"
-                  alt="Pick up where you left off"
-                  loading="lazy"
-                  decoding="async"
-                />
+              <div class="phones" role="group" aria-label="Vorn on a phone">
+                <figure class="phone">
+                  <img
+                    src="assets/phone-sessions-430.webp"
+                    srcset="
+                      assets/phone-sessions-430.webp 430w,
+                      assets/phone-sessions-860.webp 860w
+                    "
+                    sizes="210px"
+                    width="1290"
+                    height="2796"
+                    alt="Every session on this machine, waiting or running"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </figure>
+                <figure class="phone">
+                  <img
+                    src="assets/phone-terminal-430.webp"
+                    srcset="
+                      assets/phone-terminal-430.webp 430w,
+                      assets/phone-terminal-860.webp 860w
+                    "
+                    sizes="210px"
+                    width="1290"
+                    height="2796"
+                    alt="A running session, with the keys a terminal needs"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </figure>
+                <figure class="phone">
+                  <img
+                    src="assets/phone-tasks-430.webp"
+                    srcset="assets/phone-tasks-430.webp 430w, assets/phone-tasks-860.webp 860w"
+                    sizes="210px"
+                    width="1290"
+                    height="2796"
+                    alt="The same board the desktop shows"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </figure>
+                <figure class="phone">
+                  <img
+                    src="assets/phone-workflows-430.webp"
+                    srcset="
+                      assets/phone-workflows-430.webp 430w,
+                      assets/phone-workflows-860.webp 860w
+                    "
+                    sizes="210px"
+                    width="1290"
+                    height="2796"
+                    alt="Workflows, and what each one last did"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </figure>
               </div>
             </div>
             <div class="study-text">
               <div class="study-annotation">Study V</div>
-              <h3>Pick up where you left off</h3>
+              <h3>Take it with you</h3>
               <p>
-                Restore previous agent sessions on restart with accurate session matching and full
-                history tracking across projects. A quit, a crash and an update leave the session
-                running; a reboot does not, and the strip says so before it offers to resume.
+                Pair a phone by showing it a code. It joins the same server over your own network
+                and picks up from there: the sessions, a terminal with the keys it needs, the board
+                and the workflows. The desktop can close; the session was never held by the window.
               </p>
             </div>
           </div>
