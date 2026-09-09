@@ -28,6 +28,10 @@ export function MissedScheduleDialog() {
       if (!selected.has(item.workflow.id)) continue
       const wf = config?.workflows?.find((w) => w.id === item.workflow.id)
       if (!wf) continue
+      // Started, not waited on: the server answers as soon as a run exists, so
+      // recovering several missed schedules starts them together rather than
+      // one after the other. Its claim registry is what keeps a double-fire of
+      // the same schedule to one run.
       await window.api.runWorkflow({ workflowId: wf.id })
     }
     setMissed([])
