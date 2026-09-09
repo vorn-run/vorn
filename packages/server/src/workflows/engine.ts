@@ -1263,8 +1263,11 @@ export async function executeWorkflow(
     options?.source !== 'scheduler'
   ) {
     await api.runWorkflowManual(workflow.id, context?.inputs)
+    // Only a run that is still going. `latestRunForWorkflow` reads the database
+    // now, so the newest row is usually a finished run from an earlier poll --
+    // handing that back would report a run that ended days ago as this one.
     const existing = latestRunForWorkflow(workflow.id)
-    if (existing) {
+    if (existing?.status === 'running') {
       options?.onStarted?.(existing)
       return existing
     }
