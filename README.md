@@ -121,7 +121,6 @@ Create multi-step workflows with a visual node editor. Chain together agent laun
 
 Run agents and scripts in the background without a visible terminal. Headless sessions capture full output logs for later review. Combine with workflow stagger delays to orchestrate multiple agents sequentially, each one picks up where the last left off.
 
-
 ### Inline Diff Review & Git Integration
 
 View git changes in a side panel with file-level stats. Click on any changed line to add a review comment, then send all comments to the agent as structured feedback with one click. Stage, commit, and push directly from the terminal session. Full worktree support for safe parallel work on different branches.
@@ -137,7 +136,6 @@ Fuzzy search for actions, terminals, recent sessions, projects, and workflows. Q
 ### Session Persistence
 
 Restore previous agent sessions on restart. Vorn tracks session history and matches agent sessions for accurate resumption, so you can pick up right where you left off.
-
 
 ### MCP Server
 
