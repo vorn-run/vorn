@@ -291,6 +291,21 @@ export function registerIpcHandlers(): void {
   // File explorer
   safeHandle(IPC.FILE_LIST_DIR, (_, dirPath) => requireBridge().request(IPC.FILE_LIST_DIR, dirPath))
   // The `vorn` command, for people who never ran the installer script.
+  safeHandle(IPC.WORKFLOW_RUN, (_, params) => requireBridge().request(IPC.WORKFLOW_RUN, params))
+  safeHandle(IPC.WORKFLOW_SESSION_RESTORED, (_, params) =>
+    requireBridge().request(IPC.WORKFLOW_SESSION_RESTORED, params)
+  )
+  safeHandle(IPC.WORKFLOW_STOP_RUN_REQUEST, (_, params) =>
+    requireBridge().request(IPC.WORKFLOW_STOP_RUN_REQUEST, params)
+  )
+  safeHandle(IPC.WORKFLOW_RESOLVE_GATE, (_, params) =>
+    requireBridge().request(IPC.WORKFLOW_RESOLVE_GATE, params)
+  )
+  safeHandle(IPC.WORKFLOW_RETRY_RUN, (_, params) =>
+    requireBridge().request(IPC.WORKFLOW_RETRY_RUN, params)
+  )
+  safeHandle(IPC.WORKFLOW_RERUN, (_, params) => requireBridge().request(IPC.WORKFLOW_RERUN, params))
+
   safeHandle(IPC.CLI_STATUS, () => cliShimStatus())
   safeHandle(IPC.CLI_INSTALL, () => installCliShim())
 

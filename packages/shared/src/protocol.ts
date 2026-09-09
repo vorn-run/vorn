@@ -12,7 +12,9 @@ import type {
   GitDiffResult,
   GitDiffRange,
   WorkflowDefinition,
+  RestoreEnvironment,
   WorkflowExecution,
+  WorkflowExecutionContext,
   ScriptConfig,
   ScheduleLogEntry,
   ProjectConfig,
@@ -562,6 +564,39 @@ export interface RequestMethods {
     params: { runId: string; nodeId: string; decision: 'approve' | 'reject' }
     result: { accepted: boolean }
   }
+
+  /**
+   * Start a run, with the context the person started it from.
+   *
+   * `workflow:runManual` goes through the scheduler and carries inputs alone,
+   * which is right for an agent or a schedule. A run started from a card or a
+   * session carries that card or session, and it has to reach the engine.
+   */
+  'workflow:run': {
+    params: {
+      workflowId: string
+      context?: WorkflowExecutionContext
+      targetNodeId?: string
+    }
+    result: WorkflowExecution | null
+  }
+
+  /**
+   * A session came back, so anything triggered by that can run.
+   *
+   * Reported by the client that restored it, because restoring is a client
+   * action; deciding which workflows care is the server's, so they run whether
+   * or not that client stays open.
+   */
+  'workflow:sessionRestored': {
+    params: { sessionId: string; restore: 'cold' | 'warm'; environment?: RestoreEnvironment }
+    result: void
+  }
+
+  /** Start a failed run again from where it failed, keeping what succeeded. */
+  'workflow:retryRun': { params: { runId: string }; result: WorkflowExecution | null }
+  /** Start the same run over from the beginning, with the same context. */
+  'workflow:rerun': { params: { runId: string }; result: WorkflowExecution | null }
 
   'task:imageUpload': {
     params: { taskId: string; base64: string; filename: string }
@@ -1209,6 +1244,15 @@ export interface ServerNotifications {
   }>
   'workflow:executionComplete': WorkflowExecution
   /** A person answered a gate. Only the instance holding the run acts on it. */
+  /**
+   * A run moved.
+   *
+   * Runs execute in the server, so this is how a window, a phone or anything
+   * else watching learns what one is doing -- node by node, and again when it
+   * ends. Before execution moved, run state never crossed the wire at all: a
+   * second window re-read the database and hoped.
+   */
+  'workflow:runUpdated': WorkflowExecution
   'workflow:gateResolved': { runId: string; nodeId: string; decision: 'approve' | 'reject' }
   'session-exit': TerminalSession
   /** A phone offered a valid pairing code and is waiting to be approved. */

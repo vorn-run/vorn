@@ -2,19 +2,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { TerminalSession, WorkflowDefinition } from '../packages/shared/src/types'
 
 const executeWorkflow = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
+vi.mock('../packages/server/src/workflows/engine', () => ({
   executeWorkflow: (...args: unknown[]) => executeWorkflow(...args)
 }))
 
 const state = { config: { workflows: [] as WorkflowDefinition[] } }
-vi.mock('../src/renderer/stores', () => ({
-  useAppStore: { getState: () => state }
+vi.mock('../packages/server/src/workflows/host', () => ({
+  config: () => state.config
+}))
+vi.mock('../packages/server/src/logger', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 
 import {
   fireSessionRestoredTrigger,
   resetRestoreQueues
-} from '../src/renderer/lib/workflow-triggers'
+} from '../packages/server/src/workflows/triggers'
 
 function workflow(
   config: Record<string, unknown>,

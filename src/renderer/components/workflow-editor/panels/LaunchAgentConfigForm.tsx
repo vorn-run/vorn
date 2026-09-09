@@ -14,9 +14,9 @@ import {
   CONTEXT_REF,
   getAvailableContextVars,
   isContextRef
-} from '../../../lib/template-vars'
+} from '@vornrun/shared/template-vars'
 import { getWorktreeMode } from '../../../lib/workflow-helpers'
-import { DEFAULT_STEP_TIMEOUT_MINUTES } from '../../../lib/workflow-execution'
+import { DEFAULT_STEP_TIMEOUT_MINUTES } from '@vornrun/shared/workflow-graph'
 import { useAgentInstallStatus } from '../../../hooks/useAgentInstallStatus'
 import { VariableAutocomplete } from './VariableAutocomplete'
 import { ProjectPicker } from '../../ProjectPicker'

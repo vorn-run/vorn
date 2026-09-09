@@ -14,11 +14,7 @@ import {
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
-import {
-  approveWorkflowGate,
-  hasFailedStep,
-  rejectWorkflowGate
-} from '../../lib/workflow-execution'
+import { hasFailedStep } from '@vornrun/shared/workflow-graph'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { connectorLookFor, useConnections, type ConnectorLook } from '../../lib/use-connections'
@@ -333,7 +329,11 @@ export function RunStepsList({
                     </div>
                     <button
                       onClick={() => {
-                        void approveWorkflowGate(execution, ns.nodeId)
+                        void window.api.resolveWorkflowGate({
+                          runId: execution.runId,
+                          nodeId: ns.nodeId,
+                          decision: 'approve'
+                        })
                       }}
                       className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_APPROVE}`}
                     >
@@ -342,7 +342,11 @@ export function RunStepsList({
                     </button>
                     <button
                       onClick={() => {
-                        void rejectWorkflowGate(execution, ns.nodeId)
+                        void window.api.resolveWorkflowGate({
+                          runId: execution.runId,
+                          nodeId: ns.nodeId,
+                          decision: 'reject'
+                        })
                       }}
                       className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_REJECT}`}
                     >

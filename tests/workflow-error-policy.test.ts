@@ -4,7 +4,7 @@ import {
   buildGraph,
   collectSkippedBranch,
   skipEntryPoints
-} from '../src/renderer/lib/workflow-execution'
+} from '@vornrun/shared/workflow-graph'
 
 /**
  * The per-node error policy, and the branch-skipping it drives.

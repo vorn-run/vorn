@@ -4,11 +4,8 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import '@testing-library/jest-dom/vitest'
 import type { WorkflowExecution } from '../src/shared/types'
 
+// Stopping is the server's now; this only checks that the button asks.
 const stopWorkflowRun = vi.hoisted(() => vi.fn())
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  stopWorkflowRun,
-  isRunStoppable: (e: WorkflowExecution) => e.status === 'running'
-}))
 
 const toastError = vi.hoisted(() => vi.fn())
 vi.mock('../src/renderer/components/Toast', () => ({ toast: { error: toastError } }))
@@ -38,6 +35,7 @@ beforeEach(() => {
   stopWorkflowRun.mockReset()
   stopWorkflowRun.mockResolvedValue(undefined)
   toastError.mockReset()
+  ;(window as unknown as { api: unknown }).api = { stopWorkflowRun }
 })
 afterEach(() => cleanup())
 

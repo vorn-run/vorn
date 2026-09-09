@@ -6,15 +6,8 @@ import type { WorkflowExecution, WorkflowNode } from '../src/shared/types'
 import type { RunListEntry } from '../src/renderer/hooks/useAllWorkflowRuns'
 import { useAppStore } from '../src/renderer/stores'
 
-const approveMock = vi.fn()
-const rejectMock = vi.fn()
-// The real module but for the two calls this asserts, so the retry control is
-// gated by the rule the pane really uses.
-vi.mock('../src/renderer/lib/workflow-execution', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/renderer/lib/workflow-execution')>()),
-  approveWorkflowGate: (...args: unknown[]) => approveMock(...args),
-  rejectWorkflowGate: (...args: unknown[]) => rejectMock(...args)
-}))
+// Answering a gate is a request; the pane only makes it.
+const resolveWorkflowGate = vi.fn()
 
 vi.mock('../src/renderer/components/workflow-runs/StopRunButton', () => ({
   StopRunButton: () => <button type="button">Stop</button>
@@ -39,8 +32,12 @@ afterAll(() => {
 })
 
 beforeEach(() => {
-  approveMock.mockReset()
-  rejectMock.mockReset()
+  resolveWorkflowGate.mockReset()
+  ;(window as unknown as { api: unknown }).api = {
+    resolveWorkflowGate,
+    retryWorkflowRun: vi.fn().mockResolvedValue(null),
+    rerunWorkflowRun: vi.fn().mockResolvedValue(null)
+  }
 })
 
 const { RunDetailPane, RunDetailEmptyState } =
@@ -229,37 +226,51 @@ describe('RunDetailPane', () => {
     it('approves the waiting node on click', () => {
       renderPane(gateRun, gateNodes)
       fireEvent.click(screen.getByRole('button', { name: /Approve & continue/ }))
-      expect(approveMock).toHaveBeenCalledWith(gateRun, 'gate')
+      expect(resolveWorkflowGate).toHaveBeenCalledWith({
+        runId: gateRun.runId,
+        nodeId: 'gate',
+        decision: 'approve'
+      })
     })
 
     it('rejects the waiting node on click', () => {
       renderPane(gateRun, gateNodes)
       fireEvent.click(screen.getByRole('button', { name: /Reject run/ }))
-      expect(rejectMock).toHaveBeenCalledWith(gateRun, 'gate')
+      expect(resolveWorkflowGate).toHaveBeenCalledWith({
+        runId: gateRun.runId,
+        nodeId: 'gate',
+        decision: 'reject'
+      })
     })
 
     it('approves on cmd+enter and rejects on r', () => {
       renderPane(gateRun, gateNodes)
       fireEvent.keyDown(document, { key: 'Enter', metaKey: true })
-      expect(approveMock).toHaveBeenCalledWith(gateRun, 'gate')
+      expect(resolveWorkflowGate).toHaveBeenCalledWith({
+        runId: gateRun.runId,
+        nodeId: 'gate',
+        decision: 'approve'
+      })
       fireEvent.keyDown(document, { key: 'r' })
-      expect(rejectMock).toHaveBeenCalledWith(gateRun, 'gate')
+      expect(resolveWorkflowGate).toHaveBeenCalledWith({
+        runId: gateRun.runId,
+        nodeId: 'gate',
+        decision: 'reject'
+      })
     })
 
     it('ignores an auto-repeated keypress so a held key cannot reject the next run', () => {
       renderPane(gateRun, gateNodes)
       fireEvent.keyDown(document, { key: 'r', repeat: true })
       fireEvent.keyDown(document, { key: 'Enter', metaKey: true, repeat: true })
-      expect(rejectMock).not.toHaveBeenCalled()
-      expect(approveMock).not.toHaveBeenCalled()
+      expect(resolveWorkflowGate).not.toHaveBeenCalled()
     })
 
     it('mutes the shortcuts while another surface is layered over the pane', () => {
       renderPane(gateRun, gateNodes, { shortcutsEnabled: false })
       fireEvent.keyDown(document, { key: 'r' })
       fireEvent.keyDown(document, { key: 'Enter', metaKey: true })
-      expect(rejectMock).not.toHaveBeenCalled()
-      expect(approveMock).not.toHaveBeenCalled()
+      expect(resolveWorkflowGate).not.toHaveBeenCalled()
     })
 
     it('ignores the shortcuts while typing in a field', () => {
@@ -267,7 +278,7 @@ describe('RunDetailPane', () => {
       const input = document.createElement('input')
       document.body.appendChild(input)
       fireEvent.keyDown(input, { key: 'r' })
-      expect(rejectMock).not.toHaveBeenCalled()
+      expect(resolveWorkflowGate).not.toHaveBeenCalled()
       input.remove()
     })
 
@@ -275,8 +286,7 @@ describe('RunDetailPane', () => {
       renderPane(makeRun())
       fireEvent.keyDown(document, { key: 'r' })
       fireEvent.keyDown(document, { key: 'Enter', metaKey: true })
-      expect(approveMock).not.toHaveBeenCalled()
-      expect(rejectMock).not.toHaveBeenCalled()
+      expect(resolveWorkflowGate).not.toHaveBeenCalled()
     })
   })
 

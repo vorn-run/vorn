@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useAppStore } from '../stores'
-import { rescheduleWaitingGateTimers } from '../lib/workflow-execution'
 import { workflowRunId, type WorkflowExecution } from '../../shared/types'
 
 export type RunListEntry = WorkflowExecution & { workflowName?: string }
@@ -35,22 +34,15 @@ export function useAllWorkflowRuns(limit = 50): {
     try {
       const rows = await window.api.listAllWorkflowRuns(activeWorkspace, limit)
       setPersisted(rows)
-      // A gate opened by another window is only in SQLite — without this the
-      // run shows as `running` here and never offers its approve/reject
-      // actions until the app restarts and App.tsx re-hydrates. Timers are
-      // rescheduled for whatever this pass adopted, exactly as App.tsx does on
-      // boot: whichever hydration wins the race, the gate timeout and the
-      // connector lease heartbeat still get started.
+      // A gate opened while this window was closed is only in SQLite, and the
+      // run would show as `running` here with no approve or reject offered.
+      // Only the display is adopted now: the timer that eventually rejects an
+      // unanswered gate belongs to the server, which is running the run.
       const waiting = await window.api.listRunsWithWaitingGates()
       const store = useAppStore.getState()
-      const hydrated: WorkflowExecution[] = []
       for (const run of waiting) {
         if (store.workflowExecutions.has(run.runId)) continue
         store.setWorkflowExecution(run.runId, run)
-        hydrated.push(run)
-      }
-      if (hydrated.length > 0) {
-        rescheduleWaitingGateTimers(hydrated, store.config?.workflows ?? [])
       }
     } catch (err) {
       console.error('[useAllWorkflowRuns] load failed', err)

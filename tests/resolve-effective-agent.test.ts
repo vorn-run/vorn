@@ -1,23 +1,30 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// The resolver calls useAppStore.getState() to read defaults.defaultAgent as
-// the penultimate fallback. Mock the store module before importing the
-// subject so the spy is stable across imports.
+// The resolver reads defaults.defaultAgent as the penultimate fallback, from
+// the server's configuration. Mock the host before importing the subject so
+// the value is stable across imports.
 const mockState = {
   config: {
     defaults: { defaultAgent: undefined as string | undefined }
   }
 }
 
-vi.mock('../src/renderer/stores', () => ({
-  useAppStore: {
-    getState: () => mockState
-  }
+vi.mock('../packages/server/src/workflows/host', () => ({
+  config: () => mockState.config,
+  api: {},
+  publishRun: vi.fn(),
+  runById: vi.fn(),
+  activeTerminals: () => [],
+  activeHeadless: () => [],
+  nextTask: () => undefined,
+  onHeadlessData: () => () => {},
+  onHeadlessExit: () => () => {},
+  onScriptData: () => () => {}
 }))
 
 // Subject under test must import after the mock is registered.
-const { resolveEffectiveAgent } = await import('../src/renderer/lib/workflow-execution')
+const { resolveEffectiveAgent } = await import('../packages/server/src/workflows/engine')
 
 import type {
   AiAgentType,

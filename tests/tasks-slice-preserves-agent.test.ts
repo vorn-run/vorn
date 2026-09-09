@@ -1,14 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-
-// Mock workflow-triggers so the slice can import it without executing real
-// workflow logic. We capture calls to verify the trigger fires for status
-// transitions.
-const fireStatusChanged = vi.fn()
-vi.mock('../src/renderer/lib/workflow-triggers', () => ({
-  fireTaskCreatedTrigger: vi.fn(),
-  fireTaskStatusChangedTrigger: (...args: unknown[]) => fireStatusChanged(...args)
-}))
+import { describe, it, expect, vi } from 'vitest'
 
 import { create } from 'zustand'
 import { createTasksSlice } from '../src/renderer/stores/tasks-slice'
@@ -67,10 +58,6 @@ function makeStore(initialTasks: TaskConfig[]) {
   return { store, saveConfig }
 }
 
-beforeEach(() => {
-  fireStatusChanged.mockClear()
-})
-
 describe('tasks-slice — drag-to-in_progress preserves assignedAgent', () => {
   it('updateTask({ status: "in_progress" }) preserves a task\'s assignedAgent', () => {
     const { store } = makeStore([makeTask({ assignedAgent: 'codex' })])
@@ -82,19 +69,17 @@ describe('tasks-slice — drag-to-in_progress preserves assignedAgent', () => {
     expect(updated?.assignedAgent).toBe('codex')
   })
 
-  it('updateTask({ status: "in_progress" }) fires the taskStatusChanged trigger', async () => {
-    const { store } = makeStore([makeTask({ assignedAgent: 'codex' })])
+  it('updateTask({ status: "in_progress" }) saves the change for the server to act on', () => {
+    // Triggers fire in the server now, off the configuration it is handed —
+    // so what the window owes is a saved config carrying the new status.
+    const { store, saveConfig } = makeStore([makeTask({ assignedAgent: 'codex' })])
 
     store.getState().updateTask('t1', { status: 'in_progress' })
 
-    // The trigger is fired via queueMicrotask — flush it.
-    await Promise.resolve()
-
-    expect(fireStatusChanged).toHaveBeenCalledTimes(1)
-    const [task, fromStatus, toStatus] = fireStatusChanged.mock.calls[0]
-    expect((task as TaskConfig).assignedAgent).toBe('codex')
-    expect(fromStatus).toBe('todo')
-    expect(toStatus).toBe('in_progress')
+    const [saved] = saveConfig.mock.calls.at(-1) as [{ tasks: TaskConfig[] }]
+    const task = saved.tasks.find((t) => t.id === 't1')
+    expect(task?.status).toBe('in_progress')
+    expect(task?.assignedAgent).toBe('codex')
   })
 
   it('startTask(..., sessionId, agentType) DOES overwrite assignedAgent — documents the dangerous path', () => {

@@ -8,8 +8,8 @@ import {
   type ChangeEvent
 } from 'react'
 import { Braces, ChevronDown, ChevronRight } from 'lucide-react'
-import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
-import { previewStepTokens } from '../../../lib/template-vars'
+import type { StepVariableGroup, TemplateVariable } from '@vornrun/shared/template-vars'
+import { previewStepTokens } from '@vornrun/shared/template-vars'
 import { NODE_TYPE_ICON } from '../node-visuals'
 import { WORKFLOW_STATUS_DOT } from '../../../lib/workflow-status'
 import { ConnectorIcon } from '../../ConnectorIcon'

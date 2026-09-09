@@ -4,7 +4,7 @@ import type { TerminalSession } from '../packages/shared/src/types'
 
 const resumeSession = vi.fn()
 Object.defineProperty(window, 'api', {
-  value: { resumeSession, notifyWidgetStatus: vi.fn() },
+  value: { resumeSession, sessionRestored: vi.fn(), notifyWidgetStatus: vi.fn() },
   writable: true
 })
 

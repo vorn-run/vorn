@@ -29,9 +29,12 @@ vi.mock('../src/renderer/components/ProjectPicker', () => ({
 }))
 
 const mockExecuteWorkflow = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  executeWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args)
-}))
+
+beforeEach(() => {
+  mockExecuteWorkflow.mockClear()
+  ;(window as unknown as { api: unknown }).api = { runWorkflow: mockExecuteWorkflow }
+})
+// Runs start in the server; these check what the window asks for.
 
 import { useAppStore } from '../src/renderer/stores'
 import { SourcePromptDialog } from '../src/renderer/components/SourcePromptDialog'
@@ -121,7 +124,7 @@ describe('SourcePromptDialog — run inputs', () => {
     fireEvent.click(screen.getByText('Run'))
 
     expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1)
-    const [, context] = mockExecuteWorkflow.mock.calls[0]
+    const [{ context }] = mockExecuteWorkflow.mock.calls[0]
     expect(context).toEqual({ inputs: { issue: 'gh-42' } })
   })
 
@@ -130,7 +133,7 @@ describe('SourcePromptDialog — run inputs', () => {
     render(<SourcePromptDialog />)
     fireEvent.click(screen.getByText('Run'))
 
-    const [, context] = mockExecuteWorkflow.mock.calls[0]
+    const [{ context }] = mockExecuteWorkflow.mock.calls[0]
     expect(context).toEqual({ inputs: { branch: 'main' } })
   })
 
@@ -150,7 +153,7 @@ describe('SourcePromptDialog — run inputs', () => {
     render(<SourcePromptDialog />)
 
     fireEvent.click(screen.getByText('Run'))
-    const [, context] = mockExecuteWorkflow.mock.calls[0]
+    const [{ context }] = mockExecuteWorkflow.mock.calls[0]
     expect(context).toEqual({ inputs: { force: false } })
   })
 
@@ -168,7 +171,7 @@ describe('SourcePromptDialog — run inputs', () => {
     fireEvent.change(screen.getByLabelText('Issue URL'), { target: { value: 'gh-7' } })
     fireEvent.click(screen.getByText('Run'))
 
-    const [, context] = mockExecuteWorkflow.mock.calls[0]
+    const [{ context }] = mockExecuteWorkflow.mock.calls[0]
     expect(context).toEqual({ task, inputs: { issue: 'gh-7' } })
   })
 

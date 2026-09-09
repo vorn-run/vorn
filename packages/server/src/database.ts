@@ -3734,6 +3734,14 @@ export function dbGetWorkflowRunByConnectorInboxId(
   return mapRunRows([row], fetchNodesByRunIds(d, [row.id]))[0] ?? null
 }
 
+/** One run by its id — what the engine reads when a gate is answered after a restart. */
+export function getWorkflowRun(runId: string): WorkflowExecution | null {
+  const d = getDb()
+  const row = d.prepare('SELECT * FROM workflow_runs WHERE id = ?').get(runId) as RunRow | undefined
+  if (!row) return null
+  return mapRunRows([row], fetchNodesByRunIds(d, [row.id]))[0] ?? null
+}
+
 export function listWorkflowRuns(workflowId: string, limit = 20): WorkflowExecution[] {
   const d = getDb()
   const rows = d

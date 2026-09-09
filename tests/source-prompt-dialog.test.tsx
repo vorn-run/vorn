@@ -33,9 +33,12 @@ vi.mock('../src/renderer/components/ProjectPicker', () => ({
 }))
 
 const mockExecuteWorkflow = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  executeWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args)
-}))
+
+beforeEach(() => {
+  mockExecuteWorkflow.mockClear()
+  ;(window as unknown as { api: unknown }).api = { runWorkflow: mockExecuteWorkflow }
+})
+// Runs start in the server; these check what the window asks for.
 
 import { useAppStore } from '../src/renderer/stores'
 import { SourcePromptDialog } from '../src/renderer/components/SourcePromptDialog'
@@ -232,7 +235,7 @@ describe('SourcePromptDialog', () => {
     expect(mockExecuteWorkflow).not.toHaveBeenCalled()
   })
 
-  it('runs executeWorkflow with a synthesized source on submit', () => {
+  it('asks the server to run it, with a synthesized source', () => {
     const wf = makeWorkflow()
     useAppStore.setState({
       pendingWorkflowRun: { workflowId: wf.id },
@@ -242,16 +245,16 @@ describe('SourcePromptDialog', () => {
     // The default-seeded effect picks the first project automatically; click
     // Run directly.
     fireEvent.click(screen.getByText('Run'))
-    expect(mockExecuteWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'wf-context' }),
-      expect.objectContaining({
+    expect(mockExecuteWorkflow).toHaveBeenCalledWith({
+      workflowId: 'wf-context',
+      context: expect.objectContaining({
         source: expect.objectContaining({
           projectName: 'Vorn',
           projectPath: '/repo/vorn'
         })
       }),
-      { source: 'manual' }
-    )
+      targetNodeId: undefined
+    })
     expect(useAppStore.getState().pendingWorkflowRun).toBeNull()
   })
 

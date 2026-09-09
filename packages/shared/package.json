@@ -18,6 +18,8 @@
     "./session-restore": "./src/session-restore.ts",
     "./topics": "./src/topics.ts",
     "./workflow-portability": "./src/workflow-portability.ts",
-    "./viewer-settings-store": "./src/viewer-settings-store.ts"
+    "./viewer-settings-store": "./src/viewer-settings-store.ts",
+    "./template-vars": "./src/template-vars.ts",
+    "./workflow-graph": "./src/workflow-graph.ts"
   }
 }

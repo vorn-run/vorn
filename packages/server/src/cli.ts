@@ -42,6 +42,8 @@ Usage
   vorn session list [--recent] [--json]                  What is running
   vorn session logs|send|kill <id>                       Read, steer, stop one
   vorn workflow list [--json]                            Workflows
+  vorn workflow run <name> [--input k=v]                 Start one
+  vorn workflow stop <run>                               Stop a run
   vorn workflow runs [--workflow <name>] [--json]        Their runs
   vorn server serve|token                                Run a server, or its tokens
   vorn --help | --version

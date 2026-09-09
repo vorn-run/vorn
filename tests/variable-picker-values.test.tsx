@@ -10,7 +10,7 @@ vi.mock('../src/renderer/lib/use-connections', () => ({
 }))
 
 import { VariableAutocomplete } from '../src/renderer/components/workflow-editor/panels/VariableAutocomplete'
-import type { StepVariableGroup } from '../src/renderer/lib/template-vars'
+import type { StepVariableGroup } from '@vornrun/shared/template-vars'
 
 const triageGroup: StepVariableGroup = {
   nodeId: 'n1',

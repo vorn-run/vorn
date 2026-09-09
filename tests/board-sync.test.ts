@@ -5,11 +5,14 @@ import type { RestoredSession, TerminalSession } from '../packages/shared/src/ty
 const listActiveSessions = vi.fn()
 const getRestoredSessions = vi.fn()
 const resumeSession = vi.fn()
+const sessionRestored = vi.fn()
+
 Object.defineProperty(window, 'api', {
   value: {
     listActiveSessions,
     getRestoredSessions,
     resumeSession,
+    sessionRestored,
     notifyWidgetStatus: vi.fn()
   },
   writable: true
@@ -329,17 +332,14 @@ describe('a machine that restarted', () => {
   })
 })
 
-// ── the restore trigger hears about sessions coming back ─────────────────
-
-const triggerMocks = vi.hoisted(() => ({ fireSessionRestoredTrigger: vi.fn() }))
-vi.mock('../src/renderer/lib/workflow-triggers', () => triggerMocks)
+// ── the server hears about sessions coming back ──────────────────────────
 
 import { reportWarmAttach, resetRestoredIds } from '../src/renderer/lib/board-sync'
 import { resumeEndedSession } from '../src/renderer/lib/session-resume'
 
-describe('what the restore trigger is told', () => {
+describe('what the server is told about a restore', () => {
   beforeEach(() => {
-    triggerMocks.fireSessionRestoredTrigger.mockClear()
+    sessionRestored.mockClear()
     resetRestoredIds()
   })
 
@@ -358,10 +358,12 @@ describe('what the restore trigger is told', () => {
 
     await resumeEndedSession('one')
 
-    expect(triggerMocks.fireSessionRestoredTrigger).toHaveBeenCalledTimes(1)
-    const [back, how] = triggerMocks.fireSessionRestoredTrigger.mock.calls[0]
-    expect(back.id).toBe('one')
-    expect(how).toEqual({ restore: 'cold', environment })
+    expect(sessionRestored).toHaveBeenCalledTimes(1)
+    expect(sessionRestored.mock.calls[0][0]).toEqual({
+      sessionId: 'one',
+      restore: 'cold',
+      environment
+    })
   })
 
   it('hears warm, once, when a session the server had is attached live', async () => {
@@ -371,8 +373,8 @@ describe('what the restore trigger is told', () => {
     reportWarmAttach('from-server')
     reportWarmAttach('from-server')
 
-    expect(triggerMocks.fireSessionRestoredTrigger).toHaveBeenCalledTimes(1)
-    expect(triggerMocks.fireSessionRestoredTrigger.mock.calls[0][1]).toEqual({ restore: 'warm' })
+    expect(sessionRestored).toHaveBeenCalledTimes(1)
+    expect(sessionRestored.mock.calls[0][0]).toMatchObject({ restore: 'warm' })
   })
 
   it('hears nothing about a session this client started itself', async () => {
@@ -382,6 +384,6 @@ describe('what the restore trigger is told', () => {
 
     reportWarmAttach('mine')
 
-    expect(triggerMocks.fireSessionRestoredTrigger).not.toHaveBeenCalled()
+    expect(sessionRestored).not.toHaveBeenCalled()
   })
 })

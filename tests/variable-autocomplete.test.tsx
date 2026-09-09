@@ -4,7 +4,7 @@ import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 import { VariableAutocomplete } from '../src/renderer/components/workflow-editor/panels/VariableAutocomplete'
-import type { TemplateVariable } from '../src/renderer/lib/template-vars'
+import type { TemplateVariable } from '@vornrun/shared/template-vars'
 
 describe('VariableAutocomplete', () => {
   it('lists context variables under a Context group when typing {{', () => {

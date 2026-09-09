@@ -77,12 +77,7 @@ import {
   needsRunPrompt
 } from '../../lib/workflow-helpers'
 import { startManualRun } from '../../lib/workflow-menu-items'
-import {
-  buildStepOutputsMap,
-  retryRunFromFailure,
-  rerunWorkflowRun,
-  stopWorkflowRun
-} from '../../lib/workflow-execution'
+import { buildStepOutputsMap } from '@vornrun/shared/workflow-graph'
 import { toast } from '../Toast'
 import { refreshConnections, useConnections, useInstalledPacks } from '../../lib/use-connections'
 import { useConnectorCatalog } from '../../lib/use-connector-catalog'
@@ -119,7 +114,7 @@ import {
   getAncestorNodes,
   buildStepGroups,
   buildInputVars
-} from '../../lib/template-vars'
+} from '@vornrun/shared/template-vars'
 
 const EMPTY_TASKS: import('../../../shared/types').TaskConfig[] = []
 
@@ -560,9 +555,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       const workflow = persistWorkflow()
       // A stale toast or row must never replay another workflow's run here.
       if (run.workflowId !== workflow.id) return
-      retryRunFromFailure(workflow, run).catch((err) =>
-        toast.error(err instanceof Error ? err.message : String(err))
-      )
+      window.api
+        .retryWorkflowRun(run.runId)
+        .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
     },
     [persistWorkflow]
   )
@@ -600,10 +595,11 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
   const handleRerunRun = useCallback(
     (run: WorkflowExecution) => {
-      const workflow = persistWorkflow()
-      rerunWorkflowRun(workflow, run).catch((err) =>
-        toast.error(err instanceof Error ? err.message : String(err))
-      )
+      // Saved first, so the run that starts is the graph on screen.
+      persistWorkflow()
+      window.api
+        .rerunWorkflowRun(run.runId)
+        .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
     },
     [persistWorkflow]
   )
@@ -1297,7 +1293,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
               </span>
               <Tooltip label="Stop run" position="bottom">
                 <button
-                  onClick={() => runningRun && void stopWorkflowRun(runningRun.runId)}
+                  onClick={() => runningRun && void window.api.stopWorkflowRun(runningRun.runId)}
                   aria-label="Stop run"
                   disabled={!runningRun}
                   className="text-gray-400 hover:text-danger p-1.5 rounded-md hover:bg-white/[0.06]

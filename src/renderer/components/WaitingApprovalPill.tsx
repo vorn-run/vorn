@@ -9,7 +9,6 @@ import {
 } from '../../shared/types'
 import { useAppStore } from '../stores'
 import { ICON_MAP } from './project-sidebar/icon-map'
-import { approveWorkflowGate, rejectWorkflowGate } from '../lib/workflow-execution'
 import { Tooltip } from './Tooltip'
 
 interface Props {
@@ -43,7 +42,11 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
   const handleApprove = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      void approveWorkflowGate(execution, nodeState.nodeId)
+      void window.api.resolveWorkflowGate({
+        runId: execution.runId,
+        nodeId: nodeState.nodeId,
+        decision: 'approve'
+      })
     },
     [execution, nodeState.nodeId]
   )
@@ -51,7 +54,11 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
   const handleReject = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      void rejectWorkflowGate(execution, nodeState.nodeId)
+      void window.api.resolveWorkflowGate({
+        runId: execution.runId,
+        nodeId: nodeState.nodeId,
+        decision: 'reject'
+      })
     },
     [execution, nodeState.nodeId]
   )

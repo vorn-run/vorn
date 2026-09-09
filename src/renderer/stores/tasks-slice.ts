@@ -1,7 +1,6 @@
 import { StateCreator } from 'zustand'
-import { TaskConfig, TaskStatus, isTerminalTaskStatus } from '../../shared/types'
+import { TaskConfig, isTerminalTaskStatus } from '../../shared/types'
 import { AppStore, TasksSlice } from './types'
-import { fireTaskCreatedTrigger, fireTaskStatusChangedTrigger } from '../lib/workflow-triggers'
 
 export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set, get) => ({
   getTasksForProject: (projectName) => {
@@ -28,7 +27,6 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
         tasks: [...(state.config.tasks || []), task]
       }
       window.api.saveConfig(updated)
-      queueMicrotask(() => fireTaskCreatedTrigger(task))
       return { config: updated }
     }),
 
@@ -51,28 +49,21 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
     set((state) => {
       if (!state.config) return {}
       const now = new Date().toISOString()
-      let oldStatus: TaskStatus | undefined
-      let newTask: TaskConfig | undefined
       const clearArchived = updates.status !== undefined && !isTerminalTaskStatus(updates.status)
       const updated = {
         ...state.config,
         tasks: (state.config.tasks || []).map((t) => {
           if (t.id !== id) return t
-          oldStatus = t.status
           const mapped: TaskConfig = {
             ...t,
             ...updates,
             updatedAt: now,
             ...(clearArchived && { archivedAt: undefined })
           }
-          newTask = mapped
           return mapped
         })
       }
       window.api.saveConfig(updated)
-      if (newTask && updates.status && oldStatus && updates.status !== oldStatus) {
-        queueMicrotask(() => fireTaskStatusChangedTrigger(newTask!, oldStatus!, updates.status!))
-      }
       return { config: updated }
     }),
 
@@ -108,13 +99,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
     set((state) => {
       if (!state.config) return {}
       const now = new Date().toISOString()
-      let oldStatus: TaskStatus | undefined
-      let newTask: TaskConfig | undefined
       const updated = {
         ...state.config,
         tasks: (state.config.tasks || []).map((t) => {
           if (t.id !== id) return t
-          oldStatus = t.status
           const mapped = {
             ...t,
             status: 'in_progress' as const,
@@ -124,14 +112,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
             updatedAt: now,
             archivedAt: undefined
           }
-          newTask = mapped
           return mapped
         })
       }
       window.api.saveConfig(updated)
-      if (newTask && oldStatus && oldStatus !== 'in_progress') {
-        queueMicrotask(() => fireTaskStatusChangedTrigger(newTask!, oldStatus!, 'in_progress'))
-      }
       return { config: updated }
     }),
 
@@ -139,13 +123,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
     set((state) => {
       if (!state.config) return {}
       const now = new Date().toISOString()
-      let oldStatus: TaskStatus | undefined
-      let newTask: TaskConfig | undefined
       const updated = {
         ...state.config,
         tasks: (state.config.tasks || []).map((t) => {
           if (t.id !== id) return t
-          oldStatus = t.status
           const mapped = {
             ...t,
             status: 'done' as const,
@@ -153,14 +134,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
             updatedAt: now,
             assignedSessionId: undefined
           }
-          newTask = mapped
           return mapped
         })
       }
       window.api.saveConfig(updated)
-      if (newTask && oldStatus && oldStatus !== 'done') {
-        queueMicrotask(() => fireTaskStatusChangedTrigger(newTask!, oldStatus!, 'done'))
-      }
       return { config: updated }
     }),
 
@@ -168,13 +145,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
     set((state) => {
       if (!state.config) return {}
       const now = new Date().toISOString()
-      let oldStatus: TaskStatus | undefined
-      let newTask: TaskConfig | undefined
       const updated = {
         ...state.config,
         tasks: (state.config.tasks || []).map((t) => {
           if (t.id !== id) return t
-          oldStatus = t.status
           const mapped = {
             ...t,
             status: 'in_review' as const,
@@ -182,14 +156,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
             archivedAt: undefined,
             assignedSessionId: undefined
           }
-          newTask = mapped
           return mapped
         })
       }
       window.api.saveConfig(updated)
-      if (newTask && oldStatus && oldStatus !== 'in_review') {
-        queueMicrotask(() => fireTaskStatusChangedTrigger(newTask!, oldStatus!, 'in_review'))
-      }
       return { config: updated }
     }),
 
@@ -197,13 +167,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
     set((state) => {
       if (!state.config) return {}
       const now = new Date().toISOString()
-      let oldStatus: TaskStatus | undefined
-      let newTask: TaskConfig | undefined
       const updated = {
         ...state.config,
         tasks: (state.config.tasks || []).map((t) => {
           if (t.id !== id) return t
-          oldStatus = t.status
           const mapped = {
             ...t,
             status: 'cancelled' as const,
@@ -211,14 +178,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
             updatedAt: now,
             assignedSessionId: undefined
           }
-          newTask = mapped
           return mapped
         })
       }
       window.api.saveConfig(updated)
-      if (newTask && oldStatus && oldStatus !== 'cancelled') {
-        queueMicrotask(() => fireTaskStatusChangedTrigger(newTask!, oldStatus!, 'cancelled'))
-      }
       return { config: updated }
     }),
 
@@ -226,13 +189,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
     set((state) => {
       if (!state.config) return {}
       const now = new Date().toISOString()
-      let oldStatus: TaskStatus | undefined
-      let newTask: TaskConfig | undefined
       const updated = {
         ...state.config,
         tasks: (state.config.tasks || []).map((t) => {
           if (t.id !== id) return t
-          oldStatus = t.status
           const mapped = {
             ...t,
             status: 'todo' as const,
@@ -242,14 +202,10 @@ export const createTasksSlice: StateCreator<AppStore, [], [], TasksSlice> = (set
             assignedSessionId: undefined,
             assignedAgent: undefined
           }
-          newTask = mapped
           return mapped
         })
       }
       window.api.saveConfig(updated)
-      if (newTask && oldStatus && oldStatus !== 'todo') {
-        queueMicrotask(() => fireTaskStatusChangedTrigger(newTask!, oldStatus!, 'todo'))
-      }
       return { config: updated }
     }),
 

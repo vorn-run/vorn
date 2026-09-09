@@ -3,12 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-const approve = vi.fn()
-const reject = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  approveWorkflowGate: (...args: unknown[]) => approve(...args),
-  rejectWorkflowGate: (...args: unknown[]) => reject(...args)
-}))
+// Answering a gate is a request to the server; the pill only makes it.
+const resolveWorkflowGate = vi.fn()
 
 const setEditingWorkflowId = vi.fn()
 const setWorkflowEditorOpen = vi.fn()
@@ -60,8 +56,8 @@ function workflow(msg?: string): WorkflowDefinition {
 }
 
 beforeEach(() => {
-  approve.mockReset()
-  reject.mockReset()
+  resolveWorkflowGate.mockReset()
+  ;(window as unknown as { api: unknown }).api = { resolveWorkflowGate }
   setEditingWorkflowId.mockReset()
   setWorkflowEditorOpen.mockReset()
 })
@@ -96,21 +92,29 @@ describe('WaitingApprovalPill', () => {
     expect(setWorkflowEditorOpen).toHaveBeenCalledWith(true)
   })
 
-  it('invokes approveWorkflowGate when Approve is clicked and stops propagation', () => {
+  it('asks the server to approve, and does not open the editor', () => {
     const { getByLabelText } = render(
       <WaitingApprovalPill execution={execution()} nodeState={nodeState()} workflow={workflow()} />
     )
     fireEvent.click(getByLabelText('Approve'))
-    expect(approve).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'wf-1' }), 'n1')
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'wf-1:2026-04-20T10:00:00Z',
+      nodeId: 'n1',
+      decision: 'approve'
+    })
     expect(setEditingWorkflowId).not.toHaveBeenCalled()
   })
 
-  it('invokes rejectWorkflowGate when Reject is clicked and stops propagation', () => {
+  it('asks the server to reject, and does not open the editor', () => {
     const { getByLabelText } = render(
       <WaitingApprovalPill execution={execution()} nodeState={nodeState()} workflow={workflow()} />
     )
     fireEvent.click(getByLabelText('Reject'))
-    expect(reject).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'wf-1' }), 'n1')
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'wf-1:2026-04-20T10:00:00Z',
+      nodeId: 'n1',
+      decision: 'reject'
+    })
     expect(setEditingWorkflowId).not.toHaveBeenCalled()
   })
 })

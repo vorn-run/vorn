@@ -4,12 +4,10 @@ import {
   WorkflowNode,
   WorkflowExecution,
   WorkflowExecutionContext,
-  NodeExecutionState,
   LaunchAgentConfig,
   ScriptConfig,
   ConditionConfig,
   LoopConfig,
-  ConditionOperator,
   ApprovalConfig,
   CreateTaskFromItemConfig,
   CallConnectorActionConfig,
@@ -17,18 +15,73 @@ import {
   TaskConfig,
   ConnectorItemContext,
   getProjectRemoteHostId
-} from '../../shared/types'
+} from '@vornrun/shared/types'
 import {
   getAncestorNodes,
   resolveContextField,
   resolveTemplateVars,
   StepOutputs
-} from './template-vars'
-import { getWorktreeMode, webhookTriggerFromItem } from './workflow-helpers'
-import { buildTaskPrompt, buildWorkflowPrompt } from '../../shared/prompt-builder'
-import { extractStructuredOutput } from '../../shared/structured-output'
-import { useAppStore } from '../stores'
-import { sendWorkflowGateNotification } from './notifications'
+} from '@vornrun/shared/template-vars'
+import { getWorktreeMode, webhookTriggerFromItem } from '@vornrun/shared/workflow-graph'
+import { buildTaskPrompt, buildWorkflowPrompt } from '@vornrun/shared/prompt-builder'
+import { extractStructuredOutput } from '@vornrun/shared/structured-output'
+import {
+  ABANDONED,
+  appendBoundedLog,
+  blankPassState,
+  buildGraph,
+  buildStepOutputsMap,
+  collectSkippedBranch,
+  dedupeFingerprint,
+  DEFAULT_STEP_TIMEOUT_MINUTES,
+  evaluateCondition,
+  gateKey,
+  hasFailedStep,
+  isRunStoppable,
+  loopShouldStop,
+  MAX_LOOP_ITERATIONS,
+  resolveScriptConfig,
+  resolveWorktreeOrigin,
+  runEndedInError,
+  seedRetryStates,
+  skipEntryPoints,
+  StepDiagnostics,
+  stopsRunOnError,
+  updateNodeState
+} from '@vornrun/shared/workflow-graph'
+import {
+  activeHeadless,
+  activeTerminals,
+  api,
+  config as loadConfig,
+  nextTask,
+  onHeadlessData,
+  onHeadlessExit,
+  onScriptData,
+  publishRun,
+  runById
+} from './host'
+import { reopenTask, startTask } from './tasks'
+import { listWorkflowRuns } from '../database'
+import log from '../logger'
+
+// Re-exported because the editor and the run views import them from here. They
+// decide rather than do, so they now live in shared, beside the types.
+export {
+  blankPassState,
+  buildGraph,
+  buildStepOutputsMap,
+  collectSkippedBranch,
+  DEFAULT_STEP_TIMEOUT_MINUTES,
+  hasFailedStep,
+  isRunStoppable,
+  loopShouldStop,
+  MAX_LOOP_ITERATIONS,
+  resolveScriptConfig,
+  seedRetryStates,
+  skipEntryPoints,
+  stopsRunOnError
+}
 
 /**
  * Runs currently executing in this window, keyed by run id.
@@ -70,7 +123,7 @@ function startConnectorLeaseHeartbeat(execution: WorkflowExecution): void {
     return
   }
   const timer = setInterval(() => {
-    void window.api
+    void api
       .renewConnectorInbox({
         id: inboxId,
         leaseToken
@@ -78,7 +131,7 @@ function startConnectorLeaseHeartbeat(execution: WorkflowExecution): void {
       .then((renewed) => {
         if (!renewed) stopConnectorLeaseHeartbeat(execution.runId)
       })
-      .catch((err) => console.warn('[connector] failed to renew inbox lease:', err))
+      .catch((err) => log.warn('[connector] failed to renew inbox lease:', err))
   }, CONNECTOR_LEASE_RENEW_INTERVAL_MS)
   connectorLeaseHeartbeats.set(execution.runId, timer)
 }
@@ -107,10 +160,7 @@ function monitorRestoredConnectorExecution(execution: WorkflowExecution): void {
   const timer = setInterval(() => {
     if (reconciling) return
     reconciling = true
-    void reconcileRunningExecutions(
-      [execution],
-      useAppStore.getState().config?.workflows ?? []
-    ).finally(() => {
+    void reconcileRunningExecutions([execution], loadConfig()?.workflows ?? []).finally(() => {
       reconciling = false
     })
   }, RESTORED_CONNECTOR_POLL_INTERVAL_MS)
@@ -121,7 +171,7 @@ async function acknowledgeReconciledConnectorExecution(
   execution: WorkflowExecution
 ): Promise<void> {
   if (execution.connectorInboxId === undefined || !execution.connectorInboxLeaseToken) return
-  await window.api.completeConnectorInbox({
+  await api.completeConnectorInbox({
     id: execution.connectorInboxId,
     leaseToken: execution.connectorInboxLeaseToken,
     disposition:
@@ -134,38 +184,10 @@ async function acknowledgeReconciledConnectorExecution(
   })
 }
 
-/** Default ceiling for a headless step that never reports an exit. */
-export const DEFAULT_STEP_TIMEOUT_MINUTES = 60
-
-const LOG_BUFFER_MAX = 100_000
-const LOG_BUFFER_KEEP = 80_000
-
-/** Cap renderer-resident log buffers so a chatty agent can't exhaust memory. */
-function appendBoundedLog(buffer: string, chunk: string): string {
-  const next = buffer + chunk
-  return next.length > LOG_BUFFER_MAX ? next.slice(-LOG_BUFFER_KEEP) : next
-}
-
-/** Tag worktree provenance for cleanup. `undefined` when no worktree is in
- *  play; `'inherited'` when the contextual source supplied one (don't delete);
- *  `'created'` when this node spun one up itself. */
-function resolveWorktreeOrigin(
-  worktreePath: string | undefined,
-  inherited: boolean
-): 'created' | 'inherited' | undefined {
-  if (!worktreePath) return undefined
-  return inherited ? 'inherited' : 'created'
-}
-
 const PERSIST_INTERVAL_MS = 3000
 
 /** Cleared on approve/reject so a late timer can't reject an already-resolved gate. */
 const gateTimers = new Map<string, ReturnType<typeof setTimeout>>()
-
-/** Scoped to the run, not the workflow — parallel runs each have their own gate. */
-function gateKey(runId: string, nodeId: string): string {
-  return `${runId}:${nodeId}`
-}
 
 function scheduleGateTimeout(
   runId: string,
@@ -224,16 +246,13 @@ export async function reconcileRunningExecutions(
       runningNodes.map(async (ns) => {
         if (!ns.sessionId) return { ns, kind: 'no-session' as const }
         try {
-          const events = await window.api.listSessionEventsBySession(ns.sessionId, 50)
+          const events = await api.listSessionEventsBySession(ns.sessionId, 50)
           const exitEvent = events.find((e) => e.eventType === 'exited')
           return exitEvent
             ? { ns, kind: 'exited' as const, exitEvent }
             : { ns, kind: 'still-running' as const }
         } catch (err) {
-          console.warn(
-            `[workflow] reconcile: failed to query session_events for ${ns.sessionId}`,
-            err
-          )
+          log.warn({ err, sessionId: ns.sessionId }, '[workflow] reconcile: no session events')
           return { ns, kind: 'error' as const }
         }
       })
@@ -296,8 +315,8 @@ export async function reconcileRunningExecutions(
     }
 
     if (dirty) {
-      useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
-      await window.api.saveWorkflowRun(execution)
+      publishRun(execution)
+      await api.saveWorkflowRun(execution)
     }
     if (execution.status !== 'running') {
       stopConnectorLeaseHeartbeat(execution.runId)
@@ -339,6 +358,15 @@ export interface ExecuteWorkflowOptions {
   source?: 'scheduler' | 'manual'
   /** Run only this node and its upstream slice; everything else is skipped. */
   targetNodeId?: string
+  /**
+   * Called once the run exists, before a step has been taken.
+   *
+   * A caller waiting on the whole run waits as long as the agents do, which is
+   * the wrong answer for anything holding a request open -- a CLI command, or a
+   * phone. They want the run, and they want it now; this hands it over and
+   * leaves the walking to happen behind them.
+   */
+  onStarted?: (execution: WorkflowExecution) => void
 }
 
 /**
@@ -362,19 +390,17 @@ export function resolveEffectiveAgent(
   return (
     context?.task?.assignedAgent ??
     resolvedTask?.assignedAgent ??
-    useAppStore.getState().config?.defaults.defaultAgent ??
+    loadConfig()?.defaults.defaultAgent ??
     'claude'
   )
 }
 
 function resolveTaskContext(task: TaskConfig, fallbackBranch?: string, fallbackWorktree?: boolean) {
-  const state = useAppStore.getState()
-  const project = state.config?.projects.find((p) => p.name === task.projectName)
+  const current = loadConfig()
+  const project = current?.projects.find((p) => p.name === task.projectName)
   let initialPrompt: string
   if (project) {
-    const siblingTasks = (state.config?.tasks || []).filter(
-      (t) => t.projectName === task.projectName
-    )
+    const siblingTasks = (current?.tasks || []).filter((t) => t.projectName === task.projectName)
     initialPrompt = buildTaskPrompt({ task, project, siblingTasks })
   } else {
     initialPrompt = task.description
@@ -388,202 +414,19 @@ function resolveTaskContext(task: TaskConfig, fallbackBranch?: string, fallbackW
 }
 
 function persistExecution(execution: WorkflowExecution): void {
-  useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
-  window.api.saveWorkflowRun(execution)
-}
-
-/**
- * What this run was triggered *with*. Two runs of one workflow count as the
- * same trigger only when this matches, which is what lets a connector fan-out
- * run its items in parallel while a genuine double-fire collapses to one run.
- */
-function dedupeFingerprint(context?: WorkflowExecutionContext): string {
-  // Two runs started with different parameters are different triggers, so the
-  // inputs qualify every fingerprint rather than only the context-less one —
-  // a workflow launched twice from the same card with different answers is
-  // still two distinct runs.
-  const inputs = fingerprintInputs(context?.inputs)
-  const params = inputs ? `:inputs:${inputs}` : ''
-  const item = context?.connectorItem
-  if (item) return `item:${item.connectionId}:${item.externalId}${params}`
-  if (context?.task) return `task:${context.task.id}${params}`
-  if (context?.source) return `session:${context.source.id}${params}`
-  return `manual${params}`
-}
-
-/** Stable serialization of run inputs — key-sorted so object ordering can't
- *  make two identical parameter sets look like different triggers. */
-function fingerprintInputs(inputs: Record<string, unknown> | undefined): string {
-  if (!inputs) return ''
-  const keys = Object.keys(inputs).sort()
-  if (keys.length === 0) return ''
-  // No try/catch: values are already required to be JSON-serializable, since
-  // saveWorkflowRun persists them the same way. Falling back to a key-only
-  // digest would silently collapse two different parameter sets into one
-  // fingerprint — exactly the dedupe bug this function exists to prevent.
-  return JSON.stringify(keys.map((k) => [k, inputs[k]]))
+  publishRun(execution)
+  // Not awaited -- the walk does not wait on a write -- but caught: this
+  // process holds every live PTY, and an unhandled rejection would end it.
+  void api
+    .saveWorkflowRun(execution)
+    .catch((err) => log.warn({ err, runId: execution.runId }, '[workflow] could not save a run'))
 }
 
 /** Resolved step ceiling: the node's own value, else the configured default. 0 disables. */
 function resolveStepTimeoutMs(config: LaunchAgentConfig): number {
   if (typeof config.timeoutMs === 'number') return config.timeoutMs
-  const minutes =
-    useAppStore.getState().config?.defaults?.headlessStepTimeoutMinutes ??
-    DEFAULT_STEP_TIMEOUT_MINUTES
+  const minutes = loadConfig()?.defaults?.headlessStepTimeoutMinutes ?? DEFAULT_STEP_TIMEOUT_MINUTES
   return minutes > 0 ? minutes * 60_000 : 0
-}
-
-/**
- * Records what the engine did on a step's behalf, so a step that produced no
- * output still accounts for itself. Times are relative to the step starting,
- * because "the agent was spawned but had written nothing 60 minutes later" is
- * the shape of the answer, not the wall-clock time it happened at.
- */
-class StepDiagnostics {
-  private readonly lines: string[] = []
-  private readonly startedAt = Date.now()
-
-  note(message: string): void {
-    const seconds = ((Date.now() - this.startedAt) / 1000).toFixed(1)
-    this.lines.push(`[+${seconds}s] ${message}`)
-  }
-
-  toString(): string {
-    return this.lines.join('\n')
-  }
-}
-
-function updateNodeState(
-  execution: WorkflowExecution,
-  nodeId: string,
-  updates: Partial<NodeExecutionState>
-): void {
-  const state = execution.nodeStates.find((s) => s.nodeId === nodeId)
-  if (state) {
-    Object.assign(state, updates)
-  }
-}
-
-// A script step with its templates filled in, directory included.
-export function resolveScriptConfig(
-  config: ScriptConfig,
-  context?: WorkflowExecutionContext,
-  stepOutputs?: StepOutputs
-): ScriptConfig {
-  const path = (value: string | undefined): string | undefined =>
-    value === undefined ? undefined : resolveTemplateVars(value, context, stepOutputs) || undefined
-  return {
-    ...config,
-    scriptContent: resolveTemplateVars(config.scriptContent, context, stepOutputs),
-    cwd: path(config.cwd),
-    projectPath: path(config.projectPath),
-    // Untrusted text reaches the script as an argument, never spliced into its source.
-    ...(config.args && {
-      args: config.args.map((arg) => resolveTemplateVars(arg, context, stepOutputs))
-    })
-  }
-}
-
-export function buildStepOutputsMap(
-  execution: WorkflowExecution,
-  nodeMap: Map<string, WorkflowNode>
-): StepOutputs {
-  const outputs: StepOutputs = {}
-  for (const ns of execution.nodeStates) {
-    if (ns.status !== 'success' && ns.status !== 'error') continue
-    const node = nodeMap.get(ns.nodeId)
-    if (!node?.slug) continue
-
-    // Schema-typed connector outputs come first so a declared key like
-    // `html_url` wins over the generic fallback — but the defaults
-    // (output/status/error) always overlay so control-flow references keep
-    // working regardless of whether the connector returned a typed payload.
-    outputs[node.slug] = {
-      ...(ns.structuredOutput ?? {}),
-      output: ns.output || ns.logs || '',
-      status: ns.status,
-      error: ns.error || '',
-      // The directory the step worked in, so a later step can run there.
-      worktreePath: ns.worktreePath ?? ''
-    }
-  }
-  return outputs
-}
-
-function evaluateCondition(operator: ConditionOperator, resolved: string, value: string): boolean {
-  switch (operator) {
-    case 'equals':
-      return resolved === value
-    case 'notEquals':
-      return resolved !== value
-    case 'contains':
-      return resolved.includes(value)
-    case 'notContains':
-      return !resolved.includes(value)
-    case 'isEmpty':
-      return resolved.trim() === ''
-    case 'isNotEmpty':
-      return resolved.trim() !== ''
-    default:
-      return false
-  }
-}
-
-/** Ceiling on `maxIterations`, whatever a workflow asks for. */
-export const MAX_LOOP_ITERATIONS = 10
-
-/**
- * Decide whether a loop should stop after the pass that just finished.
- *
- * Split out because the interesting part is testable without a run: the stop
- * reason is what a reader needs afterwards, and "we hit the cap" reads very
- * differently from "the reviewer approved it".
- */
-/** Operators that compare against a value; the other two test the variable alone. */
-const VALUE_OPERATORS: ConditionOperator[] = ['equals', 'notEquals', 'contains', 'notContains']
-
-export function loopShouldStop(
-  until: ConditionConfig | undefined,
-  resolvedVariable: string,
-  resolvedValue: string
-): boolean {
-  if (!until) return false
-
-  // A half-written condition means "not configured yet", not "stop now". Typing
-  // one into the form leaves it briefly incomplete, and some incomplete forms
-  // are degenerate rather than merely false: `contains ""` matches every
-  // string, and `notEquals ""` matches everything non-empty. Either would end
-  // the loop after one pass, which looks like the loop being broken.
-  //
-  // The cost is that `equals ""` cannot be expressed, and it does not need to
-  // be: isEmpty says exactly that and needs no value.
-  if (until.variable.trim() === '') return false
-  if (VALUE_OPERATORS.includes(until.operator) && resolvedValue.trim() === '') return false
-
-  return evaluateCondition(until.operator, resolvedVariable, resolvedValue)
-}
-
-/**
- * The state a body step is reset to at the start of a pass.
- *
- * Enumerates what SURVIVES rather than what gets cleared. A list of fields to
- * clear has to be updated every time NodeExecutionState gains one, and the
- * failure is silent: the new field leaks from the previous pass into a step
- * reported as pending. The first version of this listed eight fields and
- * missed taskId, the worktree trio, approvedAt and diagnostics — and its test
- * passed, because the test enumerated the same eight.
- */
-const SURVIVES_A_PASS = new Set(['nodeId'])
-
-export function blankPassState(
-  state: NodeExecutionState,
-  iteration: number
-): Partial<NodeExecutionState> {
-  const cleared: Record<string, unknown> = {}
-  for (const key of Object.keys(state)) {
-    if (!SURVIVES_A_PASS.has(key)) cleared[key] = undefined
-  }
-  return { ...cleared, status: 'pending', iteration } as Partial<NodeExecutionState>
 }
 
 /**
@@ -749,7 +592,7 @@ async function executeNode(
 
     const config = node.config as ApprovalConfig
     const timeoutSuffix = config.timeoutMs ? ` (timeout ${config.timeoutMs}ms)` : ''
-    console.log(`[workflow] approval gate "${node.label}" waiting${timeoutSuffix}`)
+    log.info(`[workflow] approval gate "${node.label}" waiting${timeoutSuffix}`)
 
     updateNodeState(execution, node.id, {
       status: 'waiting',
@@ -757,18 +600,8 @@ async function executeNode(
     })
     persistExecution(execution)
 
-    sendWorkflowGateNotification(
-      workflow,
-      node.id,
-      node.label,
-      config.message,
-      useAppStore.getState().config ?? null,
-      () => {
-        useAppStore.getState().setEditingWorkflowId(workflow.id)
-        useAppStore.getState().setWorkflowEditorOpen(true)
-      }
-    )
-
+    // The gate is announced by the run going out on the wire; a window that is
+    // open turns that into a notification, with its own sound and focus rules.
     scheduleGateTimeout(execution.runId, node.id, config.timeoutMs, execution)
     return
   }
@@ -785,7 +618,7 @@ async function executeNode(
     const value = resolveTemplateVars(config.value || '', context, stepOutputs)
     const result = evaluateCondition(config.operator, resolved, value)
 
-    console.log(
+    log.info(
       `[workflow] condition "${node.label}": "${resolved}" ${config.operator} "${value}" → ${result}`
     )
 
@@ -800,7 +633,7 @@ async function executeNode(
 
   if (node.type === 'script') {
     const config = node.config as ScriptConfig
-    console.log(`[workflow] executing script: ${config.scriptType}`)
+    log.info(`[workflow] executing script: ${config.scriptType}`)
 
     const runId = crypto.randomUUID()
     const resolvedConfig: ScriptConfig = {
@@ -809,7 +642,7 @@ async function executeNode(
     }
 
     let streamedLogs = ''
-    const removeScriptDataListener = window.api.onScriptData(
+    const removeScriptDataListener = onScriptData(
       ({ runId: id, data }: { runId: string; data: string }) => {
         if (id !== runId) return
         streamedLogs = appendBoundedLog(streamedLogs, data)
@@ -819,12 +652,12 @@ async function executeNode(
         // and inserted a second entry that runsForWorkflow reported as a
         // duplicate run. Note `runId` in this scope is the script's, not the
         // run's.
-        useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
+        publishRun(execution)
       }
     )
 
     try {
-      const result = await window.api.executeScript(resolvedConfig)
+      const result = await api.executeScript(resolvedConfig)
 
       const finalLogs = streamedLogs || result.output
       // Streamed logs already include stderr, so only surface result.error
@@ -838,7 +671,7 @@ async function executeNode(
         error: result.error
       })
     } catch (err) {
-      console.error(`[workflow] script execution error:`, err)
+      log.error({ err }, '[workflow] script execution error')
       updateNodeState(execution, node.id, {
         status: 'error',
         completedAt: new Date().toISOString(),
@@ -858,7 +691,7 @@ async function executeNode(
       resolvedArgs[k] = resolveTemplateVars(v, context, stepOutputs)
     }
     try {
-      const result = await window.api.executeConnectorAction({
+      const result = await api.executeConnectorAction({
         connectionId: cfg.connectionId,
         action: cfg.action,
         args: resolvedArgs
@@ -895,7 +728,7 @@ async function executeNode(
       if (name.trim()) headers[name.trim()] = resolveTemplateVars(value, context, stepOutputs)
     }
     try {
-      const result = await window.api.httpRequest({
+      const result = await api.httpRequest({
         profileConnectionId: cfg.profileConnectionId || undefined,
         method: cfg.method,
         url: resolveTemplateVars(cfg.url ?? '', context, stepOutputs),
@@ -942,7 +775,7 @@ async function executeNode(
       config.project === 'fromConnection' || !config.project ? undefined : config.project
 
     try {
-      const result = await window.api.upsertTaskFromItem({
+      const result = await api.upsertTaskFromItem({
         connectionId: item.connectionId,
         item,
         initialStatus: config.initialStatus,
@@ -970,7 +803,7 @@ async function executeNode(
   }
 
   const config = node.config as LaunchAgentConfig
-  console.log(
+  log.info(
     `[workflow] launch agent: ${node.label} headless=${config.headless} prompt="${(config.prompt || '').slice(0, 50)}"`
   )
 
@@ -988,7 +821,7 @@ async function executeNode(
       : config.useWorktree
   const inheritedWorktree = config.useWorktree === 'fromContext'
   let existingWorktreePath: string | undefined
-  const currentState = useAppStore.getState()
+  const currentConfig = loadConfig()
 
   const worktreeMode = getWorktreeMode(config)
   if (worktreeMode === 'fromStep') {
@@ -1034,7 +867,7 @@ async function executeNode(
     // already in its target status (typically 'in_progress'). Accept any
     // non-terminal status so both the legacy static-taskId path and the new
     // trigger-driven path work.
-    const task = (currentState.config?.tasks || []).find(
+    const task = (currentConfig?.tasks || []).find(
       (t) => t.id === effectiveTaskId && t.status !== 'done' && t.status !== 'cancelled'
     )
     if (task) {
@@ -1049,7 +882,7 @@ async function executeNode(
       }
     }
   } else if (config.taskFromQueue) {
-    const task = currentState.getNextTask(config.projectName)
+    const task = nextTask(config.projectName)
     if (task) {
       resolvedTask = task
       const ctx = resolveTaskContext(task, branch, useWorktree)
@@ -1075,7 +908,7 @@ async function executeNode(
   if (!effectiveProjectName || !effectiveProjectPath) {
     const taskForProject = context?.task ?? resolvedTask
     if (taskForProject) {
-      const proj = currentState.config?.projects.find((p) => p.name === taskForProject.projectName)
+      const proj = currentConfig?.projects.find((p) => p.name === taskForProject.projectName)
       if (proj) {
         effectiveProjectName = effectiveProjectName || proj.name
         effectiveProjectPath = effectiveProjectPath || proj.path
@@ -1086,7 +919,7 @@ async function executeNode(
   // (template-only case), still walk the projects store one more time so
   // contextual workflows launched without a `source` object still work.
   if (effectiveProjectName && !effectiveProjectPath) {
-    const proj = currentState.config?.projects.find((p) => p.name === effectiveProjectName)
+    const proj = currentConfig?.projects.find((p) => p.name === effectiveProjectName)
     if (proj) effectiveProjectPath = proj.path
   }
 
@@ -1108,7 +941,7 @@ async function executeNode(
   }
 
   if (config.headless) {
-    console.log(
+    log.info(
       `[workflow] creating headless session for "${node.label}" prompt="${(initialPrompt || '').slice(0, 80)}"`
     )
 
@@ -1126,7 +959,7 @@ async function executeNode(
     /** Publishes the timeline immediately, so it is readable while the step is still running. */
     const publishDiagnostics = (): void => {
       updateNodeState(execution, node.id, { diagnostics: diag.toString() })
-      useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
+      publishRun(execution)
     }
     publishDiagnostics()
 
@@ -1144,27 +977,29 @@ async function executeNode(
         lastPersistedBytes = logs.length
         // Only persist; the in-memory store was already updated by the
         // listener so the editor UI is up to date already.
-        void window.api.saveWorkflowRun(execution)
+        void api
+          .saveWorkflowRun(execution)
+          .catch((err) =>
+            log.warn({ err, runId: execution.runId }, '[workflow] could not save a run')
+          )
       }, PERSIST_INTERVAL_MS)
     }
 
-    const removeDataListener = window.api.onHeadlessData(
-      ({ id, data }: { id: string; data: string }) => {
-        if (sessionId && id === sessionId) {
-          if (bytesFromAgent === 0) {
-            // Whether the agent ever spoke at all is the single most useful
-            // fact when a step stalls, so mark the first byte specifically.
-            diag.note(`First output from the agent (${data.length} bytes)`)
-            updateNodeState(execution, node.id, { diagnostics: diag.toString() })
-          }
-          bytesFromAgent += data.length
-          logs = appendBoundedLog(logs, data)
-          updateNodeState(execution, node.id, { logs })
-          useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
-          schedulePersistLogs()
+    const removeDataListener = onHeadlessData(({ id, data }: { id: string; data: string }) => {
+      if (sessionId && id === sessionId) {
+        if (bytesFromAgent === 0) {
+          // Whether the agent ever spoke at all is the single most useful
+          // fact when a step stalls, so mark the first byte specifically.
+          diag.note(`First output from the agent (${data.length} bytes)`)
+          updateNodeState(execution, node.id, { diagnostics: diag.toString() })
         }
+        bytesFromAgent += data.length
+        logs = appendBoundedLog(logs, data)
+        updateNodeState(execution, node.id, { logs })
+        publishRun(execution)
+        schedulePersistLogs()
       }
-    )
+    })
 
     /**
      * How the step ends: the agent's exit code, or why we stopped waiting for
@@ -1190,7 +1025,7 @@ async function executeNode(
      */
     const exitsBeforeIdKnown = new Map<string, number>()
 
-    const removeExitListener = window.api.onHeadlessExit(
+    const removeExitListener = onHeadlessExit(
       ({ id, exitCode: code }: { id: string; exitCode: number }) => {
         if (!sessionId) {
           exitsBeforeIdKnown.set(id, code)
@@ -1210,7 +1045,7 @@ async function executeNode(
     active?.abort.signal.addEventListener('abort', onAbort, { once: true })
 
     try {
-      const headlessSession = await window.api.createHeadlessSession({
+      const headlessSession = await api.createHeadlessSession({
         agentType: effectiveAgent,
         projectName: effectiveProjectName,
         projectPath: effectiveProjectPath,
@@ -1228,7 +1063,6 @@ async function executeNode(
 
       sessionId = headlessSession.id
       active?.sessionIds.add(headlessSession.id)
-      useAppStore.getState().addHeadlessSession(headlessSession)
 
       diag.note(
         `Session ${headlessSession.id} started (pid ${headlessSession.pid || 'unknown'})` +
@@ -1262,7 +1096,7 @@ async function executeNode(
       persistExecution(execution)
 
       if (resolvedTaskId) {
-        useAppStore.getState().startTask(resolvedTaskId, headlessSession.id, effectiveAgent)
+        startTask(resolvedTaskId, headlessSession.id, effectiveAgent)
       }
 
       const outcome = await outcomePromise
@@ -1283,15 +1117,16 @@ async function executeNode(
           bytesFromAgent === 0
             ? `Step timed out after ${minutes} minute${minutes === 1 ? '' : 's'}. The agent was started but never produced any output, which usually means it never really ran or is waiting on input it will never get.`
             : `Step timed out after ${minutes} minute${minutes === 1 ? '' : 's'} without the agent exiting, after ${bytesFromAgent} bytes of output.`
-        console.warn(
-          `[workflow] "${node.label}": ${reason} — killing session ${headlessSession.id}`
-        )
+        log.warn(`[workflow] "${node.label}": ${reason} — killing session ${headlessSession.id}`)
         diag.note(reason)
         try {
-          await window.api.killHeadlessSession(headlessSession.id)
+          await api.killHeadlessSession(headlessSession.id)
           diag.note('Agent killed')
         } catch (err) {
-          console.warn(`[workflow] failed to kill timed-out session ${headlessSession.id}`, err)
+          log.warn(
+            { err, sessionId: headlessSession.id },
+            '[workflow] could not kill a timed-out session'
+          )
           diag.note(`Could not kill the agent: ${err instanceof Error ? err.message : String(err)}`)
         }
         updateNodeState(execution, node.id, {
@@ -1303,7 +1138,7 @@ async function executeNode(
           diagnostics: diag.toString()
         })
         persistExecution(execution)
-        if (resolvedTaskId) useAppStore.getState().reopenTask(resolvedTaskId)
+        if (resolvedTaskId) reopenTask(resolvedTaskId)
         return
       }
 
@@ -1346,7 +1181,7 @@ async function executeNode(
 
       // Reset task back to todo on failure so it can be retried
       if (failed && resolvedTaskId) {
-        useAppStore.getState().reopenTask(resolvedTaskId)
+        reopenTask(resolvedTaskId)
       }
     } catch (err) {
       // The step never got as far as running — most often the worktree or the
@@ -1368,10 +1203,10 @@ async function executeNode(
       }
     }
   } else {
-    const cfg = useAppStore.getState().config
+    const cfg = loadConfig()
     const proj = cfg?.projects.find((p) => p.name === effectiveProjectName)
     const remoteHostId = proj ? getProjectRemoteHostId(proj) : undefined
-    const session = await window.api.createTerminal({
+    const session = await api.createTerminal({
       agentType: effectiveAgent,
       projectName: effectiveProjectName,
       projectPath: effectiveProjectPath,
@@ -1384,10 +1219,9 @@ async function executeNode(
       args: config.args,
       remoteHostId
     })
-    useAppStore.getState().addTerminal(session)
 
     if (resolvedTaskId) {
-      useAppStore.getState().startTask(resolvedTaskId, session.id, effectiveAgent)
+      startTask(resolvedTaskId, session.id, effectiveAgent)
     }
 
     updateNodeState(execution, node.id, {
@@ -1407,108 +1241,9 @@ async function executeNode(
   }
 }
 
-/**
- * Whether a node's failure ends the run.
- *
- * Absent means stop — see WorkflowNodeErrorPolicy for why that is the default
- * rather than the continue-everything behaviour this replaced.
- */
-export function stopsRunOnError(node: Partial<Pick<WorkflowNode, 'onError'>>): boolean {
-  return (node.onError ?? 'stop') === 'stop'
-}
-
-/** A step the engine wrote off rather than ran: the reconciler never saw it start. */
-const ABANDONED = 'Run abandoned (no session id recorded)'
-
-/** A step that never ran, so no policy of its own has anything to say about it. */
-function neverRan(state: NodeExecutionState): boolean {
-  return state.error?.startsWith('Skipped:') === true || state.error === ABANDONED
-}
-
-/** A step that failed on its own terms, which is what a retry has somewhere to start from. */
-export function hasFailedStep(execution: WorkflowExecution): boolean {
-  return execution.nodeStates.some((ns) => ns.status === 'error' && !neverRan(ns))
-}
-
-// Whether the run failed, rather than merely holding a step that failed and said so survivably.
-function runEndedInError(
-  execution: WorkflowExecution,
-  nodes: Map<string, WorkflowNode>,
-  skipped?: ReadonlySet<string>
-): boolean {
-  return execution.nodeStates.some((ns) => {
-    if (ns.status !== 'error' || skipped?.has(ns.nodeId)) return false
-    if (neverRan(ns)) return true
-    const node = nodes.get(ns.nodeId)
-    return !node || stopsRunOnError(node)
-  })
-}
-
 /** The definition a run came from, which the store holds once the config has loaded. */
 function workflowById(id: string): WorkflowDefinition | undefined {
-  return (useAppStore.getState().config?.workflows || []).find((w) => w.id === id)
-}
-
-export function buildGraph(edges: readonly { source: string; target: string }[]): {
-  successors: Map<string, string[]>
-  predecessors: Map<string, string[]>
-} {
-  const successors = new Map<string, string[]>()
-  const predecessors = new Map<string, string[]>()
-  for (const e of edges) {
-    successors.set(e.source, [...(successors.get(e.source) || []), e.target])
-    predecessors.set(e.target, [...(predecessors.get(e.target) || []), e.source])
-  }
-  return { successors, predecessors }
-}
-
-/** Stops at join points whose other predecessors aren't already terminal/skipped. */
-export function collectSkippedBranch(
-  startNodeId: string,
-  successors: Map<string, string[]>,
-  predecessors: Map<string, string[]>,
-  isTerminal: (nodeId: string) => boolean
-): Set<string> {
-  const skipped = new Set<string>()
-  const queue = [startNodeId]
-  while (queue.length > 0) {
-    const id = queue.shift()!
-    if (skipped.has(id) || isTerminal(id)) continue
-    skipped.add(id)
-    for (const s of successors.get(id) || []) {
-      const otherPreds = (predecessors.get(s) || []).filter(
-        (p) => p !== id && !skipped.has(p) && !isTerminal(p)
-      )
-      if (otherPreds.length === 0) queue.push(s)
-    }
-  }
-  return skipped
-}
-
-/**
- * The entry points into the branch a failed node feeds.
- *
- * collectSkippedBranch applies a join guard to every hop it takes, but not to
- * the node it is handed — so the first hop has to be filtered here. Without it,
- * a join directly below the failure is skipped even when another predecessor is
- * still live and about to feed it, and that path dies silently.
- */
-export function skipEntryPoints(
-  failedNodeId: string,
-  edges: { source: string; target: string }[],
-  predecessors: Map<string, string[]>,
-  isSettled: (nodeId: string) => boolean
-): string[] {
-  const entries: string[] = []
-  for (const edge of edges) {
-    if (edge.source !== failedNodeId) continue
-    const otherPreds = (predecessors.get(edge.target) || []).filter(
-      (p) => p !== failedNodeId && !isSettled(p)
-    )
-    if (otherPreds.length > 0) continue
-    entries.push(edge.target)
-  }
-  return entries
+  return (loadConfig()?.workflows || []).find((w) => w.id === id)
 }
 
 export async function executeWorkflow(
@@ -1527,9 +1262,15 @@ export async function executeWorkflow(
     !context?.connectorItem &&
     options?.source !== 'scheduler'
   ) {
-    await window.api.runWorkflowManual(workflow.id, context?.inputs)
+    await api.runWorkflowManual(workflow.id, context?.inputs)
+    // Only a run that is still going. `latestRunForWorkflow` reads the database
+    // now, so the newest row is usually a finished run from an earlier poll --
+    // handing that back would report a run that ended days ago as this one.
     const existing = latestRunForWorkflow(workflow.id)
-    if (existing) return existing
+    if (existing?.status === 'running') {
+      options?.onStarted?.(existing)
+      return existing
+    }
     // Return a minimal synthetic execution so callers don't break. The real
     // executions will land via onSchedulerExecute as the scheduler fans out.
     return {
@@ -1549,13 +1290,16 @@ export async function executeWorkflow(
   const dedupeParams = options?.targetNodeId
     ? `${dedupeFingerprint(context)}:target:${options.targetNodeId}`
     : dedupeFingerprint(context)
-  const claim = await window.api.claimWorkflowRun({ workflowId: workflow.id, params: dedupeParams })
+  const claim = await api.claimWorkflowRun({ workflowId: workflow.id, params: dedupeParams })
   if (!claim.granted) {
-    console.warn(
+    log.warn(
       `[workflow] skipping execution of "${workflow.name}" — trigger already claimed (params=${dedupeParams})`
     )
-    const existing = useAppStore.getState().workflowExecutions.get(claim.runId)
-    if (existing) return existing
+    const existing = runById(claim.runId)
+    if (existing) {
+      options?.onStarted?.(existing)
+      return existing
+    }
     throw new Error(`Workflow "${workflow.name}" is already running for this trigger`)
   }
 
@@ -1596,11 +1340,12 @@ export async function executeWorkflow(
   }
 
   const actionNodeCount = workflow.nodes.filter((n) => n.type !== 'trigger').length
-  console.log(
+  log.info(
     `[workflow] executeWorkflow "${workflow.name}" — ${actionNodeCount} action nodes, run=${execution.runId}, triggerTaskId=${context?.task?.id}`
   )
 
   persistExecution(execution)
+  options?.onStarted?.(execution)
 
   return runExecution(workflow, execution, context, options)
 }
@@ -1608,7 +1353,7 @@ export async function executeWorkflow(
 /** Rebuild a run's launch context so a retry or re-run resolves the same templates. */
 export function contextFromRun(run: WorkflowExecution): WorkflowExecutionContext | undefined {
   const task = run.triggerTaskId
-    ? useAppStore.getState().config?.tasks?.find((t) => t.id === run.triggerTaskId)
+    ? loadConfig()?.tasks?.find((t) => t.id === run.triggerTaskId)
     : undefined
   // The inbox lease belongs to the original run; a re-run must not double-ack it.
   const connectorItem = run.connectorItem
@@ -1620,46 +1365,23 @@ export function contextFromRun(run: WorkflowExecution): WorkflowExecutionContext
 }
 
 /**
- * The node states a retry starts from: successes adopted, deliberate skips
- * (condition branches, a partial run's slice) preserved, everything else —
- * failures, gate rejections, loop bodies — reset to pending.
- */
-export function seedRetryStates(
-  workflow: WorkflowDefinition,
-  failedRun: WorkflowExecution
-): NodeExecutionState[] {
-  const priorById = new Map(failedRun.nodeStates.map((ns) => [ns.nodeId, ns]))
-  // Body steps chain by real edges but are driven only by their loop; adopting
-  // one as completed would let the wave loop race its successor with the loop.
-  const bodyIds = new Set<string>()
-  for (const n of workflow.nodes) {
-    if (n.type !== 'loop') continue
-    for (const id of (n.config as LoopConfig).bodyNodeIds ?? []) bodyIds.add(id)
-  }
-  return workflow.nodes.map((n) => {
-    const prior = priorById.get(n.id)
-    if (n.type === 'trigger') return { nodeId: n.id, status: 'success' }
-    if (bodyIds.has(n.id)) return { nodeId: n.id, status: 'pending' }
-    if (prior?.status === 'success') return { ...prior }
-    if (prior?.status === 'skipped' && prior.skipReason) return { ...prior }
-    return { nodeId: n.id, status: 'pending' }
-  })
-}
-
-/**
  * Resume a failed run as a new one: completed steps keep their recorded
  * outputs and are never re-executed; scheduling restarts at the failure.
  */
 export async function retryRunFromFailure(
   workflow: WorkflowDefinition,
-  failedRun: WorkflowExecution
+  failedRun: WorkflowExecution,
+  options?: ExecuteWorkflowOptions
 ): Promise<WorkflowExecution> {
   const context = contextFromRun(failedRun)
   const params = `${failedRun.dedupeParams ?? 'manual'}:retry:${failedRun.runId}`
-  const claim = await window.api.claimWorkflowRun({ workflowId: workflow.id, params })
+  const claim = await api.claimWorkflowRun({ workflowId: workflow.id, params })
   if (!claim.granted) {
-    const existing = useAppStore.getState().workflowExecutions.get(claim.runId)
-    if (existing) return existing
+    const existing = runById(claim.runId)
+    if (existing) {
+      options?.onStarted?.(existing)
+      return existing
+    }
     throw new Error(`A retry of this run is already in flight`)
   }
 
@@ -1678,22 +1400,22 @@ export async function retryRunFromFailure(
   }
 
   persistExecution(execution)
+  options?.onStarted?.(execution)
   return runExecution(workflow, execution, context)
 }
 
 /** Start a fresh run with the same launch context as an earlier one. */
 export async function rerunWorkflowRun(
   workflow: WorkflowDefinition,
-  run: WorkflowExecution
+  run: WorkflowExecution,
+  options?: ExecuteWorkflowOptions
 ): Promise<WorkflowExecution> {
-  return executeWorkflow(workflow, contextFromRun(run), { source: 'manual' })
+  return executeWorkflow(workflow, contextFromRun(run), { ...options, source: 'manual' })
 }
 
 /** Live runs of one workflow, newest first. */
 function runsForWorkflow(workflowId: string): WorkflowExecution[] {
-  return Array.from(useAppStore.getState().workflowExecutions.values())
-    .filter((e) => e.workflowId === workflowId)
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+  return listWorkflowRuns(workflowId).sort((a, b) => b.startedAt.localeCompare(a.startedAt))
 }
 
 function latestRunForWorkflow(workflowId: string): WorkflowExecution | undefined {
@@ -1717,14 +1439,18 @@ export async function applyGateDecision(
   nodeId: string,
   decision: 'approve' | 'reject'
 ): Promise<void> {
-  const execution =
-    activeRuns.get(runId)?.execution ?? useAppStore.getState().workflowExecutions.get(runId)
+  const execution = activeRuns.get(runId)?.execution ?? runById(runId)
   if (!execution) return
 
   const node = execution.nodeStates.find((state) => state.nodeId === nodeId)
-  // Already answered, by this instance or by a broadcast that arrived twice.
-  // Re-approving would restart the branch below the gate.
-  if (node?.status !== 'waiting') return
+  // Already answered, or answered twice. Re-approving would restart the branch
+  // below the gate -- but the asker is still showing a pill for it, so the run
+  // goes out as it stands rather than leaving that on screen with nothing to
+  // clear it.
+  if (node?.status !== 'waiting') {
+    publishRun(execution)
+    return
+  }
 
   if (decision === 'approve') await approveWorkflowGate(execution, nodeId)
   else await rejectWorkflowGate(execution, nodeId)
@@ -1740,9 +1466,16 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
   const handle = activeRuns.get(runId)
   // Prefer the live object over the store's copy so the run the engine is
   // driving sees the cancellation too, not just the snapshot the UI renders.
-  const execution = handle?.execution ?? useAppStore.getState().workflowExecutions.get(runId)
+  const execution = handle?.execution ?? runById(runId)
   if (!execution && !handle) {
-    console.warn(`[workflow] stopWorkflowRun: no run ${runId}`)
+    log.warn(`[workflow] stopWorkflowRun: no run ${runId}`)
+    return
+  }
+  // A run that has already ended is not stoppable, and rewriting it as
+  // cancelled would rewrite its history. Reachable now that the lookup reads
+  // the database and finds every run rather than only the live ones.
+  if (execution && execution.status !== 'running') {
+    log.info({ runId, status: execution.status }, '[workflow] stop: the run already ended')
     return
   }
 
@@ -1758,8 +1491,8 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
   }
   await Promise.allSettled(
     Array.from(sessionIds).map((id) =>
-      Promise.resolve(window.api.killHeadlessSession(id)).catch((err) =>
-        console.warn(`[workflow] stop: failed to kill session ${id}`, err)
+      Promise.resolve(api.killHeadlessSession(id)).catch((err) =>
+        log.warn(`[workflow] stop: failed to kill session ${id}`, err)
       )
     )
   )
@@ -1791,12 +1524,12 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
   // a run and starting it again is not blocked by the run just stopped.
   const workflow = workflowById(execution.workflowId)
   await Promise.allSettled([
-    window.api.releaseWorkflowRun({
+    api.releaseWorkflowRun({
       workflowId: execution.workflowId,
       params: execution.dedupeParams,
       runId
     }),
-    window.api.reportWorkflowComplete({
+    api.reportWorkflowComplete({
       workflowId: execution.workflowId,
       workflowName: workflow?.name ?? execution.workflowId,
       completedAt: now,
@@ -1805,7 +1538,7 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
     }),
     ...(execution.connectorInboxId !== undefined && execution.connectorInboxLeaseToken
       ? [
-          window.api.completeConnectorInbox({
+          api.completeConnectorInbox({
             id: execution.connectorInboxId,
             leaseToken: execution.connectorInboxLeaseToken,
             // Stop is an explicit user decision, not a transient failure that
@@ -1816,12 +1549,7 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
         ]
       : [])
   ])
-  console.log(`[workflow] run ${runId} stopped by user`)
-}
-
-/** Whether a run can still be stopped — drives the Stop control's visibility. */
-export function isRunStoppable(execution: WorkflowExecution): boolean {
-  return execution.status === 'running'
+  log.info(`[workflow] run ${runId} stopped by user`)
 }
 
 async function runExecution(
@@ -1833,7 +1561,7 @@ async function runExecution(
   // Guards re-entry into *this* run (a gate approved twice, say). Other runs of
   // the same workflow are free to proceed alongside it.
   if (activeRuns.has(execution.runId)) {
-    console.warn(`[workflow] runExecution: run ${execution.runId} already active, skipping`)
+    log.warn(`[workflow] runExecution: run ${execution.runId} already active, skipping`)
     return execution
   }
   const active: ActiveRun = {
@@ -1908,7 +1636,7 @@ async function runExecution(
       if (ready.length === 0) break
 
       wave++
-      console.log(
+      log.info(
         `[workflow] wave ${wave}: executing ${ready.length} node(s) in parallel: ${ready.map((n) => n.label).join(', ')}`
       )
 
@@ -1923,7 +1651,7 @@ async function runExecution(
         try {
           await executeNode(node, workflow, execution, context, stepOutputs, active)
         } catch (err) {
-          console.error(`[workflow] node "${node.label}" error:`, err)
+          log.error({ err, node: node.label }, '[workflow] a step failed')
           updateNodeState(execution, node.id, {
             status: 'error',
             completedAt: new Date().toISOString(),
@@ -2036,7 +1764,7 @@ async function runExecution(
     execution.status = runEndedInError(execution, nodeMap, skippedByCondition) ? 'error' : 'success'
     execution.completedAt = new Date().toISOString()
   } catch (err) {
-    console.error(`[workflow] execution error:`, err)
+    log.error({ err }, '[workflow] run failed')
     execution.status = 'error'
     execution.completedAt = new Date().toISOString()
     for (const ns of execution.nodeStates) {
@@ -2051,23 +1779,22 @@ async function runExecution(
     if (!parkedOnGate) {
       // Hand the trigger back so an identical one can run again immediately
       // instead of waiting out the dedupe window.
-      void window.api
+      void api
         .releaseWorkflowRun({
           workflowId: workflow.id,
           params: active.dedupeParams,
           runId: execution.runId
         })
-        .catch((err) => console.warn('[workflow] failed to release run claim:', err))
+        .catch((err) => log.warn('[workflow] failed to release run claim:', err))
     }
   }
 
-  const state = useAppStore.getState()
-  const terminals = state.terminals
-  const headlessById = new Map(state.headlessSessions.map((s) => [s.id, s]))
+  const terminals = new Map(activeTerminals().map((t) => [t.id, t]))
+  const headlessById = new Map(activeHeadless().map((h) => [h.id, h]))
   for (const ns of execution.nodeStates) {
     if (ns.sessionId && !ns.agentSessionId) {
       const agentSid =
-        terminals.get(ns.sessionId)?.session.agentSessionId ??
+        terminals.get(ns.sessionId)?.agentSessionId ??
         headlessById.get(ns.sessionId)?.agentSessionId
       if (agentSid) {
         ns.agentSessionId = agentSid
@@ -2104,25 +1831,25 @@ async function runExecution(
     await Promise.allSettled(
       Array.from(worktreeMap.entries()).map(async ([wtPath, projectPath]) => {
         if (!projectPath) return
-        const { count } = await window.api.getWorktreeActiveSessions(wtPath)
+        const { count } = await api.getWorktreeActiveSessions(wtPath)
         if (count > 0) {
-          console.log(`[workflow] skipping worktree cleanup (${count} active sessions): ${wtPath}`)
+          log.info(`[workflow] skipping worktree cleanup (${count} active sessions): ${wtPath}`)
           return
         }
-        const dirty = await window.api.isWorktreeDirty(wtPath)
+        const dirty = await api.isWorktreeDirty(wtPath)
         if (dirty) {
-          console.log(`[workflow] skipping dirty worktree cleanup: ${wtPath}`)
+          log.info(`[workflow] skipping dirty worktree cleanup: ${wtPath}`)
           return
         }
-        await window.api.removeWorktree(projectPath, wtPath, false)
-        console.log(`[workflow] auto-cleaned worktree: ${wtPath}`)
+        await api.removeWorktree(projectPath, wtPath, false)
+        log.info(`[workflow] auto-cleaned worktree: ${wtPath}`)
       })
     )
   }
 
   // Report completion to main process for schedule log + workflow status update
   await Promise.all([
-    window.api.reportWorkflowComplete({
+    api.reportWorkflowComplete({
       workflowId: workflow.id,
       workflowName: workflow.name,
       completedAt: execution.completedAt!,
@@ -2132,7 +1859,7 @@ async function runExecution(
     }),
     ...(execution.connectorInboxId !== undefined && execution.connectorInboxLeaseToken
       ? [
-          window.api.completeConnectorInbox({
+          api.completeConnectorInbox({
             id: execution.connectorInboxId,
             leaseToken: execution.connectorInboxLeaseToken,
             disposition: execution.connectorInboxDisposition ?? 'retry',
@@ -2146,12 +1873,6 @@ async function runExecution(
   ])
   terminalConnectorDecisions.delete(execution.runId)
 
-  if (Notification.permission === 'granted') {
-    new Notification('Vorn', {
-      body: `Workflow "${workflow.name}" ${execution.status === 'success' ? 'completed' : 'failed'} — ${actionNodeCount} node${actionNodeCount !== 1 ? 's' : ''}`
-    })
-  }
-
   return execution
 }
 
@@ -2160,7 +1881,7 @@ function rebuildContextForResume(
   execution: WorkflowExecution
 ): WorkflowExecutionContext | undefined {
   const task = execution.triggerTaskId
-    ? (useAppStore.getState().config?.tasks || []).find((t) => t.id === execution.triggerTaskId)
+    ? (loadConfig()?.tasks || []).find((t) => t.id === execution.triggerTaskId)
     : undefined
   if (!task && !execution.connectorItem && !execution.inputs) return undefined
   const trigger = webhookTriggerFromItem(execution.connectorItem)
@@ -2186,8 +1907,8 @@ export async function adoptConnectorInboxLease(
   stopConnectorLeaseHeartbeat(execution.runId)
   execution.connectorItem = connectorItem
   execution.connectorInboxLeaseToken = connectorItem.inboxLeaseToken
-  useAppStore.getState().setWorkflowExecution(execution.runId, { ...execution })
-  await window.api.saveWorkflowRun(execution)
+  publishRun(execution)
+  await api.saveWorkflowRun(execution)
   startConnectorLeaseHeartbeat(execution)
 }
 
@@ -2198,15 +1919,13 @@ function resolveWaitingGate(
 ): { workflow: WorkflowDefinition } | null {
   const workflow = workflowById(execution.workflowId)
   if (!workflow) {
-    console.warn(`[workflow] ${caller}WorkflowGate: workflow ${execution.workflowId} not found`)
+    log.warn(`[workflow] ${caller}WorkflowGate: workflow ${execution.workflowId} not found`)
     return null
   }
 
   const ns = execution.nodeStates.find((s) => s.nodeId === nodeId)
   if (!ns || ns.status !== 'waiting') {
-    console.warn(
-      `[workflow] ${caller}WorkflowGate: node ${nodeId} not waiting (status=${ns?.status})`
-    )
+    log.warn(`[workflow] ${caller}WorkflowGate: node ${nodeId} not waiting (status=${ns?.status})`)
     return null
   }
 

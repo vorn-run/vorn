@@ -1,4 +1,5 @@
 import {
+  AppConfig,
   WorkflowDefinition,
   TriggerConfig,
   TaskConfig,
@@ -6,9 +7,10 @@ import {
   TerminalSession,
   RestoreEnvironment,
   WorkflowExecutionContext
-} from '../../shared/types'
-import { executeWorkflow } from './workflow-execution'
-import { useAppStore } from '../stores'
+} from '@vornrun/shared/types'
+import { executeWorkflow } from './engine'
+import { config } from './host'
+import log from '../logger'
 
 function getTriggerConfig(wf: WorkflowDefinition): TriggerConfig | null {
   const triggerNode = wf.nodes.find((n) => n.type === 'trigger')
@@ -21,29 +23,18 @@ function getTriggerConfig(wf: WorkflowDefinition): TriggerConfig | null {
  * that match the task's project.
  */
 export function fireTaskCreatedTrigger(task: TaskConfig): void {
-  const workflows = (useAppStore.getState().config?.workflows || []).filter((wf) => wf.enabled)
-  console.log(
-    `[triggers] fireTaskCreatedTrigger: task="${task.title}" project="${task.projectName}" workflows=${workflows.length}`
-  )
+  const workflows = (config()?.workflows || []).filter((wf) => wf.enabled)
 
   for (const wf of workflows) {
     const trigger = getTriggerConfig(wf)
-    if (!trigger || trigger.triggerType !== 'taskCreated') {
-      console.log(`[triggers] skip "${wf.name}": triggerType=${trigger?.triggerType}`)
-      continue
-    }
-    if (trigger.projectFilter && trigger.projectFilter !== task.projectName) {
-      console.log(
-        `[triggers] skip "${wf.name}": projectFilter=${trigger.projectFilter} != ${task.projectName}`
-      )
-      continue
-    }
+    if (!trigger || trigger.triggerType !== 'taskCreated') continue
+    if (trigger.projectFilter && trigger.projectFilter !== task.projectName) continue
 
-    console.log(`[triggers] executing "${wf.name}" for task "${task.title}"`)
+    log.info({ workflow: wf.name, task: task.title }, '[triggers] task created')
     executeWorkflow(wf, {
       task,
       trigger: { type: 'taskCreated' }
-    }).catch((err) => console.error(`[triggers] executeWorkflow error:`, err))
+    }).catch((err) => log.error({ err, workflow: wf.name }, '[triggers] workflow failed to start'))
   }
 }
 
@@ -58,7 +49,7 @@ export function fireTaskStatusChangedTrigger(
 ): void {
   if (fromStatus === toStatus) return
 
-  const workflows = (useAppStore.getState().config?.workflows || []).filter((wf) => wf.enabled)
+  const workflows = (config()?.workflows || []).filter((wf) => wf.enabled)
 
   for (const wf of workflows) {
     const trigger = getTriggerConfig(wf)
@@ -72,7 +63,7 @@ export function fireTaskStatusChangedTrigger(
       trigger: { type: 'taskStatusChanged', fromStatus, toStatus }
     }
     executeWorkflow(wf, context).catch((err) =>
-      console.error(`[triggers] executeWorkflow error:`, err)
+      log.error({ err, workflow: wf.name }, '[triggers] workflow failed to start')
     )
   }
 }
@@ -91,7 +82,7 @@ export function fireSessionRestoredTrigger(
   session: TerminalSession,
   how: { restore: 'cold' | 'warm'; environment?: RestoreEnvironment }
 ): void {
-  const workflows = (useAppStore.getState().config?.workflows || []).filter((wf) => wf.enabled)
+  const workflows = (config()?.workflows || []).filter((wf) => wf.enabled)
 
   for (const wf of workflows) {
     const trigger = getTriggerConfig(wf)
@@ -105,7 +96,7 @@ export function fireSessionRestoredTrigger(
     }
     const start = (): Promise<unknown> =>
       executeWorkflow(wf, context).catch((err) =>
-        console.error(`[triggers] executeWorkflow error:`, err)
+        log.error({ err, workflow: wf.name }, '[triggers] workflow failed to start')
       )
     if (trigger.concurrency === 'unbounded') {
       void start()
@@ -120,4 +111,31 @@ export function fireSessionRestoredTrigger(
 /** Test-only. */
 export function resetRestoreQueues(): void {
   restoreQueues.clear()
+}
+
+/**
+ * Fire the task triggers for a configuration that just replaced another.
+ *
+ * Task writes arrive as a whole configuration -- from this app, a phone or an
+ * agent -- so the change has to be read out of the diff rather than reported by
+ * whoever made it. It used to be reported: the renderer's task store called
+ * these directly, which is why moving a card on a phone fired nothing.
+ */
+export function fireTaskTriggersForChange(before: AppConfig, after: AppConfig): void {
+  const previous = new Map((before.tasks ?? []).map((t) => [t.id, t]))
+
+  for (const task of after.tasks ?? []) {
+    const prior = previous.get(task.id)
+    if (!prior) {
+      fireTaskCreatedTrigger(task)
+      continue
+    }
+    if (prior.status === task.status) continue
+    // Only a change that is newer than what is stored. Every client posts the
+    // whole configuration, so one that has not yet caught up with a status a
+    // step just set would otherwise read as a move back -- and start the
+    // workflows watching for that move.
+    if (task.updatedAt < prior.updatedAt) continue
+    fireTaskStatusChangedTrigger(task, prior.status, task.status)
+  }
 }

@@ -1,5 +1,4 @@
 import { useAppStore } from '../stores'
-import { fireSessionRestoredTrigger } from './workflow-triggers'
 import { endedFromRestored } from './ended-from-restored'
 import { toast } from '../components/Toast'
 
@@ -77,7 +76,13 @@ export async function resumeEndedSession(
   // a session open elsewhere is the one surprise worth a line.
   if (result.boundTo) toast('That conversation was already running. This pane shows it.')
   // A bound session was not started again; it was already going elsewhere.
-  if (!result.boundTo) fireSessionRestoredTrigger(result.session, { restore: 'cold', environment })
+  if (!result.boundTo) {
+    void window.api.sessionRestored({
+      sessionId: result.session.id,
+      restore: 'cold',
+      environment
+    })
+  }
 }
 
 /**

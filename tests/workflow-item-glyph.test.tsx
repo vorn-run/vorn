@@ -15,7 +15,7 @@ vi.mock('../src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockStore) : mockStore
 }))
-vi.mock('../src/renderer/lib/workflow-execution', () => ({ executeWorkflow: vi.fn() }))
+vi.mock('../packages/server/src/workflows/engine', () => ({ executeWorkflow: vi.fn() }))
 
 const { WorkflowItem } = await import('../src/renderer/components/project-sidebar/WorkflowItem')
 const { __resetConnectionsCacheForTests } = await import('../src/renderer/lib/use-connections')

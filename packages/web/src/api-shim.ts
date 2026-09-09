@@ -759,6 +759,31 @@ export function createApiShim(wsUrl: string) {
       rpc.invoke('workflowRun:claim', req),
     releaseWorkflowRun: (req: { workflowId: string; params?: string; runId: string }) =>
       rpc.invoke('workflowRun:release', req),
+    runWorkflow: (params: {
+      workflowId: string
+      context?: import('../../shared/src/types').WorkflowExecutionContext
+      targetNodeId?: string
+    }) => rpc.invoke('workflow:run', params),
+    sessionRestored: (params: {
+      sessionId: string
+      restore: 'cold' | 'warm'
+      environment?: import('../../shared/src/types').RestoreEnvironment
+    }) => rpc.invoke('workflow:sessionRestored', params),
+    stopWorkflowRun: (runId: string) => rpc.invoke('workflow:stopRun', { runId }),
+    resolveWorkflowGate: (params: {
+      runId: string
+      nodeId: string
+      decision: 'approve' | 'reject'
+    }) => rpc.invoke('workflow:resolveGate', params),
+    retryWorkflowRun: (runId: string) => rpc.invoke('workflow:retryRun', { runId }),
+    rerunWorkflowRun: (runId: string) => rpc.invoke('workflow:rerun', { runId }),
+    onWorkflowRunUpdated: (
+      callback: (execution: import('../../shared/src/types').WorkflowExecution) => void
+    ) =>
+      rpc.on('workflow:runUpdated', (params) =>
+        callback(params as import('../../shared/src/types').WorkflowExecution)
+      ),
+
     runWorkflowManual: (workflowId: string, inputs?: Record<string, unknown>) =>
       rpc.invoke('workflow:runManual', { workflowId, inputs }),
 

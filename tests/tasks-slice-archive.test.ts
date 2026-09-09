@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('../src/renderer/lib/workflow-triggers', () => ({
+vi.mock('../packages/server/src/workflows/triggers', () => ({
   fireTaskCreatedTrigger: vi.fn(),
   fireTaskStatusChangedTrigger: vi.fn()
 }))

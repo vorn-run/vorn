@@ -65,6 +65,36 @@ beforeEach(() => {
   sockets.length = 0
 })
 
+describe('a method the server does not have', () => {
+  it('reads as an older server, not as a mystery about a name', async () => {
+    const call = rpcCall('workflow:run')
+    await vi.waitFor(() => expect(sockets.at(-1)?.sent.length).toBe(1))
+    const socket = sockets.at(-1)!
+    const { id } = JSON.parse(socket.sent[0]) as { id: number }
+
+    socket.emit(
+      'message',
+      Buffer.from(JSON.stringify({ id, error: { message: 'Method not found: workflow:run' } }))
+    )
+
+    await expect(call).rejects.toThrow(/older than the vorn command/)
+  })
+
+  it('leaves every other error exactly as the server put it', async () => {
+    const call = rpcCall('workflow:run')
+    await vi.waitFor(() => expect(sockets.at(-1)?.sent.length).toBe(1))
+    const socket = sockets.at(-1)!
+    const { id } = JSON.parse(socket.sent[0]) as { id: number }
+
+    socket.emit(
+      'message',
+      Buffer.from(JSON.stringify({ id, error: { message: 'Workflow not found' } }))
+    )
+
+    await expect(call).rejects.toThrow('Workflow not found')
+  })
+})
+
 describe('a call the server never answers', () => {
   it('names a refused credential rather than blaming the clock', async () => {
     const call = rpcCall('terminal:listActive')

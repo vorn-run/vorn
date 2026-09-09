@@ -357,6 +357,7 @@ function wireServerNotifications(bridge: ServerBridge): void {
       case IPC.SCHEDULER_MISSED:
       case IPC.WORKFLOW_EXECUTION_COMPLETE:
       case IPC.WORKFLOW_GATE_RESOLVED:
+      case IPC.WORKFLOW_RUN_UPDATED:
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send(method, params)
         }

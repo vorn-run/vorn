@@ -22,6 +22,8 @@ export interface ClientArgs {
   branch?: string
   /** Workflow id or name, for the commands that filter by one. */
   workflow?: string
+  /** `--input key=value`, repeated: the values a manual run was started with. */
+  inputs?: Record<string, string>
   dataDir?: string
   lines?: number
   limit?: number
@@ -52,6 +54,7 @@ export const CLIENT_OPTIONS = {
   name: { type: 'string' },
   branch: { type: 'string' },
   workflow: { type: 'string' },
+  input: { type: 'string', multiple: true },
   'data-dir': { type: 'string' },
   lines: { type: 'string' },
   limit: { type: 'string' },
@@ -81,7 +84,7 @@ function positiveInt(raw: string | undefined, flag: string): number | undefined 
  * printing usage and failing — the same contract `parseServerArgs` has.
  */
 export function parseClientArgs(argv: string[]): ClientArgs {
-  let values: Record<string, string | boolean | undefined>
+  let values: Record<string, string | boolean | string[] | undefined>
   let positionals: string[]
 
   try {
@@ -96,6 +99,19 @@ export function parseClientArgs(argv: string[]): ClientArgs {
   } catch (err) {
     throw new ClientArgsError(err instanceof Error ? err.message : String(err))
   }
+
+  /** `--input pr=42` pairs, refused rather than guessed at when malformed. */
+  const inputs = ((): Record<string, string> | undefined => {
+    const given = values.input
+    if (!Array.isArray(given) || given.length === 0) return undefined
+    const pairs: Record<string, string> = {}
+    for (const entry of given) {
+      const at = entry.indexOf('=')
+      if (at <= 0) throw new ClientArgsError(`--input wants key=value, got "${entry}"`)
+      pairs[entry.slice(0, at)] = entry.slice(at + 1)
+    }
+    return pairs
+  })()
 
   const str = (name: string): string | undefined => {
     const value = values[name]
@@ -118,6 +134,7 @@ export function parseClientArgs(argv: string[]): ClientArgs {
     name: str('name'),
     branch: str('branch'),
     workflow: str('workflow'),
+    inputs,
     dataDir,
     lines: positiveInt(str('lines'), '--lines'),
     limit: positiveInt(str('limit'), '--limit'),

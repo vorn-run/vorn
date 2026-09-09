@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  loopShouldStop,
-  blankPassState,
-  MAX_LOOP_ITERATIONS
-} from '../src/renderer/lib/workflow-execution'
+import { loopShouldStop, blankPassState, MAX_LOOP_ITERATIONS } from '@vornrun/shared/workflow-graph'
 import { validateLoopBodies } from '../packages/mcp/src/tools/workflows'
 import {
   nodesAfter,

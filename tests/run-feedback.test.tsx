@@ -64,16 +64,10 @@ const toastFn = vi.hoisted(() => {
 })
 vi.mock('../src/renderer/components/Toast', () => ({ toast: toastFn }))
 
+// The editor asks the server to run, retry and stop; these are those requests.
 const executeWorkflow = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const retryRunFromFailure = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const stopWorkflowRun = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  executeWorkflow,
-  retryRunFromFailure,
-  rerunWorkflowRun: vi.fn().mockResolvedValue(undefined),
-  stopWorkflowRun,
-  buildStepOutputsMap: vi.fn(() => ({}))
-}))
 
 const workflow = {
   id: 'wf-x',
@@ -132,6 +126,10 @@ vi.mock('../src/renderer/stores', () => {
   removeEventListener: vi.fn(),
   api: {
     listWorkflowRuns: vi.fn().mockResolvedValue([]),
+    runWorkflow: executeWorkflow,
+    retryWorkflowRun: retryRunFromFailure,
+    rerunWorkflowRun: vi.fn().mockResolvedValue(undefined),
+    stopWorkflowRun,
     listConnectionActions: vi.fn().mockResolvedValue([]),
     createTerminal: vi.fn(),
     isWindowMaximized: vi.fn().mockResolvedValue(false),

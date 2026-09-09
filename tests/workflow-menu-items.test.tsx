@@ -3,9 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 
 const mockExecuteWorkflow = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  executeWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args)
-}))
+// Runs start in the server; these check what the window asks for.
 
 const mockSetPending = vi.fn()
 vi.mock('../src/renderer/stores', () => {
@@ -70,6 +68,7 @@ const someSession: TerminalSession = {
 
 beforeEach(() => {
   mockExecuteWorkflow.mockClear()
+  ;(window as unknown as { api: unknown }).api = { runWorkflow: mockExecuteWorkflow }
   mockSetPending.mockClear()
 })
 
@@ -107,21 +106,21 @@ describe('buildWorkflowMenuItems', () => {
     })
     items[0].onClick()
     expect(onSelect).toHaveBeenCalled()
-    expect(mockExecuteWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'a' }),
-      { task: undefined, source: someSession },
-      { source: 'manual' }
-    )
+    expect(mockExecuteWorkflow).toHaveBeenCalledWith({
+      workflowId: 'a',
+      context: { task: undefined, source: someSession },
+      targetNodeId: undefined
+    })
   })
 
   it('passes undefined context for non-contextual call sites', () => {
     const items = buildWorkflowMenuItems([makeWorkflow('b', false)], vi.fn())
     items[0].onClick()
-    expect(mockExecuteWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'b' }),
-      undefined,
-      { source: 'manual' }
-    )
+    expect(mockExecuteWorkflow).toHaveBeenCalledWith({
+      workflowId: 'b',
+      context: undefined,
+      targetNodeId: undefined
+    })
   })
 })
 
@@ -134,11 +133,11 @@ describe('startManualRun', () => {
 
   it('runs non-contextual workflows directly', () => {
     startManualRun(makeWorkflow('b', false))
-    expect(mockExecuteWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'b' }),
-      undefined,
-      { source: 'manual' }
-    )
+    expect(mockExecuteWorkflow).toHaveBeenCalledWith({
+      workflowId: 'b',
+      context: undefined,
+      targetNodeId: undefined
+    })
     expect(mockSetPending).not.toHaveBeenCalled()
   })
 })

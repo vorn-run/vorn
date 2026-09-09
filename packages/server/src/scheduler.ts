@@ -7,8 +7,7 @@ import {
   WorkflowDefinition,
   TriggerConfig,
   ConnectorPollTriggerConfig,
-  ConnectorItemContext,
-  IPC
+  ConnectorItemContext
 } from '@vornrun/shared/types'
 import { configManager } from './config-manager'
 import {
@@ -27,8 +26,9 @@ import {
 } from './database'
 import { connectorRegistry, applyDecryptedCreds } from './connectors'
 import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, pollMcpConnection } from './connectors/mcp'
-import { clientRegistry } from './broadcast'
 import log from './logger'
+import { runConnectorItem, runScheduled } from './workflows/dispatch'
+import { stopWorkflowRun } from './workflows/engine'
 
 const LOCK_DIR = path.join(os.homedir(), '.vorn')
 const INBOX_LEASE_MS = 5 * 60_000
@@ -87,24 +87,19 @@ class Scheduler extends EventEmitter {
   /**
    * Armed schedules that this server can act on with nobody attached.
    *
-   * Only connector polls. `dispatchConnectorPoll` really does the work here --
-   * it calls the connector and writes inbox rows without any client -- whereas a
-   * recurring or one-off trigger only broadcasts `SCHEDULER_EXECUTE` for a
-   * renderer to execute, so staying awake for one buys nothing: with no client
-   * the occurrence is emitted, the minute lock is written, and the run is lost.
-   * Holding the server open for that would be keeping a promise by dropping it.
-   *
-   * It matters which: connector polls are seeded enabled when a connector is
-   * installed, so counting every armed cron meant anyone with a connector had a
-   * server that never exited.
+   * Every one of them, now that runs execute here. It used to count connector
+   * polls alone, because a recurring trigger "only broadcasts SCHEDULER_EXECUTE
+   * for a renderer to execute, so staying awake for one buys nothing: with no
+   * client the occurrence is emitted, the minute lock is written, and the run is
+   * lost". That was true, and ending it is the point of this change -- a
+   * nightly workflow is a promise this server can now keep, so it stays up to
+   * keep it.
    */
   serverSideScheduleCount(): number {
-    return this.connectorPollWorkflowIds.size
+    return this.cronJobs.size + this.timeouts.size
   }
 
   private cronJobs = new Map<string, ScheduledTask>()
-  /** Of those, the ones that do real work here rather than in a renderer. */
-  private connectorPollWorkflowIds = new Set<string>()
   private timeouts = new Map<string, NodeJS.Timeout>()
   /** Polls run server-side, before any run claim, so they serialize here. */
   private pollsInFlight = new Set<string>()
@@ -151,9 +146,9 @@ class Scheduler extends EventEmitter {
   }
 
   deliverPendingConnectorInbox(): void {
-    // Claiming without a receiver would hide the row behind its lease until it
-    // expires. Leave it pending and drain immediately when a client connects.
-    if (clientRegistry.size === 0) return
+    // No client check any more: the receiver is this process. It used to leave a
+    // row pending until a window appeared, because claiming one with nobody to
+    // run it hid the row behind its lease until the lease expired.
     const now = Date.now()
     const nowIso = new Date(now).toISOString()
     const availableSlots = INBOX_BATCH_SIZE - dbCountActiveConnectorInboxLeases(nowIso)
@@ -175,7 +170,7 @@ class Scheduler extends EventEmitter {
         dbCompleteConnectorInbox(item.id, item.leaseToken, new Date().toISOString())
         continue
       }
-      this.emit('client-message', IPC.SCHEDULER_EXECUTE, {
+      void runConnectorItem({
         workflowId: item.workflowId,
         connectorItem: {
           ...item.connectorItem,
@@ -202,7 +197,6 @@ class Scheduler extends EventEmitter {
       if (!wf || !wf.enabled || (kind !== 'recurring' && kind !== 'connectorPoll')) {
         this.cronJobs.get(id)?.stop()
         this.cronJobs.delete(id)
-        this.connectorPollWorkflowIds.delete(id)
       }
     }
     for (const [id] of this.timeouts) {
@@ -245,22 +239,9 @@ class Scheduler extends EventEmitter {
             timezone: trigger.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
           })
           this.cronJobs.set(wf.id, task)
-          if (trigger.triggerType === 'connectorPoll') this.connectorPollWorkflowIds.add(wf.id)
         } catch (err) {
           log.error({ err }, `[scheduler] failed to schedule workflow "${wf.name}":`)
         }
-      }
-
-      // Membership is derived from the trigger as it stands now, not from what
-      // it was when the job was created. Both loops above keep an existing cron
-      // job when the new kind is still cron-eligible, and the registration below
-      // is skipped for an id that already has one -- so an edit from `recurring`
-      // to `connectorPoll` would never add the id, and the reverse edit would
-      // leave it behind. Either way the count that decides whether this server
-      // may leave stops describing the schedules it actually holds.
-      if (this.cronJobs.has(wf.id)) {
-        if (trigger.triggerType === 'connectorPoll') this.connectorPollWorkflowIds.add(wf.id)
-        else this.connectorPollWorkflowIds.delete(wf.id)
       }
 
       if (trigger.triggerType === 'once' && !this.timeouts.has(wf.id)) {
@@ -327,7 +308,7 @@ class Scheduler extends EventEmitter {
     }
 
     log.info(`[scheduler] executing workflow ${workflowId}`)
-    this.emit('client-message', IPC.SCHEDULER_EXECUTE, { workflowId, inputs })
+    void runScheduled(workflowId, inputs)
   }
 
   /**
@@ -471,23 +452,16 @@ class Scheduler extends EventEmitter {
     this.executeWorkflow(workflowId, inputs)
   }
 
-  /**
-   * Ask the instance running `runId` to stop it.
-   *
-   * No lock and no lookup: unlike a trigger, this must not be claimed by one
-   * instance, because the one that answers may not be the one holding the run.
-   * Every instance gets the message and only the owner acts on it.
-   */
+  /** Stop a run. It is held here now, so there is nobody to ask. */
   stopRun(runId: string): void {
-    log.info(`[scheduler] broadcasting stop for run ${runId}`)
-    this.emit('client-message', IPC.SCHEDULER_STOP_RUN, { runId })
+    log.info(`[scheduler] stopping run ${runId}`)
+    void stopWorkflowRun(runId)
   }
 
   stopAll(): void {
     for (const [, job] of this.cronJobs) job.stop()
     for (const [, timer] of this.timeouts) clearTimeout(timer)
     this.cronJobs.clear()
-    this.connectorPollWorkflowIds.clear()
     this.pollsInFlight.clear()
     this.timeouts.clear()
     if (this.inboxTimer) clearInterval(this.inboxTimer)

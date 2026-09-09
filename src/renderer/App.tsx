@@ -1,4 +1,3 @@
-import { schedulerExecutionContext } from './lib/workflow-helpers'
 import { useEffect, useState, Suspense, lazy } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AnimatePresence } from 'framer-motion'
@@ -19,15 +18,7 @@ const WorkflowsLandingView = lazy(() =>
     default: m.WorkflowsLandingView
   }))
 )
-import {
-  adoptConnectorInboxLease,
-  executeWorkflow as runWorkflow,
-  rescheduleWaitingGateTimers,
-  reconcileRunningExecutions,
-  stopWorkflowRun,
-  applyGateDecision
-} from './lib/workflow-execution'
-import type { WorkflowExecution } from '../shared/types'
+import { announceRun } from './lib/run-notifications'
 import { CommandPalette } from './components/CommandPalette'
 import { SessionRestoredBanner } from './components/SessionRestoredBanner'
 import { GridToolbar } from './components/GridToolbar'
@@ -376,72 +367,11 @@ export function App() {
       useAppStore.getState().setFocusedTerminal(terminalId)
     })
 
-    // Scheduler: auto-execute workflows when triggered
-    const removeSchedulerListener = window.api.onSchedulerExecute(
-      async ({
-        workflowId,
-        connectorItem,
-        connectorInboxId,
-        connectorInboxLeaseToken,
-        existingExecution,
-        inputs
-      }) => {
-        const state = useAppStore.getState()
-        const workflow = state.config?.workflows?.find((w) => w.id === workflowId)
-        if (!workflow) {
-          if (connectorInboxId !== undefined && connectorInboxLeaseToken) {
-            await window.api.completeConnectorInbox({
-              id: connectorInboxId,
-              leaseToken: connectorInboxLeaseToken,
-              disposition: 'defer'
-            })
-          }
-          return
-        }
-
-        if (existingExecution && connectorItem) {
-          await adoptConnectorInboxLease(existingExecution, connectorItem)
-          rescheduleWaitingGateTimers([existingExecution], [workflow])
-          await reconcileRunningExecutions([existingExecution], [workflow])
-          return
-        }
-
-        const context = schedulerExecutionContext(connectorItem, inputs)
-        try {
-          const execution = await runWorkflow(workflow, context, { source: 'scheduler' })
-          // The server may have re-leased the row while the run was starting.
-          if (
-            connectorItem &&
-            connectorInboxLeaseToken &&
-            execution.connectorInboxLeaseToken !== connectorInboxLeaseToken
-          ) {
-            await adoptConnectorInboxLease(execution, connectorItem)
-          }
-        } catch (err) {
-          // Another renderer may have won the workflow claim. It will
-          // acknowledge the shared inbox row; otherwise the lease expires and
-          // the server retries it.
-          console.warn('[connector] scheduled workflow did not complete:', err)
-        }
-      }
-    )
-
-    // Stop requests are broadcast to every instance, so most arrive here for a
-    // run this window has never heard of. stopWorkflowRun already treats an
-    // unknown id as a no-op, which is what makes the broadcast safe.
-    const removeStopRunListener = window.api.onSchedulerStopRun(({ runId }) => {
-      void stopWorkflowRun(runId).catch((err) =>
-        console.warn(`[workflow] stop request for ${runId} failed:`, err)
-      )
-    })
-
-    // A gate answered elsewhere — a phone, or another window. Broadcast for the
-    // same reason a stop is: whoever answered is usually not who is holding the
-    // run. applyGateDecision no-ops unless this instance is.
-    const removeGateListener = window.api.onWorkflowGateResolved(({ runId, nodeId, decision }) => {
-      void applyGateDecision(runId, nodeId, decision).catch((err) =>
-        console.warn(`[workflow] gate decision for ${runId} failed:`, err)
-      )
+    // Runs happen in the server now, so this window is told what they did
+    // rather than doing it. Every node transition arrives here.
+    const removeRunUpdatedListener = window.api.onWorkflowRunUpdated((execution) => {
+      useAppStore.getState().setWorkflowExecution(execution.runId, execution)
+      announceRun(execution)
     })
 
     // Seed from main first: the events fire once, and a window opened after
@@ -560,20 +490,14 @@ export function App() {
       .listRunsWithWaitingGates()
       .then((runs) => {
         const store = useAppStore.getState()
-        const hydrated: WorkflowExecution[] = []
         for (const run of runs) {
           if (store.workflowExecutions.has(run.runId)) continue
           store.setWorkflowExecution(run.runId, run)
-          hydrated.push(run)
         }
-        rescheduleWaitingGateTimers(hydrated, store.config?.workflows ?? [])
       })
       .catch((err) => console.error('[App] failed to hydrate waiting gates:', err))
 
-    // Resolve runs the previous renderer left in `running`. The main process
-    // keeps headless agents alive past a renderer reload, but the in-memory
-    // exit-promise dies — the run wedges. Reconcile against session_events
-    // and close out anything that already exited.
+    // Runs left `running` are the server's to resolve; this only shows them.
     configReady
       .then(() => window.api.listRunningWorkflowRuns())
       .then((runs) => {
@@ -583,10 +507,8 @@ export function App() {
             store.setWorkflowExecution(run.runId, run)
           }
         }
-        // After the config, so a step that said its failure was survivable is read that way.
-        return reconcileRunningExecutions(runs, store.config?.workflows ?? [])
       })
-      .catch((err) => console.error('[App] failed to reconcile running runs:', err))
+      .catch((err) => console.error('[App] failed to load running runs:', err))
 
     // Auto-prune exited headless sessions
     const pruneInterval = setInterval(() => {
@@ -605,7 +527,7 @@ export function App() {
       removeSessionCreatedListener()
       removeConfigListener()
       removeMenuListener()
-      removeSchedulerListener()
+      removeRunUpdatedListener()
       removeWidgetSelectListener()
       removeUpdateListener()
       removeBrowserOpenListener()
@@ -616,8 +538,6 @@ export function App() {
       removeSessionUpdatedListener()
       removeHeadlessExitListener()
       removeHeadlessDataListener()
-      removeStopRunListener()
-      removeGateListener()
       clearInterval(headlessPollInterval)
       clearInterval(pruneInterval)
     }

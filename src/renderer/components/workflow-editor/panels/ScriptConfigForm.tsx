@@ -9,7 +9,7 @@ import {
   CONTEXT_REF,
   getAvailableContextVars,
   isContextRef
-} from '../../../lib/template-vars'
+} from '@vornrun/shared/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 import { ProjectPicker } from '../../ProjectPicker'
 import { SelectPicker } from '../../SelectPicker'
