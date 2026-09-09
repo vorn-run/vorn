@@ -122,4 +122,12 @@ describe('a run that ends', () => {
 
     expect(sendWorkflowGateNotification).toHaveBeenCalledTimes(2)
   })
+
+  it('forgets a stopped one too, which raises nothing to say it is over', () => {
+    announceRun(waiting())
+    announceRun(run({ status: 'cancelled' }))
+    announceRun(waiting())
+
+    expect(sendWorkflowGateNotification).toHaveBeenCalledTimes(2)
+  })
 })

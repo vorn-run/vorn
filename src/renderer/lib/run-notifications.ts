@@ -54,7 +54,9 @@ export function announceRun(execution: WorkflowExecution): void {
     }
   }
 
-  if (ended) lastSeen.delete(execution.runId)
+  // Cancelled counts as over here even though it raises nothing: no further
+  // update arrives for a stopped run, so anything kept would be kept forever.
+  if (execution.status !== 'running') lastSeen.delete(execution.runId)
   else lastSeen.set(execution.runId, { status: execution.status, waiting })
 }
 
