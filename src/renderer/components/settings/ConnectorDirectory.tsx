@@ -448,7 +448,8 @@ function facts(
         ].filter(Boolean) as string[])
   if (offers.length > 0) parts.push(offers.join(', '))
 
-  const version = listing.catalogItem?.version ?? listing.pack?.version
+  // Only what installing would bring: an installed pack says its version on the status line below.
+  const version = listing.catalogItem?.version
   if (version) parts.push(`v${version}`)
   if (listing.kind === 'extension') {
     // Only worth saying once it is installed; before that there are no cards to be on.
