@@ -50,7 +50,9 @@ function tokenFileMissingMessage(): string {
   return `Vorn local credential not found (${localTokenFile()}).
 The server writes it on startup and removes it on shutdown, so this usually means
 Vorn is not running. Start Vorn (or \`vorn server serve\`) and try again.
-If the server runs with --data-dir, pass the same --data-dir here.`
+If the server runs with --data-dir, pass the same --data-dir here, or set
+VORN_DATA_DIR to that directory -- which is how anything that is not the CLI,
+MCP included, reaches a server that moved.`
 }
 
 /**

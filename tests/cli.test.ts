@@ -106,6 +106,16 @@ describe('usage and dispatch', () => {
     expect(io.out()).toBe('No device tokens.\n')
   })
 
+  it('names the option that swallowed the command, not the leftovers', async () => {
+    const io = capture()
+    expect(await runCli(['--data-dir', 'session', 'list'], io)).toBe(2)
+    expect(io.err()).toContain('--data-dir needs a value; it took "session" as one')
+
+    const io2 = capture()
+    expect(await runCli(['--data-dir', 'session'], io2)).toBe(2)
+    expect(io2.err()).toContain('--data-dir needs a value')
+  })
+
   it('reports an unknown command', async () => {
     const io = capture()
     expect(await runCli(['bogus'], io)).toBe(2)

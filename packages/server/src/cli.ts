@@ -252,6 +252,26 @@ export function findCommand(argv: string[]): string | undefined {
   return undefined
 }
 
+const COMMANDS = ['session', 'workflow', 'server', 'serve', 'token', 'help']
+
+/**
+ * An option that swallowed the command, because its own value was missing.
+ *
+ * `vorn --data-dir session list` parses: `--data-dir` takes `session`, and what
+ * is left is `list`, which is not a command. Reported as the missing value it
+ * is, rather than as a mystery about `list`. Only consulted once the command has
+ * failed to resolve, so `--prompt session` on a real command is left alone.
+ */
+function optionAteTheCommand(argv: string[]): { option: string; value: string } | undefined {
+  for (let i = 0; i < argv.length - 1; i++) {
+    const token = argv[i]
+    if (!token.startsWith('--') || token.includes('=')) continue
+    if (!TAKES_VALUE.has(token.slice(2))) continue
+    if (COMMANDS.includes(argv[i + 1])) return { option: token, value: argv[i + 1] }
+  }
+  return undefined
+}
+
 /** The same argv with the command itself taken out, options left where they were. */
 function withoutCommand(argv: string[], command: string): string[] {
   const at = argv.indexOf(command)
@@ -275,6 +295,11 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.write(USAGE)
       return EXIT_OK
     }
+    const eaten = optionAteTheCommand(argv)
+    if (eaten) {
+      deps.writeErr(`vorn: ${eaten.option} needs a value; it took "${eaten.value}" as one\n`)
+      return EXIT_USAGE
+    }
     deps.writeErr(USAGE)
     return EXIT_USAGE
   }
@@ -293,9 +318,15 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     case 'session':
     case 'workflow':
       return runClientCommand(argv, deps)
-    default:
+    default: {
+      const eaten = optionAteTheCommand(argv)
+      if (eaten) {
+        deps.writeErr(`vorn: ${eaten.option} needs a value; it took "${eaten.value}" as one\n`)
+        return EXIT_USAGE
+      }
       deps.writeErr(`vorn: unknown command "${command}". Try: session, workflow, server, help\n`)
       return EXIT_USAGE
+    }
   }
 }
 
