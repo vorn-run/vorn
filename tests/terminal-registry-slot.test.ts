@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+// When on, the fit mock sizes the grid from the wrapper's box, 8x16 px cells, so a moved rect moves cols/rows.
+const sizer = vi.hoisted(() => ({ enabled: false }))
+
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
     element: HTMLElement | null = null
@@ -17,7 +20,7 @@ vi.mock('@xterm/xterm', () => {
     }
     registerMarker = vi.fn()
     registerDecoration = vi.fn()
-    loadAddon = vi.fn()
+    loadAddon = vi.fn((addon: { activate?: (t: unknown) => void }) => addon.activate?.(this))
     onData = vi.fn()
     attachCustomKeyEventHandler = vi.fn()
     dispose = vi.fn()
@@ -49,7 +52,16 @@ vi.mock('@xterm/xterm', () => {
 
 vi.mock('@xterm/addon-fit', () => {
   class MockFitAddon {
-    fit = vi.fn()
+    term: { element: HTMLElement | null; cols: number; rows: number } | null = null
+    activate(term: unknown): void {
+      this.term = term as MockFitAddon['term']
+    }
+    fit = vi.fn(() => {
+      const el = this.term?.element
+      if (!sizer.enabled || !this.term || !el) return
+      this.term.cols = Math.max(2, Math.floor((parseInt(el.style.width) || 0) / 8))
+      this.term.rows = Math.max(1, Math.floor((parseInt(el.style.height) || 0) / 16))
+    })
   }
   return { FitAddon: MockFitAddon }
 })
@@ -79,7 +91,8 @@ import {
   syncTerminalOverlay,
   onRegistryChange,
   getRegisteredTerminalIds,
-  destroyTerminal
+  destroyTerminal,
+  fitTerminal
 } from '../src/renderer/lib/terminal-registry'
 
 function makeSlot(rect: Partial<DOMRect>): HTMLDivElement {
@@ -265,5 +278,120 @@ describe('terminal-registry: slot / persistent-host API', () => {
     syncTerminalOverlay('term-round')
     expect(wrapper.style.top).toBe('50px')
     expect(wrapper.style.left).toBe('101px')
+  })
+})
+
+// The pty hears a terminal's first size at once and every later one once it settles: a drag is one SIGWINCH, not one per frame.
+describe('what the pty is told about size', () => {
+  let host: HTMLDivElement
+  const resize = (): ReturnType<typeof vi.fn> =>
+    window.api.resizeTerminal as ReturnType<typeof vi.fn>
+  const sizes = (): Array<{ cols: number; rows: number }> =>
+    resize().mock.calls.map((c) => ({ cols: c[0].cols, rows: c[0].rows }))
+
+  /** A slot whose rect the test can move. */
+  function movableSlot(
+    width: number,
+    height: number
+  ): { el: HTMLDivElement; resizeTo: (w: number, h: number) => void } {
+    const el = document.createElement('div')
+    let box = { width, height }
+    el.getBoundingClientRect = () =>
+      ({
+        top: 0,
+        left: 0,
+        right: box.width,
+        bottom: box.height,
+        x: 0,
+        y: 0,
+        ...box,
+        toJSON: () => ({})
+      }) as DOMRect
+    return {
+      el,
+      resizeTo: (w, h) => {
+        box = { width: w, height: h }
+      }
+    }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    sizer.enabled = true
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    setHostRoot(host)
+  })
+
+  afterEach(() => {
+    for (const id of getRegisteredTerminalIds()) destroyTerminal(id)
+    setHostRoot(null)
+    document.body.innerHTML = ''
+    sizer.enabled = false
+    vi.clearAllMocks()
+    vi.useRealTimers()
+  })
+
+  it('tells it the first size at once', () => {
+    const slot = movableSlot(800, 480)
+    registerSlot('t', slot.el)
+
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('tells it a drag once, after the last frame, with the size it ended at', () => {
+    const slot = movableSlot(800, 480)
+    registerSlot('t', slot.el)
+
+    for (let w = 808; w <= 880; w += 8) {
+      slot.resizeTo(w, 480)
+      syncTerminalOverlay('t')
+      vi.advanceTimersByTime(16)
+    }
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+
+    vi.advanceTimersByTime(50)
+    expect(sizes()).toEqual([
+      { cols: 100, rows: 30 },
+      { cols: 110, rows: 30 }
+    ])
+  })
+
+  it('says nothing when a drag ends where it began', () => {
+    const slot = movableSlot(800, 480)
+    registerSlot('t', slot.el)
+    slot.resizeTo(880, 480)
+    syncTerminalOverlay('t')
+    slot.resizeTo(800, 480)
+    syncTerminalOverlay('t')
+
+    vi.advanceTimersByTime(50)
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('says nothing for a terminal destroyed during the hold', () => {
+    const slot = movableSlot(800, 480)
+    registerSlot('t', slot.el)
+    slot.resizeTo(880, 480)
+    syncTerminalOverlay('t')
+    destroyTerminal('t')
+
+    vi.advanceTimersByTime(50)
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('holds a refit for a font or renderer change the same way', () => {
+    const slot = movableSlot(800, 480)
+    registerSlot('t', slot.el)
+    // The box did not move; the cell did. `fitTerminal` is that path.
+    getPersistentWrapper('t')!.style.width = '880px'
+    fitTerminal('t')
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+
+    vi.advanceTimersByTime(50)
+    expect(sizes()).toEqual([
+      { cols: 100, rows: 30 },
+      { cols: 110, rows: 30 }
+    ])
   })
 })

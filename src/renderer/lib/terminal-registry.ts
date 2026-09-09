@@ -21,6 +21,9 @@ interface TerminalEntry {
   lastAppliedRect: { top: number; left: number; width: number; height: number } | null
   lastSyncedCols: number
   lastSyncedRows: number
+  /** A size the pty has not been told yet, and the hold before it is. */
+  pendingSize: { cols: number; rows: number } | null
+  resizeTimer: ReturnType<typeof setTimeout> | null
   _loadRenderer?: (() => void) | null
   _gpuAddon?: { dispose(): void } | null
   _disposeCommandBlocks?: (() => void) | null
@@ -435,7 +438,9 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
     activeSlot: null,
     lastAppliedRect: null,
     lastSyncedCols: 0,
-    lastSyncedRows: 0
+    lastSyncedRows: 0,
+    pendingSize: null,
+    resizeTimer: null
   }
 
   entry._loadRenderer = loadRenderer
@@ -575,6 +580,32 @@ function hideWrapper(wrapper: HTMLDivElement, entry: TerminalEntry): void {
   entry.lastAppliedRect = null
 }
 
+/** How long a size has to stand still before the process is told. */
+const RESIZE_SETTLE_MS = 50
+
+function sendSize(entry: TerminalEntry, terminalId: string, cols: number, rows: number): void {
+  if (cols === entry.lastSyncedCols && rows === entry.lastSyncedRows) return
+  entry.lastSyncedCols = cols
+  entry.lastSyncedRows = rows
+  window.api.resizeTerminal({ id: terminalId, cols, rows })
+}
+
+/** The first size goes out at once; every later one once it settles, so a drag is one SIGWINCH rather than one per frame. */
+function announceSize(entry: TerminalEntry, terminalId: string, cols: number, rows: number): void {
+  if (entry.lastSyncedCols === 0) {
+    sendSize(entry, terminalId, cols, rows)
+    return
+  }
+  entry.pendingSize = { cols, rows }
+  if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
+  entry.resizeTimer = setTimeout(() => {
+    entry.resizeTimer = null
+    const size = entry.pendingSize
+    entry.pendingSize = null
+    if (size) sendSize(entry, terminalId, size.cols, size.rows)
+  }, RESIZE_SETTLE_MS)
+}
+
 /**
  * Position the persistent wrapper to overlay the active slot. Called every
  * frame by TerminalHost, so the function is aggressively guarded:
@@ -633,11 +664,7 @@ export function syncTerminalOverlay(terminalId: string): void {
     return
   }
   const { cols, rows } = entry.term
-  if (cols !== entry.lastSyncedCols || rows !== entry.lastSyncedRows) {
-    entry.lastSyncedCols = cols
-    entry.lastSyncedRows = rows
-    window.api.resizeTerminal({ id: terminalId, cols, rows })
-  }
+  announceSize(entry, terminalId, cols, rows)
 }
 
 export function onRegistryChange(cb: () => void): () => void {
@@ -671,11 +698,7 @@ export function fitTerminal(terminalId: string): void {
     return
   }
   const { cols, rows } = entry.term
-  if (cols !== entry.lastSyncedCols || rows !== entry.lastSyncedRows) {
-    entry.lastSyncedCols = cols
-    entry.lastSyncedRows = rows
-    window.api.resizeTerminal({ id: terminalId, cols, rows })
-  }
+  announceSize(entry, terminalId, cols, rows)
 }
 
 /**
@@ -887,6 +910,9 @@ export function destroyTerminal(terminalId: string): void {
   // A seed still in flight would otherwise resolve and write into a terminal
   // that no longer exists.
   hydrating.delete(terminalId)
+  if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
+  entry.resizeTimer = null
+  entry.pendingSize = null
   entry._disposeCommandBlocks?.()
   entry._disposeCommandBlocks = null
   entry._disposeScrollAnchor?.()
