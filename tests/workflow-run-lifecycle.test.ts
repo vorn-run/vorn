@@ -72,25 +72,51 @@ const mockState = {
     workflows: [] as WorkflowDefinition[]
   },
   workflowExecutions: new Map<string, WorkflowExecution>(),
-  terminals: new Map(),
   headlessSessions: [] as { id: string; agentSessionId?: string }[],
-  setWorkflowExecution: (runId: string, execution: WorkflowExecution) => {
-    mockState.workflowExecutions.set(runId, execution)
-  },
-  addHeadlessSession: vi.fn(),
-  startTask: vi.fn(),
-  reopenTask: vi.fn(),
-  getNextTask: vi.fn(),
-  setEditingWorkflowId: vi.fn(),
-  setWorkflowEditorOpen: vi.fn()
+  getNextTask: vi.fn()
 }
 
-vi.mock('../src/renderer/stores', () => ({
-  useAppStore: { getState: () => mockState }
+/** Everything the engine reaches the rest of the server through. */
+const hostApi: Record<string, unknown> = {}
+
+vi.mock('../packages/server/src/workflows/host', () => ({
+  api: new Proxy(
+    {},
+    {
+      get: (_t, name: string) => hostApi[name]
+    }
+  ),
+  config: () => mockState.config,
+  publishRun: (execution: WorkflowExecution) => {
+    mockState.workflowExecutions.set(execution.runId, { ...execution })
+  },
+  runById: (runId: string) => mockState.workflowExecutions.get(runId),
+  activeTerminals: () => [],
+  activeHeadless: () => mockState.headlessSessions,
+  nextTask: (project: string) => mockState.getNextTask(project),
+  onHeadlessData: (fn: DataListener) => {
+    dataListeners.add(fn)
+    return () => dataListeners.delete(fn)
+  },
+  onHeadlessExit: (fn: ExitListener) => {
+    exitListeners.add(fn)
+    return () => exitListeners.delete(fn)
+  },
+  onScriptData: () => () => {}
 }))
 
-vi.mock('../src/renderer/lib/notifications', () => ({
-  sendWorkflowGateNotification: vi.fn()
+vi.mock('../packages/server/src/workflows/tasks', () => ({
+  startTask: vi.fn(),
+  reopenTask: vi.fn()
+}))
+
+vi.mock('../packages/server/src/database', () => ({
+  listWorkflowRuns: () => [],
+  getWorkflowRun: () => null
+}))
+
+vi.mock('../packages/server/src/logger', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }))
 
 const {
@@ -100,7 +126,7 @@ const {
   reconcileRunningExecutions,
   rejectWorkflowGate,
   stopWorkflowRun
-} = await import('../src/renderer/lib/workflow-execution')
+} = await import('../packages/server/src/workflows/engine')
 
 function makeWorkflow(id = 'wf-1'): WorkflowDefinition {
   return {
@@ -158,7 +184,7 @@ beforeEach(() => {
   killHeadlessSession.mockClear()
   createHeadlessSession.mockClear()
 
-  globalThis.window.api = {
+  Object.assign(hostApi, {
     claimWorkflowRun,
     releaseWorkflowRun,
     createHeadlessSession,
@@ -171,17 +197,8 @@ beforeEach(() => {
     listSessionEventsBySession: vi.fn(() => Promise.resolve([])),
     getWorktreeActiveSessions: vi.fn(() => Promise.resolve({ count: 0 })),
     isWorktreeDirty: vi.fn(() => Promise.resolve(false)),
-    removeWorktree: vi.fn(() => Promise.resolve()),
-    onHeadlessData: (fn: DataListener) => {
-      dataListeners.add(fn)
-      return () => dataListeners.delete(fn)
-    },
-    onHeadlessExit: (fn: ExitListener) => {
-      exitListeners.add(fn)
-      return () => exitListeners.delete(fn)
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any
+    removeWorktree: vi.fn(() => Promise.resolve())
+  })
 })
 
 afterEach(() => {
@@ -267,11 +284,11 @@ describe('run concurrency', () => {
     })
     const sessionId = await nextSession()
 
-    expect(window.api.completeConnectorInbox).not.toHaveBeenCalled()
+    expect(hostApi.completeConnectorInbox).not.toHaveBeenCalled()
     emitExit(sessionId, 0)
     await vi.runAllTimersAsync()
     expect((await run).status).toBe('success')
-    expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
+    expect(hostApi.completeConnectorInbox).toHaveBeenCalledWith({
       id: 73,
       leaseToken: 'lease-73',
       disposition: 'processed'
@@ -477,7 +494,7 @@ describe('stopping a run', () => {
     expect(killHeadlessSession).toHaveBeenCalledWith(sessionId)
     expect(execution.status).toBe('cancelled')
     expect(execution.nodeStates.find((n) => n.nodeId === 'agent')?.error).toBe('Stopped by user')
-    expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
+    expect(hostApi.completeConnectorInbox).toHaveBeenCalledWith({
       id: 74,
       leaseToken: 'lease-74',
       disposition: 'processed',
@@ -596,7 +613,7 @@ describe('rejecting an approval gate', () => {
     })
     const rejected = await rejectWorkflowGate(waiting, 'approval')
     expect(rejected.status).toBe('error')
-    expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
+    expect(hostApi.completeConnectorInbox).toHaveBeenCalledWith({
       id: 91,
       leaseToken: 'lease-92',
       disposition: 'processed'
@@ -756,17 +773,15 @@ describe('a step that declared its failure survivable', () => {
         { nodeId: 'agent', status: 'running', sessionId: 'sess-reloaded' }
       ]
     }
-    globalThis.window.api.listSessionEventsBySession = vi.fn(
-      () =>
-        Promise.resolve([
-          {
-            eventType: 'exited',
-            timestamp: '2026-04-20T10:01:00Z',
-            metadata: { exitCode: 1 }
-          }
-        ])
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ) as any
+    hostApi.listSessionEventsBySession = vi.fn(() =>
+      Promise.resolve([
+        {
+          eventType: 'exited',
+          timestamp: '2026-04-20T10:01:00Z',
+          metadata: { exitCode: 1 }
+        }
+      ])
+    )
 
     await reconcileRunningExecutions([execution], mockState.config.workflows)
 
@@ -813,7 +828,7 @@ describe('connector run recovery', () => {
 
     await reconcileRunningExecutions([execution], [])
 
-    expect(window.api.completeConnectorInbox).toHaveBeenCalledWith({
+    expect(hostApi.completeConnectorInbox).toHaveBeenCalledWith({
       id: 101,
       leaseToken: 'lease-101',
       disposition: 'processed'

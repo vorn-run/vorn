@@ -3,17 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-const approve = vi.fn()
-const reject = vi.fn()
-// The real module but for the calls this asserts, so the retry control is gated
-// by the rule the entry really uses.
-vi.mock('../src/renderer/lib/workflow-execution', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/renderer/lib/workflow-execution')>()),
-  approveWorkflowGate: (...args: unknown[]) => approve(...args),
-  rejectWorkflowGate: (...args: unknown[]) => reject(...args),
-  isRunStoppable: (e: { status: string }) => e.status === 'running',
-  stopWorkflowRun: vi.fn()
-}))
+// A gate is answered by asking the server; the entry only makes the request.
+const resolveWorkflowGate = vi.fn()
 
 vi.mock('../src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
@@ -42,8 +33,8 @@ const approvalNode: WorkflowNode = {
 }
 
 beforeEach(() => {
-  approve.mockReset()
-  reject.mockReset()
+  resolveWorkflowGate.mockReset()
+  ;(window as unknown as { api: unknown }).api = { resolveWorkflowGate, stopWorkflowRun: vi.fn() }
 })
 
 describe('RunEntry — approval gate controls', () => {
@@ -60,16 +51,24 @@ describe('RunEntry — approval gate controls', () => {
     expect(getByText('Waiting for approval.')).toBeTruthy()
   })
 
-  it('invokes approveWorkflowGate when Approve is clicked', () => {
+  it('asks the server to approve when Approve is clicked', () => {
     const { getByText } = render(<RunEntry execution={makeExec()} nodes={[approvalNode]} />)
     fireEvent.click(getByText('Approve'))
-    expect(approve).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'wf-1' }), 'gate')
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      nodeId: 'gate',
+      decision: 'approve'
+    })
   })
 
-  it('invokes rejectWorkflowGate when Reject is clicked', () => {
+  it('asks the server to reject when Reject is clicked', () => {
     const { getByText } = render(<RunEntry execution={makeExec()} nodes={[approvalNode]} />)
     fireEvent.click(getByText('Reject'))
-    expect(reject).toHaveBeenCalledWith(expect.objectContaining({ workflowId: 'wf-1' }), 'gate')
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      nodeId: 'gate',
+      decision: 'reject'
+    })
   })
 
   it('offers a retry from the failed step when a step failed but the run went on', () => {

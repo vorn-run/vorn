@@ -25,6 +25,13 @@ vi.mock('node-cron', () => ({
 vi.mock('../packages/server/src/config-manager', () => ({
   configManager: { loadConfig: vi.fn(), saveConfig: vi.fn() }
 }))
+const runScheduled = vi.hoisted(() => vi.fn(async (_workflowId: string, _inputs?: unknown) => {}))
+const runConnectorItem = vi.hoisted(() => vi.fn(async (_event: unknown) => {}))
+vi.mock('../packages/server/src/workflows/dispatch', () => ({ runScheduled, runConnectorItem }))
+
+const stopWorkflowRun = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock('../packages/server/src/workflows/engine', () => ({ stopWorkflowRun }))
+
 vi.mock('../packages/server/src/schedule-log', () => ({
   scheduleLogManager: { addEntry: vi.fn() }
 }))
@@ -153,13 +160,14 @@ describe('firing a workflow', () => {
     }
   }
 
+  /** What the scheduler asked to be run, in order. */
   function watch(): { seen: unknown[]; stop: () => void } {
+    runScheduled.mockClear()
     const seen: unknown[] = []
-    const listener = (method: string, params: unknown): void => {
-      if (method === 'scheduler:execute') seen.push(params)
-    }
-    scheduler.on('client-message', listener)
-    return { seen, stop: () => scheduler.off('client-message', listener) }
+    runScheduled.mockImplementation(async (workflowId: string, inputs?: unknown) => {
+      seen.push({ workflowId, inputs })
+    })
+    return { seen, stop: () => runScheduled.mockClear() }
   }
 
   it('runs a workflow as often as it is asked to, within one minute', () => {
@@ -201,29 +209,22 @@ describe('firing a workflow', () => {
 })
 
 describe('scheduler.stopRun', () => {
-  it('broadcasts the run id to every connected instance', () => {
-    const seen: Array<[string, unknown]> = []
-    const listener = (method: string, params: unknown) => seen.push([method, params])
-    scheduler.on('client-message', listener)
+  it('stops the run itself, because it is holding it', () => {
+    stopWorkflowRun.mockClear()
 
     scheduler.stopRun('run-abc')
 
-    scheduler.off('client-message', listener)
-    expect(seen).toEqual([['scheduler:stopRun', { runId: 'run-abc' }]])
+    expect(stopWorkflowRun).toHaveBeenCalledWith('run-abc')
   })
 
-  // Unlike a trigger, a stop must not be claimed: the instance that would win
-  // the lock is not necessarily the one holding the run, so a claimed stop
-  // would be swallowed by a window that has never heard of it.
-  it('does not take an execution lock, so repeats still go out', () => {
-    const seen: unknown[] = []
-    const listener = (_method: string, params: unknown) => seen.push(params)
-    scheduler.on('client-message', listener)
+  // Unlike a trigger, a stop takes no execution lock: asking twice must reach
+  // the run twice, since the first may have raced the run ending.
+  it('does not take an execution lock, so repeats still go through', () => {
+    stopWorkflowRun.mockClear()
 
     scheduler.stopRun('run-abc')
     scheduler.stopRun('run-abc')
 
-    scheduler.off('client-message', listener)
-    expect(seen).toEqual([{ runId: 'run-abc' }, { runId: 'run-abc' }])
+    expect(stopWorkflowRun).toHaveBeenCalledTimes(2)
   })
 })

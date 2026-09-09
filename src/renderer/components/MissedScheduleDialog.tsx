@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../stores'
-import { executeWorkflow } from '../lib/workflow-execution'
 import { Clock, AlertTriangle } from 'lucide-react'
 
 interface MissedItem {
@@ -29,7 +28,7 @@ export function MissedScheduleDialog() {
       if (!selected.has(item.workflow.id)) continue
       const wf = config?.workflows?.find((w) => w.id === item.workflow.id)
       if (!wf) continue
-      await executeWorkflow(wf)
+      await window.api.runWorkflow({ workflowId: wf.id })
     }
     setMissed([])
   }

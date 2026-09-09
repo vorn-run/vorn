@@ -28,7 +28,7 @@ vi.mock('../src/renderer/hooks/useWaitingApprovals', () => ({
   useWaitingApprovals: () => waitingMock()
 }))
 
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
+vi.mock('../packages/server/src/workflows/engine', () => ({
   executeWorkflow: vi.fn()
 }))
 

@@ -58,29 +58,46 @@ const mockState = {
     workflows: [] as WorkflowDefinition[]
   },
   workflowExecutions: new Map<string, WorkflowExecution>(),
-  terminals: new Map(),
-  headlessSessions: [] as { id: string; agentSessionId?: string }[],
-  setWorkflowExecution: (runId: string, execution: WorkflowExecution) => {
-    mockState.workflowExecutions.set(runId, execution)
-  },
-  addHeadlessSession: vi.fn(),
-  startTask: vi.fn(),
-  reopenTask: vi.fn(),
-  getNextTask: vi.fn(),
-  setEditingWorkflowId: vi.fn(),
-  setWorkflowEditorOpen: vi.fn()
+  headlessSessions: [] as { id: string; agentSessionId?: string }[]
 }
 
-vi.mock('../src/renderer/stores', () => ({
-  useAppStore: { getState: () => mockState }
+/** Everything the engine reaches the rest of the server through. */
+const hostApi: Record<string, unknown> = {}
+
+vi.mock('../packages/server/src/workflows/host', () => ({
+  api: new Proxy({}, { get: (_t, name: string) => hostApi[name] }),
+  config: () => mockState.config,
+  publishRun: (execution: WorkflowExecution) => {
+    mockState.workflowExecutions.set(execution.runId, { ...execution })
+  },
+  runById: (runId: string) => mockState.workflowExecutions.get(runId),
+  activeTerminals: () => [],
+  activeHeadless: () => mockState.headlessSessions,
+  nextTask: () => undefined,
+  onHeadlessData: () => () => {},
+  onHeadlessExit: (fn: ExitListener) => {
+    exitListeners.add(fn)
+    return () => exitListeners.delete(fn)
+  },
+  onScriptData: () => () => {}
 }))
 
-vi.mock('../src/renderer/lib/notifications', () => ({
-  sendWorkflowGateNotification: vi.fn()
+vi.mock('../packages/server/src/workflows/tasks', () => ({
+  startTask: vi.fn(),
+  reopenTask: vi.fn()
+}))
+
+vi.mock('../packages/server/src/database', () => ({
+  listWorkflowRuns: () => [],
+  getWorkflowRun: () => null
+}))
+
+vi.mock('../packages/server/src/logger', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }))
 
 const { executeWorkflow, retryRunFromFailure, rerunWorkflowRun, contextFromRun, seedRetryStates } =
-  await import('../src/renderer/lib/workflow-execution')
+  await import('../packages/server/src/workflows/engine')
 
 const agentNode = (id: string, prompt: string) => ({
   id,
@@ -139,7 +156,7 @@ beforeEach(() => {
   onSessionCreated = null
   mockState.workflowExecutions.clear()
 
-  globalThis.window.api = {
+  Object.assign(hostApi, {
     claimWorkflowRun,
     releaseWorkflowRun,
     createHeadlessSession,
@@ -152,14 +169,8 @@ beforeEach(() => {
     listSessionEventsBySession: vi.fn(() => Promise.resolve([])),
     getWorktreeActiveSessions: vi.fn(() => Promise.resolve({ count: 0 })),
     isWorktreeDirty: vi.fn(() => Promise.resolve(false)),
-    removeWorktree: vi.fn(() => Promise.resolve()),
-    onHeadlessData: () => () => {},
-    onHeadlessExit: (fn: ExitListener) => {
-      exitListeners.add(fn)
-      return () => exitListeners.delete(fn)
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any
+    removeWorktree: vi.fn(() => Promise.resolve())
+  })
 })
 
 afterEach(() => {

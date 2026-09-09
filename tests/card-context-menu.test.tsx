@@ -12,6 +12,7 @@ const mockListWorktrees = vi.fn()
 Object.defineProperty(window, 'api', {
   value: {
     createTerminal: (...args: unknown[]) => mockCreateTerminal(...args),
+    runWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args),
     createShellTerminal: (...args: unknown[]) => mockCreateShellTerminal(...args),
     listBranches: (...args: unknown[]) => mockListBranches(...args),
     listWorktrees: (...args: unknown[]) => mockListWorktrees(...args),
@@ -44,9 +45,11 @@ vi.mock('../src/renderer/hooks/useIsMobile', () => ({
 }))
 
 const mockExecuteWorkflow = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  executeWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args)
-}))
+
+beforeEach(() => {
+  mockExecuteWorkflow.mockClear()
+})
+// Runs start in the server; these check what the window asks for.
 
 import { useAppStore } from '../src/renderer/stores'
 import { CardContextMenu } from '../src/renderer/components/CardContextMenu'
@@ -342,13 +345,13 @@ describe('CardContextMenu', () => {
 
     fireEvent.click(screen.getByText('Deploy Staging'))
     expect(onClose).toHaveBeenCalled()
-    expect(mockExecuteWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'wf-1', name: 'Deploy Staging' }),
-      expect.objectContaining({
+    expect(mockExecuteWorkflow).toHaveBeenCalledWith({
+      workflowId: 'wf-1',
+      context: expect.objectContaining({
         source: expect.objectContaining({ projectName: expect.any(String) })
       }),
-      { source: 'manual' }
-    )
+      targetNodeId: undefined
+    })
   })
 
   it('only shows workflows from the active workspace', () => {

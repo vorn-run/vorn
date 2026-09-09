@@ -3,11 +3,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { WorkflowExecution } from '../src/shared/types'
 
-const rescheduleMock = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  rescheduleWaitingGateTimers: (...args: unknown[]) => rescheduleMock(...args)
-}))
-
 const setWorkflowExecution = vi.fn((id: string, exec: WorkflowExecution) => {
   mockState.workflowExecutions.set(id, exec)
 })
@@ -47,7 +42,6 @@ const listWaiting = vi.fn()
 
 beforeEach(() => {
   mockState.workflowExecutions = new Map()
-  rescheduleMock.mockReset()
   setWorkflowExecution.mockClear()
   listAll.mockReset().mockResolvedValue([])
   listWaiting.mockReset().mockResolvedValue([])
@@ -56,7 +50,7 @@ beforeEach(() => {
 })
 
 describe('useAllWorkflowRuns', () => {
-  it('hydrates a waiting run this renderer has never seen and starts its timers', async () => {
+  it('hydrates a waiting run this window has never seen', async () => {
     const waiting = run({
       status: 'running',
       nodeStates: [{ nodeId: 'gate', status: 'waiting' }]
@@ -66,10 +60,9 @@ describe('useAllWorkflowRuns', () => {
     renderHook(() => useAllWorkflowRuns(10))
 
     await waitFor(() => expect(setWorkflowExecution).toHaveBeenCalledWith('run-1', waiting))
-    expect(rescheduleMock).toHaveBeenCalledWith([waiting], mockState.config.workflows)
   })
 
-  it('does not re-hydrate or re-time a run already in the live map', async () => {
+  it('does not re-hydrate a run already in the live map', async () => {
     mockState.workflowExecutions.set('run-1', run())
     listWaiting.mockResolvedValue([run()])
 
@@ -77,7 +70,6 @@ describe('useAllWorkflowRuns', () => {
 
     await waitFor(() => expect(listWaiting).toHaveBeenCalled())
     expect(setWorkflowExecution).not.toHaveBeenCalled()
-    expect(rescheduleMock).not.toHaveBeenCalled()
   })
 
   it('prefers the live entry over the persisted snapshot while the run is in flight', async () => {

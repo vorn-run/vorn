@@ -12,13 +12,7 @@ import {
   runSummaryText,
   type RunWorkflowRef
 } from '../../lib/run-presentation'
-import {
-  approveWorkflowGate,
-  rejectWorkflowGate,
-  retryRunFromFailure,
-  rerunWorkflowRun,
-  hasFailedStep
-} from '../../lib/workflow-execution'
+import { hasFailedStep } from '@vornrun/shared/workflow-graph'
 import { RunStepsList, StatusDot } from '../workflow-editor/RunEntry'
 import { RunIcon } from './RunIcon'
 import { useConnectorLook } from '../../lib/use-connections'
@@ -87,10 +81,18 @@ export function RunDetailPane({
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault()
-        void approveWorkflowGate(run, waitingGate.nodeId)
+        void window.api.resolveWorkflowGate({
+          runId: run.runId,
+          nodeId: waitingGate.nodeId,
+          decision: 'approve'
+        })
       } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'r') {
         e.preventDefault()
-        void rejectWorkflowGate(run, waitingGate.nodeId)
+        void window.api.resolveWorkflowGate({
+          runId: run.runId,
+          nodeId: waitingGate.nodeId,
+          decision: 'reject'
+        })
       }
     }
     document.addEventListener('keydown', onKeyDown)
@@ -118,7 +120,7 @@ export function RunDetailPane({
             <button
               aria-label="Retry from failed step"
               title="Retry from failed step"
-              onClick={() => retryRunFromFailure(fullWorkflow, run).catch(onLaunchError)}
+              onClick={() => window.api.retryWorkflowRun(run.runId).catch(onLaunchError)}
               className="p-1 rounded text-gray-500 hover:text-white transition-colors shrink-0"
             >
               <RotateCcw size={13} strokeWidth={2} />
@@ -128,7 +130,7 @@ export function RunDetailPane({
             <button
               aria-label="Run again"
               title="Run again"
-              onClick={() => rerunWorkflowRun(fullWorkflow, run).catch(onLaunchError)}
+              onClick={() => window.api.rerunWorkflowRun(run.runId).catch(onLaunchError)}
               className="p-1 rounded text-gray-500 hover:text-white transition-colors shrink-0"
             >
               <Play size={13} strokeWidth={2} />
@@ -187,7 +189,13 @@ export function RunDetailPane({
         <div className="px-5 pb-4 shrink-0 flex flex-col gap-1.5">
           <button
             type="button"
-            onClick={() => void approveWorkflowGate(run, waitingGate.nodeId)}
+            onClick={() =>
+              void window.api.resolveWorkflowGate({
+                runId: run.runId,
+                nodeId: waitingGate.nodeId,
+                decision: 'approve'
+              })
+            }
             className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE}`}
           >
             <Check size={14} strokeWidth={2} />
@@ -199,7 +207,13 @@ export function RunDetailPane({
           </button>
           <button
             type="button"
-            onClick={() => void rejectWorkflowGate(run, waitingGate.nodeId)}
+            onClick={() =>
+              void window.api.resolveWorkflowGate({
+                runId: run.runId,
+                nodeId: waitingGate.nodeId,
+                decision: 'reject'
+              })
+            }
             className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_REJECT}`}
           >
             <X size={14} strokeWidth={2} />

@@ -59,7 +59,7 @@ vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPan
   WorkflowPropertiesPanel: () => <div />
 }))
 
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
+vi.mock('../packages/server/src/workflows/engine', () => ({
   executeWorkflow: vi.fn().mockResolvedValue(undefined)
 }))
 

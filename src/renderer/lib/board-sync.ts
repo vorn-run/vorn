@@ -1,6 +1,5 @@
 import type { RestoredSession, TerminalSession } from '../../shared/types'
 import { endedFromRestored } from './ended-from-restored'
-import { fireSessionRestoredTrigger } from './workflow-triggers'
 import { useAppStore } from '../stores'
 import { coldSessions } from './session-utils'
 import { resumeEndedSession } from './session-resume'
@@ -148,7 +147,7 @@ const restoredIds = new Set<string>()
 export function reportWarmAttach(terminalId: string): void {
   if (!restoredIds.delete(terminalId)) return
   const session = useAppStore.getState().terminals.get(terminalId)?.session
-  if (session) fireSessionRestoredTrigger(session, { restore: 'warm' })
+  if (session) void window.api.sessionRestored({ sessionId: session.id, restore: 'warm' })
 }
 
 /** Test-only. */

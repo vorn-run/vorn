@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { GitBranch, Zap } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { ProjectPicker } from './ProjectPicker'
-import { executeWorkflow } from '../lib/workflow-execution'
 import { containsContextRef, isContextRef } from '@vornrun/shared/template-vars'
 import { getWorkflowInputs, isContextualWorkflow } from '../lib/workflow-helpers'
 import { WorkflowInputFields } from './WorkflowInputFields'
@@ -153,14 +152,11 @@ export function SourcePromptDialog() {
             } satisfies TerminalSession
           }
         : null
-    void executeWorkflow(
-      workflow,
-      { ...base, inputs },
-      {
-        source: 'manual',
-        targetNodeId: pendingRun?.targetNodeId
-      }
-    )
+    void window.api.runWorkflow({
+      workflowId: workflow.id,
+      context: { ...base, inputs },
+      targetNodeId: pendingRun?.targetNodeId
+    })
     close()
   }
 

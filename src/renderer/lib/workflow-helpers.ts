@@ -1,3 +1,10 @@
+export {
+  getWorktreeMode,
+  schedulerExecutionContext,
+  webhookTriggerFromItem,
+  type WorktreeMode
+} from '@vornrun/shared/workflow-graph'
+
 import {
   WorkflowDefinition,
   WorkflowNode,
@@ -178,13 +185,6 @@ export interface ManualRunContext {
 export function needsRunPrompt(wf: WorkflowDefinition, ctx?: ManualRunContext): boolean {
   const hasSource = !!(ctx?.task || ctx?.source)
   return (isContextualWorkflow(wf) && !hasSource) || getWorkflowInputs(wf).length > 0
-}
-
-export type WorktreeMode = 'none' | 'new' | 'fromStep' | 'existing' | 'fromContext'
-
-export function getWorktreeMode(cfg: LaunchAgentConfig): WorktreeMode {
-  if (cfg.useWorktree === 'fromContext') return 'fromContext'
-  return cfg.worktreeMode ?? (cfg.useWorktree === true ? 'new' : 'none')
 }
 
 export function getTriggerLabel(wf: WorkflowDefinition): string | undefined {
@@ -389,40 +389,6 @@ export function createCallConnectorActionNode(
     } as import('../../shared/types').CallConnectorActionConfig,
     position: { x: 0, y: 0 }
   }
-}
-
-/** The {{trigger.*}} namespace of a webhook run, rebuilt from the event's stored payload. */
-export function webhookTriggerFromItem(
-  connectorItem: import('../../shared/types').ConnectorItemContext | undefined
-): import('../../shared/types').WorkflowExecutionContext['trigger'] | undefined {
-  if (connectorItem?.connectorId !== 'webhook') return undefined
-  const raw = connectorItem.raw as {
-    body?: unknown
-    headers?: Record<string, string>
-    query?: Record<string, string>
-    method?: string
-  }
-  return {
-    type: 'webhook' as const,
-    body: raw.body,
-    headers: raw.headers,
-    query: raw.query,
-    method: raw.method
-  }
-}
-
-/**
- * The run context for a scheduler-delivered event. A webhook event rides the
- * connector pipe for durability, so its payload is lifted into the trigger
- * namespace here while the connectorItem keeps the lease machinery working.
- */
-export function schedulerExecutionContext(
-  connectorItem: import('../../shared/types').ConnectorItemContext | undefined,
-  inputs: Record<string, unknown> | undefined
-): import('../../shared/types').WorkflowExecutionContext | undefined {
-  if (!connectorItem && !inputs) return undefined
-  const trigger = webhookTriggerFromItem(connectorItem)
-  return { connectorItem, inputs, ...(trigger && { trigger }) }
 }
 
 /** Steps that can swap type in place; condition, loop, and trigger own structure or their own path. */

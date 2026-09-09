@@ -1,7 +1,6 @@
 import { type ReactNode } from 'react'
 import { Workflow } from 'lucide-react'
 import { ICON_MAP } from '../components/project-sidebar/icon-map'
-import { executeWorkflow } from './workflow-execution'
 import { isContextualWorkflow, needsRunPrompt } from './workflow-helpers'
 import type { ManualRunContext } from './workflow-helpers'
 import { useAppStore } from '../stores'
@@ -33,12 +32,12 @@ export type WorkflowMenuContext = ManualRunContext
  * Anything the user still has to supply — a source folder, or declared run
  * inputs — opens the run dialog first; everything else launches immediately.
  * Every manual surface (sidebar, palette, card/terminal menus, the editor's
- * Run button) must go through here rather than calling `executeWorkflow`
- * directly: skipping the prompt is silent, and produces a run whose
+ * Run button) must go through here rather than asking the server to run the
+ * workflow directly: skipping the prompt is silent, and produces a run whose
  * `{{inputs.*}}` templates reach the agent unresolved.
  *
- * `executeWorkflow` itself stays unguarded because the scheduler, connector
- * triggers and missed-schedule recovery legitimately run without a user.
+ * The server's own entry point stays unguarded, because the scheduler,
+ * connector triggers and missed-schedule recovery run without a user.
  */
 export function startManualRun(
   workflow: WorkflowDefinition,
@@ -54,7 +53,11 @@ export function startManualRun(
     useAppStore.getState().setPendingWorkflowRun(workflow.id, ctx, options?.targetNodeId)
     return
   }
-  void executeWorkflow(workflow, ctx, { source: 'manual', targetNodeId: options?.targetNodeId })
+  void window.api.runWorkflow({
+    workflowId: workflow.id,
+    context: ctx,
+    targetNodeId: options?.targetNodeId
+  })
 }
 
 export function buildWorkflowMenuItems(

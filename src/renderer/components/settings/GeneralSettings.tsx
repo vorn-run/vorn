@@ -9,7 +9,7 @@ import { isElectron } from '../../lib/platform'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
-import { DEFAULT_STEP_TIMEOUT_MINUTES } from '../../lib/workflow-execution'
+import { DEFAULT_STEP_TIMEOUT_MINUTES } from '@vornrun/shared/workflow-graph'
 
 interface CliCommandState {
   available: boolean

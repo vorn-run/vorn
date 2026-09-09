@@ -18,10 +18,13 @@ vi.mock('../src/renderer/stores', () => ({
   }
 }))
 
+// Running is a request to the server; the row only makes it.
 const execute = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  executeWorkflow: (...args: unknown[]) => execute(...args)
-}))
+
+Object.defineProperty(window, 'api', {
+  value: { runWorkflow: (...args: unknown[]) => execute(...args) },
+  writable: true
+})
 
 const { WorkflowItem } = await import('../src/renderer/components/project-sidebar/WorkflowItem')
 

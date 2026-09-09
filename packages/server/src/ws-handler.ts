@@ -159,6 +159,25 @@ export function registerMethod<M extends RequestMethod>(
 }
 
 /**
+ * Call a registered method from inside this process.
+ *
+ * The workflow engine is a client of the server's own methods: it creates
+ * sessions, runs scripts and calls connector actions exactly as a window used
+ * to ask the server to. Going through the registry rather than reaching for
+ * each manager keeps one implementation of every one of those -- including the
+ * parts a caller would forget, like the transcript naming `terminal:create`
+ * does and the broadcasts the methods already send.
+ */
+export async function callMethod<M extends RequestMethod>(
+  method: M,
+  params: RequestMethods[M]['params']
+): Promise<RequestMethods[M]['result']> {
+  const handler = handlers.get(method)
+  if (!handler) throw new Error(`No handler registered for ${method}`)
+  return (await handler(params)) as RequestMethods[M]['result']
+}
+
+/**
  * Register a fire-and-forget notification handler (no response sent).
  *
  * Typed against `ClientNotifications` the way `registerMethod` is against

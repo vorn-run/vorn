@@ -52,9 +52,8 @@ vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPan
   WorkflowPropertiesPanel: () => <div data-testid="properties-panel" />
 }))
 
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  executeWorkflow: vi.fn().mockResolvedValue(undefined)
-}))
+// Running is a request to the server; the editor only makes it.
+const runWorkflow = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 
 const mockState = {
   isWorkflowEditorOpen: true,
@@ -85,6 +84,7 @@ vi.mock('../src/renderer/stores', () => {
   removeEventListener: vi.fn(),
   api: {
     listWorkflowRuns: vi.fn().mockResolvedValue([]),
+    runWorkflow,
     createTerminal: vi.fn(),
     isWindowMaximized: vi.fn().mockResolvedValue(false),
     onWindowMaximizedChange: vi.fn(() => () => {}),
@@ -171,8 +171,7 @@ describe('WorkflowEditor', () => {
   it('prompts for run inputs instead of launching the workflow blind', async () => {
     // Running straight from the editor used to skip the prompt entirely, so
     // {{inputs.*}} reached the agent unresolved.
-    const { executeWorkflow } = await import('../src/renderer/lib/workflow-execution')
-    vi.mocked(executeWorkflow).mockClear()
+    runWorkflow.mockClear()
     mockState.setPendingWorkflowRun.mockClear()
     mockState.editingWorkflowId = 'wf-inputs' as unknown as null
     mockState.config.workflows = [
@@ -200,15 +199,14 @@ describe('WorkflowEditor', () => {
     fireEvent.click(container.querySelector('button[aria-label="Run workflow"]')!)
 
     expect(mockState.setPendingWorkflowRun).toHaveBeenCalledWith('wf-inputs', undefined, undefined)
-    expect(executeWorkflow).not.toHaveBeenCalled()
+    expect(runWorkflow).not.toHaveBeenCalled()
 
     mockState.editingWorkflowId = null
     mockState.config.workflows = []
   })
 
   it('runs a workflow with no declared inputs directly', async () => {
-    const { executeWorkflow } = await import('../src/renderer/lib/workflow-execution')
-    vi.mocked(executeWorkflow).mockClear()
+    runWorkflow.mockClear()
     mockState.setPendingWorkflowRun.mockClear()
     mockState.editingWorkflowId = 'wf-plain' as unknown as null
     mockState.config.workflows = [
@@ -232,7 +230,7 @@ describe('WorkflowEditor', () => {
     const { container } = render(<WorkflowEditor />)
     fireEvent.click(container.querySelector('button[aria-label="Run workflow"]')!)
 
-    expect(executeWorkflow).toHaveBeenCalled()
+    expect(runWorkflow).toHaveBeenCalled()
     expect(mockState.setPendingWorkflowRun).not.toHaveBeenCalled()
 
     mockState.editingWorkflowId = null

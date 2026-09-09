@@ -134,6 +134,7 @@ import {
   dbInsertWorkflow,
   dbDeleteWorkflow,
   dbGetWorkflow,
+  getWorkflowRun,
   dbListWorkflows,
   dbUpdateWorkflow,
   dbListTasks,
@@ -171,6 +172,14 @@ import {
   performHttpRequest
 } from './connectors/http'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
+import { fireSessionRestoredTrigger, fireTaskTriggersForChange } from './workflows/triggers'
+import {
+  applyGateDecision,
+  executeWorkflow,
+  rerunWorkflowRun,
+  retryRunFromFailure,
+  stopWorkflowRun
+} from './workflows/engine'
 import { listKeys, passwordFields } from './connectors/keys'
 import { installedPack } from './connectors/packs'
 import {
@@ -768,12 +777,39 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('workflow:resolveGate', ({ runId, nodeId, decision }) => {
-    // Broadcast rather than claimed, for the same reason stopping a run is: the
-    // client that answers is not necessarily the one holding the run, and on a
-    // phone it never is.
-    log.info({ runId, nodeId, decision }, '[workflow] broadcasting a gate decision')
+    // Applied here, where the run is. It used to be broadcast for whichever
+    // window held the run to apply, which is why answering from a phone with
+    // nothing open did nothing at all.
+    log.info({ runId, nodeId, decision }, '[workflow] a gate was answered')
+    void applyGateDecision(runId, nodeId, decision)
+    // Still broadcast: a window showing the pill needs to stop showing it.
     clientRegistry.broadcast(IPC.WORKFLOW_GATE_RESOLVED, { runId, nodeId, decision })
     return { accepted: true }
+  })
+
+  registerMethod('workflow:sessionRestored', ({ sessionId, restore, environment }) => {
+    const session = ptyManager.getActiveSessions().find((s) => s.id === sessionId)
+    if (session) fireSessionRestoredTrigger(session, { restore, environment })
+  })
+
+  registerMethod('workflow:run', async ({ workflowId, context, targetNodeId }) => {
+    const workflow = dbGetWorkflow(workflowId)
+    if (!workflow) return null
+    return executeWorkflow(workflow, context, { source: 'manual', targetNodeId })
+  })
+
+  registerMethod('workflow:retryRun', async ({ runId }) => {
+    const run = getWorkflowRun(runId)
+    const workflow = run ? dbGetWorkflow(run.workflowId) : null
+    if (!run || !workflow) return null
+    return retryRunFromFailure(workflow, run)
+  })
+
+  registerMethod('workflow:rerun', async ({ runId }) => {
+    const run = getWorkflowRun(runId)
+    const workflow = run ? dbGetWorkflow(run.workflowId) : null
+    if (!run || !workflow) return null
+    return rerunWorkflowRun(workflow, run)
   })
 
   registerMethod(
@@ -997,8 +1033,11 @@ export function registerAllMethods(): void {
   registerMethod('config:load', () => configManager.loadConfig())
   registerMethod('config:save', (config) => {
     clearAgentDetectionCache()
+    // Read before the write, so a task that changed status can be seen to have.
+    const before = configManager.loadConfig()
     configManager.saveConfig(config)
     configManager.notifyChanged()
+    fireTaskTriggersForChange(before, config)
   })
 
   // Sessions
@@ -1645,12 +1684,10 @@ export function registerAllMethods(): void {
     scheduler.triggerWorkflow(workflowId, inputs)
   })
 
-  // Runs live in the renderer, so stopping one is a request broadcast to every
-  // connected instance rather than something this process can do itself. The
-  // instance owning the run recognises the id and tears it down; the others
-  // find no such run and ignore it.
+  // The run is here, so stopping it is done here rather than asked of whoever
+  // might be holding it.
   registerMethod('workflow:stopRun', ({ runId }: { runId: string }) => {
-    scheduler.stopRun(runId)
+    void stopWorkflowRun(runId)
   })
 
   registerMethod('connector:inboxComplete', ({ id, leaseToken, disposition, error }) => {

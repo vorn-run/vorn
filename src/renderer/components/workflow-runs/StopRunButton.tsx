@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Square } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
-import { isRunStoppable, stopWorkflowRun } from '../../lib/workflow-execution'
+import { isRunStoppable } from '@vornrun/shared/workflow-graph'
 import type { WorkflowExecution } from '../../../shared/types'
 
 interface Props {
@@ -27,7 +27,7 @@ export function StopRunButton({ execution, stopPropagation = true }: Props) {
     if (stopping) return
     setStopping(true)
     try {
-      await stopWorkflowRun(execution.runId)
+      await window.api.stopWorkflowRun(execution.runId)
     } catch (err) {
       // An async click handler that throws becomes an unhandled rejection and
       // the run silently appears not to stop. Say so instead.

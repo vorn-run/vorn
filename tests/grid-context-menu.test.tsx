@@ -14,6 +14,7 @@ Object.defineProperty(window, 'api', {
     createTerminal: (...args: unknown[]) => mockCreateTerminal(...args),
     createShellTerminal: (...args: unknown[]) => mockCreateShellTerminal(...args),
     listBranches: (...args: unknown[]) => mockListBranches(...args),
+    runWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args),
     listWorktrees: (...args: unknown[]) => mockListWorktrees(...args),
     killTerminal: vi.fn(),
     saveConfig: vi.fn(),
@@ -28,10 +29,8 @@ vi.mock('../src/renderer/components/Toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() }
 }))
 
+// Runs start in the server; these check what the window asks for.
 const mockExecuteWorkflow = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  executeWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args)
-}))
 
 import { useAppStore } from '../src/renderer/stores'
 import { GridContextMenu } from '../src/renderer/components/GridContextMenu'
@@ -234,11 +233,11 @@ describe('GridContextMenu', () => {
 
     fireEvent.click(screen.getByText('Deploy Staging'))
     expect(onClose).toHaveBeenCalled()
-    expect(mockExecuteWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'wf-1', name: 'Deploy Staging' }),
-      undefined,
-      { source: 'manual' }
-    )
+    expect(mockExecuteWorkflow).toHaveBeenCalledWith({
+      workflowId: 'wf-1',
+      context: undefined,
+      targetNodeId: undefined
+    })
   })
 
   it('only shows workflows from the active workspace in "Run workflow"', () => {

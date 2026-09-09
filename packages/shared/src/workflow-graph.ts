@@ -1,5 +1,7 @@
 import {
   ConditionConfig,
+  ConnectorItemContext,
+  LaunchAgentConfig,
   ConditionOperator,
   LoopConfig,
   NodeExecutionState,
@@ -368,4 +370,45 @@ export function seedRetryStates(
 /** Whether a run can still be stopped — drives the Stop control's visibility. */
 export function isRunStoppable(execution: WorkflowExecution): boolean {
   return execution.status === 'running'
+}
+
+export type WorktreeMode = 'none' | 'new' | 'fromStep' | 'existing' | 'fromContext'
+
+export function getWorktreeMode(cfg: LaunchAgentConfig): WorktreeMode {
+  if (cfg.useWorktree === 'fromContext') return 'fromContext'
+  return cfg.worktreeMode ?? (cfg.useWorktree === true ? 'new' : 'none')
+}
+
+/** The {{trigger.*}} namespace of a webhook run, rebuilt from the event's stored payload. */
+export function webhookTriggerFromItem(
+  connectorItem: ConnectorItemContext | undefined
+): WorkflowExecutionContext['trigger'] | undefined {
+  if (connectorItem?.connectorId !== 'webhook') return undefined
+  const raw = connectorItem.raw as {
+    body?: unknown
+    headers?: Record<string, string>
+    query?: Record<string, string>
+    method?: string
+  }
+  return {
+    type: 'webhook' as const,
+    body: raw.body,
+    headers: raw.headers,
+    query: raw.query,
+    method: raw.method
+  }
+}
+
+/**
+ * The run context for a scheduler-delivered event. A webhook event rides the
+ * connector pipe for durability, so its payload is lifted into the trigger
+ * namespace here while the connectorItem keeps the lease machinery working.
+ */
+export function schedulerExecutionContext(
+  connectorItem: ConnectorItemContext | undefined,
+  inputs: Record<string, unknown> | undefined
+): WorkflowExecutionContext | undefined {
+  if (!connectorItem && !inputs) return undefined
+  const trigger = webhookTriggerFromItem(connectorItem)
+  return { connectorItem, inputs, ...(trigger && { trigger }) }
 }

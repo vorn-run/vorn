@@ -15,10 +15,13 @@ vi.mock('../src/renderer/lib/terminal-registry', () => ({
   focusTerminal: (...args: unknown[]) => mockFocusTerminal(...args)
 }))
 
+// Running is a request to the server; the menu only makes it.
 const mockExecuteWorkflow = vi.fn()
-vi.mock('../src/renderer/lib/workflow-execution', () => ({
-  executeWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args)
-}))
+
+Object.defineProperty(window, 'api', {
+  value: { runWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args) },
+  writable: true
+})
 
 import { useAppStore } from '../src/renderer/stores'
 import { TerminalContextMenu } from '../src/renderer/components/TerminalContextMenu'
@@ -177,11 +180,11 @@ describe('TerminalContextMenu', () => {
     fireEvent.click(screen.getByText('Deploy Staging'))
     expect(onClose).toHaveBeenCalled()
     expect(mockFocusTerminal).toHaveBeenCalledWith('term-1')
-    expect(mockExecuteWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'wf-1', name: 'Deploy Staging' }),
-      undefined,
-      { source: 'manual' }
-    )
+    expect(mockExecuteWorkflow).toHaveBeenCalledWith({
+      workflowId: 'wf-1',
+      context: undefined,
+      targetNodeId: undefined
+    })
   })
 
   it('toggles workflow submenu on click', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveScriptConfig } from '../src/renderer/lib/workflow-execution'
+import { resolveScriptConfig } from '@vornrun/shared/workflow-graph'
 import type { ScriptConfig } from '../src/shared/types'
 import type { StepOutputs } from '@vornrun/shared/template-vars'
 

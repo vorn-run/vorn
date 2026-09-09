@@ -21,7 +21,9 @@ import {
   GitCommitResult,
   ScheduleLogEntry,
   HeadlessSession,
+  RestoreEnvironment,
   WorkflowExecution,
+  WorkflowExecutionContext,
   ScriptConfig,
   AiAgentType,
   MobileProject,
@@ -879,6 +881,41 @@ const api = {
   ): Promise<SourceConnection | null> => ipcRenderer.invoke(IPC.CONNECTION_UPDATE, { id, updates }),
 
   deleteConnection: (id: string): Promise<void> => ipcRenderer.invoke(IPC.CONNECTION_DELETE, id),
+
+  /**
+   * Run controls, now that runs happen in the server.
+   *
+   * Each of these used to be a function call inside this window, which is why
+   * answering a gate from a phone did nothing when no window was open.
+   */
+  runWorkflow: (params: {
+    workflowId: string
+    context?: WorkflowExecutionContext
+    targetNodeId?: string
+  }): Promise<WorkflowExecution | null> => ipcRenderer.invoke(IPC.WORKFLOW_RUN, params),
+  sessionRestored: (params: {
+    sessionId: string
+    restore: 'cold' | 'warm'
+    environment?: RestoreEnvironment
+  }): Promise<void> => ipcRenderer.invoke(IPC.WORKFLOW_SESSION_RESTORED, params),
+  stopWorkflowRun: (runId: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.WORKFLOW_STOP_RUN_REQUEST, { runId }),
+  resolveWorkflowGate: (params: {
+    runId: string
+    nodeId: string
+    decision: 'approve' | 'reject'
+  }): Promise<{ accepted: boolean }> => ipcRenderer.invoke(IPC.WORKFLOW_RESOLVE_GATE, params),
+  retryWorkflowRun: (runId: string): Promise<WorkflowExecution | null> =>
+    ipcRenderer.invoke(IPC.WORKFLOW_RETRY_RUN, { runId }),
+  rerunWorkflowRun: (runId: string): Promise<WorkflowExecution | null> =>
+    ipcRenderer.invoke(IPC.WORKFLOW_RERUN, { runId }),
+  onWorkflowRunUpdated: (callback: (execution: WorkflowExecution) => void): (() => void) => {
+    const listener = (_e: unknown, execution: WorkflowExecution): void => callback(execution)
+    ipcRenderer.on(IPC.WORKFLOW_RUN_UPDATED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.WORKFLOW_RUN_UPDATED, listener)
+    }
+  },
 
   runWorkflowManual: (workflowId: string, inputs?: Record<string, unknown>): Promise<void> =>
     ipcRenderer.invoke(IPC.WORKFLOW_RUN_MANUAL, { workflowId, inputs }),

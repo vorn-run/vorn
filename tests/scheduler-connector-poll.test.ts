@@ -43,6 +43,11 @@ const {
   pollMcpConnectionMock: vi.fn()
 }))
 
+const runScheduled = vi.hoisted(() => vi.fn(async (_workflowId: string, _inputs?: unknown) => {}))
+const runConnectorItem = vi.hoisted(() => vi.fn(async (_event: unknown) => {}))
+vi.mock('../packages/server/src/workflows/dispatch', () => ({ runScheduled, runConnectorItem }))
+vi.mock('../packages/server/src/workflows/engine', () => ({ stopWorkflowRun: vi.fn() }))
+
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
@@ -143,6 +148,8 @@ beforeEach(() => {
   dbDeferConnectorInboxMock.mockReset()
   dbRenewConnectorInboxLeaseMock.mockReset()
   clientRegistryMock.size = 1
+  runScheduled.mockClear()
+  runConnectorItem.mockClear()
   connectorGetMock.mockReset()
   pollMcpConnectionMock.mockReset()
 })
@@ -208,7 +215,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     expect(emitted.length).toBe(0)
   })
 
-  it('emits per-item SCHEDULER_EXECUTE events with connectorItem when poll yields items', async () => {
+  it('runs one workflow per item when a poll yields several', async () => {
     const wf = makePollWorkflow('wf-items')
     loadConfigMock.mockReturnValue({ workflows: [wf] })
     dbGetSourceConnectionMock.mockReturnValue(makeConn())
@@ -258,24 +265,18 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
       }
     ])
 
-    const emitted: Array<{
-      workflowId: string
-      connectorItem?: unknown
-      connectorInboxId?: number
-      connectorInboxLeaseToken?: string
-    }> = []
-    const listener = (
-      _ch: string,
-      payload: { workflowId: string; connectorItem?: unknown }
-    ): void => {
-      emitted.push(payload)
-    }
-    scheduler.on('client-message', listener)
-
     scheduler.triggerWorkflow('wf-items')
     await new Promise((r) => setImmediate(r))
-    scheduler.off('client-message', listener)
 
+    const emitted = runConnectorItem.mock.calls.map(
+      ([event]) =>
+        event as {
+          workflowId: string
+          connectorItem?: { externalId?: string; title?: string }
+          connectorInboxId?: number
+          connectorInboxLeaseToken?: string
+        }
+    )
     expect(emitted).toHaveLength(2)
     expect(emitted[0].connectorItem).toMatchObject({ externalId: '1', title: 'A' })
     expect(emitted[1].connectorItem).toMatchObject({ externalId: '2', title: 'B' })
@@ -358,10 +359,10 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     expect(dbDeferConnectorInboxMock).toHaveBeenCalledWith(43, 'lease-43', expect.any(String))
   })
 
-  it('leaves inbox rows unclaimed while no renderer is connected', () => {
+  it('claims inbox rows with nobody connected, because it runs them itself', () => {
     clientRegistryMock.size = 0
     scheduler.deliverPendingConnectorInbox()
-    expect(dbClaimConnectorInboxMock).not.toHaveBeenCalled()
+    expect(dbClaimConnectorInboxMock).toHaveBeenCalled()
   })
 
   it('claims only the remaining global delivery capacity', () => {
@@ -395,14 +396,9 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
       connectorInboxId: 51,
       nodeStates: [{ nodeId: 'approval', status: 'waiting' }]
     })
-    const listener = vi.fn()
-    scheduler.on('client-message', listener)
-
     scheduler.deliverPendingConnectorInbox()
 
-    scheduler.off('client-message', listener)
-    expect(listener).toHaveBeenCalledWith(
-      'scheduler:execute',
+    expect(runConnectorItem).toHaveBeenCalledWith(
       expect.objectContaining({
         connectorInboxLeaseToken: 'lease-51',
         existingExecution: expect.objectContaining({ runId: 'run-51' })
@@ -580,25 +576,22 @@ describe('the count that decides whether this server may leave', () => {
     scheduler.stopAll()
   })
 
-  it('counts an armed connector poll and not a recurring trigger', () => {
+  it('counts every armed schedule, because it can act on all of them', () => {
     scheduler.syncSchedules([makePollWorkflow('poll-a'), recurring('cron-a')])
-    expect(scheduler.serverSideScheduleCount()).toBe(1)
+    expect(scheduler.serverSideScheduleCount()).toBe(2)
   })
 
-  it('follows a trigger that changes kind in either direction', () => {
-    // Both sync loops keep an existing cron job when the new kind is still
-    // cron-eligible, and registration is skipped for an id that already has one.
-    // So membership taken at creation time never moved again: flipping to
-    // `connectorPoll` left the server free to exit and silently stop polling,
-    // and flipping away from it left the server pinned open for ever.
+  it('keeps counting a workflow whose trigger changes kind', () => {
+    // Both kinds are armed here and both are acted on, so the count holds
+    // steady across a change that used to move a workflow in and out of it.
     scheduler.syncSchedules([recurring('wf-x')])
-    expect(scheduler.serverSideScheduleCount()).toBe(0)
+    expect(scheduler.serverSideScheduleCount()).toBe(1)
 
     scheduler.syncSchedules([makePollWorkflow('wf-x')])
     expect(scheduler.serverSideScheduleCount()).toBe(1)
 
     scheduler.syncSchedules([recurring('wf-x')])
-    expect(scheduler.serverSideScheduleCount()).toBe(0)
+    expect(scheduler.serverSideScheduleCount()).toBe(1)
   })
 
   it('drops the count when the workflow is disabled', () => {
