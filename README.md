@@ -93,12 +93,20 @@ Vorn supports two ways of working. **Interactive**: open a grid of terminals and
 
 Run Claude, Copilot, Codex, OpenCode, and Gemini in a responsive grid layout. Resize, reorder, minimize, and filter by status. Focus any terminal fullscreen with one click, or switch to a tab view for sequential browsing. Real-time status detection shows whether each agent is running, waiting, idle, or in an error state.
 
+### Panes Beside the Terminal
+
+A session holds its own terminals, a browser, an editor and an iOS simulator. Draw on the page and the agent sees it; it reads and drives all of them to check its own work.
+
+<p align="center">
+  <img src="docs/screenshots/panes.png" alt="A session with a terminal and a browser pane side by side" width="700" />
+</p>
+
 ### Task Queue & Kanban Board
 
 Manage tasks per project with a list view or a drag-and-drop kanban board. Tasks support markdown descriptions, image attachments, git branch targeting, and worktree isolation. Start a task and it launches an agent with the description as the prompt. Tasks can also trigger workflows automatically when created or when their status changes.
 
 <p align="center">
-  <img src="docs/screenshots/tasks.png" alt="Task queue and kanban board" width="700" />
+  <img src="docs/screenshots/tasks.png" alt="Kanban board with a card per branch" width="700" />
 </p>
 
 ### Workflow Automation
@@ -106,16 +114,13 @@ Manage tasks per project with a list view or a drag-and-drop kanban board. Tasks
 Create multi-step workflows with a visual node editor. Chain together agent launches, script executions (Bash, Python, Node.js, PowerShell), and task queue operations. Schedule them manually, once at a specific time, or on a recurring cron. Workflows can also trigger automatically when tasks are created or change status.
 
 <p align="center">
-  <img src="docs/screenshots/workflows.png" alt="Workflow editor" width="700" />
+  <img src="docs/screenshots/workflows.png" alt="A pull request review workflow on the canvas" width="700" />
 </p>
 
 ### Headless Execution
 
 Run agents and scripts in the background without a visible terminal. Headless sessions capture full output logs for later review. Combine with workflow stagger delays to orchestrate multiple agents sequentially, each one picks up where the last left off.
 
-<p align="center">
-  <img src="docs/screenshots/headless.png" alt="Headless workflow execution" width="700" />
-</p>
 
 ### Inline Diff Review & Git Integration
 
@@ -133,9 +138,6 @@ Fuzzy search for actions, terminals, recent sessions, projects, and workflows. Q
 
 Restore previous agent sessions on restart. Vorn tracks session history and matches agent sessions for accurate resumption, so you can pick up right where you left off.
 
-<p align="center">
-  <img src="docs/screenshots/resume-sessions.png" alt="Resume sessions" width="700" />
-</p>
 
 ### MCP Server
 
