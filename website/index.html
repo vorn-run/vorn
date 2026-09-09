@@ -814,13 +814,6 @@
         order: 2;
       }
 
-      /* A portrait shot in a landscape column: hold it to a phone's width
-         rather than letting the row stretch to its height. */
-      .study-media.is-tall .study-frame {
-        max-width: 340px;
-        margin: 0 auto;
-      }
-
       .study-annotation {
         font-family: var(--mono);
         font-size: 13px;
@@ -887,9 +880,6 @@
         .study .study-text,
         .study.reverse .study-text {
           order: 2;
-        }
-        .study-media.is-tall .study-frame {
-          max-width: 280px;
         }
       }
 
@@ -1803,7 +1793,7 @@
                   srcset="assets/panes-1200.webp 1200w, assets/panes-3024.webp 3024w"
                   sizes="(max-width: 900px) 100vw, 900px"
                   width="3024"
-                  height="1701"
+                  height="1700"
                   alt="More than a terminal"
                   loading="lazy"
                   decoding="async"
