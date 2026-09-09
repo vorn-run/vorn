@@ -52,8 +52,10 @@ describe('starting a server when there is none', () => {
     const err = sink()
     await ensureServer(transportUpAfter(1), err.write, '/tmp/elsewhere')
 
-    const [, args] = spawn.mock.calls[0] as unknown as [string, string[]]
+    const [, args, options] = spawn.mock.calls[0] as unknown as [string, string[], { cwd: string }]
     expect(args.slice(-2)).toEqual(['--data-dir', '/tmp/elsewhere'])
+    // The log and the working directory follow the flag, not what discovery found.
+    expect(options.cwd).toBe('/tmp/elsewhere')
   })
 
   it('gives up on a deadline rather than hanging, and says where to look', async () => {

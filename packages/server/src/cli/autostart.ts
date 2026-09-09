@@ -38,7 +38,9 @@ export async function ensureServer(
 
   writeErr('No server running, starting one.\n')
 
-  const dir = dataDir()
+  // The flag wins over what discovery resolved, so the log this names and the
+  // directory the server is told to use cannot disagree with each other.
+  const dir = dataDirFlag ?? dataDir()
   fs.mkdirSync(dir, { recursive: true })
   // A file descriptor rather than a pipe: the parent exits in a moment, and a
   // pipe dying under the server takes the server with it on its next log line.

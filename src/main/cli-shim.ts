@@ -22,11 +22,22 @@ function isWritable(dir: string): boolean {
   }
 }
 
-/** Whether a shell would find a command in this directory. */
-export function onPath(dir: string): boolean {
+/**
+ * Whether a shell would find a command in this directory.
+ *
+ * Case-folded on Windows, where `%PATH%` names the same directory in whatever
+ * case it was written in and a literal comparison would call it absent.
+ */
+export function onPath(dir: string, platform: NodeJS.Platform = process.platform): boolean {
+  // The platform's own rules, taken explicitly: separator, delimiter and case.
+  const rules = platform === 'win32' ? path.win32 : path.posix
+  const fold = (value: string): string =>
+    platform === 'win32' ? rules.resolve(value).toLowerCase() : rules.resolve(value)
+
+  const wanted = fold(dir)
   return (process.env.PATH ?? '')
-    .split(path.delimiter)
-    .some((entry) => entry !== '' && path.resolve(entry) === path.resolve(dir))
+    .split(rules.delimiter)
+    .some((entry) => entry !== '' && fold(entry) === wanted)
 }
 
 /**
@@ -42,7 +53,7 @@ export function shimDirectory(): string {
 
   const userBin = path.join(os.homedir(), '.local', 'bin')
   const candidates = ['/usr/local/bin', userBin].filter(isWritable)
-  return candidates.find(onPath) ?? candidates[0] ?? userBin
+  return candidates.find((dir) => onPath(dir)) ?? candidates[0] ?? userBin
 }
 
 export function shimPath(): string {

@@ -22,7 +22,7 @@ vi.mock('../src/main/logger', () => ({ default: { warn: () => {}, error: () => {
 
 import os from 'node:os'
 import path from 'node:path'
-import { shimDirectory, shimScript } from '../src/main/cli-shim'
+import { onPath, shimDirectory, shimScript } from '../src/main/cli-shim'
 
 const MAC = {
   exe: '/Applications/Vorn.app/Contents/MacOS/Vorn',
@@ -98,6 +98,13 @@ describe('where the command goes', () => {
     process.env.PATH = '/usr/bin'
 
     expect(shimDirectory()).toBe('/usr/local/bin')
+  })
+
+  it('reads a Windows PATH entry whatever case it was written in', () => {
+    process.env.PATH = 'C:\\Users\\J\\AppData\\Local\\Programs\\Vorn'
+
+    expect(onPath('C:\\users\\j\\appdata\\local\\programs\\vorn', 'win32')).toBe(true)
+    expect(onPath('C:\\users\\j\\appdata\\local\\programs\\vorn', 'linux')).toBe(false)
   })
 
   it('falls back to the one directory it may always create', () => {
