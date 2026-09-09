@@ -51,6 +51,14 @@ export interface LocalEndpoint {
   readonly path: string
   /** Whether this process still holds the name. Read, never cached. */
   holds(): boolean
+  /**
+   * Give up the name while staying answerable to whoever is already connected.
+   *
+   * A listener is identified by its inode, so unlinking the name stops new
+   * connections and leaves existing ones alone -- which is what lets a handoff
+   * reply to the request that asked for it. Only ever a name this process created.
+   */
+  relinquish(): boolean
   close(): Promise<void>
 }
 
@@ -143,6 +151,18 @@ export async function openLocalEndpoint(
   const endpoint: LocalEndpoint = {
     path: canonical,
     holds: () => stillOurs(canonical, mine),
+    relinquish: () => {
+      // Checked, not assumed: the name may already be somebody else's.
+      if (!stillOurs(canonical, mine)) return false
+      try {
+        fs.rmSync(canonical, { force: true })
+        log.info({ path: canonical }, '[endpoint] released the name for a replacement')
+        return true
+      } catch (err) {
+        log.error({ err, path: canonical }, '[endpoint] could not release the name')
+        return false
+      }
+    },
     close: async () => {
       // Terminated, not asked. `ws` with `clientTracking` does not close tracked
       // sockets on `close()` -- it waits for them, and so does the http server

@@ -687,6 +687,31 @@ export function createApiShim(wsUrl: string) {
     installUpdate: () => {},
     setUpdateChannel: (_channel: 'stable' | 'beta') => {},
 
+    // ── Which build is serving (nothing to answer in the browser) ──
+    // No bundle to move onto and no local endpoint to ask over. Present rather than
+    // absent because a missing name throws during render rather than degrading.
+    onServerRuntimeStatus:
+      (_callback: (status: import('../../shared/src/types').ServerRuntimeStatus) => void) =>
+      () => {},
+    getServerRuntimeStatus: (): import('../../shared/src/types').ServerRuntimeStatus => ({
+      serverVersion: 'unknown',
+      appVersion: 'web',
+      serverPid: null,
+      adopted: false,
+      canUpgrade: false,
+      sessions: null,
+      lastUpgrade: null
+    }),
+    upgradeServer: async (): Promise<import('../../shared/src/types').ServerRuntimeStatus> => ({
+      serverVersion: 'unknown',
+      appVersion: 'web',
+      serverPid: null,
+      adopted: false,
+      canUpgrade: false,
+      sessions: null,
+      lastUpgrade: { kind: 'not-needed', why: 'the web client cannot move a server' }
+    }),
+
     // ── Git ──
     isGitRepo: (projectPath: string) => rpc.invoke('git:isGitRepo', projectPath),
     getGitBranch: (cwd: string) => rpc.invoke('git:getBranch', cwd),

@@ -132,6 +132,16 @@ export function isLoopbackAddress(address: string | undefined): boolean {
 type Handler = (params: unknown) => Promise<unknown> | unknown
 const handlers = new Map<string, Handler>()
 
+/**
+ * Methods callable only over the local endpoint. `server:handoff` execs a path the
+ * caller names, which is an escalation over TCP and none through a 0700 directory.
+ */
+const localOnly = new Set<string>(['server:handoff'])
+
+export function requireLocalEndpoint(method: string): void {
+  localOnly.add(method)
+}
+
 registerCapability('auth', 1)
 
 // Declared so a client knows the server will honour a topic list before it sends
@@ -442,6 +452,19 @@ export function handleConnection(
     }
 
     // Request-response
+    if (localOnly.has(method) && peer?.transport !== 'unix') {
+      log.warn({ method, peer }, '[ws] refusing a local-endpoint method from elsewhere')
+      ws.send(
+        JSON.stringify(
+          createErrorResponse(
+            id,
+            -32000,
+            `${method} may only be called over this machine's local endpoint`
+          )
+        )
+      )
+      return
+    }
     const handler = handlers.get(method)
     if (!handler) {
       ws.send(JSON.stringify(createErrorResponse(id, -32601, `Method not found: ${method}`)))

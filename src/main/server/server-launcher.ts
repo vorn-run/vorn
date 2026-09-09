@@ -26,6 +26,8 @@ import {
   resolveDataDir,
   type AdoptionVerdict
 } from './server-adoption'
+import { SERVER_LOG_FILENAME, type HandoffResult } from '@vornrun/shared/protocol'
+import { decideHandoff, buildHandoffRequest, devRepoRoot } from './handoff-request'
 
 /**
  * Thrown when a server is running that this app may not use.
@@ -73,6 +75,13 @@ let relaunchTimer: NodeJS.Timeout | null = null
  * was written to end.
  */
 let adoptedPid: number | null = null
+
+/** Held because the decision they feed happens after the launch, not during it. */
+let adoptedIdentity: ServerIdentity | null = null
+let adoptedTarget: string | null = null
+
+/** Or the disconnect after a successful handoff reads as a crash and spawns a third server. */
+let handingOver = false
 
 /**
  * What the last adoption attempt refused, and the pid still holding the sessions.
@@ -401,7 +410,12 @@ async function spawnServer(): Promise<number> {
     // mkdirSync on every spawn -- including every crash relaunch during a
     // `yarn dev` session -- for a value it never touches.
     const dataDir = ensureDataDir()
-    const asarUnpacked = path.join(app.getAppPath() + '.unpacked', 'node_modules')
+    // One definition of how this app starts a server, shared with the handoff
+    // that asks a running server to start its replacement. Two spellings of this
+    // environment is how a handed-over server ends up subtly unlike a spawned
+    // one -- see `serverProcessSpec`.
+    const spec = serverProcessSpec()
+    if (!spec) throw new Error('[launcher] could not describe how to start a server')
 
     // Straight to a file, not to pipes.
     //
@@ -416,25 +430,11 @@ async function spawnServer(): Promise<number> {
     // diagnostics a pipe existed to carry end up somewhere durable rather than
     // in a log that stops the moment the app does.
     const logFd = openSync(join(dataDir, SERVER_LOG_FILENAME), 'a')
-    const child = spawn(process.execPath, [serverEntryPoint], {
+    const child = spawn(spec.exec, spec.args, {
       stdio: ['ignore', logFd, logFd],
       detached: true,
-      // A daemon must not hold open a directory that can be deleted underneath
-      // it, so not the app bundle and not a worktree. The data dir is where the
-      // server's own files live, so it lasts as long as the server has anything
-      // to serve -- but on a first run it does not exist yet: the *server*
-      // creates it, and it has not started. `spawn` with a missing cwd fails
-      // ENOENT, so it is created here first.
-      cwd: dataDir,
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
-        [BOOTSTRAP_ENV_VAR]: bootstrapToken,
-        NODE_ENV: 'production',
-        VORN_NATIVE_MODULES_PATH: asarUnpacked,
-        NODE_PATH: [path.join(app.getAppPath(), 'node_modules'), asarUnpacked].join(path.delimiter),
-        ...identityEnv()
-      }
+      cwd: spec.cwd,
+      env: { ...process.env, ...spec.env }
     })
 
     // Closed here as soon as the child holds its own copy; leaving it open would
@@ -735,12 +735,16 @@ async function tryAdopt(
   // falling back keeps a pid-less record (which `packages/mcp` writes when it
   // heals one) from leaving nothing to signal later.
   adoptedPid = expectedPid ?? identity.pid
+  adoptedIdentity = identity
+  adoptedTarget = target
   // An adopted server has no child handle, so nothing would ever call
   // `onServerExit` for it. Watching the socket is the only signal available, and
   // the pid distinguishes the two reasons it drops: a server that died, and one
   // that is merely busy while the bridge retries.
   candidate.on('disconnected', () => {
     if (adoptedPid === null || stoppingDeliberately) return
+    // The incumbent exits on purpose once its replacement is serving.
+    if (handingOver) return
     if (isPidAlive(adoptedPid)) return
     onServerExit(`adopted server pid=${adoptedPid} is gone`)
   })
@@ -1008,6 +1012,162 @@ export function detachFromServer(): void {
   adoptedPid = null
 }
 
+/**
+ * Built once and used twice: to spawn a server, and to ask a server to spawn its
+ * replacement. A replacement brought up differently would differ in ways nobody
+ * would think to look for. The environment here is only the overrides.
+ */
+export function serverProcessSpec(): {
+  exec: string
+  args: string[]
+  env: Record<string, string>
+  cwd: string
+} | null {
+  bootstrapToken ??= randomBytes(32).toString('base64url')
+  const entry = resolveServerEntry()
+
+  if (buildChannel() === 'dev') {
+    // `--import tsx`, never the `tsx` binary: the CLI re-executes in a child of its
+    // own, which does not inherit the pty masters a handoff travels on. Measured.
+    const repoRoot = devRepoRoot(__dirname)
+    const devPort = readDevPort()
+    return {
+      exec: process.execPath,
+      args: ['--import', 'tsx', entry, ...(devPort ? ['--port', devPort] : [])],
+      // The repo root, because ESM resolution walks up from cwd rather than NODE_PATH.
+      cwd: repoRoot,
+      env: {
+        // `process.execPath` is the Electron binary; without this it launches a second Vorn.
+        ELECTRON_RUN_AS_NODE: '1',
+        [BOOTSTRAP_ENV_VAR]: bootstrapToken,
+        NODE_ENV: process.env.NODE_ENV ?? 'development',
+        ...identityEnv()
+      }
+    }
+  }
+
+  const dataDir = ensureDataDir()
+  const asarUnpacked = path.join(app.getAppPath() + '.unpacked', 'node_modules')
+  return {
+    exec: process.execPath,
+    args: [entry],
+    // A daemon must not hold a directory an update can delete underneath it.
+    cwd: dataDir,
+    env: {
+      ELECTRON_RUN_AS_NODE: '1',
+      [BOOTSTRAP_ENV_VAR]: bootstrapToken,
+      NODE_ENV: 'production',
+      VORN_NATIVE_MODULES_PATH: asarUnpacked,
+      NODE_PATH: [path.join(app.getAppPath(), 'node_modules'), asarUnpacked].join(path.delimiter),
+      ...identityEnv()
+    }
+  }
+}
+
+/** "Which version am I running" has two answers now, and the app's is the less useful one. */
+export function serverRuntime(): {
+  serverVersion: string
+  serverPid: number | null
+  adopted: boolean
+  canUpgrade: boolean
+  sessions: number | null
+} {
+  const identity = adoptedIdentity
+  if (!identity || !adoptedTarget) {
+    return {
+      serverVersion: app.getVersion(),
+      serverPid: serverProcess?.pid ?? null,
+      adopted: false,
+      canUpgrade: false,
+      sessions: null
+    }
+  }
+  const verdict = decideHandoff({
+    target: adoptedTarget,
+    platform: process.platform,
+    incumbent: identity,
+    self: { appVersion: app.getVersion(), buildChannel: buildChannel() },
+    forced: true
+  })
+  return {
+    serverVersion: identity.appVersion,
+    serverPid: adoptedPid,
+    adopted: true,
+    // Forced, because this reports whether the button would do anything.
+    canUpgrade: verdict.ask,
+    sessions: identity.sessions ?? null
+  }
+}
+
+/** What the app tells the user about an attempt to move onto a newer server. */
+export type UpgradeOutcome =
+  | { kind: 'handed-over'; sessions: number }
+  | { kind: 'not-needed'; why: string }
+  | { kind: 'failed'; why: string }
+
+/**
+ * Move the running server onto this app's build without ending its terminals, by
+ * asking it to start the replacement itself and pass the descriptors across.
+ * Nothing here kills anything; the commit boundary in `handoff/donor.ts` guarantees it.
+ */
+export async function upgradeServerInPlace(forced = false): Promise<UpgradeOutcome> {
+  if (!bridge || !adoptedIdentity || !adoptedTarget) {
+    // This app spawned its own server, so it is already this build.
+    return { kind: 'not-needed', why: 'this app started the server it is talking to' }
+  }
+
+  const verdict = decideHandoff({
+    target: adoptedTarget,
+    platform: process.platform,
+    incumbent: adoptedIdentity,
+    self: { appVersion: app.getVersion(), buildChannel: buildChannel() },
+    forced
+  })
+  if (!verdict.ask) {
+    log.info(`[handoff] not asking: ${verdict.why}`)
+    return { kind: 'not-needed', why: verdict.why }
+  }
+
+  const spec = serverProcessSpec()
+  if (!spec) return { kind: 'failed', why: 'this app cannot describe how to start a server' }
+
+  log.info(`[handoff] asking the running server to hand over: ${verdict.why}`)
+  handingOver = true
+  try {
+    const result = (await bridge.request(
+      'server:handoff',
+      buildHandoffRequest({ ...spec, appVersion: app.getVersion() }),
+      HANDOFF_TIMEOUT_MS
+    )) as HandoffResult
+
+    if (result.kind === 'declined') {
+      log.warn(`[handoff] the running server declined: ${result.because}`)
+      return { kind: 'failed', why: result.because }
+    }
+
+    // Recorded before the disconnect arrives, so the reconnect finds a live pid.
+    adoptedPid = result.pid
+    adoptedIdentity = { ...adoptedIdentity, appVersion: app.getVersion(), pid: result.pid }
+    log.info(`[handoff] ${result.sessions} terminal(s) moved to pid ${result.pid}`)
+    return { kind: 'handed-over', sessions: result.sessions }
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err)
+    log.error(`[handoff] the request failed: ${why}`)
+    return { kind: 'failed', why }
+  } finally {
+    // Held past the request so the disconnect it causes is covered.
+    setTimeout(() => {
+      handingOver = false
+    }, HANDOFF_SETTLE_MS)
+  }
+}
+
+/** Long: the far side checkpoints every screen and starts a server before it answers. */
+const HANDOFF_TIMEOUT_MS = 90_000
+
+/** How long the incumbent's death stays expected after a successful handoff. */
+const HANDOFF_SETTLE_MS = 30_000
+
 export async function stopServer(): Promise<void> {
   beginDeliberateStop()
 
@@ -1151,8 +1311,6 @@ function onChildExit(code: number | null, signal: NodeJS.Signals | null): void {
  */
 let lastSpawnStoodDown = false
 
-/** Where a detached server's stdout and stderr go, under the data directory. */
-const SERVER_LOG_FILENAME = 'server.log'
 const SPAWN_READY_TIMEOUT_MS = 20_000
 const SPAWN_POLL_MS = 100
 

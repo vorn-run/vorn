@@ -54,6 +54,7 @@ import {
   DeviceTarget,
   DevicePoint,
   UpdateStatus,
+  ServerRuntimeStatus,
   AuthProbeReport
 } from '../shared/types'
 
@@ -824,6 +825,20 @@ const api = {
   installUpdate: () => ipcRenderer.send(IPC.UPDATE_INSTALL),
   setUpdateChannel: (channel: 'stable' | 'beta') =>
     ipcRenderer.send(IPC.UPDATE_SET_CHANNEL, channel),
+
+  // The server outlives the app, so after an update these are briefly different
+  // builds; `upgradeServer` resolves that without ending anything.
+  onServerRuntimeStatus: (callback: (status: ServerRuntimeStatus) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, status: ServerRuntimeStatus): void =>
+      callback(status)
+    ipcRenderer.on(IPC.SERVER_RUNTIME_STATUS, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.SERVER_RUNTIME_STATUS, listener)
+    }
+  },
+  getServerRuntimeStatus: (): ServerRuntimeStatus =>
+    ipcRenderer.sendSync(IPC.SERVER_GET_RUNTIME_STATUS),
+  upgradeServer: (): Promise<ServerRuntimeStatus> => ipcRenderer.invoke(IPC.SERVER_UPGRADE),
 
   // Connectors
   listConnectors: (): Promise<

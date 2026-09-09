@@ -193,14 +193,14 @@ describe('what the restart will cost', () => {
       ['b', { status: 'idle' }]
     ])
     render(<UpdatesSettings />)
-    expect(screen.getByText(/Your 2 sessions restart on the new version/)).toBeInTheDocument()
+    expect(screen.getByText(/Your 2 sessions keep running through the update/)).toBeInTheDocument()
   })
 
   it('names the turn only when one is running', () => {
     mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
     mockStore.terminals = new Map([['a', { status: 'running' }]])
     render(<UpdatesSettings />)
-    expect(screen.getByText(/A turn in flight is lost/)).toBeInTheDocument()
+    expect(screen.getByText(/The turn in flight continues/)).toBeInTheDocument()
   })
 
   it('says nothing about sessions when there are none', () => {
@@ -228,7 +228,7 @@ describe('sessions that have already ended', () => {
       ['b', { status: 'idle' }]
     ])
     render(<UpdatesSettings />)
-    expect(screen.getByText(/Your session restarts on the new version/)).toBeInTheDocument()
+    expect(screen.getByText(/Your session keeps running through the update/)).toBeInTheDocument()
   })
 
   it('leave nothing to say when they are all there is', () => {

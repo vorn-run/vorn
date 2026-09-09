@@ -24,7 +24,8 @@ import {
   extensionRenamedSession,
   reconcileImplicitConnections,
   registerAllMethods,
-  setServerPort
+  setServerPort,
+  sessionsToPersist
 } from './register-methods'
 import { registerWebhookRoute } from './webhook-trigger'
 import { registerExtensionBridge, type ExtensionRouteDeps } from './extensions/bridge'
@@ -35,6 +36,9 @@ import { abandonSelections } from './extensions/selection'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
+import { handOver, type HandoffHost } from './handoff/donor'
+import { receiveHandoff, announceServing, type AdoptedPane } from './handoff/heir'
+import { releaseListener, retakeListener } from './server-rebind'
 import { beginDraining, isDraining, watchEndpoint } from './draining'
 import {
   initBootstrapSecret,
@@ -44,11 +48,15 @@ import {
 } from './ws-auth'
 import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
-import { DEFAULT_SERVER_PORT, EXIT_ENDPOINT_TAKEN } from '@vornrun/shared/protocol'
+import {
+  DEFAULT_SERVER_PORT,
+  EXIT_ENDPOINT_TAKEN,
+  SERVER_LOG_FILENAME
+} from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
-import { configureHistory, flushHistory } from './history/writer'
+import { configureHistory, flushHistory, checkpointAll } from './history/writer'
 import { recoverHistory } from './history/recovery'
-import { seedRestored, markRecovered, verifyRestored } from './restored-sessions'
+import { seedRestored, markRecovered, verifyRestored, consumeRestored } from './restored-sessions'
 import { getGitBranch, getGitHead } from './git-utils'
 import { sessionManager } from './session-persistence'
 import { headlessManager } from './headless-manager'
@@ -138,6 +146,8 @@ export async function startServer(
     idleShutdown?: boolean
     /** Origins beyond this server's own that may frame a pane, such as the desktop's. */
     extensionFrameAncestors?: string[]
+    /** Terminals inherited from the server this one replaces, already taken and paused. */
+    adopted?: AdoptedPane[]
   } = {}
 ) {
   // Initialize database + config. This resolves the data directory for the whole
@@ -386,6 +396,11 @@ export async function startServer(
   const bootTime = Date.now() - os.uptime() * 1000
   const carriedOver = seedRestored(sessionManager.readPreviousSessions(), Date.now(), bootTime)
 
+  const adopted = options.adopted ?? []
+  // Handed-over sessions are live, but the previous server wrote them down on its
+  // way out, so they are also sitting in the list above being offered as resumable.
+  for (const pane of adopted) consumeRestored(pane.session.id)
+
   // Register all RPC methods
   registerAllMethods()
   // Connects the rung-none packs installed before installing meant connecting.
@@ -516,12 +531,62 @@ export async function startServer(
     await app.close()
     process.exit(EXIT_ENDPOINT_TAKEN)
   }
-  const endpoint = claimed.kind === 'held' ? claimed.endpoint : null
+  // `let`, because a handoff gives it up and an abandoned handoff takes it back.
+  let endpoint = claimed.kind === 'held' ? claimed.endpoint : null
   // Asked at session creation rather than only on the idle tick: that timer runs
   // at a quarter of the window and is switched off entirely for `vorn-server
   // serve`, so a check that lived only there would be late or absent exactly
   // where it matters.
-  if (endpoint) watchEndpoint(() => endpoint.holds())
+  if (endpoint) watchEndpoint(() => endpoint?.holds() ?? false)
+
+  /** Registered here because every closure needs the endpoint, port and file ownership. */
+  const handoffHost: HandoffHost = {
+    dataDir,
+    describePanes: () => ptyManager.describeForHandoff(),
+    pauseAll: () => ptyManager.pauseAllForHandoff(),
+    resumeAll: () => {
+      ptyManager.resumeAllForHandoff()
+      // A handoff that did not happen must not leave this server never persisting again.
+      sessionManager.startAutoSave(sessionsToPersist)
+    },
+    quiesce: async () => {
+      // What a shutdown does, minus the sealing and the killing.
+      sessionManager.stopAutoSave()
+      sessionManager.persistNow()
+      ptyManager.flushPendingOutput()
+      await checkpointAll()
+    },
+    openLogFd: () => fs.openSync(path.join(dataDir, SERVER_LOG_FILENAME), 'a'),
+    release: async () => {
+      // The order is the commit: name, then port file, then listener.
+      //
+      // `relinquish`, not `close`: the request being served arrived on this
+      // endpoint and its reply has to travel back out over it.
+      //
+      // The draining watch is pointed away first, or giving the name up
+      // deliberately would latch it irreversibly on a server that may roll back.
+      watchEndpoint(() => true)
+      endpoint?.relinquish()
+      removePortFile(dataDir, ownsPublished)
+      await releaseListener()
+    },
+    reclaim: async () => {
+      const listening = await retakeListener()
+      // A fresh listener: an anonymous inode cannot be linked back to a path. The
+      // old one stays open, because this request's socket is still on it.
+      const again = await openLocalEndpoint(dataDir, () => scheduler.deliverPendingConnectorInbox())
+      if (again.kind === 'held') {
+        endpoint = again.endpoint
+        watchEndpoint(() => endpoint?.holds() ?? false)
+      }
+      if (listening) writePortFile(dataDir, actualPort, ownsPublished)
+      return listening && again.kind === 'held'
+    },
+    // Not `shutdown()`: that kills every PTY, which is the one thing a handoff must not do.
+    exit: () => process.exit(0)
+  }
+
+  registerMethod('server:handoff', (params) => handOver(params, handoffHost))
 
   // Only now, and for two reasons. It is after `registerAllMethods()`, so
   // nothing here races the first debounced `saveSessions`. And it is after the
@@ -533,7 +598,24 @@ export async function startServer(
   // this server until both of those exist, so there is no moment where one can
   // ask for history that has not been read yet. The cost is that discovery waits
   // on it -- measured at 77ms for fifty terminals.
-  markRecovered((await recoverHistory(dataDir, carriedOver)).recovered)
+  // Adopted sessions belong in this list for both things it decides: their screens
+  // are rebuilt from the previous server's checkpoint, and a session absent from it
+  // has its history swept. Null stays null, which sweeps nothing.
+  const recoverable =
+    carriedOver === null
+      ? null
+      : [
+          ...carriedOver,
+          ...adopted
+            .filter((pane) => !carriedOver.some((s) => s.id === pane.session.id))
+            .map((pane) => pane.session)
+        ]
+  if (carriedOver === null && adopted.length) {
+    log.warn(
+      '[handoff] the session list could not be read; adopted terminals start without scrollback'
+    )
+  }
+  markRecovered((await recoverHistory(dataDir, recoverable)).recovered)
   verifyRestored({
     isDirectory: (at) => {
       try {
@@ -545,6 +627,10 @@ export async function startServer(
     branch: getGitBranch,
     head: getGitHead
   })
+
+  // After recovery, whose rebuilt screens `createScreen` would otherwise clear, and
+  // before the port file, so no client can find this server and be told it is empty.
+  ptyManager.adoptPanes(adopted)
 
   // Published together, after the claim, because they are one announcement: the
   // port says where, the credential says how, and a reader that finds one
@@ -713,10 +799,25 @@ const isDirectRun =
   process.argv[1]?.endsWith('index.js') ||
   process.argv[1]?.endsWith('index.cjs')
 if (isDirectRun) {
-  const { host, port, dataDir } = parseServerArgs(process.argv.slice(2))
+  const { host, port, dataDir, adoptHandoff } = parseServerArgs(process.argv.slice(2))
 
-  startServer({ port, host, dataDir })
+  /**
+   * Before `startServer`, and that ordering is the transaction: the cheap certain
+   * work while failing is still free, the fallible work after the commit.
+   */
+  const adopting = adoptHandoff ? receiveHandoff(adoptHandoff) : Promise.resolve([])
+
+  adopting
+    .then((adopted) => {
+      if (adopted === null) {
+        log.error('[handoff] could not take the terminals; leaving the previous server with them')
+        process.exit(1)
+      }
+      return startServer({ port, host, dataDir, adopted })
+    })
     .then(({ port: actualPort }) => {
+      // The last moment the handoff could have been abandoned.
+      if (adoptHandoff) announceServing()
       // This entry point is the one Electron forks, and its launcher blocks on
       // reading this line to learn where to connect. It belongs here rather than
       // inside startServer, which has no parent to answer to.

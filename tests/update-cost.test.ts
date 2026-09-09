@@ -11,18 +11,19 @@ describe('what restarting for an update costs', () => {
   })
 
   it('names one session without pluralising it', () => {
-    expect(updateCostLine(1, false)).toBe('Your session restarts on the new version.')
+    expect(updateCostLine(1, false)).toBe('Your session keeps running through the update.')
   })
 
   it('counts them when there is more than one', () => {
-    expect(updateCostLine(3, false)).toBe('Your 3 sessions restart on the new version.')
+    expect(updateCostLine(3, false)).toBe('Your 3 sessions keep running through the update.')
   })
 
   it('names the turn only when one is running', () => {
-    // A session comes back where it was. A turn in flight does not, and that is
-    // the only part actually lost — so it is said separately or not at all.
+    // The turn is the part people brace for, so it is named — and now to say it
+    // survives. The pty outlives the server that owned it, so the program on the
+    // far side never learns the update happened.
     expect(updateCostLine(3, true)).toBe(
-      'Your 3 sessions restart on the new version. A turn in flight is lost.'
+      'Your 3 sessions keep running through the update. The turn in flight continues.'
     )
     expect(updateCostLine(3, false)).not.toContain('turn')
   })

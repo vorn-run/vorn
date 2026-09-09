@@ -136,8 +136,8 @@ describe('what the sidebar restart will cost', () => {
       ['b', { status: 'idle' }]
     ])
     render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
-    expect(screen.getByText(/Your 2 sessions restart on the new version/)).toBeInTheDocument()
-    expect(screen.getByText(/A turn in flight is lost/)).toBeInTheDocument()
+    expect(screen.getByText(/Your 2 sessions keep running through the update/)).toBeInTheDocument()
+    expect(screen.getByText(/The turn in flight continues/)).toBeInTheDocument()
   })
 
   it('says nothing when there are no sessions to lose', () => {

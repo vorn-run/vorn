@@ -1245,6 +1245,35 @@ export type UpdateStatus =
   | { kind: 'error'; message: string }
   | { kind: 'unsupported' }
 
+/**
+ * Which build is holding this machine's terminals.
+ *
+ * The server outlives the app, so the two can be different builds -- and after an
+ * update they are, for a moment. A fix that shipped and did not take effect is
+ * nearly always this.
+ */
+export interface ServerRuntimeStatus {
+  /** 'unknown' for a server somebody started from the command line. */
+  serverVersion: string
+  /** The release this app is. */
+  appVersion: string
+  serverPid: number | null
+  /** Whether this app adopted a server it did not start. */
+  adopted: boolean
+  /** False on Windows, for a server reached by port, and for one this app started. */
+  canUpgrade: boolean
+  /** How many terminals a move would carry, when the server has said. */
+  sessions: number | null
+  /** What the last attempt did, so a panel opened afterwards can say. */
+  lastUpgrade: ServerUpgradeOutcome | null
+}
+
+export type ServerUpgradeOutcome =
+  | { kind: 'handed-over'; sessions: number }
+  | { kind: 'not-needed'; why: string }
+  | { kind: 'failed'; why: string }
+  | { kind: 'working' }
+
 export interface AppConfig {
   version: number
   /**
@@ -1765,6 +1794,12 @@ export const IPC = {
   UPDATE_SET_AUTO_DOWNLOAD: 'update:set-auto-download',
   /** Synchronous read, so a freshly-opened panel renders without waiting. */
   UPDATE_GET_STATUS: 'update:get-status',
+  /** Which build is serving this machine's terminals, and whether it can move. */
+  SERVER_RUNTIME_STATUS: 'server:runtime-status',
+  /** Synchronous read, so a freshly-opened panel renders without waiting. */
+  SERVER_GET_RUNTIME_STATUS: 'server:get-runtime-status',
+  /** Move the running server onto this app's build, keeping every terminal. */
+  SERVER_UPGRADE: 'server:upgrade',
   TASK_IMAGE_SAVE: 'task:imageSave',
   TASK_IMAGE_DELETE: 'task:imageDelete',
   TASK_IMAGE_GET_PATH: 'task:imageGetPath',

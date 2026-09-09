@@ -17,6 +17,38 @@ export function getCurrentHost(): string {
   return currentHost
 }
 
+/** Reversible, unlike closing fastify: the replacement is about to bind this port. */
+export async function releaseListener(): Promise<void> {
+  const server = httpServer
+  if (!server) return
+  if (typeof server.closeAllConnections === 'function') server.closeAllConnections()
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+}
+
+/** Only for a handoff that committed and then lost its replacement. */
+export async function retakeListener(): Promise<boolean> {
+  const server = httpServer
+  if (!server) return false
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (err: unknown): void => {
+        server.removeListener('listening', onListening)
+        reject(err)
+      }
+      const onListening = (): void => {
+        server.removeListener('error', onError)
+        resolve()
+      }
+      server.once('error', onError)
+      server.listen(boundPort, currentHost, onListening)
+    })
+    return true
+  } catch (err) {
+    log.error({ err }, '[server] could not listen again after an abandoned handoff')
+    return false
+  }
+}
+
 /**
  * Rebind if the reachability setting has changed.
  *

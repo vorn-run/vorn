@@ -482,6 +482,11 @@ export function setCwdReporter(fn: CwdReporter | null): void {
 }
 
 /** How many models are held. For the measurement that bounds this. */
+/** For the one caller that must not clear a screen recovery has just rebuilt. */
+export function hasScreen(id: string): boolean {
+  return screens.has(id)
+}
+
 export function screenCount(): number {
   return screens.size
 }
