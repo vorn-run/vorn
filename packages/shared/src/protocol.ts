@@ -534,6 +534,7 @@ export interface RequestMethods {
   'terminal:listActive': { params: void; result: TerminalSession[] }
   'terminal:rename': { params: { id: string; displayName: string }; result: void }
   'terminal:reorder': { params: string[]; result: void }
+  'terminal:setGroup': { params: { id: string; groupId: string | null }; result: void }
   'terminal:readOutput': { params: { id: string; lines?: number }; result: string[] }
   /**
    * The terminal's output as it was emitted, escape sequences intact.

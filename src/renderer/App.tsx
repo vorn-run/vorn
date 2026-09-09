@@ -502,6 +502,11 @@ export function App() {
         if (session.displayName && existing.session.displayName !== session.displayName) {
           store.renameTerminal(session.id, session.displayName)
         }
+        // Filed from another client — without this the board keeps drawing the
+        // session under whatever group it last knew about.
+        if (session.groupId !== existing.session.groupId) {
+          store.updateSessionGroupId(session.id, session.groupId)
+        }
         const wtUpdates: { worktreePath?: string; worktreeName?: string } = {}
         if (session.worktreePath && session.worktreePath !== existing.session.worktreePath) {
           wtUpdates.worktreePath = session.worktreePath

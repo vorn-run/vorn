@@ -272,6 +272,20 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       return next ? { terminals: next } : state
     }),
 
+  // Ungrouping deletes the key rather than setting a falsy one, so this takes
+  // undefined as a real value and cannot use a truthiness check.
+  updateSessionGroupId: (id, groupId) =>
+    set((state) => {
+      const term = state.terminals.get(id)
+      if (!term || term.session.groupId === groupId) return state
+      const session = { ...term.session }
+      if (groupId === undefined) delete session.groupId
+      else session.groupId = groupId
+      const next = new Map(state.terminals)
+      next.set(id, { ...term, session })
+      return { terminals: next }
+    }),
+
   updateSessionWorktree: (id, updates) =>
     set((state) => {
       const term = state.terminals.get(id)

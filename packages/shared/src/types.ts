@@ -90,6 +90,8 @@ export interface TerminalSession {
   hookSessionId?: string
   agentSessionId?: string
   statusSource?: 'hooks' | 'pattern'
+  /** The group this session was filed under, if any. */
+  groupId?: string
   /**
    * The geometry the PTY is currently running at.
    *
@@ -272,6 +274,23 @@ export const DEFAULT_WORKSPACE: WorkspaceConfig = {
   icon: 'User',
   iconColor: '#6b7280',
   order: 0
+}
+
+/**
+ * A bucket of sessions inside one workspace, and a scope you can select.
+ *
+ * Membership cuts across the project tree on purpose: the sessions in a group
+ * come from whatever repos and worktrees the work spans. A session belongs to
+ * at most one, and belonging to none is the ordinary state — an ungrouped
+ * session is drawn exactly where it was before any group existed.
+ */
+export interface SessionGroupConfig {
+  id: string
+  name: string
+  icon?: string
+  iconColor?: string
+  order: number
+  workspaceId: string
 }
 
 export interface ProjectConfig {
@@ -1362,6 +1381,7 @@ export interface AppConfig {
   remoteHosts?: RemoteHost[]
   tasks?: TaskConfig[]
   workspaces?: WorkspaceConfig[]
+  sessionGroups?: SessionGroupConfig[]
 }
 
 export interface RecentSession {
@@ -1644,6 +1664,7 @@ export const IPC = {
   SESSION_REORDERED: 'session:reordered',
   TERMINAL_RENAME: 'terminal:rename-session',
   TERMINAL_REORDER: 'terminal:reorder-sessions',
+  TERMINAL_SET_GROUP: 'terminal:set-group',
   CONFIG_LOAD: 'config:load',
   CONFIG_SAVE: 'config:save',
   CONFIG_CHANGED: 'config:changed',

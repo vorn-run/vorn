@@ -1185,6 +1185,15 @@ class PtyManager extends EventEmitter {
     this.emit('client-message', IPC.SESSION_UPDATED, session)
   }
 
+  /** Files a session under a group, or takes it out of one with null. */
+  setSessionGroup(id: string, groupId: string | null): void {
+    const session = this.sessions.get(id)
+    if (!session) throw new Error(`Session not found: ${id}`)
+    if (groupId) session.groupId = groupId
+    else delete session.groupId
+    this.emit('client-message', IPC.SESSION_UPDATED, session)
+  }
+
   reorderSessions(ids: string[]): void {
     if (new Set(ids).size !== ids.length) throw new Error('Duplicate session IDs')
     for (const id of ids) {

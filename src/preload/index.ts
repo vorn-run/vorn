@@ -196,6 +196,8 @@ const api = {
     ipcRenderer.invoke(IPC.TERMINAL_RENAME, { id, displayName }),
 
   reorderSessions: (ids: string[]) => ipcRenderer.invoke(IPC.TERMINAL_REORDER, ids),
+  setSessionGroup: (id: string, groupId: string | null) =>
+    ipcRenderer.invoke(IPC.TERMINAL_SET_GROUP, { id, groupId }),
 
   openDirectoryDialog: (): Promise<string | null> => ipcRenderer.invoke(IPC.DIALOG_OPEN_DIRECTORY),
 

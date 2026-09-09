@@ -17,6 +17,7 @@ function patchConfig(
 export const createProjectsSlice: StateCreator<AppStore, [], [], ProjectsSlice> = (set) => ({
   config: null,
   activeProject: loadView().activeProject,
+  activeGroupId: loadView().activeGroupId,
   activeWorktreePath: loadView().activeWorktreePath,
 
   setConfig: (config) =>
@@ -27,8 +28,12 @@ export const createProjectsSlice: StateCreator<AppStore, [], [], ProjectsSlice> 
     }),
 
   setActiveProject: (name) => {
-    saveView({ activeProject: name, activeWorktreePath: null })
-    set({ activeProject: name, activeWorktreePath: null })
+    saveView({ activeProject: name, activeGroupId: null, activeWorktreePath: null })
+    set({ activeProject: name, activeGroupId: null, activeWorktreePath: null })
+  },
+  setActiveGroup: (id) => {
+    saveView({ activeGroupId: id, activeProject: null, activeWorktreePath: null })
+    set({ activeGroupId: id, activeProject: null, activeWorktreePath: null })
   },
   setActiveWorktreePath: (path) => {
     saveView({ activeWorktreePath: path })
@@ -49,6 +54,49 @@ export const createProjectsSlice: StateCreator<AppStore, [], [], ProjectsSlice> 
         projects: c.projects.map((p) => (p.name === originalName ? project : p))
       }))
     ),
+
+  addSessionGroup: (group) =>
+    set((s) =>
+      patchConfig(s.config, (c) => ({ sessionGroups: [...(c.sessionGroups || []), group] }))
+    ),
+
+  updateSessionGroup: (id, updates) =>
+    set((s) =>
+      patchConfig(s.config, (c) => ({
+        sessionGroups: (c.sessionGroups || []).map((g) => (g.id === id ? { ...g, ...updates } : g))
+      }))
+    ),
+
+  removeSessionGroup: (id) =>
+    set((state) => {
+      if (!state.config) return {}
+      const clearSelection = state.activeGroupId === id
+      const updated = {
+        ...state.config,
+        sessionGroups: (state.config.sessionGroups || []).filter((g) => g.id !== id)
+      }
+      window.api.saveConfig(updated)
+      // The server owns membership, so the sessions are let go through it.
+      for (const [sessionId, t] of state.terminals) {
+        if (t.session.groupId === id) void window.api.setSessionGroup(sessionId, null)
+      }
+      if (clearSelection) saveView({ activeGroupId: null })
+      return { config: updated, ...(clearSelection && { activeGroupId: null }) }
+    }),
+
+  moveSessionToGroup: (sessionId, groupId) => {
+    void window.api.setSessionGroup(sessionId, groupId)
+    set((state) => {
+      const t = state.terminals.get(sessionId)
+      if (!t) return {}
+      const terminals = new Map(state.terminals)
+      const session = { ...t.session }
+      if (groupId) session.groupId = groupId
+      else delete session.groupId
+      terminals.set(sessionId, { ...t, session })
+      return { terminals }
+    })
+  },
 
   addWorkflow: (workflow) =>
     set((s) => patchConfig(s.config, (c) => ({ workflows: [...(c.workflows || []), workflow] }))),
@@ -95,6 +143,9 @@ export const createProjectsSlice: StateCreator<AppStore, [], [], ProjectsSlice> 
       const updated = {
         ...state.config,
         workspaces: (state.config.workspaces || []).filter((ws) => ws.id !== id),
+        // A group belongs to one workspace, so it goes with it. Its sessions keep
+        // a group_id pointing at nothing, which every reader treats as ungrouped.
+        sessionGroups: (state.config.sessionGroups || []).filter((g) => g.workspaceId !== id),
         projects: state.config.projects.map((p) =>
           (p.workspaceId ?? 'personal') === id ? { ...p, workspaceId: 'personal' } : p
         ),

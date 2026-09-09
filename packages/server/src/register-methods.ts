@@ -729,6 +729,11 @@ export function registerAllMethods(): void {
     sessionManager.scheduleSave()
     broadcastWidgetUpdate()
   })
+  registerMethod('terminal:setGroup', ({ id, groupId }) => {
+    ptyManager.setSessionGroup(id, groupId)
+    sessionManager.scheduleSave()
+    broadcastWidgetUpdate()
+  })
   registerMethod('terminal:reorder', (ids) => {
     ptyManager.reorderSessions(ids)
     sessionManager.scheduleSave()
@@ -1085,7 +1090,10 @@ export function registerAllMethods(): void {
           ...(previous.worktreeName !== undefined && { worktreeName: previous.worktreeName }),
           ...(previous.branch !== undefined && { branch: previous.branch }),
           ...(previous.isWorktree !== undefined && { isWorktree: previous.isWorktree }),
-          ...(previous.displayName !== undefined && { displayName: previous.displayName })
+          ...(previous.displayName !== undefined && { displayName: previous.displayName }),
+          // Same reason as the rest: rebuilt from a whitelist, so anything left
+          // out is written back as null by the save below and gone for good.
+          ...(previous.groupId !== undefined && { groupId: previous.groupId })
         })
         // Synchronously, so it is in the buffer before the shell's first byte.
         ptyManager.injectOutput(session.id, BETWEEN_RUNS)
@@ -1114,6 +1122,9 @@ export function registerAllMethods(): void {
 
       // Same id, same reasons as the shell branch above.
       const session = ptyManager.createPty(buildRestorePayload(grounded, transcriptId), id)
+      // Carried on the server rather than through the payload, so membership is
+      // never something a client can set on a spawn.
+      if (grounded.groupId !== undefined) session.groupId = grounded.groupId
       // The record names the conversation now, so the claim standing in for it is
       // spent; leaving it would hold an id the session already reports.
       if (session.agentSessionId) releaseSpawningTranscriptsFor(id)

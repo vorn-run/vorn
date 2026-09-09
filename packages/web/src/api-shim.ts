@@ -455,6 +455,8 @@ export function createApiShim(wsUrl: string) {
     renameSession: (id: string, displayName: string) =>
       rpc.invoke('terminal:rename', { id, displayName }),
     reorderSessions: (ids: string[]) => rpc.invoke('terminal:reorder', ids),
+    setSessionGroup: (id: string, groupId: string | null) =>
+      rpc.invoke('terminal:setGroup', { id, groupId }),
 
     // ── Dialogs (web: use HTML5 file inputs) ──
     openDirectoryDialog: async (): Promise<string | null> => {

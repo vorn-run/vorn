@@ -6,6 +6,7 @@ import { getDisplayName } from '../../lib/terminal-display'
 import { useSidebarResize } from './useSidebarResize'
 import { SidebarHeader } from './SidebarHeader'
 import { ProjectsSection } from './ProjectsSection'
+import { GroupSessionsSection } from './GroupSessionsSection'
 import { FlatSessionsSection } from './FlatSessionsSection'
 import { WorkflowsSection } from './WorkflowsSection'
 import { TasksProjectsSection } from './TasksProjectsSection'
@@ -136,6 +137,12 @@ export function ProjectSidebar() {
           <TasksProjectsSection isCollapsed={isCollapsed} workspaceProjects={workspaceProjects} />
         ) : sidebarViewMode === 'sessions-flat' ? (
           <FlatSessionsSection
+            isCollapsed={isCollapsed}
+            workspaceProjectNames={workspaceProjectNames}
+            workspaceTerminalCount={workspaceTerminalCount}
+          />
+        ) : sidebarViewMode === 'groups-sessions' ? (
+          <GroupSessionsSection
             isCollapsed={isCollapsed}
             workspaceProjectNames={workspaceProjectNames}
             workspaceTerminalCount={workspaceTerminalCount}

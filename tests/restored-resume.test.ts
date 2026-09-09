@@ -99,6 +99,25 @@ describe('claiming one', () => {
 
     expect(restoredRecords().map((s) => s.id)).toEqual(['two'])
   })
+
+  /**
+   * Resume rebuilds the session from a whitelist under the same id and saves it,
+   * so a field the whitelist forgets is written back as null and lost for good.
+   * The group is the value that has to reach the handler for it to carry it.
+   */
+  it('carries a group on the record the resume handler reads', () => {
+    seedRestored([session({ id: 'one', groupId: 'g1' })], NOW)
+
+    expect(restoredRecords()[0].groupId).toBe('g1')
+    expect(consumeRestored('one')?.session.groupId).toBe('g1')
+  })
+
+  /** The payload is client-shaped, so membership is applied server-side instead. */
+  it('is not something buildRestorePayload carries, by design', () => {
+    const payload = buildRestorePayload(session({ id: 'one', groupId: 'g1' }), undefined)
+
+    expect(payload).not.toHaveProperty('groupId')
+  })
 })
 
 describe('what is on disk when a session is claimed or let go', () => {

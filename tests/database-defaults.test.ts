@@ -14,7 +14,11 @@ import {
   saveConfig,
   dbInsertSourceConnection,
   dbInsertTaskSourceLink,
-  dbGetTaskSourceLink
+  dbGetTaskSourceLink,
+  dbDeleteSessionGroup,
+  dbListSessionGroups,
+  saveSessions,
+  getPreviousSessions
 } from '../packages/server/src/database'
 import type { AppConfig, TaskConfig } from '../packages/shared/src/types'
 
@@ -331,5 +335,66 @@ describe('reopening the panes you had open', () => {
     saveConfig({ ...config, defaults: { ...config.defaults, reopenSessions: false } })
 
     expect(loadConfig().defaults.reopenSessions).toBe(false)
+  })
+})
+
+describe('session groups', () => {
+  const group = { id: 'g1', name: 'Sidebar work', order: 0, workspaceId: 'personal' }
+  const config: AppConfig = {
+    version: 1,
+    defaults: { shell: '/bin/zsh', fontSize: 13, theme: 'dark' },
+    projects: [{ name: 'vorn', path: '/tmp/vorn', preferredAgents: [] }],
+    sessionGroups: [group]
+  } as AppConfig
+
+  const session = (id: string, groupId?: string) =>
+    ({
+      id,
+      agentType: 'claude',
+      projectName: 'vorn',
+      projectPath: '/tmp/vorn',
+      status: 'idle',
+      createdAt: 1,
+      pid: 1,
+      ...(groupId && { groupId })
+    }) as Parameters<typeof saveSessions>[0][number]
+
+  it('round-trips a group', () => {
+    saveConfig(config)
+    expect(loadConfig().sessionGroups).toEqual([group])
+  })
+
+  /** Membership rides on the session row the server already restores. */
+  it('brings a session back still filed under its group', () => {
+    saveConfig(config)
+    saveSessions([session('s1', 'g1'), session('s2')])
+    const restored = getPreviousSessions()
+    expect(restored.find((s) => s.id === 's1')?.groupId).toBe('g1')
+    expect(restored.find((s) => s.id === 's2')?.groupId).toBeUndefined()
+  })
+
+  it('lets the sessions go when the group is deleted, and kills none', () => {
+    saveConfig(config)
+    saveSessions([session('s1', 'g1'), session('s2', 'g1')])
+    dbDeleteSessionGroup('g1')
+    expect(dbListSessionGroups()).toEqual([])
+    const restored = getPreviousSessions()
+    expect(restored.map((s) => s.id).sort()).toEqual(['s1', 's2'])
+    expect(restored.every((s) => s.groupId === undefined)).toBe(true)
+  })
+
+  it('spares a group another client added after this snapshot was loaded', () => {
+    saveConfig(config)
+    const stale = loadConfig()
+    saveConfig({
+      ...stale,
+      sessionGroups: [...(stale.sessionGroups ?? []), { ...group, id: 'g2', name: 'Release' }]
+    })
+    saveConfig(stale)
+    expect(
+      dbListSessionGroups()
+        .map((g) => g.id)
+        .sort()
+    ).toEqual(['g1', 'g2'])
   })
 })

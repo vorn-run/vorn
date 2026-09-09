@@ -143,6 +143,9 @@ export function registerIpcHandlers(): void {
   )
   safeHandle(IPC.TERMINAL_RENAME, (_, params) => requireBridge().request('terminal:rename', params))
   safeHandle(IPC.TERMINAL_REORDER, (_, ids) => requireBridge().request('terminal:reorder', ids))
+  safeHandle(IPC.TERMINAL_SET_GROUP, (_, params) =>
+    requireBridge().request('terminal:setGroup', params)
+  )
 
   // Git
   safeHandle(IPC.GIT_IS_REPO, (_, projectPath) =>
