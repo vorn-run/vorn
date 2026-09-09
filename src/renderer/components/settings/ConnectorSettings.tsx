@@ -133,6 +133,22 @@ export function ConnectorSettings() {
     () => buildConnectorListings(connectors, catalog, connections, packs, mcpServers),
     [connectors, catalog, connections, packs, mcpServers]
   )
+  // The map itself, which the store owns; counting inside the selector would
+  // hand `useShallow` a fresh object every call and never settle.
+  const activation = useAppStore((s) => s.extensionActivation)
+  // One pass for the whole panel, with the honest denominator beside it: a card
+  // this window never opened cannot be counted, and a total would overstate it.
+  const activeCards = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const states of activation.values()) {
+      for (const state of states) {
+        if (!state.active) continue
+        counts[state.extensionId] = (counts[state.extensionId] ?? 0) + 1
+      }
+    }
+    return counts
+  }, [activation])
+  const openCards = activation.size
   // Re-read from the current listings so a connection made while the panel is
   // open updates its "connected" count rather than showing the stale copy.
   const selectedListing = selected
@@ -186,7 +202,7 @@ export function ConnectorSettings() {
     <div>
       <SettingsPageHeader
         title="Connections"
-        description="Vorn watches these and starts a workflow when something happens. Each connection seeds a visible, editable workflow that polls on cron."
+        description="Vorn watches these and starts a workflow when something happens. Each connection seeds a visible, editable workflow that polls on cron. Extensions add footers and panes to a card instead."
       />
 
       <div className="inline-flex bg-white/[0.04] rounded-sm p-0.5 mb-4">
@@ -243,6 +259,7 @@ export function ConnectorSettings() {
           onRefresh={async () => {
             await refreshConnectorCatalog()
           }}
+          activeCards={activeCards}
           onSelect={setSelected}
           onAdd={setAdding}
           onInstall={handleInstall}
@@ -261,6 +278,10 @@ export function ConnectorSettings() {
             progress: installProgress[selectedListing.id]
           })}
           activity={activity.state(selectedListing.id, ['rollback', 'remove'])}
+          {...(selectedListing.kind === 'extension' && {
+            activeCards: activeCards[selectedListing.id] ?? 0,
+            openCards
+          })}
           pending={pendingPack?.rowKey === selectedListing.key ? pendingSheet : null}
           onAdd={() => setAdding(selectedListing)}
           onUse={() => openWorkflowEditor(null)}
