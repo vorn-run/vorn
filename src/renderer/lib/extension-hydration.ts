@@ -26,8 +26,12 @@ export async function hydrateExtensions(
   if (hydrated.has(sessionId)) return
   hydrated.add(sessionId)
   const [states, readings] = await Promise.all([
-    Promise.resolve(window.api.extensionActivation?.(sessionId)).catch(() => undefined),
-    Promise.resolve(window.api.extensionFooterItems?.(sessionId)).catch(() => undefined)
+    Promise.resolve()
+      .then(() => window.api.extensionActivation?.(sessionId))
+      .catch(() => undefined),
+    Promise.resolve()
+      .then(() => window.api.extensionFooterItems?.(sessionId))
+      .catch(() => undefined)
   ])
   const store = getStore()
   // A session closed while the host was answering keeps nothing: the store

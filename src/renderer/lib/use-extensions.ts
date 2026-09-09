@@ -22,7 +22,8 @@ let inFlight: Promise<InstalledConnectorPack[]> | undefined
 async function load(): Promise<InstalledConnectorPack[]> {
   if (cache) return cache
   if (inFlight) return inFlight
-  inFlight = Promise.resolve(window.api?.listExtensions?.())
+  inFlight = Promise.resolve()
+    .then(() => window.api?.listExtensions?.())
     .then((packs) => {
       if (packs) cache = packs
       return cache ?? EMPTY
