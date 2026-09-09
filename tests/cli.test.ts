@@ -20,12 +20,13 @@ import { mintOwnerToken } from '../packages/server/src/token-manager'
 let dataDir: string
 
 /** Collects what the CLI wrote, so assertions read against real output. */
-function capture(): CliDeps & { out: () => string; err: () => string } {
+function capture(isTty = false): CliDeps & { out: () => string; err: () => string } {
   const outParts: string[] = []
   const errParts: string[] = []
   return {
     write: (t) => outParts.push(t),
     writeErr: (t) => errParts.push(t),
+    isTty,
     out: () => outParts.join(''),
     err: () => errParts.join('')
   }
@@ -64,7 +65,7 @@ describe('usage and dispatch', () => {
   it('prints usage to stdout and succeeds for --help', async () => {
     const io = capture()
     expect(await runCli(['--help'], io)).toBe(0)
-    expect(io.out()).toContain('vorn-server: run a Vorn server')
+    expect(io.out()).toContain('vorn: Vorn from the command line')
     expect(io.err()).toBe('')
   })
 
@@ -74,11 +75,45 @@ describe('usage and dispatch', () => {
     expect(io.out()).toContain('Usage')
   })
 
+  it('describes the server commands under their own noun', async () => {
+    const io = capture()
+    expect(await runCli(['server', '--help'], io)).toBe(0)
+    expect(io.out()).toContain('vorn server: run a Vorn server')
+  })
+
+  it('still takes the bare serve and token commands vorn-server was called with', async () => {
+    const io = capture()
+    expect(await runCli(['server'], io)).toBe(2)
+    expect(io.err()).toContain('vorn server serve')
+  })
+
   it('treats a bare invocation as a usage error, on stderr', async () => {
     const io = capture()
     expect(await runCli([], io)).toBe(2)
     expect(io.err()).toContain('Usage')
     expect(io.out()).toBe('')
+  })
+
+  it("finds the command after a global option, not the option's value", async () => {
+    const io = capture()
+    expect(await runCli(['--data-dir', dataDir, 'token', 'list'], io)).toBe(0)
+    expect(io.out()).toBe('No device tokens.\n')
+  })
+
+  it('finds it after the noun the server commands live under too', async () => {
+    const io = capture()
+    expect(await runCli(['--data-dir', dataDir, 'server', 'token', 'list'], io)).toBe(0)
+    expect(io.out()).toBe('No device tokens.\n')
+  })
+
+  it('names the option that swallowed the command, not the leftovers', async () => {
+    const io = capture()
+    expect(await runCli(['--data-dir', 'session', 'list'], io)).toBe(2)
+    expect(io.err()).toContain('--data-dir needs a value; it took "session" as one')
+
+    const io2 = capture()
+    expect(await runCli(['--data-dir', 'session'], io2)).toBe(2)
+    expect(io2.err()).toContain('--data-dir needs a value')
   })
 
   it('reports an unknown command', async () => {
@@ -97,7 +132,7 @@ describe('usage and dispatch', () => {
   it('reports an unknown option', async () => {
     const io = capture()
     expect(await runCli(['serve', '--nope'], io)).toBe(2)
-    expect(io.err()).toContain('vorn-server:')
+    expect(io.err()).toContain('vorn:')
   })
 })
 
@@ -178,8 +213,17 @@ describe('token revoke', () => {
 })
 
 describe('serve', () => {
+  it('keeps the first-run token out of a stream nobody is watching', async () => {
+    const io = capture(false)
+    const code = await runCli(['serve', '--data-dir', dataDir], io)
+
+    expect(code).toBe(0)
+    expect(io.out()).not.toContain('vorn_')
+    expect(io.out()).toContain('vorn server token create')
+  })
+
   it('reports the port and mints a first-run token on an empty data dir', async () => {
-    const io = capture()
+    const io = capture(true)
     const code = await runCli(['serve', '--data-dir', dataDir], io)
 
     expect(code).toBe(0)

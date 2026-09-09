@@ -706,6 +706,12 @@ export function createApiShim(wsUrl: string) {
     writeFileContent: (filePath: string, content: string, remoteHostId?: string) =>
       rpc.invoke('file:writeContent', { filePath, content, remoteHostId }),
 
+    // ── The vorn command ──
+    // A browser has no PATH to put it on, and says so rather than pretending.
+    cliCommandStatus: () =>
+      Promise.resolve({ available: false, installed: false, path: '', onPath: false }),
+    installCliCommand: unsupportedInWeb('Installing the command line tool'),
+
     // ── Shells ──
     listShellExecutables: () => rpc.invoke('shell:listExecutables'),
     listInstalledShells: () => rpc.invoke('shell:listInstalled'),

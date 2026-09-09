@@ -61,9 +61,32 @@ try {
         Write-Host "Added $InstallDir to your PATH."
     }
 
+    # The `vorn` command, beside the app and inside the directory just added to
+    # PATH. It runs the app's own Node, so nothing else has to be installed and
+    # the native modules inside the bundle resolve.
+    # Joined with CRLF rather than written as a here-string: this file may be
+    # fetched with LF endings, and cmd.exe is unreliable about a multi-line
+    # block that arrives that way.
+    $ShimLines = @(
+        '@echo off',
+        'setlocal',
+        'set "APPDIR=%~dp0"',
+        'if "%~1"=="" (',
+        '  start "" "%APPDIR%Vorn.exe"',
+        '  exit /b',
+        ')',
+        'set "ELECTRON_RUN_AS_NODE=1"',
+        'set "VORN_NATIVE_MODULES_PATH=%APPDIR%resources\app.asar.unpacked\node_modules"',
+        'set "NODE_PATH=%APPDIR%resources\app.asar\node_modules;%VORN_NATIVE_MODULES_PATH%"',
+        '"%APPDIR%Vorn.exe" "%APPDIR%resources\server\cli.cjs" %*'
+    )
+    $Shim = ($ShimLines -join "`r`n") + "`r`n"
+    Set-Content -Path (Join-Path $InstallDir "vorn.cmd") -Value $Shim -Encoding ASCII -NoNewline
+
     Write-Host ""
     Write-Host "$AppName $Version installed to $InstallDir"
     Write-Host "Launch from Start Menu, desktop shortcut, or run '$AppName' in a new terminal."
+    Write-Host "The vorn command is available in a new terminal: vorn --help"
 } finally {
     Write-Host "Cleaning up..."
     Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue

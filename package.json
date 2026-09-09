@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "electron-vite dev",
-    "build:server": "cd packages/server && npx tsup src/index.ts --format cjs --target node22 --external node-pty --external libsql --clean",
+    "build:server": "cd packages/server && npx tsup",
     "build:web": "cd packages/web && npx vite build",
     "build": "yarn build:server && yarn build:web && electron-vite build",
     "preview": "electron-vite preview",

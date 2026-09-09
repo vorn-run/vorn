@@ -25,6 +25,15 @@ export interface ServerArgs {
 
 export class ServerArgsError extends Error {}
 
+/** The options this grammar accepts, exported for the reason `CLIENT_OPTIONS` is. */
+export const SERVER_OPTIONS = {
+  host: { type: 'string' },
+  port: { type: 'string' },
+  'data-dir': { type: 'string' },
+  name: { type: 'string' },
+  help: { type: 'boolean', short: 'h' }
+} as const
+
 /**
  * Parse server arguments, accepting both `--port=3000` and `--port 3000`.
  *
@@ -44,13 +53,7 @@ export function parseServerArgs(argv: string[]): ServerArgs {
   try {
     const parsed = parseArgs({
       args: argv,
-      options: {
-        host: { type: 'string' },
-        port: { type: 'string' },
-        'data-dir': { type: 'string' },
-        name: { type: 'string' },
-        help: { type: 'boolean', short: 'h' }
-      },
+      options: SERVER_OPTIONS,
       allowPositionals: true,
       // Unknown options are reported by us, with the option name in the message,
       // rather than surfacing parseArgs' internal phrasing.

@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 const rpcCall = vi.fn()
-vi.mock('../packages/mcp/src/ws-client', () => ({ rpcCall: (...a: unknown[]) => rpcCall(...a) }))
+vi.mock('../packages/server/src/rpc-client', () => ({
+  rpcCall: (...a: unknown[]) => rpcCall(...a)
+}))
 
 const { registerConnectorTools } = await import('../packages/mcp/src/tools/connectors')
 

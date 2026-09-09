@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useAppStore } from '../../stores'
 import { ShellPicker } from './ShellPicker'
 import { AGENT_LIST } from '../../lib/agent-definitions'
@@ -9,6 +10,92 @@ import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
 import { DEFAULT_STEP_TIMEOUT_MINUTES } from '../../lib/workflow-execution'
+
+interface CliCommandState {
+  available: boolean
+  installed: boolean
+  path: string
+  onPath: boolean
+}
+
+/**
+ * The `vorn` command, and whether this copy of Vorn has put it on PATH.
+ *
+ * Asked of the main process rather than remembered in the config: the file can
+ * be removed, and an install that happened on another machine sharing this
+ * configuration says nothing about this one.
+ */
+function CliCommandRow() {
+  const [state, setState] = useState<CliCommandState | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    // Optional chaining short-circuits the whole chain, so a build without the
+    // method never reaches `then`; the catch is for an IPC call that rejects.
+    void window.api
+      .cliCommandStatus?.()
+      .then((next) => {
+        if (!cancelled) setState(next)
+      })
+      .catch(() => {
+        if (!cancelled) setState(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (!state) return null
+
+  const install = (): void => {
+    setBusy(true)
+    setError(null)
+    window.api
+      .installCliCommand()
+      .then((result) => {
+        if (!result.ok) {
+          setError(result.error)
+          return undefined
+        }
+        // Asked again rather than patched: where it went decides whether the
+        // shell will find it, and only the main process knows both.
+        return window.api.cliCommandStatus?.().then((next) => {
+          if (next) setState(next)
+        })
+      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setBusy(false))
+  }
+
+  // Installed somewhere the shell does not look is a file, not a command.
+  const note =
+    error ?? (state.onPath ? state.path : `${state.path} — add its directory to your PATH`)
+
+  return (
+    <SettingRow
+      label="Command Line Tool"
+      description={
+        state.installed
+          ? `Installed. Run \`vorn --help\` in a terminal.`
+          : 'Put the vorn command on your PATH, for starting sessions and reading them from a terminal.'
+      }
+      note={note}
+      disabled={!state.available}
+    >
+      <button
+        onClick={install}
+        disabled={busy || !state.available}
+        className="text-xs px-2 py-1 rounded bg-white/[0.04] hover:bg-white/[0.08]
+                   text-gray-400 hover:text-gray-200 transition-colors shrink-0
+                   disabled:opacity-40"
+      >
+        {state.installed ? 'Reinstall' : 'Install'}
+      </button>
+    </SettingRow>
+  )
+}
 
 export function GeneralSettings() {
   const config = useAppStore((s) => s.config)
@@ -171,6 +258,8 @@ export function GeneralSettings() {
             onChange={(enableHoverPreview) => updateDefaults({ enableHoverPreview })}
           />
         </SettingRow>
+
+        {isElectron && <CliCommandRow />}
 
         {/* Floating Widget — Electron only */}
         {isElectron && (

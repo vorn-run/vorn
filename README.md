@@ -67,6 +67,24 @@ brew tap vorn-run/tap && brew install --cask vorn
 
 Or download directly from [GitHub Releases](https://github.com/vorn-run/vorn/releases).
 
+## Command line
+
+The installer also puts a `vorn` command on your PATH. It talks to the same server the app
+does, and starts one if none is running.
+
+```bash
+vorn session start --agent claude --prompt "fix the failing test"
+vorn session list
+vorn session logs <id>
+vorn session send <id> "run the tests"
+vorn workflow list
+vorn server serve          # a server on its own, without the app
+```
+
+`vorn` on its own opens the app. `--json` gives machine-readable output on stdout, with
+notices and errors on stderr, so a command can be piped. If you installed by dragging the
+app across or with Homebrew, Settings → General → Command Line Tool writes the same command.
+
 ## Features
 
 Vorn supports two ways of working. **Interactive**: open a grid of terminals and pair with agents hands-on. **Autonomous**: define tasks and workflows, and let agents run headlessly while you focus on something else. Mix both freely — they share the same projects, tasks, and git integration.

@@ -10,7 +10,7 @@ import type {
   BrowserTarget
 } from '@vornrun/shared/types'
 import { V } from '../validation'
-import { rpcCall } from '../ws-client'
+import { rpcCall } from '@vornrun/server/rpc-client'
 
 /**
  * The agent's half of the session browser pane.
