@@ -113,13 +113,10 @@ export function describeActivation(activates: ExtensionActivation | undefined): 
   const contains = activates?.workspaceContains?.filter(Boolean) ?? []
   if (contains.length > 0) clauses.push(`projects with ${anyOf(contains)}`)
 
+  // One clause for the field, whatever it lists: two would read as both being required.
   const hosts = activates?.remoteHost?.filter(Boolean) ?? []
-  if (hosts.length > 0) {
-    const named = hosts.filter((host) => HOST_LABEL[host] !== undefined)
-    const rest = hosts.filter((host) => HOST_LABEL[host] === undefined)
-    if (named.length > 0) clauses.push(`${anyOf(named.map((host) => HOST_LABEL[host]))} remotes`)
-    if (rest.length > 0) clauses.push(`remotes on ${anyOf(rest)}`)
-  }
+  if (hosts.length > 0)
+    clauses.push(`${anyOf(hosts.map((host) => HOST_LABEL[host] ?? host))} remotes`)
 
   const agents = activates?.agent ?? []
   if (agents.length > 0) clauses.push(`${anyOf(agents.map(agentLabel))} sessions`)
@@ -134,17 +131,20 @@ export function describeActivation(activates: ExtensionActivation | undefined): 
 /** "2 panes, 1 footer" — what it adds, counted the way the row counts triggers. */
 export function describeContributions(contributes: ExtensionContributions | undefined): string {
   const parts = [
-    count(contributes?.panes?.length ?? 0, 'pane'),
-    count(contributes?.footers?.length ?? 0, 'footer'),
-    count(contributes?.linkHandlers?.length ?? 0, 'link handler')
-  ].filter((part): part is string => part !== null)
+    [contributes?.panes?.length ?? 0, 'pane'] as const,
+    [contributes?.footers?.length ?? 0, 'footer'] as const,
+    [contributes?.linkHandlers?.length ?? 0, 'link handler'] as const
+  ]
+    .filter(([n]) => n > 0)
+    .map(([n, noun]) => count(n, noun))
   return parts.join(', ')
 }
 
-/** How a pane is drawn, or how often a footer runs: the one fact per kind worth a line. */
+/** How a pane is drawn: a page it carries, a program it runs, or neither said yet. */
 export function describePaneKind(pane: { web?: string; command?: string[] }): string {
   if (pane.command && pane.command.length > 0) return `runs ${pane.command.join(' ')}`
-  return 'a page it ships'
+  if (pane.web) return 'a page it ships'
+  return 'a pane'
 }
 
 export function describeFooterInterval(seconds: number): string {
@@ -155,7 +155,7 @@ export function describeFooterInterval(seconds: number): string {
   return `every ${seconds}s`
 }
 
-function count(n: number, noun: string): string | null {
-  if (n === 0) return null
+/** "1 pane", "2 panes" — the plural rule said once, for every surface that counts something. */
+export function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`
 }

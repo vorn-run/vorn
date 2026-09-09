@@ -144,6 +144,14 @@ describe('what a requirement can do about itself', () => {
     })
   })
 
+  // It shows on the cards its activation names; the form would ask for a
+  // connection nothing consumes.
+  it('offers no connection form for an installed extension', () => {
+    const pack = { id: 'review', name: 'Review', version: '0.1.0' } as ConnectorListing['pack']
+    const extension = listing({ key: 'catalog:review', id: 'review', kind: 'extension', pack })
+    expect(requirementAction(needs('review'), [extension])).toMatchObject({ kind: 'install' })
+  })
+
   it('offers the connection straight away for a built-in', () => {
     const builtIn = listing({ key: 'github', id: 'github', name: 'GitHub', source: 'builtin' })
     expect(requirementAction(needs('github'), [builtIn])).toMatchObject({ kind: 'addConnection' })

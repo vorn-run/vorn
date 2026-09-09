@@ -15,6 +15,7 @@ import type {
 } from '../../shared/types'
 import { isImplicitConnection } from '../../shared/types'
 import { connectionConnectorId, connectionIcon } from './connection-icon'
+import { EXTENSION_PERMISSION } from './extension-copy'
 
 /**
  * One row in the connector list, whether it came from a built-in connector, a
@@ -162,7 +163,9 @@ export function listingDetails(
     // nothing rather than saying "no triggers", which would be a lie. An
     // extension states what it adds instead, and having said it is known.
     if (!entry?.triggers && !entry?.actions) {
-      return listing.contributes ? { ...EMPTY_DETAILS, known: true } : EMPTY_DETAILS
+      return listing.kind === 'extension' || listing.contributes
+        ? { ...EMPTY_DETAILS, known: true }
+        : EMPTY_DETAILS
     }
     return {
       triggers: entry.triggers ?? [],
@@ -245,12 +248,6 @@ export function buildConnectorListings(
     })),
     ...catalog.map((entry) => {
       const pack = packFor(entry.id)
-      // The installed files answer for themselves; the catalog only says what
-      // installing would ask for, which a newer pack on disk may have changed.
-      const rung = pack?.auth?.rung ?? entry.authRung
-      const contributes = pack?.contributes ?? entry.contributes
-      const permissions = pack?.permissions ?? entry.permissions
-      const activates = pack?.activates ?? entry.activates
       return {
         ...entry,
         key: `catalog:${entry.id}`,
@@ -261,11 +258,12 @@ export function buildConnectorListings(
         connectedCount: countFor(entry.id),
         implicitlyConnected: implicitFor(entry.id),
         catalogItem: entry,
-        ...(rung !== undefined && { authRung: rung }),
-        ...(entry.verified !== undefined && { verified: entry.verified }),
-        ...(contributes !== undefined && { contributes }),
-        ...(permissions !== undefined && { permissions }),
-        ...(activates !== undefined && { activates }),
+        // The entry above says what installing would bring; the files on disk
+        // answer for themselves, so each of these overrides it where it exists.
+        ...(pack?.auth?.rung !== undefined && { authRung: pack.auth.rung }),
+        ...(pack?.contributes !== undefined && { contributes: pack.contributes }),
+        ...(pack?.permissions !== undefined && { permissions: pack.permissions }),
+        ...(pack?.activates !== undefined && { activates: pack.activates }),
         ...(pack && { pack })
       }
     }),
@@ -426,7 +424,9 @@ export function filterConnectorListings(
         ...(contributes?.panes ?? []),
         ...(contributes?.footers ?? []),
         ...(contributes?.linkHandlers ?? [])
-      ].map((contribution) => contribution.title)
+      ].map((contribution) => contribution.title),
+      // And by what it reaches, in the words the page uses rather than the manifest's.
+      ...(listing.permissions ?? []).map((name) => EXTENSION_PERMISSION[name].phrase)
     ]
       .join(' ')
       .toLowerCase()
@@ -487,8 +487,9 @@ export function connectorAuthRungs(listings: ConnectorListing[]): ConnectorAuthR
 }
 
 /** What a kind is called where a person picks one. */
-export const CONNECTOR_KIND: Record<ConnectorKind, { label: string; badge: string }> = {
-  connector: { label: 'Connectors', badge: 'connector' },
+export const CONNECTOR_KIND: Record<ConnectorKind, { label: string; badge?: string }> = {
+  connector: { label: 'Connectors' },
+  // Only the extension wears a badge; a row without one is the ordinary case.
   extension: { label: 'Extensions', badge: 'extension' }
 }
 

@@ -84,11 +84,15 @@ describe('where an extension shows', () => {
   it('names a host it knows and says the rest as they are', () => {
     expect(describeActivation({ remoteHost: ['github.com'] })).toEqual(['GitHub remotes'])
     expect(describeActivation({ remoteHost: ['git.example.com'] })).toEqual([
-      'remotes on git.example.com'
+      'git.example.com remotes'
     ])
+  })
+
+  // Any one of a field's values is enough, so two of them are one clause. Two
+  // clauses would read as both being required, which is the opposite.
+  it('reads a list within one field as any of them', () => {
     expect(describeActivation({ remoteHost: ['github.com', 'git.example.com'] })).toEqual([
-      'GitHub remotes',
-      'remotes on git.example.com'
+      'GitHub or git.example.com remotes'
     ])
   })
 
@@ -130,6 +134,11 @@ describe('what an extension adds', () => {
   it('says how a pane is drawn', () => {
     expect(describePaneKind({ web: 'web/report/index.html' })).toBe('a page it ships')
     expect(describePaneKind({ command: ['top'] })).toBe('runs top')
+  })
+
+  // Claiming a page for a pane that ships none would be describing a file that is not there.
+  it('says nothing about a pane that names neither a page nor a program', () => {
+    expect(describePaneKind({})).toBe('a pane')
   })
 
   it('says an interval the way a person would', () => {

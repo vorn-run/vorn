@@ -601,12 +601,41 @@ describe('what a listing is', () => {
     expect(filterConnectorListings(listings, 'checks').map((l) => l.id)).toEqual(['review'])
   })
 
+  // An extension is worth finding by what it reaches, said the way the page says it.
+  it('finds an extension by what it asks to read', () => {
+    const listings = buildConnectorListings(
+      [],
+      [
+        catalogItem('review', 'Review', {
+          kind: 'extension',
+          contributes: REVIEW,
+          permissions: ['terminal.read']
+        })
+      ],
+      []
+    )
+    expect(filterConnectorListings(listings, 'terminal output').map((l) => l.id)).toEqual([
+      'review'
+    ])
+  })
+
   // Saying "no triggers" about a thing that never has any would be a lie; it
   // says what it adds instead, and having said it, it is described.
   it('counts an extension that states its contributions as described', () => {
     const [listing] = buildConnectorListings(
       [],
       [catalogItem('review', 'Review', { kind: 'extension', contributes: REVIEW })],
+      []
+    )
+    expect(listingDetails(listing).known).toBe(true)
+  })
+
+  // Its kind is the answer; a catalog that has not listed its panes yet still
+  // describes something, and the connector's "Add it to see" is unreachable here.
+  it('counts an extension that lists nothing as described', () => {
+    const [listing] = buildConnectorListings(
+      [],
+      [catalogItem('review', 'Review', { kind: 'extension' })],
       []
     )
     expect(listingDetails(listing).known).toBe(true)

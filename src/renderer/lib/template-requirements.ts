@@ -116,7 +116,11 @@ export function requirementAction(
   const state = packStateFor({ installed: listing.pack, catalogItem: listing.catalogItem })
   // No release published a pack, so neither button would do anything.
   if (state.kind === 'not-released') return { kind: 'none' }
-  const route = { source: listing.source, hasLegacyLaunch: !!listing.catalogItem?.packageName }
+  const route = {
+    source: listing.source,
+    kind: listing.kind,
+    hasLegacyLaunch: !!listing.catalogItem?.packageName
+  }
   return canAddConnection(state, route)
     ? { kind: 'addConnection', listing }
     : { kind: 'install', listing }
