@@ -43,8 +43,9 @@ async function handToAnotherProcess(): Promise<HeirReport> {
   // this, and guesses wrong on a loaded CI runner.
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('the shell never started')), 30_000)
-    const subscription = shell.onData(() => {
+    const subscription = shell.onData((first) => {
       clearTimeout(timer)
+      process.stderr.write(`[parent] first chunk=${JSON.stringify(first)}\n`)
       subscription.dispose()
       resolve()
     })

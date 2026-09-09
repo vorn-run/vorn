@@ -19,6 +19,7 @@ adopted.onExit(() => {
   exited = true
 })
 
+const born = Date.now()
 const until = (match: RegExp, ms = 30_000): Promise<boolean> =>
   new Promise((resolve) => {
     const started = Date.now()
@@ -28,6 +29,9 @@ const until = (match: RegExp, ms = 30_000): Promise<boolean> =>
         resolve(true)
       } else if (Date.now() - started > ms) {
         clearInterval(tick)
+        process.stderr.write(
+          `[heir] ${match} not seen after ${ms}ms (t+${Date.now() - born}ms); seen=${JSON.stringify(seen)}\n`
+        )
         resolve(false)
       }
     }, 25)
@@ -38,6 +42,7 @@ async function main(): Promise<void> {
   // is waiting for input; the fallback covers a shell that never enables it.
   // eslint-disable-next-line no-control-regex
   if (!(await until(/\x1b\[\?2004h/, 10_000))) await until(/\S/, 10_000)
+  process.stderr.write(`[heir] ready at t+${Date.now() - born}ms; seen=${JSON.stringify(seen)}\n`)
 
   const read = await (async () => {
     adopted.write('echo ADOPTED_READ\r')
