@@ -358,6 +358,15 @@ export interface ExecuteWorkflowOptions {
   source?: 'scheduler' | 'manual'
   /** Run only this node and its upstream slice; everything else is skipped. */
   targetNodeId?: string
+  /**
+   * Called once the run exists, before a step has been taken.
+   *
+   * A caller waiting on the whole run waits as long as the agents do, which is
+   * the wrong answer for anything holding a request open -- a CLI command, or a
+   * phone. They want the run, and they want it now; this hands it over and
+   * leaves the walking to happen behind them.
+   */
+  onStarted?: (execution: WorkflowExecution) => void
 }
 
 /**
@@ -1247,7 +1256,10 @@ export async function executeWorkflow(
   ) {
     await api.runWorkflowManual(workflow.id, context?.inputs)
     const existing = latestRunForWorkflow(workflow.id)
-    if (existing) return existing
+    if (existing) {
+      options?.onStarted?.(existing)
+      return existing
+    }
     // Return a minimal synthetic execution so callers don't break. The real
     // executions will land via onSchedulerExecute as the scheduler fans out.
     return {
@@ -1273,7 +1285,10 @@ export async function executeWorkflow(
       `[workflow] skipping execution of "${workflow.name}" — trigger already claimed (params=${dedupeParams})`
     )
     const existing = runById(claim.runId)
-    if (existing) return existing
+    if (existing) {
+      options?.onStarted?.(existing)
+      return existing
+    }
     throw new Error(`Workflow "${workflow.name}" is already running for this trigger`)
   }
 
@@ -1319,6 +1334,7 @@ export async function executeWorkflow(
   )
 
   persistExecution(execution)
+  options?.onStarted?.(execution)
 
   return runExecution(workflow, execution, context, options)
 }

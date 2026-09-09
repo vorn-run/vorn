@@ -205,6 +205,29 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('handing a run back before it is finished', () => {
+  it('answers with the run as soon as it exists, and keeps walking behind that', async () => {
+    // A run lasts as long as its agents do. Anything holding a request open --
+    // the CLI, a phone -- wants the run now, not when it ends.
+    const wf = makeWorkflow()
+    let started: WorkflowExecution | undefined
+
+    const finished = executeWorkflow(wf, undefined, {
+      source: 'manual',
+      onStarted: (execution) => {
+        started = execution
+      }
+    })
+
+    const sessionId = await nextSession()
+    expect(started?.runId).toBe('run-1')
+    expect(started?.status).toBe('running')
+
+    emitExit(sessionId, 0)
+    expect((await finished).status).toBe('success')
+  })
+})
+
 describe('headless step completion', () => {
   it('completes the run when the agent exits cleanly', async () => {
     const wf = makeWorkflow()

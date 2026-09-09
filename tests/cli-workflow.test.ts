@@ -176,6 +176,86 @@ describe('workflow runs', () => {
   })
 })
 
+describe('workflow run', () => {
+  it('starts one and answers with the run, rather than waiting for it', async () => {
+    const { transport, calls } = fakeRpc({
+      'workflow:list': () => [workflow()],
+      'workflow:run': () => run({ status: 'running' })
+    })
+    const io = capture(transport)
+
+    expect(await runCli(['workflow', 'run', 'Nightly review'], io)).toBe(0)
+    expect(calls.at(-1)).toEqual({
+      method: 'workflow:run',
+      params: { workflowId: '7c2e11a0-1111-2222-3333-444455556666' },
+      timeoutMs: undefined
+    })
+    expect(io.out()).toContain('run      r8813f01-aaaa-bbbb-cccc-ddddeeeeffff')
+  })
+
+  it('carries --input pairs into the run', async () => {
+    const { transport, calls } = fakeRpc({
+      'workflow:list': () => [workflow()],
+      'workflow:run': () => run()
+    })
+    const io = capture(transport)
+
+    await runCli(
+      ['workflow', 'run', 'Nightly review', '--input', 'pr=42', '--input', 'branch=main'],
+      io
+    )
+    expect(calls.at(-1)?.params).toEqual({
+      workflowId: '7c2e11a0-1111-2222-3333-444455556666',
+      context: { inputs: { pr: '42', branch: 'main' } }
+    })
+  })
+
+  it('refuses an input that is not a pair', async () => {
+    const io = capture(fakeRpc({}).transport)
+    expect(await runCli(['workflow', 'run', 'x', '--input', 'nope'], io)).toBe(2)
+    expect(io.err()).toContain('--input wants key=value')
+  })
+
+  it('says so when the server could not start it', async () => {
+    const { transport } = fakeRpc({
+      'workflow:list': () => [workflow()],
+      'workflow:run': () => null
+    })
+    const io = capture(transport)
+
+    expect(await runCli(['workflow', 'run', 'Nightly review'], io)).toBe(1)
+    expect(io.err()).toContain('did not start')
+  })
+})
+
+describe('workflow stop', () => {
+  it('takes any prefix of a run id that names one', async () => {
+    const { transport, calls } = fakeRpc({
+      'workflowRun:listAll': () => [run()],
+      'workflow:stopRun': () => undefined
+    })
+    const io = capture(transport)
+
+    expect(await runCli(['workflow', 'stop', 'r8813f01'], io)).toBe(0)
+    expect(calls.at(-1)).toEqual({
+      method: 'workflow:stopRun',
+      params: { runId: 'r8813f01-aaaa-bbbb-cccc-ddddeeeeffff' },
+      timeoutMs: undefined
+    })
+    expect(io.out()).toBe('')
+  })
+
+  it('refuses a prefix that names more than one run', async () => {
+    const { transport } = fakeRpc({
+      'workflowRun:listAll': () => [run({ runId: 'aa-1' }), run({ runId: 'aa-2' })]
+    })
+    const io = capture(transport)
+
+    expect(await runCli(['workflow', 'stop', 'aa'], io)).toBe(1)
+    expect(io.err()).toContain('matches 2 runs')
+  })
+})
+
 describe('workflow dispatch', () => {
   it('treats a bare noun as a usage error, on stderr', async () => {
     const io = capture(fakeRpc({}).transport)
@@ -184,10 +264,9 @@ describe('workflow dispatch', () => {
     expect(io.err()).toContain('vorn workflow list')
   })
 
-  it('says running one is not here yet rather than pretending', async () => {
+  it('reports a verb it does not have', async () => {
     const io = capture(fakeRpc({}).transport)
-    expect(await runCli(['workflow', 'run', 'Nightly review'], io)).toBe(2)
-    expect(io.err()).toContain('unknown workflow command "run"')
-    expect(io.err()).toContain('a run is started from the app')
+    expect(await runCli(['workflow', 'dance'], io)).toBe(2)
+    expect(io.err()).toContain('unknown workflow command "dance"')
   })
 })

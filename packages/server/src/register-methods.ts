@@ -76,6 +76,7 @@ import type {
   ExternalItem,
   ProjectConfig,
   TerminalSession,
+  WorkflowExecution,
   WorktreeRetentionConfig
 } from '@vornrun/shared/types'
 import { connectionConnectorId, DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
@@ -792,10 +793,33 @@ export function registerAllMethods(): void {
     if (session) fireSessionRestoredTrigger(session, { restore, environment })
   })
 
+  /**
+   * Start a run and answer with it, rather than waiting for it to finish.
+   *
+   * A run lasts as long as its agents do. The caller wants the run id back now
+   * -- to show a pane, or to print it -- so the walk carries on behind this.
+   */
   registerMethod('workflow:run', async ({ workflowId, context, targetNodeId }) => {
     const workflow = dbGetWorkflow(workflowId)
     if (!workflow) return null
-    return executeWorkflow(workflow, context, { source: 'manual', targetNodeId })
+    return new Promise<WorkflowExecution | null>((resolve) => {
+      let answered = false
+      const answer = (execution: WorkflowExecution | null): void => {
+        if (answered) return
+        answered = true
+        resolve(execution)
+      }
+      void executeWorkflow(workflow, context, {
+        source: 'manual',
+        targetNodeId,
+        onStarted: answer
+      })
+        .then(answer)
+        .catch((err) => {
+          log.warn({ err, workflowId }, '[workflow] a run did not start')
+          answer(null)
+        })
+    })
   })
 
   registerMethod('workflow:retryRun', async ({ runId }) => {

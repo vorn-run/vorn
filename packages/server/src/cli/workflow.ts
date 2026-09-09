@@ -5,10 +5,12 @@ import { asJson, paintStatus, shortId, table, timeAgo } from './output'
 
 export const WORKFLOW_USAGE = `Usage
   vorn workflow list [--json]
+  vorn workflow run <name or id> [--input key=value] [--json]
+  vorn workflow stop <run>
   vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]
 
-Running a workflow from here waits on the engine moving into the server; until
-then a run is started from the app.
+A run happens in the server, so it keeps going when nothing is watching. The
+command answers with the run rather than waiting for it to finish.
 `
 
 function usage(ctx: ClientContext, message: string): number {
@@ -89,6 +91,65 @@ async function listWorkflows(ctx: ClientContext): Promise<number> {
   }
 }
 
+async function startRun(ctx: ClientContext, given: string | undefined): Promise<number> {
+  if (!given) return usage(ctx, 'workflow run needs a workflow')
+  try {
+    const workflows = await ctx.rpc.call('workflow:list')
+    const workflow = findWorkflow(workflows, given)
+    const execution = await ctx.rpc.call('workflow:run', {
+      workflowId: workflow.id,
+      ...(ctx.args.inputs && { context: { inputs: ctx.args.inputs } })
+    })
+    if (!execution) {
+      ctx.writeErr(`vorn: "${workflow.name}" did not start. Check the server log.\n`)
+      return EXIT_FAILURE
+    }
+
+    if (ctx.args.json) {
+      ctx.write(asJson(execution))
+      return EXIT_OK
+    }
+    ctx.write(
+      [
+        `run      ${execution.runId}`,
+        `workflow ${workflow.name}`,
+        `steps    ${execution.nodeStates.filter((ns) => ns.status === 'pending').length} to run`,
+        ''
+      ].join('\n')
+    )
+    ctx.writeErr(`Follow it with: vorn workflow runs --workflow ${shortId(workflow.id)}\n`)
+    return EXIT_OK
+  } catch (err) {
+    return failed(ctx, 'could not start the workflow', err)
+  }
+}
+
+/** A run by id or by any prefix that names one, across every workflow. */
+async function resolveRunId(ctx: ClientContext, given: string): Promise<string> {
+  const runs = await ctx.rpc.call('workflowRun:listAll', {})
+  const exact = runs.find((run) => run.runId === given)
+  if (exact) return exact.runId
+
+  const matches = runs.filter((run) => run.runId.startsWith(given))
+  if (matches.length === 1) return matches[0].runId
+  if (matches.length === 0) throw new Error(`no run matches "${given}"`)
+  throw new Error(
+    `"${given}" matches ${matches.length} runs: ${matches.map((r) => shortId(r.runId)).join(', ')}`
+  )
+}
+
+async function stopRun(ctx: ClientContext, given: string | undefined): Promise<number> {
+  if (!given) return usage(ctx, 'workflow stop needs a run')
+  try {
+    const runId = await resolveRunId(ctx, given)
+    await ctx.rpc.call('workflow:stopRun', { runId })
+    ctx.writeErr(`Stopped ${shortId(runId)}.\n`)
+    return EXIT_OK
+  } catch (err) {
+    return failed(ctx, 'could not stop the run', err)
+  }
+}
+
 async function listRuns(ctx: ClientContext): Promise<number> {
   try {
     const workflows = await ctx.rpc.call('workflow:list')
@@ -130,7 +191,7 @@ async function listRuns(ctx: ClientContext): Promise<number> {
 }
 
 export async function runWorkflowCommand(ctx: ClientContext): Promise<number> {
-  const [, verb] = ctx.args.positionals
+  const [, verb, ...rest] = ctx.args.positionals
 
   if (ctx.args.help) {
     ctx.write(WORKFLOW_USAGE)
@@ -140,10 +201,19 @@ export async function runWorkflowCommand(ctx: ClientContext): Promise<number> {
     ctx.writeErr(WORKFLOW_USAGE)
     return EXIT_USAGE
   }
-  if (!['list', 'runs'].includes(verb)) {
+  if (!['list', 'run', 'runs', 'stop'].includes(verb)) {
     return usage(ctx, `unknown workflow command "${verb}"`)
   }
   if (!(await ctx.server())) return EXIT_UNREACHABLE
 
-  return verb === 'list' ? listWorkflows(ctx) : listRuns(ctx)
+  switch (verb) {
+    case 'list':
+      return listWorkflows(ctx)
+    case 'run':
+      return startRun(ctx, rest[0])
+    case 'stop':
+      return stopRun(ctx, rest[0])
+    default:
+      return listRuns(ctx)
+  }
 }
