@@ -188,21 +188,43 @@ export function nextTask(projectName: string): TaskConfig | undefined {
     .sort((a, b) => a.order - b.order)[0]
 }
 
-/** Streams the engine consumes. In-process now: the emitters are right here. */
+/**
+ * Streams the engine consumes. In-process now: the emitters are right here.
+ *
+ * One listener on the manager, fanned out from here, rather than one per step:
+ * a step subscribes twice and a parallel wave has several in flight, which
+ * crosses node's ten-listener warning threshold on an ordinary workflow.
+ */
+type Fanout<T> = Set<(event: T) => void>
+
+const headlessData: Fanout<{ id: string; data: string }> = new Set()
+const headlessExits: Fanout<{ id: string; exitCode: number }> = new Set()
+let listeningToHeadless = false
+
+function listenToHeadless(): void {
+  if (listeningToHeadless) return
+  listeningToHeadless = true
+  headlessManager.on('client-message', (channel: string, payload: unknown) => {
+    if (channel === IPC.HEADLESS_DATA) {
+      for (const cb of headlessData) cb(payload as { id: string; data: string })
+    } else if (channel === IPC.HEADLESS_EXIT) {
+      for (const cb of headlessExits) cb(payload as { id: string; exitCode: number })
+    }
+  })
+}
+
+function subscribe<T>(set: Fanout<T>, cb: (event: T) => void): () => void {
+  listenToHeadless()
+  set.add(cb)
+  return () => set.delete(cb)
+}
+
 export function onHeadlessData(cb: (event: { id: string; data: string }) => void): () => void {
-  const listener = (channel: string, payload: unknown): void => {
-    if (channel === IPC.HEADLESS_DATA) cb(payload as { id: string; data: string })
-  }
-  headlessManager.on('client-message', listener)
-  return () => headlessManager.off('client-message', listener)
+  return subscribe(headlessData, cb)
 }
 
 export function onHeadlessExit(cb: (event: { id: string; exitCode: number }) => void): () => void {
-  const listener = (channel: string, payload: unknown): void => {
-    if (channel === IPC.HEADLESS_EXIT) cb(payload as { id: string; exitCode: number })
-  }
-  headlessManager.on('client-message', listener)
-  return () => headlessManager.off('client-message', listener)
+  return subscribe(headlessExits, cb)
 }
 
 export function onScriptData(cb: (event: { runId: string; data: string }) => void): () => void {
