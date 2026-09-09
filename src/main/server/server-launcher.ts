@@ -188,7 +188,30 @@ function buildChannel(): 'dev' | 'packaged' {
  * extension, which is right for a CLI run and merely probable here.
  */
 function identityEnv(): Record<string, string> {
-  return { VORN_BUILD_CHANNEL: buildChannel(), VORN_APP_VERSION: app.getVersion() }
+  return {
+    VORN_BUILD_CHANNEL: buildChannel(),
+    VORN_APP_VERSION: app.getVersion(),
+    VORN_APP_ORIGINS: appOrigins().join(',')
+  }
+}
+
+/**
+ * Where this app's windows are served from, for the pages they are allowed to frame.
+ *
+ * An extension's pane page is served on an origin of its own so it shares
+ * nothing with the app, and the price of that is that the app has to be named
+ * as an allowed ancestor or the frame stays blank. A packaged window is a
+ * `file:` page, whose origin is opaque — `file:` as a scheme source is what a
+ * CSP can match it by. Dev is an ordinary origin and is given as one.
+ */
+function appOrigins(): string[] {
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL
+  if (!rendererUrl) return ['file:']
+  try {
+    return [new URL(rendererUrl).origin]
+  } catch {
+    return ['file:']
+  }
 }
 
 /**

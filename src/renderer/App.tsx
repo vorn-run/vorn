@@ -56,6 +56,7 @@ import {
   setLiveReporter
 } from './lib/terminal-registry'
 import { listenForSelectionRequests } from './lib/extension-selection'
+import { hydrateExtensions } from './lib/extension-hydration'
 import {
   setCwdReporter,
   getShellInputState,
@@ -250,6 +251,9 @@ export function App() {
       // dying is stopped whether or not the app happened to be open at the time,
       // so one setting decides both.
       const reopen = useAppStore.getState().config?.defaults.reopenSessions ?? true
+      // An extension pane is a grant of the server that minted it, and this is
+      // not that server. Held on to, it frames a page whose nonce nobody has.
+      useAppStore.getState().dropExtensionPanes()
       void syncBoard({ showCold: true, resume: reopen })
     })
 
@@ -316,6 +320,10 @@ export function App() {
         return
       }
 
+      // A program pane's own terminal is no session and reaches none of the rest
+      // of this: the host has dropped its grant, so the pane goes with it.
+      if (state.closeExtensionPaneForTerminal(id)) return
+
       const terminal = state.terminals.get(id)
       if (!terminal) return
 
@@ -347,6 +355,7 @@ export function App() {
 
     const removeSessionCreatedListener = window.api.onSessionCreated((session) => {
       const state = useAppStore.getState()
+      void hydrateExtensions(session.id, useAppStore.getState)
       if (!state.terminals.has(session.id)) {
         state.addTerminal(session)
         if (session.projectPath) {
@@ -455,6 +464,20 @@ export function App() {
       useAppStore.getState().openDevicePane(sessionId, { udid, name })
     })
 
+    // Pushed only when a reading moves or an extension starts or stops showing;
+    // what a card holds at the moment it appears is hydrated separately.
+    const removeExtensionFooterListener = window.api.onExtensionFooterItems?.(
+      ({ sessionId, readings }) => {
+        useAppStore.getState().setExtensionFooters(sessionId, readings)
+      }
+    )
+
+    const removeExtensionActivationListener = window.api.onExtensionActivation?.(
+      ({ sessionId, states }) => {
+        useAppStore.getState().setExtensionActivation(sessionId, states)
+      }
+    )
+
     const removeBrowserTabListener = window.api.onBrowserTabCommand((cmd) => {
       const store = useAppStore.getState()
       if (cmd.action === 'add') store.addBrowserTab(cmd.sessionId, cmd.url, { trusted: true })
@@ -466,6 +489,7 @@ export function App() {
       const store = useAppStore.getState()
       const existing = store.terminals.get(session.id)
       if (existing) {
+        void hydrateExtensions(session.id, useAppStore.getState)
         if (session.status !== existing.status) {
           store.updateStatus(session.id, session.status)
         }
@@ -581,6 +605,8 @@ export function App() {
       removeUpdateListener()
       removeBrowserOpenListener()
       removeDeviceOpenListener()
+      removeExtensionFooterListener?.()
+      removeExtensionActivationListener?.()
       removeBrowserTabListener()
       removeSessionUpdatedListener()
       removeHeadlessExitListener()

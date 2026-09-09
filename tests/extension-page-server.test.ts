@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { appFrameAncestors } from '../packages/server/src/extensions/frame-ancestors'
 
 /**
  * Where a pane's pages are served from.
@@ -70,5 +71,27 @@ describe('the origin pages are served from', () => {
     await startExtensionPageServer(deps)
     await stopExtensionPageServer()
     expect(extensionPageOrigin()).toBe('')
+  })
+})
+
+describe('the origins the launcher says its windows are drawn from', () => {
+  it('takes the ones an app really has', () => {
+    expect(appFrameAncestors('file:,http://localhost:5173')).toEqual([
+      'file:',
+      'http://localhost:5173'
+    ])
+  })
+
+  it('names none when the launcher named none', () => {
+    expect(appFrameAncestors(undefined)).toEqual([])
+    expect(appFrameAncestors('  ,  ')).toEqual([])
+  })
+
+  // Written straight into a header: one of these would either widen what may
+  // frame a page, or make the header unserveable and cost every pane its page.
+  it('refuses one that would rewrite the header around it', () => {
+    expect(
+      appFrameAncestors("http://a.example 'unsafe-inline',*,; script-src *,http://b.example")
+    ).toEqual(['http://b.example'])
   })
 })

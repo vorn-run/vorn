@@ -485,13 +485,16 @@ export function toContributes(value: unknown): ExtensionContributions | undefine
   const panes = declared(value.panes).flatMap((raw): ExtensionPaneContribution[] => {
     const base = toContribution(raw)
     if (!base || !isRecord(raw)) return []
+    // A glyph this build cannot draw costs the glyph, not the pane.
+    const icon = toIcon(raw.icon)
+    const drawn = { ...base, ...(icon && { icon }) }
     const web = text(raw.web).trim()
     const command = boundedStrings(raw.command)
     if (web !== '' && WEB_ENTRY_PATTERN.test(web) && !web.split('/').includes('..')) {
-      return [{ ...base, web }]
+      return [{ ...drawn, web }]
     }
     // Argv, so an empty element would run something the extension did not name.
-    if (command.length > 0 && command.every((arg) => arg !== '')) return [{ ...base, command }]
+    if (command.length > 0 && command.every((arg) => arg !== '')) return [{ ...drawn, command }]
     return []
   })
 

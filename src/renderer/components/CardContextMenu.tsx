@@ -11,6 +11,8 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { useWorkspaceWorkflows } from '../hooks/useWorkspaceWorkflows'
 import { buildWorkflowMenuItems } from '../lib/workflow-menu-items'
 import { createShellInProject } from '../lib/session-utils'
+import { useExtensions, extensionPanes } from '../lib/use-extensions'
+import { ExtensionPaneIcon } from './ExtensionPaneIcon'
 
 interface Props {
   terminalId: string
@@ -30,6 +32,8 @@ interface MenuItem {
   icon?: React.FC<{ size?: number; className?: string }>
   iconElement?: React.ReactNode
   label: string
+  /** Said quietly at the end of the row: whose pane this is. */
+  detail?: string
   onClick?: () => void
   className?: string
   separator?: boolean
@@ -45,6 +49,10 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
   const config = useAppStore((s) => s.config)
   const isMobile = useIsMobile()
   const workspaceWorkflows = useWorkspaceWorkflows()
+  const packs = useExtensions()
+  const activation = useAppStore((s) => s.extensionActivation.get(terminalId))
+  const showingPane = useAppStore((s) => s.extensionPanes.get(terminalId)?.open)
+  const toggleExtensionPane = useAppStore((s) => s.toggleExtensionPane)
   const { status: agentInstallStatus } = useAgentInstallStatus()
 
   const [hoveredSubmenu, setHoveredSubmenu] = useState<number | null>(null)
@@ -94,6 +102,38 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
 
   const items: MenuItem[] = []
 
+  // First, and not behind a submenu: what this card can show is the reason the
+  // menu was opened more often than making a session is. Activation carries ids;
+  // titles and glyphs belong to the pack, so the two are read together.
+  const paneItems: MenuItem[] = (activation ?? [])
+    .filter((state) => state.active && state.panes.length > 0)
+    .flatMap((state) => {
+      const pack = packs.find((p) => p.id === state.extensionId)
+      return extensionPanes(packs, state.extensionId)
+        .filter((pane) => state.panes.includes(pane.id))
+        .map((pane) => {
+          const open =
+            showingPane?.extensionId === state.extensionId && showingPane?.paneId === pane.id
+          return {
+            iconElement: (
+              <ExtensionPaneIcon
+                icon={pane.icon}
+                extensionIcon={pack?.icon}
+                extensionId={state.extensionId}
+              />
+            ),
+            label: open ? `Close ${pane.title}` : pane.title,
+            detail: state.extensionName,
+            onClick: () => {
+              onClose()
+              void toggleExtensionPane(terminalId, state.extensionId, pane.id)
+            }
+          }
+        })
+    })
+
+  items.push(...paneItems)
+
   const defaultAgent = config?.defaults?.defaultAgent || 'claude'
 
   const createSessionWithAgent = async (agentType: AiAgentType) => {
@@ -114,6 +154,7 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
   items.push({
     iconElement: <AgentIcon agentType={defaultAgent} size={14} />,
     label: 'New session',
+    separator: paneItems.length > 0,
     onClick: () => createSessionWithAgent(defaultAgent)
   })
 
@@ -240,6 +281,9 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
                   <item.icon size={14} className={item.className ?? 'text-gray-500'} />
                 ))}
               <span className="flex-1 text-left truncate">{item.label}</span>
+              {item.detail && (
+                <span className="text-[10px] ml-auto shrink-0 text-gray-600">{item.detail}</span>
+              )}
               {item.submenu && (
                 <ChevronRight size={11} className="text-gray-600 ml-auto shrink-0" />
               )}
@@ -281,14 +325,11 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
               >
                 {sub.iconElement}
                 <span className="flex-1 text-left font-mono truncate">{sub.label}</span>
+                {/* Plain. This used to colour any detail that was not the word
+                    "idle", which reads a status out of a string and spends
+                    colour on a name — an extension's, here — that is not one. */}
                 {sub.detail && (
-                  <span
-                    className={`text-[10px] ml-auto shrink-0 ${
-                      sub.detail !== 'idle' ? 'text-green-400/70' : 'text-gray-600'
-                    }`}
-                  >
-                    {sub.detail}
-                  </span>
+                  <span className="text-[10px] ml-auto shrink-0 text-gray-600">{sub.detail}</span>
                 )}
               </button>
             </div>

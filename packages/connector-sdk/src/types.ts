@@ -536,8 +536,10 @@ interface ContributionBase {
  * program it runs, never both — a union, so the invalid pair is a type error
  * while the extension is being written.
  */
-export type PaneContribution = ContributionBase &
-  (
+export type PaneContribution = ContributionBase & {
+  /** Glyph for the menu row and the pane's own bar; the extension's is used when absent. */
+  icon?: ConnectorIcon
+} & (
     | {
         /** Page inside the pack, under `web/`, rendered in a pane. */
         web: string

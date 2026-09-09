@@ -2181,6 +2181,8 @@ export interface ExtensionContributionSummary {
 
 /** A pane an extension adds: a page it ships, or a program it runs. */
 export interface ExtensionPaneContribution extends ExtensionContributionSummary {
+  /** The pane's own glyph; the extension's is drawn when it has none. */
+  icon?: SdkConnectorIcon
   /** Page inside the pack, under `web/`. Set on a pane Vorn renders. */
   web?: string
   /** Argv run in the worktree. Set on a pane drawn as a terminal. */

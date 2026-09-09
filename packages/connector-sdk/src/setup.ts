@@ -113,7 +113,7 @@ interface ManifestContribution {
 }
 
 export interface ManifestContributions {
-  panes?: Array<ManifestContribution & { web?: string; command?: string[] }>
+  panes?: Array<ManifestContribution & { icon?: ConnectorIcon; web?: string; command?: string[] }>
   footers?: Array<ManifestContribution & { every: number }>
   linkHandlers?: Array<ManifestContribution & { pattern: string; example: string }>
 }
@@ -183,6 +183,7 @@ function manifestContributions(connector: Connector): ManifestContributions | un
     ...(contributes.panes !== undefined && {
       panes: contributes.panes.map((pane) => ({
         ...shared(pane),
+        ...(pane.icon !== undefined && { icon: pane.icon }),
         ...(pane.web !== undefined && { web: pane.web }),
         ...(pane.command !== undefined && { command: pane.command })
       }))

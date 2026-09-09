@@ -5,12 +5,15 @@ import {
   editorPaneId,
   browserPaneId,
   devicePaneId,
+  extensionPaneId,
   terminalsPaneId
 } from '../lib/pane-id'
 import { releaseFromPanels, saveTerminalPanels } from './ui-slice'
 import { clearDirty } from '../lib/editor-dirty'
+import { forgetExtensionHydration, hydrateExtensions } from '../lib/extension-hydration'
+import { destroyTerminal } from '../lib/terminal-registry'
 
-export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set) => ({
+export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set, get) => ({
   terminals: new Map(),
 
   addTerminal: (session, ended) =>
@@ -31,6 +34,10 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         ? state.terminalOrder
         : [...state.terminalOrder, session.id]
       window.api.notifyWidgetStatus()
+      // The one funnel a session appears through, whichever brought it: a fresh
+      // launch, the board sync, a restore. The host only pushes what changes, so
+      // a card that arrives after the last change would otherwise stay blank.
+      void hydrateExtensions(session.id, get)
       return { terminals: next, terminalOrder: order }
     }),
 
@@ -45,11 +52,18 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       const order = state.terminalOrder.filter((tid) => tid !== id && !held.has(tid))
       // A session owns its file-tree, editor, browser and device panes: they
       // die with it, and so does any maximized state pointing at them.
-      const childIds = [filesPaneId(id), editorPaneId(id), browserPaneId(id), devicePaneId(id)]
+      const childIds = [
+        filesPaneId(id),
+        editorPaneId(id),
+        browserPaneId(id),
+        devicePaneId(id),
+        extensionPaneId(id)
+      ]
       // The dirty registry lives outside the store, so it needs explicit
       // teardown — otherwise a session closed with unsaved edits leaves a flag
       // that a recycled id would inherit.
       clearDirty(id)
+      forgetExtensionHydration(id)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(id)
       for (const childId of childIds) minimized.delete(childId)
@@ -110,6 +124,16 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       // session no longer holds, and block a later pane from opening.
       const devicePanes = new Map(state.devicePanes)
       devicePanes.delete(id)
+      // Only the viewer -- the host drops the grants -- but the terminal a program
+      // pane drew is this window's to destroy, or it holds a GPU context for nobody.
+      const extensionPanes = new Map(state.extensionPanes)
+      const showing = extensionPanes.get(id)
+      if (showing?.open.terminalId) destroyTerminal(showing.open.terminalId)
+      extensionPanes.delete(id)
+      const extensionFooters = new Map(state.extensionFooters)
+      extensionFooters.delete(id)
+      const extensionActivation = new Map(state.extensionActivation)
+      extensionActivation.delete(id)
       // How this card divided its interior dies with it too; a recycled id
       // would otherwise inherit a divider position from a different session.
       const cardSplits = { ...state.cardSplits }
@@ -143,6 +167,9 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         browserPanes,
         browserMemory,
         devicePanes,
+        extensionPanes,
+        extensionFooters,
+        extensionActivation,
         cardSplits,
         gitDiffStats,
         ...(maxOwned ? { maximizedPaneId: null } : {}),
@@ -187,6 +214,8 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       const seen = new Set<string>()
       const order = mapped.filter((id) => !seen.has(id) && seen.add(id))
       window.api.notifyWidgetStatus()
+      forgetExtensionHydration(previousId)
+      void hydrateExtensions(session.id, get)
       return {
         terminals: next,
         terminalOrder: seen.has(session.id) ? order : [...order, session.id]

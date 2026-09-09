@@ -60,6 +60,7 @@ import { initRebind, checkAndRebind, getCurrentHost } from './server-rebind'
 import { isAllowedUpgrade, logRefusedUpgrade, setTrustedOriginHosts } from './ws-origin'
 import { setEnvPassthrough, setLaunchDataDir } from './process-utils'
 import log from './logger'
+import { appFrameAncestors } from './extensions/frame-ancestors'
 
 /**
  * Names, beyond IP literals and `localhost`, that the web client may legitimately
@@ -475,7 +476,11 @@ export async function startServer(
   // are the only ones allowed to; a page that fails to start costs its panes, not
   // the server.
   const appOrigins = [`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`]
-  extensionFrameAncestors = [...appOrigins, ...(options.extensionFrameAncestors ?? [])]
+  extensionFrameAncestors = [
+    ...appOrigins,
+    ...appFrameAncestors(process.env.VORN_APP_ORIGINS),
+    ...(options.extensionFrameAncestors ?? [])
+  ]
   try {
     await startExtensionPageServer(extensionRouteDeps)
   } catch (err) {
