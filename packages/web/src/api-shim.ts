@@ -1,4 +1,5 @@
 import { CLOSE_CREDENTIAL_REJECTED, RUNTIME_PROTOCOL_VERSION } from '@vornrun/shared/protocol'
+import { decodeTerminalFrame } from '@vornrun/shared/terminal-frame'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import type { GitDiffRange, AppConfig } from '@vornrun/shared/types'
 /**
@@ -146,6 +147,8 @@ class RpcClient {
 
   private connect(): void {
     this.ws = new WebSocket(this.url)
+    // Terminal output arrives as a frame of bytes; a Blob would need a read.
+    this.ws.binaryType = 'arraybuffer'
 
     this.ws.onopen = () => {
       // A browser cannot set headers on the upgrade, so the credential goes in
@@ -166,6 +169,12 @@ class RpcClient {
     }
 
     this.ws.onmessage = (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        const frame = decodeTerminalFrame(new Uint8Array(event.data))
+        const cbs = frame && this.listeners.get('terminal:data')
+        if (cbs) for (const cb of cbs) cb(frame)
+        return
+      }
       let msg: {
         id?: number
         method?: string
@@ -197,7 +206,10 @@ class RpcClient {
         this._resolveReady()
         // A fresh socket knows only the URL's base topics; the cards on screen
         // would otherwise go quiet after every network change until scrolled.
-        if (this.topics) this.notify('subscribe:set', { topics: this.topics })
+        this.notify('subscribe:set', {
+          ...(this.topics ? { topics: this.topics } : {}),
+          terminalBytes: true
+        })
         return
       }
 
@@ -297,7 +309,7 @@ class RpcClient {
   /** Replaces the socket's filter now, and again on every reconnect. */
   setTopics(topics: readonly string[]): Promise<void> {
     this.topics = topics
-    return this.invoke('subscribe:set', { topics }).then(() => undefined)
+    return this.invoke('subscribe:set', { topics, terminalBytes: true }).then(() => undefined)
   }
 
   notify(method: string, params?: unknown): void {
@@ -407,8 +419,9 @@ export function createApiShim(wsUrl: string) {
     createShellTerminal: (cwd?: string) => rpc.invoke('shell:create', cwd),
 
     // ── Terminal Events ──
-    onTerminalData: (callback: (event: { id: string; data: string; seq: number }) => void) =>
-      rpc.on('terminal:data', callback as (p: unknown) => void),
+    onTerminalData: (
+      callback: (event: { id: string; data: string | Uint8Array; seq: number }) => void
+    ) => rpc.on('terminal:data', callback as (p: unknown) => void),
     onTerminalBell: (callback: (event: { id: string }) => void) =>
       rpc.on('terminal:bell', callback as (p: unknown) => void),
     onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) =>

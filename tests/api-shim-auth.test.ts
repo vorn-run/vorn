@@ -307,7 +307,10 @@ describe('the filter a phone asked for', () => {
     expect(resent?.params?.topics).toEqual(['session:*', 'terminal:data#abc'])
   })
 
-  it('is not sent on a reconnect when nothing was ever asked for', async () => {
+  it('names no topics on a reconnect when none were ever asked for', async () => {
+    // The socket still asks for terminal bytes on every connection, but must
+    // not narrow a filter nobody set: no `topics` key means "everything", as
+    // before.
     createApiShim('ws://x/ws')
     sockets[0].open()
     sockets[0].authOk()
@@ -315,6 +318,9 @@ describe('the filter a phone asked for', () => {
     await vi.advanceTimersByTimeAsync(2000)
     sockets[1].open()
     sockets[1].authOk()
-    expect(sentMethods(sockets[1])).not.toContain('subscribe:set')
+    const resent = sockets[1].sent
+      .map((m) => JSON.parse(m) as { method: string; params?: unknown })
+      .filter((m) => m.method === 'subscribe:set')
+    expect(resent.map((m) => m.params)).toEqual([{ terminalBytes: true }])
   })
 })
