@@ -319,14 +319,13 @@ describe('output that arrives as bytes', () => {
     expect(written()).toEqual(['text:seed', 'bytes:live-1', 'bytes:live-2'])
   })
 
-  it('still joins text from a server that sends it', async () => {
+  it('writes text from a server that sends it as it came', async () => {
     attachTerminal.mockResolvedValue({ data: '', seq: 0, live: true })
     await open()
 
     emit({ id: ID, data: 'plain', seq: 1 })
     emit({ id: ID, data: ' text', seq: 2 })
-    await frame()
 
-    expect(written()).toEqual(['text:plain text'])
+    expect(written()).toEqual(['text:plain', 'text: text'])
   })
 })

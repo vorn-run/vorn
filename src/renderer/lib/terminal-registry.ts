@@ -58,7 +58,6 @@ const registry = new Map<string, TerminalEntry>()
 const seeding = new Set<string>()
 const readyCallbacks = new Map<string, Set<() => void>>()
 
-// --- Write batching: single global listener + requestAnimationFrame ---
 /** One flush of a session's output; see `PtyManager.flushSeq` for `seq`. */
 type Chunk = Pick<TerminalData, 'data' | 'seq'>
 
@@ -79,9 +78,6 @@ function writeChunks(term: Terminal, chunks: readonly Chunk[]): void {
   if (text) term.write(text)
 }
 
-const pendingWrites = new Map<string, Chunk[]>()
-let rafId: number | null = null
-
 /**
  * Sessions being seeded right now.
  *
@@ -100,51 +96,29 @@ interface Hydration {
 
 const hydrating = new Map<string, Hydration>()
 
-function scheduleFlush(): void {
-  if (rafId !== null) return
-  rafId = requestAnimationFrame(flushWrites)
-}
-
-function flushWrites(): void {
-  rafId = null
-  for (const [id, chunks] of pendingWrites) {
-    // Not `seeding`: that is a module-level Set in this file now, and a local
-    // of the same name holding something else entirely is a trap for whoever
-    // edits this next.
-    const hydration = hydrating.get(id)
-    if (hydration) {
-      for (const chunk of chunks) hydration.held.push(chunk)
-      continue
-    }
-    const entry = registry.get(id)
-    if (entry) writeChunks(entry.term, chunks)
+/** Live output goes straight to xterm, which draws on its own frame; holding it for one of ours only added a frame. */
+function receive(id: string, chunk: Chunk): void {
+  const hydration = hydrating.get(id)
+  if (hydration) {
+    hydration.held.push(chunk)
+    return
   }
-  pendingWrites.clear()
+  const entry = registry.get(id)
+  if (entry) entry.term.write(chunk.data)
 }
 
 let removeGlobalDataListener: (() => void) | null = null
 
 export function initGlobalDataListener(): void {
   if (removeGlobalDataListener) return
-  removeGlobalDataListener = window.api.onTerminalData(({ id, data, seq }) => {
-    const existing = pendingWrites.get(id)
-    if (existing) {
-      existing.push({ data, seq })
-    } else {
-      pendingWrites.set(id, [{ data, seq }])
-    }
-    scheduleFlush()
-  })
+  removeGlobalDataListener = window.api.onTerminalData(({ id, data, seq }) =>
+    receive(id, { data, seq })
+  )
 }
 
 export function disposeGlobalDataListener(): void {
   removeGlobalDataListener?.()
   removeGlobalDataListener = null
-  if (rafId !== null) {
-    cancelAnimationFrame(rafId)
-    rafId = null
-  }
-  pendingWrites.clear()
   hydrating.clear()
   seeding.clear()
 }
@@ -910,12 +884,6 @@ export function onTerminalScroll(
 export function destroyTerminal(terminalId: string): void {
   const entry = registry.get(terminalId)
   if (!entry) return
-  // Whatever is still batched goes in before the terminal goes.
-  const chunks = pendingWrites.get(terminalId)
-  if (chunks) {
-    writeChunks(entry.term, chunks)
-    pendingWrites.delete(terminalId)
-  }
   // A seed still in flight would otherwise resolve and write into a terminal
   // that no longer exists.
   hydrating.delete(terminalId)
