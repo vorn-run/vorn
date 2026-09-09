@@ -71,6 +71,7 @@ function server(overrides: Record<string, unknown> = {}) {
       { id: 'mcp', name: 'MCP', capabilities: ['actions'], manifest: {} }
     ],
     'connector:catalog': CATALOG,
+    'connector:listPacks': [],
     'connection:list': [],
     'connector:status': [{ connectorId: 'github', authed: true }],
     'connector:probeSdk': { ok: true, manifest: MANIFEST },
