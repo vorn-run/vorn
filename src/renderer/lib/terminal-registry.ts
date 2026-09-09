@@ -61,7 +61,7 @@ const readyCallbacks = new Map<string, Set<() => void>>()
 /** One flush of a session's output; see `PtyManager.flushSeq` for `seq`. */
 type Chunk = Pick<TerminalData, 'data' | 'seq'>
 
-/** Text is joined as it always was; bytes go in as they came, since joining them means copying them. */
+/** The chunks held behind a seed: text joined, bytes as they came, since joining bytes means copying them. */
 function writeChunks(term: Terminal, chunks: readonly Chunk[]): void {
   let text = ''
   for (const chunk of chunks) {
@@ -160,7 +160,7 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
   const state: Hydration = { held: [], done: Promise.resolve() }
   hydrating.set(terminalId, state)
 
-  /** Everything held, in order, as one write. xterm queues a task per call. */
+  /** Everything held, in order, after the seed. */
   const flushHeld = (above = -1): void => {
     // A chunk whose sequence cannot be compared cannot be deduplicated, and the
     // choice is then between showing it twice and not showing it at all. Twice
