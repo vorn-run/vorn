@@ -1,7 +1,14 @@
 import WebSocket from 'ws'
 import { EventEmitter } from 'node:events'
-import type { RpcResponse, RpcNotification, ServerIdentity } from '@vornrun/shared/protocol'
+import type {
+  RpcResponse,
+  RpcNotification,
+  ServerHello,
+  ServerIdentity
+} from '@vornrun/shared/protocol'
 import { createRequest, createNotification } from '@vornrun/shared/protocol'
+import { decodeTerminalFrame } from '@vornrun/shared/terminal-frame'
+import { IPC } from '@vornrun/shared/types'
 import log from '../logger'
 
 interface PendingRequest {
@@ -135,7 +142,14 @@ export class ServerBridge extends EventEmitter {
       this.emit('connected')
     })
 
-    this.ws.on('message', (raw: Buffer) => {
+    this.ws.on('message', (raw: Buffer, isBinary: boolean) => {
+      // Terminal output as bytes, for the renderer as it is.
+      if (isBinary) {
+        const frame = decodeTerminalFrame(raw)
+        if (frame) this.emit('server-notification', IPC.TERMINAL_DATA, frame)
+        else log.warn('[bridge] dropped a binary frame it could not read')
+        return
+      }
       try {
         const msg = JSON.parse(raw.toString())
         if ('method' in msg && 'id' in msg && msg.id !== undefined && msg.id !== null) {
@@ -146,9 +160,13 @@ export class ServerBridge extends EventEmitter {
           this.handleResponse(msg as RpcResponse)
         } else if ('method' in msg) {
           if (msg.method === 'server:hello') {
-            const hello = (msg as RpcNotification).params as { protocolVersion?: number }
+            const hello = (msg as RpcNotification).params as ServerHello | undefined
             this.helloVersion = hello?.protocolVersion
             log.info({ hello }, '[bridge] server protocol')
+            // Frame layout 1 is the one this build reads; asked per connection, since the choice dies with the socket.
+            if (hello?.capabilities?.terminalBytes === 1) {
+              this.notify('subscribe:set', { terminalBytes: true })
+            }
           }
           if (msg.method === 'server:identity') {
             this.identity = (msg as RpcNotification).params as ServerIdentity

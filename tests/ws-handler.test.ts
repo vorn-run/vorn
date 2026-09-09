@@ -179,7 +179,11 @@ describe('handshake', () => {
 
     // Declared by the code that enforces it, so the advertisement cannot drift
     // from the behaviour. Pass A shipped this empty because nothing was true yet.
-    expect(sentFrames(ws)[0].params?.capabilities).toEqual({ auth: 1, subscribe: 1 })
+    expect(sentFrames(ws)[0].params?.capabilities).toEqual({
+      auth: 1,
+      subscribe: 1,
+      terminalBytes: 1
+    })
   })
 
   it('greets every connection, not just the first', () => {
@@ -611,7 +615,27 @@ describe('narrowing what a socket receives', () => {
 
     sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { topics: ['session:*'] } })
 
-    expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, ['session:*'])
+    expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, ['session:*'], undefined)
+  })
+
+  it('passes on a request for terminal output as bytes', () => {
+    const ws = createMockWs()
+    connectAuthed(ws)
+
+    sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { terminalBytes: true } })
+
+    expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, undefined, true)
+  })
+
+  it('does not count asking for bytes as activity', () => {
+    // The bridge asks on every hello, adoption probes included; counting it would keep a leftover server alive.
+    const ws = createMockWs()
+    connectAuthed(ws)
+    vi.mocked(clientRegistry.touch).mockClear()
+
+    sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { terminalBytes: true } })
+
+    expect(clientRegistry.touch).not.toHaveBeenCalled()
   })
 
   it('acknowledges when asked with an id', async () => {

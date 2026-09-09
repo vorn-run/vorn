@@ -144,6 +144,8 @@ registerCapability('auth', 1)
 // one. Without the check, an older server silently drops `subscribe:set` and the
 // client believes it is filtered while receiving everything.
 registerCapability('subscribe', 1)
+// Terminal output as frames of bytes, for a socket that asks; the number is the frame layout.
+registerCapability('terminalBytes', 1)
 
 /**
  * Register a method handler. Called during server startup to wire up
@@ -367,7 +369,9 @@ export function handleConnection(
     // Counting that would let a user blocked by a leftover reset its clock on
     // every launch attempt, so the leftover never leaves and the launches never
     // stop being blocked.
-    if (session && method !== 'bridge:identify') clientRegistry.touch()
+    // Nor `subscribe:set`: the bridge sends it on every hello, adoption probes included.
+    if (session && method !== 'bridge:identify' && method !== 'subscribe:set')
+      clientRegistry.touch()
 
     // Everything below this line requires an authenticated socket. The one
     // exception is the credential itself.
@@ -445,8 +449,8 @@ export function handleConnection(
     // `registerNotification` because it is the socket that is being configured,
     // and a registered handler is given only its params.
     if (method === 'subscribe:set') {
-      const topics = (params as { topics?: readonly string[] } | undefined)?.topics
-      clientRegistry.setTopics(ws, topics)
+      const options = params as { topics?: readonly string[]; terminalBytes?: boolean } | undefined
+      clientRegistry.setTopics(ws, options?.topics, options?.terminalBytes)
       if (id !== undefined && id !== null) {
         ws.send(JSON.stringify(createResponse(id, { ok: true })))
       }

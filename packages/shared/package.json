@@ -20,6 +20,7 @@
     "./workflow-portability": "./src/workflow-portability.ts",
     "./viewer-settings-store": "./src/viewer-settings-store.ts",
     "./template-vars": "./src/template-vars.ts",
-    "./workflow-graph": "./src/workflow-graph.ts"
+    "./workflow-graph": "./src/workflow-graph.ts",
+    "./terminal-frame": "./src/terminal-frame.ts"
   }
 }

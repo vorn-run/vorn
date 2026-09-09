@@ -11,6 +11,7 @@ import {
 import { chooseAnchor, readScrollAnchor, resolveAnchor, writeScrollAnchor } from './scroll-anchor'
 import type { BufferMetrics } from './spine-layout'
 import { TERMINAL_BACKGROUND } from '../../shared/surface'
+import type { TerminalData } from '@vornrun/shared/protocol'
 
 interface TerminalEntry {
   term: Terminal
@@ -58,10 +59,24 @@ const seeding = new Set<string>()
 const readyCallbacks = new Map<string, Set<() => void>>()
 
 // --- Write batching: single global listener + requestAnimationFrame ---
-interface Chunk {
-  data: string
-  /** Which flush of that session this came from. See `PtyManager.flushSeq`. */
-  seq: number
+/** One flush of a session's output; see `PtyManager.flushSeq` for `seq`. */
+type Chunk = Pick<TerminalData, 'data' | 'seq'>
+
+/** Text is joined as it always was; bytes go in as they came, since joining them means copying them. */
+function writeChunks(term: Terminal, chunks: readonly Chunk[]): void {
+  let text = ''
+  for (const chunk of chunks) {
+    if (typeof chunk.data === 'string') {
+      text += chunk.data
+      continue
+    }
+    if (text) {
+      term.write(text)
+      text = ''
+    }
+    term.write(chunk.data)
+  }
+  if (text) term.write(text)
 }
 
 const pendingWrites = new Map<string, Chunk[]>()
@@ -101,9 +116,8 @@ function flushWrites(): void {
       for (const chunk of chunks) hydration.held.push(chunk)
       continue
     }
-    const data = chunks.length === 1 ? chunks[0].data : chunks.map((c) => c.data).join('')
     const entry = registry.get(id)
-    if (entry) entry.term.write(data)
+    if (entry) writeChunks(entry.term, chunks)
   }
   pendingWrites.clear()
 }
@@ -185,8 +199,7 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
         !Number.isFinite(chunk.seq) || !Number.isFinite(above) || (chunk.seq as number) > above
     )
     if (!kept.length) return
-    const data = kept.map((chunk) => chunk.data).join('')
-    entry.term.write(data)
+    writeChunks(entry.term, kept)
   }
 
   /**
@@ -897,13 +910,10 @@ export function onTerminalScroll(
 export function destroyTerminal(terminalId: string): void {
   const entry = registry.get(terminalId)
   if (!entry) return
-  // Flush any pending batched writes before destroying. Joined by their data:
-  // these became `{ data, seq }` when attaching needed a way to tell what a seed
-  // already contained, and this line kept joining the objects -- which type-
-  // checks, and writes `[object Object]` instead of the output it exists to save.
+  // Whatever is still batched goes in before the terminal goes.
   const chunks = pendingWrites.get(terminalId)
   if (chunks) {
-    entry.term.write(chunks.map((chunk) => chunk.data).join(''))
+    writeChunks(entry.term, chunks)
     pendingWrites.delete(terminalId)
   }
   // A seed still in flight would otherwise resolve and write into a terminal

@@ -4,6 +4,7 @@ import {
   CLOSE_UNAUTHENTICATED,
   RUNTIME_PROTOCOL_VERSION
 } from '@vornrun/shared/protocol'
+import { encodeTerminalFrame } from '../packages/shared/src/terminal-frame'
 
 /**
  * The web client's half of the auth boundary.
@@ -19,8 +20,9 @@ const sockets: FakeSocket[] = []
 
 class FakeSocket {
   static OPEN = 1
+  binaryType = 'blob'
   onopen: (() => void) | null = null
-  onmessage: ((e: { data: string }) => void) | null = null
+  onmessage: ((e: { data: string | ArrayBuffer }) => void) | null = null
   onclose: ((e: { code: number }) => void) | null = null
   onerror: (() => void) | null = null
   readyState = 1
@@ -44,6 +46,12 @@ class FakeSocket {
   }
   closeWith(code: number): void {
     this.onclose?.({ code })
+  }
+  /** What the socket hands over for a binary message once `binaryType` is set. */
+  binary(bytes: Uint8Array): void {
+    this.onmessage?.({
+      data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+    })
   }
 }
 
@@ -316,5 +324,73 @@ describe('the filter a phone asked for', () => {
     sockets[1].open()
     sockets[1].authOk()
     expect(sentMethods(sockets[1])).not.toContain('subscribe:set')
+  })
+})
+
+// Bytes are asked for only of a server whose hello says it sends frame layout 1, and a frame reaches the listeners a JSON notification does.
+describe('terminal output as bytes', () => {
+  function helloWith(ws: FakeSocket, capabilities: Record<string, number>): void {
+    ws.onmessage?.({
+      data: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'server:hello',
+        params: { protocolVersion: RUNTIME_PROTOCOL_VERSION, capabilities }
+      })
+    })
+  }
+  const asks = (ws: FakeSocket): unknown[] =>
+    ws.sent
+      .map((m) => JSON.parse(m) as { method: string; params?: unknown })
+      .filter((m) => m.method === 'subscribe:set')
+      .map((m) => m.params)
+
+  it('opens the socket for ArrayBuffers', () => {
+    createApiShim('ws://x/ws')
+
+    expect(sockets[0].binaryType).toBe('arraybuffer')
+  })
+
+  it('asks once let in, and again with every filter', async () => {
+    const api = createApiShim('ws://x/ws')
+    sockets[0].open()
+    helloWith(sockets[0], { auth: 1, subscribe: 1, terminalBytes: 1 })
+    sockets[0].authOk()
+    void api.setTopics?.(['session:*'])
+
+    expect(asks(sockets[0])).toEqual([
+      { terminalBytes: true },
+      { topics: ['session:*'], terminalBytes: true }
+    ])
+  })
+
+  it('asks for nothing of a server that sends text, or a layout it cannot read', async () => {
+    const api = createApiShim('ws://x/ws')
+    sockets[0].open()
+    helloWith(sockets[0], { auth: 1, subscribe: 1, terminalBytes: 2 })
+    sockets[0].authOk()
+    void api.setTopics?.(['session:*'])
+
+    expect(asks(sockets[0])).toEqual([{ topics: ['session:*'] }])
+  })
+
+  it('gives a frame to whoever listens for terminal data', () => {
+    const api = createApiShim('ws://x/ws')
+    const seen: unknown[] = []
+    api.onTerminalData((event) => seen.push(event))
+    const data = new TextEncoder().encode('\u001b[32m$\u001b[0m ')
+
+    sockets[0].binary(encodeTerminalFrame({ id: 'term-9', seq: 2, data }))
+
+    expect(seen).toEqual([{ id: 'term-9', seq: 2, data }])
+  })
+
+  it('ignores binary that is not a frame', () => {
+    const api = createApiShim('ws://x/ws')
+    const seen: unknown[] = []
+    api.onTerminalData((event) => seen.push(event))
+
+    sockets[0].binary(Uint8Array.from([0, 1, 2]))
+
+    expect(seen).toEqual([])
   })
 })

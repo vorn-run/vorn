@@ -1200,7 +1200,8 @@ export interface ServerNotifications {
    * a client subscribes first, buffers, and then applies only the chunks
    * numbered above what it was handed.
    */
-  'terminal:data': { id: string; data: string; seq: number }
+  /** Bytes for a socket that asked with `subscribe:set`, text for every other. */
+  'terminal:data': { id: string; data: string | Uint8Array; seq: number }
   /**
    * A terminal rang. Broadcast rather than read off `terminal:data`, so a
    * session nobody has open still reaches whoever is meant to be interrupted.
@@ -1291,7 +1292,8 @@ export interface ClientNotifications {
    * Prefer the `topics` query parameter on the socket URL for the initial set:
    * this message can only take effect after the socket is already receiving.
    */
-  'subscribe:set': { topics?: readonly string[] }
+  /** A field left out stays as it was; `terminalBytes` asks for output as frames. */
+  'subscribe:set': { topics?: readonly string[]; terminalBytes?: boolean }
   /** The answer to `extension:selectionRequest`, from the window that drew the terminal. */
   'extension:selectionResult': { requestId: number; text: string }
 }
@@ -1326,3 +1328,6 @@ export function createErrorResponse(
 ): RpcResponse {
   return { jsonrpc: '2.0', id, error: { code, message, data } }
 }
+
+/** Terminal output as a client receives it. */
+export type TerminalData = ServerNotifications['terminal:data']

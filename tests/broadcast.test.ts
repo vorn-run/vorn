@@ -5,6 +5,7 @@ vi.mock('../packages/server/src/logger', () => ({
 }))
 
 import { ClientRegistry, parseTopics } from '../packages/server/src/broadcast'
+import { decodeTerminalFrame } from '../packages/shared/src/terminal-frame'
 
 function mockWs(open = true) {
   const ws = {
@@ -144,12 +145,12 @@ describe('what one client wants', () => {
     expect(toJSON).not.toHaveBeenCalled()
   })
 
-  it('widens back to everything when the list is cleared', () => {
+  it('widens back to everything when the list is set empty', () => {
     const reg = new ClientRegistry()
     const ws = mockWs()
     reg.add(ws, ['session:*'])
 
-    reg.setTopics(ws, undefined)
+    reg.setTopics(ws, [])
     reg.broadcast('terminal:data', {})
 
     expect(sentMethods(ws)).toEqual(['terminal:data'])
@@ -273,5 +274,95 @@ describe('subscribing to one terminal', () => {
 
     expect(sentMethods(watching)).toEqual(['terminal:data', 'session:updated'])
     expect(sentMethods(listing)).toEqual(['session:updated'])
+  })
+})
+
+// Two wire forms; each socket gets the one it asked for, and one that never asked sees no change.
+describe('terminal output as bytes', () => {
+  const sent = (ws: import('ws').WebSocket): unknown[] =>
+    (ws.send as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0])
+
+  it('is text for a socket that never asked', () => {
+    const reg = new ClientRegistry()
+    const ws = mockWs()
+    reg.add(ws)
+    reg.broadcast('terminal:data', { id: 'a', data: 'hi', seq: 1 }, 'a')
+
+    expect(JSON.parse(sent(ws)[0] as string)).toEqual({
+      jsonrpc: '2.0',
+      method: 'terminal:data',
+      params: { id: 'a', data: 'hi', seq: 1 }
+    })
+  })
+
+  it('is a frame for a socket that asked, and text for its neighbour', () => {
+    const reg = new ClientRegistry()
+    const bytes = mockWs()
+    const text = mockWs()
+    reg.add(bytes)
+    reg.add(text)
+    reg.setTopics(bytes, undefined, true)
+    reg.broadcast('terminal:data', { id: 'a', data: '\u001b[1mx', seq: 9 }, 'a')
+
+    expect(decodeTerminalFrame(sent(bytes)[0] as Uint8Array)).toEqual({
+      id: 'a',
+      seq: 9,
+      data: new TextEncoder().encode('\u001b[1mx')
+    })
+    expect(typeof sent(text)[0]).toBe('string')
+  })
+
+  it('keeps the choice when the topics change without mentioning it', () => {
+    const reg = new ClientRegistry()
+    const ws = mockWs()
+    reg.add(ws)
+    reg.setTopics(ws, undefined, true)
+    // The web client pushes its topics whole on every scroll.
+    reg.setTopics(ws, ['terminal:data#a'])
+    reg.broadcast('terminal:data', { id: 'a', data: 'x', seq: 1 }, 'a')
+
+    expect(sent(ws)[0]).toBeInstanceOf(Uint8Array)
+  })
+
+  it('still honours the topic filter for bytes', () => {
+    const reg = new ClientRegistry()
+    const ws = mockWs()
+    reg.add(ws)
+    reg.setTopics(ws, ['terminal:data#a'], true)
+    reg.broadcast('terminal:data', { id: 'b', data: 'x', seq: 1 }, 'b')
+
+    expect(ws.send).not.toHaveBeenCalled()
+  })
+
+  it('cannot be asked for by a socket that was never admitted', () => {
+    const reg = new ClientRegistry()
+    const ws = mockWs()
+    reg.setTopics(ws, undefined, true)
+    reg.broadcast('terminal:data', { id: 'a', data: 'x', seq: 1 }, 'a')
+
+    expect(ws.send).not.toHaveBeenCalled()
+  })
+
+  it('leaves the topics alone when a request does not mention them', () => {
+    const reg = new ClientRegistry()
+    const ws = mockWs()
+    reg.add(ws, ['session:*'])
+    // The desktop asks for bytes and nothing else; the phone's URL filter must survive it.
+    reg.setTopics(ws, undefined, true)
+    reg.broadcast('terminal:data', { id: 'a', data: 'x', seq: 1 }, 'a')
+    reg.broadcast('session:updated', { id: 'a' })
+
+    expect(ws.send).toHaveBeenCalledOnce()
+    expect(typeof sent(ws)[0]).toBe('string')
+  })
+
+  it('takes only a plain true as asking for bytes', () => {
+    const reg = new ClientRegistry()
+    const ws = mockWs()
+    reg.add(ws)
+    reg.setTopics(ws, undefined, 'yes')
+    reg.broadcast('terminal:data', { id: 'a', data: 'x', seq: 1 }, 'a')
+
+    expect(typeof sent(ws)[0]).toBe('string')
   })
 })
