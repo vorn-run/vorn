@@ -44,7 +44,7 @@ const pack = (): InstalledConnectorPack =>
     env: [],
     contributes: {
       panes: [
-        { id: 'report', title: 'Report' },
+        { id: 'report', title: 'Report', icon: { viewBox: '0 0 24 24', paths: ['M4 4h16v16H4z'] } },
         { id: 'top', title: 'Top' }
       ]
     }
@@ -81,10 +81,10 @@ function seed(states: ExtensionActivationState[]): void {
   })
 }
 
+/** The rows sit in the menu itself, so opening it is all there is to do. */
 async function openMenu(): Promise<void> {
   render(<CardContextMenu terminalId="t1" position={{ x: 10, y: 10 }} onClose={() => {}} />)
-  await waitFor(() => expect(screen.getByText('Open pane')).toBeInTheDocument())
-  fireEvent.mouseEnter(screen.getByText('Open pane').closest('button') as HTMLElement)
+  await waitFor(() => expect(screen.getByText('New session')).toBeInTheDocument())
 }
 
 describe('offering the panes an extension contributes', () => {
@@ -104,7 +104,7 @@ describe('offering the panes an extension contributes', () => {
     seed([])
     render(<CardContextMenu terminalId="t1" position={{ x: 10, y: 10 }} onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('New session')).toBeInTheDocument())
-    expect(screen.queryByText('Open pane')).toBeNull()
+    expect(screen.queryByText('Report')).toBeNull()
   })
 
   // Activation says which contributions show; the title belongs to the pack, so
@@ -123,7 +123,7 @@ describe('offering the panes an extension contributes', () => {
     seed([activation({ active: false })])
     render(<CardContextMenu terminalId="t1" position={{ x: 10, y: 10 }} onClose={() => {}} />)
     await waitFor(() => expect(screen.getByText('New session')).toBeInTheDocument())
-    expect(screen.queryByText('Open pane')).toBeNull()
+    expect(screen.queryByText('Report')).toBeNull()
   })
 
   it('opens the pane the row names', async () => {
@@ -159,5 +159,30 @@ describe('offering the panes an extension contributes', () => {
     await openMenu()
 
     expect(await screen.findByText('Close Report')).toBeInTheDocument()
+  })
+
+  // At the top, above making a session: what this card can show is the reason
+  // the menu was opened more often than starting new work is.
+  it('puts the panes above the rest of the menu', async () => {
+    seed([activation()])
+    await openMenu()
+
+    const labels = [...document.querySelectorAll('.z-\\[150\\] button')].map((b) =>
+      b.textContent?.replace('Demo', '').trim()
+    )
+    expect(labels.slice(0, 2)).toEqual(['Report', 'New session'])
+  })
+
+  it('draws the glyph the pane ships, and a neutral one for a pane with none', async () => {
+    seed([activation({ panes: ['report', 'top'] })])
+    await openMenu()
+
+    const own = (await screen.findByText('Report')).closest('button')?.querySelector('svg')
+    expect(own?.querySelector('path')).toHaveAttribute('d', 'M4 4h16v16H4z')
+    // Its extension ships none either, so the row keeps its place with a mark
+    // that says only "an extension put this here".
+    const fallback = screen.getByText('Top').closest('button')?.querySelector('svg')
+    expect(fallback).toBeInTheDocument()
+    expect(fallback?.querySelector('path')?.getAttribute('d')).not.toBe('M4 4h16v16H4z')
   })
 })

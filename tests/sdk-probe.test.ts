@@ -596,6 +596,35 @@ describe('what a probed extension contributes', () => {
     return probeSdkConnector({ command: 'npx', args: [] })
   }
 
+  // A glyph is decoration on a row that still has a name; refusing the pane over
+  // it would cost the person the pane rather than the picture.
+  it('keeps a pane whose glyph it cannot draw, and the glyph it can', async () => {
+    const result = await probeExtension({
+      contributes: {
+        panes: [
+          {
+            id: 'report',
+            title: 'Report',
+            web: 'web/report/index.html',
+            icon: { paths: ['<svg>'] }
+          },
+          {
+            id: 'top',
+            title: 'Top',
+            command: ['top'],
+            icon: { viewBox: '0 0 24 24', paths: ['M4 4h16v16H4z'] }
+          }
+        ]
+      }
+    })
+    if (!result.ok) throw new Error(result.error)
+
+    const panes = result.manifest.contributes?.panes ?? []
+    expect(panes.map((pane) => pane.id)).toEqual(['report', 'top'])
+    expect(panes[0].icon).toBeUndefined()
+    expect(panes[1].icon).toEqual({ viewBox: '0 0 24 24', paths: ['M4 4h16v16H4z'] })
+  })
+
   it('reads an extension that has no triggers and no actions', async () => {
     const result = await probeExtension()
     if (!result.ok) throw new Error(result.error)

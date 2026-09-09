@@ -18,7 +18,8 @@ import {
   DeviceClaimFailure,
   ExtensionActivationState,
   ExtensionFooterReading,
-  ExtensionOpenPane
+  ExtensionOpenPane,
+  SdkConnectorIcon
 } from '../../shared/types'
 import type { PortableRequirement } from '../../shared/workflow-portability'
 
@@ -229,6 +230,8 @@ export interface ExtensionPaneState {
   title: string
   /** Which extension it belongs to, shown beside the title. */
   extensionName: string
+  /** The pane's glyph, or its extension's, for the pane's own bar. */
+  icon?: SdkConnectorIcon
 }
 
 /**

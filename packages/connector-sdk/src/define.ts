@@ -4,6 +4,7 @@ import type {
   Connector,
   ConnectorConfig,
   ConnectorDefinition,
+  ConnectorIcon,
   DedupeStrategy,
   ExtensionAgent,
   ExtensionDefinition,
@@ -198,22 +199,27 @@ function assertIdentity(
   if (!definition.name?.trim()) {
     throw new Error(`${kind} ${definition.id} is missing a name`)
   }
-  if (!definition.icon) return
+  assertIcon(`${kind} ${definition.id}`, definition.icon)
+}
 
-  const { viewBox, paths } = definition.icon
+/** Path data and nothing else, so a glyph cannot carry markup into the app drawing it. */
+function assertIcon(subject: string, icon: ConnectorIcon | undefined): void {
+  if (!icon) return
+
+  const { viewBox, paths } = icon
   if (!Array.isArray(paths) || paths.length === 0) {
-    throw new Error(`${kind} ${definition.id} has an icon with no paths`)
+    throw new Error(`${subject} has an icon with no paths`)
   }
   for (const path of paths) {
     if (typeof path !== 'string' || !PATH_DATA_PATTERN.test(path)) {
       throw new Error(
-        `${kind} ${definition.id} has an icon path that is not SVG path data. ` +
+        `${subject} has an icon path that is not SVG path data. ` +
           `Only path data is accepted, not markup.`
       )
     }
   }
   if (viewBox !== undefined && !VIEW_BOX_PATTERN.test(viewBox)) {
-    throw new Error(`${kind} ${definition.id} has an icon viewBox that is not four numbers`)
+    throw new Error(`${subject} has an icon viewBox that is not four numbers`)
   }
 }
 
@@ -395,6 +401,7 @@ function assertPredicate(id: string, where: string, predicate?: ActivationPredic
 
 /** A pane is a page the pack carries or a program it runs, and the two are told apart here. */
 function assertPane(id: string, pane: PaneContribution): void {
+  assertIcon(`Extension ${id} pane ${pane.id}`, pane.icon)
   const loose = pane as { web?: unknown; command?: unknown }
   const page = loose.web !== undefined
   const program = loose.command !== undefined

@@ -272,6 +272,8 @@ export const connector = defineExtension({
       id: 'report',
       title: 'Report',
       description: 'The reading, in full, beside the terminal',
+      // Drawn beside the pane's name wherever it is offered; path data only.
+      icon: { viewBox: '0 0 24 24', paths: ['M4 4h16v16H4z M8 9h8 M8 13h8 M8 17h5'] },
       // Served from the pack; everything the page needs lives under web/.
       web: 'web/report/index.html'
     }

@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
-import type { ExtensionPaneContribution, InstalledConnectorPack } from '../../shared/types'
+import type {
+  ExtensionPaneContribution,
+  InstalledConnectorPack,
+  SdkConnectorIcon
+} from '../../shared/types'
 
 /**
  * The installed extensions, read once and shared by everything that names one.
@@ -73,11 +77,16 @@ export function extensionPanes(
 export async function paneLabel(
   extensionId: string,
   paneId: string
-): Promise<{ title: string; extensionName: string }> {
+): Promise<{ title: string; extensionName: string; icon?: SdkConnectorIcon }> {
   const packs = cache ?? (await load())
   const pack = packs.find((p) => p.id === extensionId)
   const pane = pack?.contributes?.panes?.find((p) => p.id === paneId)
-  return { title: pane?.title ?? paneId, extensionName: pack?.name ?? extensionId }
+  const icon = pane?.icon ?? pack?.icon
+  return {
+    title: pane?.title ?? paneId,
+    extensionName: pack?.name ?? extensionId,
+    ...(icon && { icon })
+  }
 }
 
 /** Test seam: forget what this process has read. */

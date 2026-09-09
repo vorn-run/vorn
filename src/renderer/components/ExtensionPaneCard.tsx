@@ -2,6 +2,7 @@ import { memo, forwardRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { PaneCard, PaneControls } from './PaneCard'
+import { ExtensionPaneIcon } from './ExtensionPaneIcon'
 import { TerminalPane } from './TerminalPane'
 import { extensionPaneId } from '../lib/pane-id'
 import { PANE_SURFACE } from '../lib/pane-surface'
@@ -45,7 +46,7 @@ export const ExtensionPaneCard = memo(
     if (!pane) return null
 
     const paneId = extensionPaneId(sessionId)
-    const { open, title, extensionName } = pane
+    const { open, title, extensionName, icon } = pane
 
     return (
       <PaneCard
@@ -68,6 +69,7 @@ export const ExtensionPaneCard = memo(
           onPointerDown={onDragStart ? (e) => onDragStart(paneId, e) : undefined}
           data-testid={`extension-pane-header-${sessionId}`}
         >
+          <ExtensionPaneIcon icon={icon} extensionId={open.extensionId} size={12} />
           <span className="text-[12px] text-gray-300 font-medium shrink-0">{title}</span>
           <span className="text-ink-ghost shrink-0">·</span>
           <span className="text-[11px] text-ink-secondary truncate">{extensionName}</span>

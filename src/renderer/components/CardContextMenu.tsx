@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, Workflow, Terminal, PanelRight } from 'lucide-react'
+import { ChevronRight, Workflow, Terminal } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { type AiAgentType, getProjectRemoteHostId } from '../../shared/types'
 import { AgentIcon } from './AgentIcon'
@@ -12,6 +12,7 @@ import { useWorkspaceWorkflows } from '../hooks/useWorkspaceWorkflows'
 import { buildWorkflowMenuItems } from '../lib/workflow-menu-items'
 import { createShellInProject } from '../lib/session-utils'
 import { useExtensions, extensionPanes } from '../lib/use-extensions'
+import { ExtensionPaneIcon } from './ExtensionPaneIcon'
 
 interface Props {
   terminalId: string
@@ -31,6 +32,8 @@ interface MenuItem {
   icon?: React.FC<{ size?: number; className?: string }>
   iconElement?: React.ReactNode
   label: string
+  /** Said quietly at the end of the row: whose pane this is. */
+  detail?: string
   onClick?: () => void
   className?: string
   separator?: boolean
@@ -99,6 +102,38 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
 
   const items: MenuItem[] = []
 
+  // First, and not behind a submenu: what this card can show is the reason the
+  // menu was opened more often than making a session is. Activation carries ids;
+  // titles and glyphs belong to the pack, so the two are read together.
+  const paneItems: MenuItem[] = (activation ?? [])
+    .filter((state) => state.active && state.panes.length > 0)
+    .flatMap((state) => {
+      const pack = packs.find((p) => p.id === state.extensionId)
+      return extensionPanes(packs, state.extensionId)
+        .filter((pane) => state.panes.includes(pane.id))
+        .map((pane) => {
+          const open =
+            showingPane?.extensionId === state.extensionId && showingPane?.paneId === pane.id
+          return {
+            iconElement: (
+              <ExtensionPaneIcon
+                icon={pane.icon}
+                extensionIcon={pack?.icon}
+                extensionId={state.extensionId}
+              />
+            ),
+            label: open ? `Close ${pane.title}` : pane.title,
+            detail: state.extensionName,
+            onClick: () => {
+              onClose()
+              void toggleExtensionPane(terminalId, state.extensionId, pane.id)
+            }
+          }
+        })
+    })
+
+  items.push(...paneItems)
+
   const defaultAgent = config?.defaults?.defaultAgent || 'claude'
 
   const createSessionWithAgent = async (agentType: AiAgentType) => {
@@ -119,6 +154,7 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
   items.push({
     iconElement: <AgentIcon agentType={defaultAgent} size={14} />,
     label: 'New session',
+    separator: paneItems.length > 0,
     onClick: () => createSessionWithAgent(defaultAgent)
   })
 
@@ -162,35 +198,6 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
       iconElement: <Workflow size={14} className="text-gray-500" />,
       label: 'Run workflow',
       submenu: workflowMenuItems
-    })
-  }
-
-  // What each active extension puts on this card. Activation carries ids;
-  // titles belong to the pack, so the two are read together.
-  const paneSubmenuItems: SubmenuItem[] = (activation ?? [])
-    .filter((state) => state.active && state.panes.length > 0)
-    .flatMap((state) =>
-      extensionPanes(packs, state.extensionId)
-        .filter((pane) => state.panes.includes(pane.id))
-        .map((pane) => {
-          const open =
-            showingPane?.extensionId === state.extensionId && showingPane?.paneId === pane.id
-          return {
-            label: open ? `Close ${pane.title}` : pane.title,
-            detail: state.extensionName,
-            onClick: () => {
-              onClose()
-              void toggleExtensionPane(terminalId, state.extensionId, pane.id)
-            }
-          }
-        })
-    )
-
-  if (paneSubmenuItems.length > 0) {
-    items.push({
-      iconElement: <PanelRight size={14} className="text-gray-500" />,
-      label: 'Open pane',
-      submenu: paneSubmenuItems
     })
   }
 
@@ -274,6 +281,9 @@ export function CardContextMenu({ terminalId, position, onClose }: Props) {
                   <item.icon size={14} className={item.className ?? 'text-gray-500'} />
                 ))}
               <span className="flex-1 text-left truncate">{item.label}</span>
+              {item.detail && (
+                <span className="text-[10px] ml-auto shrink-0 text-gray-600">{item.detail}</span>
+              )}
               {item.submenu && (
                 <ChevronRight size={11} className="text-gray-600 ml-auto shrink-0" />
               )}

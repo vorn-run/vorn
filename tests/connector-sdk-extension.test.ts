@@ -77,6 +77,36 @@ describe('defineExtension', () => {
     expect(pane('web/report/index.html')).not.toThrow()
   })
 
+  // The same rule the pack's own glyph is held to: a pane is named in a menu,
+  // and markup smuggled through a manifest would be drawn by the app naming it.
+  it('refuses a pane glyph that is not path data, and carries a good one', () => {
+    const withIcon = (icon: unknown) => () =>
+      extension({
+        panes: [{ id: 'report', title: 'Report', web: 'web/r/index.html', icon: icon as never }]
+      })
+
+    expect(withIcon({ paths: ['<script>alert(1)</script>'] })).toThrow(/not SVG path data/)
+    expect(withIcon({ paths: [] })).toThrow(/icon with no paths/)
+    expect(withIcon({ paths: ['M4 4h16v16H4z'], viewBox: 'nonsense' })).toThrow(
+      /viewBox that is not four numbers/
+    )
+
+    const built = extension({
+      panes: [
+        {
+          id: 'report',
+          title: 'Report',
+          web: 'web/r/index.html',
+          icon: { viewBox: '0 0 24 24', paths: ['M4 4h16v16H4z'] }
+        }
+      ]
+    })
+    expect(connectorManifest(built).contributes?.panes?.[0].icon).toEqual({
+      viewBox: '0 0 24 24',
+      paths: ['M4 4h16v16H4z']
+    })
+  })
+
   it('refuses a pane that is both a page and a program, or neither', () => {
     expect(() =>
       extension({
