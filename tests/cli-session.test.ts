@@ -86,6 +86,17 @@ describe('session dispatch', () => {
     expect(io.out()).toBe('')
   })
 
+  it('takes options written before the noun', async () => {
+    const { transport } = fakeRpc({
+      'terminal:listActive': () => [terminal()],
+      'headless:list': () => []
+    })
+    const io = capture(transport)
+
+    expect(await runCli(['--json', 'session', 'list'], io)).toBe(0)
+    expect(JSON.parse(io.out())).toHaveLength(1)
+  })
+
   it('reports an unknown verb', async () => {
     const io = capture(fakeRpc({}).transport)
     expect(await runCli(['session', 'dance'], io)).toBe(2)

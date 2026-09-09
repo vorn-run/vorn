@@ -37,6 +37,33 @@ export interface ClientArgs {
 
 export class ClientArgsError extends Error {}
 
+/**
+ * The options this grammar accepts.
+ *
+ * Exported because the dispatcher has to know which of them take a value, to
+ * find the command in `vorn --data-dir /tmp session list` without mistaking the
+ * directory for it.
+ */
+export const CLIENT_OPTIONS = {
+  agent: { type: 'string' },
+  prompt: { type: 'string' },
+  project: { type: 'string' },
+  path: { type: 'string' },
+  name: { type: 'string' },
+  branch: { type: 'string' },
+  workflow: { type: 'string' },
+  'data-dir': { type: 'string' },
+  lines: { type: 'string' },
+  limit: { type: 'string' },
+  timeout: { type: 'string' },
+  headless: { type: 'boolean' },
+  worktree: { type: 'boolean' },
+  recent: { type: 'boolean' },
+  raw: { type: 'boolean' },
+  json: { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' }
+} as const
+
 /** A count, a line budget, a millisecond ceiling: all of them positive integers. */
 function positiveInt(raw: string | undefined, flag: string): number | undefined {
   if (raw === undefined) return undefined
@@ -60,25 +87,7 @@ export function parseClientArgs(argv: string[]): ClientArgs {
   try {
     const parsed = parseArgs({
       args: argv,
-      options: {
-        agent: { type: 'string' },
-        prompt: { type: 'string' },
-        project: { type: 'string' },
-        path: { type: 'string' },
-        name: { type: 'string' },
-        branch: { type: 'string' },
-        workflow: { type: 'string' },
-        'data-dir': { type: 'string' },
-        lines: { type: 'string' },
-        limit: { type: 'string' },
-        timeout: { type: 'string' },
-        headless: { type: 'boolean' },
-        worktree: { type: 'boolean' },
-        recent: { type: 'boolean' },
-        raw: { type: 'boolean' },
-        json: { type: 'boolean' },
-        help: { type: 'boolean', short: 'h' }
-      },
+      options: CLIENT_OPTIONS,
       allowPositionals: true,
       strict: true
     })

@@ -1,8 +1,8 @@
 import { startServer } from './index'
 import { initDatabase, closeDatabase } from './database'
 import { mintOwnerToken, listTokens, hasTokens, revokeToken } from './token-manager'
-import { parseServerArgs, ServerArgsError, type ServerArgs } from './server-args'
-import { parseClientArgs, ClientArgsError } from './client-args'
+import { parseServerArgs, ServerArgsError, SERVER_OPTIONS, type ServerArgs } from './server-args'
+import { parseClientArgs, ClientArgsError, CLIENT_OPTIONS } from './client-args'
 import { useDataDir } from './rpc-client'
 import { clientContext, type CliDeps } from './cli/deps'
 import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE } from './cli/exit'
@@ -229,12 +229,41 @@ async function runClientCommand(argv: string[], deps: CliDeps): Promise<number> 
   return args.positionals[0] === 'session' ? runSessionCommand(ctx) : runWorkflowCommand(ctx)
 }
 
+/** Which option names carry a value, taken from the grammars rather than a list. */
+const TAKES_VALUE = new Set(
+  [...Object.entries(SERVER_OPTIONS), ...Object.entries(CLIENT_OPTIONS)]
+    .filter(([, spec]) => spec.type === 'string')
+    .map(([name]) => name)
+)
+
+/**
+ * The command, wherever it sits.
+ *
+ * `vorn --data-dir /tmp session list` is how a person writes this, and taking
+ * argv[0] alone read the flag as the command and the directory as nothing.
+ * Skipping an option's value is what makes the directory not look like a noun.
+ */
+export function findCommand(argv: string[]): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]
+    if (!token.startsWith('-')) return token
+    if (token.startsWith('--') && !token.includes('=') && TAKES_VALUE.has(token.slice(2))) i++
+  }
+  return undefined
+}
+
+/** The same argv with the command itself taken out, options left where they were. */
+function withoutCommand(argv: string[], command: string): string[] {
+  const at = argv.indexOf(command)
+  return [...argv.slice(0, at), ...argv.slice(at + 1)]
+}
+
 /**
  * Run one command. Returns the process exit code; `serve` returns 0 while
  * leaving the server listening, so the caller must not exit on success.
  */
 export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
-  const command = argv[0] && !argv[0].startsWith('-') ? argv[0] : undefined
+  const command = findCommand(argv)
 
   if (!command) {
     if (argv.includes('--version')) {
@@ -255,7 +284,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.write(USAGE)
       return EXIT_OK
     case 'server':
-      return runServerCommand(argv.slice(1), deps)
+      return runServerCommand(withoutCommand(argv, command), deps)
     // `vorn-server` was called this way for as long as it existed, and scripts
     // that still do keep working.
     case 'serve':

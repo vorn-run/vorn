@@ -94,6 +94,18 @@ describe('usage and dispatch', () => {
     expect(io.out()).toBe('')
   })
 
+  it("finds the command after a global option, not the option's value", async () => {
+    const io = capture()
+    expect(await runCli(['--data-dir', dataDir, 'token', 'list'], io)).toBe(0)
+    expect(io.out()).toBe('No device tokens.\n')
+  })
+
+  it('finds it after the noun the server commands live under too', async () => {
+    const io = capture()
+    expect(await runCli(['--data-dir', dataDir, 'server', 'token', 'list'], io)).toBe(0)
+    expect(io.out()).toBe('No device tokens.\n')
+  })
+
   it('reports an unknown command', async () => {
     const io = capture()
     expect(await runCli(['bogus'], io)).toBe(2)
