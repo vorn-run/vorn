@@ -139,6 +139,34 @@ describe('workflow runs', () => {
     })
   })
 
+  it('refuses an id prefix that names more than one, rather than picking one', async () => {
+    const { transport } = fakeRpc({
+      'workflow:list': () => [
+        workflow({ id: 'import:first', name: 'Build connector' }),
+        workflow({ id: 'import:second', name: 'Build connector twice' })
+      ]
+    })
+    const io = capture(transport)
+
+    expect(await runCli(['workflow', 'runs', '--workflow', 'import:'], io)).toBe(1)
+    expect(io.err()).toContain('matches 2 workflows')
+    expect(io.err()).toContain('Build connector')
+  })
+
+  it('takes a full id even when it is a prefix of another', async () => {
+    const { transport, calls } = fakeRpc({
+      'workflow:list': () => [
+        workflow({ id: 'import:first', name: 'Build connector' }),
+        workflow({ id: 'import:first-again', name: 'Build connector again' })
+      ],
+      'workflowRun:list': () => []
+    })
+    const io = capture(transport)
+
+    expect(await runCli(['workflow', 'runs', '--workflow', 'import:first'], io)).toBe(0)
+    expect(calls.at(-1)?.params).toMatchObject({ workflowId: 'import:first' })
+  })
+
   it('says so when the name matches nothing', async () => {
     const { transport } = fakeRpc({ 'workflow:list': () => [workflow()] })
     const io = capture(transport)

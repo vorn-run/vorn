@@ -55,8 +55,10 @@ function CliCommandRow() {
     window.api
       .installCliCommand()
       .then((result) => {
-        if (result.ok) setState({ ...state, installed: true, path: result.path })
-        else setError(result.error)
+        // Functional form: the status can change between the click and this.
+        if (result.ok) {
+          setState((prev) => (prev ? { ...prev, installed: true, path: result.path } : prev))
+        } else setError(result.error)
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setBusy(false))

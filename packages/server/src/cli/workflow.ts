@@ -29,10 +29,26 @@ function triggerKind(workflow: WorkflowDefinition): string {
   return kind ?? 'manual'
 }
 
-/** A workflow by id, or by name when that names exactly one. */
+/**
+ * A workflow by id, by a prefix of one, or by name -- and only when that names
+ * exactly one of them.
+ *
+ * A prefix that matches several is refused rather than resolved to the first:
+ * seeded and imported workflows carry ids like `import:foo`, so shared prefixes
+ * are ordinary here, and acting on the wrong workflow is not a small mistake.
+ */
 function findWorkflow(workflows: WorkflowDefinition[], given: string): WorkflowDefinition {
-  const byId = workflows.find((w) => w.id === given || w.id.startsWith(given))
-  if (byId) return byId
+  const exact = workflows.find((w) => w.id === given)
+  if (exact) return exact
+
+  const byPrefix = workflows.filter((w) => w.id.startsWith(given))
+  if (byPrefix.length === 1) return byPrefix[0]
+  if (byPrefix.length > 1) {
+    throw new Error(
+      `"${given}" matches ${byPrefix.length} workflows: ${byPrefix.map((w) => w.name).join(', ')}`
+    )
+  }
+
   const byName = workflows.filter((w) => w.name.toLowerCase() === given.toLowerCase())
   if (byName.length === 1) return byName[0]
   if (byName.length === 0) throw new Error(`no workflow matches "${given}"`)
