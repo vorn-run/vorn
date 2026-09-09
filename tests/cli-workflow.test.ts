@@ -244,9 +244,10 @@ describe('workflow run', () => {
 })
 
 describe('workflow stop', () => {
-  it('takes any prefix of a run id that names one', async () => {
+  it('takes any prefix of a run id that names one, gate-parked runs included', async () => {
     const { transport, calls } = fakeRpc({
-      'workflowRun:listAll': () => [run()],
+      'workflowRun:listRunning': () => [run()],
+      'workflowRun:listWaiting': () => [],
       'workflow:stopRun': () => undefined
     })
     const io = capture(transport)
@@ -262,7 +263,8 @@ describe('workflow stop', () => {
 
   it('refuses a prefix that names more than one run', async () => {
     const { transport } = fakeRpc({
-      'workflowRun:listAll': () => [run({ runId: 'aa-1' }), run({ runId: 'aa-2' })]
+      'workflowRun:listRunning': () => [run({ runId: 'aa-1' })],
+      'workflowRun:listWaiting': () => [run({ runId: 'aa-2' })]
     })
     const io = capture(transport)
 

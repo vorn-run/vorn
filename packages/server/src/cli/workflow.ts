@@ -127,15 +127,30 @@ async function startRun(ctx: ClientContext, given: string | undefined): Promise<
   }
 }
 
-/** A run by id or by any prefix that names one, across every workflow. */
+/**
+ * A run by id, or by any prefix that names one.
+ *
+ * Looked for among the runs that can actually be stopped rather than the most
+ * recent fifty of everything: a run parked on a gate for a day is exactly the
+ * one worth stopping, and it falls off the end of that listing.
+ */
 async function resolveRunId(ctx: ClientContext, given: string): Promise<string> {
-  const runs = await ctx.rpc.call('workflowRun:listAll', {})
+  const [running, waiting] = await Promise.all([
+    ctx.rpc.call('workflowRun:listRunning'),
+    ctx.rpc.call('workflowRun:listWaiting')
+  ])
+  const seen = new Set<string>()
+  const runs = [...running, ...waiting].filter((run) => {
+    if (seen.has(run.runId)) return false
+    seen.add(run.runId)
+    return true
+  })
   const exact = runs.find((run) => run.runId === given)
   if (exact) return exact.runId
 
   const matches = runs.filter((run) => run.runId.startsWith(given))
   if (matches.length === 1) return matches[0].runId
-  if (matches.length === 0) throw new Error(`no run matches "${given}"`)
+  if (matches.length === 0) throw new Error(`no run in flight matches "${given}"`)
   throw new Error(
     `"${given}" matches ${matches.length} runs: ${matches.map((r) => shortId(r.runId)).join(', ')}`
   )
