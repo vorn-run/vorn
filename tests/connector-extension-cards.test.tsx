@@ -96,7 +96,7 @@ describe('the cards an extension is on', () => {
       ['card-2', [drawing()]]
     ])
     render(<ConnectorSettings />)
-    expect(await screen.findByText(/on 2 cards/)).toBeInTheDocument()
+    expect(await screen.findByText(/on 2 of 2 open cards/)).toBeInTheDocument()
   })
 
   // The shell in a card's panel is drawn inside that card, so counting it would
@@ -108,7 +108,7 @@ describe('the cards an extension is on', () => {
     ])
     state.terminalsPanes = new Map([['card-1', { terminals: ['shell-1'], activeTab: 0 }]])
     render(<ConnectorSettings />)
-    expect(await screen.findByText(/on 1 card/)).toBeInTheDocument()
+    expect(await screen.findByText(/on 1 of 1 open card/)).toBeInTheDocument()
   })
 
   // Installed and drawing nowhere is a fact worth saying; silence reads as unknown.

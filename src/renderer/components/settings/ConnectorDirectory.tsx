@@ -133,8 +133,8 @@ export function ConnectorDirectory({
       }
       data-drop-active={dragOver ? 'true' : undefined}
     >
-      <div className="flex items-center gap-2 mb-1">
-        <div className="relative flex-1">
+      <div className="mb-1">
+        <div className="relative mb-2">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
           <input
             type="text"
@@ -144,69 +144,72 @@ export function ConnectorDirectory({
             className="w-full pl-7 pr-2 py-1.5 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-200 focus:border-white/[0.2] outline-none"
           />
         </div>
-        {onInstallFile && onPickFile && (
-          <button
-            onClick={async () => {
-              const filePath = await onPickFile()
-              if (filePath) onInstallFile(filePath)
-            }}
-            title="Install a .vorn.tgz you already have"
-            className="shrink-0 py-1.5 px-2 text-xs text-gray-300 hover:text-white border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
-          >
-            <FolderOpen size={11} /> Install from file
-          </button>
-        )}
-        {/* A dropdown rather than a row of chips, which wrapped to a second
+        {/* Filters on their own row, so the search box keeps its width when three of them show. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {onInstallFile && onPickFile && (
+            <button
+              onClick={async () => {
+                const filePath = await onPickFile()
+                if (filePath) onInstallFile(filePath)
+              }}
+              title="Install a .vorn.tgz you already have"
+              className="shrink-0 py-1.5 px-2 text-xs text-gray-300 hover:text-white border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1"
+            >
+              <FolderOpen size={11} /> Install from file
+            </button>
+          )}
+          {/* A dropdown rather than a row of chips, which wrapped to a second
             line and pushed the list down. */}
-        {categories.length > 1 && (
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            aria-label="Filter by category"
-            className="py-1.5 px-2 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-300 outline-none focus:border-white/[0.2]"
-          >
-            <option value="">All categories</option>
-            {categories.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        )}
-        {/* A connector and an extension answer different questions, so which
+          {categories.length > 1 && (
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              aria-label="Filter by category"
+              className="py-1.5 px-2 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-300 outline-none focus:border-white/[0.2]"
+            >
+              <option value="">All categories</option>
+              {categories.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
+          {/* A connector and an extension answer different questions, so which
             one you came for narrows the list before anything else does. */}
-        {kinds.length > 1 && (
-          <select
-            value={kind}
-            onChange={(e) => setKind(e.target.value as '' | ConnectorKind)}
-            aria-label="Filter by kind"
-            className="py-1.5 px-2 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-300 outline-none focus:border-white/[0.2]"
-          >
-            <option value="">Everything</option>
-            {kinds.map((name) => (
-              <option key={name} value={name}>
-                {CONNECTOR_KIND[name].label}
-              </option>
-            ))}
-          </select>
-        )}
-        {/* What setting one up will ask of you is the question people bring
+          {kinds.length > 1 && (
+            <select
+              value={kind}
+              onChange={(e) => setKind(e.target.value as '' | ConnectorKind)}
+              aria-label="Filter by kind"
+              className="py-1.5 px-2 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-300 outline-none focus:border-white/[0.2]"
+            >
+              <option value="">Everything</option>
+              {kinds.map((name) => (
+                <option key={name} value={name}>
+                  {CONNECTOR_KIND[name].label}
+                </option>
+              ))}
+            </select>
+          )}
+          {/* What setting one up will ask of you is the question people bring
             here second, right after what it talks to. */}
-        {rungs.length > 1 && (
-          <select
-            value={rung}
-            onChange={(e) => setRung(e.target.value as '' | ConnectorAuthRung)}
-            aria-label="Filter by sign-in"
-            className="py-1.5 px-2 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-300 outline-none focus:border-white/[0.2]"
-          >
-            <option value="">Any sign-in</option>
-            {rungs.map((name) => (
-              <option key={name} value={name}>
-                {AUTH_RUNG[name].label}
-              </option>
-            ))}
-          </select>
-        )}
+          {rungs.length > 1 && (
+            <select
+              value={rung}
+              onChange={(e) => setRung(e.target.value as '' | ConnectorAuthRung)}
+              aria-label="Filter by sign-in"
+              className="py-1.5 px-2 bg-white/[0.05] border border-white/[0.1] rounded-sm text-xs text-gray-300 outline-none focus:border-white/[0.2]"
+            >
+              <option value="">Any sign-in</option>
+              {rungs.map((name) => (
+                <option key={name} value={name}>
+                  {AUTH_RUNG[name].label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {installError && (
