@@ -253,10 +253,13 @@ function toggleWidget(): void {
  */
 function explainRefusal(reason: string): string {
   if (reason === 'protocol-mismatch') {
+    // Reached only after asking it to hand its terminals over and being turned
+    // down, so the offer is no longer worth repeating here.
     return (
       'Another Vorn server is already running, from a different version, and this ' +
-      'app cannot talk to it. Your sessions are still alive inside it. Stop that ' +
-      'server to start fresh here, or reopen the version that started it.'
+      'app cannot talk to it. It was asked to move your terminals to this version ' +
+      'and could not. They are still alive inside it. Stop that server to start ' +
+      'fresh here, or reopen the version that started it.'
     )
   }
   if (reason === 'different-build') {

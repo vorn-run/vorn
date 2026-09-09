@@ -28,6 +28,7 @@ import {
 } from './server-adoption'
 import { SERVER_LOG_FILENAME, type HandoffResult } from '@vornrun/shared/protocol'
 import { decideHandoff, buildHandoffRequest, devRepoRoot } from './handoff-request'
+import { askForHandoff } from './handoff-direct'
 
 /**
  * Thrown when a server is running that this app may not use.
@@ -754,6 +755,64 @@ async function tryAdopt(
 }
 
 /**
+ * Ask an unadoptable-but-ours server to hand its terminals to this build.
+ *
+ * Answers whether it did. Every failure leaves the incumbent exactly as it was,
+ * which is the same guarantee the ordinary path has and for the same reason: the
+ * commit boundary is on the far side.
+ */
+async function standAside(target: string, dataDir: string): Promise<boolean> {
+  if (!target.startsWith('ws+unix://')) return false
+  const credential = readLocalToken(dataDir)
+  if (!credential) {
+    log.warn(
+      '[handoff] no credential published, so the older server cannot be asked to stand aside'
+    )
+    return false
+  }
+  const spec = serverProcessSpec()
+  if (!spec) return false
+
+  try {
+    handingOver = true
+    const result = await askForHandoff(
+      target,
+      credential,
+      buildHandoffRequest({ ...spec, appVersion: app.getVersion() })
+    )
+    if (result.kind === 'declined') {
+      log.warn(`[handoff] the older server declined to stand aside: ${result.because}`)
+      return false
+    }
+    log.info(`[handoff] ${result.sessions} terminal(s) moved off the older protocol`)
+    return true
+  } catch (err) {
+    log.warn(`[handoff] could not ask the older server to stand aside: ${(err as Error).message}`)
+    return false
+  } finally {
+    setTimeout(() => {
+      handingOver = false
+    }, HANDOFF_SETTLE_MS)
+  }
+}
+
+/** The replacement needs a moment to claim the name the old server just released. */
+async function adoptAfterHandoff(dataDir: string): Promise<ServerBridge | null> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    for (const candidate of discoverable(dataDir)) {
+      const outcome = await tryAdopt(candidate.target, candidate.pid, {
+        dataDir,
+        buildChannel: buildChannel()
+      })
+      if ('bridge' in outcome) return outcome.bridge
+    }
+  }
+  log.warn('[handoff] the replacement never became adoptable')
+  return null
+}
+
+/**
  * Every way a server on this machine might be found, in the order to try them.
  *
  * The endpoint first, because it is the name a server *owns* rather than a record
@@ -891,6 +950,22 @@ async function adoptSomethingRunning(dataDir: string): Promise<ServerBridge | nu
       `[launcher] declined to adopt the running server (${refusal.reason}): ` +
         `${refusal.detail}. It keeps running and keeps its sessions.`
     )
+
+    // A protocol mismatch is the one refusal that should not be final.
+    //
+    // Every other reason says this is somebody else's server -- another data
+    // directory, another build channel -- and the right answer is to stand down.
+    // This one says it is *our* server, holding our terminals, speaking a wire
+    // format this release changed. Standing down there ends exactly what the
+    // handoff exists to protect, so it is asked to stand aside instead, over a
+    // socket that needs no agreement about the protocol it just disagreed on.
+    if (refusal.reason === 'protocol-mismatch' && (await standAside(candidate.target, dataDir))) {
+      // It committed, so the machine now has a server this app can speak to.
+      // Discovery runs again rather than recursing: the endpoint is the same name
+      // and the replacement has just claimed it.
+      const replacement = await adoptAfterHandoff(dataDir)
+      if (replacement) return replacement
+    }
     // Declining to adopt is not a reason to start a rival.
     //
     // Both servers would open the same SQLite file, and `saveSessions` is a
