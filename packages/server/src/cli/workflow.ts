@@ -51,7 +51,10 @@ function findWorkflow(workflows: WorkflowDefinition[], given: string): WorkflowD
     )
   }
 
-  const byName = workflows.filter((w) => w.name.toLowerCase() === given.toLowerCase())
+  // Trimmed on both sides: a trailing space is invisible in the list, so two
+  // rows that read the same must be ambiguous rather than quietly distinct.
+  const wanted = given.trim().toLowerCase()
+  const byName = workflows.filter((w) => w.name.trim().toLowerCase() === wanted)
   if (byName.length === 1) return byName[0]
   if (byName.length === 0) throw new Error(`no workflow matches "${given}"`)
   throw new Error(`"${given}" matches ${byName.length} workflows; use an id`)

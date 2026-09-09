@@ -167,6 +167,21 @@ describe('workflow runs', () => {
     expect(calls.at(-1)?.params).toMatchObject({ workflowId: 'import:first' })
   })
 
+  it('refuses two names that read the same, whatever whitespace separates them', async () => {
+    // A trailing space is invisible in the list, so picking one silently would
+    // run a workflow the person did not point at.
+    const { transport } = fakeRpc({
+      'workflow:list': () => [
+        workflow({ id: 'import:one', name: 'Build connector' }),
+        workflow({ id: 'import:two', name: 'Build connector ' })
+      ]
+    })
+    const io = capture(transport)
+
+    expect(await runCli(['workflow', 'run', 'Build connector'], io)).toBe(1)
+    expect(io.err()).toContain('matches 2 workflows; use an id')
+  })
+
   it('says so when the name matches nothing', async () => {
     const { transport } = fakeRpc({ 'workflow:list': () => [workflow()] })
     const io = capture(transport)

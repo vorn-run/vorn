@@ -151,6 +151,20 @@ or stop it.`
   return `The server closed the connection before answering (code ${code}).`
 }
 
+/**
+ * A method the server does not have.
+ *
+ * The command and the server ship together, so this means the running server is
+ * older than the binary asking -- a packaged app beside a newer checkout, which
+ * is the ordinary way to meet it.
+ */
+function explain(message: string): string {
+  if (!message.startsWith('Method not found:')) return message
+  const method = message.slice('Method not found:'.length).trim()
+  return `This server does not have ${method}, so it is older than the vorn command asking for it.
+Restart Vorn to pick up the newer server, or run this against the matching build.`
+}
+
 let rpcId = 0
 
 // Cache discovered port to avoid repeated execFileSync calls
@@ -346,7 +360,7 @@ export async function rpcCall<T = unknown>(
         // the close handler below -- which would otherwise reject the answer
         // this line already has.
         if (msg.error) {
-          reject(new Error(msg.error.message))
+          reject(new Error(explain(msg.error.message)))
         } else {
           resolve(msg.result as T)
         }
