@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from 'react'
 import { useAppStore } from '../../stores'
 import { Tooltip } from '../Tooltip'
 import type { ExtensionFooterItem, ExtensionFooterReading } from '../../../shared/types'
@@ -28,7 +36,8 @@ export function ExtensionStatusItems({ terminalId }: { terminalId: string }): Re
     [readings]
   )
 
-  const box = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLDivElement | null>(null)
+  const watch = useRef<ResizeObserver | null>(null)
   const [fit, setFit] = useState<Fit>(WIDEST)
   const [fitted, setFitted] = useState(ordered)
 
@@ -38,24 +47,32 @@ export function ExtensionStatusItems({ terminalId }: { terminalId: string }): Re
     setFit(WIDEST)
   }
 
-  // The bar is watched, not this box, which narrows as it gives things up.
-  useEffect(() => {
-    const bar = box.current?.parentElement
+  // Attached as the box appears rather than in an effect keyed on mount: a bar
+  // that had nothing to say has no box to watch, and would never grow one.
+  const attach = useCallback((el: HTMLDivElement | null) => {
+    box.current = el
+    watch.current?.disconnect()
+    watch.current = null
+    // The bar is watched, not this box, which narrows as it gives things up.
+    const bar = el?.parentElement
     if (!bar || typeof ResizeObserver === 'undefined') return
     let width = bar.clientWidth
-    const observer = new ResizeObserver(() => {
+    watch.current = new ResizeObserver(() => {
       if (bar.clientWidth === width) return
       width = bar.clientWidth
       setFit(WIDEST)
     })
-    observer.observe(bar)
-    return () => observer.disconnect()
+    watch.current.observe(bar)
   }, [])
 
-  // One step narrower per pass, so what is given up is the least that can be.
+  useEffect(() => () => watch.current?.disconnect(), [])
+
+  // One step narrower per pass, so what is given up is the least that can be. A
+  // bar of no width has not been laid out — a tab body on the frame it appears —
+  // and stepping down on that measurement would give everything up for nothing.
   useLayoutEffect(() => {
     const el = box.current
-    if (!el || el.scrollWidth <= el.clientWidth) return
+    if (!el || el.clientWidth === 0 || el.scrollWidth <= el.clientWidth) return
     setFit((current) => {
       if (!current.collapsed) return { collapsed: true, hidden: 0 }
       if (current.hidden < ordered.length) return { collapsed: true, hidden: current.hidden + 1 }
@@ -69,7 +86,7 @@ export function ExtensionStatusItems({ terminalId }: { terminalId: string }): Re
 
   return (
     <div
-      ref={box}
+      ref={attach}
       data-testid={`extension-items-${terminalId}`}
       className="flex items-center gap-2 min-w-0 overflow-hidden"
     >

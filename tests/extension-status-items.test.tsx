@@ -12,8 +12,16 @@ vi.hoisted(() => {
   })
 })
 
+// The tab body's own furniture, stubbed: this is about what the bar says in it.
+vi.mock('../src/renderer/components/TerminalPane', () => ({ TerminalPane: () => null }))
+vi.mock('../src/renderer/components/card/SessionComposer', () => ({ SessionComposer: () => null }))
+vi.mock('../src/renderer/components/PromptLauncher', () => ({ PromptLauncher: () => null }))
+vi.mock('../src/renderer/components/AppNavCluster', () => ({ AppNavCluster: () => null }))
+vi.mock('../src/renderer/components/GridContextMenu', () => ({ GridContextMenu: () => null }))
+
 import { useAppStore } from '../src/renderer/stores'
 import { CardStatusBar } from '../src/renderer/components/card/CardStatusBar'
+import { TabView } from '../src/renderer/components/TabView'
 import type { ExtensionFooterReading } from '../packages/shared/src/types'
 
 const reading = (over: Partial<ExtensionFooterReading> = {}): ExtensionFooterReading => ({
@@ -48,7 +56,12 @@ function seed(readings: ExtensionFooterReading[]): void {
         ]
       ]) as never,
       extensionFooters: new Map(readings.length > 0 ? [['t1', readings]] : []),
-      config: null
+      config: null,
+      // What the tab strip needs to show a tab for it, and to have it open.
+      terminalOrder: ['t1'],
+      visibleTerminalIds: ['t1'],
+      knownSessionIds: new Set(['t1']),
+      activeTabId: 't1'
     })
   })
 }
@@ -97,7 +110,10 @@ describe('what an extension says in the card status bar', () => {
       getGitBranch: () => Promise.resolve(null),
       detectIDEs: () => Promise.resolve([]),
       openInIDE: () => {},
-      openExternal
+      openExternal,
+      onWindowMaximizedChange: () => () => {},
+      isWindowMaximized: () => Promise.resolve(false),
+      listExtensions: () => Promise.resolve([])
     }
     openExternal.mockClear()
     restore = room(99)
@@ -230,5 +246,26 @@ describe('what an extension says in the card status bar', () => {
     const bars = document.querySelectorAll('.h-\\[22px\\]')
     expect(bars).toHaveLength(1)
     expect(bars[0]).toContainElement(screen.getByTestId('extension-items-t1'))
+  })
+
+  // A bar of no width has not been laid out yet, which is what the tab body
+  // gives on the frame it appears. Reading that as "no room" gave everything up
+  // and never took it back, so a session read in tabs said nothing at all.
+  it('gives nothing up for a bar that has not been laid out', () => {
+    restore?.()
+    restore = room(0)
+    seed([reading()])
+    render(<CardStatusBar terminalId="t1" />)
+
+    expect(screen.getByText('tests')).toBeInTheDocument()
+    expect(screen.getByText('345 passed')).toBeInTheDocument()
+  })
+
+  it('says the same thing in the tab body as on the card', () => {
+    seed([reading()])
+    render(<TabView />)
+
+    const items = screen.getByTestId('extension-items-t1')
+    expect(items).toHaveTextContent('tests345 passed')
   })
 })
