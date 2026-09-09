@@ -287,3 +287,59 @@ describe('the data directory handed to spawned processes', () => {
     expect(mod.getLaunchEnv().VORN_DATA_DIR).toBe('/tmp/some-other-vorn')
   })
 })
+
+describe('the login-shell environment', () => {
+  const originalEnv = process.env
+
+  beforeEach(() => {
+    vi.resetModules()
+    mockExecFile.mockReset()
+    process.env = { HOME: '/home/user', PATH: '/usr/bin', SHELL: '/bin/zsh' }
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+    vi.useRealTimers()
+  })
+
+  it('primes in the background and hands the answer to every later caller', async () => {
+    mockExecFile.mockImplementation((_bin, _args, _opts, cb) =>
+      cb(null, 'PATH=/opt/homebrew/bin:/usr/bin\nEDITOR=vim\n')
+    )
+    const mod = await import('../packages/server/src/process-utils')
+    await mod.primeShellEnv()
+    expect(mod.getSafeEnv().PATH).toBe('/opt/homebrew/bin:/usr/bin')
+    expect(mockExecFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers with its own environment while the shell is still being asked', async () => {
+    let finish: (() => void) | undefined
+    mockExecFile.mockImplementation((_bin, _args, _opts, cb) => {
+      finish = () => cb(null, 'PATH=/from/shell\n')
+    })
+    const mod = await import('../packages/server/src/process-utils')
+    const priming = mod.primeShellEnv()
+    expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+    finish?.()
+    await priming
+    expect(mod.getSafeEnv().PATH).toBe('/from/shell')
+  })
+
+  it('does not remember a shell that failed to answer', async () => {
+    vi.useFakeTimers()
+    const { execFileSync } = await import('node:child_process')
+    const sync = execFileSync as unknown as ReturnType<typeof vi.fn>
+    sync.mockImplementationOnce(() => {
+      throw new Error('ETIMEDOUT')
+    })
+    const mod = await import('../packages/server/src/process-utils')
+    expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+
+    sync.mockImplementationOnce(() => 'PATH=/late/but/right\n')
+    // Inside the retry window the failure still stands, without asking again.
+    expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+    vi.advanceTimersByTime(31_000)
+    expect(mod.getSafeEnv().PATH).toBe('/late/but/right')
+    expect(mod.getSafeEnv().PATH).toBe('/late/but/right')
+  })
+})

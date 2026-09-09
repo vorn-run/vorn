@@ -162,9 +162,9 @@ describe('checking each record against the tree', () => {
     head: () => 'cafe0000'
   }
 
-  it('records what it found beside the record', () => {
+  it('records what it found beside the record', async () => {
     seedRestored([session({ headCommit: 'cafe0000', branch: 'main' })], NOW)
-    verifyRestored(probe)
+    await verifyRestored(probe)
     expect(listRestored()[0].environment).toEqual({
       worktree: 'ok',
       branch: { recorded: 'main', actual: 'main' },
@@ -172,15 +172,15 @@ describe('checking each record against the tree', () => {
     })
   })
 
-  it('marks a worktree that is no longer there', () => {
+  it('marks a worktree that is no longer there', async () => {
     seedRestored([session({ worktreePath: '/gone' })], NOW)
-    verifyRestored(probe)
+    await verifyRestored(probe)
     expect(listRestored()[0].environment?.worktree).toBe('missing')
   })
 
-  it('does not let one record that throws take the launch down with it', () => {
+  it('does not let one record that throws take the launch down with it', async () => {
     seedRestored([session({ id: 'bad', projectPath: '/boom' }), session({ id: 'good' })], NOW)
-    verifyRestored({
+    await verifyRestored({
       ...probe,
       isDirectory: (at) => {
         if (at === '/boom') throw new Error('EACCES')

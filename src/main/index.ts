@@ -101,6 +101,7 @@ function createWindow(): void {
   })
 
   mainWindow.once('ready-to-show', () => {
+    log.info(`[window] ready to show ${Math.round(process.uptime() * 1000)}ms after launch`)
     mainWindow?.maximize()
     mainWindow?.show()
   })

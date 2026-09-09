@@ -57,7 +57,7 @@ import { ptyManager } from './pty-manager'
 import { configureHistory, flushHistory, checkpointAll } from './history/writer'
 import { recoverHistory } from './history/recovery'
 import { seedRestored, markRecovered, verifyRestored, consumeRestored } from './restored-sessions'
-import { getGitBranch, getGitHead } from './git-utils'
+import { getGitBranchAsync, getGitHeadAsync } from './git-utils'
 import { sessionManager } from './session-persistence'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
@@ -67,7 +67,7 @@ import { redeemCode, pollRequest, pendingRequests } from './pairing'
 import { getTailscaleStatus } from './tailscale'
 import { initRebind, checkAndRebind, getCurrentHost } from './server-rebind'
 import { isAllowedUpgrade, logRefusedUpgrade, setTrustedOriginHosts } from './ws-origin'
-import { setEnvPassthrough, setLaunchDataDir } from './process-utils'
+import { primeShellEnv, setEnvPassthrough, setLaunchDataDir } from './process-utils'
 import log from './logger'
 import { appFrameAncestors } from './extensions/frame-ancestors'
 
@@ -151,6 +151,9 @@ export async function startServer(
     adopted?: AdoptedPane[]
   } = {}
 ) {
+  const bootStarted = Date.now()
+  // First, so the shell runs while the database opens and the modules load.
+  const shellEnvReady = primeShellEnv()
   // Initialize database + config. This resolves the data directory for the whole
   // process; everything else reads it back with getDataDir() rather than
   // deriving it again, so nothing can disagree about where the files are.
@@ -404,6 +407,43 @@ export async function startServer(
 
   // Register all RPC methods
   registerAllMethods()
+
+  // Started here and awaited before the port file: history is read and the
+  // trees are checked while the socket comes up, so discovery waits on neither.
+  // After `registerAllMethods()`, so nothing here races the first debounced
+  // `saveSessions`. Adopted sessions belong in this list for both things it
+  // decides: their screens are rebuilt from the previous server's checkpoint,
+  // and a session absent from it has its history swept. Null sweeps nothing.
+  const recoverable =
+    carriedOver === null
+      ? null
+      : [
+          ...carriedOver,
+          ...adopted
+            .filter((pane) => !carriedOver.some((s) => s.id === pane.session.id))
+            .map((pane) => pane.session)
+        ]
+  if (carriedOver === null && adopted.length) {
+    log.warn(
+      '[handoff] the session list could not be read; adopted terminals start without scrollback'
+    )
+  }
+  const recovering = recoverHistory(dataDir, recoverable)
+  // The shell's PATH is worth a short wait for git; a slow shell is not worth the boot.
+  const verifying = Promise.race([shellEnvReady, new Promise((r) => setTimeout(r, 1000))]).then(
+    () =>
+      verifyRestored({
+        isDirectory: (at) => {
+          try {
+            return fs.statSync(at).isDirectory()
+          } catch {
+            return false
+          }
+        },
+        branch: getGitBranchAsync,
+        head: getGitHeadAsync
+      })
+  )
   // Connects the rung-none packs installed before installing meant connecting.
   reconcileImplicitConnections()
   scheduler.startInboxWorker()
@@ -595,45 +635,8 @@ export async function startServer(
 
   registerMethod('server:handoff', (params) => handOver(params, handoffHost))
 
-  // Only now, and for two reasons. It is after `registerAllMethods()`, so
-  // nothing here races the first debounced `saveSessions`. And it is after the
-  // endpoint claim, so a server that arrives second exits above rather than
-  // replaying every terminal on the machine and then standing down.
-  //
-  // It runs before the port file and the credential below, which closes the
-  // window the plan for this expected to have to live with: a client cannot find
-  // this server until both of those exist, so there is no moment where one can
-  // ask for history that has not been read yet. The cost is that discovery waits
-  // on it -- measured at 77ms for fifty terminals.
-  // Adopted sessions belong in this list for both things it decides: their screens
-  // are rebuilt from the previous server's checkpoint, and a session absent from it
-  // has its history swept. Null stays null, which sweeps nothing.
-  const recoverable =
-    carriedOver === null
-      ? null
-      : [
-          ...carriedOver,
-          ...adopted
-            .filter((pane) => !carriedOver.some((s) => s.id === pane.session.id))
-            .map((pane) => pane.session)
-        ]
-  if (carriedOver === null && adopted.length) {
-    log.warn(
-      '[handoff] the session list could not be read; adopted terminals start without scrollback'
-    )
-  }
-  markRecovered((await recoverHistory(dataDir, recoverable)).recovered)
-  verifyRestored({
-    isDirectory: (at) => {
-      try {
-        return fs.statSync(at).isDirectory()
-      } catch {
-        return false
-      }
-    },
-    branch: getGitBranch,
-    head: getGitHead
-  })
+  markRecovered((await recovering).recovered)
+  await verifying
 
   // After recovery, whose rebuilt screens `createScreen` would otherwise clear, and
   // before the port file, so no client can find this server and be told it is empty.
@@ -645,7 +648,7 @@ export async function startServer(
   publishLocalCredential(ownsPublished)
   writePortFile(dataDir, actualPort, ownsPublished)
 
-  log.info(`[server] listening on ${host}:${actualPort}`)
+  log.info(`[server] listening on ${host}:${actualPort} (ready in ${Date.now() - bootStarted}ms)`)
 
   // Graceful shutdown
   const { hookServer } = await import('./hook-server')

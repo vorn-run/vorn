@@ -113,15 +113,18 @@ export function markRecovered(
 }
 
 /** Check each record against the tree once, so Resume is offered knowingly. One that throws is left unchecked. */
-export function verifyRestored(probe: EnvironmentProbe): void {
-  for (const entry of held.values()) {
-    try {
-      const environment = probeEnvironment(entry.session, probe)
-      if (environment) entry.environment = environment
-    } catch (err) {
-      log.warn({ err, id: entry.session.id }, '[restored] could not verify a session')
-    }
-  }
+/** Every record at once: the git calls behind the probe are what a busy boot waits on. */
+export async function verifyRestored(probe: EnvironmentProbe): Promise<void> {
+  await Promise.all(
+    [...held.values()].map(async (entry) => {
+      try {
+        const environment = await probeEnvironment(entry.session, probe)
+        if (environment) entry.environment = environment
+      } catch (err) {
+        log.warn({ err, id: entry.session.id }, '[restored] could not verify a session')
+      }
+    })
+  )
 }
 
 /** What a client is offered. */

@@ -13,6 +13,7 @@ const { version } = JSON.parse(readFileSync('./package.json', 'utf-8'))
 const SHEBANG = '#!/usr/bin/env node'
 
 const NATIVE_MODULE_PATCH = `
+;try { require('module').enableCompileCache() } catch (e) {}
 // Patch module resolution for Electron's utilityProcess.
 //
 // utilityProcess doesn't have the main process's ASAR require() patching,

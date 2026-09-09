@@ -25,6 +25,8 @@ const published = {
   pidAlive: true,
   /** Whether the running server closes the socket after greeting us. */
   rejectsCredential: false,
+  /** Whether the name refuses the connection outright: a socket nobody holds. */
+  refused: false,
   /** Set once the fake spawned server has "published" its port file. */
   spawnedPid: null as number | null
 }
@@ -62,6 +64,12 @@ class FakeBridge extends EventEmitter {
   }
   connect(): void {
     setImmediate(() => {
+      if (published.refused) {
+        // Once: the server this launch then spawns must be reachable.
+        published.refused = false
+        this.emit('disconnected')
+        return
+      }
       // Mirrors the real ordering: the socket opens and `connected` fires first,
       // then frames arrive. So `isConnected` is already true when the greeting
       // lands, and cannot be used as proof the credential was accepted.
@@ -197,6 +205,7 @@ beforeEach(() => {
   published.protocolVersion = RUNTIME_PROTOCOL_VERSION
   published.pidAlive = true
   published.rejectsCredential = false
+  published.refused = false
   published.spawnedPid = null
   hostSettings.value = { mode: 'local', url: '', token: undefined }
 })
@@ -320,6 +329,23 @@ describe('declining a server that is running', () => {
     await launchServer()
 
     expect(spawned).toHaveLength(1)
+  })
+
+  it('gives up at once on a name that refuses the connection', async () => {
+    // The state after an update: the old server is gone and its socket with it.
+    // Waiting out the greeting deadline here is what made every update slow.
+    published.port = 50091
+    published.token = null
+    published.identity = null
+    published.protocolVersion = undefined as unknown as number
+    published.refused = true
+    const { launchServer } = await import('../src/main/server/server-launcher')
+
+    const started = Date.now()
+    await launchServer()
+
+    expect(spawned).toHaveLength(1)
+    expect(Date.now() - started).toBeLessThan(1000)
   })
 
   it('spawns when nothing is published at all', async () => {
