@@ -103,6 +103,20 @@ describe('a task that moved', () => {
     expect(executeWorkflow).not.toHaveBeenCalled()
   })
 
+  it('ignores a client that has not caught up with a status a step just set', () => {
+    // Every client posts the whole configuration; one holding an older copy
+    // would otherwise read as a move back, and start the workflows watching
+    // for that move.
+    state.config.workflows = [workflow({ triggerType: 'taskStatusChanged' })]
+
+    fireTaskTriggersForChange(
+      config([task({ status: 'in_progress', updatedAt: '2026-09-09T10:05:00Z' })]),
+      config([task({ status: 'todo', updatedAt: '2026-09-09T10:00:00Z' })])
+    )
+
+    expect(executeWorkflow).not.toHaveBeenCalled()
+  })
+
   it('leaves a disabled workflow alone', () => {
     const disabled = workflow({ triggerType: 'taskCreated' })
     disabled.enabled = false

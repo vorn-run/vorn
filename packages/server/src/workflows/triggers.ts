@@ -130,8 +130,12 @@ export function fireTaskTriggersForChange(before: AppConfig, after: AppConfig): 
       fireTaskCreatedTrigger(task)
       continue
     }
-    if (prior.status !== task.status) {
-      fireTaskStatusChangedTrigger(task, prior.status, task.status)
-    }
+    if (prior.status === task.status) continue
+    // Only a change that is newer than what is stored. Every client posts the
+    // whole configuration, so one that has not yet caught up with a status a
+    // step just set would otherwise read as a move back -- and start the
+    // workflows watching for that move.
+    if (task.updatedAt < prior.updatedAt) continue
+    fireTaskStatusChangedTrigger(task, prior.status, task.status)
   }
 }
