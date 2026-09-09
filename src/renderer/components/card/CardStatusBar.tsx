@@ -4,7 +4,7 @@ import { GitChangesIndicator } from '../GitChangesIndicator'
 import { OpenInButton } from '../OpenInButton'
 import { BranchChip } from './BranchChip'
 import { LastCommandChip } from './LastCommandChip'
-import { ExtensionFooterBand } from './ExtensionFooterBand'
+import { ExtensionStatusItems } from './ExtensionStatusItems'
 import { ListTodo } from 'lucide-react'
 
 interface Props {
@@ -29,47 +29,43 @@ export function CardStatusBar({ terminalId, dimmed }: Props) {
 
   const hasBranch = Boolean(terminal.session.branch)
 
-  // The extension bands ride with the bar rather than beside it: every frame
-  // that shows a status bar wants them, and each one naming them separately is
-  // how the device pane shipped drawing in two places out of four.
   return (
-    <>
-      <div
-        className={`shrink-0 flex items-center gap-2 px-2 h-[22px] border-t border-white/[0.04] text-[11px]
-                  transition-opacity duration-200 ease-out
-                  ${dimmed ? 'opacity-60 group-hover/card:opacity-100' : 'opacity-100'}`}
-        style={{ background: 'var(--color-surface-raised)' }}
-      >
-        {hasBranch && <BranchChip terminalId={terminalId} />}
+    <div
+      className={`shrink-0 flex items-center gap-2 px-2 h-[22px] border-t border-white/[0.04] text-[11px]
+                transition-opacity duration-200 ease-out
+                ${dimmed ? 'opacity-60 group-hover/card:opacity-100' : 'opacity-100'}`}
+      style={{ background: 'var(--color-surface-raised)' }}
+    >
+      {hasBranch && <BranchChip terminalId={terminalId} />}
 
-        {assignedTask && (
-          <button
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
-              setEditingTask(assignedTask)
-              setTaskDialogOpen(true)
-            }}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-white/[0.08]
-                     hover:bg-white/[0.06] transition-colors shrink-0"
-          >
-            <ListTodo size={10} className="text-ink-faint shrink-0" strokeWidth={2} />
-            <span className="text-[10px] text-ink-secondary truncate max-w-[140px]">
-              {assignedTask.title}
-            </span>
-          </button>
-        )}
+      {assignedTask && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            setEditingTask(assignedTask)
+            setTaskDialogOpen(true)
+          }}
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-white/[0.08]
+                   hover:bg-white/[0.06] transition-colors shrink-0"
+        >
+          <ListTodo size={10} className="text-ink-faint shrink-0" strokeWidth={2} />
+          <span className="text-[10px] text-ink-secondary truncate max-w-[140px]">
+            {assignedTask.title}
+          </span>
+        </button>
+      )}
 
-        <LastCommandChip terminalId={terminalId} />
+      <LastCommandChip terminalId={terminalId} />
 
-        <div className="flex-1" />
+      {/* Between the card's own facts and the space that pushes git to the end. */}
+      <ExtensionStatusItems terminalId={terminalId} />
 
-        <GitChangesIndicator terminalId={terminalId} />
-        <OpenInButton projectPath={terminal.session.projectPath} direction="up" />
-      </div>
+      <div className="flex-1" />
 
-      <ExtensionFooterBand terminalId={terminalId} dimmed={dimmed} />
-    </>
+      <GitChangesIndicator terminalId={terminalId} />
+      <OpenInButton projectPath={terminal.session.projectPath} direction="up" />
+    </div>
   )
 }
