@@ -3,7 +3,11 @@ import type {
   ConnectorCatalogActionInput,
   ConnectorCatalogItem,
   ConnectorCatalogVerification,
+  ConnectorKind,
   ConnectorPackSummary,
+  ExtensionActivation,
+  ExtensionContributions,
+  ExtensionPermission,
   InstalledConnectorPack,
   McpServerCatalogEntry,
   SdkConnectorIcon,
@@ -28,6 +32,8 @@ export interface ConnectorListing {
   description?: string
   capabilities: string[]
   category: string
+  /** Whether this polls a service or contributes to a card. A built-in is always a connector. */
+  kind: ConnectorKind
   /** `installed` is a pack the catalog does not carry; it brings its own manifest. */
   source: 'builtin' | 'catalog' | 'installed' | 'mcp'
   /** Set for an MCP server, which is a launch line rather than a package. */
@@ -47,6 +53,24 @@ export interface ConnectorListing {
   verified?: ConnectorCatalogVerification
   // Connected without anyone being asked to connect it — a connector that signs in with nothing is ready the moment it.
   implicitlyConnected?: boolean
+  /** What an extension adds to a card, what it may touch, and where it shows. */
+  contributes?: ExtensionContributions
+  permissions?: ExtensionPermission[]
+  activates?: ExtensionActivation
+}
+
+/**
+ * What a row is, deciding between the pack on disk and the catalog's claim.
+ *
+ * The installed files answer for themselves, the same precedence the sign-in
+ * rung already follows: a catalog published before a pack changed kind would
+ * otherwise describe something that is no longer what it says.
+ */
+export function kindOf(listing: {
+  pack?: InstalledConnectorPack
+  catalogItem?: { kind?: ConnectorKind }
+}): ConnectorKind {
+  return listing.pack?.kind ?? listing.catalogItem?.kind ?? 'connector'
 }
 
 // Whether a checked pack is the one the row already described, down to the version, the sign-in and the receipt.
@@ -135,8 +159,11 @@ export function listingDetails(
   if (listing.source === 'catalog') {
     const entry = listing.catalogItem
     // An entry from a catalog published before these fields existed says
-    // nothing rather than saying "no triggers", which would be a lie.
-    if (!entry?.triggers && !entry?.actions) return EMPTY_DETAILS
+    // nothing rather than saying "no triggers", which would be a lie. An
+    // extension states what it adds instead, and having said it is known.
+    if (!entry?.triggers && !entry?.actions) {
+      return listing.contributes ? { ...EMPTY_DETAILS, known: true } : EMPTY_DETAILS
+    }
     return {
       triggers: entry.triggers ?? [],
       actions: entry.actions ?? [],
@@ -210,6 +237,7 @@ export function buildConnectorListings(
       name: c.name,
       capabilities: c.capabilities,
       category: 'Built in',
+      kind: 'connector' as const,
       source: 'builtin' as const,
       keywords: [],
       connectedCount: countFor(c.id),
@@ -220,10 +248,14 @@ export function buildConnectorListings(
       // The installed files answer for themselves; the catalog only says what
       // installing would ask for, which a newer pack on disk may have changed.
       const rung = pack?.auth?.rung ?? entry.authRung
+      const contributes = pack?.contributes ?? entry.contributes
+      const permissions = pack?.permissions ?? entry.permissions
+      const activates = pack?.activates ?? entry.activates
       return {
         ...entry,
         key: `catalog:${entry.id}`,
         category: entry.category ?? UNCATEGORIZED,
+        kind: kindOf({ ...(pack && { pack }), catalogItem: entry }),
         source: 'catalog' as const,
         keywords: entry.keywords ?? [],
         connectedCount: countFor(entry.id),
@@ -231,6 +263,9 @@ export function buildConnectorListings(
         catalogItem: entry,
         ...(rung !== undefined && { authRung: rung }),
         ...(entry.verified !== undefined && { verified: entry.verified }),
+        ...(contributes !== undefined && { contributes }),
+        ...(permissions !== undefined && { permissions }),
+        ...(activates !== undefined && { activates }),
         ...(pack && { pack })
       }
     }),
@@ -250,12 +285,16 @@ export function buildConnectorListings(
         ...(pack.description !== undefined && { description: pack.description }),
         capabilities: packCapabilities(pack),
         category: 'Installed',
+        kind: kindOf({ pack }),
         source: 'installed' as const,
         keywords: [],
         connectedCount: countFor(pack.id),
         implicitlyConnected: implicitFor(pack.id),
         ...(pack.auth?.rung !== undefined && { authRung: pack.auth.rung }),
         ...(pack.icon !== undefined && { icon: pack.icon }),
+        ...(pack.contributes !== undefined && { contributes: pack.contributes }),
+        ...(pack.permissions !== undefined && { permissions: pack.permissions }),
+        ...(pack.activates !== undefined && { activates: pack.activates }),
         pack
       })),
     // A server Vorn starts and speaks MCP to. Its connections are `mcp` rows
@@ -267,6 +306,7 @@ export function buildConnectorListings(
       ...(server.description !== undefined && { description: server.description }),
       capabilities: ['actions'],
       category: server.category ?? 'MCP servers',
+      kind: 'connector' as const,
       source: 'mcp' as const,
       keywords: server.keywords ?? [],
       connectedCount: countFor(server.id),
@@ -374,12 +414,19 @@ export function filterConnectorListings(
   if (terms.length === 0) return listings
 
   return listings.filter((listing) => {
+    const contributes = listing.contributes
     const haystack = [
       listing.name,
       listing.description ?? '',
       listing.category,
       ...listing.capabilities,
-      ...listing.keywords
+      ...listing.keywords,
+      // An extension is worth finding by what it adds, the way a connector is by what it triggers on.
+      ...[
+        ...(contributes?.panes ?? []),
+        ...(contributes?.footers ?? []),
+        ...(contributes?.linkHandlers ?? [])
+      ].map((contribution) => contribution.title)
     ]
       .join(' ')
       .toLowerCase()
@@ -437,6 +484,27 @@ export const AUTH_RUNG: Record<
 export function connectorAuthRungs(listings: ConnectorListing[]): ConnectorAuthRung[] {
   const order: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
   return order.filter((rung) => listings.some((listing) => listing.authRung === rung))
+}
+
+/** What a kind is called where a person picks one. */
+export const CONNECTOR_KIND: Record<ConnectorKind, { label: string; badge: string }> = {
+  connector: { label: 'Connectors', badge: 'connector' },
+  extension: { label: 'Extensions', badge: 'extension' }
+}
+
+/** The kinds actually present, so the filter never offers an empty answer. */
+export function connectorKinds(listings: ConnectorListing[]): ConnectorKind[] {
+  const order: ConnectorKind[] = ['connector', 'extension']
+  return order.filter((kind) => listings.some((listing) => listing.kind === kind))
+}
+
+/** Narrow to what polls a service, or to what shows on a card. */
+export function filterByKind(
+  listings: ConnectorListing[],
+  kind: ConnectorKind | undefined
+): ConnectorListing[] {
+  if (!kind) return listings
+  return listings.filter((listing) => listing.kind === kind)
 }
 
 /** Narrow to the connectors that sign in a particular way. */

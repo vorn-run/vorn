@@ -122,6 +122,7 @@ describe('what a requirement can do about itself', () => {
     name: 'Slack',
     capabilities: ['actions'],
     category: 'Chat',
+    kind: 'connector',
     source: 'catalog',
     keywords: [],
     connectedCount: 0,

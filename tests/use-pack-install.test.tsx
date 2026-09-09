@@ -15,6 +15,7 @@ const LISTING: ConnectorListing = {
   name: 'Slack',
   capabilities: ['actions'],
   category: 'Chat',
+  kind: 'connector',
   source: 'catalog',
   keywords: [],
   connectedCount: 0,
