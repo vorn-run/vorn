@@ -11,6 +11,7 @@ import {
 import { releaseFromPanels, saveTerminalPanels } from './ui-slice'
 import { clearDirty } from '../lib/editor-dirty'
 import { forgetExtensionHydration, hydrateExtensions } from '../lib/extension-hydration'
+import { destroyTerminal } from '../lib/terminal-registry'
 
 export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set, get) => ({
   terminals: new Map(),
@@ -126,8 +127,12 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       // The host releases an extension's grants when the session ends, so this
       // is only the viewer -- but a pane left behind would frame a page whose
       // nonce is already gone, and its footers would keep reading out the last
-      // thing a dead branch said.
+      // thing a dead branch said. A program pane's terminal is this window's to
+      // destroy: left registered it holds an xterm and a GPU context for a
+      // session nobody can reach.
       const extensionPanes = new Map(state.extensionPanes)
+      const showing = extensionPanes.get(id)
+      if (showing?.open.terminalId) destroyTerminal(showing.open.terminalId)
       extensionPanes.delete(id)
       const extensionFooters = new Map(state.extensionFooters)
       extensionFooters.delete(id)

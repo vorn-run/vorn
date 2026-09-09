@@ -15,6 +15,7 @@ import type { InstalledConnectorPack, SourceConnection } from '../../../shared/t
 import { SdkConnectorForm } from './SdkConnectorForm'
 import { PackInstallConfirm } from './PackInstallConfirm'
 import { AddConnectionForm, MCP_CONNECTOR_ID, type ConnectorInfo } from './AddConnectionForm'
+import { refreshExtensions } from '../../lib/use-extensions'
 
 export function ConnectorSettings() {
   const workflows = useAppStore((s) => s.config?.workflows ?? [])
@@ -112,6 +113,8 @@ export function ConnectorSettings() {
     async (id: string) => {
       await activity.run('remove', id, async () => {
         const result = await window.api.removeConnectorPack(id)
+        // What a card offers is read from this list, and one of them just left it.
+        if (result.ok) void refreshExtensions()
         // Said after the fact rather than asked before it: the count is what the
         // server counted, and a connection left without files is worth naming.
         if (result.ok && (result.connections ?? 0) > 0) {

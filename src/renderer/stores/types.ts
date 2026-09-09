@@ -627,6 +627,16 @@ export interface UISlice {
   closeExtensionPane: (sessionId: string) => void
   /** Open it, or close it when this contribution is the one already showing. */
   toggleExtensionPane: (sessionId: string, extensionId: string, paneId: string) => Promise<void>
+  /**
+   * Close the pane a program terminal belongs to, saying whether one did.
+   *
+   * A program pane's terminal is no session, so the exit that ends it reaches
+   * none of what ends a card; without this the pane stays, framing a dead
+   * process, and the grant behind it is already gone.
+   */
+  closeExtensionPaneForTerminal: (terminalId: string) => boolean
+  /** Let every open pane go, for a server that can no longer honour their grants. */
+  dropExtensionPanes: () => void
   setExtensionFooters: (sessionId: string, readings: ExtensionFooterReading[]) => void
   setExtensionActivation: (sessionId: string, states: ExtensionActivationState[]) => void
   /**

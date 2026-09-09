@@ -5,6 +5,7 @@ import type {
   ConnectorPackSummary
 } from '../../shared/types'
 import { matchesListing, type ConnectorListing } from './connector-browse'
+import { refreshExtensions } from './use-extensions'
 
 /**
  * Installing a pack: inspect first, show what it is, keep it only on confirm.
@@ -102,6 +103,8 @@ export function usePackInstall(onInstalled?: () => void | Promise<void>): PackIn
         if (result.ok) {
           // Still installing to the row until the reload shows the pack; the server's last word came too early.
           setProgress((current) => ({ ...current, [id]: { id, phase: 'installing' } }))
+          // What a card offers is read from this list; a new extension is on it.
+          void refreshExtensions()
           installed = true
         } else {
           setProgress((current) => ({

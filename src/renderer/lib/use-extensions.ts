@@ -13,20 +13,16 @@ const EMPTY: InstalledConnectorPack[] = []
 
 let cache: InstalledConnectorPack[] | undefined
 let inFlight: Promise<InstalledConnectorPack[]> | undefined
-const listeners = new Set<(packs: InstalledConnectorPack[]) => void>()
-
-function publish(packs: InstalledConnectorPack[]): InstalledConnectorPack[] {
-  cache = packs
-  for (const listener of listeners) listener(packs)
-  return packs
-}
 
 // Asked once. A failure is not kept, so the next reader asks again.
 async function load(): Promise<InstalledConnectorPack[]> {
   if (cache) return cache
   if (inFlight) return inFlight
   inFlight = Promise.resolve(window.api?.listExtensions?.())
-    .then((packs) => (packs ? publish(packs) : (cache ?? EMPTY)))
+    .then((packs) => {
+      if (packs) cache = packs
+      return cache ?? EMPTY
+    })
     .catch(() => EMPTY)
     .finally(() => {
       inFlight = undefined
@@ -34,22 +30,19 @@ async function load(): Promise<InstalledConnectorPack[]> {
   return inFlight
 }
 
-/** `enabled` is how a closed menu says nobody is looking yet. */
-export function useExtensions(enabled: boolean = true): InstalledConnectorPack[] {
+/** Read on mount, which for the menu is every time it opens. */
+export function useExtensions(): InstalledConnectorPack[] {
   const [packs, setPacks] = useState<InstalledConnectorPack[]>(() => cache ?? EMPTY)
 
   useEffect(() => {
-    if (!enabled) return
     let live = true
-    listeners.add(setPacks)
     void load().then((next) => {
       if (live) setPacks(next)
     })
     return () => {
       live = false
-      listeners.delete(setPacks)
     }
-  }, [enabled])
+  }, [])
 
   return packs
 }
@@ -91,5 +84,4 @@ export async function paneLabel(
 export function __resetExtensionsCacheForTests(): void {
   cache = undefined
   inFlight = undefined
-  listeners.clear()
 }

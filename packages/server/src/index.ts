@@ -60,6 +60,7 @@ import { initRebind, checkAndRebind, getCurrentHost } from './server-rebind'
 import { isAllowedUpgrade, logRefusedUpgrade, setTrustedOriginHosts } from './ws-origin'
 import { setEnvPassthrough, setLaunchDataDir } from './process-utils'
 import log from './logger'
+import { appFrameAncestors } from './extensions/frame-ancestors'
 
 /**
  * Names, beyond IP literals and `localhost`, that the web client may legitimately
@@ -100,21 +101,6 @@ function resolveIdleWindowMs(): number {
   const raw = process.env.VORN_IDLE_TIMEOUT_MS
   const parsed = raw ? Number(raw) : NaN
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_IDLE_WINDOW_MS
-}
-
-/**
- * Origins the app that spawned this server draws its windows from.
- *
- * A desktop window is not served by this server — it is a `file:` page, or a
- * dev server's — so it cannot be inferred from a port the way the web client's
- * origin is. Only the launcher knows, and it says so here; a server started
- * from the CLI has no such window and names none.
- */
-function resolveAppFrameAncestors(): string[] {
-  return (process.env.VORN_APP_ORIGINS ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean)
 }
 
 /**
@@ -492,7 +478,7 @@ export async function startServer(
   const appOrigins = [`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`]
   extensionFrameAncestors = [
     ...appOrigins,
-    ...resolveAppFrameAncestors(),
+    ...appFrameAncestors(process.env.VORN_APP_ORIGINS),
     ...(options.extensionFrameAncestors ?? [])
   ]
   try {

@@ -251,6 +251,9 @@ export function App() {
       // dying is stopped whether or not the app happened to be open at the time,
       // so one setting decides both.
       const reopen = useAppStore.getState().config?.defaults.reopenSessions ?? true
+      // An extension pane is a grant of the server that minted it, and this is
+      // not that server. Held on to, it frames a page whose nonce nobody has.
+      useAppStore.getState().dropExtensionPanes()
       void syncBoard({ showCold: true, resume: reopen })
     })
 
@@ -316,6 +319,10 @@ export function App() {
         }
         return
       }
+
+      // A program pane's own terminal is no session and reaches none of the rest
+      // of this: the host has dropped its grant, so the pane goes with it.
+      if (state.closeExtensionPaneForTerminal(id)) return
 
       const terminal = state.terminals.get(id)
       if (!terminal) return

@@ -40,6 +40,8 @@ import { pruneIntentDrafts } from '../lib/intent-drafts'
 import { confirmDiscard, confirmDiscardAll, clearDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 import { paneLabel } from '../lib/use-extensions'
+import { destroyTerminal } from '../lib/terminal-registry'
+import { toast } from '../components/Toast'
 
 const EMPTY_SESSIONS: TerminalSession[] = []
 const WORKTREE_CACHE_TTL = 5_000
@@ -717,6 +719,37 @@ export function releaseFromPanels(
  * Every field is only written when it actually changes, so a close that touches
  * nothing returns nothing.
  */
+/** The same, for panes going at once: each reads what the ones before it cleared. */
+function clearPlacementAll(
+  state: Parameters<typeof clearPlacement>[0],
+  paneIds: string[]
+): Partial<AppStore> {
+  let cleared: Partial<AppStore> = {}
+  for (const paneId of paneIds)
+    cleared = { ...cleared, ...clearPlacement({ ...state, ...cleared }, paneId) }
+  return cleared
+}
+
+/**
+ * Everything an open pane holds outside the store.
+ *
+ * The grant goes back fire-and-forget, as a device claim does: one the host
+ * refuses to drop must not trap the pane open, and it releases the lot on
+ * session teardown regardless. A program pane's terminal is this window's to
+ * destroy -- left registered it keeps an xterm and a GPU context alive, and
+ * every frame goes on measuring it.
+ */
+function releaseExtensionPane(pane: ExtensionPaneState, opts?: { release?: boolean }): void {
+  if (opts?.release !== false) {
+    try {
+      void window.api.closeExtensionPane?.(pane.open.nonce)?.catch(() => {})
+    } catch {
+      // A release that throws synchronously still must not hold the pane.
+    }
+  }
+  if (pane.open.terminalId) destroyTerminal(pane.open.terminalId)
+}
+
 function clearPlacement(
   state: Pick<
     AppStore,
@@ -1365,7 +1398,15 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   openExtensionPane: async (sessionId, extensionId, paneId) => {
     // Asked for before anything is committed: the grant is the pane, and a
     // frame put up first would point at a URL nobody has authorised yet.
-    const open = await window.api.openExtensionPane?.(extensionId, paneId, sessionId)
+    let open: Awaited<ReturnType<NonNullable<typeof window.api.openExtensionPane>>> | undefined
+    try {
+      open = await window.api.openExtensionPane?.(extensionId, paneId, sessionId)
+    } catch (err) {
+      // The host refuses in sentences -- no such pane, no page server -- and a
+      // menu row that did nothing at all is the one thing it must not look like.
+      toast(err instanceof Error ? err.message : 'The pane could not be opened', 'error')
+      return
+    }
     if (!open) return
     const label = await paneLabel(extensionId, paneId)
     // A card holds one, so whatever was showing hands its grant back. Read after
@@ -1378,25 +1419,19 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     })
   },
 
-  closeExtensionPane: (sessionId) =>
+  closeExtensionPane: (sessionId) => {
+    const showing = get().extensionPanes.get(sessionId)
+    if (!showing) return
+    releaseExtensionPane(showing)
     set((state) => {
-      const showing = state.extensionPanes.get(sessionId)
-      if (!showing) return {}
-      // Fire-and-forget, as the device release is: a grant the host refuses to
-      // drop must not trap the pane open, and it releases on session teardown
-      // regardless.
-      try {
-        void window.api.closeExtensionPane?.(showing.open.nonce)?.catch(() => {})
-      } catch {
-        // A release that throws synchronously still must not hold the pane.
-      }
       const next = new Map(state.extensionPanes)
       next.delete(sessionId)
       return {
         extensionPanes: next,
         ...clearPlacement(state, extensionPaneId(sessionId))
       }
-    }),
+    })
+  },
 
   toggleExtensionPane: async (sessionId, extensionId, paneId) => {
     const showing = get().extensionPanes.get(sessionId)?.open
@@ -1419,14 +1454,42 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       return { extensionFooters: next }
     }),
 
-  setExtensionActivation: (sessionId, states) =>
+  setExtensionActivation: (sessionId, states) => {
+    // An extension that no longer shows here has had its grants dropped by the
+    // host already; the frame left behind would point at a nonce that is gone.
+    const showing = get().extensionPanes.get(sessionId)
+    if (
+      showing &&
+      !states.some((one) => one.active && one.extensionId === showing.open.extensionId)
+    )
+      get().closeExtensionPane(sessionId)
     set((state) => {
       if (states.length === 0 && !state.extensionActivation.has(sessionId)) return {}
       const next = new Map(state.extensionActivation)
       if (states.length === 0) next.delete(sessionId)
       else next.set(sessionId, states)
       return { extensionActivation: next }
-    }),
+    })
+  },
+
+  closeExtensionPaneForTerminal: (terminalId) => {
+    const owner = [...get().extensionPanes].find(
+      ([, pane]) => pane.open.terminalId === terminalId
+    )?.[0]
+    if (owner === undefined) return false
+    get().closeExtensionPane(owner)
+    return true
+  },
+
+  dropExtensionPanes: () => {
+    const showing = get().extensionPanes
+    if (showing.size === 0) return
+    // Every grant this window held died with the server that minted it, so there
+    // is nothing to hand back -- only this window's own terminals to let go of.
+    for (const pane of showing.values()) releaseExtensionPane(pane, { release: false })
+    const paneIds = [...showing.keys()].map(extensionPaneId)
+    set((state) => ({ extensionPanes: new Map(), ...clearPlacementAll(state, paneIds) }))
+  },
 
   openTerminalsPane: (sessionId, terminalId) =>
     set((state) => {
