@@ -1,0 +1,10 @@
+{
+  "name": "vorn-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "images": "node scripts/optimize-images.mjs",
+    "loops": "node scripts/encode-loops.mjs",
+    "stamp": "node scripts/stamp.mjs"
+  }
+}

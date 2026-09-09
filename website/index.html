@@ -6,31 +6,50 @@
     <title>Vorn. The Agent Command Center.</title>
     <meta
       name="description"
-      content="Vorn is an agentic IDE and agent command center. Orchestrate Claude Code, GitHub Copilot, OpenAI Codex, OpenCode, and Gemini CLI in one desktop app. Multi-agent grid, task queue, workflow automation, headless execution. Free and open source."
+      content="Vorn runs your coding agents and keeps them running: quit the app and the session survives. Workflows on a canvas, connectors that borrow the login you already have."
     />
     <meta property="og:title" content="Vorn. The Agent Command Center." />
     <meta
       property="og:description"
-      content="The agent command center for AI coding. Run Claude, Copilot, Codex, OpenCode, and Gemini from one desktop app. Interactive or autonomous, everything local."
+      content="Quit the app and the agent keeps working. A desktop command center for Claude, Copilot, Codex, OpenCode and Gemini, with workflows, connectors and a phone that pairs."
     />
-    <meta property="og:image" content="assets/hero.png" />
+    <meta property="og:image" content="https://vorn.run/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Vorn. The agent command center." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Vorn. The Agent Command Center." />
     <meta
       name="twitter:description"
-      content="Orchestrate every AI coding agent from one desktop app. Free and open source."
+      content="Quit the app and the agent keeps working. Workflows on a canvas, connectors as offline packs, a phone that pairs to any session."
     />
-    <meta name="twitter:image" content="assets/hero.png" />
+    <meta name="twitter:image" content="https://vorn.run/assets/og.png" />
     <meta
       name="keywords"
-      content="agentic IDE, agent command center, AI coding agents, vibe coding, vibecoding, Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, OpenCode, multi-agent, workflow automation, terminal manager, developer tools, AI pair programming, autonomous coding, headless agents, open source"
+      content="agentic IDE, agent command center, AI coding agents, durable agent sessions, detached terminal sessions, Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, OpenCode, multi-agent, workflow automation, webhook triggers, connectors, MCP server, browser pane, iOS simulator, terminal manager, developer tools, headless agents, open source"
     />
     <meta name="author" content="Javier Canizalez" />
     <meta name="robots" content="index, follow" />
     <meta property="og:site_name" content="Vorn" />
-    <meta property="og:url" content="https://vorn.dev" />
+    <meta property="og:url" content="https://vorn.run/" />
+    <link rel="canonical" href="https://vorn.run/" />
     <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Vorn",
+        "url": "https://vorn.run/",
+        "description": "The agent command center: run Claude Code, GitHub Copilot, OpenAI Codex, OpenCode and Gemini CLI from one desktop app, interactively or autonomously, everything local.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Windows, Linux",
+        "downloadUrl": "https://github.com/vorn-run/vorn/releases",
+        "license": "https://opensource.org/license/mit",
+        "author": { "@type": "Person", "name": "Javier Canizalez" },
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -105,6 +124,26 @@
       }
       ul {
         list-style: none;
+      }
+
+      /* ═══════ SKIP LINK ═══════ */
+
+      .skip-link {
+        position: absolute;
+        left: 16px;
+        top: -60px;
+        z-index: 300;
+        padding: 10px 16px;
+        background: var(--parchment);
+        color: var(--museum-black);
+        font-family: var(--mono);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        border-radius: 2px;
+      }
+      .skip-link:focus {
+        top: 16px;
       }
 
       /* ═══════ ATMOSPHERIC OVERLAYS ═══════ */
@@ -209,7 +248,7 @@
         left: 0;
         right: 0;
         z-index: 200;
-        padding: 24px 0;
+        padding: 7px 0;
         transition:
           background 0.5s ease,
           border-color 0.5s ease,
@@ -222,7 +261,7 @@
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border-bottom-color: var(--border);
-        padding: 16px 0;
+        padding: 5px 0;
       }
 
       .nav-inner {
@@ -242,7 +281,7 @@
 
       .nav-logo span {
         font-family: var(--display);
-        font-size: 28px;
+        font-size: 20px;
         font-weight: 400;
         letter-spacing: 0.15em;
         text-transform: lowercase;
@@ -252,12 +291,12 @@
       .nav-links {
         display: flex;
         align-items: center;
-        gap: 40px;
+        gap: 26px;
       }
 
       .nav-links a {
         font-family: var(--display);
-        font-size: 18px;
+        font-size: 15px;
         font-weight: 500;
         letter-spacing: 0.08em;
         color: rgba(237, 229, 204, 0.5);
@@ -465,6 +504,9 @@
       .hero-screenshot img {
         position: relative;
         width: 100%;
+        /* Without this the height attribute sets the box and the frame
+           letterboxes inside it, banding the hero with dead space. */
+        height: auto;
         display: block;
         z-index: 1;
         border-radius: 10px;
@@ -744,17 +786,17 @@
 
       .study {
         display: grid;
-        grid-template-columns: 3fr 1fr;
-        gap: clamp(32px, 4vw, 48px);
+        grid-template-columns: 2.4fr 1fr;
+        gap: clamp(32px, 4vw, 56px);
         align-items: center;
-        margin-bottom: clamp(80px, 10vw, 130px);
+        margin-bottom: clamp(72px, 9vw, 120px);
       }
 
       .study:last-child {
         margin-bottom: 0;
       }
 
-      /* Default: image first (left), text second (right) */
+      /* Default: picture first (left), words second (right) */
       .study .study-media {
         order: 1;
       }
@@ -762,9 +804,8 @@
         order: 2;
       }
 
-      /* Reverse: text first (left), image second (right) */
       .study.reverse {
-        grid-template-columns: 1fr 3fr;
+        grid-template-columns: 1fr 2.4fr;
       }
       .study.reverse .study-text {
         order: 1;
@@ -804,69 +845,78 @@
       }
 
       .study-text p {
-        font-size: clamp(17px, 1.8vw, 20px);
+        font-size: clamp(16px, 1.7vw, 18px);
         color: rgba(237, 229, 204, 0.72);
-        line-height: 1.85;
-      }
-
-      .study-media {
-        position: relative;
-      }
-
-      .study-media img {
-        display: block;
-        width: 100%;
-        transition: transform 0.6s var(--ease);
+        line-height: 1.8;
       }
 
       .study-frame {
         position: relative;
         overflow: hidden;
-        border-radius: 10px;
+        border-radius: 6px;
+        border: 0.5px solid var(--border);
+        background: var(--obsidian);
+        transform-style: preserve-3d;
         transition: transform 0.5s var(--ease);
-        border: none;
-        outline: none;
       }
 
-      .study-frame .js-tilt-glare {
-        border: none !important;
-        outline: none !important;
-        border-radius: 0 !important;
+      .study-frame img {
+        display: block;
+        width: 100%;
+        height: auto;
       }
 
-      .study-frame .js-tilt-glare-inner {
-        border: none !important;
-        outline: none !important;
-        border-radius: 0 !important;
-      }
-
-      .study-fig {
-        font-family: var(--serif);
-        font-size: 14px;
-        font-style: italic;
-        color: rgba(237, 229, 204, 0.45);
-        margin-top: 16px;
-        text-align: center;
-        letter-spacing: 0.04em;
-      }
-
-      @media (max-width: 768px) {
+      @media (max-width: 900px) {
         .study,
         .study.reverse {
           grid-template-columns: 1fr;
-          gap: 28px;
+          gap: 26px;
+          margin-bottom: 64px;
         }
         .study .study-media,
         .study.reverse .study-media {
           order: 1;
-          width: 100%;
         }
         .study .study-text,
         .study.reverse .study-text {
           order: 2;
         }
-        .study-frame {
-          width: 100%;
+      }
+
+      /* A row of phones that becomes a swipe when the row runs out of width. */
+      .phones {
+        display: flex;
+        gap: 14px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        padding-bottom: 6px;
+        scrollbar-width: none;
+      }
+
+      .phones::-webkit-scrollbar {
+        display: none;
+      }
+
+      .phone {
+        flex: 0 0 auto;
+        width: 210px;
+        margin: 0;
+        scroll-snap-align: start;
+        border-radius: 14px;
+        overflow: hidden;
+        border: 0.5px solid var(--border);
+        background: var(--obsidian);
+      }
+
+      .phone img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      @media (max-width: 900px) {
+        .phone {
+          width: 168px;
         }
       }
 
@@ -945,61 +995,41 @@
         }
       }
 
-      /* ═══════ SECONDARY FEATURES ═══════ */
+      /* ═══════ THE INDEX — EVERYTHING ELSE ═══════ */
 
-      .secondary-grid {
+      .index-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 0.5px;
-        background: var(--border);
-        border: 0.5px solid var(--border);
+        column-gap: clamp(28px, 4vw, 56px);
       }
 
-      .secondary-card {
-        background: var(--obsidian);
-        padding: 32px;
-        transition: background 0.4s ease;
+      .index-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 15px 0;
+        border-bottom: 0.5px solid var(--border);
       }
 
-      .secondary-card:hover {
-        background: #0d0c09;
-      }
-
-      .secondary-icon {
-        width: 22px;
-        height: 22px;
-        margin-bottom: 18px;
-        color: rgba(201, 151, 42, 0.4);
-      }
-
-      .secondary-icon svg {
-        width: 100%;
-        height: 100%;
-      }
-
-      .secondary-card h4 {
-        font-family: var(--display);
+      .index-name {
         font-size: 18px;
-        font-weight: 400;
-        color: var(--parchment);
-        margin-bottom: 8px;
-        letter-spacing: 0.02em;
+        color: rgba(237, 229, 204, 0.82);
       }
 
-      .secondary-card p {
-        font-size: 16px;
-        color: rgba(237, 229, 204, 0.68);
-        line-height: 1.75;
+      .index-note {
+        font-size: 15.5px;
+        line-height: 1.6;
+        color: rgba(237, 229, 204, 0.42);
       }
 
-      @media (max-width: 768px) {
-        .secondary-grid {
+      @media (max-width: 860px) {
+        .index-grid {
           grid-template-columns: 1fr 1fr;
         }
       }
 
-      @media (max-width: 500px) {
-        .secondary-grid {
+      @media (max-width: 560px) {
+        .index-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -1527,6 +1557,7 @@
     </style>
   </head>
   <body>
+    <a href="#main" class="skip-link">Skip to content</a>
     <!-- ═══════ ATMOSPHERIC OVERLAYS ═══════ -->
     <div class="overlay-vignette" aria-hidden="true"></div>
 
@@ -1534,7 +1565,7 @@
     <nav class="nav" id="nav">
       <div class="nav-inner">
         <a href="/" class="nav-logo">
-          <img src="assets/vorn-mark.png" alt="" width="38" height="18" />
+          <img src="assets/vorn-mark-152.webp" alt="" width="38" height="18" />
           <span>vorn</span>
         </a>
         <div class="nav-links">
@@ -1576,13 +1607,15 @@
       <a href="#install" class="nav-cta">Download</a>
     </div>
 
-    <main>
+    <main id="main">
       <!-- ═══════ ROOM I — THE PROLOGUE ═══════ -->
       <section class="hero">
         <!-- Vitruvian Man — clean line art from EPS vector source -->
         <img
-          src="assets/vitruvian-lines.png"
+          src="assets/vitruvian-lines-1200.webp"
           alt=""
+          width="1200"
+          height="1200"
           loading="lazy"
           class="hero-vitruvian"
           aria-hidden="true"
@@ -1616,7 +1649,7 @@
 
         <div class="hero-content container">
           <div class="hero-badge hero-enter" id="version-badge">
-            <span class="dot"></span> v0.1.0
+            <span class="dot"></span> v0.6.1
           </div>
           <h1 class="hero-title hero-enter">Vorn</h1>
           <p class="hero-subtitle hero-enter">The <em>agent command center.</em></p>
@@ -1655,8 +1688,12 @@
           </div>
           <div class="hero-screenshot hero-enter">
             <img
-              src="assets/hero.png"
-              alt="Vorn agentic IDE showing multi-agent grid with Claude Code, Copilot, and Codex"
+              src="assets/hero-1400.webp"
+              srcset="assets/hero-1400.webp 1400w, assets/hero-3024.webp 3024w"
+              sizes="(max-width: 1448px) 100vw, 1400px"
+              width="3024"
+              height="1700"
+              alt="Four agent sessions running side by side in Vorn, each streaming its own output"
               decoding="async"
               fetchpriority="high"
             />
@@ -1720,140 +1757,203 @@
             <div class="section-label">Features</div>
             <h2 class="section-heading">Run every agent, your way</h2>
             <p class="section-sub">
-              A complete environment for running parallel agent sessions, automating multi-step
-              workflows, and keeping everything organized.
+              Parallel sessions, workflows that run themselves, one place to keep them.
             </p>
           </div>
 
           <div class="study reveal">
+            <div class="study-media">
+              <div class="study-frame">
+                <img
+                  src="assets/grid-study-3024.webp"
+                  srcset="assets/grid-study-1200.webp 1200w, assets/grid-study-3024.webp 3024w"
+                  sizes="(max-width: 900px) 100vw, 900px"
+                  width="3024"
+                  height="1700"
+                  alt="All your agents, side by side"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+            </div>
             <div class="study-text">
               <div class="study-annotation">Study I</div>
-              <h3>Many minds, one grid</h3>
+              <h3>All your agents, side by side</h3>
               <p>
-                Run Claude, Copilot, Codex, OpenCode, and Gemini simultaneously. Resize, reorder,
-                minimize. Real-time status detection for every agent.
+                Claude, Copilot, Codex, OpenCode and Gemini, side by side. Resize, reorder,
+                minimize. The server holds every session, so closing the app stops nothing.
               </p>
             </div>
+          </div>
+          <div class="study reverse reveal">
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/hero.png"
-                  alt="Multi-agent grid layout"
+                  src="assets/panes-3024.webp"
+                  srcset="assets/panes-1200.webp 1200w, assets/panes-3024.webp 3024w"
+                  sizes="(max-width: 900px) 100vw, 900px"
+                  width="3024"
+                  height="1700"
+                  alt="More than a terminal"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. II &mdash; Multi-Agent Grid</p>
             </div>
-          </div>
-
-          <div class="study reverse reveal">
             <div class="study-text">
               <div class="study-annotation">Study II</div>
-              <h3>Every task, accounted for</h3>
+              <h3>More than a terminal</h3>
               <p>
-                Per-project kanban boards with markdown support, image attachments, git branch
-                targeting, and worktree isolation for clean parallel work.
+                A session holds its own terminals, a browser, an editor and an iOS simulator. Draw
+                on the page and the agent sees it. It reads and drives all of them to check its own
+                work.
               </p>
             </div>
+          </div>
+          <div class="study reveal">
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/tasks.png"
-                  alt="Task queue and kanban board"
+                  src="assets/plate-tasks-3024.webp"
+                  srcset="assets/plate-tasks-1200.webp 1200w, assets/plate-tasks-3024.webp 3024w"
+                  sizes="(max-width: 900px) 100vw, 900px"
+                  width="3024"
+                  height="1701"
+                  alt="Every task, accounted for"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. III &mdash; Task Queue &amp; Kanban</p>
             </div>
-          </div>
-
-          <div class="study reveal">
             <div class="study-text">
               <div class="study-annotation">Study III</div>
-              <h3>Workflow automation</h3>
+              <h3>Every task, accounted for</h3>
               <p>
-                Create multi-step workflows that chain agent launches, script executions, and task
-                operations. Schedule manually or on a cron.
+                A board per project. Each card carries its branch and opens as a session in its own
+                worktree.
               </p>
             </div>
+          </div>
+          <div class="study reverse reveal">
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/workflows.png"
-                  alt="Visual workflow editor"
+                  src="assets/workflows-3024.webp"
+                  srcset="assets/workflows-1200.webp 1200w, assets/workflows-3024.webp 3024w"
+                  sizes="(max-width: 900px) 100vw, 900px"
+                  width="3024"
+                  height="1898"
+                  alt="Workflow automation"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. IV &mdash; Workflow Automation</p>
             </div>
-          </div>
-
-          <div class="study reverse reveal">
             <div class="study-text">
               <div class="study-annotation">Study IV</div>
-              <h3>Run agents headless</h3>
+              <h3>Workflow automation</h3>
               <p>
-                Run agents without a visible terminal. Full output capture for later review. Stagger
-                delays for sequential orchestration.
+                Draw the pipeline on a canvas. Triggers, conditions, loops, approvals, any API.
+                Agents can run headless. Connectors install as offline packs.
               </p>
             </div>
-            <div class="study-media">
-              <div class="study-frame">
-                <img
-                  src="assets/headless.png"
-                  alt="Headless execution interface"
-                  loading="lazy"
-                  decoding="async"
-                />
-              </div>
-              <p class="study-fig">Fig. V &mdash; Headless Execution</p>
-            </div>
           </div>
-
           <div class="study reveal">
+            <div class="study-media">
+              <div class="phones" role="group" aria-label="Vorn on a phone">
+                <figure class="phone">
+                  <img
+                    src="assets/phone-sessions-430.webp"
+                    srcset="
+                      assets/phone-sessions-430.webp 430w,
+                      assets/phone-sessions-860.webp 860w
+                    "
+                    sizes="210px"
+                    width="1290"
+                    height="2796"
+                    alt="Every session on this machine, waiting or running"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </figure>
+                <figure class="phone">
+                  <img
+                    src="assets/phone-terminal-430.webp"
+                    srcset="
+                      assets/phone-terminal-430.webp 430w,
+                      assets/phone-terminal-860.webp 860w
+                    "
+                    sizes="210px"
+                    width="1290"
+                    height="2796"
+                    alt="A running session, with the keys a terminal needs"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </figure>
+                <figure class="phone">
+                  <img
+                    src="assets/phone-tasks-430.webp"
+                    srcset="assets/phone-tasks-430.webp 430w, assets/phone-tasks-860.webp 860w"
+                    sizes="210px"
+                    width="1290"
+                    height="2796"
+                    alt="The same board the desktop shows"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </figure>
+                <figure class="phone">
+                  <img
+                    src="assets/phone-workflows-430.webp"
+                    srcset="
+                      assets/phone-workflows-430.webp 430w,
+                      assets/phone-workflows-860.webp 860w
+                    "
+                    sizes="210px"
+                    width="1290"
+                    height="2796"
+                    alt="Workflows, and what each one last did"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </figure>
+              </div>
+            </div>
             <div class="study-text">
               <div class="study-annotation">Study V</div>
-              <h3>Find anything instantly</h3>
+              <h3>Take it with you</h3>
               <p>
-                Fuzzy search for actions, terminals, sessions, projects, and workflows. Launch
-                agents instantly from anywhere.
+                Pair a phone with a code. Pair a browser the same way, or point a desktop at another
+                machine's server. The work stays put; you reach it from any screen.
               </p>
-            </div>
-            <div class="study-media">
-              <div class="study-frame">
-                <img
-                  src="assets/command-palette.png"
-                  alt="Command palette"
-                  loading="lazy"
-                  decoding="async"
-                />
-              </div>
-              <p class="study-fig">Fig. VI &mdash; Command Palette</p>
             </div>
           </div>
-
           <div class="study reverse reveal">
-            <div class="study-text">
-              <div class="study-annotation">Study VI</div>
-              <h3>Pick up where you left off</h3>
-              <p>
-                Restore previous agent sessions on restart with accurate session matching and full
-                history tracking across projects.
-              </p>
-            </div>
             <div class="study-media">
               <div class="study-frame">
                 <img
-                  src="assets/resume-sessions.png"
-                  alt="Session persistence"
+                  src="assets/command-palette-3024.webp"
+                  srcset="
+                    assets/command-palette-1200.webp 1200w,
+                    assets/command-palette-3024.webp 3024w
+                  "
+                  sizes="(max-width: 900px) 100vw, 900px"
+                  width="3024"
+                  height="1701"
+                  alt="Find anything instantly"
                   loading="lazy"
                   decoding="async"
                 />
               </div>
-              <p class="study-fig">Fig. VII &mdash; Session Persistence</p>
+            </div>
+            <div class="study-text">
+              <div class="study-annotation">Study VI</div>
+              <h3>Find anything instantly</h3>
+              <p>
+                Fuzzy search across actions, sessions, projects and workflows. Launch an agent from
+                anywhere.
+              </p>
             </div>
           </div>
         </div>
@@ -2080,131 +2180,51 @@
       <section>
         <div class="container">
           <div class="section-header reveal">
-            <div class="section-label">And More</div>
-            <h2 class="section-heading">Ship faster with less context-switching</h2>
+            <div class="section-label">Also in the box</div>
+            <h2 class="section-heading">The rest of it, in one page</h2>
           </div>
-          <div class="secondary-grid stagger">
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M12 3v18" />
-                  <path d="M5 12h14" />
-                  <path d="M5 7l3 0" />
-                  <path d="M5 17l3 0" />
-                  <path d="M16 7l3 0" />
-                  <path d="M16 17l3 0" />
-                </svg>
+          <div class="index-grid">
+            <div class="index-col">
+              <div class="index-row reveal">
+                <span class="index-name">Resume a session</span>
+                <span class="index-note">After a quit, a crash or an update.</span>
               </div>
-              <h4>Inline diff review</h4>
-              <p>
-                Review git changes inline, add comments to specific lines, and send structured
-                feedback directly to your agents.
-              </p>
+              <div class="index-row reveal">
+                <span class="index-name">Connector packs</span>
+                <span class="index-note">Versioned, installed offline, with a receipt.</span>
+              </div>
+              <div class="index-row reveal">
+                <span class="index-name">Inline diff review</span>
+                <span class="index-note">Comment on a line, send it back.</span>
+              </div>
             </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                  <path d="M6 2v2" />
-                  <path d="M6 20v2" />
-                  <path d="M18 2v2" />
-                  <path d="M18 20v2" />
-                  <path d="M2 6h2" />
-                  <path d="M20 6h2" />
-                  <path d="M2 18h2" />
-                  <path d="M20 18h2" />
-                </svg>
+            <div class="index-col">
+              <div class="index-row reveal">
+                <span class="index-name">MCP server</span>
+                <span class="index-note">Agents drive Vorn itself.</span>
               </div>
-              <h4>Floating widget</h4>
-              <p>Always-on-top overlay showing real-time agent status across your desktop.</p>
+              <div class="index-row reveal">
+                <span class="index-name">Keys in one place</span>
+                <span class="index-note">Borrowed by a script when it asks.</span>
+              </div>
+              <div class="index-row reveal">
+                <span class="index-name">Editor and file panes</span>
+                <span class="index-note">Read and edit beside the terminal.</span>
+              </div>
             </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path
-                    d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"
-                  />
-                  <path d="M12 6v6l4 2" />
-                </svg>
+            <div class="index-col">
+              <div class="index-row reveal">
+                <span class="index-name">Floating widget</span>
+                <span class="index-note">Status while Vorn is behind something.</span>
               </div>
-              <h4>MCP server</h4>
-              <p>
-                Agents can create tasks, trigger workflows, launch other agents, and query project
-                state.
-              </p>
-            </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <rect x="2" y="3" width="20" height="14" rx="2" />
-                  <path d="M8 21h8" />
-                  <path d="M12 17v4" />
-                </svg>
+              <div class="index-row reveal">
+                <span class="index-name">Remote SSH</span>
+                <span class="index-note">Terminals on another machine.</span>
               </div>
-              <h4>Cross-platform</h4>
-              <p>Native builds for macOS, Windows, and Linux with automatic updates.</p>
-            </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-                  <path d="M21 3v5h-5" />
-                </svg>
+              <div class="index-row reveal">
+                <span class="index-name">Updates itself</span>
+                <span class="index-note">And takes its server with it.</span>
               </div>
-              <h4>Auto-update</h4>
-              <p>Built-in update checking keeps you on the latest version effortlessly.</p>
-            </div>
-            <div class="secondary-card reveal">
-              <div class="secondary-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M4 17l6-6-6-6" />
-                  <path d="M12 19h8" />
-                </svg>
-              </div>
-              <h4>Remote SSH</h4>
-              <p>Launch terminals on remote machines and manage agents over SSH.</p>
             </div>
           </div>
         </div>
@@ -2216,7 +2236,9 @@
           <div class="section-header reveal">
             <div class="section-label">Install</div>
             <h2 class="section-heading">Install in seconds</h2>
-            <p class="section-sub">Install Vorn with a single command on any platform.</p>
+            <p class="section-sub">
+              One command on macOS, Windows or Linux. Vorn updates itself after that.
+            </p>
           </div>
           <div class="install-wrapper reveal">
             <div class="terminal">
@@ -2259,7 +2281,7 @@
                 <a
                   class="os-btn"
                   data-os="mac"
-                  href="https://github.com/vorn-run/vorn/releases"
+                  href="https://github.com/vorn-run/vorn/releases/download/v0.6.1/Vorn-0.6.1-arm64.dmg"
                   target="_blank"
                   rel="noopener"
                 >
@@ -2279,7 +2301,7 @@
                 <a
                   class="os-btn"
                   data-os="win"
-                  href="https://github.com/vorn-run/vorn/releases"
+                  href="https://github.com/vorn-run/vorn/releases/download/v0.6.1/Vorn-Setup-0.6.1.exe"
                   target="_blank"
                   rel="noopener"
                 >
@@ -2299,7 +2321,7 @@
                 <a
                   class="os-btn"
                   data-os="linux"
-                  href="https://github.com/vorn-run/vorn/releases"
+                  href="https://github.com/vorn-run/vorn/releases/download/v0.6.1/Vorn-0.6.1.AppImage"
                   target="_blank"
                   rel="noopener"
                 >
@@ -2381,7 +2403,13 @@
       <div class="container">
         <div class="footer-inner">
           <div class="footer-left">
-            <img src="assets/vorn-mark.png" alt="" width="20" height="9" style="opacity: 0.3" />
+            <img
+              src="assets/vorn-mark-152.webp"
+              alt=""
+              width="20"
+              height="9"
+              style="opacity: 0.3"
+            />
             <span>MIT License</span>
           </div>
           <div class="footer-links">
@@ -2440,8 +2468,7 @@
         const platform = navigator.platform || ''
         if (/Mac|iPhone|iPad|iPod/.test(platform) || /Macintosh/.test(ua)) return 'mac'
         if (/Win/.test(platform) || /Windows/.test(ua)) return 'win'
-        if (/Android|CrOS/.test(ua)) return 'mac'
-        if (/Linux/.test(ua)) return 'linux'
+        if (/Android|CrOS|Linux/.test(ua)) return 'linux'
         return 'mac'
       }
       const detectedOS = detectOS()
@@ -2618,22 +2645,25 @@
         .catch(() => {})
 
       // ═══════════════════════════════════════
-      // VANILLA TILT — 3D hover on images
+      // VANILLA TILT — 3D hover on the pictures
       // ═══════════════════════════════════════
-      const tiltScript = document.createElement('script')
-      tiltScript.src =
-        'https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.8.1/vanilla-tilt.min.js'
-      tiltScript.onload = function () {
-        if (window.innerWidth > 768) {
-          VanillaTilt.init(document.querySelectorAll('.study-frame'), {
+      if (
+        window.innerWidth > 768 &&
+        !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ) {
+        const tiltScript = document.createElement('script')
+        tiltScript.src =
+          'https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.8.1/vanilla-tilt.min.js'
+        tiltScript.onload = function () {
+          VanillaTilt.init(document.querySelectorAll('.study-frame, .hero-screenshot'), {
             max: 6,
             speed: 500,
             glare: false,
             perspective: 1200
           })
         }
+        document.body.appendChild(tiltScript)
       }
-      document.body.appendChild(tiltScript)
 
       // ═══════════════════════════════════════
       // ROTATING QUOTES — live cycle with fade
@@ -2643,12 +2673,12 @@
           {
             text: 'Where the spirit does not work with the hand, there is no art.',
             attr: 'Leonardo da Vinci',
-            bg: 'assets/davinci-embryo.jpg'
+            bg: 'assets/davinci-embryo-900.webp'
           },
           {
             text: 'Study the science of art. Study the art of science.',
             attr: 'Leonardo da Vinci',
-            bg: 'assets/davinci-embryo-alt.jpg'
+            bg: 'assets/davinci-embryo-alt-900.webp'
           }
         ]
         const quoteEl = document.getElementById('rotating-quote')

@@ -14,7 +14,8 @@ export default tseslint.config(
       'node_modules/',
       '*.config.js',
       '**/*.config.cjs',
-      'scripts/'
+      'scripts/',
+      'website/scripts/'
     ]
   },
 
