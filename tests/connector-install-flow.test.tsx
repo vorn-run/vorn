@@ -122,3 +122,31 @@ describe('installing from a catalog row', () => {
     await waitFor(() => expect(screen.queryByText(/the server went away/)).toBeNull())
   })
 })
+
+describe('which tab leads', () => {
+  it('opens on the catalog when nothing is installed', async () => {
+    render(<ConnectorSettings />)
+    await screen.findByRole('button', { name: /^Install$/ })
+    expect(screen.getByRole('button', { name: 'Browse' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Installed' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+  })
+
+  it('opens on what is installed once a pack is on disk', async () => {
+    ;(window as unknown as { api: { listConnectorPacks: unknown } }).api.listConnectorPacks = vi
+      .fn()
+      .mockResolvedValue([
+        { ...PREVIEW, path: '/packs/acme', installedAt: 0, bytes: 1, kind: 'connector' }
+      ])
+    render(<ConnectorSettings />)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Installed' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      )
+    )
+    expect(screen.getByRole('heading', { name: 'Plugins' })).toBeInTheDocument()
+  })
+})

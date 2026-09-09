@@ -54,6 +54,45 @@ function setup(
   return { ...utils, onAdd }
 }
 
+describe('a connector on disk with nothing connected', () => {
+  it('is listed under its own heading with the way to connect it', () => {
+    const onAdd = vi.fn()
+    const pack = {
+      id: 'ado',
+      name: 'Azure DevOps',
+      version: '0.1.0',
+      kind: 'connector' as const,
+      path: '/packs/ado',
+      installedAt: 0,
+      bytes: 1,
+      triggers: [],
+      actions: [],
+      env: []
+    }
+    const { getByText } = render(
+      <ConnectionGroups
+        connections={[]}
+        listings={buildConnectorListings([], [ADO], [], [pack])}
+        manifests={{}}
+        statuses={[]}
+        workflows={[]}
+        activity={{ busy: {}, failed: {}, run: async () => {}, state: () => ({}) }}
+        backfillResult={{}}
+        onAdd={onAdd}
+        onRun={vi.fn()}
+        onBackfill={vi.fn()}
+        onDelete={vi.fn()}
+        onResetWorkflow={vi.fn()}
+        onOpenWorkflow={vi.fn()}
+        onRefresh={vi.fn()}
+      />
+    )
+    expect(getByText('Installed, no connection yet')).toBeInTheDocument()
+    fireEvent.click(getByText('Add connection'))
+    expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ id: 'ado' }))
+  })
+})
+
 describe('connections grouped by connector', () => {
   it('puts two connections under one heading with the count beside them', () => {
     // Not on a catalog card trying to sell a third — beside the things it
