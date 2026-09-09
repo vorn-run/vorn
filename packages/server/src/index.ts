@@ -550,9 +550,11 @@ export async function startServer(
       sessionManager.startAutoSave(sessionsToPersist)
     },
     quiesce: async () => {
-      // What a shutdown does, minus the sealing and the killing.
-      sessionManager.stopAutoSave()
+      // What a shutdown does, minus the sealing and the killing. Written down
+      // before the auto-save is stopped, because stopping it drops the source
+      // `persistNow` reads -- the other order saves nothing at all.
       sessionManager.persistNow()
+      sessionManager.stopAutoSave()
       ptyManager.flushPendingOutput()
       await checkpointAll()
     },
@@ -575,10 +577,12 @@ export async function startServer(
       // A fresh listener: an anonymous inode cannot be linked back to a path. The
       // old one stays open, because this request's socket is still on it.
       const again = await openLocalEndpoint(dataDir, () => scheduler.deliverPendingConnectorInbox())
-      if (again.kind === 'held') {
-        endpoint = again.endpoint
-        watchEndpoint(() => endpoint?.holds() ?? false)
-      }
+      if (again.kind === 'held') endpoint = again.endpoint
+      // Restored on both paths. `release` pointed the watch at `true` so giving
+      // the name up deliberately would not latch draining; left there after a
+      // reclaim that failed, this server would never notice it has no endpoint
+      // and would go on creating sessions nothing can reach.
+      watchEndpoint(() => endpoint?.holds() ?? false)
       if (listening) writePortFile(dataDir, actualPort, ownsPublished)
       return listening && again.kind === 'held'
     },
@@ -665,9 +669,10 @@ export async function startServer(
       log.error('[server] shutdown did not finish; exiting anyway')
       process.exit(1)
     }, SHUTDOWN_DEADLINE_MS).unref?.()
-    // Stop the periodic timer first, then do one final synchronous save
-    sessionManager.stopAutoSave()
+    // The final save first: `stopAutoSave` drops the session source, so the
+    // other order made this write nothing on every shutdown.
     sessionManager.persistNow()
+    sessionManager.stopAutoSave()
     // The last few milliseconds of output, then every terminal's screen, before
     // anything kills a PTY. After `killAll()` the buffers this reads have been
     // emptied; before `persistNow()` the sessions these belong to are not yet

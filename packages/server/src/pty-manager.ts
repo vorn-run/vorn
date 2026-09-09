@@ -1098,7 +1098,13 @@ class PtyManager extends EventEmitter {
     for (const id of ranked) {
       const held = this.ptys.get(id)
       const session = this.sessions.get(id)
-      if (!held || !session) continue
+      if (!held || !session) {
+        // All-or-nothing, the same as a missing descriptor below. A pty whose
+        // record has gone is one the replacement could not be told about, and
+        // skipping it would hand over a machine quietly missing a pane.
+        log.warn({ id }, '[pty] this terminal has no session record to hand over')
+        return null
+      }
       const fd = masterFd(held)
       if (fd === null) {
         log.warn({ id }, '[pty] this terminal has no descriptor to hand over')

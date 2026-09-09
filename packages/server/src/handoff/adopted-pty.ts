@@ -50,6 +50,11 @@ export class AdoptedPty implements ManagedPty {
     // A master reports the far side going away as EIO on some platforms and EOF on others.
     this.reader.on('end', () => this.finish())
     this.reader.on('error', (err: NodeJS.ErrnoException) => {
+      // A non-blocking master says "nothing yet" as an error, and node-pty's own
+      // reader notes it arrives twice on startup. Treating it as the far side
+      // going away would end a healthy terminal the moment it was adopted --
+      // and `onExit` removes the session's history on its way past.
+      if (err.code === 'EAGAIN') return
       if (err.code === 'EIO') return this.finish()
       log.warn({ err, pid: this.pid }, '[handoff] read error on an adopted pty')
       this.finish()

@@ -157,6 +157,32 @@ describe('a pty adopted in this process', () => {
     expect(() => adopted.resize(120, 40)).not.toThrow()
   })
 
+  it('survives the read errors a non-blocking descriptor raises normally', async () => {
+    const { master, slave } = terminal()
+    const adopted = adopt(master)
+    let ended = false
+    adopted.onExit(() => {
+      ended = true
+    })
+    const seen: string[] = []
+    adopted.onData((d) => seen.push(d))
+
+    // node-pty's own reader notes this arrives twice on startup. Reading it as
+    // the far side going away would end a healthy terminal the instant it was
+    // adopted -- and `onExit` takes the session's history with it.
+    const transient: NodeJS.ErrnoException = new Error('resource temporarily unavailable')
+    transient.code = 'EAGAIN'
+    ;(adopted as unknown as { reader: { emit(event: string, err: Error): void } }).reader.emit(
+      'error',
+      transient
+    )
+
+    expect(ended).toBe(false)
+    fs.writeSync(slave, 'still here\n')
+    await settled()
+    expect(seen.join('')).toContain('still here')
+  })
+
   it('reports the far side closing', async () => {
     const { master, slave } = terminal()
     const adopted = adopt(master)

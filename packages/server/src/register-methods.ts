@@ -64,8 +64,7 @@ import {
   SessionEventType,
   RemoteHost,
   getProjectRemoteHostId,
-  isTerminalTaskStatus,
-  TerminalSession
+  isTerminalTaskStatus
 } from '@vornrun/shared/types'
 import type {
   SourceConnection,
