@@ -1440,9 +1440,14 @@ export async function applyGateDecision(
   if (!execution) return
 
   const node = execution.nodeStates.find((state) => state.nodeId === nodeId)
-  // Already answered, by this instance or by a broadcast that arrived twice.
-  // Re-approving would restart the branch below the gate.
-  if (node?.status !== 'waiting') return
+  // Already answered, or answered twice. Re-approving would restart the branch
+  // below the gate -- but the asker is still showing a pill for it, so the run
+  // goes out as it stands rather than leaving that on screen with nothing to
+  // clear it.
+  if (node?.status !== 'waiting') {
+    publishRun(execution)
+    return
+  }
 
   if (decision === 'approve') await approveWorkflowGate(execution, nodeId)
   else await rejectWorkflowGate(execution, nodeId)

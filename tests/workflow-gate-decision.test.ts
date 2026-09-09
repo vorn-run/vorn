@@ -11,12 +11,12 @@ import type { WorkflowExecution } from '../packages/shared/src/types'
  */
 
 const executions = new Map<string, WorkflowExecution>()
-const saved: WorkflowExecution[] = []
+const published: WorkflowExecution[] = []
 
 vi.mock('../packages/server/src/workflows/host', () => ({
   api: { saveWorkflowRun: vi.fn(async () => {}) },
   config: () => ({ workflows: [{ id: 'wf-1', name: 'W', nodes: [], edges: [] }] }),
-  publishRun: (execution: WorkflowExecution) => saved.push(execution),
+  publishRun: (execution: WorkflowExecution) => published.push(execution),
   runById: (runId: string) => executions.get(runId),
   activeTerminals: () => [],
   activeHeadless: () => [],
@@ -60,7 +60,7 @@ afterEach(() => vi.unstubAllGlobals())
 beforeEach(async () => {
   executions.clear()
   warned.mockClear()
-  saved.length = 0
+  published.length = 0
   vi.resetModules()
   ;({ applyGateDecision } = await import('../packages/server/src/workflows/engine'))
 })
@@ -70,17 +70,20 @@ describe('acting on a gate decision from another client', () => {
     // The ordinary case for a stale client: the run is finished and gone.
     await applyGateDecision('run-nobody-has', 'gate-1', 'approve')
 
-    expect(saved).toHaveLength(0)
+    expect(published).toHaveLength(0)
   })
 
   it('does nothing for a node that has already resolved', async () => {
     // A duplicate broadcast, or two people answering at once. Approving a gate
-    // that is no longer waiting would resume the branch below it twice.
+    // that is no longer waiting would resume the branch below it twice. The run
+    // still goes back out: whoever answered is showing a pill for a gate that
+    // is over, and this is what clears it.
     executions.set('run-1', parkedRun('success'))
 
     await applyGateDecision('run-1', 'gate-1', 'approve')
 
-    expect(saved).toHaveLength(0)
+    expect(published).toHaveLength(1)
+    expect(published[0]?.nodeStates.find((n) => n.nodeId === 'gate-1')?.status).toBe('success')
   })
 
   it('drops a duplicate quietly, rather than through the layer below', async () => {
@@ -100,7 +103,8 @@ describe('acting on a gate decision from another client', () => {
 
     await applyGateDecision('run-1', 'a-node-from-another-workflow', 'approve')
 
-    expect(saved).toHaveLength(0)
+    expect(published).toHaveLength(1)
+    expect(published[0]?.nodeStates.find((n) => n.nodeId === 'gate-1')?.status).toBe('waiting')
   })
 
   it('acts when this instance is holding a run parked on that gate', async () => {
@@ -112,7 +116,7 @@ describe('acting on a gate decision from another client', () => {
     // make this a test of the engine rather than of the decision. What matters
     // is that the decision was taken and written down.
     await applyGateDecision('run-1', 'gate-1', 'approve').catch(() => {})
-    expect(saved.length).toBeGreaterThan(0)
-    expect(saved[0]?.nodeStates.find((n) => n.nodeId === 'gate-1')?.status).toBe('success')
+    expect(published.length).toBeGreaterThan(0)
+    expect(published[0]?.nodeStates.find((n) => n.nodeId === 'gate-1')?.status).toBe('success')
   })
 })
