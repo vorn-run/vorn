@@ -2,6 +2,8 @@ import WebSocket from 'ws'
 import { EventEmitter } from 'node:events'
 import type { RpcResponse, RpcNotification, ServerIdentity } from '@vornrun/shared/protocol'
 import { createRequest, createNotification } from '@vornrun/shared/protocol'
+import { decodeTerminalFrame } from '@vornrun/shared/terminal-frame'
+import { IPC } from '@vornrun/shared/types'
 import log from '../logger'
 
 interface PendingRequest {
@@ -135,7 +137,14 @@ export class ServerBridge extends EventEmitter {
       this.emit('connected')
     })
 
-    this.ws.on('message', (raw: Buffer) => {
+    this.ws.on('message', (raw: Buffer, isBinary: boolean) => {
+      // Terminal output, as bytes: no JSON anywhere between the pty and xterm.
+      if (isBinary) {
+        const frame = decodeTerminalFrame(raw)
+        if (frame) this.emit('server-notification', IPC.TERMINAL_DATA, frame)
+        else log.warn('[bridge] dropped a binary frame it could not read')
+        return
+      }
       try {
         const msg = JSON.parse(raw.toString())
         if ('method' in msg && 'id' in msg && msg.id !== undefined && msg.id !== null) {
@@ -149,6 +158,9 @@ export class ServerBridge extends EventEmitter {
             const hello = (msg as RpcNotification).params as { protocolVersion?: number }
             this.helloVersion = hello?.protocolVersion
             log.info({ hello }, '[bridge] server protocol')
+            // Asked here, on every connection, because the filter dies with the socket.
+            const capabilities = (hello as { capabilities?: Record<string, number> })?.capabilities
+            if (capabilities?.terminalBytes) this.notify('subscribe:set', { terminalBytes: true })
           }
           if (msg.method === 'server:identity') {
             this.identity = (msg as RpcNotification).params as ServerIdentity

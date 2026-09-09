@@ -87,10 +87,12 @@ const api = {
   createShellTerminal: (cwd?: string): Promise<TerminalSession> =>
     ipcRenderer.invoke(IPC.SHELL_CREATE, cwd),
 
-  onTerminalData: (callback: (event: { id: string; data: string; seq: number }) => void) => {
+  onTerminalData: (
+    callback: (event: { id: string; data: string | Uint8Array; seq: number }) => void
+  ) => {
     const listener = (
       _: Electron.IpcRendererEvent,
-      event: { id: string; data: string; seq: number }
+      event: { id: string; data: string | Uint8Array; seq: number }
     ): void => callback(event)
     ipcRenderer.on(IPC.TERMINAL_DATA, listener)
     return () => {
