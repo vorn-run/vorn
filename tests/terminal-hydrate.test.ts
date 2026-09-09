@@ -63,7 +63,7 @@ vi.mock('@xterm/addon-fit', () => ({
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class {} }))
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}))
 
-type Chunk = { id: string; data: string; seq: number }
+type Chunk = { id: string; data: string | Uint8Array; seq: number }
 let emit: (c: Chunk) => void = () => {}
 const attachTerminal = vi.fn()
 
@@ -281,5 +281,52 @@ describe('a chunk whose sequence cannot be compared', () => {
 
     expect(writes().join('')).not.toContain('already in the seed')
     expect(writes().join('')).toContain('after the seed')
+  })
+})
+
+// Bytes go into xterm as they came; text is still joined; a text seed never ends up glued to bytes.
+describe('output that arrives as bytes', () => {
+  const bytes = (text: string): Uint8Array => new TextEncoder().encode(text)
+  /** What went in, readable, with bytes marked so the two forms cannot be confused. */
+  const written = (): string[] =>
+    created[created.length - 1]!.write.mock.calls.map((c) => {
+      const w = c[0] as string | Uint8Array
+      return typeof w === 'string' ? `text:${w}` : `bytes:${new TextDecoder().decode(w)}`
+    })
+
+  it('writes each byte chunk as it came', async () => {
+    attachTerminal.mockResolvedValue({ data: '', seq: 0, live: true })
+    await open()
+
+    emit({ id: ID, data: bytes('ab'), seq: 1 })
+    emit({ id: ID, data: bytes('cd'), seq: 2 })
+    await frame()
+
+    expect(written()).toEqual(['bytes:ab', 'bytes:cd'])
+  })
+
+  it('writes a text seed and the bytes held behind it separately, in order', async () => {
+    let seed!: (v: { data: string; seq: number; live: boolean }) => void
+    attachTerminal.mockReturnValue(new Promise((resolve) => (seed = resolve)))
+    const hydrated = open()
+
+    emit({ id: ID, data: bytes('live-1'), seq: 2 })
+    emit({ id: ID, data: bytes('live-2'), seq: 3 })
+    await frame()
+    seed({ data: 'seed', seq: 1, live: true })
+    await hydrated
+
+    expect(written()).toEqual(['text:seed', 'bytes:live-1', 'bytes:live-2'])
+  })
+
+  it('still joins text from a server that sends it', async () => {
+    attachTerminal.mockResolvedValue({ data: '', seq: 0, live: true })
+    await open()
+
+    emit({ id: ID, data: 'plain', seq: 1 })
+    emit({ id: ID, data: ' text', seq: 2 })
+    await frame()
+
+    expect(written()).toEqual(['text:plain text'])
   })
 })

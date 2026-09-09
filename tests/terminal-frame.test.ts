@@ -5,13 +5,7 @@ import {
   MAX_FRAME_ID_BYTES
 } from '../packages/shared/src/terminal-frame'
 
-/**
- * Terminal bytes on the wire.
- *
- * What matters is that the output comes back untouched -- escapes, NUL, a
- * multibyte sequence cut in half by the flush -- and that the decoder refuses
- * bytes that are not a frame rather than reading garbage out of them.
- */
+// The output must come back untouched, and bytes that are not a frame must be refused.
 
 const bytes = (...values: number[]): Uint8Array => Uint8Array.from(values)
 
@@ -39,12 +33,12 @@ describe('a terminal frame', () => {
     expect(frame?.seq).toBe(0xfffffffe)
   })
 
-  it('copies the output out of the buffer it arrived in', () => {
+  it('views the output when the buffer is exactly the frame', () => {
+    // A browser socket hands over one ArrayBuffer per message; copying that would be for nothing.
     const wire = encodeTerminalFrame({ id: 't', seq: 1, data: bytes(1, 2, 3) })
     const frame = decodeTerminalFrame(wire)
 
-    // A view would clone the whole socket buffer when it crosses to the renderer.
-    expect(frame?.data.buffer).not.toBe(wire.buffer)
+    expect(frame?.data.buffer).toBe(wire.buffer)
     expect(frame?.data.byteLength).toBe(3)
   })
 
@@ -53,11 +47,11 @@ describe('a terminal frame', () => {
     const pooled = new Uint8Array(wire.length + 8)
     pooled.set(wire, 4)
 
-    expect(decodeTerminalFrame(pooled.subarray(4, 4 + wire.length))).toEqual({
-      id: 'xyz',
-      seq: 7,
-      data: bytes(9)
-    })
+    const frame = decodeTerminalFrame(pooled.subarray(4, 4 + wire.length))
+
+    expect(frame).toEqual({ id: 'xyz', seq: 7, data: bytes(9) })
+    // Copied out: a view would cross to the renderer with the whole pool attached.
+    expect(frame?.data.buffer).not.toBe(pooled.buffer)
   })
 
   it('refuses bytes that are not a frame', () => {

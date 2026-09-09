@@ -11,6 +11,7 @@ import {
 import { chooseAnchor, readScrollAnchor, resolveAnchor, writeScrollAnchor } from './scroll-anchor'
 import type { BufferMetrics } from './spine-layout'
 import { TERMINAL_BACKGROUND } from '../../shared/surface'
+import type { TerminalData } from '@vornrun/shared/protocol'
 
 interface TerminalEntry {
   term: Terminal
@@ -58,44 +59,24 @@ const seeding = new Set<string>()
 const readyCallbacks = new Map<string, Set<() => void>>()
 
 // --- Write batching: single global listener + requestAnimationFrame ---
-interface Chunk {
-  /** Bytes from a server that sends them, text from one that does not. */
-  data: string | Uint8Array
-  /** Which flush of that session this came from. See `PtyManager.flushSeq`. */
-  seq: number
-}
+/** One flush of a session's output; see `PtyManager.flushSeq` for `seq`. */
+type Chunk = Pick<TerminalData, 'data' | 'seq'>
 
-/**
- * Chunks into the terminal, in order, with as few writes as their forms allow.
- *
- * xterm takes either form but not both in one call. Runs of the same form are
- * joined, since each `write` queues a task; a change of form starts a new run.
- * Text meets bytes only around a seed, which is text from `attachTerminal`
- * while live output is bytes.
- */
+/** Text is joined as it always was; bytes go in as they came, since joining them means copying them. */
 function writeChunks(term: Terminal, chunks: readonly Chunk[]): void {
-  let run: Chunk['data'][] = []
-  const flush = (): void => {
-    if (!run.length) return
-    if (typeof run[0] === 'string') term.write(run.length === 1 ? run[0] : run.join(''))
-    else if (run.length === 1) term.write(run[0])
-    else {
-      const parts = run as Uint8Array[]
-      const joined = new Uint8Array(parts.reduce((n, part) => n + part.length, 0))
-      let offset = 0
-      for (const part of parts) {
-        joined.set(part, offset)
-        offset += part.length
-      }
-      term.write(joined)
-    }
-    run = []
-  }
+  let text = ''
   for (const chunk of chunks) {
-    if (run.length && typeof run[0] !== typeof chunk.data) flush()
-    run.push(chunk.data)
+    if (typeof chunk.data === 'string') {
+      text += chunk.data
+      continue
+    }
+    if (text) {
+      term.write(text)
+      text = ''
+    }
+    term.write(chunk.data)
   }
-  flush()
+  if (text) term.write(text)
 }
 
 const pendingWrites = new Map<string, Chunk[]>()
@@ -929,10 +910,7 @@ export function onTerminalScroll(
 export function destroyTerminal(terminalId: string): void {
   const entry = registry.get(terminalId)
   if (!entry) return
-  // Flush any pending batched writes before destroying. Joined by their data:
-  // these became `{ data, seq }` when attaching needed a way to tell what a seed
-  // already contained, and this line kept joining the objects -- which type-
-  // checks, and writes `[object Object]` instead of the output it exists to save.
+  // Whatever is still batched goes in before the terminal goes.
   const chunks = pendingWrites.get(terminalId)
   if (chunks) {
     writeChunks(entry.term, chunks)

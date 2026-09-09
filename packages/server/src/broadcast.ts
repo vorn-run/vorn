@@ -1,5 +1,5 @@
 import type { WebSocket } from 'ws'
-import { createNotification } from '@vornrun/shared/protocol'
+import { createNotification, type TerminalData } from '@vornrun/shared/protocol'
 import { encodeTerminalFrame } from '@vornrun/shared/terminal-frame'
 import log from './logger'
 
@@ -89,15 +89,19 @@ export function parseTopics(query: unknown): readonly string[] | undefined {
 
 interface Client {
   subscription: Subscription | null
-  /** Terminal output as a binary frame rather than a JSON string. */
+  /** Terminal output as a frame of bytes rather than a JSON string. */
   terminalBytes: boolean
 }
 
-/** What `terminal:data` carries before it is put on the wire. */
-export interface TerminalDataPayload {
-  id: string
-  data: string
-  seq: number
+/** Terminal output before the wire: the pty hands over text. */
+export type TerminalText = Omit<TerminalData, 'data'> & { data: string }
+
+function terminalFrame(payload: TerminalText): Uint8Array {
+  return encodeTerminalFrame({
+    id: payload.id,
+    seq: payload.seq,
+    data: Buffer.from(payload.data, 'utf-8')
+  })
 }
 
 export class ClientRegistry {
@@ -147,13 +151,12 @@ export class ClientRegistry {
    * Ignored for a socket that was never admitted, so this cannot be used to add
    * an unauthenticated connection to the broadcast set.
    */
-  setTopics(ws: WebSocket, topics: TopicFilter, terminalBytes?: boolean): void {
+  setTopics(ws: WebSocket, topics: TopicFilter, terminalBytes?: unknown): void {
     const client = this.clients.get(ws)
     if (!client) return
-    client.subscription = subscriptionFrom(topics)
-    // Left as it was when not mentioned: the web client resets its topics on
-    // every scroll, and should not have to say "bytes, still" each time.
-    if (terminalBytes !== undefined) client.terminalBytes = terminalBytes
+    // A field left out stays as it was: the desktop asks for bytes alone, the web client sends topics alone.
+    if (topics !== undefined) client.subscription = subscriptionFrom(topics)
+    if (terminalBytes !== undefined) client.terminalBytes = terminalBytes === true
   }
 
   /**
@@ -162,44 +165,16 @@ export class ClientRegistry {
    * so the registry keeps knowing nothing about any particular payload shape.
    */
   broadcast(method: string, params: unknown, scope?: string): void {
-    // Serialised on the first socket that actually wants it. With only a
-    // filtered client attached, an unwanted notification now costs a map walk
-    // instead of a full JSON encode of the payload.
-    let msg: string | undefined
-    for (const [ws, { subscription }] of this.clients) {
-      if (ws.readyState !== ws.OPEN) continue
-      if (subscription && !subscription.wants(method, scope)) continue
-      msg ??= JSON.stringify(createNotification(method, params))
-      ws.send(msg)
-    }
-  }
-
-  /**
-   * Terminal output, in whichever form each socket asked for.
-   *
-   * The one notification with a second wire form. A socket that asked for
-   * bytes gets the frame; every other gets the JSON it always did, so a client
-   * that never heard of frames -- a phone on last month's build -- sees no
-   * change. Each form is built at most once per flush, and only if somebody
-   * wants it.
-   */
-  broadcastTerminalData(payload: TerminalDataPayload): void {
-    const scope = payload.id
+    // Each wire form is built on the first socket that wants it, and not at all otherwise.
     let text: string | undefined
     let frame: Uint8Array | undefined
-    for (const [ws, { subscription, terminalBytes }] of this.clients) {
+    for (const [ws, client] of this.clients) {
       if (ws.readyState !== ws.OPEN) continue
-      if (subscription && !subscription.wants('terminal:data', scope)) continue
-      if (terminalBytes) {
-        frame ??= encodeTerminalFrame({
-          id: payload.id,
-          seq: payload.seq,
-          data: Buffer.from(payload.data, 'utf-8')
-        })
-        ws.send(Buffer.from(frame.buffer, frame.byteOffset, frame.byteLength))
+      if (client.subscription && !client.subscription.wants(method, scope)) continue
+      if (client.terminalBytes && method === 'terminal:data') {
+        ws.send((frame ??= terminalFrame(params as TerminalText)))
       } else {
-        text ??= JSON.stringify(createNotification('terminal:data', payload))
-        ws.send(text)
+        ws.send((text ??= JSON.stringify(createNotification(method, params))))
       }
     }
   }

@@ -1,4 +1,9 @@
-import { CLOSE_CREDENTIAL_REJECTED, RUNTIME_PROTOCOL_VERSION } from '@vornrun/shared/protocol'
+import {
+  CLOSE_CREDENTIAL_REJECTED,
+  RUNTIME_PROTOCOL_VERSION,
+  type ServerHello,
+  type TerminalData
+} from '@vornrun/shared/protocol'
 import { decodeTerminalFrame } from '@vornrun/shared/terminal-frame'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import type { GitDiffRange, AppConfig } from '@vornrun/shared/types'
@@ -147,7 +152,7 @@ class RpcClient {
 
   private connect(): void {
     this.ws = new WebSocket(this.url)
-    // Terminal output arrives as a frame of bytes; a Blob would need a read.
+    // A frame of terminal bytes as an ArrayBuffer; a Blob would need a read first.
     this.ws.binaryType = 'arraybuffer'
 
     this.ws.onopen = () => {
@@ -192,8 +197,9 @@ class RpcClient {
       // a mismatch says so plainly: an old cached bundle against a newer server
       // otherwise fails later, in ways that read as the app being broken.
       if (msg.method === 'server:hello') {
-        const serverVersion = (msg.params as { protocolVersion?: number } | undefined)
-          ?.protocolVersion
+        const hello = msg.params as ServerHello | undefined
+        this.terminalBytes = hello?.capabilities?.terminalBytes === 1
+        const serverVersion = hello?.protocolVersion
         if (typeof serverVersion === 'number' && serverVersion !== RUNTIME_PROTOCOL_VERSION) {
           this.onVersionMismatch?.(serverVersion, RUNTIME_PROTOCOL_VERSION)
         }
@@ -206,10 +212,8 @@ class RpcClient {
         this._resolveReady()
         // A fresh socket knows only the URL's base topics; the cards on screen
         // would otherwise go quiet after every network change until scrolled.
-        this.notify('subscribe:set', {
-          ...(this.topics ? { topics: this.topics } : {}),
-          terminalBytes: true
-        })
+        const ask = { ...(this.topics ? { topics: this.topics } : {}), ...this.bytesAsk() }
+        if (Object.keys(ask).length) this.notify('subscribe:set', ask)
         return
       }
 
@@ -309,7 +313,14 @@ class RpcClient {
   /** Replaces the socket's filter now, and again on every reconnect. */
   setTopics(topics: readonly string[]): Promise<void> {
     this.topics = topics
-    return this.invoke('subscribe:set', { topics, terminalBytes: true }).then(() => undefined)
+    return this.invoke('subscribe:set', { topics, ...this.bytesAsk() }).then(() => undefined)
+  }
+
+  /** Frame layout 1 is the one this build reads. */
+  private terminalBytes = false
+
+  private bytesAsk(): { terminalBytes?: true } {
+    return this.terminalBytes ? { terminalBytes: true } : {}
   }
 
   notify(method: string, params?: unknown): void {
@@ -419,9 +430,8 @@ export function createApiShim(wsUrl: string) {
     createShellTerminal: (cwd?: string) => rpc.invoke('shell:create', cwd),
 
     // ── Terminal Events ──
-    onTerminalData: (
-      callback: (event: { id: string; data: string | Uint8Array; seq: number }) => void
-    ) => rpc.on('terminal:data', callback as (p: unknown) => void),
+    onTerminalData: (callback: (event: TerminalData) => void) =>
+      rpc.on('terminal:data', callback as (p: unknown) => void),
     onTerminalBell: (callback: (event: { id: string }) => void) =>
       rpc.on('terminal:bell', callback as (p: unknown) => void),
     onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) =>

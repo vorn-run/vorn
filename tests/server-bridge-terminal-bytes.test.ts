@@ -3,14 +3,7 @@ import { WebSocketServer, type WebSocket as WsSocket } from 'ws'
 import { ServerBridge } from '../src/main/server/server-bridge'
 import { encodeTerminalFrame } from '../packages/shared/src/terminal-frame'
 
-/**
- * The desktop's half of terminal output as bytes.
- *
- * Two things, both on every connection because the choice dies with the
- * socket: the bridge asks for bytes as soon as the server says it can send
- * them, and a binary frame comes out as the same notification a JSON one did,
- * so nothing downstream knows the wire changed.
- */
+// The bridge asks for bytes per connection, of a server that can send them, and hands a frame on as the notification it stands for.
 
 const servers: WebSocketServer[] = []
 const bridges: ServerBridge[] = []
@@ -66,6 +59,17 @@ describe('terminal output as bytes, at the bridge', () => {
       method: 'subscribe:set',
       params: { terminalBytes: true }
     })
+  })
+
+  it('asks for nothing of a frame layout it does not read', async () => {
+    const { socket } = await connect()
+    const received: string[] = []
+    socket.on('message', (raw) => received.push(JSON.parse(raw.toString()).method))
+
+    socket.send(hello({ auth: 1, subscribe: 1, terminalBytes: 2 }))
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(received).not.toContain('subscribe:set')
   })
 
   it('asks for nothing of a server that cannot', async () => {

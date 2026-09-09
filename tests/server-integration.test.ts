@@ -457,7 +457,11 @@ describe('server integration', () => {
         })
       })
       const { clientRegistry } = await import('../packages/server/src/broadcast')
-      clientRegistry.broadcastTerminalData({ id: 'a', data: '\u001b[32mok\u001b[0m', seq: 3 })
+      clientRegistry.broadcast(
+        'terminal:data',
+        { id: 'a', data: '\u001b[32mok\u001b[0m', seq: 3 },
+        'a'
+      )
 
       const received = await frame
       expect(decodeTerminalFrame(received.raw)).toEqual({

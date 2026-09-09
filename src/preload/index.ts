@@ -6,6 +6,7 @@ import {
   type LocalServerNotice
 } from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
+import type { TerminalData } from '@vornrun/shared/protocol'
 import {
   CreateTerminalPayload,
   TerminalSession,
@@ -87,13 +88,8 @@ const api = {
   createShellTerminal: (cwd?: string): Promise<TerminalSession> =>
     ipcRenderer.invoke(IPC.SHELL_CREATE, cwd),
 
-  onTerminalData: (
-    callback: (event: { id: string; data: string | Uint8Array; seq: number }) => void
-  ) => {
-    const listener = (
-      _: Electron.IpcRendererEvent,
-      event: { id: string; data: string | Uint8Array; seq: number }
-    ): void => callback(event)
+  onTerminalData: (callback: (event: TerminalData) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, event: TerminalData): void => callback(event)
     ipcRenderer.on(IPC.TERMINAL_DATA, listener)
     return () => {
       ipcRenderer.removeListener(IPC.TERMINAL_DATA, listener)
