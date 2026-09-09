@@ -6,13 +6,10 @@ import type { ServerRuntimeStatus } from '../../shared/types'
  * Pure and separate from the panel, like `update-status.ts`: this is what somebody
  * reads while working out why a fix they know shipped has not taken effect.
  */
-export interface ServerRuntimeView {
-  description: string
-  /** Whether to offer the button, rather than only report. */
-  offerMove: boolean
-  /** What to show instead of the button. */
-  trailing: string
-}
+/** The button and the trailing note are alternatives, so the type says so. */
+export type ServerRuntimeView =
+  | { description: string; offerMove: true }
+  | { description: string; offerMove: false; trailing: string }
 
 export function describeServerRuntime(status: ServerRuntimeStatus): ServerRuntimeView {
   const last = status.lastUpgrade
@@ -63,10 +60,9 @@ export function describeServerRuntime(status: ServerRuntimeStatus): ServerRuntim
     return {
       description: `${behind}. The last attempt did not take: ${last.why}`,
       // Still offered: nothing was lost, so trying again is free.
-      offerMove: true,
-      trailing: ''
+      offerMove: true
     }
   }
 
-  return { description: `${behind}.${carried}`, offerMove: true, trailing: '' }
+  return { description: `${behind}.${carried}`, offerMove: true }
 }

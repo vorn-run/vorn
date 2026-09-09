@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import type { HandoffRequest, HandoffResult } from '@vornrun/shared/protocol'
+import { createRequest, type HandoffRequest, type HandoffResult } from '@vornrun/shared/protocol'
 import log from '../logger'
 
 /**
@@ -81,7 +81,7 @@ function reply(socket: WebSocket, request: HandoffRequest): Promise<HandoffResul
     // The socket closing before the reply is the handoff having gone wrong on the
     // far side, not having succeeded: a successful one replies first, then exits.
     socket.once('close', () => settle(() => reject(new Error('the connection closed first'))))
-    socket.send(JSON.stringify({ jsonrpc: '2.0', id, method: 'server:handoff', params: request }))
+    socket.send(JSON.stringify(createRequest(id, 'server:handoff', request)))
     log.info('[handoff] asked over a direct socket, without adopting')
   })
 }

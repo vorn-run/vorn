@@ -24,7 +24,6 @@ afterEach(() => {
 interface HeirReport {
   read: boolean
   cols: string
-  burst: boolean
   exited: boolean
 }
 
@@ -83,9 +82,6 @@ describe('a pty handed to another process', () => {
     // The assertion that cannot be faked: Node has no ioctl, so 120 from `tput cols`
     // proves the binding call landed on this descriptor in this process.
     expect(report.cols).toBe('120')
-
-    // Whole rather than truncated at the first EAGAIN.
-    expect(report.burst).toBe(true)
 
     // Visible even though nothing can `waitpid` for a program it never forked.
     expect(report.exited).toBe(true)

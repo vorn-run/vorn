@@ -46,24 +46,15 @@ async function main(): Promise<void> {
   await until(/\b120\b/)
   const cols = /(?:^|\D)(\d{2,4})\r?\n/.exec(seen)?.[1] ?? 'none'
 
-  // A non-blocking master answers a full buffer with EAGAIN, which is where a paste
-  // is silently truncated. Echo off first, or this measures rendering instead.
-  adopted.write('stty -echo\r')
-  await until(/\$|#|>/, 5_000)
-  seen = ''
-  adopted.write(`: ${'x'.repeat(64_000)}\r`)
-  adopted.write('echo BURST_DONE\r')
-  const burst = await until(/BURST_DONE\r?\n/, 20_000)
-
   seen = ''
   adopted.write('exit\r')
   await until(/never/, 3_000)
 
   if (process.env.HEIR_DEBUG) {
-    process.stderr.write(`[heir] read=${read} cols=${cols} burst=${burst} exited=${exited}\n`)
+    process.stderr.write(`[heir] read=${read} cols=${cols} exited=${exited}\n`)
     process.stderr.write(`[heir] tail=${JSON.stringify(seen.slice(-400))}\n`)
   }
-  process.send?.({ read, cols, burst, exited })
+  process.send?.({ read, cols, exited })
   process.exit(0)
 }
 

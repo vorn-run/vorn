@@ -25,8 +25,8 @@ export async function releaseListener(): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()))
 }
 
-/** Only for a handoff that committed and then lost its replacement. */
-export async function retakeListener(): Promise<boolean> {
+/** Listen on `host`, answering whether it worked rather than throwing. */
+async function listenOn(host: string): Promise<boolean> {
   const server = httpServer
   if (!server) return false
   try {
@@ -40,13 +40,18 @@ export async function retakeListener(): Promise<boolean> {
         resolve()
       }
       server.once('error', onError)
-      server.listen(boundPort, currentHost, onListening)
+      server.listen(boundPort, host, onListening)
     })
     return true
   } catch (err) {
-    log.error({ err }, '[server] could not listen again after an abandoned handoff')
+    log.error({ err, host }, '[server] could not listen')
     return false
   }
+}
+
+/** Only for a handoff that committed and then lost its replacement. */
+export async function retakeListener(): Promise<boolean> {
+  return listenOn(currentHost)
 }
 
 /**
@@ -85,27 +90,13 @@ async function doRebind(): Promise<void> {
 
   log.info(`[server] rebinding from ${currentHost} to ${desiredHost}:${boundPort}`)
 
-  try {
-    const server = httpServer
-    if (typeof server.closeAllConnections === 'function') {
-      server.closeAllConnections()
-    }
-    await new Promise<void>((resolve) => server.close(() => resolve()))
-    await new Promise<void>((resolve, reject) => {
-      const onError = (err: unknown) => {
-        server.removeListener('listening', onListening)
-        reject(err)
-      }
-      const onListening = () => {
-        server.removeListener('error', onError)
-        resolve()
-      }
-      server.once('error', onError)
-      server.listen(boundPort, desiredHost, onListening)
-    })
+  // The same two steps a handoff commit and its rollback use, so a change to
+  // either -- a drain timeout, different error handling -- reaches both.
+  await releaseListener()
+  if (await listenOn(desiredHost)) {
     currentHost = desiredHost
     log.info(`[server] rebound successfully to ${desiredHost}:${boundPort}`)
-  } catch (err) {
-    log.error({ err }, '[server] rebind failed')
+  } else {
+    log.error('[server] rebind failed')
   }
 }

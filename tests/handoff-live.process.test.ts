@@ -11,6 +11,7 @@ import {
   type HandoffResult
 } from '@vornrun/shared/protocol'
 import { spawnsRealServers } from './helpers/one-at-a-time'
+import { isPidAlive } from '../packages/server/src/published-files'
 
 /**
  * The whole thing, with two real servers and a real shell.
@@ -242,19 +243,9 @@ describe('a live handoff between two real servers', () => {
 
     // The outgoing server left, and took nothing with it.
     await new Promise((r) => setTimeout(r, 1_000))
-    expect(alive(donor.pid)).toBe(false)
-    expect(alive(session.pid)).toBe(true)
+    expect(isPidAlive(donor.pid as number)).toBe(false)
+    expect(isPidAlive(session.pid)).toBe(true)
 
     second.close()
   }, 180_000)
 })
-
-function alive(pid: number | undefined): boolean {
-  if (!pid) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}

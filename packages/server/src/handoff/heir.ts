@@ -21,9 +21,25 @@ export interface AdoptedPane {
 
 const COMMIT_DEADLINE_MS = 30_000
 
+/**
+ * The handshake channel: `process` in production, a fake under test.
+ *
+ * Injected because the alternative is a test that replaces `process.send` and
+ * removes `process` listeners -- in a runner that uses both to report its own
+ * results.
+ */
+export interface HandoffChannel {
+  send?: (message: unknown) => boolean
+  on(event: string, listener: (...args: unknown[]) => void): unknown
+  off(event: string, listener: (...args: unknown[]) => void): unknown
+}
+
 /** Null means this process must not serve; the outgoing server still has everything. */
-export async function receiveHandoff(source: string): Promise<AdoptedPane[] | null> {
-  if (typeof process.send !== 'function') {
+export async function receiveHandoff(
+  source: string,
+  channel: HandoffChannel = process
+): Promise<AdoptedPane[] | null> {
+  if (typeof channel.send !== 'function') {
     log.error('[handoff] started with --adopt-handoff but no channel to answer on')
     return null
   }
@@ -63,9 +79,9 @@ export async function receiveHandoff(source: string): Promise<AdoptedPane[] | nu
     { panes: panes.length, donor: manifest.donorPid },
     '[handoff] panes taken; waiting for the commit'
   )
-  process.send({ kind: 'imported' })
+  channel.send({ kind: 'imported' })
 
-  const committed = await waitForCommit()
+  const committed = await waitForCommit(channel)
   if (!committed) {
     log.error('[handoff] the outgoing server never committed; standing down')
     return null
@@ -77,15 +93,15 @@ export async function receiveHandoff(source: string): Promise<AdoptedPane[] | nu
   return panes
 }
 
-function waitForCommit(): Promise<boolean> {
+function waitForCommit(channel: HandoffChannel): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false
     const done = (answer: boolean): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      process.off('message', onMessage)
-      process.off('disconnect', onDisconnect)
+      channel.off('message', onMessage)
+      channel.off('disconnect', onDisconnect)
       resolve(answer)
     }
     const onMessage = (msg: unknown): void => {
@@ -95,15 +111,15 @@ function waitForCommit(): Promise<boolean> {
     const onDisconnect = (): void => done(false)
     const timer = setTimeout(() => done(false), COMMIT_DEADLINE_MS)
 
-    process.on('message', onMessage)
-    process.on('disconnect', onDisconnect)
+    channel.on('message', onMessage)
+    channel.on('disconnect', onDisconnect)
   })
 }
 
 /** Tell the outgoing server it may leave. */
-export function announceServing(): void {
+export function announceServing(channel: HandoffChannel = process): void {
   try {
-    process.send?.({ kind: 'serving' })
+    channel.send?.({ kind: 'serving' })
   } catch (err) {
     log.warn({ err }, '[handoff] could not tell the outgoing server we are serving')
   }

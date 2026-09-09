@@ -16,8 +16,13 @@ const base: ServerRuntimeStatus = {
 describe('what the panel says about the running server', () => {
   it('reports a matching build without offering anything', () => {
     const view = describeServerRuntime(base)
-    expect(view.offerMove).toBe(false)
-    expect(view.trailing).toBe('Current')
+    // Asserted whole, because the type pairs the note with "no button" and reading
+    // one without the other is what the union exists to stop.
+    expect(view).toEqual({
+      description: `Vorn 0.8.0, running since before this window opened`,
+      offerMove: false,
+      trailing: 'Current'
+    })
   })
 
   it('names both versions when they differ, and what moving would carry', () => {
@@ -38,6 +43,8 @@ describe('what the panel says about the running server', () => {
     const view = describeServerRuntime({ ...base, serverVersion: '0.7.0', canUpgrade: false })
     expect(view.offerMove).toBe(false)
     expect(view.description).toContain('needs a restart of Vorn')
+    if (view.offerMove) throw new Error('a view that offers nothing must carry a note')
+    expect(view.trailing).toBe('Restart to move')
   })
 
   it('carries the reason a previous attempt failed', () => {

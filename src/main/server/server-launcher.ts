@@ -755,45 +755,58 @@ async function tryAdopt(
 }
 
 /**
- * Ask an unadoptable-but-ours server to hand its terminals to this build.
+ * Ask a server to hand its terminals to a replacement built from this bundle.
  *
- * Answers whether it did. Every failure leaves the incumbent exactly as it was,
- * which is the same guarantee the ordinary path has and for the same reason: the
- * commit boundary is on the far side.
+ * One way to ask, over a socket that needs no adoption. The bridge could carry
+ * this whenever one happens to be open, but then there would be two ways to send
+ * the same request and only one of them would work in the case that matters --
+ * a release that changed the wire format, where there is no bridge at all.
+ *
+ * Owns the `handingOver` latch, so the incumbent's death is expected on both
+ * paths without either remembering to say so.
  */
-async function standAside(target: string, dataDir: string): Promise<boolean> {
-  if (!target.startsWith('ws+unix://')) return false
-  const credential = readLocalToken(dataDir)
-  if (!credential) {
-    log.warn(
-      '[handoff] no credential published, so the older server cannot be asked to stand aside'
-    )
-    return false
-  }
-  const spec = serverProcessSpec()
-  if (!spec) return false
+type AskOutcome = { ok: true; result: HandoffResult } | { ok: false; why: string }
 
+async function requestHandoff(target: string, dataDir: string): Promise<AskOutcome> {
+  if (!target.startsWith('ws+unix://')) {
+    return { ok: false, why: 'the running server was reached by port rather than by name' }
+  }
+  const credential = readLocalToken(dataDir)
+  if (!credential) return { ok: false, why: 'the running server published no credential' }
+  const spec = serverProcessSpec()
+  if (!spec) return { ok: false, why: 'this app cannot describe how to start a server' }
+
+  handingOver = true
   try {
-    handingOver = true
     const result = await askForHandoff(
       target,
       credential,
       buildHandoffRequest({ ...spec, appVersion: app.getVersion() })
     )
-    if (result.kind === 'declined') {
-      log.warn(`[handoff] the older server declined to stand aside: ${result.because}`)
-      return false
-    }
-    log.info(`[handoff] ${result.sessions} terminal(s) moved off the older protocol`)
-    return true
+    return { ok: true, result }
   } catch (err) {
-    log.warn(`[handoff] could not ask the older server to stand aside: ${(err as Error).message}`)
-    return false
+    return { ok: false, why: (err as Error).message }
   } finally {
+    // Held past the request so the disconnect it causes is covered.
     setTimeout(() => {
       handingOver = false
     }, HANDOFF_SETTLE_MS)
   }
+}
+
+/** Whether an unadoptable-but-ours server gave up its terminals. */
+async function standAside(target: string, dataDir: string): Promise<boolean> {
+  const outcome = await requestHandoff(target, dataDir)
+  if (!outcome.ok) {
+    log.warn(`[handoff] could not ask the older server to stand aside: ${outcome.why}`)
+    return false
+  }
+  if (outcome.result.kind === 'declined') {
+    log.warn(`[handoff] the older server declined to stand aside: ${outcome.result.because}`)
+    return false
+  }
+  log.info(`[handoff] ${outcome.result.sessions} terminal(s) moved off the older protocol`)
+  return true
 }
 
 /** The replacement needs a moment to claim the name the old server just released. */
@@ -1186,7 +1199,7 @@ export type UpgradeOutcome =
  * Nothing here kills anything; the commit boundary in `handoff/donor.ts` guarantees it.
  */
 export async function upgradeServerInPlace(forced = false): Promise<UpgradeOutcome> {
-  if (!bridge || !adoptedIdentity || !adoptedTarget) {
+  if (!adoptedIdentity || !adoptedTarget) {
     // This app spawned its own server, so it is already this build.
     return { kind: 'not-needed', why: 'this app started the server it is talking to' }
   }
@@ -1203,42 +1216,23 @@ export async function upgradeServerInPlace(forced = false): Promise<UpgradeOutco
     return { kind: 'not-needed', why: verdict.why }
   }
 
-  const spec = serverProcessSpec()
-  if (!spec) return { kind: 'failed', why: 'this app cannot describe how to start a server' }
-
   log.info(`[handoff] asking the running server to hand over: ${verdict.why}`)
-  handingOver = true
-  try {
-    const result = (await bridge.request(
-      'server:handoff',
-      buildHandoffRequest({ ...spec, appVersion: app.getVersion() }),
-      HANDOFF_TIMEOUT_MS
-    )) as HandoffResult
-
-    if (result.kind === 'declined') {
-      log.warn(`[handoff] the running server declined: ${result.because}`)
-      return { kind: 'failed', why: result.because }
-    }
-
-    // Recorded before the disconnect arrives, so the reconnect finds a live pid.
-    adoptedPid = result.pid
-    adoptedIdentity = { ...adoptedIdentity, appVersion: app.getVersion(), pid: result.pid }
-    log.info(`[handoff] ${result.sessions} terminal(s) moved to pid ${result.pid}`)
-    return { kind: 'handed-over', sessions: result.sessions }
-  } catch (err) {
-    const why = err instanceof Error ? err.message : String(err)
-    log.error(`[handoff] the request failed: ${why}`)
-    return { kind: 'failed', why }
-  } finally {
-    // Held past the request so the disconnect it causes is covered.
-    setTimeout(() => {
-      handingOver = false
-    }, HANDOFF_SETTLE_MS)
+  const outcome = await requestHandoff(adoptedTarget, resolveDataDir())
+  if (!outcome.ok) {
+    log.error(`[handoff] the request failed: ${outcome.why}`)
+    return { kind: 'failed', why: outcome.why }
   }
-}
+  if (outcome.result.kind === 'declined') {
+    log.warn(`[handoff] the running server declined: ${outcome.result.because}`)
+    return { kind: 'failed', why: outcome.result.because }
+  }
 
-/** Long: the far side checkpoints every screen and starts a server before it answers. */
-const HANDOFF_TIMEOUT_MS = 90_000
+  // Recorded before the disconnect arrives, so the reconnect finds a live pid.
+  adoptedPid = outcome.result.pid
+  adoptedIdentity = { ...adoptedIdentity, appVersion: app.getVersion(), pid: outcome.result.pid }
+  log.info(`[handoff] ${outcome.result.sessions} terminal(s) moved to pid ${outcome.result.pid}`)
+  return { kind: 'handed-over', sessions: outcome.result.sessions }
+}
 
 /** How long the incumbent's death stays expected after a successful handoff. */
 const HANDOFF_SETTLE_MS = 30_000

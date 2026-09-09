@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { AppConfig, UpdateStatus } from '../src/shared/types'
+import type { AppConfig, UpdateStatus, ServerRuntimeStatus } from '../src/shared/types'
 
 const mockStore = {
   config: null as AppConfig | null,
@@ -23,6 +23,23 @@ const checkForUpdates = vi.fn()
 const setUpdateChannel = vi.fn()
 const setUpdateAutoDownload = vi.fn()
 const saveConfig = vi.fn()
+const upgradeServer = vi.fn(async () => runtimeStatus)
+
+/**
+ * Which build is holding the terminals.
+ *
+ * The server outlives the app, so after an update these are briefly different
+ * builds — and the panel is where somebody looks to find that out.
+ */
+let runtimeStatus: ServerRuntimeStatus = {
+  serverVersion: '0.6.0-beta.4',
+  appVersion: '0.6.0-beta.4',
+  serverPid: 4242,
+  adopted: true,
+  canUpgrade: false,
+  sessions: null,
+  lastUpgrade: null
+}
 
 Object.defineProperty(window, 'api', {
   value: {
@@ -32,7 +49,10 @@ Object.defineProperty(window, 'api', {
     setUpdateChannel,
     setUpdateAutoDownload,
     saveConfig,
-    getAppVersion: () => '0.6.0-beta.4'
+    getAppVersion: () => '0.6.0-beta.4',
+    getServerRuntimeStatus: () => runtimeStatus,
+    onServerRuntimeStatus: () => () => {},
+    upgradeServer
   },
   writable: true
 })
@@ -238,5 +258,49 @@ describe('sessions that have already ended', () => {
     ])
     render(<UpdatesSettings />)
     expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()
+  })
+})
+
+describe('which build is serving', () => {
+  beforeEach(() => {
+    mockStore.config = makeConfig()
+    upgradeServer.mockClear()
+    runtimeStatus = {
+      serverVersion: '0.6.0-beta.4',
+      appVersion: '0.6.0-beta.4',
+      serverPid: 4242,
+      adopted: true,
+      canUpgrade: false,
+      sessions: null,
+      lastUpgrade: null
+    }
+  })
+
+  it('names the server beside the app, even when they agree', () => {
+    render(<UpdatesSettings />)
+    // Always shown: a row that appears only when something is wrong is one
+    // nobody knows exists, and this is the question the panel gets opened for.
+    expect(screen.getByText('Terminal server')).toBeInTheDocument()
+    expect(screen.getByText('Current')).toBeInTheDocument()
+  })
+
+  it('offers to move a server left behind by an older build', () => {
+    runtimeStatus = { ...runtimeStatus, serverVersion: '0.5.0', canUpgrade: true, sessions: 2 }
+    render(<UpdatesSettings />)
+
+    expect(screen.getByText(/0\.5\.0 is still holding your terminals/)).toBeInTheDocument()
+    // The reassurance is the number: "moving" reads as destructive without it.
+    expect(screen.getByText(/2 terminals across without stopping them/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Move to this build' }))
+    expect(upgradeServer).toHaveBeenCalled()
+  })
+
+  it('says why it cannot move one rather than showing a dead button', () => {
+    runtimeStatus = { ...runtimeStatus, serverVersion: '0.5.0', canUpgrade: false }
+    render(<UpdatesSettings />)
+
+    expect(screen.getByText(/needs a restart of Vorn/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Move to this build' })).not.toBeInTheDocument()
+    expect(screen.getByText('Restart to move')).toBeInTheDocument()
   })
 })

@@ -138,10 +138,6 @@ const handlers = new Map<string, Handler>()
  */
 const localOnly = new Set<string>(['server:handoff'])
 
-export function requireLocalEndpoint(method: string): void {
-  localOnly.add(method)
-}
-
 registerCapability('auth', 1)
 
 // Declared so a client knows the server will honour a topic list before it sends
