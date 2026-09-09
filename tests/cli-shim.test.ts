@@ -70,6 +70,10 @@ describe('the vorn command the app writes', () => {
     expect(script).toContain('if "%~1"=="" (')
     expect(script).toContain('set "ELECTRON_RUN_AS_NODE=1"')
     expect(script).toContain('%*')
+    // Written from a Mac in this test, and still a Windows path.
+    expect(script).toContain('\\resources\\server\\cli.cjs')
+    expect(script).not.toContain('/resources/')
+    expect(script.split('\n').every((line) => line === '' || line.endsWith('\r'))).toBe(true)
   })
 })
 

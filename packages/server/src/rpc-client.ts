@@ -94,19 +94,21 @@ const IS_WIN = process.platform === 'win32'
 // under ~/.vorn, and a fix-it line pointing at the wrong path is worse than none.
 function portFileMissingMessage(): string {
   const file = portFile()
+  // Quoted paths and, on Windows, PowerShell -- the line above it already sends
+  // you there, and `echo {...} > file` is not a thing PowerShell will do for you.
   return IS_WIN
     ? `Vorn port file not found (${file}).
 The app may be running but the port file was deleted (e.g. by another instance shutting down).
-To fix, find the Vorn process and its listening port:
-  powershell -c "Get-NetTCPConnection -State Listen -OwningProcess (Get-Process Vorn).Id | Select LocalPort"
+To fix, in PowerShell, find the Vorn process and its listening port:
+  Get-NetTCPConnection -State Listen -OwningProcess (Get-Process Vorn).Id | Select LocalPort
 Then write the WS port to the file:
-  echo {"port":<PORT>,"pid":<PID>} > ${file}
+  '{"port":<PORT>,"pid":<PID>}' | Set-Content -Path "${file}"
 Or restart Vorn to regenerate it.`
     : `Vorn port file not found (${file}).
 The app may be running but the port file was deleted (e.g. by another instance shutting down).
 To fix, run:  lsof -iTCP -sTCP:LISTEN -P | grep Vorn
 Then write the WS port (the one on *:<port>) to the file:
-  echo '{"port":<PORT>,"pid":<PID>}' > ${file}
+  echo '{"port":<PORT>,"pid":<PID>}' > "${file}"
 Or restart Vorn to regenerate it.`
 }
 
@@ -114,7 +116,7 @@ function portFileInvalidMessage(): string {
   const file = portFile()
   return `Vorn port file exists but contains invalid data (${file}).
 Delete it and restart Vorn, or overwrite it with the correct port:
-  ${IS_WIN ? `del ${file}` : `rm ${file}`}`
+  ${IS_WIN ? `Remove-Item "${file}"` : `rm "${file}"`}`
 }
 
 /**

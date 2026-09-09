@@ -79,6 +79,10 @@ export interface ShimPaths {
  */
 export function shimScript(paths: ShimPaths, platform: NodeJS.Platform = process.platform): string {
   if (platform === 'win32') {
+    // `path.win32`, not `path` -- this script may be written from a machine that
+    // is not Windows, and a batch file with forward slashes in it is a bug.
+    const inResources = (...parts: string[]): string => path.win32.join(paths.resources, ...parts)
+
     return [
       '@echo off',
       'setlocal',
@@ -87,9 +91,9 @@ export function shimScript(paths: ShimPaths, platform: NodeJS.Platform = process
       '  exit /b',
       ')',
       'set "ELECTRON_RUN_AS_NODE=1"',
-      `set "VORN_NATIVE_MODULES_PATH=${path.join(paths.resources, 'app.asar.unpacked', 'node_modules')}"`,
-      `set "NODE_PATH=${path.join(paths.resources, 'app.asar', 'node_modules')};%VORN_NATIVE_MODULES_PATH%"`,
-      `"${paths.exe}" "${path.join(paths.resources, 'server', 'cli.cjs')}" %*`,
+      `set "VORN_NATIVE_MODULES_PATH=${inResources('app.asar.unpacked', 'node_modules')}"`,
+      `set "NODE_PATH=${inResources('app.asar', 'node_modules')};%VORN_NATIVE_MODULES_PATH%"`,
+      `"${paths.exe}" "${inResources('server', 'cli.cjs')}" %*`,
       ''
     ].join('\r\n')
   }
