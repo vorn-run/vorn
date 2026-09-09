@@ -639,7 +639,10 @@ class PtyManager extends EventEmitter {
     return this.extensionPtys.has(id)
   }
 
+  /** How long a stream is held so its many small reads go out as one flush. */
   private static readonly BUFFER_FLUSH_MS = 8
+  /** A read this small after a quiet spell is a keystroke's echo; a TUI's repaint is never this small. */
+  private static readonly ECHO_MAX_BYTES = 64
 
   /**
    * Put bytes into a session's output as though the process had written them.
@@ -665,13 +668,25 @@ class PtyManager extends EventEmitter {
   private bufferData(id: string, data: string): void {
     const existing = this.dataBuffers.get(id)
     this.dataBuffers.set(id, existing ? existing + data : data)
+    // A pending timer means a stream is in flight, and this read joins it.
+    if (this.flushTimers.has(id)) return
 
-    if (!this.flushTimers.has(id)) {
-      this.flushTimers.set(
-        id,
-        setTimeout(() => this.flushBuffer(id), PtyManager.BUFFER_FLUSH_MS)
-      )
-    }
+    // An echo held for company that never comes is what a keystroke feels as lag.
+    if (!existing && Buffer.byteLength(data) <= PtyManager.ECHO_MAX_BYTES) this.flushBuffer(id)
+    this.armFlush(id)
+  }
+
+  /** The hold, re-armed while a stream keeps coming so quiet is the timer lapsing with nothing to send. */
+  private armFlush(id: string): void {
+    this.flushTimers.set(
+      id,
+      setTimeout(() => {
+        this.flushTimers.delete(id)
+        if (!this.dataBuffers.has(id)) return
+        this.flushBuffer(id)
+        this.armFlush(id)
+      }, PtyManager.BUFFER_FLUSH_MS)
+    )
   }
 
   /**
@@ -699,7 +714,6 @@ class PtyManager extends EventEmitter {
   private flushBuffer(id: string): void {
     const data = this.dataBuffers.get(id)
     this.dataBuffers.delete(id)
-    this.flushTimers.delete(id)
     if (data) {
       const seq = this.lastFlushSeq(id) + 1
       this.flushSeq.set(id, seq)
@@ -753,6 +767,8 @@ class PtyManager extends EventEmitter {
   private drainBuffer(id: string): void {
     const timer = this.flushTimers.get(id)
     if (timer) clearTimeout(timer)
+    // Forgotten as well as cleared: a timer left in the map reads as a stream in flight, and every read after it would wait for a flush that never comes.
+    this.flushTimers.delete(id)
     this.flushBuffer(id)
   }
 

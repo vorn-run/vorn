@@ -168,14 +168,7 @@ function createAgent(overrides: Partial<CreateTerminalPayload> = {}): {
 
 const ESC = '\x1b'
 
-/**
- * Wait for the output coalescer.
- *
- * `emitData` only buffers; `flushBuffer` runs on an 8 ms timer and that is where
- * the screen is fed. An assertion made straight after `emitData` is made before
- * anything under test has happened -- which is how the first version of these
- * passed against a `pty-manager` deliberately rigged to write replies back.
- */
+// Past the 8 ms hold and its re-arm: a small first read goes out at once, everything else waits for this.
 const afterFlush = (): Promise<void> => new Promise((r) => setTimeout(r, 40))
 
 beforeEach(() => {
@@ -320,12 +313,98 @@ describe('the terminal is recorded where it is fed', () => {
     // frames written after it, and a restore counted them twice.
     resetScrollback()
     const { session, fake } = createAgent()
+    // The first read after a quiet spell goes out at once; the second is held for the flush.
+    fake.emitData('went out at once')
     fake.emitData('printed but not yet flushed')
 
-    expect(readScrollback(session.id), 'the buffer saw it before the model did').toBe('')
+    expect(readScrollback(session.id), 'the buffer saw it before the model did').not.toContain(
+      'printed but not yet flushed'
+    )
 
     await afterFlush()
     expect(readScrollback(session.id)).toContain('printed but not yet flushed')
+  })
+
+  // What a keystroke feels: its echo is one small read after a quiet spell, and it must not wait.
+  describe('how soon output goes out', () => {
+    function flushesOf(id: string): string[] {
+      const seen: string[] = []
+      const listener = (channel: string, payload: unknown): void => {
+        const p = payload as { id: string; data: string }
+        if (channel === 'terminal:data' && p.id === id) seen.push(p.data)
+      }
+      ptyManager.on('client-message', listener)
+      listeners.push(listener)
+      return seen
+    }
+    const listeners: Array<(channel: string, payload: unknown) => void> = []
+    afterEach(() => {
+      for (const l of listeners) ptyManager.off('client-message', l)
+      listeners.length = 0
+    })
+
+    it('sends a small first read after a quiet spell at once', () => {
+      const { session, fake } = createAgent()
+      const seen = flushesOf(session.id)
+
+      fake.emitData('k')
+
+      expect(seen).toEqual(['k'])
+    })
+
+    it('holds a large first read: a repaint is not an echo', async () => {
+      // A TUI clears and redraws in reads far bigger than a keystroke; sent alone, the clear
+      // would paint a blank frame before the body arrived.
+      const { session, fake } = createAgent()
+      const seen = flushesOf(session.id)
+      const clear = `${ESC}[2J${ESC}[H` + 'x'.repeat(200)
+
+      fake.emitData(clear)
+      fake.emitData('the rest of the frame')
+      expect(seen).toEqual([])
+
+      await afterFlush()
+      expect(seen).toEqual([clear + 'the rest of the frame'])
+    })
+
+    it('holds what follows within the hold, and sends it as one flush', async () => {
+      const { session, fake } = createAgent()
+      const seen = flushesOf(session.id)
+
+      fake.emitData('line 1\n')
+      fake.emitData('line 2\n')
+      fake.emitData('line 3\n')
+      expect(seen).toEqual(['line 1\n'])
+
+      await afterFlush()
+      expect(seen).toEqual(['line 1\n', 'line 2\nline 3\n'])
+    })
+
+    it('is quick again after a resume drained what was held', async () => {
+      // `releaseForResume` drains mid-stream; the timer must go with the drain, or the next
+      // read would wait for a flush nothing is going to schedule.
+      const { session, fake } = createAgent()
+      const seen = flushesOf(session.id)
+
+      fake.emitData('a')
+      fake.emitData('b')
+      ptyManager.releaseForResume(session.id)
+      fake.emitData('c')
+
+      expect(seen).toEqual(['a', 'b', 'c'])
+    })
+
+    it('is quick again once the stream has gone quiet', async () => {
+      const { session, fake } = createAgent()
+      const seen = flushesOf(session.id)
+
+      fake.emitData('a')
+      fake.emitData('b')
+      await afterFlush()
+      fake.emitData('c')
+
+      expect(seen).toEqual(['a', 'b', 'c'])
+    })
   })
 
   it('opens a log when a terminal is spawned', async () => {
@@ -351,16 +430,19 @@ describe('the terminal is recorded where it is fed', () => {
   })
 
   it('records once per flush rather than once per chunk', async () => {
-    // The reason the call sits in `flushBuffer` and not in `onData`. Thirty
-    // keystrokes are one frame, not thirty -- and it is what keeps the byte
-    // buffer and the screen model seeing the same bytes at the same moment.
+    // The reason the call sits in `flushBuffer` and not in `onData`: a small first read goes out
+    // alone, and the twenty-nine that follow are one frame, not twenty-nine -- one flush more per
+    // burst than before, taken so that a keystroke's echo never waits.
     const { session, fake } = createAgent()
     for (let i = 0; i < 30; i++) fake.emitData('x')
     await afterFlush()
     await settled()
 
     const output = framesFor(session.id).filter((f) => f.kind === 'output')
-    expect(output).toEqual([{ kind: 'output', data: 'x'.repeat(30) }])
+    expect(output).toEqual([
+      { kind: 'output', data: 'x' },
+      { kind: 'output', data: 'x'.repeat(29) }
+    ])
   })
 
   it('takes the history with the terminal when it is killed', async () => {

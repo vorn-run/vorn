@@ -157,7 +157,6 @@ describe('what the seed already contains', () => {
 
     const hydrating = open()
     emit({ id: ID, data: 'already in the seed', seq: 5 })
-    await frame()
     answer({ data: 'THE SEED', seq: 5, live: true })
     await hydrating
 
@@ -171,7 +170,6 @@ describe('what the seed already contains', () => {
     const hydrating = open()
     emit({ id: ID, data: 'in the seed', seq: 5 })
     emit({ id: ID, data: 'after the seed', seq: 6 })
-    await frame()
     answer({ data: 'THE SEED', seq: 5, live: true })
     await hydrating
 
@@ -190,13 +188,10 @@ describe('what the seed already contains', () => {
     ] as const) {
       emit({ id: ID, data, seq })
     }
-    await frame()
     answer({ data: 'THE SEED', seq: 5, live: true })
     await hydrating
 
-    // One write, not three. xterm queues a task per call, and the held chunks
-    // are already in order -- joining them is the same bytes at a third of the
-    // scheduling.
+    // Held text is joined: the same bytes in one write.
     expect(writes()).toEqual(['THE SEED', 'firstsecondthird'])
   })
 })
@@ -241,7 +236,6 @@ describe('a seed that never arrives', () => {
 
     const hydrating = open()
     emit({ id: ID, data: 'happened anyway', seq: 2 })
-    await frame()
     await hydrating
     quiet.mockRestore()
 
@@ -260,7 +254,6 @@ describe('a chunk whose sequence cannot be compared', () => {
 
     const hydrating = open()
     emit({ id: ID, data: 'no sequence on this', seq: undefined as unknown as number })
-    await frame()
     answer({ data: 'THE SEED', seq: 5, live: true })
     await hydrating
 
@@ -300,8 +293,8 @@ describe('output that arrives as bytes', () => {
 
     emit({ id: ID, data: bytes('ab'), seq: 1 })
     emit({ id: ID, data: bytes('cd'), seq: 2 })
-    await frame()
 
+    // No wait: live output that sat until a frame would pass with one, and that is the regression this pins.
     expect(written()).toEqual(['bytes:ab', 'bytes:cd'])
   })
 
@@ -312,21 +305,19 @@ describe('output that arrives as bytes', () => {
 
     emit({ id: ID, data: bytes('live-1'), seq: 2 })
     emit({ id: ID, data: bytes('live-2'), seq: 3 })
-    await frame()
     seed({ data: 'seed', seq: 1, live: true })
     await hydrated
 
     expect(written()).toEqual(['text:seed', 'bytes:live-1', 'bytes:live-2'])
   })
 
-  it('still joins text from a server that sends it', async () => {
+  it('writes text from a server that sends it as it came', async () => {
     attachTerminal.mockResolvedValue({ data: '', seq: 0, live: true })
     await open()
 
     emit({ id: ID, data: 'plain', seq: 1 })
     emit({ id: ID, data: ' text', seq: 2 })
-    await frame()
 
-    expect(written()).toEqual(['text:plain text'])
+    expect(written()).toEqual(['text:plain', 'text: text'])
   })
 })
