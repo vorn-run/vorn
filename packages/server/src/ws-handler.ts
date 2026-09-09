@@ -144,8 +144,7 @@ registerCapability('auth', 1)
 // one. Without the check, an older server silently drops `subscribe:set` and the
 // client believes it is filtered while receiving everything.
 registerCapability('subscribe', 1)
-// Terminal output as bytes, for a client that asks. A JSON string carries every
-// escape as six characters and costs both ends an encode the emulator undoes.
+// Terminal output as frames of bytes, for a socket that asks; the number is the frame layout.
 registerCapability('terminalBytes', 1)
 
 /**
@@ -370,7 +369,9 @@ export function handleConnection(
     // Counting that would let a user blocked by a leftover reset its clock on
     // every launch attempt, so the leftover never leaves and the launches never
     // stop being blocked.
-    if (session && method !== 'bridge:identify') clientRegistry.touch()
+    // Nor `subscribe:set`: the bridge sends it on every hello, adoption probes included.
+    if (session && method !== 'bridge:identify' && method !== 'subscribe:set')
+      clientRegistry.touch()
 
     // Everything below this line requires an authenticated socket. The one
     // exception is the credential itself.

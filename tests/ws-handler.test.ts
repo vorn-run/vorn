@@ -627,6 +627,17 @@ describe('narrowing what a socket receives', () => {
     expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, undefined, true)
   })
 
+  it('does not count asking for bytes as activity', () => {
+    // The bridge asks on every hello, adoption probes included; counting it would keep a leftover server alive.
+    const ws = createMockWs()
+    connectAuthed(ws)
+    vi.mocked(clientRegistry.touch).mockClear()
+
+    sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { terminalBytes: true } })
+
+    expect(clientRegistry.touch).not.toHaveBeenCalled()
+  })
+
   it('acknowledges when asked with an id', async () => {
     const ws = createMockWs()
     connectAuthed(ws)
