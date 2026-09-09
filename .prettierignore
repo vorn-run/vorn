@@ -10,3 +10,6 @@ yarn.lock
 src/renderer/lib/completion-index/names.json
 src/renderer/lib/completion-index/outlines/
 src/renderer/lib/completion-index/LICENSE
+
+# Google Search Console reads this byte for byte.
+website/google21afb44e7186463c.html
