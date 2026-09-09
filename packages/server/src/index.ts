@@ -61,6 +61,7 @@ import { getGitBranch, getGitHead } from './git-utils'
 import { sessionManager } from './session-persistence'
 import { headlessManager } from './headless-manager'
 import { scheduler } from './scheduler'
+import { resumeRunsAfterStart } from './workflows/resume'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
 import { redeemCode, pollRequest, pendingRequests } from './pairing'
 import { getTailscaleStatus } from './tailscale'
@@ -406,6 +407,8 @@ export async function startServer(
   // Connects the rung-none packs installed before installing meant connecting.
   reconcileImplicitConnections()
   scheduler.startInboxWorker()
+  // After the methods, because picking a run back up uses them.
+  void resumeRunsAfterStart()
 
   // Server shutdown method (callable from clients)
   registerMethod('server:shutdown', async () => {

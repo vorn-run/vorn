@@ -415,7 +415,11 @@ function resolveTaskContext(task: TaskConfig, fallbackBranch?: string, fallbackW
 
 function persistExecution(execution: WorkflowExecution): void {
   publishRun(execution)
-  api.saveWorkflowRun(execution)
+  // Not awaited -- the walk does not wait on a write -- but caught: this
+  // process holds every live PTY, and an unhandled rejection would end it.
+  void api
+    .saveWorkflowRun(execution)
+    .catch((err) => log.warn({ err, runId: execution.runId }, '[workflow] could not save a run'))
 }
 
 /** Resolved step ceiling: the node's own value, else the configured default. 0 disables. */
@@ -973,7 +977,11 @@ async function executeNode(
         lastPersistedBytes = logs.length
         // Only persist; the in-memory store was already updated by the
         // listener so the editor UI is up to date already.
-        void api.saveWorkflowRun(execution)
+        void api
+          .saveWorkflowRun(execution)
+          .catch((err) =>
+            log.warn({ err, runId: execution.runId }, '[workflow] could not save a run')
+          )
       }, PERSIST_INTERVAL_MS)
     }
 

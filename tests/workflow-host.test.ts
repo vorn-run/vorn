@@ -61,7 +61,8 @@ import {
   nextTask,
   onHeadlessData,
   onHeadlessExit,
-  onScriptData
+  onScriptData,
+  publishRun
 } from '../packages/server/src/workflows/host'
 
 /**
@@ -131,15 +132,61 @@ describe('what the engine asks the server for', () => {
     expect(callMethod.mock.calls.map((call) => call[0])).toEqual(calls.map((call) => call[0]))
   })
 
-  it('saves a run and tells whoever is watching, in that order', async () => {
-    const execution = { runId: 'run-1', workflowId: 'wf-1' }
+  it('writes a run without also announcing it', async () => {
+    // Announcing is `publishRun`, which the engine calls at the points a
+    // viewer cares about — including ones where nothing is saved. Doing both
+    // here sent every node transition out twice.
+    const execution = { runId: 'run-1', workflowId: 'wf-1', status: 'running', nodeStates: [] }
     await api.saveWorkflowRun(execution as never)
 
     expect(callMethod).toHaveBeenCalledWith('workflowRun:save', execution)
-    expect(broadcast).toHaveBeenCalledWith(IPC.WORKFLOW_RUN_UPDATED, execution)
-    expect(callMethod.mock.invocationCallOrder[0]).toBeLessThan(
-      broadcast.mock.invocationCallOrder[0]
-    )
+    expect(broadcast).not.toHaveBeenCalled()
+  })
+})
+
+describe('how often a run says something', () => {
+  it('says so at once when a step moves', () => {
+    const running = (nodeStatus: string): unknown => ({
+      runId: 'run-2',
+      workflowId: 'wf-1',
+      status: 'running',
+      nodeStates: [{ nodeId: 'a', status: nodeStatus }]
+    })
+
+    publishRun(running('pending') as never)
+    publishRun(running('running') as never)
+    publishRun(running('success') as never)
+
+    expect(broadcast).toHaveBeenCalledTimes(3)
+  })
+
+  it('holds back output that changes nothing a viewer draws', () => {
+    const chunk = (): unknown => ({
+      runId: 'run-3',
+      workflowId: 'wf-1',
+      status: 'running',
+      nodeStates: [{ nodeId: 'a', status: 'running', logs: 'a line' }]
+    })
+
+    publishRun(chunk() as never)
+    publishRun(chunk() as never)
+    publishRun(chunk() as never)
+
+    expect(broadcast).toHaveBeenCalledTimes(1)
+  })
+
+  it('always sends the end of a run, however quiet it was', () => {
+    const run = (status: string): unknown => ({
+      runId: 'run-4',
+      workflowId: 'wf-1',
+      status,
+      nodeStates: [{ nodeId: 'a', status: 'running' }]
+    })
+
+    publishRun(run('running') as never)
+    publishRun(run('success') as never)
+
+    expect(broadcast).toHaveBeenCalledTimes(2)
   })
 })
 

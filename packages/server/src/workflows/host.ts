@@ -41,10 +41,10 @@ export const api = {
   renewConnectorInbox: (params: { id: number; leaseToken: string }): Promise<boolean> =>
     callMethod('connector:inboxRenew', params),
 
-  saveWorkflowRun: async (execution: WorkflowExecution): Promise<void> => {
-    await callMethod('workflowRun:save', execution)
-    publishRun(execution)
-  },
+  // Writes only. Telling clients is `publishRun`, which the engine calls at the
+  // points a viewer cares about -- including ones where nothing is saved.
+  saveWorkflowRun: (execution: WorkflowExecution): Promise<void> =>
+    callMethod('workflowRun:save', execution),
 
   listSessionEventsBySession: (sessionId: string, limit?: number): Promise<SessionEvent[]> =>
     callMethod('sessionEvent:listBySession', { sessionId, limit }),
@@ -122,14 +122,38 @@ export const api = {
     callMethod('git:removeWorktree', { projectPath, worktreePath, force })
 }
 
+/** How often a run that is only producing output says so. */
+const LOG_ONLY_INTERVAL_MS = 3_000
+
+const lastPublished = new Map<string, { at: number; shape: string }>()
+
+/** Which steps a run is on, which is what a viewer redraws for. */
+function shapeOf(execution: WorkflowExecution): string {
+  return `${execution.status}|${execution.nodeStates.map((ns) => `${ns.nodeId}:${ns.status}`).join(',')}`
+}
+
 /**
  * Run progress, sent to whoever is watching.
  *
  * Nothing carried run state before this: a second window learned what a run was
  * doing by re-reading the database. With the run happening here and the windows
  * watching, that is the wrong way round.
+ *
+ * A step moving goes out at once. Output alone goes out at most every few
+ * seconds, because it arrives a chunk at a time and the run carries its logs --
+ * a chatty agent would otherwise push a hundred kilobytes down a phone's socket
+ * on every line it printed.
  */
 export function publishRun(execution: WorkflowExecution): void {
+  const shape = shapeOf(execution)
+  const previous = lastPublished.get(execution.runId)
+  const now = Date.now()
+
+  if (previous && previous.shape === shape && now - previous.at < LOG_ONLY_INTERVAL_MS) return
+
+  if (execution.status === 'running') lastPublished.set(execution.runId, { at: now, shape })
+  else lastPublished.delete(execution.runId)
+
   clientRegistry.broadcast(IPC.WORKFLOW_RUN_UPDATED, execution)
 }
 
