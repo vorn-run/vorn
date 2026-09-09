@@ -113,10 +113,11 @@ SHIM
 
     mkdir -p "$BIN_DIR" "$LIB_DIR"
 
-    # Earlier installs put the AppImage itself here. It moves to make room for
-    # the command, which launches the app when given nothing to do.
+    # Earlier installs put the AppImage itself here. The new one is downloaded
+    # to LIB_DIR below, so the old file is removed rather than moved -- said
+    # plainly, because a message about moving would send you looking for it.
     if [ -f "${BIN_DIR}/vorn" ] && [ ! -f "${LIB_DIR}/${APP_NAME}.AppImage" ]; then
-      echo "Moving the app out of ${BIN_DIR} to make room for the vorn command..."
+      echo "Removing the old AppImage at ${BIN_DIR}/vorn; the app now lives in ${LIB_DIR}."
       rm -f "${BIN_DIR}/vorn"
     fi
 

@@ -153,6 +153,31 @@ describe('session list', () => {
     expect(io.out()).toContain('12 turns')
   })
 
+  it('turns a project name into the directory recent sessions are filtered by', async () => {
+    const { transport, calls } = fakeRpc({
+      'config:load': () => ({
+        projects: [{ name: 'website', path: '/repo/website', preferredAgents: [] }]
+      }),
+      'sessions:getRecent': () => []
+    })
+    const io = capture(transport)
+
+    expect(await runCli(['session', 'list', '--recent', '--project', 'website'], io)).toBe(0)
+    expect(calls.at(-1)).toEqual({
+      method: 'sessions:getRecent',
+      params: '/repo/website',
+      timeoutMs: undefined
+    })
+  })
+
+  it('says which project it does not know rather than listing everything', async () => {
+    const { transport } = fakeRpc({ 'config:load': () => ({ projects: [] }) })
+    const io = capture(transport)
+
+    expect(await runCli(['session', 'list', '--recent', '--project', 'nope'], io)).toBe(1)
+    expect(io.err()).toContain('no project named "nope"')
+  })
+
   it('says so when nothing recent is kept either', async () => {
     const { transport } = fakeRpc({ 'sessions:getRecent': () => [] })
     const io = capture(transport)

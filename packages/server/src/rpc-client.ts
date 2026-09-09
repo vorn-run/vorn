@@ -4,6 +4,8 @@ import os from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { WebSocket } from 'ws'
 import {
+  CLOSE_CREDENTIAL_REJECTED,
+  CLOSE_UNAUTHENTICATED,
   LOCAL_TOKEN_FILENAME,
   WS_PORT_FILENAME,
   type RequestMethods,
@@ -106,6 +108,25 @@ Or restart Vorn to regenerate it.`
 const PORT_FILE_INVALID_MSG = `Vorn port file exists but contains invalid data (~/.vorn/ws-port).
 Delete it and restart Vorn, or overwrite it with the correct port:
   ${IS_WIN ? 'del %USERPROFILE%\\.vorn\\ws-port' : 'rm ~/.vorn/ws-port'}`
+
+/**
+ * A socket that closed before the call was answered.
+ *
+ * Worth its own message, because the honest reading of a refused credential is
+ * not "the server is slow". A second Vorn server on the same port -- a dev build
+ * bound to loopback while the app holds the wildcard address -- takes the
+ * connection and rejects a credential minted for the other one's data directory.
+ * Without this the call sat until the timeout and blamed the wrong thing.
+ */
+function closedBeforeAnswering(code: number): string {
+  if (code === CLOSE_UNAUTHENTICATED || code === CLOSE_CREDENTIAL_REJECTED) {
+    return `A Vorn server on this port refused the credential in ${localTokenFile()}.
+Another server is listening on it with its own data directory, which a dev build
+running beside the app does. Point at that one with --data-dir (or VORN_DATA_DIR),
+or stop it.`
+  }
+  return `The server closed the connection before answering (code ${code}).`
+}
 
 let rpcId = 0
 
@@ -304,6 +325,13 @@ export function rpcCall<T = unknown>(
       } catch {
         // ignore non-JSON messages
       }
+    })
+
+    // A close is an answer too. Settling here is safe on the happy path: the
+    // response resolves first and this fires on the close that follows it.
+    ws.on('close', (code: number) => {
+      clearTimeout(timer)
+      reject(new Error(closedBeforeAnswering(code)))
     })
 
     ws.on('error', (err) => {

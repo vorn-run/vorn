@@ -171,14 +171,27 @@ async function startSession(ctx: ClientContext): Promise<number> {
   }
 }
 
+/** Where a project by that name lives, so `--project` means the same thing everywhere. */
+async function pathForProject(ctx: ClientContext, name: string): Promise<string> {
+  const config = await ctx.rpc.call('config:load')
+  const project = (config.projects ?? []).find((p) => p.name === name)
+  if (!project) throw new Error(`no project named "${name}"`)
+  return project.path
+}
+
 /** Headless sessions are sessions; a list that hid them would hide `--headless`. */
 async function listSessions(ctx: ClientContext): Promise<number> {
   try {
     if (ctx.args.recent) {
-      const recent = await ctx.rpc.call(
-        'sessions:getRecent',
-        ctx.args.path ? path.resolve(ctx.args.path) : undefined
-      )
+      // Recent sessions are filtered by where they ran, so a project name has
+      // to become a path -- rather than being quietly dropped, as it was.
+      const within = ctx.args.project
+        ? await pathForProject(ctx, ctx.args.project)
+        : ctx.args.path
+          ? path.resolve(ctx.args.path)
+          : undefined
+
+      const recent = await ctx.rpc.call('sessions:getRecent', within)
       if (ctx.args.json) {
         ctx.write(asJson(recent))
         return EXIT_OK
