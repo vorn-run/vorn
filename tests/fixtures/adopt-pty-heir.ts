@@ -19,7 +19,7 @@ adopted.onExit(() => {
   exited = true
 })
 
-const until = (match: RegExp, ms = 10_000): Promise<boolean> =>
+const until = (match: RegExp, ms = 30_000): Promise<boolean> =>
   new Promise((resolve) => {
     const started = Date.now()
     const tick = setInterval(() => {
@@ -34,6 +34,11 @@ const until = (match: RegExp, ms = 10_000): Promise<boolean> =>
   })
 
 async function main(): Promise<void> {
+  // Readiness before anything is typed. Bracketed paste going on means readline
+  // is waiting for input; the fallback covers a shell that never enables it.
+  // eslint-disable-next-line no-control-regex
+  if (!(await until(/\x1b\[\?2004h/, 10_000))) await until(/\S/, 10_000)
+
   const read = await (async () => {
     adopted.write('echo ADOPTED_READ\r')
     return until(/ADOPTED_READ\r?\n/)
@@ -50,10 +55,10 @@ async function main(): Promise<void> {
   adopted.write('exit\r')
   await until(/never/, 3_000)
 
-  if (process.env.HEIR_DEBUG) {
-    process.stderr.write(`[heir] read=${read} cols=${cols} exited=${exited}\n`)
-    process.stderr.write(`[heir] tail=${JSON.stringify(seen.slice(-400))}\n`)
-  }
+  // Always, not only under a flag: this runs in a process the test does not own,
+  // and a bare "expected true" tells whoever reads CI nothing at all.
+  process.stderr.write(`[heir] read=${read} cols=${cols} exited=${exited}\n`)
+  process.stderr.write(`[heir] tail=${JSON.stringify(seen.slice(-400))}\n`)
   process.send?.({ read, cols, exited })
   process.exit(0)
 }

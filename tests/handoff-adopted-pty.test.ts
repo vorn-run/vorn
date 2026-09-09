@@ -36,8 +36,20 @@ async function handToAnotherProcess(): Promise<HeirReport> {
   })
   opened.push(shell)
 
+  // Wait for the shell to actually start before handing it on. A pty accepts
+  // keystrokes from the moment it exists, but a shell that has not begun reading
+  // them leaves the line discipline echoing characters it never ran -- which
+  // looks exactly like a command that produced nothing. A fixed pause guesses at
+  // this, and guesses wrong on a loaded CI runner.
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('the shell never started')), 30_000)
+    const subscription = shell.onData(() => {
+      clearTimeout(timer)
+      subscription.dispose()
+      resolve()
+    })
+  })
   // Paused the way a handoff pauses it: the bytes wait in the kernel's buffer.
-  await new Promise((resolve) => setTimeout(resolve, 400))
   shell.pause()
 
   const master = (shell as unknown as { fd: number }).fd
@@ -68,6 +80,10 @@ async function handToAnotherProcess(): Promise<HeirReport> {
     heir.on('exit', (code) => {
       clearTimeout(timer)
       reject(new Error(`the adopting process exited (${code}) without reporting`))
+    })
+    heir.on('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
     })
   })
 }
