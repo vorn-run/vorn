@@ -14,19 +14,32 @@ get_latest_version() {
     | sed 's/.*"tag_name": *"//;s/".*//'
 }
 
-# Where the `vorn` command goes: a directory already on PATH if we can write to
-# one, otherwise the per-user default, which is printed with a hint.
+# -F: a directory holding a dot -- ~/.local/bin, say -- is not a regex.
+on_path() {
+  echo ":$PATH:" | grep -qF ":$1:"
+}
+
+# Where the `vorn` command goes: a writable directory the shell already searches,
+# or, failing that, the per-user one, which is created and printed with a hint.
 choose_bin_dir() {
-  if [ -w "/usr/local/bin" ]; then
-    echo "/usr/local/bin"
-  else
-    echo "${HOME}/.local/bin"
-  fi
+  user_bin="${HOME}/.local/bin"
+  for dir in "/usr/local/bin" "$user_bin"; do
+    if [ -w "$dir" ] && on_path "$dir"; then
+      echo "$dir"
+      return
+    fi
+  done
+  for dir in "/usr/local/bin" "$user_bin"; do
+    if [ -w "$dir" ]; then
+      echo "$dir"
+      return
+    fi
+  done
+  echo "$user_bin"
 }
 
 path_hint() {
-  # -F: a directory holding a dot -- ~/.local/bin, say -- is not a regex.
-  if ! echo ":$PATH:" | grep -qF ":$1:"; then
+  if ! on_path "$1"; then
     echo ""
     echo "Add ${1} to your PATH:"
     echo "  export PATH=\"${1}:\$PATH\""

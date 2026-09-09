@@ -101,6 +101,17 @@ describe('finding the server', () => {
     expect(dataDir()).toBe('/tmp/env-dir')
   })
 
+  it('ignores a VORN_DATA_DIR that names nothing, for both questions it answers', async () => {
+    noPortFile()
+    process.env.VORN_DATA_DIR = '   '
+    const { dataDir, isServerRunning } = await load()
+
+    expect(dataDir()).toBe(path.join(os.homedir(), '.vorn'))
+    // And discovery is allowed again: a blank value did not name another server.
+    expect(isServerRunning()).toBe(true)
+    expect(execFileSync).toHaveBeenCalled()
+  })
+
   it('treats VORN_DATA_DIR the same way', async () => {
     noPortFile()
     process.env.VORN_DATA_DIR = '/tmp/env-dir'

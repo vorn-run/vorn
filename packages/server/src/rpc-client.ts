@@ -23,18 +23,24 @@ import {
 let dataDirOverride: string | undefined
 
 /**
- * Point discovery at a server started with `--data-dir`, before any call.
+ * A blank value names no directory, wherever it came from.
  *
- * An empty override is no override: it would otherwise resolve to the process's
- * working directory and quietly look for a server that is not there.
+ * Both sources need this: an empty override or an empty `VORN_DATA_DIR` would
+ * otherwise resolve to the process's working directory, and the client would
+ * look for `ws-port` wherever the command happened to be typed.
  */
+function named(value: string | undefined): string | undefined {
+  return value?.trim() ? value : undefined
+}
+
+/** Point discovery at a server started with `--data-dir`, before any call. */
 export function useDataDir(dir: string | undefined): void {
-  dataDirOverride = dir?.trim() ? dir : undefined
+  dataDirOverride = named(dir)
 }
 
 /** Where the server this client talks to keeps its port and credential files. */
 export function dataDir(): string {
-  return dataDirOverride ?? process.env.VORN_DATA_DIR ?? path.join(os.homedir(), '.vorn')
+  return dataDirOverride ?? named(process.env.VORN_DATA_DIR) ?? path.join(os.homedir(), '.vorn')
 }
 
 // Resolved per call rather than at import: `--data-dir` is parsed after this module loads.
@@ -222,7 +228,7 @@ function discoverPort(): number | null {
  * empty directory with the desktop app running.
  */
 function discoveryAllowed(): boolean {
-  return dataDirOverride === undefined && !process.env.VORN_DATA_DIR
+  return dataDirOverride === undefined && named(process.env.VORN_DATA_DIR) === undefined
 }
 
 /** Try OS-level discovery, cache result, and heal the port file. */
