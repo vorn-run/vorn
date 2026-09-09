@@ -21,6 +21,7 @@ import type {
   ConnectorCatalogSummary,
   ConnectorManifest,
   ConnectorPackResult,
+  ExtensionContributions,
   InstalledConnectorPack,
   SdkProbeResult,
   SourceConnection
@@ -62,32 +63,61 @@ function summarize(entry: ConnectorCatalogSummary): { type: string; label: strin
   return { type: entry.type, label: entry.label }
 }
 
+/** What an extension adds, named by id so an agent can open a pane it reads about. */
+/** "a, b and c" — a list read aloud rather than joined. */
+function andList(values: string[]): string {
+  if (values.length <= 1) return values[0] ?? ''
+  return `${values.slice(0, -1).join(', ')} and ${values[values.length - 1]}`
+}
+
+function contributionSummary(contributes: ExtensionContributions | undefined): {
+  panes: Array<{ id: string; title: string }>
+  footers: Array<{ id: string; title: string }>
+  linkHandlers: Array<{ id: string; title: string }>
+} {
+  const named = (entries: Array<{ id: string; title: string }> | undefined) =>
+    (entries ?? []).map((entry) => ({ id: entry.id, title: entry.title }))
+  return {
+    panes: named(contributes?.panes),
+    footers: named(contributes?.footers),
+    linkHandlers: named(contributes?.linkHandlers)
+  }
+}
+
 export function registerConnectorTools(server: McpServer): void {
   server.tool(
     'list_connectors',
-    'List every connector: the ones built into Vorn, the ones installable from a package, ' +
-      'and how many connections each already has. Use this before creating a workflow that ' +
-      'calls a connector action, or to find the id of a connector to install.',
+    'List every connector and extension: the ones built into Vorn, the ones installable from a ' +
+      'package, and how many connections each already has. A connector polls a service; an ' +
+      'extension adds footers and panes to a session card and says what it may touch. Use this ' +
+      'before creating a workflow that calls a connector action, or to find an id to install.',
     {
-      installable_only: z.boolean().optional().describe('Only connectors that are not set up yet')
+      installable_only: z.boolean().optional().describe('Only connectors that are not set up yet'),
+      kind: z
+        .enum(['connector', 'extension'])
+        .optional()
+        .describe('Only one kind: what polls a service, or what shows on a card')
     },
     async (args) => {
-      const [builtIns, snapshot, connections, statuses] = await Promise.all([
+      const [builtIns, snapshot, connections, statuses, packs] = await Promise.all([
         rpcCall<ConnectorListEntry[]>('connector:list'),
         rpcCall<ConnectorCatalogSnapshot>('connector:catalog'),
         rpcCall<SourceConnection[]>('connection:list', { connectorId: undefined }),
-        rpcCall<ConnectorStatus[]>('connector:status')
+        rpcCall<ConnectorStatus[]>('connector:status'),
+        rpcCall<InstalledConnectorPack[]>('connector:listPacks')
       ])
 
       const countFor = (id: string) =>
         connections.filter((conn) => connectionConnectorId(conn) === id).length
       const statusFor = (id: string) => statuses.find((s) => s.connectorId === id)
+      const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
       const entries = [
         ...builtIns.map((c) => ({
           id: c.id,
           name: c.name,
           source: 'built-in' as const,
+          kind: 'connector' as const,
           capabilities: c.capabilities,
           connections: countFor(c.id),
           // Only meaningful for connectors that authenticate up front; the
@@ -97,26 +127,54 @@ export function registerConnectorTools(server: McpServer): void {
             ...(statusFor(c.id)!.message && { authMessage: statusFor(c.id)!.message })
           })
         })),
-        ...snapshot.items.map((entry) => ({
-          id: entry.id,
-          name: entry.name,
-          source: 'package' as const,
-          description: entry.description,
-          package: entry.packageName,
-          ...(entry.version && { version: entry.version }),
-          capabilities: entry.capabilities,
-          connections: countFor(entry.id),
-          ...(entry.auth && { auth: entry.auth }),
-          // Generated upstream from the connector's own manifest, so an agent
-          // can tell whether a connector is worth installing without launching
-          // it — which for a list of twenty would be twenty npx processes.
-          ...(entry.triggers && { triggers: entry.triggers.map(summarize) }),
-          ...(entry.actions && { actions: entry.actions.map(summarize) }),
-          ...(entry.env && { env: entry.env.map((e) => e.name) })
-        }))
+        ...snapshot.items.map((entry) => {
+          const pack = packFor(entry.id)
+          // The files on disk answer for themselves; the catalog says what installing would bring.
+          const kind = pack?.kind ?? entry.kind ?? 'connector'
+          return {
+            id: entry.id,
+            name: entry.name,
+            source: 'package' as const,
+            kind,
+            description: entry.description,
+            package: entry.packageName,
+            ...(entry.version && { version: entry.version }),
+            capabilities: entry.capabilities,
+            connections: countFor(entry.id),
+            ...(pack && { installed: pack.version }),
+            ...(entry.auth && { auth: entry.auth }),
+            // Generated upstream from the connector's own manifest, so an agent
+            // can tell whether a connector is worth installing without launching
+            // it — which for a list of twenty would be twenty npx processes.
+            ...(entry.triggers && { triggers: entry.triggers.map(summarize) }),
+            ...(entry.actions && { actions: entry.actions.map(summarize) }),
+            ...(entry.env && { env: entry.env.map((e) => e.name) }),
+            // Only what was stated: an empty list would read as "adds nothing",
+            // which is a claim an older catalog never made.
+            ...(kind === 'extension' && {
+              ...((pack?.contributes ?? entry.contributes) && {
+                contributes: contributionSummary(pack?.contributes ?? entry.contributes)
+              }),
+              ...((pack?.permissions ?? entry.permissions) && {
+                permissions: pack?.permissions ?? entry.permissions
+              }),
+              ...((pack?.activates ?? entry.activates) && {
+                activates: pack?.activates ?? entry.activates
+              })
+            })
+          }
+        })
       ]
 
-      return json(args.installable_only ? entries.filter((e) => e.connections === 0) : entries)
+      const ofKind = args.kind ? entries.filter((e) => e.kind === args.kind) : entries
+      // An extension has no connections to count, so "not set up yet" means it is not installed.
+      return json(
+        args.installable_only
+          ? ofKind.filter((e) =>
+              e.kind === 'extension' ? !('installed' in e && e.installed) : e.connections === 0
+            )
+          : ofKind
+      )
     }
   )
 
@@ -178,8 +236,9 @@ export function registerConnectorTools(server: McpServer): void {
   server.tool(
     'inspect_connector_package',
     'Start a connector package and read what it offers — its triggers, actions and required ' +
-      'environment variables — without installing it. Use this to review a connector before ' +
-      'install_connector, or to check a local build.',
+      'environment variables, or for an extension what it contributes to a card and what it ' +
+      'asks to touch — without installing it. Use this to review one before install_connector, ' +
+      'or to check a local build.',
     {
       package: V.shortText.describe(
         'npm package name, or a command to run a local build (e.g. "node /path/to/dist/index.js")'
@@ -195,9 +254,11 @@ export function registerConnectorTools(server: McpServer): void {
   server.tool(
     'install_connector',
     'Install a connector from a pack file, from the catalog, or by a launch command, creating ' +
-      'a connection ready to poll. Call list_connectors for catalog ids and ' +
-      'inspect_connector_package to see which environment variables are needed. Secrets cannot ' +
-      'be set this way — see the error it returns if the connector requires one.',
+      'a connection ready to poll. Installing an extension is the whole of setting it up: it ' +
+      'takes no trigger and makes no connection, and shows on the cards its activation names. ' +
+      'Call list_connectors for catalog ids and inspect_connector_package to see which ' +
+      'environment variables are needed. Secrets cannot be set this way — see the error it ' +
+      'returns if the connector requires one.',
     {
       connector_id: V.id
         .optional()
@@ -242,11 +303,33 @@ export function registerConnectorTools(server: McpServer): void {
         })
         if (!outcome.ok) return failure(`The pack was refused: ${outcome.error}`)
         installed = outcome.pack
+      } else if (entry?.kind === 'extension') {
+        // An extension is its pack: there is no launch line to probe and no
+        // connection to make, so the catalog's own pack is what gets installed.
+        if (!entry.packUrl) {
+          return failure(
+            `${entry.name} is in the catalog but no release has published a pack for it yet.`
+          )
+        }
+        const outcome = await rpcCall<ConnectorPackResult>('connector:installPack', {
+          kind: 'url',
+          url: entry.packUrl,
+          ...(entry.sha256 && { sha256: entry.sha256 })
+        })
+        if (!outcome.ok) return failure(`The pack was refused: ${outcome.error}`)
+        installed = outcome.pack
       }
 
       // An extension contributes to the card rather than polling a service, so
       // installing it is the whole of connecting it: there is no trigger to pick.
       if (installed?.kind === 'extension') {
+        const ignored = [
+          args.trigger !== undefined && 'trigger',
+          args.sync_interval_minutes !== undefined && 'sync_interval_minutes',
+          args.env !== undefined && 'env',
+          args.name !== undefined && 'name',
+          args.project !== undefined && 'project'
+        ].filter(Boolean) as string[]
         return json({
           installed: installed.name,
           kind: 'extension',
@@ -254,7 +337,12 @@ export function registerConnectorTools(server: McpServer): void {
           path: installed.path,
           contributes: installed.contributes ?? {},
           permissions: installed.permissions ?? [],
-          note: 'Extensions have no connection: they show on the cards their activation names.'
+          ...(installed.activates && { activates: installed.activates }),
+          note:
+            'Extensions have no connection: they show on the cards their activation names.' +
+            (ignored.length > 0
+              ? ` Ignored ${andList(ignored)}, which only a connection uses.`
+              : '')
         })
       }
 

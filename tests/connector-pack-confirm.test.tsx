@@ -157,3 +157,56 @@ describe('the sheet shown before a pack is kept', () => {
     expect(queryByText('Needs')).not.toBeInTheDocument()
   })
 })
+
+describe('the sheet shown before an extension is kept', () => {
+  const EXTENSION: ConnectorPackSummary = {
+    id: 'review',
+    name: 'Review',
+    version: '0.1.0',
+    kind: 'extension',
+    token: 'staged-review',
+    triggers: [],
+    actions: [],
+    env: [],
+    contributes: {
+      panes: [{ id: 'report', title: 'Report', web: 'web/report/index.html' }],
+      footers: [{ id: 'checks', title: 'Checks', every: 30 }]
+    },
+    permissions: ['git.read', 'terminal.send', 'card.rename']
+  }
+
+  it('says what it would add to a card', () => {
+    render(<PackInstallConfirm preview={EXTENSION} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.getByText('Adds')).toBeInTheDocument()
+    expect(screen.getByText('Report pane, Checks footer')).toBeInTheDocument()
+  })
+
+  // What it may touch is the question this sheet exists to answer.
+  it('says what it would reach, under the verb it answers to', () => {
+    render(<PackInstallConfirm preview={EXTENSION} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.getByText('Reads')).toBeInTheDocument()
+    expect(screen.getByText("the worktree's diff and status")).toBeInTheDocument()
+    expect(screen.getByText('Sends')).toBeInTheDocument()
+    expect(screen.getByText("text into the session's terminal")).toBeInTheDocument()
+    expect(screen.getByText('Renames')).toBeInTheDocument()
+    expect(screen.getByText('the session card')).toBeInTheDocument()
+  })
+
+  it('stays silent about a verb it asks nothing of', () => {
+    render(
+      <PackInstallConfirm
+        preview={{ ...EXTENSION, permissions: ['git.read'] }}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+    expect(screen.queryByText('Sends')).not.toBeInTheDocument()
+    expect(screen.queryByText('Renames')).not.toBeInTheDocument()
+  })
+
+  it('shows no Adds row for a connector, which adds nothing to a card', () => {
+    render(<PackInstallConfirm preview={PREVIEW} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.queryByText('Adds')).not.toBeInTheDocument()
+    expect(screen.queryByText('Reads')).not.toBeInTheDocument()
+  })
+})

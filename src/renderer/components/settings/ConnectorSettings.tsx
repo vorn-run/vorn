@@ -8,6 +8,7 @@ import { refreshConnections } from '../../lib/use-connections'
 import { SDK_FILTER_KEYS } from '../../../shared/types'
 import { ConnectorDirectory } from './ConnectorDirectory'
 import { ConnectorDetail } from './ConnectorDetail'
+import { InstalledPlugins } from './InstalledPlugins'
 import { ConnectionGroups, type ConnectorStatus } from './ConnectionGroups'
 import { useRowAction } from '../../lib/use-row-action'
 import { waitForSync } from '../../lib/connection-sync'
@@ -16,6 +17,13 @@ import { SdkConnectorForm } from './SdkConnectorForm'
 import { PackInstallConfirm } from './PackInstallConfirm'
 import { AddConnectionForm, MCP_CONNECTOR_ID, type ConnectorInfo } from './AddConnectionForm'
 import { refreshExtensions } from '../../lib/use-extensions'
+import { useClaimedTerminalIds } from '../../hooks/usePanelTerminals'
+
+const TAB_LABEL = {
+  installed: 'Installed',
+  connections: 'Connections',
+  browse: 'Browse'
+} as const
 
 export function ConnectorSettings() {
   const workflows = useAppStore((s) => s.config?.workflows ?? [])
@@ -38,18 +46,18 @@ export function ConnectorSettings() {
   const { items: catalog, mcpServers, fetchedAt: catalogFetchedAt } = useConnectorCatalog()
   // What the detail view is describing.
   const [selected, setSelected] = useState<ConnectorListing | null>(null)
-  // Connections lead once there are any; with none there is nothing to lead
-  // with, so the catalog opens instead of a second empty-state layout.
-  const [view, setView] = useState<'connections' | 'browse'>('connections')
+  // What is installed leads: it is what a person came back for. With nothing on
+  // disk there is nothing to lead with, so the catalog opens instead.
+  const [view, setView] = useState<'installed' | 'connections' | 'browse'>('installed')
   const [packs, setPacks] = useState<InstalledConnectorPack[]>([])
   const activity = useRowAction()
   const [backfillResult, setBackfillResult] = useState<
     Record<string, { imported: number; updated: number; error?: string }>
   >({})
 
-  // Decided once, from the first load: switching away from an empty
-  // connections view mid-session because the last one was deleted would be the
-  // page moving under someone's hands.
+  // Decided once, from the first load: switching away from an empty view
+  // mid-session because the last pack was removed would be the page moving
+  // under someone's hands.
   const decidedView = useRef(false)
 
   const load = useCallback(async () => {
@@ -63,7 +71,7 @@ export function ConnectorSettings() {
     setConnections(conns)
     setStatuses(st)
     setPacks(installed)
-    if (!decidedView.current && conns.length === 0) setView('browse')
+    if (!decidedView.current && installed.length === 0) setView('browse')
     decidedView.current = true
   }, [])
 
@@ -133,6 +141,29 @@ export function ConnectorSettings() {
     () => buildConnectorListings(connectors, catalog, connections, packs, mcpServers),
     [connectors, catalog, connections, packs, mcpServers]
   )
+  // The map itself, which the store owns; counting inside the selector would
+  // hand `useShallow` a fresh object every call and never settle.
+  const activation = useAppStore((s) => s.extensionActivation)
+  // A shell inside a card's panel is a session of its own and deliberately not a
+  // card, so counting sessions would inflate both halves of the fraction.
+  const claimed = useClaimedTerminalIds()
+  // One pass for the whole panel, with the honest denominator beside it: a card
+  // this window never opened cannot be counted, and a total would overstate it.
+  const { activeCards, openCards } = useMemo(() => {
+    const counts: Record<string, number> = {}
+    let open = 0
+    for (const [sessionId, states] of activation) {
+      if (claimed.has(sessionId)) continue
+      open += 1
+      for (const state of states) {
+        // Seeded either way, so an extension on no card says so rather than going quiet.
+        counts[state.extensionId] ??= 0
+        const draws = state.panes.length + state.footers.length + state.linkHandlers.length > 0
+        if (state.active && draws) counts[state.extensionId] += 1
+      }
+    }
+    return { activeCards: counts, openCards: open }
+  }, [activation, claimed])
   // Re-read from the current listings so a connection made while the panel is
   // open updates its "connected" count rather than showing the stale copy.
   const selectedListing = selected
@@ -185,12 +216,12 @@ export function ConnectorSettings() {
   return (
     <div>
       <SettingsPageHeader
-        title="Connections"
-        description="Vorn watches these and starts a workflow when something happens. Each connection seeds a visible, editable workflow that polls on cron."
+        title="Plugins"
+        description="Connectors watch a service and start workflows. Extensions add footers and panes to a card. Both install as packs from the same directory."
       />
 
       <div className="inline-flex bg-white/[0.04] rounded-sm p-0.5 mb-4">
-        {(['connections', 'browse'] as const).map((tab) => (
+        {(['installed', 'connections', 'browse'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => {
@@ -203,10 +234,27 @@ export function ConnectorSettings() {
               view === tab ? 'bg-white/[0.08] text-gray-200' : 'text-gray-500 hover:text-gray-300'
             }`}
           >
-            {tab === 'connections' ? 'Your connections' : 'Browse'}
+            {TAB_LABEL[tab]}
           </button>
         ))}
       </div>
+
+      {view === 'installed' && !adding && !selectedListing && (
+        <InstalledPlugins
+          listings={listings}
+          builtIns={connectors}
+          progress={installProgress}
+          activeCards={activeCards}
+          openCards={openCards}
+          activity={activity}
+          pending={pendingPack ? { sheet: pendingSheet, rowKey: pendingPack.rowKey } : undefined}
+          onSelect={setSelected}
+          onInstall={handleInstall}
+          onAdd={setAdding}
+          onRemove={(listing) => handleRemovePack(listing.id)}
+          onBrowse={() => setView('browse')}
+        />
+      )}
 
       {view === 'connections' && !adding && (
         <>
@@ -226,7 +274,7 @@ export function ConnectorSettings() {
             onOpenWorkflow={openWorkflowEditor}
             onRefresh={load}
           />
-          {connections.length === 0 && (
+          {connections.length === 0 && packs.length === 0 && (
             <p className="text-sm text-gray-500">
               No connections yet. Browse the connectors Vorn can talk to.
             </p>
@@ -243,6 +291,7 @@ export function ConnectorSettings() {
           onRefresh={async () => {
             await refreshConnectorCatalog()
           }}
+          activeCards={activeCards}
           onSelect={setSelected}
           onAdd={setAdding}
           onInstall={handleInstall}
@@ -253,14 +302,19 @@ export function ConnectorSettings() {
         />
       )}
 
-      {view === 'browse' && !adding && selectedListing && (
+      {/* Opened from whichever tab was showing, and closing goes back to it. */}
+      {view !== 'connections' && !adding && selectedListing && (
         <ConnectorDetail
           listing={selectedListing}
+          backLabel={view === 'installed' ? 'All plugins' : 'All connectors'}
           builtIns={connectors}
           {...(installProgress[selectedListing.id] && {
             progress: installProgress[selectedListing.id]
           })}
           activity={activity.state(selectedListing.id, ['rollback', 'remove'])}
+          {...(selectedListing.kind === 'extension' && {
+            cards: { active: activeCards[selectedListing.id] ?? 0, open: openCards }
+          })}
           pending={pendingPack?.rowKey === selectedListing.key ? pendingSheet : null}
           onAdd={() => setAdding(selectedListing)}
           onUse={() => openWorkflowEditor(null)}

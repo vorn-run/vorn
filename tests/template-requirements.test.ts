@@ -122,6 +122,7 @@ describe('what a requirement can do about itself', () => {
     name: 'Slack',
     capabilities: ['actions'],
     category: 'Chat',
+    kind: 'connector',
     source: 'catalog',
     keywords: [],
     connectedCount: 0,
@@ -141,6 +142,14 @@ describe('what a requirement can do about itself', () => {
     expect(requirementAction(needs('slack'), [listing({ pack })])).toMatchObject({
       kind: 'addConnection'
     })
+  })
+
+  // It shows on the cards its activation names; the form would ask for a
+  // connection nothing consumes.
+  it('offers no connection form for an installed extension', () => {
+    const pack = { id: 'review', name: 'Review', version: '0.1.0' } as ConnectorListing['pack']
+    const extension = listing({ key: 'catalog:review', id: 'review', kind: 'extension', pack })
+    expect(requirementAction(needs('review'), [extension])).toMatchObject({ kind: 'install' })
   })
 
   it('offers the connection straight away for a built-in', () => {

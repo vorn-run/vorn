@@ -173,7 +173,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
       },
       {
         key: 'connectors',
-        label: 'Connectors',
+        label: 'Plugins',
         icon: (
           <svg
             width="16"

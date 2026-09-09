@@ -17,6 +17,14 @@ import {
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
+import {
+  count,
+  describeActivation,
+  describeFooterInterval,
+  describePaneKind,
+  notAsked,
+  permissionRows
+} from '../../lib/extension-copy'
 import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
 import type { RowState } from '../../lib/use-row-action'
 import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
@@ -42,6 +50,8 @@ export function ConnectorDetail({
   progress,
   activity,
   pending,
+  cards,
+  backLabel,
   onAdd,
   onInstall,
   onRollback,
@@ -51,8 +61,12 @@ export function ConnectorDetail({
 }: {
   listing: ConnectorListing
   builtIns: BuiltInConnector[]
+  /** Where closing goes back to, named after the tab this was opened from. */
+  backLabel?: string
   /** The install running for this connector, when one is. */
   progress?: ConnectorInstallProgress
+  /** Open cards this extension is active on, and how many are open at all. */
+  cards?: { active: number; open: number }
   /** What this connector's own actions are doing, and what the last one answered. */
   activity?: RowState
   /** The confirm sheet for this connector's pack, once it has been verified. */
@@ -77,7 +91,7 @@ export function ConnectorDetail({
         onClick={onClose}
         className="flex items-center gap-1.5 text-[12px] text-gray-500 hover:text-gray-300 transition-colors mb-4"
       >
-        <ArrowLeft size={12} /> All connectors
+        <ArrowLeft size={12} /> {backLabel ?? 'All connectors'}
       </button>
 
       <div className="flex items-start gap-3">
@@ -111,6 +125,8 @@ export function ConnectorDetail({
         <p className="text-[12px] text-gray-500 mt-5">
           This connector does not describe itself yet. Add it to see what it offers.
         </p>
+      ) : listing.kind === 'extension' ? (
+        <ExtensionSections listing={listing} />
       ) : (
         <>
           <Section label="Starts a workflow when">
@@ -153,13 +169,19 @@ export function ConnectorDetail({
         </>
       )}
 
-      {/* The rung answers "what will this ask of me"; the connector's own sentence says it in its terms. */}
-      {(listing.authRung || entry?.auth) && (
+      {/* The rung answers "what will this ask of me"; the connector's own sentence says it in
+          its terms. An extension carries no rung, and silence there would read as unknown. */}
+      {(listing.authRung || entry?.auth || listing.kind === 'extension') && (
         <Section label="Signs in with">
           {listing.authRung && (
             <p className="text-[12.5px] text-gray-300">{AUTH_RUNG[listing.authRung].detail}</p>
           )}
           {entry?.auth && <p className="text-[12.5px] text-gray-500">{entry.auth}</p>}
+          {listing.kind === 'extension' && !listing.authRung && !entry?.auth && (
+            <p className="text-[12.5px] text-gray-300">
+              Nothing. It only reads what the session already has.
+            </p>
+          )}
         </Section>
       )}
 
@@ -169,7 +191,16 @@ export function ConnectorDetail({
           <dl className="text-[12px] leading-relaxed">
             <Fact term="Installed" value={`v${listing.pack.version}`} />
             <Fact term="On disk" value={listing.pack.path} mono />
-            <Fact term="Runs via" value={`node ${listing.pack.path}/index.js`} mono />
+            {listing.kind === 'extension' ? (
+              cards && (
+                <Fact
+                  term="Active"
+                  value={`on ${cards.active} of ${count(cards.open, 'open card')}`}
+                />
+              )
+            ) : (
+              <Fact term="Runs via" value={`node ${listing.pack.path}/index.js`} mono />
+            )}
           </dl>
         </Section>
       )}
@@ -199,6 +230,7 @@ export function ConnectorDetail({
         ) : (
           canAddConnection(state, {
             source: listing.source,
+            kind: listing.kind,
             hasLegacyLaunch: Boolean(entry?.packageName)
           }) && (
             <button
@@ -244,7 +276,8 @@ export function ConnectorDetail({
             title="Delete the installed files"
             className="text-xs text-danger hover:text-danger px-2.5 py-1.5 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] transition-colors flex items-center gap-1 disabled:opacity-50"
           >
-            <BusyIcon busy={busy} icon={Trash2} size={12} /> Remove
+            <BusyIcon busy={busy} icon={Trash2} size={12} />{' '}
+            {listing.kind === 'extension' ? 'Uninstall' : 'Remove'}
           </button>
         )}
 
@@ -271,6 +304,99 @@ export function ConnectorDetail({
       {pending && <div className="mt-3">{pending}</div>}
     </div>
   )
+}
+
+/**
+ * What an extension adds, what it may touch, and where it shows.
+ *
+ * The three questions a person asks before trusting one, in the order they ask
+ * them. Every line is read from the manifest, so a page cannot advertise a pane
+ * the pack does not ship, and what is *not* asked for is stated beside what is
+ * — a grant reads as small only against the list it was drawn from.
+ */
+function ExtensionSections({ listing }: { listing: ConnectorListing }) {
+  const contributes = listing.contributes
+  const surfaces = [
+    ...(contributes?.panes ?? []).map((pane) => ({
+      key: `pane:${pane.id}`,
+      title: `${pane.title} · pane`,
+      detail: pane.description ?? describePaneKind(pane),
+      when: pane.when
+    })),
+    ...(contributes?.footers ?? []).map((footer) => ({
+      key: `footer:${footer.id}`,
+      title: `${footer.title} · footer`,
+      detail: footer.description ?? describeFooterInterval(footer.every),
+      when: footer.when
+    })),
+    ...(contributes?.linkHandlers ?? []).map((handler) => ({
+      key: `link:${handler.id}`,
+      title: `${handler.title} · link`,
+      detail: handler.description ?? `matches ${handler.pattern}`,
+      when: handler.when
+    }))
+  ]
+  // An installed pack answered for itself, so no permissions there means none.
+  // A catalog published before the field existed says nothing, which is not the same.
+  const stated = listing.permissions !== undefined || listing.pack !== undefined
+  const rows = permissionRows(listing.permissions)
+
+  return (
+    <>
+      <Section label="Contributes">
+        {surfaces.length === 0 ? (
+          <p className="text-[12px] text-gray-600">Nothing — this one adds no surface yet.</p>
+        ) : (
+          surfaces.map((surface) => (
+            <Item
+              key={surface.key}
+              title={surface.title}
+              detail={surface.detail}
+              when={describeWhen(surface.when)}
+            />
+          ))
+        )}
+      </Section>
+
+      <Section label="Asks to">
+        {!stated ? (
+          <p className="text-[12px] text-gray-600">
+            The catalog does not say what it asks for yet.
+          </p>
+        ) : (
+          <>
+            {rows.length === 0 ? (
+              <p className="text-[12px] text-gray-600">Nothing. It draws what it is given.</p>
+            ) : (
+              rows.map((row) => (
+                <p key={row.label} className="text-[12.5px] text-gray-300">
+                  <span className="text-gray-500">{row.label} </span>
+                  {row.items.join(', ')}
+                </p>
+              ))
+            )}
+            {notAsked(listing.permissions).length > 0 && (
+              <p className="text-[12px] text-gray-600">
+                Not asked: {notAsked(listing.permissions).join(', ')}.
+              </p>
+            )}
+          </>
+        )}
+      </Section>
+
+      <Section label="Shows when">
+        <p className="text-[12.5px] text-gray-300">
+          {describeActivation(listing.activates).join(' and ')}
+        </p>
+      </Section>
+    </>
+  )
+}
+
+/** A contribution's own rule, said only when it is narrower than the extension's. */
+function describeWhen(when: ConnectorListing['activates']): string | undefined {
+  if (!when) return undefined
+  return `Shows on ${describeActivation(when).join(' and ')}`
 }
 
 /**
@@ -322,15 +448,12 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
-function Item({ title, detail }: { title: string; detail?: string }) {
+function Item({ title, detail, when }: { title: string; detail?: string; when?: string }) {
   return (
     <div className="text-[12.5px]">
       <div className="text-gray-300">{title}</div>
       {detail && <div className="text-gray-600 mt-0.5">{detail}</div>}
+      {when && <div className="text-gray-600 mt-0.5">{when}</div>}
     </div>
   )
-}
-
-function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? '' : 's'}`
 }

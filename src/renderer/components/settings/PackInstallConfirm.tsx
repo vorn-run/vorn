@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { borrowableFromManifest, type ConnectorPackSummary } from '../../../shared/types'
 import { ConnectorIcon } from '../ConnectorIcon'
+import { permissionRows } from '../../lib/extension-copy'
 
 /**
  * What a pack is and what it can do, before any of it is kept.
@@ -23,6 +24,12 @@ export function PackInstallConfirm({
   const replacing = preview.installedVersion && preview.installedVersion !== preview.version
   const required = (preview.env ?? []).filter((entry) => entry.required)
   const borrows = borrowableFromManifest(preview.auth, preview.env ?? [])
+  const contributes = preview.contributes
+  const adds = [
+    ...(contributes?.panes ?? []).map((pane) => `${pane.title} pane`),
+    ...(contributes?.footers ?? []).map((footer) => `${footer.title} footer`),
+    ...(contributes?.linkHandlers ?? []).map((handler) => `${handler.title} link`)
+  ]
   const root = useRef<HTMLDivElement>(null)
 
   // It opens beside the button that raised it, which can be below the fold.
@@ -74,6 +81,11 @@ export function PackInstallConfirm({
             )}
           />
         )}
+        {/* What an extension would add to a card, and what it would reach to do it. */}
+        <PackCapability label="Adds" items={adds} />
+        {permissionRows(preview.permissions).map((row) => (
+          <PackCapability key={row.label} label={row.label} items={row.items} />
+        ))}
       </dl>
 
       <div className="flex justify-end gap-2 mt-3">

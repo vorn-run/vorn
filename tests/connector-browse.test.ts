@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { isImplicitConnection } from '../packages/shared/src/types'
 import {
   buildConnectorListings,
+  connectorKinds,
+  filterByKind,
   filterConnectorListings,
+  kindOf,
   groupConnections,
   connectorCategories,
   describeCatalogAge,
@@ -492,6 +495,150 @@ describe('a connection nobody asked for', () => {
     const groups = groupConnections([implicit, chosen], [])
     expect(groups).toHaveLength(1)
     expect(groups[0].connections.map((c) => c.id)).toEqual(['mine'])
+  })
+})
+
+describe('what a listing is', () => {
+  const REVIEW = {
+    panes: [{ id: 'report', title: 'Report' }],
+    footers: [{ id: 'checks', title: 'Checks', every: 30 }]
+  }
+
+  it('reads a catalog entry as what the catalog says it is', () => {
+    const [listing] = buildConnectorListings(
+      [],
+      [catalogItem('review', 'Review', { kind: 'extension', contributes: REVIEW })],
+      []
+    )
+    expect(listing.kind).toBe('extension')
+    expect(listing.contributes).toEqual(REVIEW)
+  })
+
+  it('reads a side-loaded pack as what its own manifest says', () => {
+    const installed = {
+      id: 'review',
+      name: 'Review',
+      version: '0.1.0',
+      kind: 'extension' as const,
+      path: '/packs/review',
+      installedAt: 0,
+      bytes: 1,
+      triggers: [],
+      actions: [],
+      env: [],
+      contributes: REVIEW,
+      permissions: ['git.read' as const]
+    }
+    const [listing] = buildConnectorListings([], [], [], [installed])
+    expect(listing.kind).toBe('extension')
+    expect(listing.permissions).toEqual(['git.read'])
+  })
+
+  // The files on disk are what runs, so a catalog published before a pack
+  // changed kind cannot keep describing something it no longer is.
+  it('lets the pack on disk answer over the catalog', () => {
+    const installed = {
+      id: 'review',
+      name: 'Review',
+      version: '0.2.0',
+      kind: 'extension' as const,
+      path: '/packs/review',
+      installedAt: 0,
+      bytes: 1,
+      triggers: [],
+      actions: [],
+      env: [],
+      contributes: REVIEW
+    }
+    const [listing] = buildConnectorListings(
+      [],
+      [catalogItem('review', 'Review', { kind: 'connector' })],
+      [],
+      [installed]
+    )
+    expect(listing.kind).toBe('extension')
+    expect(kindOf(listing)).toBe('extension')
+  })
+
+  it('reads anything that says nothing as a connector', () => {
+    const listings = buildConnectorListings(
+      [builtIn('github', 'GitHub')],
+      [catalogItem('kusto', 'Azure Data Explorer')],
+      [],
+      [],
+      [{ id: 'playwright', name: 'Playwright', command: 'npx', args: [] }]
+    )
+    expect(listings.every((listing) => listing.kind === 'connector')).toBe(true)
+  })
+
+  it('offers only the kinds it actually has', () => {
+    const connectorsOnly = buildConnectorListings([], [catalogItem('kusto', 'Kusto')], [])
+    expect(connectorKinds(connectorsOnly)).toEqual(['connector'])
+
+    const both = buildConnectorListings(
+      [],
+      [catalogItem('kusto', 'Kusto'), catalogItem('review', 'Review', { kind: 'extension' })],
+      []
+    )
+    expect(connectorKinds(both)).toEqual(['connector', 'extension'])
+    expect(filterByKind(both, 'extension').map((l) => l.id)).toEqual(['review'])
+    expect(filterByKind(both, undefined)).toHaveLength(2)
+  })
+
+  // An extension is worth finding by what it adds, the way a connector is by what it triggers on.
+  it('finds an extension by the name of a pane it adds', () => {
+    const listings = buildConnectorListings(
+      [],
+      [
+        catalogItem('review', 'Review', {
+          kind: 'extension',
+          description: 'Beside the terminal',
+          contributes: REVIEW
+        })
+      ],
+      []
+    )
+    expect(filterConnectorListings(listings, 'checks').map((l) => l.id)).toEqual(['review'])
+  })
+
+  // An extension is worth finding by what it reaches, said the way the page says it.
+  it('finds an extension by what it asks to read', () => {
+    const listings = buildConnectorListings(
+      [],
+      [
+        catalogItem('review', 'Review', {
+          kind: 'extension',
+          contributes: REVIEW,
+          permissions: ['terminal.read']
+        })
+      ],
+      []
+    )
+    expect(filterConnectorListings(listings, 'terminal output').map((l) => l.id)).toEqual([
+      'review'
+    ])
+  })
+
+  // Saying "no triggers" about a thing that never has any would be a lie; it
+  // says what it adds instead, and having said it, it is described.
+  it('counts an extension that states its contributions as described', () => {
+    const [listing] = buildConnectorListings(
+      [],
+      [catalogItem('review', 'Review', { kind: 'extension', contributes: REVIEW })],
+      []
+    )
+    expect(listingDetails(listing).known).toBe(true)
+  })
+
+  // Its kind is the answer; a catalog that has not listed its panes yet still
+  // describes something, and the connector's "Add it to see" is unreachable here.
+  it('counts an extension that lists nothing as described', () => {
+    const [listing] = buildConnectorListings(
+      [],
+      [catalogItem('review', 'Review', { kind: 'extension' })],
+      []
+    )
+    expect(listingDetails(listing).known).toBe(true)
   })
 })
 

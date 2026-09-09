@@ -1,4 +1,8 @@
-import type { ConnectorInstallProgress, InstalledConnectorPack } from '../../shared/types'
+import type {
+  ConnectorInstallProgress,
+  ConnectorKind,
+  InstalledConnectorPack
+} from '../../shared/types'
 import type { StatusTone } from './status-tone'
 
 /** A rejection is session state, not persisted: nothing was written to disk. */
@@ -188,8 +192,10 @@ export function describePackStatus(state: PackState): PackStatusView {
 /** Whether a connection can be added: an installed pack, a launch by name, or a catalog entry that has a pack. */
 export function canAddConnection(
   state: PackState,
-  route: { source: string; hasLegacyLaunch?: boolean }
+  route: { source: string; hasLegacyLaunch?: boolean; kind?: ConnectorKind }
 ): boolean {
+  // An extension shows on the cards its activation names; there is nothing to connect.
+  if (route.kind === 'extension') return false
   if (route.source === 'builtin') return true
   // An MCP server is a command, so there is nothing to install before connecting.
   if (route.source === 'mcp') return true
