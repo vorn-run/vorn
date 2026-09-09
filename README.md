@@ -78,12 +78,17 @@ vorn session list
 vorn session logs <id>
 vorn session send <id> "run the tests"
 vorn workflow list
+vorn workflow run "Nightly review" --input pr=42
+vorn workflow stop <run>
 vorn server serve          # a server on its own, without the app
 ```
 
 `vorn` on its own opens the app. `--json` gives machine-readable output on stdout, with
 notices and errors on stderr, so a command can be piped. If you installed by dragging the
 app across or with Homebrew, Settings → General → Command Line Tool writes the same command.
+
+Workflows run in the server, so a run started here keeps going with nothing open — and a
+scheduled one happens whether or not the app is running.
 
 ## Features
 

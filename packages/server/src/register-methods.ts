@@ -812,7 +812,9 @@ export function registerAllMethods(): void {
       void executeWorkflow(workflow, context, {
         source: 'manual',
         targetNodeId,
-        onStarted: answer
+        // A snapshot: the engine goes on mutating the run it handed over, and a
+        // fast one can finish before this answer is serialised.
+        onStarted: (execution) => answer(structuredClone(execution))
       })
         .then(answer)
         .catch((err) => {
