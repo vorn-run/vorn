@@ -212,7 +212,7 @@ describe('the connector list', () => {
   it('says nothing matched rather than looking empty and broken', () => {
     const { getByPlaceholderText, getByText } = setup()
     fireEvent.change(getByPlaceholderText('Search connectors'), { target: { value: 'zzz' } })
-    expect(getByText('No connectors match that.')).toBeInTheDocument()
+    expect(getByText('Nothing matches that.')).toBeInTheDocument()
   })
 
   it('says how current the list is, and offers to check again', async () => {
@@ -651,6 +651,27 @@ describe("an extension's page", () => {
     expect(getByText(/Not asked:/)).toHaveTextContent('the text selected in the terminal')
   })
 
+  // An entry that asks for nothing is a promise; one that has not said is not.
+  it('says a grant is empty only where emptiness was stated', () => {
+    const stated = buildConnectorListings([], [{ ...REVIEW, permissions: [] }], [], [])[0]
+    const { getByText } = render(
+      <ConnectorDetail listing={stated} builtIns={[]} onAdd={vi.fn()} onClose={vi.fn()} />
+    )
+    expect(getByText('Nothing. It draws what it is given.')).toBeInTheDocument()
+    expect(getByText(/Not asked:/)).toHaveTextContent("the worktree's diff and status")
+  })
+
+  it('says the catalog has not answered rather than answering for it', () => {
+    const { permissions: _permissions, ...silent } = REVIEW
+    const listings = buildConnectorListings([], [silent as ConnectorCatalogItem], [], [])
+    const { getByText, queryByText } = render(
+      <ConnectorDetail listing={listings[0]} builtIns={[]} onAdd={vi.fn()} onClose={vi.fn()} />
+    )
+    expect(getByText('The catalog does not say what it asks for yet.')).toBeInTheDocument()
+    expect(queryByText(/Not asked:/)).not.toBeInTheDocument()
+    expect(queryByText('Nothing. It draws what it is given.')).not.toBeInTheDocument()
+  })
+
   it('says it signs in with nothing rather than leaving it unanswered', () => {
     const { getByText } = render(
       <ConnectorDetail listing={listing()} builtIns={[]} onAdd={vi.fn()} onClose={vi.fn()} />
@@ -663,8 +684,7 @@ describe("an extension's page", () => {
       <ConnectorDetail
         listing={listing(true)}
         builtIns={[]}
-        activeCards={1}
-        openCards={3}
+        cards={{ active: 1, open: 3 }}
         onAdd={vi.fn()}
         onClose={vi.fn()}
       />

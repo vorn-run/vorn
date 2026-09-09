@@ -7,7 +7,11 @@ import type { ConnectorManifest, McpServerCatalogEntry } from '../src/shared/typ
 vi.mock('../src/renderer/stores', () => ({
   useAppStore: Object.assign(
     (selector: (state: unknown) => unknown) =>
-      selector({ config: { workflows: [], projects: [] }, extensionActivation: new Map() }),
+      selector({
+        config: { workflows: [], projects: [] },
+        extensionActivation: new Map(),
+        terminalsPanes: new Map()
+      }),
     { getState: () => ({}) }
   )
 }))

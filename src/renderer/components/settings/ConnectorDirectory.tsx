@@ -22,7 +22,7 @@ import {
   type BuiltInConnector,
   type ConnectorListing
 } from '../../lib/connector-browse'
-import { describeContributions } from '../../lib/extension-copy'
+import { count, describeContributions } from '../../lib/extension-copy'
 import { canAddConnection, describePackStatus, packStateFor } from '../../lib/pack-status'
 import { TONE_DOT, TONE_TEXT } from '../../lib/status-tone'
 
@@ -248,7 +248,7 @@ export function ConnectorDirectory({
       {visible.length === 0 && (
         <p className="text-sm text-gray-500 py-4">
           {search || category || rung || kind
-            ? 'No connectors match that.'
+            ? 'Nothing matches that.'
             : 'No connectors available. Check your connection and try again.'}
         </p>
       )}
@@ -461,8 +461,4 @@ function facts(
   else if (listing.implicitlyConnected) parts.push('ready')
 
   return parts.join(' · ')
-}
-
-function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? '' : 's'}`
 }

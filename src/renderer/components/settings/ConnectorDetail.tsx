@@ -18,6 +18,7 @@ import {
   type ConnectorListing
 } from '../../lib/connector-browse'
 import {
+  count,
   describeActivation,
   describeFooterInterval,
   describePaneKind,
@@ -49,8 +50,7 @@ export function ConnectorDetail({
   progress,
   activity,
   pending,
-  activeCards,
-  openCards,
+  cards,
   onAdd,
   onInstall,
   onRollback,
@@ -63,8 +63,7 @@ export function ConnectorDetail({
   /** The install running for this connector, when one is. */
   progress?: ConnectorInstallProgress
   /** Open cards this extension is active on, and how many are open at all. */
-  activeCards?: number
-  openCards?: number
+  cards?: { active: number; open: number }
   /** What this connector's own actions are doing, and what the last one answered. */
   activity?: RowState
   /** The confirm sheet for this connector's pack, once it has been verified. */
@@ -167,22 +166,19 @@ export function ConnectorDetail({
         </>
       )}
 
-      {/* The rung answers "what will this ask of me"; the connector's own sentence says it in its terms. */}
-      {(listing.authRung || entry?.auth) && (
+      {/* The rung answers "what will this ask of me"; the connector's own sentence says it in
+          its terms. An extension carries no rung, and silence there would read as unknown. */}
+      {(listing.authRung || entry?.auth || listing.kind === 'extension') && (
         <Section label="Signs in with">
           {listing.authRung && (
             <p className="text-[12.5px] text-gray-300">{AUTH_RUNG[listing.authRung].detail}</p>
           )}
           {entry?.auth && <p className="text-[12.5px] text-gray-500">{entry.auth}</p>}
-        </Section>
-      )}
-
-      {/* An extension carries no rung, and silence there would read as unknown. */}
-      {listing.kind === 'extension' && !listing.authRung && !entry?.auth && (
-        <Section label="Signs in with">
-          <p className="text-[12.5px] text-gray-300">
-            Nothing. It only reads what the session already has.
-          </p>
+          {listing.kind === 'extension' && !listing.authRung && !entry?.auth && (
+            <p className="text-[12.5px] text-gray-300">
+              Nothing. It only reads what the session already has.
+            </p>
+          )}
         </Section>
       )}
 
@@ -193,14 +189,10 @@ export function ConnectorDetail({
             <Fact term="Installed" value={`v${listing.pack.version}`} />
             <Fact term="On disk" value={listing.pack.path} mono />
             {listing.kind === 'extension' ? (
-              activeCards !== undefined && (
+              cards && (
                 <Fact
                   term="Active"
-                  value={
-                    openCards === undefined
-                      ? `on ${count(activeCards, 'card')}`
-                      : `on ${activeCards} of ${count(openCards, 'open card')}`
-                  }
+                  value={`on ${cards.active} of ${count(cards.open, 'open card')}`}
                 />
               )
             ) : (
@@ -321,66 +313,77 @@ export function ConnectorDetail({
  */
 function ExtensionSections({ listing }: { listing: ConnectorListing }) {
   const contributes = listing.contributes
-  const panes = contributes?.panes ?? []
-  const footers = contributes?.footers ?? []
-  const handlers = contributes?.linkHandlers ?? []
+  const surfaces = [
+    ...(contributes?.panes ?? []).map((pane) => ({
+      key: `pane:${pane.id}`,
+      title: `${pane.title} · pane`,
+      detail: pane.description ?? describePaneKind(pane),
+      when: pane.when
+    })),
+    ...(contributes?.footers ?? []).map((footer) => ({
+      key: `footer:${footer.id}`,
+      title: `${footer.title} · footer`,
+      detail: footer.description ?? describeFooterInterval(footer.every),
+      when: footer.when
+    })),
+    ...(contributes?.linkHandlers ?? []).map((handler) => ({
+      key: `link:${handler.id}`,
+      title: `${handler.title} · link`,
+      detail: handler.description ?? `matches ${handler.pattern}`,
+      when: handler.when
+    }))
+  ]
+  // An installed pack answered for itself, so no permissions there means none.
+  // A catalog published before the field existed says nothing, which is not the same.
+  const stated = listing.permissions !== undefined || listing.pack !== undefined
   const rows = permissionRows(listing.permissions)
-  const unasked = notAsked(listing.permissions)
 
   return (
     <>
       <Section label="Contributes">
-        {panes.length + footers.length + handlers.length === 0 ? (
+        {surfaces.length === 0 ? (
           <p className="text-[12px] text-gray-600">Nothing — this one adds no surface yet.</p>
         ) : (
-          <>
-            {panes.map((pane) => (
-              <Item
-                key={`pane:${pane.id}`}
-                title={`${pane.title} · pane`}
-                detail={pane.description ?? describePaneKind(pane)}
-                when={describeWhen(pane.when)}
-              />
-            ))}
-            {footers.map((footer) => (
-              <Item
-                key={`footer:${footer.id}`}
-                title={`${footer.title} · footer`}
-                detail={footer.description ?? describeFooterInterval(footer.every)}
-                when={describeWhen(footer.when)}
-              />
-            ))}
-            {handlers.map((handler) => (
-              <Item
-                key={`link:${handler.id}`}
-                title={`${handler.title} · link`}
-                detail={handler.description ?? `matches ${handler.pattern}`}
-                when={describeWhen(handler.when)}
-              />
-            ))}
-          </>
+          surfaces.map((surface) => (
+            <Item
+              key={surface.key}
+              title={surface.title}
+              detail={surface.detail}
+              when={describeWhen(surface.when)}
+            />
+          ))
         )}
       </Section>
 
       <Section label="Asks to">
-        {rows.length === 0 ? (
-          <p className="text-[12px] text-gray-600">Nothing. It draws what it is given.</p>
+        {!stated ? (
+          <p className="text-[12px] text-gray-600">
+            The catalog does not say what it asks for yet.
+          </p>
         ) : (
-          rows.map((row) => (
-            <p key={row.label} className="text-[12.5px] text-gray-300">
-              <span className="text-gray-500">{row.label} </span>
-              {row.items.join(', ')}
-            </p>
-          ))
-        )}
-        {unasked.length > 0 && (
-          <p className="text-[12px] text-gray-600">Not asked: {unasked.join(', ')}.</p>
+          <>
+            {rows.length === 0 ? (
+              <p className="text-[12px] text-gray-600">Nothing. It draws what it is given.</p>
+            ) : (
+              rows.map((row) => (
+                <p key={row.label} className="text-[12.5px] text-gray-300">
+                  <span className="text-gray-500">{row.label} </span>
+                  {row.items.join(', ')}
+                </p>
+              ))
+            )}
+            {notAsked(listing.permissions).length > 0 && (
+              <p className="text-[12px] text-gray-600">
+                Not asked: {notAsked(listing.permissions).join(', ')}.
+              </p>
+            )}
+          </>
         )}
       </Section>
 
       <Section label="Shows when">
         <p className="text-[12.5px] text-gray-300">
-          {describeActivation(listing.activates).join(', ')}
+          {describeActivation(listing.activates).join(' and ')}
         </p>
       </Section>
     </>
@@ -390,7 +393,7 @@ function ExtensionSections({ listing }: { listing: ConnectorListing }) {
 /** A contribution's own rule, said only when it is narrower than the extension's. */
 function describeWhen(when: ConnectorListing['activates']): string | undefined {
   if (!when) return undefined
-  return `Shows on ${describeActivation(when).join(', ')}`
+  return `Shows on ${describeActivation(when).join(' and ')}`
 }
 
 /**
@@ -450,8 +453,4 @@ function Item({ title, detail, when }: { title: string; detail?: string; when?: 
       {when && <div className="text-gray-600 mt-0.5">{when}</div>}
     </div>
   )
-}
-
-function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? '' : 's'}`
 }

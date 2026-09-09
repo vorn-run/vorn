@@ -16,6 +16,7 @@ import { SdkConnectorForm } from './SdkConnectorForm'
 import { PackInstallConfirm } from './PackInstallConfirm'
 import { AddConnectionForm, MCP_CONNECTOR_ID, type ConnectorInfo } from './AddConnectionForm'
 import { refreshExtensions } from '../../lib/use-extensions'
+import { useClaimedTerminalIds } from '../../hooks/usePanelTerminals'
 
 export function ConnectorSettings() {
   const workflows = useAppStore((s) => s.config?.workflows ?? [])
@@ -136,19 +137,26 @@ export function ConnectorSettings() {
   // The map itself, which the store owns; counting inside the selector would
   // hand `useShallow` a fresh object every call and never settle.
   const activation = useAppStore((s) => s.extensionActivation)
+  // A shell inside a card's panel is a session of its own and deliberately not a
+  // card, so counting sessions would inflate both halves of the fraction.
+  const claimed = useClaimedTerminalIds()
   // One pass for the whole panel, with the honest denominator beside it: a card
   // this window never opened cannot be counted, and a total would overstate it.
-  const activeCards = useMemo(() => {
+  const { activeCards, openCards } = useMemo(() => {
     const counts: Record<string, number> = {}
-    for (const states of activation.values()) {
+    let open = 0
+    for (const [sessionId, states] of activation) {
+      if (claimed.has(sessionId)) continue
+      open += 1
       for (const state of states) {
-        if (!state.active) continue
-        counts[state.extensionId] = (counts[state.extensionId] ?? 0) + 1
+        // Seeded either way, so an extension on no card says so rather than going quiet.
+        counts[state.extensionId] ??= 0
+        const draws = state.panes.length + state.footers.length + state.linkHandlers.length > 0
+        if (state.active && draws) counts[state.extensionId] += 1
       }
     }
-    return counts
-  }, [activation])
-  const openCards = activation.size
+    return { activeCards: counts, openCards: open }
+  }, [activation, claimed])
   // Re-read from the current listings so a connection made while the panel is
   // open updates its "connected" count rather than showing the stale copy.
   const selectedListing = selected
@@ -279,8 +287,7 @@ export function ConnectorSettings() {
           })}
           activity={activity.state(selectedListing.id, ['rollback', 'remove'])}
           {...(selectedListing.kind === 'extension' && {
-            activeCards: activeCards[selectedListing.id] ?? 0,
-            openCards
+            cards: { active: activeCards[selectedListing.id] ?? 0, open: openCards }
           })}
           pending={pendingPack?.rowKey === selectedListing.key ? pendingSheet : null}
           onAdd={() => setAdding(selectedListing)}
