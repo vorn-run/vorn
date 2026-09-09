@@ -31,7 +31,11 @@ vi.mock('ws', () => {
       this.sent.push(data)
     }
 
-    close(): void {}
+    // Hostile on purpose: a socket that reports the close synchronously is what
+    // would let the close handler settle the call before its own answer did.
+    close(): void {
+      this.emit('close', 1000)
+    }
   }
   return { WebSocket: FakeSocket }
 })

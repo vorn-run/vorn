@@ -93,6 +93,13 @@ export function parseClientArgs(argv: string[]): ClientArgs {
     return typeof value === 'string' ? value : undefined
   }
 
+  // An empty path is not a path. Left to run, `--data-dir=` would resolve to
+  // wherever the command was typed and look for a server nobody started there.
+  const dataDir = str('data-dir')
+  if (dataDir !== undefined && dataDir.trim() === '') {
+    throw new ClientArgsError('--data-dir needs a directory')
+  }
+
   return {
     positionals,
     agent: str('agent'),
@@ -102,7 +109,7 @@ export function parseClientArgs(argv: string[]): ClientArgs {
     name: str('name'),
     branch: str('branch'),
     workflow: str('workflow'),
-    dataDir: str('data-dir'),
+    dataDir,
     lines: positiveInt(str('lines'), '--lines'),
     limit: positiveInt(str('limit'), '--limit'),
     timeoutMs: positiveInt(str('timeout'), '--timeout'),

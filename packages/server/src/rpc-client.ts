@@ -22,14 +22,19 @@ import {
  */
 let dataDirOverride: string | undefined
 
-/** Point discovery at a server started with `--data-dir`, before any call. */
+/**
+ * Point discovery at a server started with `--data-dir`, before any call.
+ *
+ * An empty override is no override: it would otherwise resolve to the process's
+ * working directory and quietly look for a server that is not there.
+ */
 export function useDataDir(dir: string | undefined): void {
-  dataDirOverride = dir
+  dataDirOverride = dir?.trim() ? dir : undefined
 }
 
 /** Where the server this client talks to keeps its port and credential files. */
 export function dataDir(): string {
-  return dataDirOverride || process.env.VORN_DATA_DIR || path.join(os.homedir(), '.vorn')
+  return dataDirOverride ?? process.env.VORN_DATA_DIR ?? path.join(os.homedir(), '.vorn')
 }
 
 // Resolved per call rather than at import: `--data-dir` is parsed after this module loads.
@@ -329,12 +334,15 @@ export async function rpcCall<T = unknown>(
         const msg: RpcResponse = JSON.parse(raw.toString())
         if (msg.id !== id) return // ignore broadcasts / notifications
         clearTimeout(timer)
-        ws.close()
+        // Settled before the socket is closed, because closing it is what runs
+        // the close handler below -- which would otherwise reject the answer
+        // this line already has.
         if (msg.error) {
           reject(new Error(msg.error.message))
         } else {
           resolve(msg.result as T)
         }
+        ws.close()
       } catch {
         // ignore non-JSON messages
       }

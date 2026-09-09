@@ -92,6 +92,15 @@ describe('finding the server', () => {
     )
   })
 
+  it('treats an empty override as no override at all', async () => {
+    readFileSync.mockReturnValue(JSON.stringify({ port: 4321, pid: process.pid }))
+    process.env.VORN_DATA_DIR = '/tmp/env-dir'
+    const { useDataDir, dataDir } = await load()
+
+    useDataDir('   ')
+    expect(dataDir()).toBe('/tmp/env-dir')
+  })
+
   it('treats VORN_DATA_DIR the same way', async () => {
     noPortFile()
     process.env.VORN_DATA_DIR = '/tmp/env-dir'

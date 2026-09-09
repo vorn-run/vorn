@@ -21,6 +21,13 @@ describe('client argument grammar', () => {
     )
   })
 
+  it('refuses an empty data directory, which would mean the working one', () => {
+    expect(() => parseClientArgs(['session', 'list', '--data-dir='])).toThrow(
+      /--data-dir needs a directory/
+    )
+    expect(() => parseClientArgs(['session', 'list', '--data-dir', '  '])).toThrow(ClientArgsError)
+  })
+
   it('reports an unknown option rather than ignoring it', () => {
     expect(() => parseClientArgs(['session', 'list', '--nope'])).toThrow(ClientArgsError)
   })
