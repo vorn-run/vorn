@@ -48,7 +48,7 @@ beforeEach(() => {
 
 describe('the command line tool row', () => {
   it('offers to install the command, and says where it went', async () => {
-    cliCommandStatus.mockResolvedValue({
+    cliCommandStatus.mockResolvedValueOnce({
       available: true,
       installed: false,
       path: '/usr/local/bin/vorn',
@@ -60,9 +60,19 @@ describe('the command line tool row', () => {
     const button = await screen.findByRole('button', { name: 'Install' })
     expect(screen.getByText('/usr/local/bin/vorn')).toBeInTheDocument()
 
+    // What the install actually did is read back, not assumed: it landed
+    // somewhere the shell does not search, and the row says so.
+    cliCommandStatus.mockResolvedValueOnce({
+      available: true,
+      installed: true,
+      path: '/Users/j/.local/bin/vorn',
+      onPath: false
+    })
+
     fireEvent.click(button)
     await waitFor(() => expect(installCliCommand).toHaveBeenCalled())
     expect(await screen.findByRole('button', { name: 'Reinstall' })).toBeInTheDocument()
+    expect(await screen.findByText(/add its directory to your PATH/)).toBeInTheDocument()
   })
 
   it('shows why it could not, instead of claiming it did', async () => {
