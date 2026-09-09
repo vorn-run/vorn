@@ -15,7 +15,7 @@ import { toWebp } from './lib.mjs'
 
 const TAKES = new URL('../release-videos/', import.meta.url).pathname
 const LOOPS = new URL('../assets/loops/', import.meta.url).pathname
-const PAGES = ['../index.html', '../demos.html'].map((p) => new URL(p, import.meta.url).pathname)
+const PAGES = ['../index.html'].map((p) => new URL(p, import.meta.url).pathname)
 
 const PLATE_BUDGET_KB = 900
 const HERO_BUDGET_KB = 1800

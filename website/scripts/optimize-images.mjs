@@ -11,9 +11,7 @@ import { ASSETS, QUALITY, toWebp } from './lib.mjs'
 /** A screenshot is read; the marginalia are only looked at. */
 const DRAWING = /^(davinci|vitruvian|vorn-mark)/
 
-const PAGES = ['../index.html', '../404.html', '../demos.html'].map(
-  (p) => new URL(p, import.meta.url).pathname
-)
+const PAGES = ['../index.html', '../404.html'].map((p) => new URL(p, import.meta.url).pathname)
 
 function size(file) {
   const out = execFileSync('sips', ['-g', 'pixelWidth', '-g', 'pixelHeight', file]).toString()
