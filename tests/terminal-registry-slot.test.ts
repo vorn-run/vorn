@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// When on, the fit mock sizes the grid from the wrapper's box, 8x16 px cells, so a moved rect moves cols/rows.
-const sizer = vi.hoisted(() => ({ enabled: false }))
+// The fit mock sizes the grid from the wrapper's box, 8x16 px cells, so a moved rect moves cols/rows.
+const made = vi.hoisted(() => ({
+  terms: [] as Array<{ onData: ReturnType<typeof vi.fn> }>,
+  fits: [] as Array<ReturnType<typeof vi.fn>>
+}))
 
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
@@ -31,6 +34,9 @@ vi.mock('@xterm/xterm', () => {
     scrollToBottom = vi.fn()
     scrollToLine = vi.fn()
     refresh = vi.fn()
+    constructor() {
+      made.terms.push(this)
+    }
     open(el: HTMLElement): void {
       this.element = el
     }
@@ -58,13 +64,30 @@ vi.mock('@xterm/addon-fit', () => {
     }
     fit = vi.fn(() => {
       const el = this.term?.element
-      if (!sizer.enabled || !this.term || !el) return
+      if (!this.term || !el) return
       this.term.cols = Math.max(2, Math.floor((parseInt(el.style.width) || 0) / 8))
       this.term.rows = Math.max(1, Math.floor((parseInt(el.style.height) || 0) / 16))
     })
+    constructor() {
+      made.fits.push(this.fit)
+    }
   }
   return { FitAddon: MockFitAddon }
 })
+
+// The GPU renderers would throw on the mock terminal; a no-op keeps the swap path alive.
+vi.mock('@xterm/addon-webgl', () => ({
+  WebglAddon: class {
+    activate(): void {}
+    dispose(): void {}
+  }
+}))
+vi.mock('@xterm/addon-canvas', () => ({
+  CanvasAddon: class {
+    activate(): void {}
+    dispose(): void {}
+  }
+}))
 
 vi.mock('@xterm/addon-web-links', () => {
   class MockWebLinksAddon {}
@@ -92,24 +115,26 @@ import {
   onRegistryChange,
   getRegisteredTerminalIds,
   destroyTerminal,
-  fitTerminal
+  fitTerminal,
+  setAllTerminalsFontSize
 } from '../src/renderer/lib/terminal-registry'
 
+/** Read lazily, so a test can move the rect it passed. */
 function makeSlot(rect: Partial<DOMRect>): HTMLDivElement {
   const el = document.createElement('div')
-  const full: DOMRect = {
-    top: 0,
-    left: 0,
-    width: 0,
-    height: 0,
-    right: 0,
-    bottom: 0,
-    x: 0,
-    y: 0,
-    toJSON: () => ({}),
-    ...rect
-  } as DOMRect
-  el.getBoundingClientRect = () => full
+  el.getBoundingClientRect = () =>
+    ({
+      top: 0,
+      left: 0,
+      width: 0,
+      height: 0,
+      right: 0,
+      bottom: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+      ...rect
+    }) as DOMRect
   return el
 }
 
@@ -281,117 +306,104 @@ describe('terminal-registry: slot / persistent-host API', () => {
   })
 })
 
-// The pty hears a terminal's first size at once and every later one once it settles: a drag is one SIGWINCH, not one per frame.
-describe('what the pty is told about size', () => {
+// The box moves every frame; the grid, the pty and the server's model take its size together once it settles.
+describe('when a moved box becomes a size', () => {
   let host: HTMLDivElement
+  let rect: Partial<DOMRect>
   const resize = (): ReturnType<typeof vi.fn> =>
     window.api.resizeTerminal as ReturnType<typeof vi.fn>
   const sizes = (): Array<{ cols: number; rows: number }> =>
     resize().mock.calls.map((c) => ({ cols: c[0].cols, rows: c[0].rows }))
-
-  /** A slot whose rect the test can move. */
-  function movableSlot(
-    width: number,
-    height: number
-  ): { el: HTMLDivElement; resizeTo: (w: number, h: number) => void } {
-    const el = document.createElement('div')
-    let box = { width, height }
-    el.getBoundingClientRect = () =>
-      ({
-        top: 0,
-        left: 0,
-        right: box.width,
-        bottom: box.height,
-        x: 0,
-        y: 0,
-        ...box,
-        toJSON: () => ({})
-      }) as DOMRect
-    return {
-      el,
-      resizeTo: (w, h) => {
-        box = { width: w, height: h }
-      }
-    }
+  const fit = (): ReturnType<typeof vi.fn> => made.fits[made.fits.length - 1]!
+  const move = (width: number, height: number): void => {
+    rect.width = width
+    rect.height = height
+    syncTerminalOverlay('t')
   }
 
   beforeEach(() => {
     vi.useFakeTimers()
-    sizer.enabled = true
+    made.terms.length = 0
+    made.fits.length = 0
     host = document.createElement('div')
     document.body.appendChild(host)
     setHostRoot(host)
+    rect = { width: 800, height: 480 }
+    registerSlot('t', makeSlot(rect))
   })
 
   afterEach(() => {
     for (const id of getRegisteredTerminalIds()) destroyTerminal(id)
     setHostRoot(null)
     document.body.innerHTML = ''
-    sizer.enabled = false
     vi.clearAllMocks()
     vi.useRealTimers()
   })
 
-  it('tells it the first size at once', () => {
-    const slot = movableSlot(800, 480)
-    registerSlot('t', slot.el)
-
+  it('takes the first box at once', () => {
     expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
   })
 
-  it('tells it a drag once, after the last frame, with the size it ended at', () => {
-    const slot = movableSlot(800, 480)
-    registerSlot('t', slot.el)
-
+  it('lets a drag settle, then refits once and tells the pty once, at the size it ended at', () => {
+    const fitsBefore = fit().mock.calls.length
     for (let w = 808; w <= 880; w += 8) {
-      slot.resizeTo(w, 480)
-      syncTerminalOverlay('t')
+      move(w, 480)
       vi.advanceTimersByTime(16)
     }
+    expect(fit().mock.calls.length).toBe(fitsBefore)
     expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
 
-    vi.advanceTimersByTime(50)
+    vi.advanceTimersByTime(100)
+    expect(fit().mock.calls.length).toBe(fitsBefore + 1)
     expect(sizes()).toEqual([
       { cols: 100, rows: 30 },
       { cols: 110, rows: 30 }
     ])
   })
 
-  it('says nothing when a drag ends where it began', () => {
-    const slot = movableSlot(800, 480)
-    registerSlot('t', slot.el)
-    slot.resizeTo(880, 480)
-    syncTerminalOverlay('t')
-    slot.resizeTo(800, 480)
-    syncTerminalOverlay('t')
+  it('says nothing to the pty when a drag ends where it began', () => {
+    move(880, 480)
+    move(800, 480)
 
-    vi.advanceTimersByTime(50)
+    vi.advanceTimersByTime(100)
     expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
   })
 
   it('says nothing for a terminal destroyed during the hold', () => {
-    const slot = movableSlot(800, 480)
-    registerSlot('t', slot.el)
-    slot.resizeTo(880, 480)
-    syncTerminalOverlay('t')
+    move(880, 480)
     destroyTerminal('t')
 
-    vi.advanceTimersByTime(50)
+    vi.advanceTimersByTime(100)
     expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
   })
 
-  it('holds a refit for a font or renderer change the same way', () => {
-    const slot = movableSlot(800, 480)
-    registerSlot('t', slot.el)
-    // The box did not move; the cell did. `fitTerminal` is that path.
-    getPersistentWrapper('t')!.style.width = '880px'
-    fitTerminal('t')
-    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  it('takes a held size before a keystroke, so what is typed follows the SIGWINCH', () => {
+    move(880, 480)
+    const onData = made.terms[made.terms.length - 1]!.onData.mock.calls[0][0] as (d: string) => void
+    onData('x')
 
-    vi.advanceTimersByTime(50)
     expect(sizes()).toEqual([
       { cols: 100, rows: 30 },
       { cols: 110, rows: 30 }
     ])
+    const write = window.api.writeTerminal as ReturnType<typeof vi.fn>
+    expect(resize().mock.invocationCallOrder[1]).toBeLessThan(write.mock.invocationCallOrder[0])
+  })
+
+  it('refits at once for a renderer or font that changed the cell, and holds a font-size gesture', () => {
+    // The box did not move; the cell did. `fitTerminal` is that path, and it is one shot.
+    getPersistentWrapper('t')!.style.width = '880px'
+    fitTerminal('t')
+    expect(sizes()).toEqual([
+      { cols: 100, rows: 30 },
+      { cols: 110, rows: 30 }
+    ])
+
+    // A pinch is many steps; the pty hears where it ends.
+    getPersistentWrapper('t')!.style.width = '960px'
+    setAllTerminalsFontSize(14)
+    expect(sizes()).toHaveLength(2)
+    vi.advanceTimersByTime(100)
+    expect(sizes()[2]).toEqual({ cols: 120, rows: 30 })
   })
 })
