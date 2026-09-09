@@ -690,6 +690,35 @@ export function sessionsToPersist(): TerminalSession[] {
   return [...active, ...restoredRecords()]
 }
 
+/**
+ * Answer with a run rather than waiting for it to finish.
+ *
+ * A run lasts as long as its agents do, and every caller of these three is
+ * holding a request open -- a window, a phone, the CLI. They want the run id
+ * now, so the walk carries on behind the answer. The answer is a snapshot: the
+ * engine goes on mutating the run it handed over, and a fast one can finish
+ * before this is serialised.
+ */
+function startedRun(
+  workflowId: string,
+  begin: (onStarted: (execution: WorkflowExecution) => void) => Promise<WorkflowExecution>
+): Promise<WorkflowExecution | null> {
+  return new Promise((resolve) => {
+    let answered = false
+    const answer = (execution: WorkflowExecution | null): void => {
+      if (answered) return
+      answered = true
+      resolve(execution ? structuredClone(execution) : null)
+    }
+    begin(answer)
+      .then(answer)
+      .catch((err) => {
+        log.warn({ err, workflowId }, '[workflow] a run did not start')
+        answer(null)
+      })
+  })
+}
+
 export function registerAllMethods(): void {
   // Wire headless worktree counter into pty-manager for cleanup gating
   ptyManager.setHeadlessWorktreeCounter((worktreePath, excludeId) =>
@@ -802,40 +831,23 @@ export function registerAllMethods(): void {
   registerMethod('workflow:run', async ({ workflowId, context, targetNodeId }) => {
     const workflow = dbGetWorkflow(workflowId)
     if (!workflow) return null
-    return new Promise<WorkflowExecution | null>((resolve) => {
-      let answered = false
-      const answer = (execution: WorkflowExecution | null): void => {
-        if (answered) return
-        answered = true
-        resolve(execution)
-      }
-      void executeWorkflow(workflow, context, {
-        source: 'manual',
-        targetNodeId,
-        // A snapshot: the engine goes on mutating the run it handed over, and a
-        // fast one can finish before this answer is serialised.
-        onStarted: (execution) => answer(structuredClone(execution))
-      })
-        .then(answer)
-        .catch((err) => {
-          log.warn({ err, workflowId }, '[workflow] a run did not start')
-          answer(null)
-        })
-    })
+    return startedRun(workflow.id, (onStarted) =>
+      executeWorkflow(workflow, context, { source: 'manual', targetNodeId, onStarted })
+    )
   })
 
   registerMethod('workflow:retryRun', async ({ runId }) => {
     const run = getWorkflowRun(runId)
     const workflow = run ? dbGetWorkflow(run.workflowId) : null
     if (!run || !workflow) return null
-    return retryRunFromFailure(workflow, run)
+    return startedRun(workflow.id, (onStarted) => retryRunFromFailure(workflow, run, { onStarted }))
   })
 
   registerMethod('workflow:rerun', async ({ runId }) => {
     const run = getWorkflowRun(runId)
     const workflow = run ? dbGetWorkflow(run.workflowId) : null
     if (!run || !workflow) return null
-    return rerunWorkflowRun(workflow, run)
+    return startedRun(workflow.id, (onStarted) => rerunWorkflowRun(workflow, run, { onStarted }))
   })
 
   registerMethod(

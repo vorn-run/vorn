@@ -1367,14 +1367,18 @@ export function contextFromRun(run: WorkflowExecution): WorkflowExecutionContext
  */
 export async function retryRunFromFailure(
   workflow: WorkflowDefinition,
-  failedRun: WorkflowExecution
+  failedRun: WorkflowExecution,
+  options?: ExecuteWorkflowOptions
 ): Promise<WorkflowExecution> {
   const context = contextFromRun(failedRun)
   const params = `${failedRun.dedupeParams ?? 'manual'}:retry:${failedRun.runId}`
   const claim = await api.claimWorkflowRun({ workflowId: workflow.id, params })
   if (!claim.granted) {
     const existing = runById(claim.runId)
-    if (existing) return existing
+    if (existing) {
+      options?.onStarted?.(existing)
+      return existing
+    }
     throw new Error(`A retry of this run is already in flight`)
   }
 
@@ -1393,15 +1397,17 @@ export async function retryRunFromFailure(
   }
 
   persistExecution(execution)
+  options?.onStarted?.(execution)
   return runExecution(workflow, execution, context)
 }
 
 /** Start a fresh run with the same launch context as an earlier one. */
 export async function rerunWorkflowRun(
   workflow: WorkflowDefinition,
-  run: WorkflowExecution
+  run: WorkflowExecution,
+  options?: ExecuteWorkflowOptions
 ): Promise<WorkflowExecution> {
-  return executeWorkflow(workflow, contextFromRun(run), { source: 'manual' })
+  return executeWorkflow(workflow, contextFromRun(run), { ...options, source: 'manual' })
 }
 
 /** Live runs of one workflow, newest first. */
@@ -1457,7 +1463,6 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
     log.warn(`[workflow] stopWorkflowRun: no run ${runId}`)
     return
   }
-
   handle?.abort.abort()
 
   // Kill from the node states as well as the handle: a run rehydrated after a
