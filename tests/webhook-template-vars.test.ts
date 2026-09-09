@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WorkflowExecutionContext } from '../src/shared/types'
-import { getAvailableContextVars, resolveTemplateVars } from '../src/renderer/lib/template-vars'
+import { getAvailableContextVars, resolveTemplateVars } from '@vornrun/shared/template-vars'
 
 describe('webhook trigger variables', () => {
   it('offers only the request body, headers, and query for a webhook trigger', () => {

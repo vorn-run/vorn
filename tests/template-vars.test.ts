@@ -11,14 +11,14 @@ import {
   getAvailableContextVars,
   buildInputVars,
   CONTEXT_REF
-} from '../src/renderer/lib/template-vars'
+} from '@vornrun/shared/template-vars'
 import type {
   TerminalSession,
   WorkflowNode,
   WorkflowEdge,
   WorkflowExecutionContext
 } from '../src/shared/types'
-import type { StepOutputs } from '../src/renderer/lib/template-vars'
+import type { StepOutputs } from '@vornrun/shared/template-vars'
 
 function makeNode(id: string, type: string, slug?: string): WorkflowNode {
   return {

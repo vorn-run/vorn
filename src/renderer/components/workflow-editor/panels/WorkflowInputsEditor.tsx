@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { SelectPicker } from '../../SelectPicker'
-import { ensureUniqueSlug } from '../../../lib/template-vars'
+import { ensureUniqueSlug } from '@vornrun/shared/template-vars'
 import type { WorkflowInputDef, WorkflowInputType } from '../../../../shared/types'
 
 interface Props {

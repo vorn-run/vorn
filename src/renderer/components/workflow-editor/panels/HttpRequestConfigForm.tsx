@@ -7,7 +7,7 @@ import {
   getAvailableContextVars,
   StepVariableGroup,
   TemplateVariable
-} from '../../../lib/template-vars'
+} from '@vornrun/shared/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => ({ value: m, label: m }))

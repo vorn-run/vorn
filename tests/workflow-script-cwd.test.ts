@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { resolveScriptConfig } from '../src/renderer/lib/workflow-execution'
 import type { ScriptConfig } from '../src/shared/types'
-import type { StepOutputs } from '../src/renderer/lib/template-vars'
+import type { StepOutputs } from '@vornrun/shared/template-vars'
 
 // Where a script runs, resolved the way what it runs already was.
 

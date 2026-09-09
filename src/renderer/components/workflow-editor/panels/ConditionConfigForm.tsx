@@ -1,5 +1,9 @@
 import { ConditionConfig, ConditionOperator, TriggerConfig } from '../../../../shared/types'
-import { TEMPLATE_VARIABLES, StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
+import {
+  TEMPLATE_VARIABLES,
+  StepVariableGroup,
+  TemplateVariable
+} from '@vornrun/shared/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 import { SelectPicker } from '../../SelectPicker'
 

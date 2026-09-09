@@ -119,7 +119,7 @@ import {
   getAncestorNodes,
   buildStepGroups,
   buildInputVars
-} from '../../lib/template-vars'
+} from '@vornrun/shared/template-vars'
 
 const EMPTY_TASKS: import('../../../shared/types').TaskConfig[] = []
 

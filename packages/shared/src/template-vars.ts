@@ -9,8 +9,8 @@ import {
   ConnectorActionDef,
   WorkflowInputDef,
   NodeExecutionStatus
-} from '../../shared/types'
-import { schemaProperties, schemaTypeHint } from '../../shared/json-schema-utils'
+} from './types'
+import { schemaProperties, schemaTypeHint } from './json-schema-utils'
 
 // --- Slug Utilities ---
 

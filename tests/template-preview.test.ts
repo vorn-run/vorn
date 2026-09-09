@@ -5,7 +5,7 @@ import {
   previewStepTokens,
   suggestNearestPath,
   type LastRunData
-} from '../src/renderer/lib/template-vars'
+} from '@vornrun/shared/template-vars'
 import type { WorkflowNode } from '../packages/shared/src/types'
 
 const agent = (id: string, slug: string): WorkflowNode =>

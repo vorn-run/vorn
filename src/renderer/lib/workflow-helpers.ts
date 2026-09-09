@@ -13,7 +13,7 @@ import {
   TaskConfig,
   TerminalSession
 } from '../../shared/types'
-import { slugify } from './template-vars'
+import { slugify } from '@vornrun/shared/template-vars'
 
 // --- Flow Layout Types ---
 

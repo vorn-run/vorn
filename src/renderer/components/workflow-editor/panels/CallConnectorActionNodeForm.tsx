@@ -10,7 +10,11 @@ import { SelectPicker } from '../../SelectPicker'
 import { ConnectorIcon } from '../../ConnectorIcon'
 import { useConnections, iconForConnection } from '../../../lib/use-connections'
 import { useConnectorCatalog } from '../../../lib/use-connector-catalog'
-import { TEMPLATE_VARIABLES, StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
+import {
+  TEMPLATE_VARIABLES,
+  StepVariableGroup,
+  TemplateVariable
+} from '@vornrun/shared/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
 
 // A published argument, in the shape this form already draws.

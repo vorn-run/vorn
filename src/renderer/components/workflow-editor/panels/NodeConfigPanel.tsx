@@ -26,7 +26,7 @@ import { CreateTaskFromItemNodeForm } from './CreateTaskFromItemNodeForm'
 import { CallConnectorActionNodeForm } from './CallConnectorActionNodeForm'
 import { HttpRequestConfigForm } from './HttpRequestConfigForm'
 import { NODE_TYPE_ICON, NODE_GLYPH } from '../node-visuals'
-import type { StepVariableGroup, TemplateVariable } from '../../../lib/template-vars'
+import type { StepVariableGroup, TemplateVariable } from '@vornrun/shared/template-vars'
 
 interface Props {
   /** Open the step library in trigger scope; shown on trigger nodes. */
