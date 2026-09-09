@@ -74,3 +74,56 @@ describe('ToolbarBreadcrumb', () => {
     await waitFor(() => expect(screen.queryByText('main')).not.toBeInTheDocument())
   })
 })
+
+/**
+ * The crumb is the only thing that names the current scope, so it must agree
+ * with what the scope actually is — including when the selection is stale.
+ */
+describe('the crumb for a group', () => {
+  const groups = [
+    { id: 'g1', name: 'Sidebar work', order: 0, workspaceId: 'personal' },
+    { id: 'g9', name: 'Elsewhere', order: 0, workspaceId: 'work' }
+  ]
+
+  const seed = (activeGroupId: string | null) =>
+    act(() => {
+      useAppStore.setState({
+        activeProject: null,
+        activeWorktreePath: null,
+        activeGroupId,
+        activeWorkspace: 'personal',
+        config: { projects: [], sessionGroups: groups }
+      } as never)
+    })
+
+  afterEach(() => {
+    act(() => {
+      useAppStore.setState(initialState)
+    })
+  })
+
+  it('names the selected group', () => {
+    seed('g1')
+    render(<ToolbarBreadcrumb />)
+    expect(screen.getByText('Sidebar work')).toBeInTheDocument()
+  })
+
+  it('clears the selection when the crumb is clicked', () => {
+    seed('g1')
+    render(<ToolbarBreadcrumb />)
+    fireEvent.click(screen.getByText('Sidebar work'))
+    expect(useAppStore.getState().activeGroupId).toBeNull()
+  })
+
+  it('says nothing for a group belonging to another workspace', () => {
+    seed('g9')
+    const { container } = render(<ToolbarBreadcrumb />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('says nothing when nothing is selected', () => {
+    seed(null)
+    const { container } = render(<ToolbarBreadcrumb />)
+    expect(container).toBeEmptyDOMElement()
+  })
+})

@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { MAIN_WORKTREE_SENTINEL, type SortMode, type TerminalState } from '../stores/types'
 import { usePromotedCardsByOwner } from './usePromotedCards'
+import { useSessionScope } from './useScopedSessionIds'
 import { useClaimedTerminalIds } from './usePanelTerminals'
 
 /**
@@ -43,10 +44,7 @@ export function compareTerminalIds(
 export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: string[] } {
   const {
     terminals,
-    activeProject,
     activeWorktreePath,
-    activeWorkspace,
-    projects,
     sortMode,
     statusFilter,
     terminalOrder,
@@ -56,10 +54,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
   } = useAppStore(
     useShallow((s) => ({
       terminals: s.terminals,
-      activeProject: s.activeProject,
       activeWorktreePath: s.activeWorktreePath,
-      activeWorkspace: s.activeWorkspace,
-      projects: s.config?.projects,
       sortMode: s.sortMode,
       statusFilter: s.statusFilter,
       terminalOrder: s.terminalOrder,
@@ -80,26 +75,21 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
   // and the registry's one-slot-per-terminal rule depends on that staying true.
   const claimedTerminals = useClaimedTerminalIds()
 
-  const workspaceProjects = useMemo(() => {
-    if (!projects) return null
-    return new Set(
-      projects.filter((p) => (p.workspaceId ?? 'personal') === activeWorkspace).map((p) => p.name)
-    )
-  }, [projects, activeWorkspace])
+  const scope = useSessionScope()
 
   const { orderedIds, minimizedIds, focusableIds } = useMemo(() => {
-    const inActiveScope = (t: TerminalState): boolean => {
-      if (activeProject && t.session.projectName !== activeProject) return false
-      if (!activeProject && workspaceProjects && !workspaceProjects.has(t.session.projectName))
-        return false
-      return true
+    const inActiveScope = (t: TerminalState, id: string): boolean => {
+      // A group answers in session ids, because its members span projects.
+      if (scope.sessionIds) return scope.sessionIds.has(id)
+      if (!scope.projectNames) return true
+      return scope.projectNames.has(t.session.projectName)
     }
     const sortFn = ([aId]: [string, TerminalState], [bId]: [string, TerminalState]): number =>
       compareTerminalIds(aId, bId, terminals, sortMode, terminalOrder)
     const all = Array.from(terminals.entries()).filter(([id]) => !claimedTerminals.has(id))
     const filtered = all
-      .filter(([, t]) => {
-        if (!inActiveScope(t)) return false
+      .filter(([id, t]) => {
+        if (!inActiveScope(t, id)) return false
         if (activeWorktreePath) {
           if (activeWorktreePath === MAIN_WORKTREE_SENTINEL) {
             if (t.session.worktreePath) return false
@@ -134,7 +124,7 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     // index straight into it, so a card being focusable at all is decided here
     // and nowhere else — the shortcut handlers never learn what an id is.
     const focusable: string[] = []
-    for (const [id] of all.filter(([, t]) => inActiveScope(t)).sort(sortFn)) {
+    for (const [id] of all.filter(([tid, t]) => inActiveScope(t, tid)).sort(sortFn)) {
       focusable.push(id)
       focusable.push(...(cardsByOwner.get(id) ?? []))
     }
@@ -142,9 +132,8 @@ export function useVisibleTerminals(): { orderedIds: string[]; minimizedIds: str
     return { orderedIds: ordered, minimizedIds: minimized, focusableIds: focusable }
   }, [
     terminals,
-    activeProject,
     activeWorktreePath,
-    workspaceProjects,
+    scope,
     statusFilter,
     sortMode,
     terminalOrder,

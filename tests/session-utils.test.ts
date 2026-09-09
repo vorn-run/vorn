@@ -2,7 +2,12 @@
 import { describe, it, expect } from 'vitest'
 import type { TerminalSession, RecentSession, AgentType } from '../packages/shared/src/types'
 
-import { resolveProjectName, buildRestorePayload } from '../src/renderer/lib/session-utils'
+import {
+  resolveProjectName,
+  buildRestorePayload,
+  resolveActiveProject
+} from '../src/renderer/lib/session-utils'
+import { useAppStore } from '../src/renderer/stores'
 
 function makeSession(overrides: Partial<TerminalSession> = {}): TerminalSession {
   return {
@@ -140,5 +145,85 @@ describe('buildRestorePayload', () => {
     expect(() => buildRestorePayload(shell)).toThrow(
       /shell sessions restore via createShellTerminal/
     )
+  })
+})
+
+/**
+ * A group holds sessions from many projects, so it cannot name one on its own.
+ * Launching from a group starts where its most recent session is.
+ */
+describe('the project a launch starts in', () => {
+  const project = (name: string, workspaceId = 'personal') => ({
+    name,
+    path: `/tmp/${name}`,
+    preferredAgents: [],
+    workspaceId
+  })
+  const term = (id: string, projectName: string, at: number, groupId?: string) => [
+    id,
+    {
+      session: { id, projectName, ...(groupId && { groupId }) },
+      status: 'idle',
+      lastOutputTimestamp: at
+    }
+  ]
+
+  const seed = (over: Record<string, unknown> = {}) =>
+    useAppStore.setState({
+      config: {
+        projects: [project('vorn'), project('ode'), project('work-thing', 'work')]
+      },
+      activeProject: null,
+      activeGroupId: null,
+      activeWorkspace: 'personal',
+      terminals: new Map(),
+      ...over
+    } as never)
+
+  it('is the selected project when there is one', () => {
+    seed({ activeProject: 'ode' })
+    expect(resolveActiveProject()?.name).toBe('ode')
+  })
+
+  it('is the workspace first project when nothing is selected', () => {
+    seed()
+    expect(resolveActiveProject()?.name).toBe('vorn')
+  })
+
+  // Pre-existing: a named project wins by name alone, workspace unchecked.
+  it('honours a named project even from another workspace', () => {
+    seed({ activeProject: 'work-thing' })
+    expect(resolveActiveProject()?.name).toBe('work-thing')
+  })
+
+  it('stays inside the workspace when falling back', () => {
+    seed({ activeProject: 'deleted-project' })
+    expect(resolveActiveProject()?.name).toBe('vorn')
+  })
+
+  it('follows the most recent session of a selected group', () => {
+    seed({
+      activeGroupId: 'g1',
+      terminals: new Map([term('s1', 'vorn', 1, 'g1'), term('s2', 'ode', 9, 'g1')] as never)
+    })
+    expect(resolveActiveProject()?.name).toBe('ode')
+  })
+
+  it('ignores sessions that are not in the group', () => {
+    seed({
+      activeGroupId: 'g1',
+      terminals: new Map([term('s1', 'vorn', 1, 'g1'), term('s2', 'ode', 9)] as never)
+    })
+    expect(resolveActiveProject()?.name).toBe('vorn')
+  })
+
+  it('falls back to the workspace when the group has no sessions left', () => {
+    seed({ activeGroupId: 'g1' })
+    expect(resolveActiveProject()?.name).toBe('vorn')
+  })
+
+  it('has nothing to offer when there are no projects', () => {
+    useAppStore.setState({ config: { projects: [] } } as never)
+    expect(resolveActiveProject()).toBeUndefined()
   })
 })

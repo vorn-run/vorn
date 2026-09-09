@@ -23,6 +23,7 @@ import {
   AgentType,
   AiAgentType,
   WorkspaceConfig,
+  SessionGroupConfig,
   DEFAULT_WORKSPACE,
   SessionEvent,
   SessionEventType,
@@ -416,6 +417,16 @@ function createSchema(): void {
       icon TEXT,
       icon_color TEXT,
       "order" INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS session_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      icon TEXT,
+      icon_color TEXT,
+      "order" INTEGER NOT NULL DEFAULT 0,
+      workspace_id TEXT NOT NULL DEFAULT 'personal',
+      row_revision INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS workflow_runs (
@@ -1041,6 +1052,20 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 17 (packaged connector task ids)')
   }
+
+  if (version < 18) {
+    d.transaction(() => {
+      const sessionCols = d.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
+      if (!sessionCols.some((c) => c.name === 'group_id')) {
+        d.exec('ALTER TABLE sessions ADD COLUMN group_id TEXT')
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '18')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 18 (session groups)')
+  }
 }
 
 /** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
@@ -1048,6 +1073,7 @@ const REVISIONED_TABLES = [
   'projects',
   'tasks',
   'workspaces',
+  'session_groups',
   'remote_hosts',
   'agent_commands'
 ] as const
@@ -1097,6 +1123,7 @@ function verifySchema(d: Database.Database): void {
         column: 'sort_order',
         ddl: 'ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0'
       },
+      { column: 'group_id', ddl: 'ALTER TABLE sessions ADD COLUMN group_id TEXT' },
       { column: 'worktree_name', ddl: 'ALTER TABLE sessions ADD COLUMN worktree_name TEXT' },
       { column: 'agent_session_id', ddl: 'ALTER TABLE sessions ADD COLUMN agent_session_id TEXT' },
       { column: 'shell_cwd', ddl: 'ALTER TABLE sessions ADD COLUMN shell_cwd TEXT' },
@@ -1229,6 +1256,7 @@ export function loadConfig(): AppConfig {
   const remoteHosts = loadRemoteHosts(d)
   const tasks = loadTasks(d)
   const workspaces = loadWorkspaces(d)
+  const sessionGroups = loadSessionGroups(d)
 
   return {
     version: 1,
@@ -1240,7 +1268,8 @@ export function loadConfig(): AppConfig {
     workflows,
     remoteHosts,
     tasks,
-    workspaces
+    workspaces,
+    sessionGroups
   }
 }
 
@@ -1455,6 +1484,18 @@ function loadTasks(d: Database.Database): TaskConfig[] {
     archived_at: string | null
   }>
   return rows.map(rowToTask)
+}
+
+function loadSessionGroups(d: Database.Database): SessionGroupConfig[] {
+  const rows = d.prepare('SELECT * FROM session_groups ORDER BY "order"').all() as Array<{
+    id: string
+    name: string
+    icon: string | null
+    icon_color: string | null
+    order: number
+    workspace_id: string | null
+  }>
+  return rows.map(rowToSessionGroup)
 }
 
 function loadWorkspaces(d: Database.Database): WorkspaceConfig[] {
@@ -1770,6 +1811,38 @@ export function saveConfig(config: AppConfig): void {
     )
     for (const ws of workspaces) {
       insertWorkspace.run(ws.id, ws.name, ws.icon ?? null, ws.iconColor ?? null, ws.order, revision)
+    }
+
+    // Session groups
+    const sessionGroups = config.sessionGroups ?? []
+    pruneMissing(
+      d,
+      'session_groups',
+      'id',
+      sessionGroups.map((g) => g.id),
+      baseRevision
+    )
+    const insertSessionGroup = d.prepare(
+      `INSERT INTO session_groups (id, name, icon, icon_color, "order", workspace_id, row_revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         row_revision = excluded.row_revision,
+         name = excluded.name,
+         icon = excluded.icon,
+         icon_color = excluded.icon_color,
+         "order" = excluded."order",
+         workspace_id = excluded.workspace_id`
+    )
+    for (const g of sessionGroups) {
+      insertSessionGroup.run(
+        g.id,
+        g.name,
+        g.icon ?? null,
+        g.iconColor ?? null,
+        g.order,
+        g.workspaceId,
+        revision
+      )
     }
 
     d.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run(
@@ -2937,10 +3010,85 @@ export function dbUpdateWorkspace(id: string, updates: Partial<WorkspaceConfig>)
 export function dbDeleteWorkspace(id: string): void {
   const d = getDb()
   d.transaction(() => {
-    // Move projects and workflows to 'personal' before deleting
+    // Move projects and workflows to 'personal' before deleting. A group belongs
+    // to one workspace, so it dies with it and its sessions come back ungrouped.
+    d.prepare(
+      'UPDATE sessions SET group_id = NULL WHERE group_id IN (SELECT id FROM session_groups WHERE workspace_id = ?)'
+    ).run(id)
+    d.prepare('DELETE FROM session_groups WHERE workspace_id = ?').run(id)
     d.prepare("UPDATE projects SET workspace_id = 'personal' WHERE workspace_id = ?").run(id)
     d.prepare("UPDATE workflows SET workspace_id = 'personal' WHERE workspace_id = ?").run(id)
     d.prepare('DELETE FROM workspaces WHERE id = ?').run(id)
+  })()
+}
+
+// ---------------------------------------------------------------------------
+// Targeted CRUD: Session groups
+// ---------------------------------------------------------------------------
+
+export function dbListSessionGroups(): SessionGroupConfig[] {
+  const rows = getDb().prepare('SELECT * FROM session_groups ORDER BY "order"').all() as Array<{
+    id: string
+    name: string
+    icon: string | null
+    icon_color: string | null
+    order: number
+    workspace_id: string | null
+  }>
+  return rows.map(rowToSessionGroup)
+}
+
+export function dbInsertSessionGroup(group: SessionGroupConfig): void {
+  getDb()
+    .prepare(
+      `INSERT INTO session_groups (id, name, icon, icon_color, "order", workspace_id) VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      group.id,
+      group.name,
+      group.icon ?? null,
+      group.iconColor ?? null,
+      group.order,
+      group.workspaceId
+    )
+}
+
+export function dbUpdateSessionGroup(id: string, updates: Partial<SessionGroupConfig>): void {
+  const sets: string[] = []
+  const params: unknown[] = []
+  if (updates.name !== undefined) {
+    sets.push('name = ?')
+    params.push(updates.name)
+  }
+  if (updates.icon !== undefined) {
+    sets.push('icon = ?')
+    params.push(updates.icon)
+  }
+  if (updates.iconColor !== undefined) {
+    sets.push('icon_color = ?')
+    params.push(updates.iconColor)
+  }
+  if (updates.order !== undefined) {
+    sets.push('"order" = ?')
+    params.push(updates.order)
+  }
+  if (updates.workspaceId !== undefined) {
+    sets.push('workspace_id = ?')
+    params.push(updates.workspaceId)
+  }
+  if (sets.length === 0) return
+  params.push(id)
+  getDb()
+    .prepare(`UPDATE session_groups SET ${sets.join(', ')} WHERE id = ?`)
+    .run(...params)
+}
+
+export function dbDeleteSessionGroup(id: string): void {
+  const d = getDb()
+  d.transaction(() => {
+    // Let the sessions go first; deleting a group never kills one.
+    d.prepare('UPDATE sessions SET group_id = NULL WHERE group_id = ?').run(id)
+    d.prepare('DELETE FROM session_groups WHERE id = ?').run(id)
   })()
 }
 
@@ -3107,6 +3255,24 @@ function rowToWorkflow(r: {
   }
 }
 
+function rowToSessionGroup(r: {
+  id: string
+  name: string
+  icon: string | null
+  icon_color: string | null
+  order: number
+  workspace_id?: string | null
+}): SessionGroupConfig {
+  return {
+    id: r.id,
+    name: r.name,
+    ...(r.icon != null && { icon: r.icon }),
+    ...(r.icon_color != null && { iconColor: r.icon_color }),
+    order: r.order,
+    workspaceId: r.workspace_id ?? 'personal'
+  }
+}
+
 function rowToWorkspace(r: {
   id: string
   name: string
@@ -3148,8 +3314,8 @@ export function saveSessions(sessions: TerminalSession[]): void {
   const run = d.transaction(() => {
     d.prepare('DELETE FROM sessions').run()
     const insert = d.prepare(
-      `INSERT INTO sessions (id, agent_type, project_name, project_path, status, created_at, pid, display_name, branch, worktree_path, is_worktree, remote_host_id, remote_host_label, hook_session_id, status_source, saved_at, sort_order, worktree_name, agent_session_id, shell_cwd, head_commit, renamed_by_person)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO sessions (id, agent_type, project_name, project_path, status, created_at, pid, display_name, branch, worktree_path, is_worktree, remote_host_id, remote_host_label, hook_session_id, status_source, saved_at, sort_order, worktree_name, agent_session_id, shell_cwd, head_commit, renamed_by_person, group_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (let i = 0; i < sessions.length; i++) {
       const s = sessions[i]
@@ -3180,7 +3346,8 @@ export function saveSessions(sessions: TerminalSession[]): void {
         s.agentSessionId ?? null,
         s.shellCwd ?? null,
         s.headCommit ?? null,
-        s.renamedByPerson ? 1 : 0
+        s.renamedByPerson ? 1 : 0,
+        s.groupId ?? null
       )
     }
   })
@@ -3208,6 +3375,7 @@ export function getPreviousSessions(): TerminalSession[] {
     saved_at: number | null
     shell_cwd: string | null
     head_commit: string | null
+    group_id: string | null
     worktree_name: string | null
     agent_session_id: string | null
     renamed_by_person: number | null
@@ -3237,7 +3405,8 @@ export function getPreviousSessions(): TerminalSession[] {
     ...(r.saved_at != null && { savedAt: r.saved_at }),
     ...(r.shell_cwd != null && { shellCwd: r.shell_cwd }),
     ...(r.head_commit != null && { headCommit: r.head_commit }),
-    ...(r.renamed_by_person != null && r.renamed_by_person !== 0 && { renamedByPerson: true })
+    ...(r.renamed_by_person != null && r.renamed_by_person !== 0 && { renamedByPerson: true }),
+    ...(r.group_id != null && { groupId: r.group_id })
   }))
 }
 

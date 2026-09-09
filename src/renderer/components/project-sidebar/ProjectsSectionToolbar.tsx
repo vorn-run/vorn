@@ -25,6 +25,7 @@ const VIEW_MODE_OPTIONS: { value: SidebarViewMode; label: string }[] = [
   { value: 'worktrees', label: 'Projects > Worktrees' },
   { value: 'worktrees-sessions', label: 'Projects > Worktrees > Sessions' },
   { value: 'sessions', label: 'Projects > Sessions' },
+  { value: 'groups-sessions', label: 'Groups > Sessions' },
   { value: 'sessions-flat', label: 'Sessions (Flat)' }
 ]
 
@@ -88,6 +89,7 @@ export function ProjectsSectionToolbar() {
       <Tooltip label="Filter & sort" position="bottom">
         <button
           ref={buttonRef}
+          aria-label="Filter & sort"
           onClick={toggle}
           className={`relative p-0.5 rounded transition-colors ${
             open
@@ -122,7 +124,7 @@ export function ProjectsSectionToolbar() {
             ))}
           </div>
 
-          {viewMode !== 'sessions-flat' && (
+          {viewMode !== 'sessions-flat' && viewMode !== 'groups-sessions' && (
             <div className="py-1.5 border-t border-white/[0.06]">
               <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">
                 Filter
@@ -138,7 +140,7 @@ export function ProjectsSectionToolbar() {
             </div>
           )}
 
-          {viewMode !== 'sessions-flat' && (
+          {viewMode !== 'sessions-flat' && viewMode !== 'groups-sessions' && (
             <div className="py-1.5 border-t border-white/[0.06]">
               <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">
                 Sort projects
@@ -154,21 +156,23 @@ export function ProjectsSectionToolbar() {
             </div>
           )}
 
-          {viewMode !== 'sessions' && viewMode !== 'sessions-flat' && (
-            <div className="py-1.5 border-t border-white/[0.06]">
-              <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">
-                Sort worktrees
+          {viewMode !== 'sessions' &&
+            viewMode !== 'sessions-flat' &&
+            viewMode !== 'groups-sessions' && (
+              <div className="py-1.5 border-t border-white/[0.06]">
+                <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wider">
+                  Sort worktrees
+                </div>
+                {WORKTREE_SORT_OPTIONS.map((opt) => (
+                  <OptionRow
+                    key={opt.value}
+                    selected={worktreeSort === opt.value}
+                    label={opt.label}
+                    onClick={() => setWorktreeSort(opt.value)}
+                  />
+                ))}
               </div>
-              {WORKTREE_SORT_OPTIONS.map((opt) => (
-                <OptionRow
-                  key={opt.value}
-                  selected={worktreeSort === opt.value}
-                  label={opt.label}
-                  onClick={() => setWorktreeSort(opt.value)}
-                />
-              ))}
-            </div>
-          )}
+            )}
         </div>
       )}
     </>

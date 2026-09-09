@@ -442,3 +442,104 @@ describe('SessionItem controls', () => {
     expect(useAppStore.getState().browserPanes.has(session.id)).toBe(false)
   })
 })
+
+describe('filing a session into a group', () => {
+  afterEach(() => {
+    useAppStore.setState(initialState)
+  })
+
+  const seedGroups = (groupId?: string) => {
+    const terminals = new Map()
+    terminals.set(session.id, {
+      id: session.id,
+      session: {
+        id: session.id,
+        projectPath: '/proj',
+        projectName: 'p',
+        agentType: 'claude',
+        ...(groupId && { groupId })
+      },
+      status: 'idle',
+      lastOutputTimestamp: 1
+    })
+    act(() => {
+      useAppStore.setState({
+        terminals,
+        devicePanes: new Map(),
+        mobileProjectCache: new Map(),
+        loadMobileProject: async () => {},
+        activeWorkspace: 'personal',
+        config: {
+          projects: [],
+          sessionGroups: [{ id: 'g1', name: 'Sidebar work', order: 0, workspaceId: 'personal' }]
+        }
+      } as never)
+    })
+  }
+
+  /**
+   * A plain count reused an order the moment a group was deleted, and counted
+   * other workspaces' groups on the way.
+   */
+  it('orders a new group after this workspace last one', () => {
+    const terminals = new Map()
+    terminals.set(session.id, {
+      id: session.id,
+      session: { id: session.id, projectPath: '/proj', projectName: 'p', agentType: 'claude' },
+      status: 'idle',
+      lastOutputTimestamp: 1
+    })
+    const addSessionGroup = vi.fn()
+    act(() => {
+      useAppStore.setState({
+        terminals,
+        devicePanes: new Map(),
+        mobileProjectCache: new Map(),
+        loadMobileProject: async () => {},
+        activeWorkspace: 'personal',
+        addSessionGroup,
+        moveSessionToGroup: vi.fn(),
+        config: {
+          projects: [],
+          sessionGroups: [
+            { id: 'a', name: 'First', order: 4, workspaceId: 'personal' },
+            { id: 'z', name: 'Far away', order: 99, workspaceId: 'work' }
+          ]
+        }
+      } as never)
+    })
+    render(<SessionItem session={session} />)
+    fireEvent.click(screen.getByRole('button', { name: `More actions for ${session.name}` }))
+    fireEvent.click(screen.getByText('New group…'))
+
+    expect(addSessionGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ order: 5, workspaceId: 'personal' })
+    )
+  })
+
+  it('offers the group menu from the row', () => {
+    seedGroups()
+    render(<SessionItem session={session} />)
+    fireEvent.click(screen.getByRole('button', { name: `More actions for ${session.name}` }))
+    expect(screen.getByText('Move to group')).toBeInTheDocument()
+    expect(screen.getByText('Sidebar work')).toBeInTheDocument()
+  })
+
+  it('shows Remove from group only once it is in one', () => {
+    seedGroups('g1')
+    render(<SessionItem session={session} />)
+    fireEvent.click(screen.getByRole('button', { name: `More actions for ${session.name}` }))
+    expect(screen.getByText('Remove from group')).toBeInTheDocument()
+  })
+
+  /** The row is the drag handle; the group rows are the drop targets. */
+  it('carries its id on a drag', () => {
+    seedGroups()
+    render(<SessionItem session={session} />)
+    const setData = vi.fn()
+    fireEvent.dragStart(screen.getByText('My Session').closest('[draggable]')!, {
+      dataTransfer: { setData, effectAllowed: '' }
+    })
+    expect(setData).toHaveBeenCalledWith('application/vorn-session', session.id)
+  })
+})

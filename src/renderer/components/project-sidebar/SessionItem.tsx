@@ -1,5 +1,13 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
-import { X, FolderTree, Globe, Loader2, Smartphone, SquareTerminal } from 'lucide-react'
+import {
+  X,
+  FolderTree,
+  Globe,
+  Loader2,
+  Smartphone,
+  SquareTerminal,
+  MoreHorizontal
+} from 'lucide-react'
 import { useAppStore } from '../../stores'
 import { AgentStatusIcon } from '../AgentStatusIcon'
 import { closeTerminalSession } from '../../lib/terminal-close'
@@ -10,6 +18,8 @@ import { DevicePicker } from '../DevicePicker'
 import { shouldShowDeviceButton } from '../../lib/device-affordance'
 import { shouldOfferPane } from '../../lib/pane-affordance'
 import { PromotedCardItem } from './PromotedCardItem'
+import { SessionContextMenu } from './SessionContextMenu'
+import { useWorkspaceSessionGroups } from '../../hooks/useWorkspaceSessionGroups'
 import { usePromotedCardsFor } from '../../hooks/usePromotedCards'
 import type { SidebarSessionInfo } from './types'
 
@@ -43,6 +53,21 @@ export function SessionItem({
   const loadMobileProject = useAppStore((s) => s.loadMobileProject)
   const promotedCards = usePromotedCardsFor(session.id)
   const [isPickerOpen, setIsPickerOpen] = useState(false)
+  const [openMenu, setOpenMenu] = useState(false)
+  const groupId = useAppStore((s) => s.terminals.get(session.id)?.session.groupId)
+  const addSessionGroup = useAppStore((s) => s.addSessionGroup)
+  const moveSessionToGroup = useAppStore((s) => s.moveSessionToGroup)
+  const activeWorkspace = useAppStore((s) => s.activeWorkspace)
+  const workspaceGroups = useWorkspaceSessionGroups()
+
+  const createGroupWithSession = useCallback(() => {
+    const id = crypto.randomUUID()
+    // max + 1 over this workspace's own groups, the same as every other path;
+    // a plain count reused an order the moment one was deleted.
+    const order = workspaceGroups.reduce((max, g) => Math.max(max, g.order), -1) + 1
+    addSessionGroup({ id, name: 'New group', order, workspaceId: activeWorkspace })
+    moveSessionToGroup(session.id, id)
+  }, [addSessionGroup, workspaceGroups, activeWorkspace, moveSessionToGroup, session.id])
   // A claim in flight. Boot plus `bootstatus -b` can run tens of seconds, and
   // until this existed nothing on screen said so.
   const [claiming, setClaiming] = useState(false)
@@ -101,6 +126,11 @@ export function SessionItem({
       <div
         role="button"
         tabIndex={0}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData('application/vorn-session', session.id)
+        }}
         onKeyDown={(e) => {
           // Keys bubbling from a nested control are that control's, not the row's.
           if (e.target !== e.currentTarget) return
@@ -243,6 +273,29 @@ export function SessionItem({
               })
             }}
           />
+        )}
+        <button
+          type="button"
+          aria-label={`More actions for ${session.name}`}
+          title="More"
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpenMenu(!openMenu)
+          }}
+          className="opacity-0 group-hover/session:opacity-100 focus:opacity-100 text-gray-500
+                     hover:text-gray-200 p-0.5 rounded hover:bg-white/[0.08] transition-colors shrink-0"
+        >
+          <MoreHorizontal size={12} strokeWidth={2} />
+        </button>
+        {openMenu && (
+          <div className="relative">
+            <SessionContextMenu
+              sessionId={session.id}
+              currentGroupId={groupId}
+              onNewGroup={createGroupWithSession}
+              onClose={() => setOpenMenu(false)}
+            />
+          </div>
         )}
         <button
           type="button"

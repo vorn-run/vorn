@@ -12,6 +12,7 @@ beforeEach(() => {
     maximizedPaneId: null,
     activeTabId: null,
     activeProject: null,
+    activeGroupId: null,
     activeWorktreePath: null,
     visibleTerminalIds: [],
     knownSessionIds: new Set<string>(),
@@ -226,5 +227,26 @@ describe('a session opened after the launch sync', () => {
     useAppStore.getState().setVisibleTerminalIds(['term-1'])
 
     expect([...useAppStore.getState().minimizedTerminals]).toEqual([])
+  })
+})
+
+describe('the group scope', () => {
+  it('survives a reload', () => {
+    useAppStore.getState().setActiveGroup('g1')
+    expect(JSON.parse(localStorage.getItem(KEY)!).activeGroupId).toBe('g1')
+  })
+
+  it('is cleared by picking a project, because it is the same selection', () => {
+    useAppStore.getState().setActiveGroup('g1')
+    useAppStore.getState().setActiveProject('vorn')
+    expect(useAppStore.getState().activeGroupId).toBeNull()
+    expect(JSON.parse(localStorage.getItem(KEY)!).activeGroupId).toBeNull()
+  })
+
+  it('clears the project in turn', () => {
+    useAppStore.getState().setActiveProject('vorn')
+    useAppStore.getState().setActiveGroup('g1')
+    expect(useAppStore.getState().activeProject).toBeNull()
+    expect(JSON.parse(localStorage.getItem(KEY)!).activeProject).toBeNull()
   })
 })

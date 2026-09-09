@@ -10,6 +10,16 @@ const EMPTY_WORKTREES: WorktreeInfo[] = []
 
 export function ToolbarBreadcrumb() {
   const activeProject = useAppStore((s) => s.activeProject)
+  const setActiveGroup = useAppStore((s) => s.setActiveGroup)
+  // Matched on the workspace too: a stale id is no selection anywhere else, and
+  // a crumb naming it would be the only thing on screen that still believed it.
+  const activeGroup = useAppStore((s) =>
+    s.activeGroupId
+      ? s.config?.sessionGroups?.find(
+          (g) => g.id === s.activeGroupId && g.workspaceId === s.activeWorkspace
+        )
+      : undefined
+  )
   const activeWorktreePath = useAppStore((s) => s.activeWorktreePath)
   const setActiveWorktreePath = useAppStore((s) => s.setActiveWorktreePath)
   const worktreeCache = useAppStore((s) => s.worktreeCache)
@@ -37,7 +47,20 @@ export function ToolbarBreadcrumb() {
     branchName
   })
 
-  if (!activeProject) return null
+  // A group is the same selection slot as a project, so it gets the same crumb.
+  if (!activeProject) {
+    if (!activeGroup) return null
+    return (
+      <div className="flex items-center gap-0.5 text-[13px] min-w-0 max-w-[400px]">
+        <button
+          onClick={() => setActiveGroup(null)}
+          className="text-white truncate hover:text-gray-300 transition-colors"
+        >
+          {activeGroup.name}
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="flex items-center gap-0.5 text-[13px] min-w-0 max-w-[400px]">

@@ -3,6 +3,7 @@ import {
   AiAgentType,
   AppConfig,
   ProjectConfig,
+  SessionGroupConfig,
   WorkflowDefinition,
   WorkflowExecution,
   WorkspaceConfig,
@@ -49,7 +50,12 @@ export type WorkflowFilter = 'all' | 'manual' | 'scheduled'
 export type RunBucket = 'all' | 'running' | 'waiting' | 'success' | 'error'
 export type WorktreeSortMode = 'name' | 'recent'
 export type WorktreeFilter = 'all' | 'active'
-export type SidebarViewMode = 'worktrees' | 'worktrees-sessions' | 'sessions' | 'sessions-flat'
+export type SidebarViewMode =
+  | 'worktrees'
+  | 'worktrees-sessions'
+  | 'sessions'
+  | 'groups-sessions'
+  | 'sessions-flat'
 export type PanelTab = 'changes'
 
 export interface FlexibleLayoutRect {
@@ -293,6 +299,7 @@ export interface TerminalsSlice {
   updateSessionBranch: (id: string, branch: string) => void
   updateSessionCwd: (id: string, shellCwd: string) => void
   setBranchForCwd: (cwd: string, branch: string) => void
+  updateSessionGroupId: (id: string, groupId: string | undefined) => void
   updateSessionWorktree: (
     id: string,
     updates: { worktreePath?: string; worktreeName?: string }
@@ -313,9 +320,11 @@ export interface TerminalsSlice {
 export interface ProjectsSlice {
   config: AppConfig | null
   activeProject: string | null
+  activeGroupId: string | null
   activeWorktreePath: string | null
   setConfig: (config: AppConfig) => void
   setActiveProject: (name: string | null) => void
+  setActiveGroup: (id: string | null) => void
   setActiveWorktreePath: (path: string | null) => void
   addProject: (project: ProjectConfig) => void
   removeProject: (name: string) => void
@@ -326,6 +335,10 @@ export interface ProjectsSlice {
   addRemoteHost: (host: RemoteHost) => void
   removeRemoteHost: (id: string) => void
   updateRemoteHost: (id: string, host: RemoteHost) => void
+  addSessionGroup: (group: SessionGroupConfig) => void
+  updateSessionGroup: (id: string, updates: Partial<SessionGroupConfig>) => void
+  removeSessionGroup: (id: string) => void
+  moveSessionToGroup: (sessionId: string, groupId: string | null) => void
   addWorkspace: (workspace: WorkspaceConfig) => void
   removeWorkspace: (id: string) => void
   updateWorkspace: (id: string, updates: Partial<WorkspaceConfig>) => void

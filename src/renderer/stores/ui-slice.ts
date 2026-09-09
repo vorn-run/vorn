@@ -73,6 +73,7 @@ interface PersistedView {
   activeTabId: string | null
   maximizedPaneId: string | null
   activeProject: string | null
+  activeGroupId: string | null
   activeWorktreePath: string | null
 }
 
@@ -81,6 +82,7 @@ const EMPTY_VIEW: PersistedView = {
   activeTabId: null,
   maximizedPaneId: null,
   activeProject: null,
+  activeGroupId: null,
   activeWorktreePath: null
 }
 
@@ -95,6 +97,7 @@ function loadView(): PersistedView {
       activeTabId: orNull(parsed.activeTabId),
       maximizedPaneId: orNull(parsed.maximizedPaneId),
       activeProject: orNull(parsed.activeProject),
+      activeGroupId: orNull(parsed.activeGroupId),
       activeWorktreePath: orNull(parsed.activeWorktreePath)
     }
   } catch {
@@ -932,13 +935,27 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   activeTabId: loadView().activeTabId,
 
   setActiveWorkspace: (id) => {
+    // Cleared in the store but not on disk, the old selection came back on the
+    // next launch pointing into a workspace that is no longer active.
+    saveView({ activeProject: null, activeGroupId: null, activeWorktreePath: null })
     const config = get().config
     if (config) {
       const updated = { ...config, defaults: { ...config.defaults, activeWorkspace: id } }
       window.api.saveConfig(updated)
-      set({ activeWorkspace: id, activeProject: null, config: updated })
+      set({
+        activeWorkspace: id,
+        activeProject: null,
+        activeGroupId: null,
+        activeWorktreePath: null,
+        config: updated
+      })
     } else {
-      set({ activeWorkspace: id, activeProject: null })
+      set({
+        activeWorkspace: id,
+        activeProject: null,
+        activeGroupId: null,
+        activeWorktreePath: null
+      })
     }
   },
   setFocusedTerminal: (id) =>

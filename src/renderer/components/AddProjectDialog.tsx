@@ -2,58 +2,9 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../stores'
 import { AiAgentType } from '../../shared/types'
-import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../lib/project-icons'
 import { toast } from './Toast'
-import {
-  Folder,
-  FolderGit2,
-  Code,
-  Globe,
-  Database,
-  Server,
-  Smartphone,
-  Package,
-  FileCode,
-  Terminal,
-  Cpu,
-  Cloud,
-  Shield,
-  Zap,
-  Gamepad2,
-  Music,
-  Image,
-  BookOpen,
-  FlaskConical,
-  Rocket,
-  FolderOpen,
-  Monitor
-} from 'lucide-react'
-
-const ICON_MAP: Record<
-  string,
-  React.FC<{ size?: number; color?: string; strokeWidth?: number }>
-> = {
-  Folder,
-  FolderGit2,
-  Code,
-  Globe,
-  Database,
-  Server,
-  Smartphone,
-  Package,
-  FileCode,
-  Terminal,
-  Cpu,
-  Cloud,
-  Shield,
-  Zap,
-  Gamepad2,
-  Music,
-  Image,
-  BookOpen,
-  FlaskConical,
-  Rocket
-}
+import { IconColorPicker } from './IconColorPicker'
+import { FolderOpen, Monitor, Server } from 'lucide-react'
 
 export function AddProjectDialog() {
   const isOpen = useAppStore((s) => s.isAddProjectDialogOpen)
@@ -136,8 +87,6 @@ export function AddProjectDialog() {
     setSelectedColor('#6b7280')
     setSelectedHostId('local')
   }
-
-  const SelectedIconComponent = ICON_MAP[selectedIcon] || Folder
 
   return (
     <AnimatePresence>
@@ -273,60 +222,12 @@ export function AddProjectDialog() {
                 />
               </div>
 
-              {/* Icon selector */}
-              <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 block">
-                  Icon
-                </label>
-                <div className="grid grid-cols-10 gap-1.5">
-                  {PROJECT_ICON_OPTIONS.map((opt) => {
-                    const IconComp = ICON_MAP[opt.name] || Folder
-                    return (
-                      <button
-                        key={opt.name}
-                        onClick={() => setSelectedIcon(opt.name)}
-                        className={`flex items-center justify-center p-2 rounded-lg border transition-all ${
-                          selectedIcon === opt.name
-                            ? 'border-white/[0.2] bg-white/[0.08]'
-                            : 'border-transparent hover:bg-white/[0.04]'
-                        }`}
-                        title={opt.label}
-                      >
-                        <IconComp
-                          size={16}
-                          color={selectedIcon === opt.name ? selectedColor : '#9ca3af'}
-                          strokeWidth={1.5}
-                        />
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* Color selector */}
-              <div>
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 block">
-                  Color
-                </label>
-                <div className="flex gap-2 items-center">
-                  {ICON_COLOR_PALETTE.map((color) => (
-                    <button
-                      key={color}
-                      onClick={() => setSelectedColor(color)}
-                      className={`w-7 h-7 rounded-full border-2 transition-all ${
-                        selectedColor === color
-                          ? 'border-white scale-110'
-                          : 'border-transparent hover:border-white/30'
-                      }`}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
-                  <div className="ml-3 flex items-center gap-2">
-                    <SelectedIconComponent size={20} color={selectedColor} strokeWidth={1.5} />
-                    <span className="text-xs text-gray-500">Preview</span>
-                  </div>
-                </div>
-              </div>
+              <IconColorPicker
+                icon={selectedIcon}
+                color={selectedColor}
+                onIconChange={setSelectedIcon}
+                onColorChange={setSelectedColor}
+              />
             </div>
 
             {/* Footer */}

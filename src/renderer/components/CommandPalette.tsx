@@ -38,7 +38,8 @@ import {
   HardDrive,
   LayoutDashboard,
   Power,
-  Globe
+  Globe,
+  Group
 } from 'lucide-react'
 
 type CommandCategory =
@@ -128,6 +129,8 @@ function useCommands(
   const addTerminal = useAppStore((s) => s.addTerminal)
   const setFocusedTerminal = useAppStore((s) => s.setFocusedTerminal)
   const setActiveProject = useAppStore((s) => s.setActiveProject)
+  const setActiveGroup = useAppStore((s) => s.setActiveGroup)
+  const activeWorkspace = useAppStore((s) => s.activeWorkspace)
   const setNewAgentDialogOpen = useAppStore((s) => s.setNewAgentDialogOpen)
   const setAddProjectDialogOpen = useAppStore((s) => s.setAddProjectDialogOpen)
   const setWorkflowEditorOpen = useAppStore((s) => s.setWorkflowEditorOpen)
@@ -186,6 +189,23 @@ function useCommands(
       icon: <FolderPlus size={14} strokeWidth={1.5} />,
       keywords: ['new project', 'create project'],
       onExecute: () => setAddProjectDialogOpen(true)
+    })
+    commands.push({
+      id: 'action:add-group',
+      label: 'New Group',
+      category: 'actions',
+      icon: <Group size={14} strokeWidth={1.5} />,
+      keywords: ['new group', 'create group', 'sidebar'],
+      onExecute: () => {
+        const state = useAppStore.getState()
+        const groups = state.config?.sessionGroups ?? []
+        state.addSessionGroup({
+          id: crypto.randomUUID(),
+          name: 'New group',
+          order: groups.reduce((max: number, g) => Math.max(max, g.order), -1) + 1,
+          workspaceId: state.activeWorkspace
+        })
+      }
     })
     commands.push({
       id: 'action:add-workflow',
@@ -377,8 +397,23 @@ function useCommands(
       category: 'projects',
       icon: <Monitor size={14} strokeWidth={1.5} />,
       keywords: ['show all', 'clear filter'],
-      onExecute: () => setActiveProject(null)
+      onExecute: () => {
+        setActiveProject(null)
+        setActiveGroup(null)
+      }
     })
+    for (const group of (config?.sessionGroups ?? []).filter(
+      (g) => g.workspaceId === activeWorkspace
+    )) {
+      commands.push({
+        id: `group:${group.id}`,
+        label: group.name,
+        category: 'projects',
+        icon: <Group size={14} strokeWidth={1.5} />,
+        keywords: ['group'],
+        onExecute: () => setActiveGroup(group.id)
+      })
+    }
     for (const project of config?.projects ?? []) {
       commands.push({
         id: `project:${project.name}`,
@@ -535,6 +570,8 @@ function useCommands(
     addTerminal,
     setFocusedTerminal,
     setActiveProject,
+    setActiveGroup,
+    activeWorkspace,
     setNewAgentDialogOpen,
     setAddProjectDialogOpen,
     setWorkflowEditorOpen,

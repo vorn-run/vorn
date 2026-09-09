@@ -267,7 +267,7 @@ function resolveProjectForPath(p?: string): ProjectConfig | undefined {
 
 /**
  * Resolve the currently active project from the store.
- * Falls back to the first project in the active workspace.
+ * Falls back to the active group's most recent session, then the workspace.
  */
 export function resolveActiveProject() {
   const state = useAppStore.getState()
@@ -280,7 +280,21 @@ export function resolveActiveProject() {
     if (match) return match
   }
   const ws = state.activeWorkspace
-  return projects.find((p) => (p.workspaceId ?? 'personal') === ws)
+  const inWorkspace = projects.filter((p) => (p.workspaceId ?? 'personal') === ws)
+  // A group holds sessions from many projects, so launching from one starts in
+  // the project its most recent session belongs to.
+  if (state.activeGroupId) {
+    let newest: { name: string; at: number } | null = null
+    for (const t of state.terminals.values()) {
+      if (t.session.groupId !== state.activeGroupId) continue
+      if (!newest || t.lastOutputTimestamp > newest.at) {
+        newest = { name: t.session.projectName, at: t.lastOutputTimestamp }
+      }
+    }
+    const match = newest && inWorkspace.find((p) => p.name === newest.name)
+    if (match) return match
+  }
+  return inWorkspace[0]
 }
 
 /**
