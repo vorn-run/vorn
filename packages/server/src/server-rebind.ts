@@ -17,6 +17,43 @@ export function getCurrentHost(): string {
   return currentHost
 }
 
+/** Reversible, unlike closing fastify: the replacement is about to bind this port. */
+export async function releaseListener(): Promise<void> {
+  const server = httpServer
+  if (!server) return
+  if (typeof server.closeAllConnections === 'function') server.closeAllConnections()
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+}
+
+/** Listen on `host`, answering whether it worked rather than throwing. */
+async function listenOn(host: string): Promise<boolean> {
+  const server = httpServer
+  if (!server) return false
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (err: unknown): void => {
+        server.removeListener('listening', onListening)
+        reject(err)
+      }
+      const onListening = (): void => {
+        server.removeListener('error', onError)
+        resolve()
+      }
+      server.once('error', onError)
+      server.listen(boundPort, host, onListening)
+    })
+    return true
+  } catch (err) {
+    log.error({ err, host }, '[server] could not listen')
+    return false
+  }
+}
+
+/** Only for a handoff that committed and then lost its replacement. */
+export async function retakeListener(): Promise<boolean> {
+  return listenOn(currentHost)
+}
+
 /**
  * Rebind if the reachability setting has changed.
  *
@@ -53,27 +90,13 @@ async function doRebind(): Promise<void> {
 
   log.info(`[server] rebinding from ${currentHost} to ${desiredHost}:${boundPort}`)
 
-  try {
-    const server = httpServer
-    if (typeof server.closeAllConnections === 'function') {
-      server.closeAllConnections()
-    }
-    await new Promise<void>((resolve) => server.close(() => resolve()))
-    await new Promise<void>((resolve, reject) => {
-      const onError = (err: unknown) => {
-        server.removeListener('listening', onListening)
-        reject(err)
-      }
-      const onListening = () => {
-        server.removeListener('error', onError)
-        resolve()
-      }
-      server.once('error', onError)
-      server.listen(boundPort, desiredHost, onListening)
-    })
+  // The same two steps a handoff commit and its rollback use, so a change to
+  // either -- a drain timeout, different error handling -- reaches both.
+  await releaseListener()
+  if (await listenOn(desiredHost)) {
     currentHost = desiredHost
     log.info(`[server] rebound successfully to ${desiredHost}:${boundPort}`)
-  } catch (err) {
-    log.error({ err }, '[server] rebind failed')
+  } else {
+    log.error('[server] rebind failed')
   }
 }

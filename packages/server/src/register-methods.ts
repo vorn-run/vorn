@@ -673,6 +673,13 @@ export async function forgetRestored(id: string): Promise<void> {
   await discardHistory(id)
 }
 
+/** Named because a rolled-back handoff has to start saving again, with exactly this. */
+export function sessionsToPersist(): TerminalSession[] {
+  const active = ptyManager.getActiveSessions()
+  ptyManager.heads.refresh(active)
+  return [...active, ...restoredRecords()]
+}
+
 export function registerAllMethods(): void {
   // Wire headless worktree counter into pty-manager for cleanup gating
   ptyManager.setHeadlessWorktreeCounter((worktreePath, excludeId) =>
@@ -2159,11 +2166,7 @@ export function registerAllMethods(): void {
   // record gone, the next start judged that session's history unreachable and
   // deleted it. Holding them here is what makes a terminal survive more than one
   // restart.
-  sessionManager.startAutoSave(() => {
-    const active = ptyManager.getActiveSessions()
-    ptyManager.heads.refresh(active)
-    return [...active, ...restoredRecords()]
-  })
+  sessionManager.startAutoSave(sessionsToPersist)
 
   // ─── Hook server integration ──────────────────────────────────
 

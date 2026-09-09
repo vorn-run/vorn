@@ -295,7 +295,14 @@ export async function discardHistory(id: string): Promise<void> {
 export async function flushHistory(): Promise<void> {
   sealed = true
   stopTicking()
+  await checkpointAll()
+}
 
+/**
+ * `flushHistory` without the seal, for a handoff: the terminals are not going
+ * anywhere, and a rolled-back server must not have its history switched off.
+ */
+export async function checkpointAll(): Promise<void> {
   const all = Promise.all(
     [...recorded.values()].map((held) => enqueue(held, () => checkpoint(held, true)))
   )

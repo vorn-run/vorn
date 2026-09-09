@@ -86,6 +86,43 @@ import type {
  */
 export const RUNTIME_PROTOCOL_VERSION = 1
 
+/**
+ * Frozen on purpose: this is the channel used when the runtime protocol has
+ * already disagreed, so nothing here may ever change shape or meaning.
+ */
+export const HANDOFF_PROTOCOL_VERSION = 1
+
+/** A file rather than a command line: ARG_MAX is not a limit to find by having many terminals. */
+export const HANDOFF_MANIFEST_VERSION = 1
+
+/**
+ * A request to stand down in favour of a named replacement.
+ *
+ * The caller supplies the command line because only it knows one: the incumbent
+ * was started from a bundle an update has since replaced. That makes this an exec
+ * of a caller-supplied path, so it is accepted only over the unix endpoint.
+ */
+export interface HandoffRequest {
+  /** Refused rather than guessed at. */
+  handoffVersion: number
+  /** In production the Electron binary of the new bundle. */
+  exec: string
+  /** Its arguments, ending in the new server's entry point. */
+  args: string[]
+  /** Environment for the replacement. Merged over the incumbent's own. */
+  env: Record<string, string>
+  /** Working directory for the replacement. */
+  cwd: string
+  /** The version the caller expects to be running afterwards, for the log. */
+  appVersion: string
+}
+
+export type HandoffResult =
+  /** The replacement is serving; reconnect rather than wait on this socket. */
+  | { kind: 'handed-over'; sessions: number; pid: number }
+  /** Nothing was disturbed: every terminal is still here, under this server. */
+  | { kind: 'declined'; because: string }
+
 export interface ServerHello {
   protocolVersion: number
   /**
@@ -226,6 +263,9 @@ export const WS_PORT_FILENAME = 'ws-port'
  * answer, and the race it leaves open remains open.
  */
 export const ENDPOINT_FILENAME = 'vorn.sock'
+
+/** Two writers now: the app when it spawns a server, and a server when it spawns its replacement. */
+export const SERVER_LOG_FILENAME = 'server.log'
 
 /**
  * Exit code for a server that found this machine already had one.
@@ -734,6 +774,8 @@ export interface RequestMethods {
     result: void
   }
   'server:shutdown': { params: void; result: void }
+  /** Hand every running terminal to the replacement described, and exit. Unix endpoint only. */
+  'server:handoff': { params: HandoffRequest; result: HandoffResult }
 
   // Credential vault (server-side storage)
   'credential:storeKey': {

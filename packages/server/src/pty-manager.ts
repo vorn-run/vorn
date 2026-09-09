@@ -42,14 +42,19 @@ import { stripAnsi } from './ansi-strip'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
 import {
   createScreen,
+  hasScreen,
   feedScreen,
   resizeScreen,
   clearScreen,
   setCwdReporter
 } from './terminal-screen'
+import type { ManagedPty } from './handoff/adopted-pty'
+import type { AdoptedPane } from './handoff/heir'
+import type { DonorPane } from './handoff/donor'
 import { startHistory, recordOutput, recordResize, stopHistory } from './history/writer'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 import { isDraining, DRAINING_MESSAGE } from './draining'
+import { isHandingOver, HANDOVER_MESSAGE } from './handoff/donor'
 
 const MAX_OUTPUT_LINES = 1000
 
@@ -79,10 +84,19 @@ type WorktreeSessionCounter = (
   excludeId?: string
 ) => { count: number; sessionIds: string[] }
 
+/**
+ * node-pty exposes `fd` as a getter its typings never declared, so this asks past
+ * the type. Both kinds of pty answer it, because a handoff must work twice.
+ */
+function masterFd(held: ManagedPty): number | null {
+  const fd = (held as unknown as { fd?: unknown }).fd
+  return typeof fd === 'number' && Number.isInteger(fd) && fd >= 0 ? fd : null
+}
+
 class PtyManager extends EventEmitter {
   /** Recorded HEAD per session, refreshed by the save loop. */
   readonly heads = new HeadRefresh(getGitHead)
-  private ptys = new Map<string, pty.IPty>()
+  private ptys = new Map<string, ManagedPty>()
   private sessions = new Map<string, TerminalSession>()
   /**
    * PTYs an extension's pane is drawing, which are not sessions.
@@ -222,6 +236,8 @@ class PtyManager extends EventEmitter {
     // nobody would ever see it. Existing sessions are untouched -- their clients
     // hold a descriptor, not a name.
     if (isDraining()) throw new Error(DRAINING_MESSAGE)
+    // A pane created now would be in neither the manifest nor the replacement.
+    if (isHandingOver()) throw new Error(HANDOVER_MESSAGE)
     const id = reuseId ?? crypto.randomUUID()
     const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
 
@@ -828,8 +844,15 @@ class PtyManager extends EventEmitter {
    *   finds nothing and silently falls back -- which is invisible while all
    *   three spawn at the same size and wrong the moment one does not.
    */
-  private setupPtyEvents(id: string, ptyProcess: pty.IPty, cols: number, rows: number): void {
-    createScreen(id, cols, rows)
+  private setupPtyEvents(
+    id: string,
+    ptyProcess: ManagedPty,
+    cols: number,
+    rows: number,
+    /** An inherited pty already has its screen rebuilt from disk, and `createScreen` clears. */
+    adopted = false
+  ): void {
+    if (!adopted || !hasScreen(id)) createScreen(id, cols, rows)
     // Replaces whatever was left under this id. A recovered session that is
     // being respawned has history describing a process that is gone.
     startHistory(id)
@@ -1057,6 +1080,87 @@ class PtyManager extends EventEmitter {
   flushPendingOutput(): void {
     // Copied because `flushBuffer` deletes from the map it is walking.
     for (const id of [...this.flushTimers.keys()]) this.drainBuffer(id)
+  }
+
+  /**
+   * Every live pane, or null if even one cannot be described: a handoff carrying
+   * most of the terminals looks exactly like losing the rest.
+   */
+  describeForHandoff(): DonorPane[] | null {
+    const live = [...this.ptys.keys()]
+    const ranked = [...live].sort((a, b) => {
+      const ai = this.sessionOrder.indexOf(a)
+      const bi = this.sessionOrder.indexOf(b)
+      return (ai === -1 ? Number.MAX_SAFE_INTEGER : ai) - (bi === -1 ? Number.MAX_SAFE_INTEGER : bi)
+    })
+
+    const panes: DonorPane[] = []
+    for (const id of ranked) {
+      const held = this.ptys.get(id)
+      const session = this.sessions.get(id)
+      if (!held || !session) {
+        // All-or-nothing, the same as a missing descriptor below. A pty whose
+        // record has gone is one the replacement could not be told about, and
+        // skipping it would hand over a machine quietly missing a pane.
+        log.warn({ id }, '[pty] this terminal has no session record to hand over')
+        return null
+      }
+      const fd = masterFd(held)
+      if (fd === null) {
+        log.warn({ id }, '[pty] this terminal has no descriptor to hand over')
+        return null
+      }
+      panes.push({
+        session,
+        fd,
+        pid: held.pid,
+        cols: session.cols ?? INITIAL_COLS,
+        rows: session.rows ?? INITIAL_ROWS
+      })
+    }
+    return panes
+  }
+
+  /** Stop every reader, so a handoff describes a machine that is holding still. */
+  pauseAllForHandoff(): void {
+    for (const held of this.ptys.values()) {
+      try {
+        held.pause()
+      } catch (err) {
+        log.warn({ err }, '[pty] could not pause a terminal for the handoff')
+      }
+    }
+  }
+
+  /** Start reading again, for a handoff that did not happen. */
+  resumeAllForHandoff(): void {
+    for (const held of this.ptys.values()) {
+      try {
+        held.resume()
+      } catch (err) {
+        log.warn({ err }, '[pty] could not resume a terminal after an abandoned handoff')
+      }
+    }
+  }
+
+  /** Called after `recoverHistory`, so the first byte read is the first with somewhere to go. */
+  adoptPanes(panes: AdoptedPane[]): void {
+    for (const pane of panes) {
+      const { session } = pane
+      this.sessions.set(session.id, session)
+      if (!this.sessionOrder.includes(session.id)) this.sessionOrder.push(session.id)
+      this.normalizedPaths.set(
+        session.id,
+        normalizePath(session.worktreePath || session.projectPath)
+      )
+      this.setupPtyEvents(session.id, pane.pty, pane.cols, pane.rows, true)
+      this.ptys.set(session.id, pane.pty)
+    }
+    // Every session wired before any of them reads.
+    for (const pane of panes) pane.pty.resume()
+    if (panes.length) {
+      log.info({ panes: panes.length }, '[pty] adopted terminals from the previous server')
+    }
   }
 
   killAll(): void {

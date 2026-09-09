@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useAppStore } from '../../stores'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
@@ -6,6 +7,8 @@ import { SegmentedControl } from './SegmentedControl'
 import { facesRestart, updateCostLine } from '../../lib/update-cost'
 import { describeUpdateStatus } from '../../lib/update-status'
 import { TONE_DOT } from '../../lib/status-tone'
+import { describeServerRuntime } from '../../lib/server-runtime'
+import type { ServerRuntimeStatus } from '../../../shared/types'
 
 /**
  * The one action a state is worth offering, as data rather than three near
@@ -31,6 +34,7 @@ function getAppVersionOnce(): string {
 
 export function UpdatesSettings() {
   const config = useAppStore((s) => s.config)
+  const runtime = useServerRuntime()
   const setConfig = useAppStore((s) => s.setConfig)
   const status = useAppStore((s) => s.appUpdateStatus)
   const sessionCount = useAppStore((s) => [...s.terminals.values()].filter(facesRestart).length)
@@ -109,6 +113,8 @@ export function UpdatesSettings() {
           </button>
         </SettingRow>
 
+        <ServerBuildRow runtime={runtime} />
+
         <SettingRow
           label="Update channel"
           description="Beta receives early releases; stable receives tested releases only"
@@ -141,5 +147,51 @@ export function UpdatesSettings() {
         </SettingRow>
       </div>
     </div>
+  )
+}
+
+/** Followed, not fetched once: the automatic move happens long before this panel opens. */
+function useServerRuntime(): ServerRuntimeStatus | null {
+  // Read during the first render, like the app version above, so the panel does
+  // not render twice. Guarded because a renderer reloaded mid-handoff may be
+  // running against an older `window.api`, and throwing here would take the page down.
+  const [runtime, setRuntime] = useState<ServerRuntimeStatus | null>(() =>
+    typeof window.api?.getServerRuntimeStatus === 'function'
+      ? window.api.getServerRuntimeStatus()
+      : null
+  )
+  useEffect(() => window.api?.onServerRuntimeStatus?.(setRuntime), [])
+  return runtime
+}
+
+/** Always shown: a row that appears only when something is wrong is one nobody knows exists. */
+function ServerBuildRow({ runtime }: { runtime: ServerRuntimeStatus | null }) {
+  const [working, setWorking] = useState(false)
+  if (!runtime) return null
+  const view = describeServerRuntime(runtime)
+
+  return (
+    <SettingRow label="Terminal server" description={view.description}>
+      {view.offerMove ? (
+        <button
+          onClick={async () => {
+            setWorking(true)
+            try {
+              await window.api.upgradeServer()
+            } finally {
+              setWorking(false)
+            }
+          }}
+          disabled={working}
+          className="px-3 py-1.5 text-xs text-gray-300 bg-white/[0.04] hover:bg-white/[0.08]
+                     border border-white/[0.08] rounded-md transition-colors
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {working ? 'Moving…' : 'Move to this build'}
+        </button>
+      ) : (
+        <span className="text-xs text-gray-500">{view.trailing}</span>
+      )}
+    </SettingRow>
   )
 }

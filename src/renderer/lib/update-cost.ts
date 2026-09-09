@@ -14,23 +14,17 @@ export function facesRestart(terminal: Pick<TerminalState, 'ended'>): boolean {
 }
 
 /**
- * What restarting for an update will cost, in one line, or null when it costs
- * nothing worth saying.
+ * What restarting for an update does to the sessions, in one line.
  *
- * Installing an update ends the server and every session on it, which is a
- * deliberate reversal of what `Keep Sessions Running` promises: that closing
- * Vorn leaves the agents working. Updating is a more considered act than closing
- * a window, so the reversal is defensible — but a setting the person turned on
- * cannot be quietly overruled, so the exception is stated on the button that
- * makes it rather than left to be discovered.
- *
- * The turn is named separately because it is the only part that is actually
- * lost. A session comes back where it was; a turn in flight does not.
+ * It used to be a warning: the update stopped the server and ended every session.
+ * The server is now handed over instead, so the line stays to say a promise is
+ * kept -- somebody who read the old one needs telling it has changed.
  */
 export function updateCostLine(sessionCount: number, aTurnIsRunning: boolean): string | null {
   if (sessionCount <= 0) return null
   const sessions =
-    sessionCount === 1 ? 'Your session restarts' : `Your ${sessionCount} sessions restart`
-  const turn = aTurnIsRunning ? ' A turn in flight is lost.' : ''
-  return `${sessions} on the new version.${turn}`
+    sessionCount === 1 ? 'Your session keeps running' : `Your ${sessionCount} sessions keep running`
+  // The part people brace for, so it is named -- now to say it survives.
+  const turn = aTurnIsRunning ? ' The turn in flight continues.' : ''
+  return `${sessions} through the update.${turn}`
 }

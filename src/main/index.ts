@@ -7,7 +7,12 @@ import { installCompanionQuitHook } from './device-companion'
 import { installConnectorCredentialsSync } from './connector-credentials-sync'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
-import { IPC, PermissionRequestInfo, type AppConfig } from '../shared/types'
+import {
+  IPC,
+  PermissionRequestInfo,
+  type AppConfig,
+  type ServerRuntimeStatus
+} from '../shared/types'
 import { setArtifactNotify } from './artifact-watcher'
 import { SURFACE } from '../shared/surface'
 import {
@@ -17,6 +22,9 @@ import {
 } from '../shared/adoption-channels'
 import {
   launchServer,
+  upgradeServerInPlace,
+  serverRuntime,
+  type UpgradeOutcome,
   stopServer,
   detachFromServer,
   getServerBridge,
@@ -245,10 +253,13 @@ function toggleWidget(): void {
  */
 function explainRefusal(reason: string): string {
   if (reason === 'protocol-mismatch') {
+    // Reached only after asking it to hand its terminals over and being turned
+    // down, so the offer is no longer worth repeating here.
     return (
       'Another Vorn server is already running, from a different version, and this ' +
-      'app cannot talk to it. Your sessions are still alive inside it. Stop that ' +
-      'server to start fresh here, or reopen the version that started it.'
+      'app cannot talk to it. It was asked to move your terminals to this version ' +
+      'and could not. They are still alive inside it. Stop that server to start ' +
+      'fresh here, or reopen the version that started it.'
     )
   }
   if (reason === 'different-build') {
@@ -286,6 +297,17 @@ let keepSessionsRunning = true
  * the quit it triggers.
  */
 let serverStopped = false
+
+/** Held because the attempt happens seconds after launch and the panel opens minutes later. */
+let lastUpgrade: UpgradeOutcome | { kind: 'working' } | null = null
+
+function serverRuntimeStatus(): ServerRuntimeStatus {
+  return {
+    ...serverRuntime(),
+    appVersion: app.getVersion(),
+    lastUpgrade
+  }
+}
 
 function rememberKeepSessionsRunning(config: unknown): void {
   const value = (config as AppConfig | null)?.defaults?.keepSessionsRunning
@@ -491,6 +513,19 @@ app.whenReady().then(async () => {
     return
   }
 
+  // After an update this is the previous build's server, still holding every
+  // terminal. Not awaited: a handoff pauses the panes for a moment, and every
+  // failure path leaves the incumbent serving exactly what it was serving.
+  void upgradeServerInPlace().then((outcome) => {
+    if (outcome.kind === 'handed-over') {
+      log.info(`[main] the server moved to this build with ${outcome.sessions} terminal(s) running`)
+    } else if (outcome.kind === 'failed') {
+      log.warn(`[main] the server stayed on its old build: ${outcome.why}`)
+    }
+    lastUpgrade = outcome
+    mainWindow?.webContents.send(IPC.SERVER_RUNTIME_STATUS, serverRuntimeStatus())
+  })
+
   setBridge(bridge)
   // Lets the browser and device registries ask the renderer for a pane, so an
   // agent can open one itself instead of waiting on a human click. Both are
@@ -612,31 +647,30 @@ app.whenReady().then(async () => {
     hideWidget()
   })
 
-  // Update IPC handlers
-  //
-  // The update takes the server with it. Left alone, `before-quit` sees
-  // `keepSessionsRunning` and lets go of the server, so the new build adopts the
-  // old one and never moves off it -- an app on beta.12 talking to a beta.11
-  // server, with no way forward but a reboot. Ending it here is what keeps client
-  // and server on one build, which is cheaper than reconciling two.
-  //
-  // Before `quitAndInstall` rather than inside the quit it raises. The deliberate
-  // path below holds its own quit open with `preventDefault`, and doing that to
-  // the updater's quit risks cancelling the relaunch -- which is the very thing
-  // `onQuitForUpdate` exists to protect. Stopping first means `before-quit` finds
-  // the work done and never intervenes.
-  ipcMain.on(IPC.UPDATE_INSTALL, async () => {
-    keepSessionsRunning = false
-    try {
-      await stopServer()
-    } catch (err) {
-      // An update that cannot stop the server still has to install. The old
-      // server is left running and the next launch adopts it, which is exactly
-      // today's behaviour rather than something worse.
-      log.error('[main] could not stop the server before updating:', err)
-    }
+  // The update leaves the server running. It used to stop it, to keep app and
+  // server on one build -- at the cost of ending every terminal on every release.
+  // `upgradeServerInPlace` is the way forward that costs nothing, so this lets go
+  // exactly as a quit does and the next launch sorts out which build should serve.
+  ipcMain.on(IPC.UPDATE_INSTALL, () => {
+    // `detachFromServer`, not `stopServer`. The distinction is the feature.
+    detachFromServer()
     serverStopped = true
     updateManager.installUpdate()
+  })
+
+  // Read synchronously so a freshly-opened panel renders without a flash.
+  ipcMain.on(IPC.SERVER_GET_RUNTIME_STATUS, (event) => {
+    event.returnValue = serverRuntimeStatus()
+  })
+
+  ipcMain.handle(IPC.SERVER_UPGRADE, async () => {
+    lastUpgrade = { kind: 'working' }
+    mainWindow?.webContents.send(IPC.SERVER_RUNTIME_STATUS, serverRuntimeStatus())
+    // Forced: a person pressing this has answered the question the version stood in for.
+    lastUpgrade = await upgradeServerInPlace(true)
+    const status = serverRuntimeStatus()
+    mainWindow?.webContents.send(IPC.SERVER_RUNTIME_STATUS, status)
+    return status
   })
 
   ipcMain.on(IPC.UPDATE_SET_CHANNEL, (_e, channel: 'stable' | 'beta') => {

@@ -258,6 +258,48 @@ describe('letting go', () => {
     expect(fs.lstatSync(endpoint.path).isSocket()).toBe(true)
   })
 
+  it('gives up the name while still answering whoever is connected', async () => {
+    const endpoint = await hold()
+    const socket = new WebSocket(endpointUrl(endpoint.path))
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve())
+      socket.once('error', reject)
+    })
+    cleanup.push(() => socket.close())
+
+    // This is the commit in a handoff: the request asking for one arrived on this
+    // endpoint, and its reply has to travel back out over it. Closing would cut
+    // the caller off at exactly the moment it needed an answer.
+    expect(endpoint.relinquish()).toBe(true)
+
+    expect(endpoint.holds()).toBe(false)
+    expect(fs.existsSync(endpoint.path)).toBe(false)
+    // Still open, and still able to carry the reply.
+    expect(socket.readyState).toBe(WebSocket.OPEN)
+    const greeted = new Promise<void>((resolve) => socket.once('message', () => resolve()))
+    const second = new WebSocket(endpointUrl(endpoint.path))
+    // And nothing new can arrive: the name is free for the replacement to claim.
+    await expect(new Promise((_, reject) => second.once('error', reject))).rejects.toBeInstanceOf(
+      Error
+    )
+    void greeted
+  })
+
+  it('refuses to remove a name that is no longer its own', async () => {
+    const endpoint = await hold()
+    const usurper = path.join(dir, 'someone-else.sock')
+    const { default: net } = await import('node:net')
+    const server = net.createServer()
+    await new Promise<void>((resolve) => server.listen(usurper, resolve))
+    fs.renameSync(usurper, endpoint.path)
+
+    // The rule the whole module rests on: no actor removes a name it did not
+    // create. Removing this one would delete a live server's endpoint.
+    expect(endpoint.relinquish()).toBe(false)
+    expect(fs.lstatSync(endpoint.path).isSocket()).toBe(true)
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
   it('stops claiming to hold a name that became somebody else’s', async () => {
     const endpoint = await hold()
     expect(endpoint.holds()).toBe(true)
