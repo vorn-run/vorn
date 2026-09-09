@@ -6,6 +6,7 @@ import { IPC, ResizePayload, browserPartition } from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
 import type { RequestMethods } from '@vornrun/shared/protocol'
 import * as browserRegistry from './browser-registry'
+import { cliShimStatus, installCliShim } from './cli-shim'
 import { setFileRoot, allowsFileUrl } from './browser-file-scope'
 import { watchArtifact, stopWatching } from './artifact-watcher'
 import * as deviceRegistry from './device-registry'
@@ -286,6 +287,10 @@ export function registerIpcHandlers(): void {
 
   // File explorer
   safeHandle(IPC.FILE_LIST_DIR, (_, dirPath) => requireBridge().request(IPC.FILE_LIST_DIR, dirPath))
+  // The `vorn` command, for people who never ran the installer script.
+  safeHandle(IPC.CLI_STATUS, () => cliShimStatus())
+  safeHandle(IPC.CLI_INSTALL, () => installCliShim())
+
   safeHandle(IPC.SHELL_LIST_EXECUTABLES, () => requireBridge().request(IPC.SHELL_LIST_EXECUTABLES))
   safeHandle(IPC.SHELL_LIST_INSTALLED, () => requireBridge().request(IPC.SHELL_LIST_INSTALLED))
   safeHandle(IPC.FILE_READ_CONTENT, (_, params) =>

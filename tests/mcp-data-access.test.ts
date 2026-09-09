@@ -14,7 +14,7 @@ import type { AppConfig } from '../packages/shared/src/types'
 const calls: Array<{ method: string; params?: unknown }> = []
 let stored: AppConfig
 
-vi.mock('../packages/mcp/src/ws-client', () => ({
+vi.mock('../packages/server/src/rpc-client', () => ({
   rpcCall: async (method: string, params?: unknown) => {
     calls.push({ method, params })
     if (method === 'config:load') return stored

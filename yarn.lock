@@ -4725,6 +4725,7 @@ __metadata:
     ws: "npm:^8.21.1"
     zod: "npm:^4.4.3"
   bin:
+    vorn: ./dist/cli.cjs
     vorn-server: ./dist/cli.cjs
   languageName: unknown
   linkType: soft

@@ -329,6 +329,12 @@ const api = {
   listShellExecutables: (): Promise<string[]> => ipcRenderer.invoke(IPC.SHELL_LIST_EXECUTABLES),
   listInstalledShells: (): Promise<InstalledShell[]> =>
     ipcRenderer.invoke(IPC.SHELL_LIST_INSTALLED),
+
+  /** Whether the `vorn` command is on PATH, and where it would go. */
+  cliCommandStatus: (): Promise<{ available: boolean; installed: boolean; path: string }> =>
+    ipcRenderer.invoke(IPC.CLI_STATUS),
+  installCliCommand: (): Promise<{ ok: true; path: string } | { ok: false; error: string }> =>
+    ipcRenderer.invoke(IPC.CLI_INSTALL),
   readFileContent: (
     filePath: string,
     maxBytes?: number,

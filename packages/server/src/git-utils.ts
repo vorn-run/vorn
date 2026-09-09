@@ -59,6 +59,15 @@ export function isGitRepo(projectPath: string): boolean {
   }
 }
 
+/** The repository a path sits in, or null when it sits in none. */
+export function getRepoRoot(cwd: string): string | null {
+  try {
+    return gitExec(['rev-parse', '--show-toplevel'], cwd, { timeout: 3000 }) || null
+  } catch {
+    return null
+  }
+}
+
 export function getGitBranch(projectPath: string, remote?: RemoteHost): string | null {
   try {
     const branch = gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath, {

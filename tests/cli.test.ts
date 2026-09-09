@@ -20,12 +20,13 @@ import { mintOwnerToken } from '../packages/server/src/token-manager'
 let dataDir: string
 
 /** Collects what the CLI wrote, so assertions read against real output. */
-function capture(): CliDeps & { out: () => string; err: () => string } {
+function capture(isTty = false): CliDeps & { out: () => string; err: () => string } {
   const outParts: string[] = []
   const errParts: string[] = []
   return {
     write: (t) => outParts.push(t),
     writeErr: (t) => errParts.push(t),
+    isTty,
     out: () => outParts.join(''),
     err: () => errParts.join('')
   }
@@ -64,7 +65,7 @@ describe('usage and dispatch', () => {
   it('prints usage to stdout and succeeds for --help', async () => {
     const io = capture()
     expect(await runCli(['--help'], io)).toBe(0)
-    expect(io.out()).toContain('vorn-server: run a Vorn server')
+    expect(io.out()).toContain('vorn: Vorn from the command line')
     expect(io.err()).toBe('')
   })
 
@@ -72,6 +73,18 @@ describe('usage and dispatch', () => {
     const io = capture()
     expect(await runCli(['help'], io)).toBe(0)
     expect(io.out()).toContain('Usage')
+  })
+
+  it('describes the server commands under their own noun', async () => {
+    const io = capture()
+    expect(await runCli(['server', '--help'], io)).toBe(0)
+    expect(io.out()).toContain('vorn server: run a Vorn server')
+  })
+
+  it('still takes the bare serve and token commands vorn-server was called with', async () => {
+    const io = capture()
+    expect(await runCli(['server'], io)).toBe(2)
+    expect(io.err()).toContain('vorn server serve')
   })
 
   it('treats a bare invocation as a usage error, on stderr', async () => {
@@ -97,7 +110,7 @@ describe('usage and dispatch', () => {
   it('reports an unknown option', async () => {
     const io = capture()
     expect(await runCli(['serve', '--nope'], io)).toBe(2)
-    expect(io.err()).toContain('vorn-server:')
+    expect(io.err()).toContain('vorn:')
   })
 })
 
@@ -178,8 +191,17 @@ describe('token revoke', () => {
 })
 
 describe('serve', () => {
+  it('keeps the first-run token out of a stream nobody is watching', async () => {
+    const io = capture(false)
+    const code = await runCli(['serve', '--data-dir', dataDir], io)
+
+    expect(code).toBe(0)
+    expect(io.out()).not.toContain('vorn_')
+    expect(io.out()).toContain('vorn server token create')
+  })
+
   it('reports the port and mints a first-run token on an empty data dir', async () => {
-    const io = capture()
+    const io = capture(true)
     const code = await runCli(['serve', '--data-dir', dataDir], io)
 
     expect(code).toBe(0)

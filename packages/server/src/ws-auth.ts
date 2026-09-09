@@ -14,7 +14,7 @@ import log from './logger'
  * upgrade, and they let a page on any origin open a socket to `localhost`. So
  * binding 127.0.0.1 is no protection at all: before this module, any website the
  * user visited could open `ws://127.0.0.1:<port>/ws` and send `terminal:create`.
- * The ephemeral port is obscurity, not a control — `packages/mcp/src/ws-client.ts`
+ * The ephemeral port is obscurity, not a control — `packages/server/src/rpc-client.ts`
  * finds it with `lsof` when the port file is missing.
  *
  * Two independent controls, because each covers what the other cannot:

@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'tsup'
+
+const { version } = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
 // Prepended to both entries. `cli.cjs` is the `vorn-server` binary, and Yarn
 // links a bin as a plain symlink — without this the shell runs it as sh and it
@@ -41,15 +44,19 @@ const NATIVE_MODULE_PATCH = `
 
 export default defineConfig({
   // Two entries: `index` is what Electron's utilityProcess spawns, `cli` is the
-  // standalone `vorn-server` binary. They are bundled independently rather than
-  // code-split, because each runs as its own process and a shared chunk would
-  // only add a require() hop.
+  // `vorn` binary the installers put on PATH. They are bundled independently
+  // rather than code-split, because each runs as its own process and a shared
+  // chunk would only add a require() hop.
   entry: ['src/index.ts', 'src/cli.ts'],
   format: ['cjs'],
   target: 'node22',
   clean: true,
   banner: {
     js: `${SHEBANG}\n${NATIVE_MODULE_PATCH}`
+  },
+  // What `vorn --version` answers. The bundle has no package.json to read.
+  define: {
+    __CLI_VERSION__: JSON.stringify(version)
   },
   // Bundle ALL JS dependencies so the server runs standalone in Electron's
   // utilityProcess (which cannot access modules inside the asar archive).

@@ -3,24 +3,48 @@ import path from 'node:path'
 import os from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { WebSocket } from 'ws'
-import { LOCAL_TOKEN_FILENAME, type RpcResponse } from '@vornrun/shared/protocol'
+import {
+  LOCAL_TOKEN_FILENAME,
+  WS_PORT_FILENAME,
+  type RequestMethods,
+  type RpcResponse
+} from '@vornrun/shared/protocol'
 
 /**
  * Where the running server keeps its port and credential files.
  *
- * Both live in the server's data directory, which `vorn-server serve --data-dir`
+ * Both live in the server's data directory, which `vorn server serve --data-dir`
  * can move. Hard-coding `~/.vorn` meant that a server started anywhere else was
  * invisible here: not just unauthenticated, but undiscoverable, since the port file
  * moves with it. `VORN_DATA_DIR` is how that server tells us where it went.
  */
-const DATA_DIR = process.env.VORN_DATA_DIR || path.join(os.homedir(), '.vorn')
-const PORT_FILE = path.join(DATA_DIR, 'ws-port')
-const LOCAL_TOKEN_FILE = path.join(DATA_DIR, LOCAL_TOKEN_FILENAME)
+let dataDirOverride: string | undefined
 
-const TOKEN_FILE_MISSING_MSG = `Vorn local credential not found (${LOCAL_TOKEN_FILE}).
+/** Point discovery at a server started with `--data-dir`, before any call. */
+export function useDataDir(dir: string | undefined): void {
+  dataDirOverride = dir
+}
+
+/** Where the server this client talks to keeps its port and credential files. */
+export function dataDir(): string {
+  return dataDirOverride || process.env.VORN_DATA_DIR || path.join(os.homedir(), '.vorn')
+}
+
+// Resolved per call rather than at import: `--data-dir` is parsed after this module loads.
+function portFile(): string {
+  return path.join(dataDir(), WS_PORT_FILENAME)
+}
+
+function localTokenFile(): string {
+  return path.join(dataDir(), LOCAL_TOKEN_FILENAME)
+}
+
+function tokenFileMissingMessage(): string {
+  return `Vorn local credential not found (${localTokenFile()}).
 The server writes it on startup and removes it on shutdown, so this usually means
-Vorn is not running. Start Vorn (or \`vorn-server serve\`) and try again.
-If the server runs with --data-dir, set VORN_DATA_DIR to the same directory.`
+Vorn is not running. Start Vorn (or \`vorn server serve\`) and try again.
+If the server runs with --data-dir, pass the same --data-dir here.`
+}
 
 /**
  * The running server's local credential.
@@ -31,11 +55,11 @@ If the server runs with --data-dir, set VORN_DATA_DIR to the same directory.`
  */
 function readLocalToken(): string {
   try {
-    const token = fs.readFileSync(LOCAL_TOKEN_FILE, 'utf-8').trim()
+    const token = fs.readFileSync(localTokenFile(), 'utf-8').trim()
     if (!token) throw new Error('empty')
     return token
   } catch {
-    throw new Error(TOKEN_FILE_MISSING_MSG)
+    throw new Error(tokenFileMissingMessage())
   }
 }
 
@@ -149,8 +173,24 @@ function discoverPort(): number | null {
   return null
 }
 
+/**
+ * Whether looking for a Vorn process is a fair answer to "where is the server".
+ *
+ * Only when nobody named a data directory. `discoverPort` finds any Vorn
+ * listening on this machine, which is the right guess for the default directory
+ * and the wrong one for a named directory: it would report a server that is not
+ * the one asked for, and heal a port file with a port belonging to somebody
+ * else -- which is exactly what happened the first time `--data-dir` met an
+ * empty directory with the desktop app running.
+ */
+function discoveryAllowed(): boolean {
+  return dataDirOverride === undefined && !process.env.VORN_DATA_DIR
+}
+
 /** Try OS-level discovery, cache result, and heal the port file. */
 function discoverAndHeal(): { port: number } | { port: null; reason: 'missing' } {
+  if (!discoveryAllowed()) return { port: null, reason: 'missing' }
+
   const now = Date.now()
   if (cachedPort && now - cacheTimestamp < CACHE_TTL_MS) return { port: cachedPort }
 
@@ -159,8 +199,8 @@ function discoverAndHeal(): { port: number } | { port: null; reason: 'missing' }
   cacheTimestamp = now
   if (discovered) {
     try {
-      fs.mkdirSync(path.dirname(PORT_FILE), { recursive: true })
-      fs.writeFileSync(PORT_FILE, JSON.stringify({ port: discovered }), 'utf-8')
+      fs.mkdirSync(dataDir(), { recursive: true })
+      fs.writeFileSync(portFile(), JSON.stringify({ port: discovered }), 'utf-8')
     } catch {
       // best-effort
     }
@@ -175,7 +215,7 @@ function discoverAndHeal(): { port: number } | { port: null; reason: 'missing' }
  */
 function readPort(): { port: number } | { port: null; reason: 'missing' | 'invalid' } {
   try {
-    const raw = fs.readFileSync(PORT_FILE, 'utf-8').trim()
+    const raw = fs.readFileSync(portFile(), 'utf-8').trim()
     if (!raw) return { port: null, reason: 'invalid' }
 
     // JSON format: { "port": 53829, "pid": 1234 }
@@ -213,7 +253,19 @@ function readPort(): { port: number } | { port: null; reason: 'missing' | 'inval
  * Send a single JSON-RPC request to the running Vorn server over WebSocket.
  * Opens a connection, sends, waits for the response, then closes.
  */
-export async function rpcCall<T = unknown>(
+// Two shapes, one implementation. A method named in `RequestMethods` types its own
+// params and result; anything else falls to the loose form callers annotate by hand.
+export function rpcCall<M extends keyof RequestMethods>(
+  method: M,
+  params?: RequestMethods[M]['params'],
+  timeoutMs?: number
+): Promise<RequestMethods[M]['result']>
+export function rpcCall<T = unknown>(
+  method: string,
+  params?: unknown,
+  timeoutMs?: number
+): Promise<T>
+export function rpcCall<T = unknown>(
   method: string,
   params?: unknown,
   /**

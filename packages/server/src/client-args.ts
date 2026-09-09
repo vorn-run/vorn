@@ -1,0 +1,116 @@
+import { parseArgs } from 'node:util'
+
+/**
+ * The grammar for the commands that talk to a running server.
+ *
+ * Kept apart from `server-args.ts` on purpose: that grammar is shared with the
+ * entry point Electron forks, so a flag only a person types has no business in
+ * it. Both are built on `node:util`'s `parseArgs`, which costs no dependency at
+ * the node22 target.
+ */
+export interface ClientArgs {
+  /** The noun, its verb, and their operands: `session`, `start`, an id. */
+  positionals: string[]
+  agent?: string
+  prompt?: string
+  /** Project name. Defaults to the basename of the resolved path. */
+  project?: string
+  /** Project directory. Defaults to the git root of the working directory. */
+  path?: string
+  /** Display name for a session. */
+  name?: string
+  branch?: string
+  /** Workflow id or name, for the commands that filter by one. */
+  workflow?: string
+  dataDir?: string
+  lines?: number
+  limit?: number
+  timeoutMs?: number
+  headless: boolean
+  worktree: boolean
+  recent: boolean
+  /** Send input exactly as given, without the Enter that submits it. */
+  raw: boolean
+  json: boolean
+  help: boolean
+}
+
+export class ClientArgsError extends Error {}
+
+/** A count, a line budget, a millisecond ceiling: all of them positive integers. */
+function positiveInt(raw: string | undefined, flag: string): number | undefined {
+  if (raw === undefined) return undefined
+  const value = Number.parseInt(raw, 10)
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new ClientArgsError(`${flag} must be a positive number, got "${raw}"`)
+  }
+  return value
+}
+
+/**
+ * Parse a client command line, accepting both `--lines=200` and `--lines 200`.
+ *
+ * Throws `ClientArgsError` rather than exiting, so the caller decides between
+ * printing usage and failing — the same contract `parseServerArgs` has.
+ */
+export function parseClientArgs(argv: string[]): ClientArgs {
+  let values: Record<string, string | boolean | undefined>
+  let positionals: string[]
+
+  try {
+    const parsed = parseArgs({
+      args: argv,
+      options: {
+        agent: { type: 'string' },
+        prompt: { type: 'string' },
+        project: { type: 'string' },
+        path: { type: 'string' },
+        name: { type: 'string' },
+        branch: { type: 'string' },
+        workflow: { type: 'string' },
+        'data-dir': { type: 'string' },
+        lines: { type: 'string' },
+        limit: { type: 'string' },
+        timeout: { type: 'string' },
+        headless: { type: 'boolean' },
+        worktree: { type: 'boolean' },
+        recent: { type: 'boolean' },
+        raw: { type: 'boolean' },
+        json: { type: 'boolean' },
+        help: { type: 'boolean', short: 'h' }
+      },
+      allowPositionals: true,
+      strict: true
+    })
+    values = parsed.values
+    positionals = parsed.positionals
+  } catch (err) {
+    throw new ClientArgsError(err instanceof Error ? err.message : String(err))
+  }
+
+  const str = (name: string): string | undefined => {
+    const value = values[name]
+    return typeof value === 'string' ? value : undefined
+  }
+
+  return {
+    positionals,
+    agent: str('agent'),
+    prompt: str('prompt'),
+    project: str('project'),
+    path: str('path'),
+    name: str('name'),
+    branch: str('branch'),
+    workflow: str('workflow'),
+    dataDir: str('data-dir'),
+    lines: positiveInt(str('lines'), '--lines'),
+    limit: positiveInt(str('limit'), '--limit'),
+    timeoutMs: positiveInt(str('timeout'), '--timeout'),
+    headless: values.headless === true,
+    worktree: values.worktree === true,
+    recent: values.recent === true,
+    raw: values.raw === true,
+    json: values.json === true,
+    help: values.help === true
+  }
+}

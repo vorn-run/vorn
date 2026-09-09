@@ -1815,6 +1815,8 @@ export const IPC = {
   FILE_READ_CONTENT: 'file:readContent',
   FILE_STAMP: 'file:stamp',
   FILE_WRITE_CONTENT: 'file:writeContent',
+  CLI_STATUS: 'cli:status',
+  CLI_INSTALL: 'cli:install',
   SHELL_LIST_EXECUTABLES: 'shell:listExecutables',
   SHELL_LIST_INSTALLED: 'shell:listInstalled',
   CONNECTOR_LIST: 'connector:list',

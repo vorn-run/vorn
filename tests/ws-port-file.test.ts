@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import path from 'node:path'
 import os from 'node:os'
 
-// Mock ws so importing ws-client doesn't pull in the real WebSocket
+// Mock ws so importing the rpc client doesn't pull in the real WebSocket
 vi.mock('ws', () => ({ WebSocket: vi.fn() }))
 
 // Mock node:fs so readPort() sees our controlled data
@@ -36,7 +36,7 @@ describe('ws-port file parsing (readPort via isServerRunning)', () => {
   })
 
   async function loadIsServerRunning() {
-    const mod = await import('../packages/mcp/src/ws-client')
+    const mod = await import('../packages/server/src/rpc-client')
     return mod.isServerRunning
   }
 

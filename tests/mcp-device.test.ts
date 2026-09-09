@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const rpc = vi.fn()
-vi.mock('../packages/mcp/src/ws-client', () => ({
+vi.mock('../packages/server/src/rpc-client', () => ({
   rpcCall: (method: string, params: unknown) => rpc(method, params),
   rpcNotify: async () => {}
 }))

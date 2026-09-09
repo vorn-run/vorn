@@ -8,7 +8,7 @@ import type {
   DeviceTarget
 } from '@vornrun/shared/types'
 import { V } from '../validation'
-import { rpcCall } from '../ws-client'
+import { rpcCall } from '@vornrun/server/rpc-client'
 import { noSessionResult, errorResult, pageResult, sessionId } from './browser'
 
 /**
