@@ -60,6 +60,33 @@ describe('workflow run persistence', () => {
     expect(state.approvedAt).toBe('2026-04-20T10:00:04Z')
   })
 
+  it('round-trips the worktree a step made, which a gate answered later runs in', () => {
+    const exec: WorkflowExecution = {
+      workflowId: 'wf-1',
+      runId: 'wf-1:2026-09-10T10:00:00Z',
+      startedAt: '2026-09-10T10:00:00Z',
+      status: 'running',
+      nodeStates: [
+        {
+          nodeId: 'research',
+          status: 'success',
+          worktreePath: '/repos/.vorn-worktrees/app/silver-madrigal-d4dc9209',
+          worktreeName: 'silver-madrigal',
+          worktreeOrigin: 'created'
+        },
+        { nodeId: 'approve', status: 'waiting' }
+      ]
+    }
+    saveWorkflowRun(exec)
+    const [loaded] = listWorkflowRuns('wf-1')
+    expect(loaded.nodeStates[0]).toMatchObject({
+      worktreePath: '/repos/.vorn-worktrees/app/silver-madrigal-d4dc9209',
+      worktreeName: 'silver-madrigal',
+      worktreeOrigin: 'created'
+    })
+    expect(loaded.nodeStates[1]).not.toHaveProperty('worktreePath')
+  })
+
   it('round-trips step diagnostics, which outlive the window that made them', () => {
     // The timeline matters most for a run you come back to later, so it has to
     // survive the reload rather than living only in renderer memory.

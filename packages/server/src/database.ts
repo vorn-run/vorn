@@ -463,6 +463,9 @@ function createSchema(): void {
       output TEXT,
       structured_output TEXT,
       iteration INTEGER,
+      worktree_path TEXT,
+      worktree_name TEXT,
+      worktree_origin TEXT,
       FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
     );
 
@@ -1065,6 +1068,24 @@ function migrateSchema(d: Database.Database): void {
       ).run()
     })()
     log.info('[database] migrated schema to version 18 (session groups)')
+  }
+
+  if (version < 19) {
+    d.transaction(() => {
+      const cols = d.prepare('PRAGMA table_info(workflow_run_nodes)').all() as Array<{
+        name: string
+      }>
+      for (const column of ['worktree_path', 'worktree_name', 'worktree_origin']) {
+        if (!cols.some((c) => c.name === column)) {
+          d.exec(`ALTER TABLE workflow_run_nodes ADD COLUMN ${column} TEXT`)
+        }
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '19')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 19 (worktrees on run steps)')
   }
 }
 
@@ -3512,8 +3533,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     d.prepare('DELETE FROM workflow_run_nodes WHERE run_id = ?').run(runId)
 
     const insertNode = d.prepare(
-      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const ns of execution.nodeStates) {
       insertNode.run(
@@ -3536,7 +3557,10 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
         // Stored as JSON text: the parsed shape is whatever the step's
         // outputSchema declared, so there is nothing narrower to store it as.
         ns.structuredOutput ? JSON.stringify(ns.structuredOutput) : null,
-        ns.iteration ?? null
+        ns.iteration ?? null,
+        ns.worktreePath ?? null,
+        ns.worktreeName ?? null,
+        ns.worktreeOrigin ?? null
       )
     }
 
@@ -3591,6 +3615,9 @@ type WorkflowRunNodeRow = {
   output: string | null
   structured_output: string | null
   iteration: number | null
+  worktree_path: string | null
+  worktree_name: string | null
+  worktree_origin: string | null
 }
 
 function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
@@ -3617,7 +3644,12 @@ function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
     ...(n.diagnostics != null && { diagnostics: n.diagnostics }),
     ...(n.output != null && { output: n.output }),
     ...(structured !== undefined && { structuredOutput: structured }),
-    ...(n.iteration != null && { iteration: n.iteration })
+    ...(n.iteration != null && { iteration: n.iteration }),
+    ...(n.worktree_path != null && { worktreePath: n.worktree_path }),
+    ...(n.worktree_name != null && { worktreeName: n.worktree_name }),
+    ...((n.worktree_origin === 'created' || n.worktree_origin === 'inherited') && {
+      worktreeOrigin: n.worktree_origin
+    })
   }
 }
 
