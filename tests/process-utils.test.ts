@@ -312,6 +312,16 @@ describe('the login-shell environment', () => {
     expect(mockExecFile).toHaveBeenCalledTimes(1)
   })
 
+  it('does not hand the desktop credential to the login shell', async () => {
+    process.env.SECRET_VORN_BOOTSTRAP_TOKEN = 'owner-token'
+    mockExecFile.mockImplementation((_bin, _args, _opts, cb) => cb(null, 'PATH=/x\n'))
+    const mod = await import('../packages/server/src/process-utils')
+    await mod.primeShellEnv()
+    const spawnEnv = mockExecFile.mock.calls[0][2].env as Record<string, string>
+    expect(spawnEnv.SECRET_VORN_BOOTSTRAP_TOKEN).toBeUndefined()
+    expect(spawnEnv.HOME).toBe('/home/user')
+  })
+
   it('answers with its own environment while the shell is still being asked', async () => {
     let finish: (() => void) | undefined
     mockExecFile.mockImplementation((_bin, _args, _opts, cb) => {

@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { getSafeEnv } from './process-utils'
+import { getSafeEnv, shellEnvResolved } from './process-utils'
 
 // Packaged Electron apps on macOS don't inherit the login-shell PATH, so
 // user-installed binaries (Homebrew at /opt/homebrew/bin, /usr/local/bin)
@@ -48,7 +48,8 @@ export function resolveExecutable(name: string): string | null {
   const hit = cache.get(name)
   if (hit) return hit
   const found = find(name)
-  if (found) cache.set(name, found)
+  // A hit on the provisional PATH is not the user's answer; keep asking until the shell has spoken.
+  if (found && shellEnvResolved()) cache.set(name, found)
   return found
 }
 

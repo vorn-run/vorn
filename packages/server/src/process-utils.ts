@@ -35,10 +35,16 @@ export function primeShellEnv(): Promise<void> {
   if (priming) return priming
   const run = new Promise<void>((resolve) => {
     const started = Date.now()
+    // The shell gets the filtered environment: the desktop's credential is still in process.env here.
     execFile(
       getDefaultShell(),
       ['-ilc', 'env'],
-      { encoding: 'utf-8', timeout: SHELL_ENV_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
+      {
+        encoding: 'utf-8',
+        timeout: SHELL_ENV_TIMEOUT_MS,
+        maxBuffer: 4 * 1024 * 1024,
+        env: filterEnv(process.env, new Set())
+      },
       (err, stdout) => {
         const ms = Date.now() - started
         if (err) {
@@ -60,6 +66,11 @@ export function primeShellEnv(): Promise<void> {
     if (priming === run) priming = undefined
   })
   return run
+}
+
+/** True once the login shell has answered; on Windows there is nothing to wait for. */
+export function shellEnvResolved(): boolean {
+  return process.platform === 'win32' || resolvedEnvCache !== undefined
 }
 
 /** Wait for the shell's answer, but never longer than `maxMs`. */

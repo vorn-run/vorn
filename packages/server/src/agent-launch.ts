@@ -17,10 +17,11 @@ function resolveAgentCommand(
   config: AgentCommandConfig,
   env: Record<string, string>
 ): { command: string; args: string[]; path: string } {
-  const primary = findOnPath(config.command, env.PATH)
+  const pathEnv = env.PATH ?? env.Path
+  const primary = findOnPath(config.command, pathEnv)
   if (primary) return { command: config.command, args: config.args, path: primary }
   if (config.fallbackCommand) {
-    const fallback = findOnPath(config.fallbackCommand, env.PATH)
+    const fallback = findOnPath(config.fallbackCommand, pathEnv)
     if (fallback)
       return { command: config.fallbackCommand, args: config.fallbackArgs ?? [], path: fallback }
   }

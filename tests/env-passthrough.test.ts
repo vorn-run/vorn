@@ -174,7 +174,7 @@ describe('normalizePassthrough', () => {
  * and `filterEnv` only strips keys, so anything it does not remove is inherited by
  * every PTY, headless agent and script node.
  *
- * This is not hypothetical on one platform only: `getUserShellEnv` falls back to
+ * This is not hypothetical on one platform only: `primeShellEnv` falls back to
  * `{ ...process.env }` on Windows and whenever the login-shell probe fails.
  */
 describe('the desktop bootstrap credential', () => {

@@ -156,9 +156,9 @@ export async function startServer(
     adopted?: AdoptedPane[]
   } = {}
 ) {
-  const bootStarted = Date.now()
   // First, so the shell answers while the database opens and the modules load.
   void primeShellEnv()
+  const bootStarted = Date.now()
   // Initialize database + config. This resolves the data directory for the whole
   // process; everything else reads it back with getDataDir() rather than
   // deriving it again, so nothing can disagree about where the files are.
