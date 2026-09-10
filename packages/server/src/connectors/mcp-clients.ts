@@ -11,6 +11,7 @@
  * never sees the encrypted ciphertext, only the plaintext the main process
  * pushes via `credentials:setDecrypted`.
  */
+import { forgetSessionGrant, sessionEnvFor } from './session-bridge'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import {
   SDK_FILTER_KEYS,
@@ -93,7 +94,10 @@ export async function buildSpawnConfig(conn: SourceConnection): Promise<SpawnCon
   const secretEnv = parseJsonObject(decrypted.secretEnv)
   const source = await resolveConnectorAuth(sdkIdOf(conn))
   const borrowed = source ? await borrowedSecrets(source) : {}
-  return { command, args, env: { ...borrowed, ...env, ...secretEnv } }
+  const browser = source?.auth?.rung === 'browser' ? source.auth.browser : undefined
+  // The window this connection signed in through, reached with a token minted for this child alone.
+  const signedIn = browser ? sessionEnvFor(conn.id, browser) : {}
+  return { command, args, env: { ...borrowed, ...env, ...secretEnv, ...signedIn } }
 }
 
 export async function getOrStartClient(conn: SourceConnection): Promise<Client> {
@@ -106,6 +110,7 @@ export async function getOrStartClient(conn: SourceConnection): Promise<Client> 
 }
 
 export async function stopClient(connectionId: string): Promise<void> {
+  forgetSessionGrant(connectionId)
   await clients.stop(connectionId)
 }
 

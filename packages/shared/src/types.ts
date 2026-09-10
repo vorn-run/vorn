@@ -418,6 +418,17 @@ export interface ActionResult {
   success: boolean
   output?: Record<string, unknown>
   error?: string
+  /** Why a browser connection's call failed, when Vorn can tell. */
+  errorKind?: 'needs-sign-in' | 'app-offline'
+  /** The calls it made through its signed-in window, kept for the step's log. */
+  sessionCalls?: SessionCall[]
+}
+
+/** One call a browser connection made through its window: what, where, and how it was answered. */
+export interface SessionCall {
+  method: string
+  path: string
+  status: number | 'app-offline' | 'failed'
 }
 
 export interface ConnectorConfigField {

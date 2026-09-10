@@ -1,5 +1,7 @@
 import { app, dialog, BrowserWindow, session, shell } from 'electron'
 import {
+  checkSession as checkConnectionSession,
+  fetchInSession as fetchInConnectionSession,
   forget as forgetConnectionSession,
   signIn as signInConnection,
   signOut as signOutConnection
@@ -72,6 +74,14 @@ function registerInboundHandlers(b: ServerBridge): void {
 
   // A connection's signed-in profile lives here, beside the windows that use it.
   b.handle('session:forget', (p) => forgetConnectionSession(p as P<'session:forget'>))
+  b.handle('session:fetch', (p) => {
+    const { connectionId, origins, request } = p as P<'session:fetch'>
+    return fetchInConnectionSession(connectionId, origins, request)
+  })
+  b.handle('session:check', (p) => {
+    const { connectionId, browser } = p as P<'session:check'>
+    return checkConnectionSession(connectionId, browser)
+  })
 }
 
 function requireBridge(): ServerBridge {

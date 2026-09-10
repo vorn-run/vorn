@@ -152,3 +152,36 @@ describe('two callers arriving together', () => {
     expect(transportInstances).toHaveLength(1)
   })
 })
+
+describe('a connector that signs in through a Vorn window', () => {
+  const BROWSER_PACK: { auth: SdkConnectorAuth; env: Array<{ name: string }> } = {
+    auth: {
+      rung: 'browser',
+      browser: {
+        signInUrl: 'https://substack.com/sign-in',
+        origins: ['https://substack.com'],
+        check: { url: 'https://substack.com/api/v1/user/profile/self', identity: ['name'] }
+      }
+    },
+    env: []
+  }
+
+  it('is handed the address and a token for its own window', async () => {
+    pack.current = BROWSER_PACK
+    const { buildSpawnConfig } = await load()
+    const { setSessionBridgeOrigin } =
+      await import('../packages/server/src/connectors/session-bridge')
+    setSessionBridgeOrigin('http://127.0.0.1:4100')
+    const spawn = await buildSpawnConfig(connection({ sdkConnectorId: 'acme' }))
+    expect(spawn.env.VORN_BROWSER_HOST).toBe('http://127.0.0.1:4100/connections/conn-1/browser')
+    expect(spawn.env.VORN_BROWSER_TOKEN).toBeTruthy()
+  })
+
+  it('hands a connector that signs in with a key no window at all', async () => {
+    pack.current = { auth: { rung: 'key', keys: ['token'] }, env: [] }
+    const { buildSpawnConfig } = await load()
+    const spawn = await buildSpawnConfig(connection({ sdkConnectorId: 'acme' }))
+    expect(spawn.env.VORN_BROWSER_HOST).toBeUndefined()
+    expect(spawn.env.VORN_BROWSER_TOKEN).toBeUndefined()
+  })
+})

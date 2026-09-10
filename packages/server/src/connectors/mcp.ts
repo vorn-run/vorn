@@ -14,6 +14,8 @@
  * token.
  * The decrypted values are merged in at spawn time via `getOrStartClient`.
  */
+import { browserSignInFor, sessionCallsSince, stillSignedIn } from './session-bridge'
+import { dbSetConnectionSignIn, dbSignalChange } from '../database'
 import type {
   VornConnector,
   ConnectorManifest,
@@ -251,6 +253,7 @@ export async function invokeMcpTool(
   toolName: string,
   args: Record<string, unknown>
 ): Promise<ActionResult> {
+  const started = Date.now()
   try {
     const client = await getOrStartClient(conn)
     // Look up this tool's discovered inputSchema so we can coerce string form
@@ -260,7 +263,12 @@ export async function invokeMcpTool(
       ? (tools as McpDiscoveredTool[]).find((t) => t.name === toolName)
       : undefined
     const callArgs = coerceMcpArgs(tool?.inputSchema, args)
-    const result = await client.callTool({ name: toolName, arguments: callArgs })
+    const browser = browserSignInFor(conn.id) !== undefined
+    // A signed-in tool may make several calls through its window, each up to twenty seconds.
+    const params = { name: toolName, arguments: callArgs }
+    const result = browser
+      ? await client.callTool(params, undefined, { timeout: BROWSER_TOOL_TIMEOUT_MS })
+      : await client.callTool(params)
     // When the tool declared an outputSchema, MCP returns the typed payload
     // under `structuredContent`. Surface that as `output` so downstream
     // workflow steps can reference the declared fields directly
@@ -273,16 +281,52 @@ export async function invokeMcpTool(
       unknown
     >
     if (result.isError) {
-      return {
+      return await withSessionOutcome(conn, started, {
         success: false,
         error: extractTextError(result.content) ?? `MCP tool ${toolName} reported an error`,
         output
-      }
+      })
     }
-    return { success: true, output }
+    return await withSessionOutcome(conn, started, { success: true, output })
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) }
+    return await withSessionOutcome(conn, started, {
+      success: false,
+      error: err instanceof Error ? err.message : String(err)
+    })
   }
+}
+
+/** A tool may make several calls through its window, each up to twenty seconds. */
+const BROWSER_TOOL_TIMEOUT_MS = 120_000
+
+/** A browser connection's result, with its window calls attached and a failure told apart: Vorn closed, or the site signed it out. */
+async function withSessionOutcome(
+  conn: SourceConnection,
+  since: number,
+  result: ActionResult
+): Promise<ActionResult> {
+  if (browserSignInFor(conn.id) === undefined) return result
+  const sessionCalls = sessionCallsSince(conn.id, since)
+  const withCalls = sessionCalls.length > 0 ? { ...result, sessionCalls } : result
+  if (result.success) return withCalls
+  if (sessionCalls.some((call) => call.status === 'app-offline')) {
+    return {
+      ...withCalls,
+      errorKind: 'app-offline',
+      error: `Open Vorn on the desktop ${conn.name} signed in on, then run this step again.`
+    }
+  }
+  const refused = sessionCalls.some((call) => call.status === 401 || call.status === 403)
+  if (refused && (await stillSignedIn(conn.id)) === false) {
+    dbSetConnectionSignIn(conn.id, null, null)
+    dbSignalChange()
+    return {
+      ...withCalls,
+      errorKind: 'needs-sign-in',
+      error: `${conn.name} was signed out. Sign in again, and this step runs again.`
+    }
+  }
+  return withCalls
 }
 
 // --- Poll / trigger support -------------------------------------------------

@@ -921,6 +921,18 @@ export interface RequestMethods {
     params: string
     result: void
   }
+  'session:fetch': {
+    params: {
+      connectionId: string
+      origins: string[]
+      request: { url: string; method: string; headers?: Record<string, string>; body?: string }
+    }
+    result: { status: number; headers: Record<string, string>; body: string }
+  }
+  'session:check': {
+    params: { connectionId: string; browser: SdkBrowserSignIn }
+    result: { signedIn: boolean; identity: string | null }
+  }
   /** Trigger a workflow manually via the scheduler — same dispatch path as
    *  cron, so connectorPoll triggers do their full poll+fan-out. */
   'workflow:runManual': {
