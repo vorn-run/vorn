@@ -287,6 +287,7 @@ export interface RunOutcome {
 export function describeOutcome(execution: WorkflowExecution, nodes: WorkflowNode[]): RunOutcome {
   const gate = execution.nodeStates.find((ns) => ns.status === 'waiting')
   if (gate) {
+    if (gate.waitingFor === 'signIn') return { label: 'needs sign-in', tone: 'waiting' }
     const node = nodes.find((n) => n.id === gate.nodeId)
     const message = node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
     return {

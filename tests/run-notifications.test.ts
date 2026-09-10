@@ -3,7 +3,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { WorkflowExecution } from '../src/shared/types'
 
 const sendWorkflowGateNotification = vi.hoisted(() => vi.fn())
-vi.mock('../src/renderer/lib/notifications', () => ({ sendWorkflowGateNotification }))
+const sendWorkflowSignInNotification = vi.hoisted(() => vi.fn())
+vi.mock('../src/renderer/lib/notifications', () => ({
+  sendWorkflowGateNotification,
+  sendWorkflowSignInNotification
+}))
 
 const setEditingWorkflowId = vi.fn()
 const setWorkflowEditorOpen = vi.fn()
@@ -13,7 +17,10 @@ const mockState = {
       {
         id: 'wf-1',
         name: 'Nightly review',
-        nodes: [{ id: 'gate', type: 'approval', label: 'Ship it?', config: { message: 'ok?' } }]
+        nodes: [
+          { id: 'gate', type: 'approval', label: 'Ship it?', config: { message: 'ok?' } },
+          { id: 'draft', type: 'callConnectorAction', label: 'Draft', config: {} }
+        ]
       }
     ]
   },
@@ -49,6 +56,7 @@ const waiting = (): WorkflowExecution =>
 beforeEach(() => {
   resetAnnouncedRuns()
   sendWorkflowGateNotification.mockClear()
+  sendWorkflowSignInNotification.mockClear()
   setEditingWorkflowId.mockClear()
   ;(globalThis as unknown as { Notification: unknown }).Notification = { permission: 'denied' }
 })
@@ -86,6 +94,25 @@ describe('a gate that starts waiting', () => {
     )
 
     expect(sendWorkflowGateNotification).not.toHaveBeenCalled()
+  })
+})
+
+describe('a step that waits for a sign-in', () => {
+  it('asks to sign in, not to approve', () => {
+    const error = 'Substack was signed out. Sign in again, and this step runs again.'
+    announceRun(
+      run({ nodeStates: [{ nodeId: 'draft', status: 'waiting', waitingFor: 'signIn', error }] })
+    )
+
+    expect(sendWorkflowGateNotification).not.toHaveBeenCalled()
+    expect(sendWorkflowSignInNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'wf-1' }),
+      'draft',
+      'Draft',
+      error,
+      mockState.config,
+      expect.any(Function)
+    )
   })
 })
 

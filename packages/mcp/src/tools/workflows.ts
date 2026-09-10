@@ -489,6 +489,12 @@ export function annotateWaitingGates<T extends WorkflowExecution>(
       ...run,
       nodeStates: run.nodeStates.map((state) => {
         if (state.status !== 'waiting') return state
+        if (state.waitingFor === 'signIn') {
+          return {
+            ...state,
+            asks: 'Sign in to its connection in the Vorn app, and this step runs again'
+          }
+        }
         const asks = gateMessage(workflow, state.nodeId)
         return asks ? { ...state, asks } : state
       })
@@ -510,8 +516,18 @@ export function resolveGateTarget(
   run: Pick<WorkflowExecution, 'nodeStates'>,
   nodeId?: string
 ): { nodeId: string } | { error: string } {
-  const waiting = run.nodeStates.filter((n) => n.status === 'waiting').map((n) => n.nodeId)
+  const signIns = run.nodeStates
+    .filter((n) => n.status === 'waiting' && n.waitingFor === 'signIn')
+    .map((n) => n.nodeId)
+  const waiting = run.nodeStates
+    .filter((n) => n.status === 'waiting' && n.waitingFor !== 'signIn')
+    .map((n) => n.nodeId)
   if (nodeId) {
+    if (signIns.includes(nodeId)) {
+      return {
+        error: `node "${nodeId}" is waiting for a sign-in in the Vorn app, not for an approval`
+      }
+    }
     if (waiting.includes(nodeId)) return { nodeId }
     return {
       error: waiting.length
@@ -520,7 +536,13 @@ export function resolveGateTarget(
     }
   }
   if (waiting.length === 1) return { nodeId: waiting[0] }
-  if (waiting.length === 0) return { error: 'no node in this run is waiting on a gate' }
+  if (waiting.length === 0) {
+    return {
+      error: signIns.length
+        ? 'this run is waiting for a sign-in in the Vorn app, not for an approval'
+        : 'no node in this run is waiting on a gate'
+    }
+  }
   return { error: `${waiting.length} nodes are waiting — pass node_id: ${waiting.join(', ')}` }
 }
 

@@ -16,12 +16,15 @@ const EMPTY: WaitingApproval[] = []
  * mutation of `workflowExecutions`.
  */
 function waitingSignature(
-  workflowExecutions: Map<string, { nodeStates: Array<{ nodeId: string; status: string }> }>
+  workflowExecutions: Map<
+    string,
+    { nodeStates: Array<{ nodeId: string; status: string; waitingFor?: string }> }
+  >
 ): string {
   const parts: string[] = []
   for (const [id, exec] of workflowExecutions) {
     for (const ns of exec.nodeStates) {
-      if (ns.status === 'waiting') parts.push(`${id}:${ns.nodeId}`)
+      if (ns.status === 'waiting' && ns.waitingFor !== 'signIn') parts.push(`${id}:${ns.nodeId}`)
     }
   }
   parts.sort()
@@ -41,7 +44,7 @@ export function useWaitingApprovals(): WaitingApproval[] {
       const workflow = workflows?.find((w) => w.id === execution.workflowId)
       if (workflow && (workflow.workspaceId ?? 'personal') !== activeWorkspace) continue
       for (const ns of execution.nodeStates) {
-        if (ns.status === 'waiting') {
+        if (ns.status === 'waiting' && ns.waitingFor !== 'signIn') {
           out.push({ execution, nodeState: ns, workflow })
         }
       }

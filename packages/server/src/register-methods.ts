@@ -184,7 +184,9 @@ import {
   executeWorkflow,
   rerunWorkflowRun,
   retryRunFromFailure,
-  stopWorkflowRun
+  stopWorkflowRun,
+  isSignInWait,
+  resumeSignInWaits
 } from './workflows/engine'
 import { listKeys, passwordFields } from './connectors/keys'
 import { installedPack } from './connectors/packs'
@@ -816,6 +818,8 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('workflow:resolveGate', ({ runId, nodeId, decision }) => {
+    // A sign-in wait ends when the connection signs in again, never by approval.
+    if (decision === 'approve' && isSignInWait(runId, nodeId)) return { accepted: false }
     // Applied here, where the run is. It used to be broadcast for whichever
     // window held the run to apply, which is why answering from a phone with
     // nothing open did nothing at all.
@@ -1735,6 +1739,9 @@ export function registerAllMethods(): void {
   registerMethod('connection:signedIn', ({ connectionId, identity }) => {
     dbSetConnectionSignIn(connectionId, identity, new Date().toISOString())
     dbSignalChange()
+    void resumeSignInWaits(connectionId, listRunsWithWaitingGates()).catch((err) =>
+      log.warn({ err }, '[workflow] resuming after a sign-in failed')
+    )
   })
 
   registerMethod('connection:signedOut', (id) => markSignedOut(id))

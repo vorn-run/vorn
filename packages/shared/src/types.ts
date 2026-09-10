@@ -1105,6 +1105,8 @@ export interface NodeExecutionState {
   status: NodeExecutionStatus
   /** Why a skipped node was skipped: a condition branch or a partial run's target slice. */
   skipReason?: 'branch' | 'target'
+  /** Why a waiting step waits: absent for an approval gate, `signIn` for a connection signed out. */
+  waitingFor?: 'signIn'
   startedAt?: string
   completedAt?: string
   sessionId?: string

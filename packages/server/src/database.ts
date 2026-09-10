@@ -466,6 +466,7 @@ function createSchema(): void {
       worktree_path TEXT,
       worktree_name TEXT,
       worktree_origin TEXT,
+      waiting_for TEXT,
       FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
     );
 
@@ -1206,6 +1207,7 @@ function verifySchema(d: Database.Database): void {
       }
     ],
     workflow_run_nodes: [
+      { column: 'waiting_for', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN waiting_for TEXT' },
       { column: 'agent_type', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN agent_type TEXT' },
       {
         column: 'project_name',
@@ -3570,8 +3572,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     d.prepare('DELETE FROM workflow_run_nodes WHERE run_id = ?').run(runId)
 
     const insertNode = d.prepare(
-      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin, waiting_for)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const ns of execution.nodeStates) {
       insertNode.run(
@@ -3597,7 +3599,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
         ns.iteration ?? null,
         ns.worktreePath ?? null,
         ns.worktreeName ?? null,
-        ns.worktreeOrigin ?? null
+        ns.worktreeOrigin ?? null,
+        ns.waitingFor ?? null
       )
     }
 
@@ -3655,6 +3658,7 @@ type WorkflowRunNodeRow = {
   worktree_path: string | null
   worktree_name: string | null
   worktree_origin: string | null
+  waiting_for: string | null
 }
 
 function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
@@ -3686,7 +3690,8 @@ function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
     ...(n.worktree_name != null && { worktreeName: n.worktree_name }),
     ...((n.worktree_origin === 'created' || n.worktree_origin === 'inherited') && {
       worktreeOrigin: n.worktree_origin
-    })
+    }),
+    ...(n.waiting_for === 'signIn' && { waitingFor: 'signIn' as const })
   }
 }
 

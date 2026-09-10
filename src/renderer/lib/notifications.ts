@@ -142,3 +142,24 @@ export function sendWorkflowGateNotification(
     onClick
   )
 }
+
+export function sendWorkflowSignInNotification(
+  workflow: WorkflowDefinition,
+  nodeId: string,
+  nodeLabel: string,
+  message: string | undefined,
+  config: AppConfig | null,
+  onClick?: () => void
+): void {
+  const prefs = config?.defaults.notifications
+  if (!prefs?.enabled || prefs.onWaiting === false) return
+
+  dispatch(
+    'waiting',
+    `workflow-sign-in:${workflow.id}:${nodeId}`,
+    prefs,
+    `${workflow.name} · awaiting sign-in`,
+    message || `${nodeLabel} is waiting for you to sign in again`,
+    onClick
+  )
+}

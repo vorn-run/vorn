@@ -1,5 +1,6 @@
 import type { AgentModelRequest, AgentModelCatalog } from './agent-models'
 import type {
+  ActionResult,
   AuthProbeReport,
   CreateTerminalPayload,
   RestoredSession,
@@ -1000,7 +1001,7 @@ export interface RequestMethods {
       action: string
       args: Record<string, unknown>
     }
-    result: { success: boolean; output?: Record<string, unknown>; error?: string }
+    result: ActionResult
   }
   /** One-shot backfill of existing items for a connection — bypasses the
    *  "since" cursor that poll() uses, calling listItems() directly. Respects

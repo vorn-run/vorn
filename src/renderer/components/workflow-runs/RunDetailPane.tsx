@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useAppStore } from '../../stores'
 import { toast } from '../Toast'
-import { Check, X, Inbox, Play, RotateCcw } from 'lucide-react'
+import { Check, X, Inbox, LogIn, Play, RotateCcw } from 'lucide-react'
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
   completedStageCount,
@@ -15,7 +15,7 @@ import {
 import { hasFailedStep } from '@vornrun/shared/workflow-graph'
 import { RunStepsList, StatusDot } from '../workflow-editor/RunEntry'
 import { RunIcon } from './RunIcon'
-import { useConnectorLook } from '../../lib/use-connections'
+import { useConnectorLook, useConnections } from '../../lib/use-connections'
 import { StopRunButton } from './StopRunButton'
 import { workflowRunId, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
@@ -66,13 +66,19 @@ export function RunDetailPane({
   const done = completedStageCount(stages)
   const summary = runSummaryText(run)
   const waitingGate = run.nodeStates.find((ns) => ns.status === 'waiting')
+  const signInWait = waitingGate?.waitingFor === 'signIn'
+  const signInConnectionId = (
+    nodes.find((n) => n.id === waitingGate?.nodeId)?.config as { connectionId?: string } | undefined
+  )?.connectionId
+  const connections = useConnections()
+  const signInName = connections.find((c) => c.id === signInConnectionId)?.name ?? 'the connection'
 
   // Keyboard approval mirrors the two visible actions, and only while a gate is
   // actually open — otherwise a stray "r" in the app would resolve nothing.
   // `shortcutsEnabled` lets the view mute them behind a modal, and `repeat` is
   // ignored so holding a key can't reject the run that auto-selects next.
   useEffect(() => {
-    if (!waitingGate || !shortcutsEnabled) return undefined
+    if (!waitingGate || signInWait || !shortcutsEnabled) return undefined
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.repeat) return
       const target = e.target as HTMLElement | null
@@ -97,7 +103,7 @@ export function RunDetailPane({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [run, waitingGate, shortcutsEnabled])
+  }, [run, waitingGate, signInWait, shortcutsEnabled])
 
   return (
     <div className="h-full flex flex-col min-h-0 overflow-y-auto">
@@ -164,7 +170,11 @@ export function RunDetailPane({
               <span
                 className={`text-[12.5px] ${waitingGate ? WORKFLOW_STATUS_TEXT.waiting : WORKFLOW_STATUS_TEXT[run.status]}`}
               >
-                {waitingGate ? 'waiting for approval' : outcome.label}
+                {waitingGate
+                  ? signInWait
+                    ? 'waiting for sign-in'
+                    : 'waiting for approval'
+                  : outcome.label}
               </span>
             )}
           </div>
@@ -173,7 +183,11 @@ export function RunDetailPane({
               ? 'ran end to end'
               : `${done} of ${stages.length} stages`}
             {' · '}
-            {ranUninterrupted(run) ? 'never paused' : 'paused for review'}
+            {ranUninterrupted(run)
+              ? 'never paused'
+              : signInWait
+                ? 'paused until signed in'
+                : 'paused for review'}
             {' · '}
             {formatRelativeTime(run.startedAt)}
           </p>
@@ -187,24 +201,38 @@ export function RunDetailPane({
 
       {waitingGate && (
         <div className="px-5 pb-4 shrink-0 flex flex-col gap-1.5">
-          <button
-            type="button"
-            onClick={() =>
-              void window.api.resolveWorkflowGate({
-                runId: run.runId,
-                nodeId: waitingGate.nodeId,
-                decision: 'approve'
-              })
-            }
-            className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE}`}
-          >
-            <Check size={14} strokeWidth={2} />
-            Approve &amp; continue
-            <span className="flex-1" />
-            <kbd className="text-[10px] font-mono text-gray-500 border border-white/[0.08] rounded px-1 py-0.5">
-              ⌘↵
-            </kbd>
-          </button>
+          {signInWait ? (
+            <button
+              type="button"
+              disabled={!signInConnectionId}
+              onClick={() =>
+                signInConnectionId && void window.api.signInConnection(signInConnectionId)
+              }
+              className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE} disabled:opacity-50`}
+            >
+              <LogIn size={14} strokeWidth={2} />
+              Sign in to {signInName}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                void window.api.resolveWorkflowGate({
+                  runId: run.runId,
+                  nodeId: waitingGate.nodeId,
+                  decision: 'approve'
+                })
+              }
+              className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE}`}
+            >
+              <Check size={14} strokeWidth={2} />
+              Approve &amp; continue
+              <span className="flex-1" />
+              <kbd className="text-[10px] font-mono text-gray-500 border border-white/[0.08] rounded px-1 py-0.5">
+                ⌘↵
+              </kbd>
+            </button>
+          )}
           <button
             type="button"
             onClick={() =>
@@ -219,9 +247,11 @@ export function RunDetailPane({
             <X size={14} strokeWidth={2} />
             Reject run
             <span className="flex-1" />
-            <kbd className="text-[10px] font-mono text-gray-500 border border-white/[0.08] rounded px-1 py-0.5">
-              R
-            </kbd>
+            {!signInWait && (
+              <kbd className="text-[10px] font-mono text-gray-500 border border-white/[0.08] rounded px-1 py-0.5">
+                R
+              </kbd>
+            )}
           </button>
         </div>
       )}

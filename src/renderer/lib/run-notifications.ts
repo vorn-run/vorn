@@ -1,6 +1,6 @@
 import type { WorkflowExecution } from '../../shared/types'
 import { useAppStore } from '../stores'
-import { sendWorkflowGateNotification } from './notifications'
+import { sendWorkflowGateNotification, sendWorkflowSignInNotification } from './notifications'
 
 /**
  * The window's half of a run that is happening somewhere else.
@@ -30,6 +30,22 @@ export function announceRun(execution: WorkflowExecution): void {
     for (const nodeId of waiting) {
       if (previous?.waiting.has(nodeId)) continue
       const node = workflow.nodes.find((n) => n.id === nodeId)
+      const openWorkflow = () => {
+        useAppStore.getState().setEditingWorkflowId(workflow.id)
+        useAppStore.getState().setWorkflowEditorOpen(true)
+      }
+      const state = execution.nodeStates.find((ns) => ns.nodeId === nodeId)
+      if (state?.waitingFor === 'signIn') {
+        sendWorkflowSignInNotification(
+          workflow,
+          nodeId,
+          node?.label ?? 'A step',
+          state.error,
+          store.config ?? null,
+          openWorkflow
+        )
+        continue
+      }
       sendWorkflowGateNotification(
         workflow,
         nodeId,

@@ -524,7 +524,7 @@ async function executeLoop(
       persistExecution(execution)
 
       const stepOutputs = buildStepOutputsMap(execution, nodeMap)
-      await executeNode(step, workflow, execution, context, stepOutputs, active)
+      await executeNode(step, workflow, execution, context, stepOutputs, active, true)
 
       const state = execution.nodeStates.find((s) => s.nodeId === step.id)
       updateNodeState(execution, step.id, { iteration })
@@ -584,7 +584,8 @@ async function executeNode(
   execution: WorkflowExecution,
   context?: WorkflowExecutionContext,
   stepOutputs?: StepOutputs,
-  active?: ActiveRun
+  active?: ActiveRun,
+  inLoop = false
 ): Promise<void> {
   if (node.type === 'loop') {
     await executeLoop(node, workflow, execution, context, active)
@@ -705,6 +706,17 @@ async function executeNode(
       // here under `typeof === 'object'` but break `buildStepOutputsMap`
       // which spreads the value into a string-keyed map (the array
       // indices `0`, `1`, … would become bogus step keys).
+      // A signed-out window waits for the person; a loop cannot wait, so there it stays an error.
+      if (!result.success && result.errorKind === 'needs-sign-in' && !inLoop) {
+        updateNodeState(execution, node.id, {
+          status: 'waiting',
+          waitingFor: 'signIn',
+          logs: JSON.stringify(result, null, 2),
+          ...(result.error && { error: result.error })
+        })
+        persistExecution(execution)
+        return
+      }
       const isPlainObject =
         !!result.output && typeof result.output === 'object' && !Array.isArray(result.output)
       updateNodeState(execution, node.id, {
@@ -713,7 +725,12 @@ async function executeNode(
         output: result.success ? `${cfg.action} succeeded` : `${cfg.action} failed`,
         logs: JSON.stringify(result, null, 2),
         ...(isPlainObject && { structuredOutput: result.output }),
-        ...(result.error && { error: result.error })
+        ...(result.error && {
+          error:
+            inLoop && result.errorKind === 'needs-sign-in'
+              ? `${result.error} It repeats inside a loop, so run the workflow again once signed in.`
+              : result.error
+        })
       })
     } catch (err) {
       updateNodeState(execution, node.id, {
@@ -1458,6 +1475,10 @@ export async function applyGateDecision(
     publishRun(execution)
     return
   }
+  if (decision === 'approve' && node.waitingFor === 'signIn') {
+    publishRun(execution)
+    return
+  }
 
   if (decision === 'approve') await approveWorkflowGate(execution, nodeId)
   else await rejectWorkflowGate(execution, nodeId)
@@ -1935,6 +1956,11 @@ function resolveWaitingGate(
     log.warn(`[workflow] ${caller}WorkflowGate: node ${nodeId} not waiting (status=${ns?.status})`)
     return null
   }
+  // Only signing in again ends a sign-in wait; approving it would skip the step it waits to run.
+  if (caller === 'approve' && ns.waitingFor === 'signIn') {
+    log.warn(`[workflow] approveWorkflowGate: node ${nodeId} waits for a sign-in, not an approval`)
+    return null
+  }
 
   const key = gateKey(execution.runId, nodeId)
   const timer = gateTimers.get(key)
@@ -2006,4 +2032,44 @@ export async function rejectWorkflowGate(
 
   const context = rebuildContextForResume(execution)
   return runExecution(workflow, execution, context)
+}
+
+/** Whether a waiting step waits for its connection to sign in again, not for an approval. */
+export function isSignInWait(runId: string, nodeId: string): boolean {
+  const execution = activeRuns.get(runId)?.execution ?? runById(runId)
+  return execution?.nodeStates.find((state) => state.nodeId === nodeId)?.waitingFor === 'signIn'
+}
+
+/** Run again the steps that waited for this connection to sign in; what ran before them is kept. */
+export async function resumeSignInWaits(
+  connectionId: string,
+  parked: WorkflowExecution[]
+): Promise<void> {
+  const resumes: Array<Promise<WorkflowExecution>> = []
+  for (const stored of parked) {
+    const execution = activeRuns.get(stored.runId)?.execution ?? stored
+    const workflow = workflowById(execution.workflowId)
+    if (!workflow) continue
+    const waiting = execution.nodeStates.filter((state) => {
+      if (state.status !== 'waiting' || state.waitingFor !== 'signIn') return false
+      const node = workflow.nodes.find((n) => n.id === state.nodeId)
+      return (node?.config as { connectionId?: string } | undefined)?.connectionId === connectionId
+    })
+    if (waiting.length === 0) continue
+    for (const state of waiting) {
+      updateNodeState(execution, state.nodeId, {
+        status: 'pending',
+        waitingFor: undefined,
+        error: undefined,
+        logs: undefined,
+        startedAt: undefined
+      })
+    }
+    persistExecution(execution)
+    log.info(
+      `[workflow] run ${execution.runId}: ${waiting.length} step(s) run again after a sign-in`
+    )
+    resumes.push(runExecution(workflow, execution, rebuildContextForResume(execution)))
+  }
+  await Promise.all(resumes)
 }
