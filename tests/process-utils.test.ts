@@ -320,26 +320,38 @@ describe('the login-shell environment', () => {
     const mod = await import('../packages/server/src/process-utils')
     const priming = mod.primeShellEnv()
     expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+    expect(mockExecFile).toHaveBeenCalledTimes(1)
     finish?.()
     await priming
     expect(mod.getSafeEnv().PATH).toBe('/from/shell')
   })
 
-  it('does not remember a shell that failed to answer', async () => {
+  it('asks the shell again after a failure, but not right away', async () => {
     vi.useFakeTimers()
-    const { execFileSync } = await import('node:child_process')
-    const sync = execFileSync as unknown as ReturnType<typeof vi.fn>
-    sync.mockImplementationOnce(() => {
-      throw new Error('ETIMEDOUT')
-    })
+    mockExecFile.mockImplementationOnce((_bin, _args, _opts, cb) => cb(new Error('ETIMEDOUT')))
     const mod = await import('../packages/server/src/process-utils')
+    await mod.primeShellEnv()
     expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+    // Inside the retry window the failure stands, without asking again.
+    expect(mockExecFile).toHaveBeenCalledTimes(1)
 
-    sync.mockImplementationOnce(() => 'PATH=/late/but/right\n')
-    // Inside the retry window the failure still stands, without asking again.
-    expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+    mockExecFile.mockImplementationOnce((_bin, _args, _opts, cb) =>
+      cb(null, 'PATH=/late/but/right\n')
+    )
     vi.advanceTimersByTime(31_000)
+    expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+    await mod.shellEnvSettled(1000)
     expect(mod.getSafeEnv().PATH).toBe('/late/but/right')
-    expect(mod.getSafeEnv().PATH).toBe('/late/but/right')
+    expect(mockExecFile).toHaveBeenCalledTimes(2)
+  })
+
+  it('waits for the shell only as long as it is told to', async () => {
+    vi.useFakeTimers()
+    mockExecFile.mockImplementation(() => {})
+    const mod = await import('../packages/server/src/process-utils')
+    void mod.primeShellEnv()
+    const settled = mod.shellEnvSettled(1000).then(() => 'done')
+    vi.advanceTimersByTime(1000)
+    await expect(settled).resolves.toBe('done')
   })
 })

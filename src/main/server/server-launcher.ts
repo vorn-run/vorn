@@ -657,13 +657,16 @@ async function tryAdopt(
   // that reading is how a second server gets started on a live port. A socket
   // that closes before greeting has answered: nothing is there.
   const identity = await new Promise<ServerIdentity | null>((resolve) => {
-    const timer = setTimeout(() => resolve(null), ADOPT_IDENTITY_TIMEOUT_MS)
-    const settle = (found: ServerIdentity | null): void => {
+    const timer = setTimeout(() => settle(null), ADOPT_IDENTITY_TIMEOUT_MS)
+    const gone = (): void => settle(null)
+    function settle(found: ServerIdentity | null): void {
       clearTimeout(timer)
+      candidate.off('identity', settle)
+      candidate.off('disconnected', gone)
       resolve(found)
     }
     candidate.once('identity', settle)
-    candidate.once('disconnected', () => settle(null))
+    candidate.once('disconnected', gone)
   })
   log.info(`[launcher] probed ${target} in ${Date.now() - probing}ms`)
 

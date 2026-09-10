@@ -332,8 +332,7 @@ describe('declining a server that is running', () => {
   })
 
   it('gives up at once on a name that refuses the connection', async () => {
-    // The state after an update: the old server is gone and its socket with it.
-    // Waiting out the greeting deadline here is what made every update slow.
+    // After an update the old server and its socket are gone; the greeting deadline is not owed.
     published.port = 50091
     published.token = null
     published.identity = null

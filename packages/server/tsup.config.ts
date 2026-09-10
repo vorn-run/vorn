@@ -12,8 +12,10 @@ const { version } = JSON.parse(readFileSync('./package.json', 'utf-8'))
 // `index.cjs`, which is required rather than executed.
 const SHEBANG = '#!/usr/bin/env node'
 
+// Node keeps the bundle's compiled form on disk, so a warm start skips half its load.
+const COMPILE_CACHE = `;try { require('module').enableCompileCache() } catch (e) {}`
+
 const NATIVE_MODULE_PATCH = `
-;try { require('module').enableCompileCache() } catch (e) {}
 // Patch module resolution for Electron's utilityProcess.
 //
 // utilityProcess doesn't have the main process's ASAR require() patching,
@@ -54,7 +56,7 @@ export default defineConfig({
   target: 'node22',
   clean: true,
   banner: {
-    js: `${SHEBANG}\n${NATIVE_MODULE_PATCH}`
+    js: `${SHEBANG}\n${COMPILE_CACHE}\n${NATIVE_MODULE_PATCH}`
   },
   // What `vorn --version` answers. The bundle has no package.json to read.
   define: {

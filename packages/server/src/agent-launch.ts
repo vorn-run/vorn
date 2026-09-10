@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import {
   AiAgentType,
   AgentType,
@@ -11,28 +10,21 @@ import {
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import { shellEscape } from './process-utils'
 import { stripSessionSelectors } from './launch-tokens'
+import { findOnPath } from './resolve-executable'
 
-function commandExists(cmd: string, env: Record<string, string>): boolean {
-  try {
-    const bin = process.platform === 'win32' ? 'where' : 'which'
-    execFileSync(bin, [cmd], { stdio: 'pipe', timeout: 3000, env })
-    return true
-  } catch {
-    return false
-  }
-}
-
+/** The configured command, and where on `env.PATH` it lives; the name when it is not there. */
 function resolveAgentCommand(
   config: AgentCommandConfig,
   env: Record<string, string>
-): { command: string; args: string[] } {
-  if (commandExists(config.command, env)) {
-    return { command: config.command, args: config.args }
+): { command: string; args: string[]; path: string } {
+  const primary = findOnPath(config.command, env.PATH)
+  if (primary) return { command: config.command, args: config.args, path: primary }
+  if (config.fallbackCommand) {
+    const fallback = findOnPath(config.fallbackCommand, env.PATH)
+    if (fallback)
+      return { command: config.fallbackCommand, args: config.fallbackArgs ?? [], path: fallback }
   }
-  if (config.fallbackCommand && commandExists(config.fallbackCommand, env)) {
-    return { command: config.fallbackCommand, args: config.fallbackArgs ?? [] }
-  }
-  return { command: config.command, args: config.args }
+  return { command: config.command, args: config.args, path: config.command }
 }
 
 /**
@@ -245,8 +237,8 @@ export function buildHeadlessSpawnArgs(
       // `claude -p` (print mode) reads the prompt from stdin when no positional
       // prompt is given. Deliver it there so the shell never sees it.
       return prompt
-        ? { command: cmd.command, args: [...extraArgs, '-p'], stdin: prompt }
-        : { command: cmd.command, args: [...extraArgs, '-p', ''] }
+        ? { command: cmd.path, args: [...extraArgs, '-p'], stdin: prompt }
+        : { command: cmd.path, args: [...extraArgs, '-p', ''] }
     case 'copilot':
       // `copilot` reads the prompt from stdin when `-p` is absent ("Run in an
       // interactive terminal or provide a prompt with -p or via standard in").
@@ -257,8 +249,8 @@ export function buildHeadlessSpawnArgs(
       // none at all, and with no prompt it blocks on stdin producing no output
       // whatsoever: the step never finished and its run never closed.
       return prompt
-        ? { command: cmd.command, args: [...extraArgs], stdin: prompt }
-        : { command: cmd.command, args: [...extraArgs, '-p', ''] }
+        ? { command: cmd.path, args: [...extraArgs], stdin: prompt }
+        : { command: cmd.path, args: [...extraArgs, '-p', ''] }
     case 'codex':
       // `codex exec` reads its instructions from stdin when no PROMPT argument
       // is given. Passing the prompt positionally instead would also work on
@@ -267,13 +259,13 @@ export function buildHeadlessSpawnArgs(
       // passed as an argument — codex then treats stdin as a separate
       // `<stdin>` block rather than as the instructions.
       return prompt
-        ? { command: cmd.command, args: [...extraArgs, 'exec'], stdin: prompt }
-        : { command: cmd.command, args: [...extraArgs, 'exec', ''] }
+        ? { command: cmd.path, args: [...extraArgs, 'exec'], stdin: prompt }
+        : { command: cmd.path, args: [...extraArgs, 'exec', ''] }
     case 'opencode':
       // `opencode run` with no positional message reads the message from stdin.
       return prompt
-        ? { command: cmd.command, args: [...extraArgs, 'run'], stdin: prompt }
-        : { command: cmd.command, args: [...extraArgs, 'run', ''] }
+        ? { command: cmd.path, args: [...extraArgs, 'run'], stdin: prompt }
+        : { command: cmd.path, args: [...extraArgs, 'run', ''] }
     case 'gemini':
       // gemini reads stdin whenever stdin isn't a TTY and uses it as the input
       // when no `-p` is given (`input = input ? stdin + input : stdin`). Piped
@@ -284,9 +276,9 @@ export function buildHeadlessSpawnArgs(
       // re-injects it as `--prompt` on the relaunch command line — which would
       // reintroduce the newline truncation. Vorn doesn't enable that sandbox.
       return prompt
-        ? { command: cmd.command, args: [...extraArgs], stdin: prompt }
-        : { command: cmd.command, args: [...extraArgs, '-p', ''] }
+        ? { command: cmd.path, args: [...extraArgs], stdin: prompt }
+        : { command: cmd.path, args: [...extraArgs, '-p', ''] }
     default:
-      return { command: cmd.command, args: [...extraArgs, '-p', prompt] }
+      return { command: cmd.path, args: [...extraArgs, '-p', prompt] }
   }
 }

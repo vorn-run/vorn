@@ -1,3 +1,4 @@
+import { promisify } from 'node:util'
 import { execFile, execFileSync } from 'node:child_process'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -68,21 +69,28 @@ export function getRepoRoot(cwd: string): string | null {
   }
 }
 
-/** `git rev-parse <what>` without blocking the event loop; null when git says no. */
-function gitRevParse(args: string[], cwd: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile(
-      gitBin(),
-      ['rev-parse', ...args],
-      { cwd, ...EXEC_OPTS, env: getSafeEnv(), timeout: 3000 },
-      (err, stdout) => resolve(err ? null : String(stdout).trim() || null)
-    )
-  })
+/** A detached HEAD is no branch. */
+function branchOrNull(raw: string | null): string | null {
+  return raw && raw !== 'HEAD' ? raw : null
+}
+
+/** `git rev-parse` without blocking the event loop; null when git says no. */
+async function gitRevParse(args: string[], cwd: string): Promise<string | null> {
+  try {
+    const { stdout } = await promisify(execFile)(gitBin(), ['rev-parse', ...args], {
+      cwd,
+      ...EXEC_OPTS,
+      env: getSafeEnv(),
+      timeout: 3000
+    })
+    return String(stdout).trim() || null
+  } catch {
+    return null
+  }
 }
 
 export async function getGitBranchAsync(projectPath: string): Promise<string | null> {
-  const branch = await gitRevParse(['--abbrev-ref', 'HEAD'], projectPath)
-  return branch && branch !== 'HEAD' ? branch : null
+  return branchOrNull(await gitRevParse(['--abbrev-ref', 'HEAD'], projectPath))
 }
 
 export function getGitHeadAsync(projectPath: string): Promise<string | null> {
@@ -91,11 +99,9 @@ export function getGitHeadAsync(projectPath: string): Promise<string | null> {
 
 export function getGitBranch(projectPath: string, remote?: RemoteHost): string | null {
   try {
-    const branch = gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath, {
-      timeout: 3000,
-      remote
-    }).trim()
-    return branch && branch !== 'HEAD' ? branch : null
+    return branchOrNull(
+      gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath, { timeout: 3000, remote }).trim()
+    )
   } catch {
     return null
   }

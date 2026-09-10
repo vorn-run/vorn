@@ -112,13 +112,29 @@ export function markRecovered(
   }
 }
 
-/** Check each record against the tree once, so Resume is offered knowingly. One that throws is left unchecked. */
-/** Every record at once: the git calls behind the probe are what a busy boot waits on. */
+/** Every record at once, one git answer per directory; a record that throws is left unchecked. */
 export async function verifyRestored(probe: EnvironmentProbe): Promise<void> {
+  const answers = new Map<string, Promise<string | null>>()
+  const shared =
+    (ask: 'branch' | 'head') =>
+    (cwd: string): Promise<string | null> => {
+      const key = `${ask}\0${cwd}`
+      let answer = answers.get(key)
+      if (!answer) {
+        answer = Promise.resolve(probe[ask](cwd))
+        answers.set(key, answer)
+      }
+      return answer
+    }
+  const once: EnvironmentProbe = {
+    isDirectory: probe.isDirectory,
+    branch: shared('branch'),
+    head: shared('head')
+  }
   await Promise.all(
     [...held.values()].map(async (entry) => {
       try {
-        const environment = await probeEnvironment(entry.session, probe)
+        const environment = await probeEnvironment(entry.session, once)
         if (environment) entry.environment = environment
       } catch (err) {
         log.warn({ err, id: entry.session.id }, '[restored] could not verify a session')
@@ -127,7 +143,6 @@ export async function verifyRestored(probe: EnvironmentProbe): Promise<void> {
   )
 }
 
-/** What a client is offered. */
 export function listRestored(): RestoredSession[] {
   return [...held.values()]
 }

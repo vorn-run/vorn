@@ -17,7 +17,7 @@ vi.mock('node:child_process', async () => {
 })
 
 vi.mock('../packages/server/src/resolve-executable', () => ({
-  resolveExecutable: (name: string) => (name === 'claude' ? '/opt/agents/bin/claude' : null)
+  findOnPath: (name: string) => (name === 'claude' ? '/opt/agents/bin/claude' : null)
 }))
 vi.mock('../packages/server/src/git-utils', () => ({
   getGitBranch: vi.fn(() => 'main'),

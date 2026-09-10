@@ -67,7 +67,12 @@ import { redeemCode, pollRequest, pendingRequests } from './pairing'
 import { getTailscaleStatus } from './tailscale'
 import { initRebind, checkAndRebind, getCurrentHost } from './server-rebind'
 import { isAllowedUpgrade, logRefusedUpgrade, setTrustedOriginHosts } from './ws-origin'
-import { primeShellEnv, setEnvPassthrough, setLaunchDataDir } from './process-utils'
+import {
+  primeShellEnv,
+  shellEnvSettled,
+  setEnvPassthrough,
+  setLaunchDataDir
+} from './process-utils'
 import log from './logger'
 import { appFrameAncestors } from './extensions/frame-ancestors'
 
@@ -152,8 +157,8 @@ export async function startServer(
   } = {}
 ) {
   const bootStarted = Date.now()
-  // First, so the shell runs while the database opens and the modules load.
-  const shellEnvReady = primeShellEnv()
+  // First, so the shell answers while the database opens and the modules load.
+  void primeShellEnv()
   // Initialize database + config. This resolves the data directory for the whole
   // process; everything else reads it back with getDataDir() rather than
   // deriving it again, so nothing can disagree about where the files are.
@@ -408,42 +413,6 @@ export async function startServer(
   // Register all RPC methods
   registerAllMethods()
 
-  // Started here and awaited before the port file: history is read and the
-  // trees are checked while the socket comes up, so discovery waits on neither.
-  // After `registerAllMethods()`, so nothing here races the first debounced
-  // `saveSessions`. Adopted sessions belong in this list for both things it
-  // decides: their screens are rebuilt from the previous server's checkpoint,
-  // and a session absent from it has its history swept. Null sweeps nothing.
-  const recoverable =
-    carriedOver === null
-      ? null
-      : [
-          ...carriedOver,
-          ...adopted
-            .filter((pane) => !carriedOver.some((s) => s.id === pane.session.id))
-            .map((pane) => pane.session)
-        ]
-  if (carriedOver === null && adopted.length) {
-    log.warn(
-      '[handoff] the session list could not be read; adopted terminals start without scrollback'
-    )
-  }
-  const recovering = recoverHistory(dataDir, recoverable)
-  // The shell's PATH is worth a short wait for git; a slow shell is not worth the boot.
-  const verifying = Promise.race([shellEnvReady, new Promise((r) => setTimeout(r, 1000))]).then(
-    () =>
-      verifyRestored({
-        isDirectory: (at) => {
-          try {
-            return fs.statSync(at).isDirectory()
-          } catch {
-            return false
-          }
-        },
-        branch: getGitBranchAsync,
-        head: getGitHeadAsync
-      })
-  )
   // Connects the rung-none packs installed before installing meant connecting.
   reconcileImplicitConnections()
   scheduler.startInboxWorker()
@@ -581,6 +550,41 @@ export async function startServer(
   // serve`, so a check that lived only there would be late or absent exactly
   // where it matters.
   if (endpoint) watchEndpoint(() => endpoint?.holds() ?? false)
+
+  // After the claim, so a server that arrives second exits above rather than
+  // replaying every terminal first; awaited before the port file, so no client
+  // can be told there is no history. Adopted sessions are rebuilt from the
+  // previous server's checkpoint, and a session absent from the list has its
+  // history swept. Null sweeps nothing.
+  const recoverable =
+    carriedOver === null
+      ? null
+      : [
+          ...carriedOver,
+          ...adopted
+            .filter((pane) => !carriedOver.some((s) => s.id === pane.session.id))
+            .map((pane) => pane.session)
+        ]
+  if (carriedOver === null && adopted.length) {
+    log.warn(
+      '[handoff] the session list could not be read; adopted terminals start without scrollback'
+    )
+  }
+  const recovering = recoverHistory(dataDir, recoverable)
+  // git is worth a short wait for the shell's PATH; a slow shell is not worth the boot.
+  const verifying = shellEnvSettled(1000).then(() =>
+    verifyRestored({
+      isDirectory: (at) => {
+        try {
+          return fs.statSync(at).isDirectory()
+        } catch {
+          return false
+        }
+      },
+      branch: getGitBranchAsync,
+      head: getGitHeadAsync
+    })
+  )
 
   /** Registered here because every closure needs the endpoint, port and file ownership. */
   const handoffHost: HandoffHost = {

@@ -12,9 +12,8 @@ import { getSafeEnv } from './process-utils'
 // "not found" until app restart.
 const cache = new Map<string, string>()
 
-function find(name: string): string | null {
-  const env = getSafeEnv()
-  const pathEnv = env.PATH || env.Path || process.env.PATH || ''
+/** Where `name` lives on `pathEnv`, or null. On Windows `.exe` and `.cmd` count too. */
+export function findOnPath(name: string, pathEnv: string | undefined): string | null {
   if (!pathEnv) return null
   const sep = process.platform === 'win32' ? ';' : ':'
   const candidates = process.platform === 'win32' ? [`${name}.exe`, `${name}.cmd`, name] : [name]
@@ -32,6 +31,11 @@ function find(name: string): string | null {
     }
   }
   return null
+}
+
+function find(name: string): string | null {
+  const env = getSafeEnv()
+  return findOnPath(name, env.PATH || env.Path || process.env.PATH)
 }
 
 /**

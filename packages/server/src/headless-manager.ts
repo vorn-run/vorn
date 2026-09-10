@@ -1,7 +1,6 @@
 import { spawn, ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
-import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import {
   AiAgentType,
@@ -21,7 +20,6 @@ import {
 } from './git-utils'
 import { getLaunchEnv, shellEscape } from './process-utils'
 import { buildHeadlessSpawnArgs } from './agent-launch'
-import { resolveExecutable } from './resolve-executable'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
 import { isDraining, DRAINING_MESSAGE } from './draining'
@@ -127,17 +125,13 @@ class HeadlessManager extends EventEmitter {
     // Not truncated: this line is the first thing anyone reads when a session
     // produces no output, and the flag that explains it is as likely to be at
     // the end as the start. The prompt isn't here — it goes to stdin.
-    // By absolute path: spawn only searches the PATH it is handed, and boot may have missed it.
-    const command = path.isAbsolute(spawnArgs.command)
-      ? spawnArgs.command
-      : (resolveExecutable(spawnArgs.command) ?? spawnArgs.command)
-    const launchCommand = [command, ...spawnArgList].join(' ')
+    const launchCommand = [spawnArgs.command, ...spawnArgList].join(' ')
     log.info(
       `[headless] launching in ${effectivePath}: ${launchCommand}` +
         (spawnArgs.stdin != null ? ` (prompt on stdin, ${spawnArgs.stdin.length} chars)` : '')
     )
 
-    const child = spawn(command, spawnArgList, {
+    const child = spawn(spawnArgs.command, spawnArgList, {
       cwd: effectivePath,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
