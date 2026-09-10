@@ -27,6 +27,7 @@ import {
   type UpgradeOutcome,
   stopServer,
   detachFromServer,
+  releaseServerForUpdate,
   getServerBridge,
   getLastAdoptionRefusal,
   AdoptionRefusedError,
@@ -649,14 +650,9 @@ app.whenReady().then(async () => {
     hideWidget()
   })
 
-  // The update leaves the server running. It used to stop it, to keep app and
-  // server on one build -- at the cost of ending every terminal on every release.
-  // `upgradeServerInPlace` is the way forward that costs nothing, so this lets go
-  // exactly as a quit does and the next launch sorts out which build should serve.
-  ipcMain.on(IPC.UPDATE_INSTALL, () => {
-    // `detachFromServer`, not `stopServer`. The distinction is the feature.
-    detachFromServer()
+  ipcMain.on(IPC.UPDATE_INSTALL, async () => {
     serverStopped = true
+    await releaseServerForUpdate()
     updateManager.installUpdate()
   })
 

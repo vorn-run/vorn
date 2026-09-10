@@ -3,29 +3,34 @@ import { facesRestart, updateCostLine } from '../src/renderer/lib/update-cost'
 
 describe('what restarting for an update costs', () => {
   it('says nothing when there is nothing to lose', () => {
-    expect(updateCostLine(0, false)).toBeNull()
+    expect(updateCostLine(0, false, true)).toBeNull()
   })
 
   it('still says nothing when the count is nonsense', () => {
-    expect(updateCostLine(-1, true)).toBeNull()
+    expect(updateCostLine(-1, true, true)).toBeNull()
   })
 
   it('names one session without pluralising it', () => {
-    expect(updateCostLine(1, false)).toBe('Your session keeps running through the update.')
+    expect(updateCostLine(1, false, true)).toBe('Your session keeps running through the update.')
   })
 
   it('counts them when there is more than one', () => {
-    expect(updateCostLine(3, false)).toBe('Your 3 sessions keep running through the update.')
+    expect(updateCostLine(3, false, true)).toBe('Your 3 sessions keep running through the update.')
   })
 
   it('names the turn only when one is running', () => {
-    // The turn is the part people brace for, so it is named — and now to say it
-    // survives. The pty outlives the server that owned it, so the program on the
-    // far side never learns the update happened.
-    expect(updateCostLine(3, true)).toBe(
+    expect(updateCostLine(3, true, true)).toBe(
       'Your 3 sessions keep running through the update. The turn in flight continues.'
     )
-    expect(updateCostLine(3, false)).not.toContain('turn')
+    expect(updateCostLine(3, false, true)).not.toContain('turn')
+  })
+
+  it('says the sessions end where nothing can hand them over', () => {
+    expect(updateCostLine(1, false, false)).toBe('Your session ends with the update.')
+    expect(updateCostLine(3, false, false)).toBe('Your 3 sessions end with the update.')
+    expect(updateCostLine(2, true, false)).toBe(
+      'Your 2 sessions end with the update. The turn in flight is cut short.'
+    )
   })
 })
 

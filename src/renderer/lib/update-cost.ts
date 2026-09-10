@@ -13,18 +13,21 @@ export function facesRestart(terminal: Pick<TerminalState, 'ended'>): boolean {
   return terminal.ended === undefined
 }
 
-/**
- * What restarting for an update does to the sessions, in one line.
- *
- * It used to be a warning: the update stopped the server and ended every session.
- * The server is now handed over instead, so the line stays to say a promise is
- * kept -- somebody who read the old one needs telling it has changed.
- */
-export function updateCostLine(sessionCount: number, aTurnIsRunning: boolean): string | null {
+/** What restarting for an update does to the sessions, in one line. */
+export function updateCostLine(
+  sessionCount: number,
+  aTurnIsRunning: boolean,
+  sessionsSurvive: boolean
+): string | null {
   if (sessionCount <= 0) return null
-  const sessions =
-    sessionCount === 1 ? 'Your session keeps running' : `Your ${sessionCount} sessions keep running`
-  // The part people brace for, so it is named -- now to say it survives.
-  const turn = aTurnIsRunning ? ' The turn in flight continues.' : ''
-  return `${sessions} through the update.${turn}`
+  const one = sessionCount === 1
+  const subject = one ? 'Your session' : `Your ${sessionCount} sessions`
+  const s = one ? 's' : ''
+  const fate = sessionsSurvive ? `keep${s} running through the update` : `end${s} with the update`
+  const turn = !aTurnIsRunning
+    ? ''
+    : sessionsSurvive
+      ? ' The turn in flight continues.'
+      : ' The turn in flight is cut short.'
+  return `${subject} ${fate}.${turn}`
 }

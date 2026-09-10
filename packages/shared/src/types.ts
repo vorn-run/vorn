@@ -1283,6 +1283,8 @@ export interface ServerRuntimeStatus {
   adopted: boolean
   /** False on Windows, for a server reached by port, and for one this app started. */
   canUpgrade: boolean
+  /** False where an update must stop the server this app holds instead of handing it over. */
+  sessionsSurviveUpdate: boolean
   /** How many terminals a move would carry, when the server has said. */
   sessions: number | null
   /** What the last attempt did, so a panel opened afterwards can say. */

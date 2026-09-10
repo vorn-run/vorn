@@ -726,6 +726,7 @@ export function createApiShim(wsUrl: string) {
       serverPid: null,
       adopted: false,
       canUpgrade: false,
+      sessionsSurviveUpdate: true,
       sessions: null,
       lastUpgrade: null
     }),
@@ -735,6 +736,7 @@ export function createApiShim(wsUrl: string) {
       serverPid: null,
       adopted: false,
       canUpgrade: false,
+      sessionsSurviveUpdate: true,
       sessions: null,
       lastUpgrade: { kind: 'not-needed', why: 'the web client cannot move a server' }
     }),

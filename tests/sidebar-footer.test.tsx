@@ -27,9 +27,14 @@ vi.mock('../src/renderer/components/Tooltip', () => ({
 }))
 
 const installUpdate = vi.fn()
+const runtime = { sessionsSurviveUpdate: true }
 
 Object.defineProperty(window, 'api', {
-  value: { installUpdate },
+  value: {
+    installUpdate,
+    getServerRuntimeStatus: () => runtime,
+    onServerRuntimeStatus: () => () => {}
+  },
   writable: true
 })
 
@@ -44,6 +49,7 @@ beforeEach(() => {
   mockStore.appUpdateStatus = { kind: 'unsupported' }
   mockStore.updateBannerDismissed = false
   mockStore.terminals = new Map()
+  runtime.sessionsSurviveUpdate = true
 })
 
 describe('SidebarFooter', () => {
@@ -138,6 +144,15 @@ describe('what the sidebar restart will cost', () => {
     render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
     expect(screen.getByText(/Your 2 sessions keep running through the update/)).toBeInTheDocument()
     expect(screen.getByText(/The turn in flight continues/)).toBeInTheDocument()
+  })
+
+  it('says the sessions end where the main process says nothing can hand them over', () => {
+    runtime.sessionsSurviveUpdate = false
+    mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
+    mockStore.terminals = new Map([['a', { status: 'running' }]])
+    render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)
+    expect(screen.getByText(/Your session ends with the update/)).toBeInTheDocument()
+    expect(screen.getByText(/The turn in flight is cut short/)).toBeInTheDocument()
   })
 
   it('says nothing when there are no sessions to lose', () => {

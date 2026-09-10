@@ -9,6 +9,7 @@ const base: ServerRuntimeStatus = {
   serverPid: 100,
   adopted: true,
   canUpgrade: true,
+  sessionsSurviveUpdate: true,
   sessions: 3,
   lastUpgrade: null
 }
