@@ -7,7 +7,6 @@ import { installCompanionQuitHook } from './device-companion'
 import { installConnectorCredentialsSync } from './connector-credentials-sync'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
-import { releaseServerForUpdate } from './server/update-prepare'
 import {
   IPC,
   PermissionRequestInfo,
@@ -28,6 +27,7 @@ import {
   type UpgradeOutcome,
   stopServer,
   detachFromServer,
+  releaseServerForUpdate,
   getServerBridge,
   getLastAdoptionRefusal,
   AdoptionRefusedError,
@@ -650,10 +650,9 @@ app.whenReady().then(async () => {
     hideWidget()
   })
 
-  // The server is left running where the next launch can take its sessions over.
   ipcMain.on(IPC.UPDATE_INSTALL, async () => {
-    await releaseServerForUpdate()
     serverStopped = true
+    await releaseServerForUpdate()
     updateManager.installUpdate()
   })
 

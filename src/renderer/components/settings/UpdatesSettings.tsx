@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useAppStore } from '../../stores'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
@@ -8,7 +8,7 @@ import { facesRestart, updateCostLine } from '../../lib/update-cost'
 import { describeUpdateStatus } from '../../lib/update-status'
 import { TONE_DOT } from '../../lib/status-tone'
 import { describeServerRuntime } from '../../lib/server-runtime'
-import { isWindows } from '../../lib/platform'
+import { useServerRuntime } from '../../hooks/useServerRuntime'
 import type { ServerRuntimeStatus } from '../../../shared/types'
 
 /**
@@ -52,7 +52,9 @@ export function UpdatesSettings() {
   // Only where the button ends them. Every other state is reporting on a
   // download, which costs nothing.
   const cost =
-    view.action === 'restart' ? updateCostLine(sessionCount, aTurnIsRunning, !isWindows) : null
+    view.action === 'restart'
+      ? updateCostLine(sessionCount, aTurnIsRunning, runtime?.sessionsSurviveUpdate ?? true)
+      : null
 
   const updateDefaults = (patch: Partial<typeof config.defaults>): void => {
     const updated = {
@@ -150,20 +152,6 @@ export function UpdatesSettings() {
       </div>
     </div>
   )
-}
-
-/** Followed, not fetched once: the automatic move happens long before this panel opens. */
-function useServerRuntime(): ServerRuntimeStatus | null {
-  // Read during the first render, like the app version above, so the panel does
-  // not render twice. Guarded because a renderer reloaded mid-handoff may be
-  // running against an older `window.api`, and throwing here would take the page down.
-  const [runtime, setRuntime] = useState<ServerRuntimeStatus | null>(() =>
-    typeof window.api?.getServerRuntimeStatus === 'function'
-      ? window.api.getServerRuntimeStatus()
-      : null
-  )
-  useEffect(() => window.api?.onServerRuntimeStatus?.(setRuntime), [])
-  return runtime
 }
 
 /** Always shown: a row that appears only when something is wrong is one nobody knows exists. */

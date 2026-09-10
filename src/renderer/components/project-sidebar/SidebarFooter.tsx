@@ -3,7 +3,7 @@ import { Tooltip } from '../Tooltip'
 import { getShortcut } from '../../lib/keyboard-shortcuts'
 import { describeUpdateStatus, hasPendingUpdate } from '../../lib/update-status'
 import { facesRestart, updateCostLine } from '../../lib/update-cost'
-import { isWindows } from '../../lib/platform'
+import { useServerRuntime } from '../../hooks/useServerRuntime'
 import { CircleHelp, Settings } from 'lucide-react'
 
 export function SidebarFooter({
@@ -33,7 +33,8 @@ export function SidebarFooter({
   const dismissed = useAppStore((s) => s.updateBannerDismissed)
   const setDismissed = useAppStore((s) => s.setUpdateBannerDismissed)
 
-  const cost = updateCostLine(sessionCount, aTurnIsRunning, !isWindows)
+  const runtime = useServerRuntime()
+  const cost = updateCostLine(sessionCount, aTurnIsRunning, runtime?.sessionsSurviveUpdate ?? true)
 
   const settingsShortcut = getShortcut('settings')?.display
   // Collapsed the rail is 52px, which the banner cannot live in; dismissed the

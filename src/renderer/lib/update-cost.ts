@@ -13,19 +13,21 @@ export function facesRestart(terminal: Pick<TerminalState, 'ended'>): boolean {
   return terminal.ended === undefined
 }
 
-/** What restarting for an update does to the sessions: handed over, they survive; otherwise they end. */
+/** What restarting for an update does to the sessions, in one line. */
 export function updateCostLine(
   sessionCount: number,
   aTurnIsRunning: boolean,
-  handedOver: boolean
+  sessionsSurvive: boolean
 ): string | null {
   if (sessionCount <= 0) return null
-  const subject = sessionCount === 1 ? 'Your session' : `Your ${sessionCount} sessions`
-  if (!handedOver) {
-    const turn = aTurnIsRunning ? ' The turn in flight is cut short.' : ''
-    return `${subject} end${sessionCount === 1 ? 's' : ''} with the update.${turn}`
-  }
-  // The part people brace for, so it is named -- to say it survives.
-  const turn = aTurnIsRunning ? ' The turn in flight continues.' : ''
-  return `${subject} keep${sessionCount === 1 ? 's' : ''} running through the update.${turn}`
+  const one = sessionCount === 1
+  const subject = one ? 'Your session' : `Your ${sessionCount} sessions`
+  const s = one ? 's' : ''
+  const fate = sessionsSurvive ? `keep${s} running through the update` : `end${s} with the update`
+  const turn = !aTurnIsRunning
+    ? ''
+    : sessionsSurvive
+      ? ' The turn in flight continues.'
+      : ' The turn in flight is cut short.'
+  return `${subject} ${fate}.${turn}`
 }

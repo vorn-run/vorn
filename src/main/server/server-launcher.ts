@@ -27,7 +27,12 @@ import {
   type AdoptionVerdict
 } from './server-adoption'
 import { SERVER_LOG_FILENAME, type HandoffResult } from '@vornrun/shared/protocol'
-import { decideHandoff, buildHandoffRequest, devRepoRoot } from './handoff-request'
+import {
+  decideHandoff,
+  buildHandoffRequest,
+  devRepoRoot,
+  updateEndsSessions
+} from './handoff-request'
 import { askForHandoff } from './handoff-direct'
 
 /**
@@ -1161,20 +1166,34 @@ export function serverProcessSpec(): {
 }
 
 /** "Which version am I running" has two answers now, and the app's is the less useful one. */
+/** A server this app started or adopted; in host mode there is none to own. */
+function ownsServer(): boolean {
+  return serverProcess !== null || adoptedPid !== null
+}
+
+/** What an update does to the server: stopped where it must be, let go of where the next build can take it over. */
+export async function releaseServerForUpdate(): Promise<void> {
+  if (updateEndsSessions(process.platform, ownsServer())) await stopServer()
+  else detachFromServer()
+}
+
 export function serverRuntime(): {
   serverVersion: string
   serverPid: number | null
   adopted: boolean
   canUpgrade: boolean
+  sessionsSurviveUpdate: boolean
   sessions: number | null
 } {
   const identity = adoptedIdentity
+  const sessionsSurviveUpdate = !updateEndsSessions(process.platform, ownsServer())
   if (!identity || !adoptedTarget) {
     return {
       serverVersion: app.getVersion(),
       serverPid: serverProcess?.pid ?? null,
       adopted: false,
       canUpgrade: false,
+      sessionsSurviveUpdate,
       sessions: null
     }
   }
@@ -1191,6 +1210,7 @@ export function serverRuntime(): {
     adopted: true,
     // Forced, because this reports whether the button would do anything.
     canUpgrade: verdict.ask,
+    sessionsSurviveUpdate,
     sessions: identity.sessions ?? null
   }
 }

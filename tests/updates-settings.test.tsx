@@ -17,18 +17,6 @@ vi.mock('../src/renderer/stores', () => ({
     selector ? selector(mockStore) : mockStore
 }))
 
-const platform = { isWindows: false }
-vi.mock('../src/renderer/lib/platform', () => ({
-  isElectron: true,
-  isMac: false,
-  isWeb: false,
-  get isWindows() {
-    return platform.isWindows
-  },
-  MOD: 'Ctrl',
-  TRAFFIC_LIGHT_PAD_PX: 78
-}))
-
 const installUpdate = vi.fn()
 const downloadUpdate = vi.fn()
 const checkForUpdates = vi.fn()
@@ -49,6 +37,7 @@ let runtimeStatus: ServerRuntimeStatus = {
   serverPid: 4242,
   adopted: true,
   canUpgrade: false,
+  sessionsSurviveUpdate: true,
   sessions: null,
   lastUpgrade: null
 }
@@ -83,7 +72,7 @@ beforeEach(() => {
   mockStore.config = makeConfig()
   mockStore.appUpdateStatus = { kind: 'idle', lastCheckedAt: null }
   mockStore.terminals = new Map()
-  platform.isWindows = false
+  runtimeStatus = { ...runtimeStatus, sessionsSurviveUpdate: true }
 })
 
 describe('UpdatesSettings', () => {
@@ -229,8 +218,8 @@ describe('what the restart will cost', () => {
     expect(screen.getByText(/Your 2 sessions keep running through the update/)).toBeInTheDocument()
   })
 
-  it('says they end on Windows, where the update stops the server', () => {
-    platform.isWindows = true
+  it('says they end where the update has to stop the server', () => {
+    runtimeStatus = { ...runtimeStatus, sessionsSurviveUpdate: false }
     mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
     mockStore.terminals = new Map([
       ['a', { status: 'idle' }],
@@ -295,6 +284,7 @@ describe('which build is serving', () => {
       serverPid: 4242,
       adopted: true,
       canUpgrade: false,
+      sessionsSurviveUpdate: true,
       sessions: null,
       lastUpgrade: null
     }

@@ -22,26 +22,19 @@ vi.mock('../src/renderer/stores', () => ({
   }
 }))
 
-const platform = { isWindows: false }
-vi.mock('../src/renderer/lib/platform', () => ({
-  isElectron: true,
-  isMac: false,
-  isWeb: false,
-  get isWindows() {
-    return platform.isWindows
-  },
-  MOD: 'Ctrl',
-  TRAFFIC_LIGHT_PAD_PX: 78
-}))
-
 vi.mock('../src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
 const installUpdate = vi.fn()
+const runtime = { sessionsSurviveUpdate: true }
 
 Object.defineProperty(window, 'api', {
-  value: { installUpdate },
+  value: {
+    installUpdate,
+    getServerRuntimeStatus: () => runtime,
+    onServerRuntimeStatus: () => () => {}
+  },
   writable: true
 })
 
@@ -56,7 +49,7 @@ beforeEach(() => {
   mockStore.appUpdateStatus = { kind: 'unsupported' }
   mockStore.updateBannerDismissed = false
   mockStore.terminals = new Map()
-  platform.isWindows = false
+  runtime.sessionsSurviveUpdate = true
 })
 
 describe('SidebarFooter', () => {
@@ -153,8 +146,8 @@ describe('what the sidebar restart will cost', () => {
     expect(screen.getByText(/The turn in flight continues/)).toBeInTheDocument()
   })
 
-  it('says the sessions end on Windows, where nothing can hand them over', () => {
-    platform.isWindows = true
+  it('says the sessions end where the main process says nothing can hand them over', () => {
+    runtime.sessionsSurviveUpdate = false
     mockStore.appUpdateStatus = { kind: 'ready', version: '0.7.0-beta.13' }
     mockStore.terminals = new Map([['a', { status: 'running' }]])
     render(<SidebarFooter isCollapsed={false} closeSidebarOnMobile={vi.fn()} />)

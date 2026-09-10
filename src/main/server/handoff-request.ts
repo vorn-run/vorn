@@ -14,6 +14,11 @@ import {
  */
 export type HandoffVerdict = { ask: true; why: string } | { ask: false; why: string }
 
+/** Windows locks a running exe and cannot hand a terminal over, so an update there ends the sessions this app's server holds. */
+export function updateEndsSessions(platform: NodeJS.Platform, ownsServer: boolean): boolean {
+  return platform === 'win32' && ownsServer
+}
+
 export function decideHandoff(input: {
   /** The server refuses this over TCP; asked here so the app declines quietly. */
   target: string

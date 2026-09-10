@@ -14,9 +14,6 @@ export const isElectron = !isWeb
 export const isMac =
   typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
 
-export const isWindows =
-  typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('WIN')
-
 export const MOD = isMac ? '⌘' : 'Ctrl+'
 
 export const TRAFFIC_LIGHT_PAD_PX = 80

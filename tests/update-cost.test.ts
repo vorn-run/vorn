@@ -19,9 +19,6 @@ describe('what restarting for an update costs', () => {
   })
 
   it('names the turn only when one is running', () => {
-    // The turn is the part people brace for, so it is named — and now to say it
-    // survives. The pty outlives the server that owned it, so the program on the
-    // far side never learns the update happened.
     expect(updateCostLine(3, true, true)).toBe(
       'Your 3 sessions keep running through the update. The turn in flight continues.'
     )
