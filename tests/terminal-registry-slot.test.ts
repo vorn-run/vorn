@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // The fit mock sizes the grid from the wrapper's box, 8x16 px cells, so a moved rect moves cols/rows.
 const made = vi.hoisted(() => ({
-  terms: [] as Array<{ onData: ReturnType<typeof vi.fn> }>,
+  terms: [] as Array<{ onData: ReturnType<typeof vi.fn>; buffer: { active: { cursorY: number } } }>,
   fits: [] as Array<ReturnType<typeof vi.fn>>
 }))
 
@@ -14,7 +14,7 @@ vi.mock('@xterm/xterm', () => {
     rows = 24
     options = { fontSize: 13 }
     buffer = {
-      active: { viewportY: 0, baseY: 0, type: 'normal' },
+      active: { viewportY: 0, baseY: 0, cursorY: 0, type: 'normal' },
       onBufferChange: vi.fn().mockReturnValue({ dispose: vi.fn() })
     }
     parser = {
@@ -443,5 +443,89 @@ describe('when a moved box becomes a size', () => {
     expect(sizes()).toHaveLength(2)
     vi.advanceTimersByTime(100)
     expect(sizes()[2]).toEqual({ cols: 120, rows: 30 })
+  })
+})
+
+// Block mode: the grid is fitted to the pane and the slot is only the window onto the rows around the cursor.
+describe('a mask over a full-size grid', () => {
+  let host: HTMLDivElement
+  let pane: { top: number; left: number; width: number; height: number }
+  let slot: { top: number; left: number; width: number; height: number }
+  const resize = (): ReturnType<typeof vi.fn> =>
+    window.api.resizeTerminal as ReturnType<typeof vi.fn>
+  const sizes = (): Array<{ cols: number; rows: number }> =>
+    resize().mock.calls.map((c) => ({ cols: c[0].cols, rows: c[0].rows }))
+  const wrapper = (): HTMLDivElement => getPersistentWrapper('t')!
+  const clip = (): string => wrapper().style.clipPath
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    made.terms.length = 0
+    made.fits.length = 0
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    setHostRoot(host)
+    // A 760px pane, 16px cells in this mock: 47 rows. The slot sits at its bottom, two rows tall.
+    pane = { top: 100, left: 0, width: 800, height: 760 }
+    slot = { top: 828, left: 0, width: 800, height: 32 }
+    registerSlot('t', makeSlot(slot), makeSlot(pane))
+  })
+
+  afterEach(() => {
+    for (const id of getRegisteredTerminalIds()) destroyTerminal(id)
+    setHostRoot(null)
+    document.body.innerHTML = ''
+    vi.clearAllMocks()
+    vi.useRealTimers()
+  })
+
+  it("gives the grid the pane's size and the pty the pane's rows", () => {
+    expect(wrapper().style.width).toBe('800px')
+    expect(wrapper().style.height).toBe('760px')
+    expect(sizes()).toEqual([{ cols: 100, rows: 47 }])
+  })
+
+  it('shows only the slot, starting at its top', () => {
+    expect(wrapper().style.top).toBe('828px')
+    expect(clip()).toBe('inset(0px 0 728px 0)')
+  })
+
+  it('grows the window with the output and tells the pty nothing', () => {
+    slot.height = 96
+    syncTerminalOverlay('t')
+    vi.advanceTimersByTime(500)
+
+    expect(clip()).toBe('inset(0px 0 664px 0)')
+    expect(sizes()).toEqual([{ cols: 100, rows: 47 }])
+  })
+
+  it('keeps the rows around the cursor in the window once it has drawn more than fits', () => {
+    slot.top = 604
+    slot.height = 256 // 16 rows
+    made.terms[made.terms.length - 1]!.buffer.active.cursorY = 30
+    syncTerminalOverlay('t')
+
+    // Rows 15..30 are the window; 15 rows lie above it.
+    expect(wrapper().style.top).toBe(`${604 - 15 * 16}px`)
+    expect(clip()).toBe('inset(240px 0 264px 0)')
+  })
+
+  it('still refits when the pane itself changes', () => {
+    pane.width = 960
+    syncTerminalOverlay('t')
+    vi.advanceTimersByTime(100)
+
+    expect(sizes()).toEqual([
+      { cols: 100, rows: 47 },
+      { cols: 120, rows: 47 }
+    ])
+  })
+
+  it('is no mask at all for a slot registered without a box', () => {
+    registerSlot('t', makeSlot({ top: 100, left: 0, width: 800, height: 760 }))
+    syncTerminalOverlay('t')
+
+    expect(clip()).toBe('')
+    expect(wrapper().style.top).toBe('100px')
   })
 })

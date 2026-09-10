@@ -18,7 +18,10 @@ interface TerminalEntry {
   fitAddon: FitAddon
   persistentWrapper: HTMLDivElement | null
   activeSlot: HTMLElement | null
+  /** When set, the grid is fitted to this box and the slot is only the window onto it. */
+  fitElement: HTMLElement | null
   lastAppliedRect: { top: number; left: number; width: number; height: number } | null
+  lastMask: { top: number; height: number; offset: number } | null
   lastSyncedCols: number
   lastSyncedRows: number
   /** The hold before a moved box is taken as the new size, and the deadline a box that keeps moving cannot push past. */
@@ -441,7 +444,9 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
     fitAddon,
     persistentWrapper: null,
     activeSlot: null,
+    fitElement: null,
     lastAppliedRect: null,
+    lastMask: null,
     lastSyncedCols: 0,
     lastSyncedRows: 0,
     resizeTimer: null,
@@ -555,10 +560,11 @@ export function setHostRoot(root: HTMLElement | null): void {
  * and will track this slot's bounding rect via syncTerminalOverlay.
  * Last-registered slot wins if multiple slots register for the same id.
  */
-export function registerSlot(terminalId: string, slotEl: HTMLElement): void {
+export function registerSlot(terminalId: string, slotEl: HTMLElement, fitEl?: HTMLElement): void {
   let entry = registry.get(terminalId)
   if (!entry) entry = createTerminalEntry(terminalId)
   entry.activeSlot = slotEl
+  entry.fitElement = fitEl ?? null
   ensurePersistentWrapper(entry, terminalId)
   openIntoPersistentWrapper(entry, terminalId)
   syncTerminalOverlay(terminalId)
@@ -572,6 +578,7 @@ export function unregisterSlot(terminalId: string, slotEl: HTMLElement): void {
   const entry = registry.get(terminalId)
   if (!entry || entry.activeSlot !== slotEl) return
   entry.activeSlot = null
+  entry.fitElement = null
   syncTerminalOverlay(terminalId)
 }
 
@@ -585,6 +592,57 @@ function hideWrapper(wrapper: HTMLDivElement, entry: TerminalEntry): void {
     wrapper.style.pointerEvents = 'none'
   }
   entry.lastAppliedRect = null
+  entry.lastMask = null
+}
+
+/**
+ * Show only the slot's rows of a grid fitted to a bigger box.
+ *
+ * Block mode sizes the live region to what the command has drawn, and used to
+ * refit the grid to it -- so the shell was told `rows=2` at an idle prompt and
+ * every line of output was a SIGWINCH. The grid keeps the box's rows now; the
+ * slot is a window onto the rows around the cursor, the same rows the small
+ * grid showed by scrolling.
+ */
+function applyMask(
+  entry: TerminalEntry,
+  wrapper: HTMLDivElement,
+  box: { top: number; height: number },
+  mask: { top: number; height: number }
+): void {
+  const rows = entry.term.rows || 1
+  // xterm floors its rows into the box, so the box over the rows recovers the cell.
+  const cell = Math.max(1, Math.floor(box.height / rows))
+  const maskRows = Math.max(1, Math.round(mask.height / cell))
+  const cursorY = entry.term.buffer.active.cursorY || 0
+  const offset = Math.max(0, cursorY + 1 - maskRows) * cell
+  const next = { top: mask.top - offset, height: mask.height, offset }
+  const last = entry.lastMask
+  if (last && last.top === next.top && last.height === next.height && last.offset === next.offset)
+    return
+  wrapper.style.top = `${next.top}px`
+  // clip-path clips hit-testing too, so the hidden rows take no clicks.
+  wrapper.style.clipPath = `inset(${offset}px 0 ${Math.max(0, box.height - offset - mask.height)}px 0)`
+  entry.lastMask = next
+}
+
+/** The window applied for a slot with a box, and taken off for one without. */
+function syncMask(
+  entry: TerminalEntry,
+  wrapper: HTMLDivElement,
+  box: { top: number; height: number },
+  maskRaw: DOMRect | null
+): void {
+  if (maskRaw) {
+    applyMask(entry, wrapper, box, {
+      top: Math.round(maskRaw.top),
+      height: Math.round(maskRaw.height)
+    })
+  } else if (entry.lastMask) {
+    wrapper.style.clipPath = ''
+    wrapper.style.top = `${box.top}px`
+    entry.lastMask = null
+  }
 }
 
 /** How long a box has to stand still before its size is taken; a slow frame must not lapse it. */
@@ -651,8 +709,10 @@ export function syncTerminalOverlay(terminalId: string): void {
     hideWrapper(wrapper, entry)
     return
   }
-  const raw = slot.getBoundingClientRect()
-  if (raw.width <= 0 || raw.height <= 0) {
+  // The grid's box is what it is fitted to; with a fit element the slot is only the window.
+  const raw = (entry.fitElement ?? slot).getBoundingClientRect()
+  const maskRaw = entry.fitElement ? slot.getBoundingClientRect() : null
+  if (raw.width <= 0 || raw.height <= 0 || (maskRaw && maskRaw.height <= 0)) {
     hideWrapper(wrapper, entry)
     return
   }
@@ -670,6 +730,7 @@ export function syncTerminalOverlay(terminalId: string): void {
     last.width === rect.width &&
     last.height === rect.height
   ) {
+    syncMask(entry, wrapper, rect, maskRaw)
     return
   }
   // Size-changed matters for fit (cols/rows depend on width/height); position-
@@ -685,6 +746,7 @@ export function syncTerminalOverlay(terminalId: string): void {
   wrapper.style.visibility = 'visible'
   wrapper.style.pointerEvents = 'auto'
   entry.lastAppliedRect = rect
+  syncMask(entry, wrapper, rect, maskRaw)
   if (sizeChanged && entry.term.element) fitWhenSettled(entry, terminalId)
 }
 

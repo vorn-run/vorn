@@ -68,4 +68,11 @@ describe('TerminalSlot', () => {
     rafCallbacks.forEach((cb) => cb())
     expect(focusTerminal).not.toHaveBeenCalled()
   })
+
+  it('hands the registry the box to fit to, when given one', () => {
+    const box = document.createElement('div')
+    render(<TerminalSlot terminalId="abc" isFocused={false} fitTo={{ current: box }} />)
+
+    expect(registerSlot).toHaveBeenCalledWith('abc', expect.any(HTMLElement), box)
+  })
 })

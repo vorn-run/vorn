@@ -5,7 +5,7 @@ import { RunningCommand } from './RunningCommand'
 import { registerBlockLogView } from '../lib/block-log'
 import { useLiveTerminalRows } from '../hooks/useLiveTerminalRows'
 import { hasShellIntegration, onCommandBlocksChange } from '../lib/command-blocks'
-import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { isShellSession } from '../../shared/types'
 import type { AgentType } from '../../shared/types'
 
@@ -60,6 +60,9 @@ export function TerminalPane({ terminalId, agentType, isFocused, flexible, domBl
   const logClass = fullScreen ? 'hidden' : 'min-h-0'
   const liveClass = fullScreen ? 'flex-1 min-h-0 w-full' : 'shrink-0 w-full'
   const liveStyle = fullScreen ? undefined : { height: liveRows * LIVE_ROW_PX }
+  // The pane is what the grid is fitted to; the live region is only the window onto it.
+  const paneRef = useRef<HTMLDivElement>(null)
+  const fitTo = fullScreen ? undefined : paneRef
 
   // Declares that this terminal's finished commands are being drawn here, so
   // the capture path knows it is safe to take them out of the buffer.
@@ -72,7 +75,7 @@ export function TerminalPane({ terminalId, agentType, isFocused, flexible, domBl
     // The 16px south-east reservation moves to the wrapper, so the resize
     // handle stays reachable while the log and terminal stack inside it.
     return (
-      <div className="absolute inset-0 right-4 bottom-4 flex flex-col justify-end">
+      <div ref={paneRef} className="absolute inset-0 right-4 bottom-4 flex flex-col justify-end">
         <BlockLog terminalId={terminalId} className={logClass} />
         {!fullScreen && <RunningCommand terminalId={terminalId} />}
         <TerminalSlot
@@ -80,6 +83,7 @@ export function TerminalPane({ terminalId, agentType, isFocused, flexible, domBl
           isFocused={isFocused}
           className={liveClass}
           style={liveStyle}
+          fitTo={fitTo}
         />
       </div>
     )
@@ -114,7 +118,7 @@ export function TerminalPane({ terminalId, agentType, isFocused, flexible, domBl
     return (
       // justify-end keeps the live terminal at the bottom before any command
       // has run, rather than stranded at the top above empty space.
-      <div className="flex h-full w-full flex-col justify-end">
+      <div ref={paneRef} className="flex h-full w-full flex-col justify-end">
         <BlockLog terminalId={terminalId} className={logClass} />
         {/* Blocks only exist once a command has finished, so a running one
             needs saying out loud — otherwise a command that never exits looks
@@ -127,6 +131,7 @@ export function TerminalPane({ terminalId, agentType, isFocused, flexible, domBl
           isFocused={isFocused}
           className={liveClass}
           style={liveStyle}
+          fitTo={fitTo}
         />
       </div>
     )
