@@ -39,17 +39,29 @@ const until = (match: RegExp, ms = 30_000): Promise<RegExpExecArray | undefined>
     }, 25)
   })
 
+/** Type a line and wait for its answer; once more if nothing at all came back. */
+async function typed(line: string, match: RegExp): Promise<RegExpExecArray | undefined> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    adopted.write(line)
+    const found = await until(match, 5_000)
+    if (found) return found
+    if (seen !== '') return until(match)
+    process.stderr.write(`[heir] nothing echoed for ${JSON.stringify(line)} (attempt ${attempt})\n`)
+  }
+  return undefined
+}
+
 async function main(): Promise<void> {
   // No readiness wait: the parent handed the pty over only after the shell had
   // printed its prompt, and it kept that chunk, so nothing arrives here until typed.
-  adopted.write('echo ADOPTED_READ\r')
-  const read = (await until(/ADOPTED_READ\r?\n/)) !== undefined
+  // The first keystrokes can still vanish into a read the previous owner had in
+  // flight when it paused, which is why `typed` asks again when nothing echoes.
+  const read = (await typed('echo ADOPTED_READ\r', /ADOPTED_READ\r?\n/)) !== undefined
 
   // `tput cols` asks the tty itself, so the answer proves TIOCSWINSZ landed here.
   adopted.resize(120, 40)
   seen = ''
-  adopted.write('tput cols\r')
-  const cols = (await until(/(?:^|\D)(\d{2,4})\r?\n/))?.[1] ?? 'none'
+  const cols = (await typed('tput cols\r', /(?:^|\D)(\d{2,4})\r?\n/))?.[1] ?? 'none'
 
   seen = ''
   adopted.write('exit\r')
