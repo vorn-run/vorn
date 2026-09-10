@@ -8,6 +8,7 @@ import { facesRestart, updateCostLine } from '../../lib/update-cost'
 import { describeUpdateStatus } from '../../lib/update-status'
 import { TONE_DOT } from '../../lib/status-tone'
 import { describeServerRuntime } from '../../lib/server-runtime'
+import { isWindows } from '../../lib/platform'
 import type { ServerRuntimeStatus } from '../../../shared/types'
 
 /**
@@ -50,7 +51,8 @@ export function UpdatesSettings() {
   const action = view.action ? ACTIONS[view.action] : null
   // Only where the button ends them. Every other state is reporting on a
   // download, which costs nothing.
-  const cost = view.action === 'restart' ? updateCostLine(sessionCount, aTurnIsRunning) : null
+  const cost =
+    view.action === 'restart' ? updateCostLine(sessionCount, aTurnIsRunning, !isWindows) : null
 
   const updateDefaults = (patch: Partial<typeof config.defaults>): void => {
     const updated = {
