@@ -46,6 +46,10 @@ linux:
   category: Development
   icon: resources/icon.png
 
+electronFuses:
+  # One-way: once on, turning it off corrupts every cookie Vorn has stored.
+  enableCookieEncryption: true
+
 npmRebuild: true
 afterPack: scripts/afterPack.cjs
 files:
