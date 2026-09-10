@@ -49,6 +49,7 @@ function workflow(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefiniti
         label: 'Write',
         config: {
           agentType: 'claude',
+          model: 'opus[1m]',
           projectName: 'Novum',
           projectPath: PROJECT,
           existingWorktreePath: `${PROJECT}/wt/draft`,
@@ -140,6 +141,7 @@ describe('round trip', () => {
 
     const agent = imported.nodes.find((n) => n.id === 'write-1')!.config as Record<string, unknown>
     expect(agent.existingWorktreePath).toBe('/Users/other/code/novum2/wt/draft')
+    expect(agent.model).toBe('opus[1m]')
   })
 
   it('gives the same id on every machine, so re-import updates in place', () => {

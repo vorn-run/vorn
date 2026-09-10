@@ -120,6 +120,7 @@ vi.mock('../packages/server/src/process-utils', async () => {
 
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { createWorktree, isGitRepo } from '../packages/server/src/git-utils'
+import { buildAgentLaunchLine } from '../packages/server/src/agent-launch'
 
 const createWorktreeMock = vi.mocked(createWorktree)
 const isGitRepoMock = vi.mocked(isGitRepo)
@@ -154,6 +155,29 @@ function createAgent(overrides: Partial<CreateTerminalPayload> = {}): {
   })
   return { session, fake: lastPty() }
 }
+
+it('records the exact Codex resume ID immediately', () => {
+  const { session } = createAgent({ agentType: 'codex', resumeSessionId: 'known-id' })
+  expect(session.agentSessionId).toBe('known-id')
+})
+
+it('records a remote Codex resume ID without local discovery', () => {
+  const { session } = createAgent({
+    agentType: 'codex',
+    resumeSessionId: 'remote-id',
+    remoteHostId: REMOTE_HOST.id
+  })
+  expect(session.agentSessionId).toBe('remote-id')
+  expect(session.remoteHostId).toBe(REMOTE_HOST.id)
+})
+
+it('rejects invalid model selection before spawning a PTY', () => {
+  vi.mocked(buildAgentLaunchLine).mockImplementationOnce(() => {
+    throw new Error('Invalid model')
+  })
+  expect(() => createAgent({ model: '-invalid' })).toThrow()
+  expect(spawnMock).not.toHaveBeenCalled()
+})
 
 function messagesOn(channel: string): Record<string, unknown>[] {
   return messages.filter((m) => m.channel === channel).map((m) => m.payload)

@@ -37,6 +37,7 @@ const releaseWorkflowRun = vi.fn(
 const launchedPrompts = new Map<string, string>()
 let onSessionCreated: ((id: string) => void) | null = null
 
+const createTerminal = vi.fn(() => Promise.resolve({ id: 'terminal' }))
 const createHeadlessSession = vi.fn((opts: { initialPrompt?: string }) => {
   const id = `sess-${++sessionSeq}`
   launchedPrompts.set(id, opts.initialPrompt ?? '')
@@ -145,6 +146,7 @@ function nextSession(): Promise<string> {
 }
 
 beforeEach(() => {
+  createHeadlessSession.mockClear()
   vi.useFakeTimers()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(globalThis as any).Notification = { permission: 'denied' }
@@ -160,6 +162,7 @@ beforeEach(() => {
     claimWorkflowRun,
     releaseWorkflowRun,
     createHeadlessSession,
+    createTerminal,
     killHeadlessSession: vi.fn(() => Promise.resolve()),
     saveWorkflowRun: vi.fn(() => Promise.resolve()),
     reportWorkflowComplete: vi.fn(() => Promise.resolve()),
@@ -178,6 +181,31 @@ afterEach(() => {
 })
 
 describe('running up to one step', () => {
+  it('passes a literal model override to headless launch', async () => {
+    const wf = makeChain()
+    Object.assign(wf.nodes[1].config, { model: 'opus[1m]' })
+    const run = executeWorkflow(wf, undefined, { targetNodeId: 'a' })
+    emitExit(await nextSession(), 0)
+    expect((await run).status).toBe('success')
+    expect(createHeadlessSession).toHaveBeenLastCalledWith(
+      expect.objectContaining({ model: 'opus[1m]' })
+    )
+  })
+
+  it('passes a model to interactive launch without interactive preferences', async () => {
+    const wf = makeChain()
+    Object.assign(wf.nodes[1].config, { model: 'opus[1m]', headless: false })
+    const result = await executeWorkflow(wf, undefined, { targetNodeId: 'a' })
+    expect(result.status).toBe('success')
+    expect(createTerminal).toHaveBeenCalledWith(expect.objectContaining({ model: 'opus[1m]' }))
+  })
+
+  it('rejects imported From task nodes containing model overrides', async () => {
+    const wf = makeChain()
+    Object.assign(wf.nodes[1].config, { model: 'opus', agentType: 'fromTask' })
+    const result = await executeWorkflow(wf, undefined, { targetNodeId: 'a' })
+    expect(result.nodeStates.find((n) => n.nodeId === 'a')?.error).toContain('concrete agent')
+  })
   it('executes only the target and its upstream slice', async () => {
     const wf = makeChain()
     const runPromise = executeWorkflow(wf, undefined, { targetNodeId: 'b' })

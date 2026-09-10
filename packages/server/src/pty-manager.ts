@@ -14,7 +14,8 @@ import {
   IPC,
   TerminalSession,
   RemoteHost,
-  supportsSessionIdPinning
+  supportsSessionIdPinning,
+  supportsExactSessionResume
 } from '@vornrun/shared/types'
 import { displayNameFromPrompt } from '@vornrun/shared/string-utils'
 import {
@@ -259,6 +260,23 @@ class PtyManager extends EventEmitter {
     shell: string,
     payload: CreateTerminalPayload
   ): TerminalSession {
+    // Session ID pinning: agents that support it (supportsSessionIdPinning) get a
+    // UUID assigned on fresh launch via --session-id, enabling exact --resume later.
+    // Other agents rely on history-based fallback for resume.
+    let agentSessionId = supportsExactSessionResume(payload.agentType)
+      ? payload.resumeSessionId
+      : undefined
+    if (supportsSessionIdPinning(payload.agentType)) {
+      if (payload.resumeSessionId) {
+        agentSessionId = payload.resumeSessionId
+      } else {
+        agentSessionId = crypto.randomUUID()
+        payload.sessionId = agentSessionId
+      }
+    }
+    // Built before a worktree or PTY exists, so a line that cannot be built creates nothing.
+    const launchLine = this.buildAgentLaunchLine(payload)
+
     let effectivePath = payload.projectPath
     let worktreePath: string | undefined
     let worktreeName: string | undefined
@@ -318,20 +336,6 @@ class PtyManager extends EventEmitter {
       env: { ...getLaunchEnv(), VORN_SESSION_ID: id }
     })
 
-    // Session ID pinning: agents that support it (supportsSessionIdPinning) get a
-    // UUID assigned on fresh launch via --session-id, enabling exact --resume later.
-    // Other agents rely on history-based fallback for resume.
-    let agentSessionId: string | undefined
-    if (supportsSessionIdPinning(payload.agentType)) {
-      if (payload.resumeSessionId) {
-        agentSessionId = payload.resumeSessionId
-      } else {
-        agentSessionId = crypto.randomUUID()
-        payload.sessionId = agentSessionId
-      }
-    }
-
-    const launchLine = this.buildAgentLaunchLine(payload)
     setTimeout(() => ptyProcess.write(launchLine + '\r'), 300)
 
     this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
@@ -375,6 +379,7 @@ class PtyManager extends EventEmitter {
     payload: CreateTerminalPayload,
     host: RemoteHost
   ): TerminalSession {
+    const agentLine = this.buildAgentLaunchLine(payload)
     const ptyProcess = pty.spawn(shell, getShellArgs(), {
       name: 'xterm-256color',
       cols: INITIAL_COLS,
@@ -419,7 +424,6 @@ class PtyManager extends EventEmitter {
     sshParts.push(`'echo ${marker} && exec $SHELL -l'`)
 
     // Build remote command: cd to project path then launch agent
-    const agentLine = this.buildAgentLaunchLine(payload)
     const remoteCmd = `cd ${shellEscape(payload.projectPath, 'posix')} && ${agentLine}`
 
     // Write SSH command after local shell is ready
@@ -529,6 +533,9 @@ class PtyManager extends EventEmitter {
       pid: ptyProcess.pid,
       remoteHostId: host.id,
       remoteHostLabel: host.label,
+      ...(payload.resumeSessionId && supportsExactSessionResume(payload.agentType)
+        ? { agentSessionId: payload.resumeSessionId }
+        : {}),
       ...(payload.displayName
         ? { displayName: payload.displayName }
         : payload.initialPrompt

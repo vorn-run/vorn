@@ -225,7 +225,8 @@ export async function createShellInProject(
 export async function launchAgentFromShell(
   shellSession: TerminalSession,
   agentType: AiAgentType,
-  prompt: string
+  prompt: string,
+  model?: string
 ): Promise<void> {
   const cwd = shellSession.shellCwd ?? shellSession.worktreePath ?? shellSession.projectPath
   try {
@@ -238,6 +239,7 @@ export async function launchAgentFromShell(
       projectName: shellSession.projectName,
       projectPath: cwd,
       initialPrompt: prompt,
+      ...(model ? { model } : {}),
       remoteHostId: shellSession.remoteHostId,
       worktreeName: shellSession.worktreeName
     })

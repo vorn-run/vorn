@@ -10,6 +10,7 @@ import {
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import { shellEscape } from './process-utils'
 import { stripSessionSelectors } from './launch-tokens'
+import { applyModelArguments, assertModelCommand, commandShape } from './model-arguments'
 import { findOnPath } from './resolve-executable'
 
 /** The configured command, and where on `env.PATH` it lives; the name when it is not there. */
@@ -41,6 +42,13 @@ function resolveHeadlessArgs(
   return baseArgs
 }
 
+/** The arguments with the chosen model as their one model selector, or as they are. */
+function withModel(payload: CreateTerminalPayload, command: string, args: string[]): string[] {
+  if (payload.model === undefined) return args
+  assertModelCommand(command, !payload.remoteHostId)
+  return applyModelArguments(payload.agentType, args, payload.model)
+}
+
 /**
  * Builds the interactive launch command (for PTY/terminal sessions).
  * This starts the agent's TUI/interactive mode.
@@ -56,14 +64,20 @@ export function buildAgentLaunchLine(
   const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
   const cmd = resolveAgentCommand(cmdConfig, env)
   // Per-step args override settings-level args; escape each for shell safety
-  const effectiveArgs = payload.args !== undefined ? payload.args : cmd.args
-  let launchLine = [cmd.command, ...effectiveArgs.map((a) => shellEscape(a))].join(' ')
+  const escape = (value: string) => shellEscape(value, payload.remoteHostId ? 'posix' : 'auto')
+  const effectiveArgs = withModel(payload, cmd.command, payload.args ?? cmd.args)
+  // Only a path with spaces that names one file is quoted; `~/bin/claude` keeps its expansion.
+  const commandLine =
+    /\s/.test(cmd.command) && commandShape(cmd.command, !payload.remoteHostId) === 'executable'
+      ? escape(cmd.command)
+      : cmd.command
+  let launchLine = [commandLine, ...effectiveArgs.map(escape)].join(' ')
 
   // Where the configured command ends and its arguments begin. Known exactly
   // rather than guessed, because this line was just composed here -- which is
   // what lets `npx -y @anthropic-ai/claude-code` be a command and an argument
   // that merely ends in `/claude` be left alone.
-  const argsFrom = cmd.command.length
+  const argsFrom = commandLine.length
 
   const exactResume = Boolean(
     payload.resumeSessionId && supportsExactSessionResume(payload.agentType)
@@ -82,7 +96,7 @@ export function buildAgentLaunchLine(
   }
 
   if (exactResume && payload.resumeSessionId) {
-    const escapedResumeId = shellEscape(payload.resumeSessionId)
+    const escapedResumeId = escape(payload.resumeSessionId)
     switch (payload.agentType) {
       case 'claude':
         launchLine += ` --resume ${escapedResumeId}`
@@ -113,11 +127,11 @@ export function buildAgentLaunchLine(
     payload.sessionId &&
     supportsSessionIdPinning(payload.agentType)
   ) {
-    launchLine += ` ${getSessionIdPinningFlag(payload.agentType)} ${shellEscape(payload.sessionId)}`
+    launchLine += ` ${getSessionIdPinningFlag(payload.agentType)} ${escape(payload.sessionId)}`
   }
 
   if (payload.initialPrompt) {
-    const escaped = shellEscape(payload.initialPrompt)
+    const escaped = escape(payload.initialPrompt)
     switch (payload.agentType) {
       case 'copilot':
         launchLine += ` -i ${escaped}`
@@ -135,53 +149,6 @@ export function buildAgentLaunchLine(
   }
 
   return launchLine
-}
-
-/**
- * Builds the non-interactive launch command (for headless/background execution).
- * Uses each agent's native non-interactive mode:
- *   claude  -> claude -p 'prompt'
- *   copilot -> copilot -p 'prompt'
- *   codex   -> codex exec 'prompt'
- *   opencode -> opencode run 'prompt'
- *   gemini  -> gemini -p 'prompt'
- */
-export function buildHeadlessLaunchLine(
-  payload: CreateTerminalPayload,
-  agentCommands: Record<AiAgentType, AgentCommandConfig>,
-  env: Record<string, string>
-): string {
-  if ((payload.agentType as AgentType) === 'shell') {
-    throw new Error('buildHeadlessLaunchLine called for shell session')
-  }
-  const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
-  const cmd = resolveAgentCommand(cmdConfig, env)
-  const baseCmd = cmd.command
-  const extraArgs = resolveHeadlessArgs(payload, cmdConfig, cmd.args)
-  const argsStr = extraArgs.length > 0 ? extraArgs.join(' ') + ' ' : ''
-
-  const emptyStr = process.platform === 'win32' ? '""' : "''"
-  const prompt = payload.initialPrompt ? shellEscape(payload.initialPrompt) : emptyStr
-
-  switch (payload.agentType) {
-    case 'claude':
-      return `${baseCmd} ${argsStr}-p ${prompt}`
-
-    case 'copilot':
-      return `${baseCmd} ${argsStr}-p ${prompt}`
-
-    case 'codex':
-      return `${baseCmd} ${argsStr}exec ${prompt}`
-
-    case 'opencode':
-      return `${baseCmd} ${argsStr}run ${prompt}`
-
-    case 'gemini':
-      return `${baseCmd} ${argsStr}-p ${prompt}`
-
-    default:
-      return `${baseCmd} ${argsStr}-p ${prompt}`
-  }
 }
 
 export interface HeadlessSpawnArgs {
@@ -221,7 +188,9 @@ export function buildHeadlessSpawnArgs(
   const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
   const cmd = resolveAgentCommand(cmdConfig, env)
   const prompt = payload.initialPrompt || ''
-  const extraArgs = [...resolveHeadlessArgs(payload, cmdConfig, cmd.args)]
+  const extraArgs = [
+    ...withModel(payload, cmd.command, resolveHeadlessArgs(payload, cmdConfig, cmd.args))
+  ]
 
   if (
     payload.resumeSessionId &&
@@ -259,6 +228,13 @@ export function buildHeadlessSpawnArgs(
       // truncates it at the first newline. Note the prompt must NOT also be
       // passed as an argument — codex then treats stdin as a separate
       // `<stdin>` block rather than as the instructions.
+      if (payload.resumeSessionId) {
+        return {
+          command: cmd.path,
+          args: [...extraArgs, 'exec', 'resume', payload.resumeSessionId, '-'],
+          stdin: prompt
+        }
+      }
       return prompt
         ? { command: cmd.path, args: [...extraArgs, 'exec'], stdin: prompt }
         : { command: cmd.path, args: [...extraArgs, 'exec', ''] }

@@ -5,6 +5,8 @@ import { AiAgentType, ProjectConfig, getProjectRemoteHostId } from '../../shared
 import { AGENT_LIST } from '../lib/agent-definitions'
 import { AgentIcon } from './AgentIcon'
 import { useLaunchSettings } from '../hooks/useLaunchSettings'
+import { usePreferredModel } from '../hooks/usePreferredModel'
+import { ModelPicker } from './ModelPicker'
 import { BranchPicker } from './BranchPicker'
 import { useAgentInstallStatus } from '../hooks/useAgentInstallStatus'
 import { getRandomTips } from '../lib/tips-data'
@@ -79,6 +81,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
 
   const [prompt, setPrompt] = useState('')
   const [launching, setLaunching] = useState(false)
+  const [launchError, setLaunchError] = useState('')
   const [showAgentPicker, setShowAgentPicker] = useState(false)
   const [showProjectPicker, setShowProjectPicker] = useState(false)
   const [showWorktreePicker, setShowWorktreePicker] = useState(false)
@@ -90,6 +93,10 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
 
   const settings = useLaunchSettings()
   const selectedProjectConfig = config?.projects.find((p) => p.name === settings.selectedProject)
+  const modelPreference = usePreferredModel(
+    settings.selectedAgent,
+    selectedProjectConfig ? getProjectRemoteHostId(selectedProjectConfig) : undefined
+  )
   const tip = useMemo(() => getRandomTips(1)[0], [])
   const { status: installStatus } = useAgentInstallStatus()
 
@@ -131,6 +138,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
     if (!project) return
 
     setLaunching(true)
+    setLaunchError('')
 
     try {
       const remoteHostId = getProjectRemoteHostId(project)
@@ -166,6 +174,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
 
       const session = await window.api.createTerminal({
         agentType: settings.selectedAgent,
+        ...(modelPreference.model ? { model: modelPreference.model } : {}),
         projectName: project.name,
         projectPath: project.path,
         branch,
@@ -182,6 +191,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
       onClose?.()
     } catch (err) {
       console.error('[PromptLauncher] launch failed:', err)
+      setLaunchError(err instanceof Error ? err.message : 'Could not start the agent.')
     } finally {
       setLaunching(false)
     }
@@ -307,6 +317,18 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
           </div>
         )}
       </div>
+
+      {/* Model, between the agent and where it runs */}
+      <ModelPicker
+        prefetch
+        agentType={settings.selectedAgent}
+        projectPath={settings.selectedWorktreePath ?? selectedProjectConfig?.path}
+        remoteHostId={
+          selectedProjectConfig ? getProjectRemoteHostId(selectedProjectConfig) : undefined
+        }
+        value={modelPreference.model}
+        onChange={modelPreference.setModel}
+      />
 
       {/* Worktree picker — worktree-first, before branch */}
       {settings.activeProjectPath && settings.isGitRepo && (
@@ -496,6 +518,10 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
       {!canLaunch ? (
         <p className="text-[11px] text-gray-600 mt-2 text-center">
           Select a project to get started
+        </p>
+      ) : launchError ? (
+        <p role="alert" className="text-xs text-red-400 mt-2">
+          {launchError}
         </p>
       ) : (
         <p className="text-[11px] text-gray-600 mt-2 text-center flex items-center justify-center gap-1.5">

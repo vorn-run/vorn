@@ -61,6 +61,19 @@ class HeadlessManager extends EventEmitter {
     // hold a descriptor, not a name.
     if (isDraining()) throw new Error(DRAINING_MESSAGE)
     const id = crypto.randomUUID()
+    // Pinned before the arguments are built, so a fresh launch carries the id it will resume by.
+    let agentSessionId = payload.agentType === 'codex' ? payload.resumeSessionId : undefined
+    if (supportsSessionIdPinning(payload.agentType)) {
+      if (payload.resumeSessionId) {
+        agentSessionId = payload.resumeSessionId
+      } else {
+        agentSessionId = crypto.randomUUID()
+        payload.sessionId = agentSessionId
+      }
+    }
+    const env = getLaunchEnv()
+    // Built before a worktree exists, so arguments that cannot be built create nothing.
+    const spawnArgs = buildHeadlessSpawnArgs(payload, this.agentCommands, env)
     let effectivePath = payload.projectPath
     let effectiveBranch: string | undefined
     let worktreeName: string | undefined
@@ -90,21 +103,6 @@ class HeadlessManager extends EventEmitter {
         effectiveBranch = payload.branch
       }
     }
-
-    // Pre-generate the session id before buildHeadlessSpawnArgs so the --session-id
-    // flag can be injected; keeps parity with the interactive PTY path.
-    let agentSessionId: string | undefined
-    if (supportsSessionIdPinning(payload.agentType)) {
-      if (payload.resumeSessionId) {
-        agentSessionId = payload.resumeSessionId
-      } else {
-        agentSessionId = crypto.randomUUID()
-        payload.sessionId = agentSessionId
-      }
-    }
-
-    const env = getLaunchEnv()
-    const spawnArgs = buildHeadlessSpawnArgs(payload, this.agentCommands, env)
 
     // Windows needs `shell: true` to run the `.cmd`/`.ps1` shims that
     // npm-installed agents ship as. Under `shell: true`, Node concatenates argv

@@ -521,6 +521,8 @@ export function createApiShim(wsUrl: string) {
     // ── IDE Detection & Launch ──
     detectIDEs: () => rpc.invoke('ide:detect'),
     detectInstalledAgents: () => rpc.invoke('agent:detectInstalled'),
+    listAgentModels: (request: import('@vornrun/shared/agent-models').AgentModelRequest) =>
+      rpc.invoke('agent:listModels', request),
     openInIDE: (ideId: string, projectPath: string) =>
       rpc.invoke('ide:open', { ideId, projectPath }),
 
