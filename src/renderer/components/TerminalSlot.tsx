@@ -8,8 +8,10 @@ interface Props {
   terminalId: string
   isFocused: boolean
   className?: string
-  /** The overlay tracks this element's rect, so sizing it here sizes the pty. */
+  /** The overlay tracks this element's rect, so sizing it here sizes the pty -- unless `fitTo` says otherwise. */
   style?: React.CSSProperties
+  /** The box the grid is fitted to; this element is then only the window onto it. */
+  fitTo?: React.RefObject<HTMLElement | null>
 }
 
 /**
@@ -18,7 +20,7 @@ interface Props {
  * and is positioned to overlay this element via fixed-position CSS. Unmounting
  * this component hides the terminal; it does not destroy or reparent it.
  */
-export function TerminalSlot({ terminalId, isFocused, className, style }: Props) {
+export function TerminalSlot({ terminalId, isFocused, className, style, fitTo }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   // Registering is what builds the xterm and pulls the session's scrollback, up
   // to 256KB of it. Every card on the board mounts one of these, so a phone
@@ -38,11 +40,13 @@ export function TerminalSlot({ terminalId, isFocused, className, style }: Props)
   useEffect(() => {
     const el = ref.current
     if (!el || !onScreen) return
-    registerSlot(terminalId, el)
+    const fitEl = fitTo?.current
+    if (fitEl) registerSlot(terminalId, el, fitEl)
+    else registerSlot(terminalId, el)
     return () => {
       unregisterSlot(terminalId, el)
     }
-  }, [terminalId, onScreen])
+  }, [terminalId, onScreen, fitTo])
 
   useEffect(() => {
     if (!isFocused) return

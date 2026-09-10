@@ -1,6 +1,16 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+// The fit mock sizes the grid from the wrapper's box, 8x16 px cells, so a moved rect moves cols/rows.
+const made = vi.hoisted(() => ({
+  terms: [] as Array<{
+    onData: ReturnType<typeof vi.fn>
+    attachCustomKeyEventHandler: ReturnType<typeof vi.fn>
+    buffer: { active: { cursorY: number } }
+  }>,
+  fits: [] as Array<ReturnType<typeof vi.fn>>
+}))
+
 vi.mock('@xterm/xterm', () => {
   class MockTerminal {
     element: HTMLElement | null = null
@@ -8,7 +18,7 @@ vi.mock('@xterm/xterm', () => {
     rows = 24
     options = { fontSize: 13 }
     buffer = {
-      active: { viewportY: 0, baseY: 0, type: 'normal' },
+      active: { viewportY: 0, baseY: 0, cursorY: 0, type: 'normal' },
       onBufferChange: vi.fn().mockReturnValue({ dispose: vi.fn() })
     }
     parser = {
@@ -17,7 +27,7 @@ vi.mock('@xterm/xterm', () => {
     }
     registerMarker = vi.fn()
     registerDecoration = vi.fn()
-    loadAddon = vi.fn()
+    loadAddon = vi.fn((addon: { activate?: (t: unknown) => void }) => addon.activate?.(this))
     onData = vi.fn()
     attachCustomKeyEventHandler = vi.fn()
     dispose = vi.fn()
@@ -28,8 +38,16 @@ vi.mock('@xterm/xterm', () => {
     scrollToBottom = vi.fn()
     scrollToLine = vi.fn()
     refresh = vi.fn()
+    screen = document.createElement('div')
+    constructor() {
+      made.terms.push(this)
+      this.screen.className = 'xterm-screen'
+      this.screen.getBoundingClientRect = () =>
+        ({ width: this.cols * 8, height: this.rows * 16 }) as DOMRect
+    }
     open(el: HTMLElement): void {
       this.element = el
+      el.appendChild(this.screen)
     }
     hasSelection(): boolean {
       return false
@@ -49,10 +67,52 @@ vi.mock('@xterm/xterm', () => {
 
 vi.mock('@xterm/addon-fit', () => {
   class MockFitAddon {
-    fit = vi.fn()
+    term: {
+      element: HTMLElement | null
+      cols: number
+      rows: number
+      buffer?: { active: { cursorY: number } }
+    } | null = null
+    activate(term: unknown): void {
+      this.term = term as MockFitAddon['term']
+    }
+    proposeDimensions(): { cols: number; rows: number } | undefined {
+      const el = this.term?.element
+      if (!el) return undefined
+      return {
+        cols: Math.max(2, Math.floor((parseInt(el.style.width) || 0) / 8)),
+        rows: Math.max(1, Math.floor((parseInt(el.style.height) || 0) / 16))
+      }
+    }
+    fit = vi.fn(() => {
+      const next = this.proposeDimensions()
+      if (!this.term || !next) return
+      this.term.cols = next.cols
+      this.term.rows = next.rows
+      // xterm keeps the cursor on the screen when the screen shrinks.
+      const active = this.term.buffer?.active
+      if (active) active.cursorY = Math.min(active.cursorY, next.rows - 1)
+    })
+    constructor() {
+      made.fits.push(this.fit)
+    }
   }
   return { FitAddon: MockFitAddon }
 })
+
+// The GPU renderers would throw on the mock terminal; a no-op keeps the swap path alive.
+vi.mock('@xterm/addon-webgl', () => ({
+  WebglAddon: class {
+    activate(): void {}
+    dispose(): void {}
+  }
+}))
+vi.mock('@xterm/addon-canvas', () => ({
+  CanvasAddon: class {
+    activate(): void {}
+    dispose(): void {}
+  }
+}))
 
 vi.mock('@xterm/addon-web-links', () => {
   class MockWebLinksAddon {}
@@ -79,24 +139,27 @@ import {
   syncTerminalOverlay,
   onRegistryChange,
   getRegisteredTerminalIds,
-  destroyTerminal
+  destroyTerminal,
+  fitTerminal,
+  setAllTerminalsFontSize
 } from '../src/renderer/lib/terminal-registry'
 
+/** Read lazily, so a test can move the rect it passed. */
 function makeSlot(rect: Partial<DOMRect>): HTMLDivElement {
   const el = document.createElement('div')
-  const full: DOMRect = {
-    top: 0,
-    left: 0,
-    width: 0,
-    height: 0,
-    right: 0,
-    bottom: 0,
-    x: 0,
-    y: 0,
-    toJSON: () => ({}),
-    ...rect
-  } as DOMRect
-  el.getBoundingClientRect = () => full
+  el.getBoundingClientRect = () =>
+    ({
+      top: 0,
+      left: 0,
+      width: 0,
+      height: 0,
+      right: 0,
+      bottom: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+      ...rect
+    }) as DOMRect
   return el
 }
 
@@ -265,5 +328,245 @@ describe('terminal-registry: slot / persistent-host API', () => {
     syncTerminalOverlay('term-round')
     expect(wrapper.style.top).toBe('50px')
     expect(wrapper.style.left).toBe('101px')
+  })
+})
+
+// The box moves every frame; the grid, the pty and the server's model take its size together once it settles.
+describe('when a moved box becomes a size', () => {
+  let host: HTMLDivElement
+  let rect: Partial<DOMRect>
+  const resize = (): ReturnType<typeof vi.fn> =>
+    window.api.resizeTerminal as ReturnType<typeof vi.fn>
+  const sizes = (): Array<{ cols: number; rows: number }> =>
+    resize().mock.calls.map((c) => ({ cols: c[0].cols, rows: c[0].rows }))
+  const fit = (): ReturnType<typeof vi.fn> => made.fits[made.fits.length - 1]!
+  const move = (width: number, height: number): void => {
+    rect.width = width
+    rect.height = height
+    syncTerminalOverlay('t')
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    made.terms.length = 0
+    made.fits.length = 0
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    setHostRoot(host)
+    rect = { width: 800, height: 480 }
+    registerSlot('t', makeSlot(rect))
+  })
+
+  afterEach(() => {
+    for (const id of getRegisteredTerminalIds()) destroyTerminal(id)
+    setHostRoot(null)
+    document.body.innerHTML = ''
+    vi.clearAllMocks()
+    vi.useRealTimers()
+  })
+
+  it('takes the first box at once', () => {
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('lets a drag settle, then refits once and tells the pty once, at the size it ended at', () => {
+    const fitsBefore = fit().mock.calls.length
+    for (let w = 808; w <= 880; w += 8) {
+      move(w, 480)
+      vi.advanceTimersByTime(16)
+    }
+    expect(fit().mock.calls.length).toBe(fitsBefore)
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+
+    vi.advanceTimersByTime(100)
+    expect(fit().mock.calls.length).toBe(fitsBefore + 1)
+    expect(sizes()).toEqual([
+      { cols: 100, rows: 30 },
+      { cols: 110, rows: 30 }
+    ])
+  })
+
+  it('ignores a move that would not change the grid, and drops a hold it had armed', () => {
+    move(880, 480)
+    // Back inside the same cell count before the hold lapses: nothing to take.
+    move(803, 480)
+
+    vi.advanceTimersByTime(400)
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('fits a box that never stands still by the deadline', () => {
+    // Two pixels a frame: the grid first moves at 808px, and the deadline runs from there.
+    let w = 800
+    for (let t = 0; t < 600; t += 16) {
+      w += 2
+      move(w, 480)
+      vi.advanceTimersByTime(16)
+    }
+
+    expect(sizes()).toHaveLength(2)
+    expect(sizes()[1]!.cols).toBeGreaterThan(100)
+  })
+
+  it('says nothing to the pty when a drag ends where it began', () => {
+    move(880, 480)
+    move(800, 480)
+
+    vi.advanceTimersByTime(100)
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('says nothing for a terminal destroyed during the hold', () => {
+    move(880, 480)
+    destroyTerminal('t')
+
+    vi.advanceTimersByTime(100)
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('takes a held size on a keystroke, so what is typed follows the SIGWINCH', () => {
+    move(880, 480)
+    const term = made.terms[made.terms.length - 1]!
+    const onKey = term.attachCustomKeyEventHandler.mock.calls[0][0] as (e: KeyboardEvent) => boolean
+    onKey({ type: 'keydown', key: 'ArrowUp', metaKey: false, ctrlKey: false } as KeyboardEvent)
+
+    expect(sizes()).toEqual([
+      { cols: 100, rows: 30 },
+      { cols: 110, rows: 30 }
+    ])
+  })
+
+  it("does not take a held size for the terminal's own reply to a query", () => {
+    move(880, 480)
+    const onData = made.terms[made.terms.length - 1]!.onData.mock.calls[0][0] as (d: string) => void
+    onData('\x1b[24;80R')
+
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('keeps the rows around the cursor in view while a shrinking box waits out the hold', () => {
+    // 30 rows of 16px; the box drops to 12 rows with the cursor on row 29.
+    made.terms[made.terms.length - 1]!.buffer.active.cursorY = 29
+    move(800, 192)
+    const box = getPersistentWrapper('t')!
+
+    expect(box.style.top).toBe(`${0 - 18 * 16}px`)
+    expect(box.style.clipPath).toBe('inset(288px 0 0px 0)')
+
+    vi.advanceTimersByTime(100)
+    expect(box.style.top).toBe('0px')
+    expect(box.style.clipPath).toBe('inset(0px 0 0px 0)')
+  })
+
+  it('refits at once for a renderer or font that changed the cell, and holds a font-size gesture', () => {
+    // The box did not move; the cell did. `fitTerminal` is that path, and it is one shot.
+    getPersistentWrapper('t')!.style.width = '880px'
+    fitTerminal('t')
+    expect(sizes()).toEqual([
+      { cols: 100, rows: 30 },
+      { cols: 110, rows: 30 }
+    ])
+
+    // A pinch is many steps; the pty hears where it ends.
+    getPersistentWrapper('t')!.style.width = '960px'
+    setAllTerminalsFontSize(14)
+    expect(sizes()).toHaveLength(2)
+    vi.advanceTimersByTime(100)
+    expect(sizes()[2]).toEqual({ cols: 120, rows: 30 })
+  })
+})
+
+// Block mode: the grid is fitted to the pane and the slot is only the window onto the rows around the cursor.
+describe('a mask over a full-size grid', () => {
+  let host: HTMLDivElement
+  let pane: { top: number; left: number; width: number; height: number }
+  let slot: { top: number; left: number; width: number; height: number }
+  const resize = (): ReturnType<typeof vi.fn> =>
+    window.api.resizeTerminal as ReturnType<typeof vi.fn>
+  const sizes = (): Array<{ cols: number; rows: number }> =>
+    resize().mock.calls.map((c) => ({ cols: c[0].cols, rows: c[0].rows }))
+  const wrapper = (): HTMLDivElement => getPersistentWrapper('t')!
+  const clip = (): string => wrapper().style.clipPath
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    made.terms.length = 0
+    made.fits.length = 0
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    setHostRoot(host)
+    // A 760px pane, 16px cells in this mock: 47 rows. The slot sits at its bottom, two rows tall.
+    pane = { top: 100, left: 0, width: 800, height: 760 }
+    slot = { top: 828, left: 0, width: 800, height: 32 }
+    registerSlot('t', makeSlot(slot), makeSlot(pane))
+  })
+
+  afterEach(() => {
+    for (const id of getRegisteredTerminalIds()) destroyTerminal(id)
+    setHostRoot(null)
+    document.body.innerHTML = ''
+    vi.clearAllMocks()
+    vi.useRealTimers()
+  })
+
+  it("gives the grid the pane's size and the pty the pane's rows", () => {
+    expect(wrapper().style.width).toBe('800px')
+    expect(wrapper().style.height).toBe('760px')
+    expect(sizes()).toEqual([{ cols: 100, rows: 47 }])
+  })
+
+  it('shows only the slot, starting at its top', () => {
+    expect(wrapper().style.top).toBe('828px')
+    expect(clip()).toBe('inset(0px 0 728px 0)')
+  })
+
+  it('grows the window with the output and tells the pty nothing', () => {
+    slot.height = 96
+    syncTerminalOverlay('t')
+    vi.advanceTimersByTime(500)
+
+    expect(clip()).toBe('inset(0px 0 664px 0)')
+    expect(sizes()).toEqual([{ cols: 100, rows: 47 }])
+  })
+
+  it('shows the top rows of the grid, which holds every row the command has drawn', () => {
+    slot.top = 604
+    slot.height = 256
+    made.terms[made.terms.length - 1]!.buffer.active.cursorY = 30
+    syncTerminalOverlay('t')
+
+    expect(wrapper().style.top).toBe('604px')
+    expect(clip()).toBe('inset(0px 0 504px 0)')
+  })
+
+  it('still refits when the pane itself changes, and keeps the window where the slot is', () => {
+    pane.width = 960
+    syncTerminalOverlay('t')
+    vi.advanceTimersByTime(100)
+
+    expect(sizes()).toEqual([
+      { cols: 100, rows: 47 },
+      { cols: 120, rows: 47 }
+    ])
+    expect(wrapper().style.top).toBe('828px')
+  })
+
+  it('shows the whole pane again for a full-screen program that took the slot over', () => {
+    // vim: the pane hands the slot over without a box, through an unregister and a register.
+    const slotEl = makeSlot({ top: 100, left: 0, width: 800, height: 760 })
+    unregisterSlot('t', document.querySelector('[data-terminal-id]') as HTMLElement)
+    registerSlot('t', slotEl)
+    syncTerminalOverlay('t')
+
+    expect(clip()).toBe('inset(0px 0 8px 0)')
+    expect(wrapper().style.top).toBe('100px')
+  })
+
+  it('is no window at all for a slot registered without a box', () => {
+    registerSlot('t', makeSlot({ top: 100, left: 0, width: 800, height: 760 }))
+    syncTerminalOverlay('t')
+
+    expect(clip()).toBe('inset(0px 0 8px 0)')
+    expect(wrapper().style.top).toBe('100px')
   })
 })
