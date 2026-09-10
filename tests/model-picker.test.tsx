@@ -113,7 +113,7 @@ describe('ModelPicker', () => {
     expect(screen.queryByRole('button', { name: 'Refresh models' })).not.toBeInTheDocument()
   })
 
-  it('asks again on refresh, and plainly on the next open', async () => {
+  it('asks again only on refresh, and keeps the list across a close and reopen', async () => {
     const list = api()
     render(<ModelPicker agentType="claude" projectPath="/p" onChange={vi.fn()} />)
     open()
@@ -124,8 +124,8 @@ describe('ModelPicker', () => {
     fireEvent.click(trigger())
     await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
     open()
-    await waitFor(() => expect(list).toHaveBeenCalledTimes(3))
-    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ refresh: false }))
+    await screen.findByRole('option', { name: /Sonnet 5/ })
+    expect(list).toHaveBeenCalledTimes(2)
   })
 
   it('groups OpenCode models by provider', async () => {
@@ -146,10 +146,10 @@ describe('ModelPicker', () => {
     expect(screen.getByText('openai')).toBeInTheDocument()
   })
 
-  it('says it is asking while the list is empty, and a card chip asks only when opened', async () => {
+  it('says it is asking while the list is empty, and asks only when opened unless told to prefetch', async () => {
     let resolve!: (value: AgentModelCatalog) => void
     const list = api(vi.fn().mockReturnValue(new Promise<AgentModelCatalog>((r) => (resolve = r))))
-    render(<ModelPicker agentType="claude" projectPath="/p" onChange={vi.fn()} />)
+    render(<ModelPicker prefetch agentType="claude" projectPath="/p" onChange={vi.fn()} />)
     await waitFor(() => expect(list).toHaveBeenCalledTimes(1))
     open()
     expect(screen.getByRole('status')).toHaveTextContent('Asking claude')
@@ -158,13 +158,11 @@ describe('ModelPicker', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
     cleanup()
 
-    const bordered = api()
-    render(
-      <ModelPicker variant="bordered" agentType="claude" projectPath="/p" onChange={vi.fn()} />
-    )
-    expect(bordered).not.toHaveBeenCalled()
+    const lazy = api()
+    render(<ModelPicker agentType="claude" projectPath="/p" onChange={vi.fn()} />)
+    expect(lazy).not.toHaveBeenCalled()
     open()
-    await waitFor(() => expect(bordered).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(lazy).toHaveBeenCalledTimes(1))
   })
 
   it('is settled, not hidden, when the step follows the task', () => {

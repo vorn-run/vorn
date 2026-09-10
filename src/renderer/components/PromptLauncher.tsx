@@ -320,6 +320,7 @@ export function PromptLauncher({ mode, onClose }: PromptLauncherProps) {
 
       {/* Model, between the agent and where it runs */}
       <ModelPicker
+        prefetch
         agentType={settings.selectedAgent}
         projectPath={settings.selectedWorktreePath ?? selectedProjectConfig?.path}
         remoteHostId={

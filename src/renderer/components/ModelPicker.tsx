@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, ChevronDown, Cpu, Loader2, RefreshCw } from 'lucide-react'
-import type { AiAgentType, LaunchAgentType } from '../../shared/types'
+import type { LaunchAgentType } from '../../shared/types'
 import {
   supportsModelSelection,
   validateModelId,
@@ -11,6 +11,7 @@ import {
 } from '@vornrun/shared/agent-models'
 import { Tooltip } from './Tooltip'
 import { useAnchoredMenu } from '../hooks/useAnchoredMenu'
+import { useAgentModelCatalog } from '../hooks/useAgentModelCatalog'
 
 const MENU_ROW_PX = 28
 const MENU_CHROME_PX = 84
@@ -26,6 +27,8 @@ interface Props {
   onChange: (model: string | undefined) => void
   /** `compact` is the launcher chip; `bordered` the intent bar's; `form` a full-width field. */
   variant?: Variant
+  /** Ask for the list as soon as the agent and project are known, not only when opened. */
+  prefetch?: boolean
 }
 
 const TRIGGER_CLASS: Record<Variant, string> = {
@@ -60,7 +63,8 @@ function footerFor(
   loading: boolean,
   openedAt: number
 ): { text: string; spinner: boolean } {
-  if (loading) return { text: `Asking ${agent}…`, spinner: true }
+  if (loading)
+    return catalog ? { text: `Asking ${agent}…`, spinner: true } : { text: '', spinner: false }
   if (!catalog) return { text: '', spinner: false }
   if (catalog.status === 'unavailable') {
     return { text: catalog.error ?? 'Could not list models — type an id', spinner: false }
@@ -78,63 +82,31 @@ export function ModelPicker({
   remoteHostId,
   value,
   onChange,
-  variant = 'compact'
+  variant = 'compact',
+  prefetch = false
 }: Props) {
   const [query, setQuery] = useState('')
   const [invalid, setInvalid] = useState('')
-  const [fetched, setFetched] = useState<{ key: string; catalog: AgentModelCatalog } | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [refreshes, setRefreshes] = useState(0)
   const [openedAt, setOpenedAt] = useState(0)
 
   const followsTask = agentType === 'fromTask'
   const supported = followsTask || supportsModelSelection(agentType)
-  const key = `${agentType}\u0000${projectPath ?? ''}\u0000${remoteHostId ?? ''}`
-  const catalog = fetched?.key === key ? fetched.catalog : null
+
+  const { open, setOpen, toggle, triggerRef, menuRef, position } = useAnchoredMenu({
+    estimateHeight: () =>
+      Math.min(8, (catalog?.choices.length ?? 0) + 1) * MENU_ROW_PX + MENU_CHROME_PX,
+    menuWidth: (trigger) => Math.max(MENU_WIDTH_PX, variant === 'form' ? trigger : 0)
+  })
+  // A remote host cannot be asked, so only an opened menu learns that and says so.
+  const wanted =
+    supported && !followsTask && (open || (prefetch && Boolean(projectPath) && !remoteHostId))
+  const { catalog, loading, refresh } = useAgentModelCatalog(
+    { agentType, projectPath, remoteHostId },
+    wanted
+  )
   const choices = catalog?.choices ?? []
   const selected = choices.find((choice) => choice.id === value)
   const label = selected?.label ?? value
-
-  const { open, setOpen, toggle, triggerRef, menuRef, position } = useAnchoredMenu({
-    estimateHeight: () => Math.min(8, choices.length + 1) * MENU_ROW_PX + MENU_CHROME_PX,
-    menuWidth: (trigger) => Math.max(MENU_WIDTH_PX, variant === 'form' ? trigger : 0)
-  })
-
-  // The one launcher and form ask as soon as they know the agent; a chip on every card waits to be opened.
-  const eager = variant !== 'bordered' && Boolean(projectPath)
-
-  useEffect(() => {
-    if (!supported || agentType === 'fromTask' || (!open && !eager)) return
-    let cancelled = false
-    const request = {
-      agentType: agentType as AiAgentType,
-      projectPath: projectPath ?? '',
-      remoteHostId
-    }
-    const list = window.api?.listAgentModels
-    const settle = (catalog: AgentModelCatalog) => {
-      if (!cancelled) setFetched({ key, catalog })
-    }
-    void (async () => {
-      await Promise.resolve()
-      if (cancelled) return
-      if (!list) {
-        settle({ choices: [], status: 'unavailable', error: 'This server cannot list models.' })
-        return
-      }
-      setLoading(true)
-      try {
-        settle(await list({ ...request, refresh: refreshes > 0 }))
-      } catch {
-        settle({ choices: [], status: 'unavailable', error: 'Could not list models.' })
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [open, eager, supported, key, agentType, projectPath, remoteHostId, refreshes])
 
   if (!supported) return null
 
@@ -143,7 +115,6 @@ export function ModelPicker({
     if (!open) {
       setQuery('')
       setInvalid('')
-      setRefreshes(0)
       setOpenedAt(Date.now())
     }
     toggle(e)
@@ -169,10 +140,8 @@ export function ModelPicker({
     : choices
   const exact = shown.find((c) => c.id.toLowerCase() === needle)
   const groupedByProvider = agentType === 'opencode'
-  const asking = loading && choices.length === 0
-  const footer = asking
-    ? { text: '', spinner: false }
-    : footerFor(agentType, catalog, loading, openedAt)
+  const asking = loading && !catalog
+  const footer = footerFor(agentType, catalog, loading, openedAt)
 
   const triggerText = followsTask ? "Follows the task's agent" : (label ?? DEFAULT_TEXT[variant])
   const formTone = followsTask
@@ -357,7 +326,7 @@ export function ModelPicker({
               onMouseDown={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                setRefreshes((n) => n + 1)
+                refresh()
               }}
               className="w-5 h-5 grid place-items-center rounded text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]"
             >

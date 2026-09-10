@@ -178,7 +178,7 @@ describe('discovery process protocol', () => {
     ])
     expect(spawn).toHaveBeenCalledWith(
       'agent',
-      ['--acp', '--no-remote', '--no-remote-export'],
+      expect.arrayContaining(['--acp', '--no-remote', '--no-remote-export']),
       expect.anything()
     )
     expect(child.kill).toHaveBeenCalled()

@@ -177,6 +177,7 @@ export function LaunchAgentConfigForm({
       <div>
         <label className="text-[13px] text-gray-400 font-medium block mb-2">Model</label>
         <ModelPicker
+          prefetch
           variant="form"
           agentType={config.agentType}
           projectPath={projectIsFromContext ? undefined : config.projectPath}

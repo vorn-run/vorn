@@ -30,8 +30,8 @@ function idOf(agent: AiAgentType, entry: Json): unknown {
 }
 
 /** Copilot says what a model costs against the plan; that is the hint worth showing. */
-function descriptionOf(entry: Json): string | undefined {
-  const usage = asObject(entry._meta).copilotUsage
+function descriptionOf(agent: AiAgentType, entry: Json): string | undefined {
+  const usage = agent === 'copilot' ? asObject(entry._meta).copilotUsage : undefined
   if (typeof usage === 'string' && usage) return `${usage} usage`
   return typeof entry.description === 'string' ? entry.description : undefined
 }
@@ -51,12 +51,12 @@ export function parseModelChoices(agent: AiAgentType, value: unknown): AgentMode
   for (const item of value) {
     const entry = asObject(item)
     if (entry.hidden === true || asObject(entry.policy).state === 'disabled') continue
-    const enablement = asObject(entry._meta).copilotEnablement
+    const enablement = agent === 'copilot' ? asObject(entry._meta).copilotEnablement : undefined
     if (enablement !== undefined && enablement !== 'enabled') continue
     const id = idOf(agent, entry)
     if (typeof id !== 'string' || !id) continue
     const label = entry.displayName ?? entry.name
-    const description = descriptionOf(entry)
+    const description = descriptionOf(agent, entry)
     byId.set(id, {
       id,
       label: typeof label === 'string' ? label : id,
@@ -96,7 +96,7 @@ function probeArguments(agent: ProbedAgent, configured: string[]): string[] {
     case 'codex':
       return [...configured, 'app-server', '--stdio']
     case 'copilot':
-      return ['--acp', '--no-remote', '--no-remote-export']
+      return [...configured, '--acp', '--no-remote', '--no-remote-export']
     case 'opencode':
       return ['models']
   }
