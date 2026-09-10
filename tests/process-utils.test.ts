@@ -287,3 +287,81 @@ describe('the data directory handed to spawned processes', () => {
     expect(mod.getLaunchEnv().VORN_DATA_DIR).toBe('/tmp/some-other-vorn')
   })
 })
+
+describe('the login-shell environment', () => {
+  const originalEnv = process.env
+
+  beforeEach(() => {
+    vi.resetModules()
+    mockExecFile.mockReset()
+    process.env = { HOME: '/home/user', PATH: '/usr/bin', SHELL: '/bin/zsh' }
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+    vi.useRealTimers()
+  })
+
+  it('primes in the background and hands the answer to every later caller', async () => {
+    mockExecFile.mockImplementation((_bin, _args, _opts, cb) =>
+      cb(null, 'PATH=/opt/homebrew/bin:/usr/bin\nEDITOR=vim\n')
+    )
+    const mod = await import('../packages/server/src/process-utils')
+    await mod.primeShellEnv()
+    expect(mod.getSafeEnv().PATH).toBe('/opt/homebrew/bin:/usr/bin')
+    expect(mockExecFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not hand the desktop credential to the login shell', async () => {
+    process.env.SECRET_VORN_BOOTSTRAP_TOKEN = 'owner-token'
+    mockExecFile.mockImplementation((_bin, _args, _opts, cb) => cb(null, 'PATH=/x\n'))
+    const mod = await import('../packages/server/src/process-utils')
+    await mod.primeShellEnv()
+    const spawnEnv = mockExecFile.mock.calls[0][2].env as Record<string, string>
+    expect(spawnEnv.SECRET_VORN_BOOTSTRAP_TOKEN).toBeUndefined()
+    expect(spawnEnv.HOME).toBe('/home/user')
+  })
+
+  it('answers with its own environment while the shell is still being asked', async () => {
+    let finish: (() => void) | undefined
+    mockExecFile.mockImplementation((_bin, _args, _opts, cb) => {
+      finish = () => cb(null, 'PATH=/from/shell\n')
+    })
+    const mod = await import('../packages/server/src/process-utils')
+    const priming = mod.primeShellEnv()
+    expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+    expect(mockExecFile).toHaveBeenCalledTimes(1)
+    finish?.()
+    await priming
+    expect(mod.getSafeEnv().PATH).toBe('/from/shell')
+  })
+
+  it('asks the shell again after a failure, but not right away', async () => {
+    vi.useFakeTimers()
+    mockExecFile.mockImplementationOnce((_bin, _args, _opts, cb) => cb(new Error('ETIMEDOUT')))
+    const mod = await import('../packages/server/src/process-utils')
+    await mod.primeShellEnv()
+    expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+    // Inside the retry window the failure stands, without asking again.
+    expect(mockExecFile).toHaveBeenCalledTimes(1)
+
+    mockExecFile.mockImplementationOnce((_bin, _args, _opts, cb) =>
+      cb(null, 'PATH=/late/but/right\n')
+    )
+    vi.advanceTimersByTime(31_000)
+    expect(mod.getSafeEnv().PATH).toBe('/usr/bin')
+    await mod.shellEnvSettled(1000)
+    expect(mod.getSafeEnv().PATH).toBe('/late/but/right')
+    expect(mockExecFile).toHaveBeenCalledTimes(2)
+  })
+
+  it('waits for the shell only as long as it is told to', async () => {
+    vi.useFakeTimers()
+    mockExecFile.mockImplementation(() => {})
+    const mod = await import('../packages/server/src/process-utils')
+    void mod.primeShellEnv()
+    const settled = mod.shellEnvSettled(1000).then(() => 'done')
+    vi.advanceTimersByTime(1000)
+    await expect(settled).resolves.toBe('done')
+  })
+})

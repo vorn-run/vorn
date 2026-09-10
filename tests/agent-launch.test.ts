@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('node:child_process', () => ({
-  execFileSync: vi.fn(() => '/usr/bin/cmd') // commandExists returns true
-}))
+// Nothing is on PATH here, so every command keeps its configured name.
+vi.mock('../packages/server/src/resolve-executable', () => ({ findOnPath: () => null }))
 
 import {
   buildAgentLaunchLine,

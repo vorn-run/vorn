@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { getSafeEnv } from './process-utils'
+import { getSafeEnv, shellEnvResolved } from './process-utils'
 
 // Packaged Electron apps on macOS don't inherit the login-shell PATH, so
 // user-installed binaries (Homebrew at /opt/homebrew/bin, /usr/local/bin)
@@ -12,9 +12,8 @@ import { getSafeEnv } from './process-utils'
 // "not found" until app restart.
 const cache = new Map<string, string>()
 
-function find(name: string): string | null {
-  const env = getSafeEnv()
-  const pathEnv = env.PATH || env.Path || process.env.PATH || ''
+/** Where `name` lives on `pathEnv`, or null. On Windows `.exe` and `.cmd` count too. */
+export function findOnPath(name: string, pathEnv: string | undefined): string | null {
   if (!pathEnv) return null
   const sep = process.platform === 'win32' ? ';' : ':'
   const candidates = process.platform === 'win32' ? [`${name}.exe`, `${name}.cmd`, name] : [name]
@@ -34,6 +33,11 @@ function find(name: string): string | null {
   return null
 }
 
+function find(name: string): string | null {
+  const env = getSafeEnv()
+  return findOnPath(name, env.PATH || env.Path || process.env.PATH)
+}
+
 /**
  * Look up an executable by name on the user's PATH (login-shell PATH via
  * `getSafeEnv()`). On Windows also tries `.exe` and `.cmd` suffixes.
@@ -44,7 +48,8 @@ export function resolveExecutable(name: string): string | null {
   const hit = cache.get(name)
   if (hit) return hit
   const found = find(name)
-  if (found) cache.set(name, found)
+  // A hit on the provisional PATH is not the user's answer; keep asking until the shell has spoken.
+  if (found && shellEnvResolved()) cache.set(name, found)
   return found
 }
 

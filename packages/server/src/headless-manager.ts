@@ -125,13 +125,14 @@ class HeadlessManager extends EventEmitter {
     // Not truncated: this line is the first thing anyone reads when a session
     // produces no output, and the flag that explains it is as likely to be at
     // the end as the start. The prompt isn't here — it goes to stdin.
-    const launchCommand = [spawnArgs.command, ...spawnArgList].join(' ')
+    const command = useShell ? shellEscape(spawnArgs.command, 'cmd') : spawnArgs.command
+    const launchCommand = [command, ...spawnArgList].join(' ')
     log.info(
       `[headless] launching in ${effectivePath}: ${launchCommand}` +
         (spawnArgs.stdin != null ? ` (prompt on stdin, ${spawnArgs.stdin.length} chars)` : '')
     )
 
-    const child = spawn(spawnArgs.command, spawnArgList, {
+    const child = spawn(command, spawnArgList, {
       cwd: effectivePath,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],

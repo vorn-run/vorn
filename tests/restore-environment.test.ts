@@ -16,45 +16,45 @@ const agent = {
 }
 
 describe('checking a record against the tree before offering Resume', () => {
-  it('reports the ordinary case: everything where it was left', () => {
-    expect(probeEnvironment(agent, tree())).toEqual({
+  it('reports the ordinary case: everything where it was left', async () => {
+    expect(await probeEnvironment(agent, tree())).toEqual({
       worktree: 'ok',
       branch: { recorded: 'feature', actual: 'feature' },
       head: { recorded: 'aaaa1111', actual: 'aaaa1111' }
     })
   })
 
-  it('names both commits when HEAD moved', () => {
-    const env = probeEnvironment(agent, tree({ head: 'bbbb2222' }))
+  it('names both commits when HEAD moved', async () => {
+    const env = await probeEnvironment(agent, tree({ head: 'bbbb2222' }))
     expect(env?.head).toEqual({ recorded: 'aaaa1111', actual: 'bbbb2222' })
     expect(headMoved(env)).toBe(true)
   })
 
-  it('says the worktree is missing and asks git nothing about it', () => {
+  it('says the worktree is missing and asks git nothing about it', async () => {
     const probe = tree({ dirs: ['/repo'] })
-    const env = probeEnvironment(agent, probe)
+    const env = await probeEnvironment(agent, probe)
     expect(env?.worktree).toBe('missing')
     expect(env?.head.actual).toBeNull()
     expect(probe.head).not.toHaveBeenCalled()
     expect(probe.branch).not.toHaveBeenCalled()
   })
 
-  it('checks the project when there is no worktree', () => {
+  it('checks the project when there is no worktree', async () => {
     const probe = tree()
-    probeEnvironment({ projectPath: '/repo' }, probe)
+    await probeEnvironment({ projectPath: '/repo' }, probe)
     expect(probe.head).toHaveBeenCalledWith('/repo')
   })
 
-  it('does not call an unknown commit a move', () => {
+  it('does not call an unknown commit a move', async () => {
     // Records written before HEAD was recorded have nothing to compare.
-    expect(headMoved(probeEnvironment({ projectPath: '/repo' }, tree()))).toBe(false)
-    expect(headMoved(probeEnvironment(agent, tree({ head: null })))).toBe(false)
+    expect(headMoved(await probeEnvironment({ projectPath: '/repo' }, tree()))).toBe(false)
+    expect(headMoved(await probeEnvironment(agent, tree({ head: null })))).toBe(false)
     expect(headMoved(undefined)).toBe(false)
   })
 
-  it('leaves a remote session unchecked rather than probing this machine', () => {
+  it('leaves a remote session unchecked rather than probing this machine', async () => {
     const probe = tree()
-    expect(probeEnvironment({ ...agent, remoteHostId: 'box' }, probe)).toBeUndefined()
+    expect(await probeEnvironment({ ...agent, remoteHostId: 'box' }, probe)).toBeUndefined()
     expect(probe.head).not.toHaveBeenCalled()
   })
 })

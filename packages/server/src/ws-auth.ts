@@ -72,9 +72,7 @@ export function initBootstrapSecret(
 
   // Remove it from the environment now that it is held in a module variable.
   // `filterEnv` strips the name, but a filter only covers the paths it is asked
-  // about — `getUserShellEnv` runs the login shell with the parent environment
-  // and reads `env` back, so anything still in `process.env` is reachable. After
-  // this, no child can inherit it however it is spawned.
+  // about; after this, no child can inherit it however it is spawned.
   delete process.env[BOOTSTRAP_ENV_VAR]
 
   localTokenPath = null

@@ -16,6 +16,9 @@ vi.mock('node:child_process', async () => {
   }
 })
 
+vi.mock('../packages/server/src/resolve-executable', () => ({
+  findOnPath: (name: string) => (name === 'claude' ? '/opt/agents/bin/claude' : null)
+}))
 vi.mock('../packages/server/src/git-utils', () => ({
   getGitBranch: vi.fn(() => 'main'),
   checkoutBranch: vi.fn(),
@@ -51,6 +54,30 @@ describe('headlessManager.createHeadless', () => {
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(args[idx + 1]).toBe(session.agentSessionId)
 
+    headlessManager.killHeadless(session.id)
+  })
+
+  it('spawns the agent by its absolute path, so a poor PATH cannot lose it', () => {
+    const session = headlessManager.createHeadless({
+      agentType: 'claude',
+      projectName: 'p',
+      projectPath: '/p',
+      initialPrompt: 'go',
+      headless: true
+    })
+    expect(spawnMock.mock.calls[0][0]).toBe('/opt/agents/bin/claude')
+    headlessManager.killHeadless(session.id)
+  })
+
+  it('keeps a bare name when nothing on PATH answers to it', () => {
+    const session = headlessManager.createHeadless({
+      agentType: 'codex',
+      projectName: 'p',
+      projectPath: '/p',
+      initialPrompt: 'go',
+      headless: true
+    })
+    expect(spawnMock.mock.calls[0][0]).toBe('codex')
     headlessManager.killHeadless(session.id)
   })
 

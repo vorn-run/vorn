@@ -3,8 +3,10 @@ import fs from 'node:fs'
 
 // We swap in a custom safe-env per test so we can drive the PATH search.
 const safeEnvMock = vi.fn()
+const shellAnswered = { value: true }
 vi.mock('../packages/server/src/process-utils', () => ({
-  getSafeEnv: () => safeEnvMock()
+  getSafeEnv: () => safeEnvMock(),
+  shellEnvResolved: () => shellAnswered.value
 }))
 
 const importResolver = async () => {
@@ -19,6 +21,7 @@ function setPlatform(p: NodeJS.Platform): void {
 }
 
 beforeEach(() => {
+  shellAnswered.value = true
   safeEnvMock.mockReset()
 })
 
@@ -53,6 +56,26 @@ describe('resolveExecutable()', () => {
     expect(second).toBe(first)
     // No additional probes on the second call.
     expect(accessSpy.mock.calls.length).toBe(callsAfterFirst)
+  })
+
+  it('does not keep a hit made before the login shell answered', async () => {
+    safeEnvMock.mockReturnValue({ PATH: '/usr/bin' })
+    const accessSpy = vi.spyOn(fs, 'accessSync').mockImplementation((p) => {
+      if (String(p).endsWith('/usr/bin/git')) return undefined
+      throw new Error('ENOENT')
+    })
+    shellAnswered.value = false
+    const { resolveExecutable } = await importResolver()
+    resolveExecutable('git')
+    const probesBeforeAnswer = accessSpy.mock.calls.length
+    resolveExecutable('git')
+    // Still asked: the provisional PATH's git may not be the user's.
+    expect(accessSpy.mock.calls.length).toBeGreaterThan(probesBeforeAnswer)
+    shellAnswered.value = true
+    resolveExecutable('git')
+    const probesAfterAnswer = accessSpy.mock.calls.length
+    expect(resolveExecutable('git')).toBe('/usr/bin/git')
+    expect(accessSpy.mock.calls.length).toBe(probesAfterAnswer)
   })
 
   it('returns null when PATH is empty', async () => {

@@ -6,39 +6,94 @@ import type { RemoteHost } from '@vornrun/shared/types'
 // anything that reaches the database.
 import { BOOTSTRAP_ENV_VAR } from '@vornrun/shared/protocol'
 import { NEVER_BORROWED_ENV, SENSITIVE_ENV_PREFIXES } from '@vornrun/shared/types'
+import log from './logger'
 
-function getUserShellEnv(): Record<string, string> {
-  if (process.platform === 'win32') return { ...process.env } as Record<string, string>
-  try {
-    const shell = process.env.SHELL || '/bin/zsh'
-    const output = execFileSync(shell, ['-ilc', 'env'], {
-      encoding: 'utf-8',
-      timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe']
-    })
-    const env: Record<string, string> = {}
-    for (const line of output.split('\n')) {
-      const idx = line.indexOf('=')
-      if (idx > 0) {
-        env[line.substring(0, idx)] = line.substring(idx + 1)
-      }
-    }
-    return env
-  } catch {
-    return { ...process.env } as Record<string, string>
+/** Parse `env` output into a map. */
+function parseEnvOutput(output: string): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const line of output.split('\n')) {
+    const idx = line.indexOf('=')
+    if (idx > 0) env[line.substring(0, idx)] = line.substring(idx + 1)
   }
+  return env
+}
+
+const SHELL_ENV_TIMEOUT_MS = 15_000
+/** How long a shell that did not answer is left alone before it is asked again. */
+const SHELL_ENV_RETRY_MS = 30_000
+
+let resolvedEnvCache: Record<string, string> | undefined
+let priming: Promise<void> | undefined
+let retryAfter = 0
+/** Set once a server asked; a short-lived CLI never starts a shell it would then wait on. */
+let wanted = false
+
+/** Ask the login shell for its environment in the background; a failure is logged, not kept. */
+export function primeShellEnv(): Promise<void> {
+  wanted = true
+  if (process.platform === 'win32' || resolvedEnvCache) return Promise.resolve()
+  if (priming) return priming
+  const run = new Promise<void>((resolve) => {
+    const started = Date.now()
+    // The shell gets the filtered environment: the desktop's credential is still in process.env here.
+    execFile(
+      getDefaultShell(),
+      ['-ilc', 'env'],
+      {
+        encoding: 'utf-8',
+        timeout: SHELL_ENV_TIMEOUT_MS,
+        maxBuffer: 4 * 1024 * 1024,
+        env: filterEnv(process.env, new Set())
+      },
+      (err, stdout) => {
+        const ms = Date.now() - started
+        if (err) {
+          retryAfter = Date.now() + SHELL_ENV_RETRY_MS
+          log.warn(
+            { err: err.message, ms },
+            "[env] the login shell did not answer; child processes get this process's PATH until it does"
+          )
+        } else {
+          resolvedEnvCache = parseEnvOutput(stdout)
+          log.info({ ms }, '[env] login shell environment resolved')
+        }
+        resolve()
+      }
+    )
+  })
+  priming = run
+  void run.then(() => {
+    if (priming === run) priming = undefined
+  })
+  return run
+}
+
+/** True once the login shell has answered; on Windows there is nothing to wait for. */
+export function shellEnvResolved(): boolean {
+  return process.platform === 'win32' || resolvedEnvCache !== undefined
+}
+
+/** Wait for the shell's answer, but never longer than `maxMs`. */
+export function shellEnvSettled(maxMs: number): Promise<void> {
+  const pending = priming
+  if (!pending) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, maxMs)
+    void pending.then(() => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
 }
 
 /**
- * Resolved lazily and memoized: getUserShellEnv() spawns a login shell, and
- * doing that at import time made merely importing this module — as the pure
- * helpers' unit tests do — pay for a subprocess it never uses.
+ * The login shell's environment once it has answered, this process's own until then.
+ * Only a success is kept: a shell that timed out at boot must not mean "no PATH" for good.
  */
-let resolvedEnvCache: Record<string, string> | undefined
-
 function resolvedEnv(): Record<string, string> {
-  resolvedEnvCache ??= getUserShellEnv()
-  return resolvedEnvCache
+  if (resolvedEnvCache) return resolvedEnvCache
+  if (wanted && !priming && Date.now() >= retryAfter) void primeShellEnv()
+  return { ...process.env } as Record<string, string>
 }
 
 /**

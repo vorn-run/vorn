@@ -648,19 +648,27 @@ async function tryAdopt(
   const token = readLocalToken(self.dataDir)
 
   const candidate = new ServerBridge(target, token ?? undefined)
+  const probing = Date.now()
   candidate.connect()
 
   // The greeting is the first frame on the socket and arrives before
   // authentication, so this resolves even against a server that would reject the
   // credential. A timeout means "cannot tell", which must not be read as "dead":
-  // that reading is how a second server gets started on a live port.
+  // that reading is how a second server gets started on a live port. A socket
+  // that closes before greeting has answered: nothing is there.
   const identity = await new Promise<ServerIdentity | null>((resolve) => {
-    const timer = setTimeout(() => resolve(null), ADOPT_IDENTITY_TIMEOUT_MS)
-    candidate.once('identity', (found: ServerIdentity) => {
+    const timer = setTimeout(() => settle(null), ADOPT_IDENTITY_TIMEOUT_MS)
+    const gone = (): void => settle(null)
+    function settle(found: ServerIdentity | null): void {
       clearTimeout(timer)
+      candidate.off('identity', settle)
+      candidate.off('disconnected', gone)
       resolve(found)
-    })
+    }
+    candidate.once('identity', settle)
+    candidate.once('disconnected', gone)
   })
+  log.info(`[launcher] probed ${target} in ${Date.now() - probing}ms`)
 
   // Something answered, so this is a server rather than a leftover -- and one
   // this app cannot reach, which is a refusal rather than permission to start a
