@@ -62,11 +62,19 @@ vi.mock('@xterm/addon-fit', () => {
     activate(term: unknown): void {
       this.term = term as MockFitAddon['term']
     }
-    fit = vi.fn(() => {
+    proposeDimensions(): { cols: number; rows: number } | undefined {
       const el = this.term?.element
-      if (!this.term || !el) return
-      this.term.cols = Math.max(2, Math.floor((parseInt(el.style.width) || 0) / 8))
-      this.term.rows = Math.max(1, Math.floor((parseInt(el.style.height) || 0) / 16))
+      if (!el) return undefined
+      return {
+        cols: Math.max(2, Math.floor((parseInt(el.style.width) || 0) / 8)),
+        rows: Math.max(1, Math.floor((parseInt(el.style.height) || 0) / 16))
+      }
+    }
+    fit = vi.fn(() => {
+      const next = this.proposeDimensions()
+      if (!this.term || !next) return
+      this.term.cols = next.cols
+      this.term.rows = next.rows
     })
     constructor() {
       made.fits.push(this.fit)
@@ -359,6 +367,36 @@ describe('when a moved box becomes a size', () => {
       { cols: 100, rows: 30 },
       { cols: 110, rows: 30 }
     ])
+  })
+
+  it('ignores a move that would not change the grid, and drops a hold it had armed', () => {
+    move(880, 480)
+    // Back inside the same cell count before the hold lapses: nothing to take.
+    move(803, 480)
+
+    vi.advanceTimersByTime(400)
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('fits a box that never stands still by the deadline', () => {
+    // Two pixels a frame: the grid first moves at 808px, and the deadline runs from there.
+    let w = 800
+    for (let t = 0; t < 600; t += 16) {
+      w += 2
+      move(w, 480)
+      vi.advanceTimersByTime(16)
+    }
+
+    expect(sizes()).toHaveLength(2)
+    expect(sizes()[1]!.cols).toBeGreaterThan(100)
+  })
+
+  it("does not take a held size for the terminal's own reply to a query", () => {
+    move(880, 480)
+    const onData = made.terms[made.terms.length - 1]!.onData.mock.calls[0][0] as (d: string) => void
+    onData('\x1b[24;80R')
+
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
   })
 
   it('says nothing to the pty when a drag ends where it began', () => {

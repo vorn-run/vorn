@@ -21,8 +21,9 @@ interface TerminalEntry {
   lastAppliedRect: { top: number; left: number; width: number; height: number } | null
   lastSyncedCols: number
   lastSyncedRows: number
-  /** The hold before a moved box is taken as the new size. */
+  /** The hold before a moved box is taken as the new size, and the deadline a box that keeps moving cannot push past. */
   resizeTimer: ReturnType<typeof setTimeout> | null
+  resizeDeadline: ReturnType<typeof setTimeout> | null
   _loadRenderer?: (() => void) | null
   _gpuAddon?: { dispose(): void } | null
   _disposeCommandBlocks?: (() => void) | null
@@ -425,9 +426,11 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
   // Forward keystrokes to pty
   term.onData((data) => {
     if (seeding.has(terminalId)) return
-    // A held size goes first: what is typed must reach the program after the SIGWINCH, not before.
+    // A held size goes before a keystroke, so what is typed reaches the program after the SIGWINCH. Not before
+    // the terminal's own reply to a query: that is not a keystroke, and a program that asks on every redraw would
+    // otherwise resize itself in a loop for as long as the box moved.
     const entry = registry.get(terminalId)
-    if (entry?.resizeTimer) fitNow(entry, terminalId)
+    if (entry?.resizeTimer && !data.startsWith('\x1b')) fitNow(entry, terminalId)
     window.api.writeTerminal(terminalId, data)
   })
 
@@ -441,7 +444,8 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
     lastAppliedRect: null,
     lastSyncedCols: 0,
     lastSyncedRows: 0,
-    resizeTimer: null
+    resizeTimer: null,
+    resizeDeadline: null
   }
 
   entry._loadRenderer = loadRenderer
@@ -585,11 +589,19 @@ function hideWrapper(wrapper: HTMLDivElement, entry: TerminalEntry): void {
 
 /** How long a box has to stand still before its size is taken; a slow frame must not lapse it. */
 const RESIZE_SETTLE_MS = 100
+/** A box that never stands still is fitted anyway by this, so nothing can starve the grid. */
+const RESIZE_MAX_WAIT_MS = 400
+
+function clearHold(entry: TerminalEntry): void {
+  if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
+  if (entry.resizeDeadline) clearTimeout(entry.resizeDeadline)
+  entry.resizeTimer = null
+  entry.resizeDeadline = null
+}
 
 /** Grid, pty and the server's screen model take the box's size at one moment, so none wraps differently from another. */
 function fitNow(entry: TerminalEntry, terminalId: string): void {
-  if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
-  entry.resizeTimer = null
+  clearHold(entry)
   // A hidden wrapper has no box to fit; fitting it would send a 2x1 grid.
   if (!entry.term.element || !entry.lastAppliedRect) return
   try {
@@ -610,8 +622,15 @@ function fitWhenSettled(entry: TerminalEntry, terminalId: string): void {
     fitNow(entry, terminalId)
     return
   }
+  // A move that would not change the grid arms nothing, and drops a hold armed for one that would have.
+  const next = entry.fitAddon.proposeDimensions()
+  if (next && next.cols === entry.lastSyncedCols && next.rows === entry.lastSyncedRows) {
+    clearHold(entry)
+    return
+  }
   if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
   entry.resizeTimer = setTimeout(() => fitNow(entry, terminalId), RESIZE_SETTLE_MS)
+  entry.resizeDeadline ??= setTimeout(() => fitNow(entry, terminalId), RESIZE_MAX_WAIT_MS)
 }
 
 /**
@@ -908,7 +927,7 @@ export function destroyTerminal(terminalId: string): void {
   // A seed still in flight would otherwise resolve and write into a terminal
   // that no longer exists.
   hydrating.delete(terminalId)
-  if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
+  clearHold(entry)
   entry._disposeCommandBlocks?.()
   entry._disposeCommandBlocks = null
   entry._disposeScrollAnchor?.()
