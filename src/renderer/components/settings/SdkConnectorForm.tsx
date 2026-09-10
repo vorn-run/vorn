@@ -1,3 +1,5 @@
+import { originLabel } from '@vornrun/shared/connector-origins'
+import { isElectron } from '../../lib/platform'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
 import { BusyIcon } from './BusyIcon'
@@ -197,7 +199,7 @@ export function SdkConnectorForm({
         executionProject: selectedProject
       })
       // Signing in takes as long as it takes, so the connection's row carries on from here.
-      if (rung === 'browser') void window.api.signInConnection?.(created.id)
+      if (rung === 'browser' && isElectron) void window.api.signInConnection(created.id)
       onDone()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -386,11 +388,7 @@ export function SdkConnectorForm({
               <p className="text-[11px] text-gray-600 mt-1">
                 After Connect, a window opens on {new URL(manifest.auth.browser.signInUrl).host}.
                 The login stays in a browser profile only this connection uses, and it acts as you
-                on{' '}
-                {manifest.auth.browser.origins
-                  .map((origin) => origin.replace('https://', ''))
-                  .join(', ')}
-                .
+                on {manifest.auth.browser.origins.map(originLabel).join(', ')}.
               </p>
             </div>
           )}

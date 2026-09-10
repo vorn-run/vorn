@@ -80,6 +80,9 @@ export function ConnectorSettings() {
     void load()
   }, [load])
 
+  // A sign-in finishes in its own window, so the rows follow the server rather than the press.
+  useEffect(() => window.api.onConfigChanged?.(() => void load()), [load])
+
   // Installing changes what is on disk, which the library reads too, so the shared cache is told as well.
   const install = usePackInstall(
     useCallback(async () => {

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { ConnectionRow } from '../src/renderer/components/settings/ConnectionRow'
+import { useRowAction } from '../src/renderer/lib/use-row-action'
 import type { SdkBrowserSignIn, SourceConnection } from '../src/shared/types'
 
 const browser: SdkBrowserSignIn = {
@@ -20,10 +21,14 @@ beforeEach(() => {
   ;(window as unknown as { api: unknown }).api = { signInConnection, signOutConnection }
 })
 
+function Row(props: Omit<Parameters<typeof ConnectionRow>[0], 'activity'>) {
+  return <ConnectionRow {...props} activity={useRowAction()} />
+}
+
 function setup(conn: Partial<SourceConnection> = {}) {
   const onRefresh = vi.fn()
   const utils = render(
-    <ConnectionRow
+    <Row
       conn={
         {
           id: 'c1',
@@ -39,7 +44,6 @@ function setup(conn: Partial<SourceConnection> = {}) {
       browserSignIn={browser}
       seededWorkflows={[]}
       missingEvents={[]}
-      activity={{ busy: {}, failed: {}, run: async () => {}, state: () => ({}) }}
       backfillResult={{}}
       onRun={vi.fn()}
       onBackfill={vi.fn()}
@@ -87,7 +91,7 @@ describe('a connection that signs in through a Vorn window', () => {
   it("shows the window's answer when no one signed in", async () => {
     signInConnection.mockResolvedValue({
       ok: false,
-      message: 'The sign-in window closed before anyone signed in.'
+      error: 'The sign-in window closed before anyone signed in.'
     })
     const { getByRole, findByText } = setup()
     fireEvent.click(getByRole('button', { name: 'Sign in' }))

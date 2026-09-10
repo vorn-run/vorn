@@ -5,7 +5,7 @@ import * as browserRegistry from './browser-registry'
 import * as deviceRegistry from './device-registry'
 import { installCompanionQuitHook } from './device-companion'
 import { installConnectorCredentialsSync } from './connector-credentials-sync'
-import { installConnectionSessions } from './connection-sessions'
+import { closeConnectionWindows, installConnectionSessions } from './connection-sessions'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
 import {
@@ -139,6 +139,8 @@ function createWindow(): void {
   })
 
   mainWindow.on('closed', () => {
+    // Hidden connection windows would otherwise keep Windows and Linux from quitting.
+    closeConnectionWindows()
     mainWindow = null
     if (widgetWindow && !widgetWindow.isDestroyed()) {
       widgetWindow.destroy()
@@ -619,7 +621,7 @@ app.whenReady().then(async () => {
   // the server's in-memory store. Runs once on boot, re-syncs on every
   // config change so newly added connections are picked up without restart.
   installConnectorCredentialsSync(bridge)
-  installConnectionSessions(bridge)
+  installConnectionSessions(bridge, { sweep: readHostSettings().mode !== 'host' })
 
   // Load config for widget + update channel
   let updateChannel: 'stable' | 'beta' = 'stable'

@@ -888,7 +888,7 @@ const api = {
   signInConnection: (
     connectionId: string,
     link?: string
-  ): Promise<{ ok: boolean; identity?: string; message?: string }> =>
+  ): Promise<{ ok: boolean; identity?: string; error?: string }> =>
     ipcRenderer.invoke(IPC.CONNECTION_SIGN_IN, { connectionId, link }),
 
   signOutConnection: (connectionId: string): Promise<void> =>

@@ -3,6 +3,11 @@
 /** An origin a connector may act on: `https://host`, or `https://*.host` for every subdomain. */
 export const ORIGIN_PATTERN = /^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$/i
 
+/** How an origin reads to a person: its host, `*.` kept for a wildcard. */
+export function originLabel(origin: string): string {
+  return origin.replace(/^https:\/\//, '')
+}
+
 /** Whether `url` is on one of the declared origins. */
 export function withinOrigins(origins: readonly string[], url: string): boolean {
   let parsed: URL
