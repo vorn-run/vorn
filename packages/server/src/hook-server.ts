@@ -71,6 +71,7 @@ export class HookServer extends EventEmitter {
    * instance the person is using.
    */
   private owner = false
+  private ownerWatch: NodeJS.Timeout | null = null
   private authToken: string
 
   constructor() {
@@ -98,6 +99,8 @@ export class HookServer extends EventEmitter {
   // restarts (Claude sessions read the URL once and keep using it).
   // Falls back to an OS-assigned port if the preferred one is taken.
   private static readonly PREFERRED_PORT = 56432
+  /** How often a server that found the registration held looks again. */
+  static OWNER_POLL_MS = 1000
 
   /** Verify bearer token from Authorization header */
   private authenticate(req: http.IncomingMessage, res: http.ServerResponse): boolean {
@@ -335,20 +338,40 @@ export class HookServer extends EventEmitter {
    * while another Vorn is running is what silently redirected its hooks here.
    */
   private claim(): void {
+    if (this.tryClaim()) return
+    // The holder may be a server on its way out, as on an update; take over when it is gone.
+    this.ownerWatch = setInterval(() => {
+      if (this.tryClaim()) this.stopWatchingOwner()
+    }, HookServer.OWNER_POLL_MS)
+    this.ownerWatch.unref?.()
+  }
+
+  /** Claims the registration when nobody live holds it; true once this server owns it. */
+  private tryClaim(): boolean {
+    if (this.owner) return true
     const owner = readHookOwnerFile()
-    this.owner = mayClaimHooks({ owner, selfPid: process.pid, isAlive: pidIsAlive })
-
-    if (!this.owner) {
-      log.info(
-        `[hooks] another Vorn (pid ${owner?.pid}) owns the hook registration on port ` +
-          `${owner?.port}, so this server listens on ${this.port} without claiming it`
-      )
-      return
+    if (!mayClaimHooks({ owner, selfPid: process.pid, isAlive: pidIsAlive })) {
+      if (!this.ownerWatch) {
+        log.info(
+          `[hooks] another Vorn (pid ${owner?.pid}) owns the hook registration on port ` +
+            `${owner?.port}, so this server listens on ${this.port} without claiming it`
+        )
+      }
+      return false
     }
-
+    this.owner = true
     this.writeOwnerFile()
     this.writePortFile()
     this.writeTokenFile()
+    if (this.ownerWatch)
+      log.info(`[hooks] the registration is free; claimed it on port ${this.port}`)
+    this.emit('claimed', this.port)
+    return true
+  }
+
+  private stopWatchingOwner(): void {
+    if (this.ownerWatch) clearInterval(this.ownerWatch)
+    this.ownerWatch = null
   }
 
   private writeOwnerFile(): void {
@@ -386,6 +409,7 @@ export class HookServer extends EventEmitter {
 
     this.server?.close()
     this.server = null
+    this.stopWatchingOwner()
 
     // Only what we wrote, confirmed against the record rather than against a flag
     // we set at startup. These files name one live server, and deleting another
