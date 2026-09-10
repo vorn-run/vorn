@@ -1,14 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   createSessionFetch,
+  ORIGIN_PATTERN,
+  SessionRefusedError,
   SessionUnavailableError,
   withinOrigins
 } from '../packages/connector-sdk/src/index'
-import { withinOrigins as sharedWithinOrigins } from '../packages/shared/src/connector-origins'
+import {
+  ORIGIN_PATTERN as SHARED_ORIGIN_PATTERN,
+  withinOrigins as sharedWithinOrigins
+} from '../packages/shared/src/connector-origins'
 
 const env = {
-  VORN_SESSION_HOST: 'http://127.0.0.1:4100/connections/c1/session',
-  VORN_SESSION_TOKEN: 't0k'
+  VORN_BROWSER_HOST: 'http://127.0.0.1:4100/connections/c1/session',
+  VORN_BROWSER_TOKEN: 't0k'
 }
 
 const answering = (status: number, body: unknown) =>
@@ -49,7 +54,7 @@ describe('the signed-in fetch a browser connector gets', () => {
   it('never sends its token to a host that is not this machine', async () => {
     const call = answering(200, {})
     const fetch = createSessionFetch({
-      env: { ...env, VORN_SESSION_HOST: 'http://collector.example/session' },
+      env: { ...env, VORN_BROWSER_HOST: 'http://collector.example/session' },
       fetchImpl: call
     })
     await expect(fetch('https://substack.com/')).rejects.toThrow(/served on this machine/)
@@ -69,7 +74,7 @@ describe('the signed-in fetch a browser connector gets', () => {
       fetchImpl: answering(403, { error: 'https://evil.io is not one of its origins' })
     })
     const error = await refused('https://evil.io/').catch((e: unknown) => e)
-    expect(error).toBeInstanceOf(Error)
+    expect(error).toBeInstanceOf(SessionRefusedError)
     expect(error).not.toBeInstanceOf(SessionUnavailableError)
     expect((error as Error).message).toMatch(/not one of its origins/)
   })
@@ -102,8 +107,25 @@ describe('which pages a browser connector may reach', () => {
   })
 
   it('draws the same line in the app as in the SDK', () => {
+    expect(SHARED_ORIGIN_PATTERN.source).toBe(ORIGIN_PATTERN.source)
+    expect(sharedWithinOrigins.toString()).toBe(withinOrigins.toString())
     for (const [url] of cases) {
       expect([url, sharedWithinOrigins(origins, url)]).toEqual([url, withinOrigins(origins, url)])
     }
+  })
+})
+
+describe('a signed-in call that cannot be helped by asking again', () => {
+  it('fails at once instead of waiting through the retries', async () => {
+    const { resilientFetch } = await import('../packages/connector-sdk/src/index')
+    const closed = vi.fn<typeof fetch>(async () => {
+      throw new SessionUnavailableError('Open Vorn')
+    })
+    const sleep = vi.fn(async () => {})
+    await expect(
+      resilientFetch({ fetchImpl: closed, retryable: true, sleep })('https://x.io/')
+    ).rejects.toThrow('Open Vorn')
+    expect(closed).toHaveBeenCalledOnce()
+    expect(sleep).not.toHaveBeenCalled()
   })
 })

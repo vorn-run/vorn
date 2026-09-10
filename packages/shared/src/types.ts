@@ -2174,6 +2174,15 @@ export interface ConnectorCatalogSnapshot {
  */
 export type ConnectorAuthRung = 'none' | 'cli' | 'key' | 'browser' | 'oauth'
 
+/** Every rung this build can describe, lowest first; the SDK keeps its own copy. */
+export const CONNECTOR_AUTH_RUNGS: readonly ConnectorAuthRung[] = [
+  'none',
+  'cli',
+  'key',
+  'browser',
+  'oauth'
+]
+
 /** Where a `browser` connector signs in, the only origins it may act on, and how to tell who is signed in. */
 export interface SdkBrowserSignIn {
   signInUrl: string

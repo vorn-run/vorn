@@ -1,3 +1,4 @@
+import { CONNECTOR_AUTH_RUNGS } from '../../shared/types'
 import type {
   ConnectorAuthRung,
   ConnectorCatalogActionInput,
@@ -487,8 +488,9 @@ export const AUTH_RUNG: Record<
 
 /** The rungs actually present, so the filter never offers an empty answer. */
 export function connectorAuthRungs(listings: ConnectorListing[]): ConnectorAuthRung[] {
-  const order: ConnectorAuthRung[] = ['none', 'cli', 'key', 'browser', 'oauth']
-  return order.filter((rung) => listings.some((listing) => listing.authRung === rung))
+  return CONNECTOR_AUTH_RUNGS.filter((rung) =>
+    listings.some((listing) => listing.authRung === rung)
+  )
 }
 
 /** What a kind is called where a person picks one. */

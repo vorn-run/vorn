@@ -35,6 +35,20 @@ export interface RunPollOptions {
 
 type SessionOptions = Pick<RunPollOptions, 'sessionFetchImpl' | 'retry' | 'sleep'>
 
+/** Wrap a fetch with the SDK's retries, as far as the caller says a repeat is safe. */
+function wrap(
+  fetchImpl: typeof fetch,
+  options: Pick<RunPollOptions, 'retry' | 'sleep'>,
+  retryable: boolean
+): typeof fetch {
+  return resilientFetch({
+    fetchImpl,
+    retryable,
+    ...(options.retry !== undefined && { retry: options.retry }),
+    ...(options.sleep !== undefined && { sleep: options.sleep })
+  })
+}
+
 /** The signed-in window, handed only to a connector that signs in through one. */
 function sessionFor(
   connector: Connector,
@@ -42,14 +56,7 @@ function sessionFor(
   retryable: boolean
 ): SessionContext | undefined {
   if (connector.auth?.rung !== 'browser') return undefined
-  return {
-    fetch: resilientFetch({
-      fetchImpl: options.sessionFetchImpl ?? createSessionFetch(),
-      retryable,
-      ...(options.retry !== undefined && { retry: options.retry }),
-      ...(options.sleep !== undefined && { sleep: options.sleep })
-    })
-  }
+  return { fetch: wrap(options.sessionFetchImpl ?? createSessionFetch(), options, retryable) }
 }
 
 /** Longest chain of pages `drainPoll` will follow before calling it a bug. */
@@ -79,12 +86,7 @@ export async function runPoll(
     ...(options.limit !== undefined && { limit: options.limit }),
     now,
     // A poll only reads, so every failure it meets is worth trying again.
-    fetch: resilientFetch({
-      fetchImpl: options.fetchImpl ?? globalThis.fetch,
-      retryable: true,
-      ...(options.retry !== undefined && { retry: options.retry }),
-      ...(options.sleep !== undefined && { sleep: options.sleep })
-    }),
+    fetch: wrap(options.fetchImpl ?? globalThis.fetch, options, true),
     ...(session && { session })
   }
 
@@ -168,12 +170,7 @@ export async function runOptions(
   const loaded = await loader({
     config: options.config ?? {},
     now: options.now ?? (() => new Date().toISOString()),
-    fetch: resilientFetch({
-      fetchImpl: options.fetchImpl ?? globalThis.fetch,
-      retryable: true,
-      ...(options.retry !== undefined && { retry: options.retry }),
-      ...(options.sleep !== undefined && { sleep: options.sleep })
-    }),
+    fetch: wrap(options.fetchImpl ?? globalThis.fetch, options, true),
     ...(session && { session })
   })
 
@@ -258,12 +255,7 @@ export async function runAction(
   const method = (action.request?.method ?? 'GET').toUpperCase()
   const retryable =
     action.idempotent === true || (action.request !== undefined && SAFE_METHODS.has(method))
-  const fetchImpl = resilientFetch({
-    fetchImpl: options.fetchImpl ?? globalThis.fetch,
-    retryable,
-    ...(options.retry !== undefined && { retry: options.retry }),
-    ...(options.sleep !== undefined && { sleep: options.sleep })
-  })
+  const fetchImpl = wrap(options.fetchImpl ?? globalThis.fetch, options, retryable)
   const session = sessionFor(connector, options, retryable)
 
   if (action.request !== undefined) {

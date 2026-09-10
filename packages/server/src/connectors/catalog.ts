@@ -18,6 +18,7 @@
  * needs is still read by probing the installed package, so nothing here is
  * trusted once a connector is actually being set up.
  */
+import { CONNECTOR_AUTH_RUNGS } from '@vornrun/shared/types'
 import { EventEmitter } from 'node:events'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
@@ -61,7 +62,7 @@ const FETCH_TIMEOUT_MS = 5000
 const CACHE_PATH = join(os.homedir(), '.vorn', 'connector-catalog.json')
 
 /** Rungs this build knows how to describe; anything else is dropped on read. */
-const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'browser', 'oauth']
+const AUTH_RUNGS = CONNECTOR_AUTH_RUNGS
 
 /** The one receipt format this build will show a verified mark for. */
 const VERIFICATION_SCHEMA = 1

@@ -14,7 +14,7 @@ import type {
   ExtensionPlatform,
   PaneContribution
 } from './types'
-import { ORIGIN_PATTERN, withinOrigins } from './session'
+import { ORIGIN_PATTERN, withinOrigins } from './origins'
 
 const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 

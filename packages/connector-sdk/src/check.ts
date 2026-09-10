@@ -353,8 +353,7 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
         await runAction(connector, action.type, args, {
           config,
           ...(options.now && { now: options.now }),
-          // Looked up per call, so the stub installed for this run serves the signed-in calls too.
-          sessionFetchImpl: (input, init) => globalThis.fetch(input, init)
+          sessionFetchImpl: globalThis.fetch
         })
         return undefined
       } catch (error) {
@@ -598,6 +597,13 @@ export function liveExamines(connector: Connector): boolean {
   return connector.preflight !== undefined || connector.actions.some(liveRunnable)
 }
 
+function needsWindow(error: unknown): boolean {
+  return (
+    error instanceof SessionUnavailableError ||
+    (error instanceof Error && error.cause instanceof SessionUnavailableError)
+  )
+}
+
 /**
  * Ask the connector, against the real service, the questions only it can answer.
  *
@@ -607,13 +613,6 @@ export function liveExamines(connector: Connector): boolean {
  * leave real issues behind, and one of `closeIssue('check')` would only prove
  * that no such issue exists.
  */
-function needsWindow(error: unknown): boolean {
-  return (
-    error instanceof SessionUnavailableError ||
-    (error instanceof Error && error.cause instanceof SessionUnavailableError)
-  )
-}
-
 async function liveFindings(connector: Connector, options: CheckOptions): Promise<CheckFinding[]> {
   if (!options.live) return []
   const found: CheckFinding[] = []

@@ -15,7 +15,7 @@ const first = (raw: Record<string, unknown>) =>
 
 describe('the rung a catalog entry declares', () => {
   it('is carried when this build knows how to describe it', () => {
-    for (const authRung of ['none', 'cli', 'key', 'oauth']) {
+    for (const authRung of ['none', 'cli', 'key', 'browser', 'oauth']) {
       expect(first({ authRung })?.authRung).toBe(authRung)
     }
   })

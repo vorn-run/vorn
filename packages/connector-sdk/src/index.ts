@@ -10,11 +10,11 @@ export { createExtensionHost, PermissionDeniedError, HOST_URL_ENV, HOST_TOKEN_EN
 export {
   createSessionFetch,
   SessionUnavailableError,
-  SESSION_HOST_ENV,
-  SESSION_TOKEN_ENV,
-  ORIGIN_PATTERN,
-  withinOrigins
+  SessionRefusedError,
+  BROWSER_HOST_ENV,
+  BROWSER_TOKEN_ENV
 } from './session'
+export { ORIGIN_PATTERN, withinOrigins } from './origins'
 export type { SessionFetchOptions } from './session'
 export type { HostBridgeOptions } from './host'
 export { checkConnector, formatFindings, runConformance, CHECK_OWNERS } from './check'

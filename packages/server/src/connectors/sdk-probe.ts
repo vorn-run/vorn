@@ -13,6 +13,7 @@
  * right for polling and wrong for a probe of something the user may not
  * install. This spawns, asks, and exits.
  */
+import { CONNECTOR_AUTH_RUNGS } from '@vornrun/shared/types'
 import { ORIGIN_PATTERN, withinOrigins } from '@vornrun/shared/connector-origins'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -197,7 +198,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const str = (value: unknown, fallback = ''): string =>
   typeof value === 'string' ? value : fallback
 
-const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'browser', 'oauth']
+const AUTH_RUNGS = CONNECTOR_AUTH_RUNGS
 
 /**
  * A bare executable name, which is all a probe command is allowed to be.

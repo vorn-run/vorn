@@ -87,6 +87,11 @@ export function backoffMs(attempt: number, policy: RetryPolicy = {}): number {
  * The wrapper is the value handed to actions as `context.fetch`, so a
  * hand-written action and a declared request are equally protected.
  */
+/** An error that says asking again cannot help, such as a closed Vorn window. */
+function isFinal(error: unknown): boolean {
+  return (error as { retryable?: unknown } | null)?.retryable === false
+}
+
 export function resilientFetch(options: ResilientFetchOptions): typeof fetch {
   const attempts = Math.min(MAX_ATTEMPTS, Math.max(1, options.retry?.attempts ?? DEFAULT_ATTEMPTS))
   const sleep = options.sleep ?? wait
@@ -120,7 +125,7 @@ export function resilientFetch(options: ResilientFetchOptions): typeof fetch {
       } catch (error) {
         // A thrown fetch is the network failing rather than the server
         // answering, which is exactly the case a retry exists for.
-        if (!options.retryable || last) throw error
+        if (!options.retryable || last || isFinal(error)) throw error
         if (!(await pause(backoffMs(attempt, options.retry)))) throw error
       }
     }
