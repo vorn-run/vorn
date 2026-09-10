@@ -762,7 +762,9 @@ function migrateSchema(d: Database.Database): void {
           last_sync_at TEXT,
           last_sync_error TEXT,
           sync_cursor TEXT,
-          created_at TEXT NOT NULL
+          created_at TEXT NOT NULL,
+          signed_in_as TEXT,
+          signed_in_at TEXT
         )
       `)
 
@@ -1086,6 +1088,24 @@ function migrateSchema(d: Database.Database): void {
       ).run()
     })()
     log.info('[database] migrated schema to version 19 (worktrees on run steps)')
+  }
+
+  if (version < 20) {
+    d.transaction(() => {
+      const cols = d.prepare('PRAGMA table_info(source_connections)').all() as Array<{
+        name: string
+      }>
+      for (const column of ['signed_in_as', 'signed_in_at']) {
+        if (!cols.some((c) => c.name === column)) {
+          d.exec(`ALTER TABLE source_connections ADD COLUMN ${column} TEXT`)
+        }
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '20')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 20 (who a connection is signed in as)')
   }
 }
 
@@ -2066,6 +2086,8 @@ interface SourceConnectionRow {
   last_sync_error: string | null
   sync_cursor: string | null
   created_at: string
+  signed_in_as: string | null
+  signed_in_at: string | null
 }
 
 function rowToSourceConnection(r: SourceConnectionRow): SourceConnection {
@@ -2080,7 +2102,9 @@ function rowToSourceConnection(r: SourceConnectionRow): SourceConnection {
     ...(r.last_sync_at != null && { lastSyncAt: r.last_sync_at }),
     ...(r.last_sync_error != null && { lastSyncError: r.last_sync_error }),
     ...(r.sync_cursor != null && { syncCursor: r.sync_cursor }),
-    createdAt: r.created_at
+    createdAt: r.created_at,
+    ...(r.signed_in_as != null && { signedInAs: r.signed_in_as }),
+    ...(r.signed_in_at != null && { signedInAt: r.signed_in_at })
   }
 }
 
@@ -2106,8 +2130,8 @@ export function dbGetSourceConnection(id: string): SourceConnection | null {
 export function dbInsertSourceConnection(conn: SourceConnection): void {
   getDb()
     .prepare(
-      `INSERT INTO source_connections (id, connector_id, name, filters, sync_interval_minutes, status_mapping, execution_project, last_sync_at, last_sync_error, sync_cursor, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO source_connections (id, connector_id, name, filters, sync_interval_minutes, status_mapping, execution_project, last_sync_at, last_sync_error, sync_cursor, created_at, signed_in_as, signed_in_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       conn.id,
@@ -2120,7 +2144,9 @@ export function dbInsertSourceConnection(conn: SourceConnection): void {
       conn.lastSyncAt ?? null,
       conn.lastSyncError ?? null,
       conn.syncCursor ?? null,
-      conn.createdAt
+      conn.createdAt,
+      conn.signedInAs ?? null,
+      conn.signedInAt ?? null
     )
 }
 
@@ -2164,6 +2190,17 @@ export function dbUpdateSourceConnection(id: string, updates: Partial<SourceConn
   getDb()
     .prepare(`UPDATE source_connections SET ${sets.join(', ')} WHERE id = ?`)
     .run(...params)
+}
+
+/** Who a connection's window is signed in as; both null once it is signed out. */
+export function dbSetConnectionSignIn(
+  id: string,
+  signedInAs: string | null,
+  signedInAt: string | null
+): void {
+  getDb()
+    .prepare('UPDATE source_connections SET signed_in_as = ?, signed_in_at = ? WHERE id = ?')
+    .run(signedInAs, signedInAt, id)
 }
 
 export function dbDeleteSourceConnection(id: string): void {

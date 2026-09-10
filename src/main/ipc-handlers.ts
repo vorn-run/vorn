@@ -1,4 +1,9 @@
 import { app, dialog, BrowserWindow, session, shell } from 'electron'
+import {
+  forget as forgetConnectionSession,
+  signIn as signInConnection,
+  signOut as signOutConnection
+} from './connection-sessions'
 import { ipcMain } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { safeHandle } from './ipc-safe-handle'
@@ -64,6 +69,9 @@ function registerInboundHandlers(b: ServerBridge): void {
   b.handle('device:openUrl', (p) => deviceRegistry.openUrl(p as P<'device:openUrl'>))
   b.handle('device:logs', (p) => deviceRegistry.logsFor(p as P<'device:logs'>))
   b.handle('device:openPane', (p) => deviceRegistry.openPane(p as P<'device:openPane'>))
+
+  // A connection's signed-in profile lives here, beside the windows that use it.
+  b.handle('session:forget', (p) => forgetConnectionSession(p as P<'session:forget'>))
 }
 
 function requireBridge(): ServerBridge {
@@ -352,6 +360,12 @@ export function registerIpcHandlers(): void {
     requireBridge().request(IPC.CONNECTION_UPDATE, params)
   )
   safeHandle(IPC.CONNECTION_DELETE, (_, id) => requireBridge().request(IPC.CONNECTION_DELETE, id))
+  safeHandle(IPC.CONNECTION_SIGN_IN, (_, { connectionId, link }) =>
+    signInConnection(requireBridge(), connectionId, link)
+  )
+  safeHandle(IPC.CONNECTION_SIGN_OUT, (_, connectionId) =>
+    signOutConnection(requireBridge(), connectionId)
+  )
   safeHandle(IPC.CONNECTION_UPSERT_FROM_ITEM, (_, params) =>
     requireBridge().request(IPC.CONNECTION_UPSERT_FROM_ITEM, params)
   )

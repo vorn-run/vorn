@@ -118,6 +118,7 @@ export function ConnectionGroups({
                   key={conn.id}
                   conn={conn}
                   manifest={manifest}
+                  browserSignIn={group.listing?.pack?.auth?.browser}
                   seededWorkflows={seededFor(workflows, conn)}
                   missingEvents={missingFor(workflows, conn, manifest)}
                   activity={activity}

@@ -68,7 +68,8 @@ import type {
   SdkProbeResult,
   InstalledShell,
   TailscaleStatus,
-  RemoteHost
+  RemoteHost,
+  SdkBrowserSignIn
 } from './types'
 
 // ─── Runtime Protocol Version ───────────────────────────────────
@@ -901,6 +902,22 @@ export interface RequestMethods {
     result: SourceConnection | null
   }
   'connection:delete': {
+    params: string
+    result: void
+  }
+  'connection:browserAuth': {
+    params: string
+    result: { name: string; browser: SdkBrowserSignIn } | null
+  }
+  'connection:signedIn': {
+    params: { connectionId: string; identity: string | null }
+    result: void
+  }
+  'connection:signedOut': {
+    params: string
+    result: void
+  }
+  'session:forget': {
     params: string
     result: void
   }

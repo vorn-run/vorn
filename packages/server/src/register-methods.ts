@@ -1,3 +1,4 @@
+import { SDK_FILTER_KEYS } from '@vornrun/shared/types'
 import fs from 'fs'
 import crypto from 'node:crypto'
 import { registerMethod, registerNotification } from './ws-handler'
@@ -120,6 +121,7 @@ import {
   dbGetSourceConnection,
   dbInsertSourceConnection,
   dbUpdateSourceConnection,
+  dbSetConnectionSignIn,
   dbDeleteSourceConnection,
   dbGetTaskSourceLink,
   dbGetTaskSourceLinkByExternalId,
@@ -358,6 +360,8 @@ function deleteConnectionRecord(id: string): void {
   dbDeleteSourceConnection(id)
   // Forget any decrypted plaintext for this connection.
   clearDecryptedCreds(id)
+  // Its signed-in profile goes too; the desktop that holds it may not be connected right now.
+  void browserBridge.request('session:forget', id).catch(() => {})
   // Terminate any live MCP stdio child for this connection.
   void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
   dbSignalChange()
@@ -1712,6 +1716,26 @@ export function registerAllMethods(): void {
       throw new Error(`${conn.name} came with its connector. Remove the pack instead.`)
     }
     deleteConnectionRecord(id)
+  })
+
+  registerMethod('connection:browserAuth', async (id) => {
+    const conn = dbGetSourceConnection(id)
+    const sdkId = conn?.filters[SDK_FILTER_KEYS.connectorId]
+    if (!conn || typeof sdkId !== 'string') return null
+    const auth = (await resolveConnectorAuth(sdkId))?.auth
+    return auth?.rung === 'browser' && auth.browser
+      ? { name: conn.name, browser: auth.browser }
+      : null
+  })
+
+  registerMethod('connection:signedIn', ({ connectionId, identity }) => {
+    dbSetConnectionSignIn(connectionId, identity, new Date().toISOString())
+    dbSignalChange()
+  })
+
+  registerMethod('connection:signedOut', (id) => {
+    dbSetConnectionSignIn(id, null, null)
+    dbSignalChange()
   })
 
   registerMethod('workflow:runManual', ({ workflowId, inputs }) => {

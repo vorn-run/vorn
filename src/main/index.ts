@@ -5,6 +5,7 @@ import * as browserRegistry from './browser-registry'
 import * as deviceRegistry from './device-registry'
 import { installCompanionQuitHook } from './device-companion'
 import { installConnectorCredentialsSync } from './connector-credentials-sync'
+import { installConnectionSessions } from './connection-sessions'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
 import {
@@ -618,6 +619,7 @@ app.whenReady().then(async () => {
   // the server's in-memory store. Runs once on boot, re-syncs on every
   // config change so newly added connections are picked up without restart.
   installConnectorCredentialsSync(bridge)
+  installConnectionSessions(bridge)
 
   // Load config for widget + update channel
   let updateChannel: 'stable' | 'beta' = 'stable'

@@ -884,6 +884,16 @@ const api = {
 
   deleteConnection: (id: string): Promise<void> => ipcRenderer.invoke(IPC.CONNECTION_DELETE, id),
 
+  /** Opens the connection's sign-in window, settling once someone is signed in or the window closes. */
+  signInConnection: (
+    connectionId: string,
+    link?: string
+  ): Promise<{ ok: boolean; identity?: string; message?: string }> =>
+    ipcRenderer.invoke(IPC.CONNECTION_SIGN_IN, { connectionId, link }),
+
+  signOutConnection: (connectionId: string): Promise<void> =>
+    ipcRenderer.invoke(IPC.CONNECTION_SIGN_OUT, connectionId),
+
   /**
    * Run controls, now that runs happen in the server.
    *

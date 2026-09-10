@@ -530,6 +530,9 @@ export interface SourceConnection {
   lastSyncError?: string
   syncCursor?: string
   createdAt: string
+  /** Who the connection's Vorn window is signed in as, for a connector that signs in through one. */
+  signedInAs?: string
+  signedInAt?: string
 }
 
 /** One stored secret on a connection, described without being disclosed. */
@@ -1895,6 +1898,8 @@ export const IPC = {
   CONNECTION_CREATE: 'connection:create',
   CONNECTION_UPDATE: 'connection:update',
   CONNECTION_DELETE: 'connection:delete',
+  CONNECTION_SIGN_IN: 'connection:signIn',
+  CONNECTION_SIGN_OUT: 'connection:signOut',
   CONNECTION_GET_SOURCE_LINK: 'connection:getSourceLink',
   CONNECTOR_DETECT_REPO: 'connector:detectRepo',
   CONNECTOR_SEED_WORKFLOW: 'connector:seedWorkflow',
@@ -2587,6 +2592,11 @@ export interface BrowserNetworkRequest {
  */
 export function browserPartition(sessionId: string): string {
   return `persist:vorn-browser-${sessionId}`
+}
+
+/** The browser profile a connection signs in through; it is that connection's secret. */
+export function connectionPartition(connectionId: string): string {
+  return `persist:vorn-connection-${connectionId}`
 }
 
 /**

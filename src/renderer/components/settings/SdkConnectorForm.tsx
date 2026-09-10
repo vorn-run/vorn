@@ -183,7 +183,7 @@ export function SdkConnectorForm({
       // connection that polls and never fires.
       if (trigger) Object.assign(filters, trigger.filters)
 
-      await window.api.createConnection({
+      const created = await window.api.createConnection({
         connectorId: 'mcp',
         name: trigger ? `${manifest.name}: ${trigger.label}` : manifest.name,
         filters,
@@ -196,6 +196,8 @@ export function SdkConnectorForm({
         ...(trigger?.defaultWorkflow && { seedWorkflow: trigger.defaultWorkflow }),
         executionProject: selectedProject
       })
+      // Signing in takes as long as it takes, so the connection's row carries on from here.
+      if (rung === 'browser') void window.api.signInConnection?.(created.id)
       onDone()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -375,6 +377,24 @@ export function SdkConnectorForm({
             </div>
           )}
 
+          {rung === 'browser' && manifest.auth?.browser && (
+            <div className="px-3 py-2 bg-white/[0.03] border border-white/[0.08] rounded-sm">
+              <div className="flex items-center gap-1.5 text-sm text-gray-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-ink-ghost shrink-0" />
+                <span>Signs in through a Vorn window</span>
+              </div>
+              <p className="text-[11px] text-gray-600 mt-1">
+                After Connect, a window opens on {new URL(manifest.auth.browser.signInUrl).host}.
+                The login stays in a browser profile only this connection uses, and it acts as you
+                on{' '}
+                {manifest.auth.browser.origins
+                  .map((origin) => origin.replace('https://', ''))
+                  .join(', ')}
+                .
+              </p>
+            </div>
+          )}
+
           {fields.map((entry) => (
             <div key={entry.name}>
               <label className="text-xs text-gray-500 mb-1 flex items-center gap-1.5">
@@ -415,7 +435,13 @@ export function SdkConnectorForm({
           className="px-4 py-1.5 text-sm bg-white/[0.1] hover:bg-white/[0.15] text-white rounded-sm transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
         >
           <BusyIcon busy={saving} size={12} />
-          {rung === 'none' ? 'Done' : saving ? 'Connecting…' : 'Connect'}
+          {rung === 'none'
+            ? 'Done'
+            : saving
+              ? 'Connecting…'
+              : rung === 'browser'
+                ? 'Connect and sign in'
+                : 'Connect'}
         </button>
         <button
           onClick={onCancel}
