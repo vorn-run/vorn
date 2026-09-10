@@ -194,6 +194,7 @@ import {
 } from './connectors/implicit-connection'
 import { probeAuth, type BorrowSource } from './connectors/auth-rung'
 import { resolveConnectorAuth } from './connectors/connector-auth'
+import { markSignedOut } from './connectors/session-bridge'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { isImplicitConnection, type ConnectorPackSource } from '@vornrun/shared/types'
 import { catalogEvents, catalogSnapshot, refreshCatalog } from './connectors/catalog'
@@ -1736,10 +1737,7 @@ export function registerAllMethods(): void {
     dbSignalChange()
   })
 
-  registerMethod('connection:signedOut', (id) => {
-    dbSetConnectionSignIn(id, null, null)
-    dbSignalChange()
-  })
+  registerMethod('connection:signedOut', (id) => markSignedOut(id))
 
   registerMethod('workflow:runManual', ({ workflowId, inputs }) => {
     const wf = dbGetWorkflow(workflowId)

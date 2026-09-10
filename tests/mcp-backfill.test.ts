@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // spawns a server.
 const callTool = vi.fn()
 vi.mock('../packages/server/src/connectors/mcp-clients', () => ({
+  sessionGrantFor: () => undefined,
   getOrStartClient: vi.fn(async () => ({ callTool }))
 }))
 

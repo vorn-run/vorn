@@ -30,6 +30,7 @@ import {
 import { registerWebhookRoute } from './webhook-trigger'
 import { registerExtensionBridge, type ExtensionRouteDeps } from './extensions/bridge'
 import { registerSessionBridge, setSessionBridgeOrigin } from './connectors/session-bridge'
+import { sessionGrantFor } from './connectors/mcp-clients'
 import { setExtensionBridgeOrigin, stopAllHosts } from './extensions/hosts'
 import { startExtensionPageServer, stopExtensionPageServer } from './extensions/page-server'
 import { stopAllFooters } from './extensions/footers'
@@ -283,8 +284,7 @@ export async function startServer(
   // was started with. The pages its panes are drawn from are served on their own
   // origin instead, so a page shares neither storage nor a socket with the app.
   registerExtensionBridge(app, extensionRouteDeps)
-  // A browser connector's child, calling through the window its connection signed in on.
-  registerSessionBridge(app)
+  registerSessionBridge(app, sessionGrantFor)
 
   /**
    * Pairing, the phone's half.

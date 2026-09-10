@@ -33,7 +33,9 @@ export interface RunPollOptions {
   sleep?: (ms: number) => Promise<void>
 }
 
-type SessionOptions = Pick<RunPollOptions, 'sessionFetchImpl' | 'retry' | 'sleep'>
+type SessionOptions = Pick<RunPollOptions, 'sessionFetchImpl' | 'retry' | 'sleep'> & {
+  sessionCall?: string
+}
 
 /** Wrap a fetch with the SDK's retries, as far as the caller says a repeat is safe. */
 function wrap(
@@ -56,7 +58,10 @@ function sessionFor(
   retryable: boolean
 ): SessionContext | undefined {
   if (connector.auth?.rung !== 'browser') return undefined
-  return { fetch: wrap(options.sessionFetchImpl ?? createSessionFetch(), options, retryable) }
+  const fetchImpl =
+    options.sessionFetchImpl ??
+    createSessionFetch(options.sessionCall ? { call: options.sessionCall } : {})
+  return { fetch: wrap(fetchImpl, options, retryable) }
 }
 
 /** Longest chain of pages `drainPoll` will follow before calling it a bug. */
@@ -142,6 +147,8 @@ export interface RunActionOptions {
   fetchImpl?: typeof fetch
   /** Replaced by the harness and by tests; defaults to the signed-in window Vorn serves. */
   sessionFetchImpl?: typeof fetch
+  /** The key Vorn gave this tool call, carried on each request through the window. */
+  sessionCall?: string
   retry?: RetryPolicy
   /** Replaced in tests so backoff costs no real time. */
   sleep?: (ms: number) => Promise<void>

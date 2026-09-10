@@ -14,8 +14,7 @@
  * token.
  * The decrypted values are merged in at spawn time via `getOrStartClient`.
  */
-import { browserSignInFor, sessionCallsSince, stillSignedIn } from './session-bridge'
-import { dbSetConnectionSignIn, dbSignalChange } from '../database'
+import { openSessionCall, sessionOutcome, type SessionGrant } from './session-bridge'
 import type {
   VornConnector,
   ConnectorManifest,
@@ -27,9 +26,9 @@ import type {
   ExternalItem,
   SourceConnection
 } from '@vornrun/shared/types'
-import { SDK_FILTER_KEYS } from '@vornrun/shared/types'
+import { SDK_FILTER_KEYS, SESSION_CALL_META } from '@vornrun/shared/types'
 import { schemaProperties, schemaTypeHint, schemaRequired } from '@vornrun/shared/json-schema-utils'
-import { getOrStartClient } from './mcp-clients'
+import { getOrStartClient, sessionGrantFor } from './mcp-clients'
 import { PREFLIGHT_TOOL, isReservedSdkTool } from './sdk-tools'
 import { describePack } from './packs'
 
@@ -253,21 +252,25 @@ export async function invokeMcpTool(
   toolName: string,
   args: Record<string, unknown>
 ): Promise<ActionResult> {
-  const started = Date.now()
+  let session: { grant: SessionGrant; key: string } | undefined
+  let outcome: ActionResult
   try {
     const client = await getOrStartClient(conn)
+    const grant = sessionGrantFor(conn.id)
+    if (grant) session = { grant, key: openSessionCall(grant) }
     // Look up this tool's discovered inputSchema so we can coerce string form
     // values back to the types the tool actually expects.
     const tools = conn.filters.discoveredTools
     const tool = Array.isArray(tools)
       ? (tools as McpDiscoveredTool[]).find((t) => t.name === toolName)
       : undefined
-    const callArgs = coerceMcpArgs(tool?.inputSchema, args)
-    const browser = browserSignInFor(conn.id) !== undefined
-    // A signed-in tool may make several calls through its window, each up to twenty seconds.
-    const params = { name: toolName, arguments: callArgs }
-    const result = browser
-      ? await client.callTool(params, undefined, { timeout: BROWSER_TOOL_TIMEOUT_MS })
+    const params = { name: toolName, arguments: coerceMcpArgs(tool?.inputSchema, args) }
+    const result = session
+      ? await client.callTool(
+          { ...params, _meta: { [SESSION_CALL_META]: session.key } },
+          undefined,
+          { timeout: BROWSER_TOOL_TIMEOUT_MS }
+        )
       : await client.callTool(params)
     // When the tool declared an outputSchema, MCP returns the typed payload
     // under `structuredContent`. Surface that as `output` so downstream
@@ -280,54 +283,21 @@ export async function invokeMcpTool(
       string,
       unknown
     >
-    if (result.isError) {
-      return await withSessionOutcome(conn, started, {
-        success: false,
-        error: extractTextError(result.content) ?? `MCP tool ${toolName} reported an error`,
-        output
-      })
-    }
-    return await withSessionOutcome(conn, started, { success: true, output })
+    outcome = result.isError
+      ? {
+          success: false,
+          error: extractTextError(result.content) ?? `MCP tool ${toolName} reported an error`,
+          output
+        }
+      : { success: true, output }
   } catch (err) {
-    return await withSessionOutcome(conn, started, {
-      success: false,
-      error: err instanceof Error ? err.message : String(err)
-    })
+    outcome = { success: false, error: err instanceof Error ? err.message : String(err) }
   }
+  return session ? await sessionOutcome(conn, session.grant, session.key, outcome) : outcome
 }
 
 /** A tool may make several calls through its window, each up to twenty seconds. */
 const BROWSER_TOOL_TIMEOUT_MS = 120_000
-
-/** A browser connection's result, with its window calls attached and a failure told apart: Vorn closed, or the site signed it out. */
-async function withSessionOutcome(
-  conn: SourceConnection,
-  since: number,
-  result: ActionResult
-): Promise<ActionResult> {
-  if (browserSignInFor(conn.id) === undefined) return result
-  const sessionCalls = sessionCallsSince(conn.id, since)
-  const withCalls = sessionCalls.length > 0 ? { ...result, sessionCalls } : result
-  if (result.success) return withCalls
-  if (sessionCalls.some((call) => call.status === 'app-offline')) {
-    return {
-      ...withCalls,
-      errorKind: 'app-offline',
-      error: `Open Vorn on the desktop ${conn.name} signed in on, then run this step again.`
-    }
-  }
-  const refused = sessionCalls.some((call) => call.status === 401 || call.status === 403)
-  if (refused && (await stillSignedIn(conn.id)) === false) {
-    dbSetConnectionSignIn(conn.id, null, null)
-    dbSignalChange()
-    return {
-      ...withCalls,
-      errorKind: 'needs-sign-in',
-      error: `${conn.name} was signed out. Sign in again, and this step runs again.`
-    }
-  }
-  return withCalls
-}
 
 // --- Poll / trigger support -------------------------------------------------
 

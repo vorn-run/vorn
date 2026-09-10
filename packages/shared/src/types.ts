@@ -424,6 +424,10 @@ export interface ActionResult {
   sessionCalls?: SessionCall[]
 }
 
+/** Where a tool call's key travels: in the call's MCP metadata, then on each request the child makes through its window. */
+export const SESSION_CALL_META = 'vorn/sessionCall'
+export const SESSION_CALL_HEADER = 'x-vorn-session-call'
+
 /** One call a browser connection made through its window: what, where, and how it was answered. */
 export interface SessionCall {
   method: string

@@ -18,6 +18,8 @@ const env = {
 
 const answering = (status: number, body: unknown) =>
   vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status }))
+const refusing = (status: number, reason: string) =>
+  vi.fn<typeof fetch>(async () => new Response(reason, { status }))
 
 describe('the signed-in fetch a browser connector gets', () => {
   it('asks Vorn to make the call, carrying the request whole', async () => {
@@ -46,6 +48,12 @@ describe('the signed-in fetch a browser connector gets', () => {
     })
   })
 
+  it('names the tool call its requests belong to, when Vorn gave it one', async () => {
+    const call = answering(200, { status: 200 })
+    await createSessionFetch({ env, fetchImpl: call, call: 'k1' })('https://substack.com/')
+    expect(call.mock.calls[0]?.[1]?.headers).toMatchObject({ 'x-vorn-session-call': 'k1' })
+  })
+
   it('says it needs Vorn when Vorn did not start it', async () => {
     const fetch = createSessionFetch({ env: {}, fetchImpl: answering(200, {}) })
     await expect(fetch('https://substack.com/')).rejects.toBeInstanceOf(SessionUnavailableError)
@@ -64,14 +72,14 @@ describe('the signed-in fetch a browser connector gets', () => {
   it('reads a closed app as unavailable, and any other refusal as an error', async () => {
     const closed = createSessionFetch({
       env,
-      fetchImpl: answering(503, { error: 'Open Vorn on the desktop this connection signed in on' })
+      fetchImpl: refusing(503, 'Open Vorn on the desktop this connection signed in on')
     })
     await expect(closed('https://substack.com/')).rejects.toThrow(SessionUnavailableError)
     await expect(closed('https://substack.com/')).rejects.toThrow(/Open Vorn on the desktop/)
 
     const refused = createSessionFetch({
       env,
-      fetchImpl: answering(403, { error: 'https://evil.io is not one of its origins' })
+      fetchImpl: refusing(403, 'https://evil.io is not one of its origins')
     })
     const error = await refused('https://evil.io/').catch((e: unknown) => e)
     expect(error).toBeInstanceOf(SessionRefusedError)

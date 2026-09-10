@@ -1,90 +1,140 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import type { SdkBrowserSignIn, SessionCall } from '@vornrun/shared/types'
+import {
+  SESSION_CALL_HEADER,
+  type ActionResult,
+  type SdkBrowserSignIn,
+  type SessionCall,
+  type SourceConnection
+} from '@vornrun/shared/types'
 import { withinOrigins } from '@vornrun/shared/connector-origins'
 import { browserBridge } from '../browser-bridge'
+import { dbSetConnectionSignIn, dbSignalChange } from '../database'
+import { constantTimeEqual } from '../token-manager'
+import { bearerFrom } from '../ws-auth'
 import { isLoopbackAddress } from '../ws-handler'
 import log from '../logger'
 
 /** One call in the window, well inside the tool call's own limit. */
 const CALL_TIMEOUT_MS = 20_000
 const MAX_REQUEST_BYTES = 1024 * 1024
-/** Enough recent calls to explain a failed step. */
+/** Enough of one tool call's requests to explain it failing. */
 const KEPT_CALLS = 50
 const METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'])
 
-interface Grant {
+/** What a browser connector's child was started with, kept beside the child and gone with it. */
+export interface SessionGrant {
   token: string
   browser: SdkBrowserSignIn
-  calls: Array<SessionCall & { at: number }>
+  /** The requests of each tool call in flight, keyed by the call's own key. */
+  calls: Map<string, SessionCall[]>
 }
 
-/** The connections whose child may call through a window, keyed by connection id. */
-const grants = new Map<string, Grant>()
 let origin = ''
 
 export function setSessionBridgeOrigin(value: string): void {
   origin = value
 }
 
-/** The endpoint and token a browser connector's child starts with; each spawn replaces the last token. */
-export function sessionEnvFor(
+/** A token for one child alone, and the environment that hands it the endpoint. */
+export function mintSessionGrant(
   connectionId: string,
   browser: SdkBrowserSignIn
-): Record<string, string> {
+): { grant: SessionGrant; env: Record<string, string> } {
   if (!origin) throw new Error('The signed-in window endpoint has no address yet')
   const token = randomBytes(32).toString('base64url')
-  grants.set(connectionId, { token, browser, calls: [] })
   return {
-    VORN_BROWSER_HOST: `${origin}/connections/${connectionId}/browser`,
-    VORN_BROWSER_TOKEN: token
+    grant: { token, browser, calls: new Map() },
+    env: {
+      VORN_BROWSER_HOST: `${origin}/connections/${connectionId}/browser`,
+      VORN_BROWSER_TOKEN: token
+    }
   }
 }
 
-export function browserSignInFor(connectionId: string): SdkBrowserSignIn | undefined {
-  return grants.get(connectionId)?.browser
+/** Start recording a tool call's requests; the key travels with the call to the child and back. */
+export function openSessionCall(grant: SessionGrant): string {
+  const key = randomBytes(12).toString('base64url')
+  grant.calls.set(key, [])
+  return key
 }
 
-export function forgetSessionGrant(connectionId: string): void {
-  grants.delete(connectionId)
+export function closeSessionCall(grant: SessionGrant, key: string): SessionCall[] {
+  const calls = grant.calls.get(key) ?? []
+  grant.calls.delete(key)
+  return calls
 }
 
-/** The calls a connection's child made through its window since `since`. */
-export function sessionCallsSince(connectionId: string, since: number): SessionCall[] {
-  return (grants.get(connectionId)?.calls ?? [])
-    .filter((call) => call.at >= since)
-    .map(({ method, path, status }) => ({ method, path, status }))
+export function markSignedOut(connectionId: string): void {
+  dbSetConnectionSignIn(connectionId, null, null)
+  dbSignalChange()
 }
 
-/** Whether the connection's window is still signed in, asked of the desktop that holds it; undefined when it cannot say. */
-export async function stillSignedIn(connectionId: string): Promise<boolean | undefined> {
-  const grant = grants.get(connectionId)
-  if (!grant || !browserBridge.isConnected) return undefined
-  try {
-    const answer = await browserBridge.request(
-      'session:check',
-      { connectionId, browser: grant.browser },
-      CALL_TIMEOUT_MS
-    )
-    return answer.signedIn
-  } catch {
-    return undefined
+const checking = new Map<string, Promise<boolean | undefined>>()
+
+/** Whether the window is still signed in, asked once however many calls failed together; undefined when no desktop can say. */
+export function stillSignedIn(
+  connectionId: string,
+  browser: SdkBrowserSignIn
+): Promise<boolean | undefined> {
+  const inFlight = checking.get(connectionId)
+  if (inFlight) return inFlight
+  const check = (async () => {
+    if (!browserBridge.isConnected) return undefined
+    try {
+      const answer = await browserBridge.request(
+        'session:check',
+        { connectionId, browser },
+        CALL_TIMEOUT_MS
+      )
+      return answer.signedIn
+    } catch {
+      return undefined
+    }
+  })().finally(() => checking.delete(connectionId))
+  checking.set(connectionId, check)
+  return check
+}
+
+/** A browser connection's result, with its window calls attached and a failure told apart: Vorn closed, or the site signed it out. */
+export async function sessionOutcome(
+  conn: SourceConnection,
+  grant: SessionGrant,
+  key: string,
+  result: ActionResult
+): Promise<ActionResult> {
+  const sessionCalls = closeSessionCall(grant, key)
+  const withCalls = sessionCalls.length > 0 ? { ...result, sessionCalls } : result
+  if (result.success) return withCalls
+  if (sessionCalls.some((call) => call.status === 'app-offline')) {
+    return {
+      ...withCalls,
+      errorKind: 'app-offline',
+      error: `Open Vorn on the desktop ${conn.name} signed in on, then run this step again.`
+    }
   }
+  const refused = sessionCalls.some((call) => call.status === 401 || call.status === 403)
+  if (refused && (await stillSignedIn(conn.id, grant.browser)) === false) {
+    markSignedOut(conn.id)
+    return {
+      ...withCalls,
+      errorKind: 'needs-sign-in',
+      error: `${conn.name} was signed out. Sign in again, and this step runs again.`
+    }
+  }
+  return withCalls
 }
 
-function record(grant: Grant, call: SessionCall): void {
-  grant.calls.push({ ...call, at: Date.now() })
-  if (grant.calls.length > KEPT_CALLS) grant.calls.splice(0, grant.calls.length - KEPT_CALLS)
+function record(grant: SessionGrant, key: string | undefined, call: SessionCall): void {
+  const calls = key === undefined ? undefined : grant.calls.get(key)
+  if (!calls) return
+  calls.push(call)
+  if (calls.length > KEPT_CALLS) calls.splice(0, calls.length - KEPT_CALLS)
 }
 
-function refuse(reply: FastifyReply, code: number, error: string): FastifyReply {
-  return reply.code(code).send({ error })
-}
-
-function sameToken(given: string, expected: string): boolean {
-  const a = Buffer.from(given)
-  const b = Buffer.from(expected)
-  return a.length === b.length && timingSafeEqual(a, b)
+function refuse(reply: FastifyReply, code: number, reason: string): FastifyReply {
+  // Plain text, like the extension bridge: the SDK reads a refusal's body verbatim into its error.
+  return reply.code(code).type('text/plain; charset=utf-8').send(reason)
 }
 
 interface CallRequest {
@@ -116,17 +166,23 @@ function readRequest(body: unknown): CallRequest | undefined {
 }
 
 /** A browser connector's child, calling through the window its connection signed in on. */
-export function registerSessionBridge(app: FastifyInstance): void {
+export function registerSessionBridge(
+  app: FastifyInstance,
+  grantFor: (connectionId: string) => SessionGrant | undefined
+): void {
   app.post(
     '/connections/:id/browser/fetch',
     { bodyLimit: MAX_REQUEST_BYTES },
     async (req, reply) => {
       if (!isLoopbackAddress(req.ip)) return refuse(reply, 403, 'Local machine only')
       const { id } = req.params as { id: string }
-      const grant = grants.get(id)
-      const auth = req.headers.authorization
-      const token = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : ''
-      if (!grant || !token || !sameToken(token, grant.token)) {
+      const grant = grantFor(id)
+      const token = bearerFrom(req.headers.authorization)
+      if (
+        !grant ||
+        !token ||
+        !constantTimeEqual(Buffer.from(token, 'utf8'), Buffer.from(grant.token, 'utf8'))
+      ) {
         return refuse(reply, 401, 'This endpoint does not know that caller')
       }
       const request = readRequest(req.body)
@@ -137,9 +193,11 @@ export function registerSessionBridge(app: FastifyInstance): void {
       if (!withinOrigins(grant.browser.origins, request.url)) {
         return refuse(reply, 403, `${request.url} is not on one of this connection's origins`)
       }
+      const header = req.headers[SESSION_CALL_HEADER]
+      const key = typeof header === 'string' ? header : undefined
       const path = new URL(request.url).pathname
       if (!browserBridge.isConnected) {
-        record(grant, { method: request.method, path, status: 'app-offline' })
+        record(grant, key, { method: request.method, path, status: 'app-offline' })
         return refuse(reply, 503, 'Open Vorn on the desktop this connection signed in on')
       }
       try {
@@ -148,10 +206,10 @@ export function registerSessionBridge(app: FastifyInstance): void {
           { connectionId: id, origins: grant.browser.origins, request },
           CALL_TIMEOUT_MS
         )
-        record(grant, { method: request.method, path, status: answer.status })
+        record(grant, key, { method: request.method, path, status: answer.status })
         return reply.code(200).send(answer)
       } catch (err) {
-        record(grant, { method: request.method, path, status: 'failed' })
+        record(grant, key, { method: request.method, path, status: 'failed' })
         return refuse(reply, 503, err instanceof Error ? err.message : String(err))
       }
     }

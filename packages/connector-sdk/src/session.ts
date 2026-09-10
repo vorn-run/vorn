@@ -3,6 +3,9 @@ import { loopbackEndpoint } from './loopback'
 /** Where Vorn serves a browser-sign-in connector the window it signed in through. */
 export const BROWSER_HOST_ENV = 'VORN_BROWSER_HOST'
 export const BROWSER_TOKEN_ENV = 'VORN_BROWSER_TOKEN'
+/** The tool call a window request belongs to, so Vorn can tell a step's own requests from another's. */
+export const SESSION_CALL_META = 'vorn/sessionCall'
+export const SESSION_CALL_HEADER = 'x-vorn-session-call'
 
 /** The signed-in window could not make the call: Vorn is closed, too old, or not the caller. */
 export class SessionUnavailableError extends Error {
@@ -27,6 +30,8 @@ export interface SessionFetchOptions {
   env?: NodeJS.ProcessEnv
   /** Replaced in tests so nothing opens a socket. */
   fetchImpl?: typeof fetch
+  /** The key of the tool call these requests belong to, from its MCP metadata. */
+  call?: string
 }
 
 /** Long enough for a window to load its origin the first time, short enough to fail a wedged app. */
@@ -55,14 +60,7 @@ function readReply(text: string): SessionReply {
   return reply as SessionReply
 }
 
-function refusal(text: string): string | undefined {
-  try {
-    const error = (JSON.parse(text) as { error?: unknown }).error
-    return typeof error === 'string' && error ? error : undefined
-  } catch {
-    return undefined
-  }
-}
+const refusal = (text: string): string | undefined => text.trim() || undefined
 
 /** A fetch whose requests run inside the connection's signed-in Vorn window, so no cookie reaches this process. */
 export function createSessionFetch(options: SessionFetchOptions = {}): typeof fetch {
@@ -84,7 +82,11 @@ export function createSessionFetch(options: SessionFetchOptions = {}): typeof fe
     const body = request.body ? await request.text() : undefined
     const answer = await call(`${url}/fetch`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        ...(options.call && { [SESSION_CALL_HEADER]: options.call })
+      },
       body: JSON.stringify({
         url: request.url,
         method: request.method,

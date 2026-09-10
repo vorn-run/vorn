@@ -12,7 +12,9 @@ export {
   SessionUnavailableError,
   SessionRefusedError,
   BROWSER_HOST_ENV,
-  BROWSER_TOKEN_ENV
+  BROWSER_TOKEN_ENV,
+  SESSION_CALL_HEADER,
+  SESSION_CALL_META
 } from './session'
 export { ORIGIN_PATTERN, withinOrigins } from './origins'
 export type { SessionFetchOptions } from './session'

@@ -4,6 +4,7 @@ import { z, type ZodTypeAny } from 'zod'
 import { EXTENSION_AGENTS, resolveConfig } from './define'
 import { createExtensionHost } from './host'
 import { runAction, runOptions, runPoll } from './runtime'
+import { SESSION_CALL_META } from './session'
 import {
   MANIFEST_TOOL,
   OPTIONS_TOOL,
@@ -340,12 +341,14 @@ export function createConnectorServer(
         inputSchema: inputShape(action.inputs ?? []),
         outputSchema: outputSchema(action.outputs ?? [])
       },
-      async (args) => {
+      async (args, extra) => {
+        const sessionCall = extra._meta?.[SESSION_CALL_META]
         try {
           return json(
             await runAction(connector, action.type, args as Record<string, unknown>, {
               config: config(),
-              ...(options.now && { now: options.now })
+              ...(options.now && { now: options.now }),
+              ...(typeof sessionCall === 'string' && { sessionCall })
             })
           )
         } catch (error) {

@@ -11,11 +11,12 @@
  * never sees the encrypted ciphertext, only the plaintext the main process
  * pushes via `credentials:setDecrypted`.
  */
-import { forgetSessionGrant, sessionEnvFor } from './session-bridge'
+import { mintSessionGrant, type SessionGrant } from './session-bridge'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import {
   SDK_FILTER_KEYS,
   connectionConnectorId,
+  type SdkBrowserSignIn,
   type SourceConnection
 } from '@vornrun/shared/types'
 import { dbListSourceConnections } from '../database'
@@ -26,7 +27,9 @@ import { borrowedSecrets } from './auth-rung'
 import { resolveConnectorAuth } from './connector-auth'
 import { createStdioClientCache } from './stdio-clients'
 
-const clients = createStdioClientCache<{ connectionId: string }>('mcp-clients')
+const clients = createStdioClientCache<{ connectionId: string; grant?: SessionGrant }>(
+  'mcp-clients'
+)
 
 function tryParseJson<T>(raw: unknown, guard: (v: unknown) => v is T, fallback: T): T {
   if (typeof raw !== 'string' || raw === '') return fallback
@@ -83,6 +86,8 @@ interface SpawnConfig {
   command: string
   args: string[]
   env: Record<string, string>
+  /** Set when the connection acts through a signed-in window. */
+  browser?: SdkBrowserSignIn
 }
 
 // A borrowed token is fetched fresh at spawn, never stored, and sits under anything entered by hand.
@@ -95,22 +100,29 @@ export async function buildSpawnConfig(conn: SourceConnection): Promise<SpawnCon
   const source = await resolveConnectorAuth(sdkIdOf(conn))
   const borrowed = source ? await borrowedSecrets(source) : {}
   const browser = source?.auth?.rung === 'browser' ? source.auth.browser : undefined
-  // The window this connection signed in through, reached with a token minted for this child alone.
-  const signedIn = browser ? sessionEnvFor(conn.id, browser) : {}
-  return { command, args, env: { ...borrowed, ...env, ...secretEnv, ...signedIn } }
+  return { command, args, env: { ...borrowed, ...env, ...secretEnv }, ...(browser && { browser }) }
 }
 
 export async function getOrStartClient(conn: SourceConnection): Promise<Client> {
   return clients.getOrStart(conn.id, async () => {
     // The spawn config carries the connection's own environment, which wins over
     // the sanitized base every child starts from.
-    const { command, args, env } = await buildSpawnConfig(conn)
-    return { config: { command, args, env }, meta: { connectionId: conn.id } }
+    const { command, args, env, browser } = await buildSpawnConfig(conn)
+    // The window this connection signed in through, reached with a token minted for this child alone.
+    const session = browser && mintSessionGrant(conn.id, browser)
+    return {
+      config: { command, args, env: { ...env, ...session?.env } },
+      meta: { connectionId: conn.id, ...(session && { grant: session.grant }) }
+    }
   })
 }
 
+/** The signed-in window grant of a connection's running child, if it has one. */
+export function sessionGrantFor(connectionId: string): SessionGrant | undefined {
+  return clients.find((meta) => meta.connectionId === connectionId)?.grant
+}
+
 export async function stopClient(connectionId: string): Promise<void> {
-  forgetSessionGrant(connectionId)
   await clients.stop(connectionId)
 }
 
