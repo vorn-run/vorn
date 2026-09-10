@@ -43,6 +43,11 @@ beforeEach(() => {
 })
 
 describe('launchAgentFromShell', () => {
+  it('forwards a model override without replacing advanced arguments', async () => {
+    await launchAgentFromShell(shell(), 'codex', 'go', 'chosen')
+    expect(lastPayload().model).toBe('chosen')
+    expect(lastPayload().args).toBeUndefined()
+  })
   it('starts the agent in the shell’s current directory', async () => {
     // A `cd` before the prompt must be honoured, which is the whole point of
     // tracking shellCwd.

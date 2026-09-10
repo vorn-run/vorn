@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { AgentModelRequest, AgentModelCatalog } from '@vornrun/shared/agent-models'
 import {
   LOCAL_SERVER_RUNNING_CHANNEL,
   SERVER_REPLACED_CHANNEL,
@@ -224,6 +225,9 @@ const api = {
 
   detectInstalledAgents: (): Promise<Record<AiAgentType, boolean>> =>
     ipcRenderer.invoke(IPC.AGENT_DETECT_INSTALLED),
+
+  listAgentModels: (request: AgentModelRequest): Promise<AgentModelCatalog> =>
+    ipcRenderer.invoke(IPC.AGENT_LIST_MODELS, request),
 
   openInIDE: (ideId: string, projectPath: string): Promise<void> =>
     ipcRenderer.invoke(IPC.IDE_OPEN, { ideId, projectPath }),

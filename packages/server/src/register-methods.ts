@@ -209,6 +209,7 @@ import {
 import { disconnectToken } from './ws-handler'
 import { testSshConnection } from './process-utils'
 import { captureAgentSessionId } from './agent-session-capture'
+import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
 
@@ -1502,6 +1503,7 @@ export function registerAllMethods(): void {
 
   // Agent/IDE detection
   registerMethod('agent:detectInstalled', () => detectInstalledAgents())
+  registerMethod('agent:listModels', (request) => listAgentModels(request))
   registerMethod('ide:detect', () => detectIDEs())
   registerMethod('project:detectMobile', ({ projectPath }) => detectMobileProject(projectPath))
   registerMethod('ide:open', ({ ideId, projectPath }) => openInIDE(ideId, projectPath))
@@ -2269,12 +2271,15 @@ export function registerAllMethods(): void {
       // (e.g. the agent CLI doesn't support hooks.json).
     }
 
-    // For agents without session ID pinning (copilot, codex, opencode), read
-    // the agent's own DB after it starts to capture the real session ID.
-    // This enables reliable --resume on next app restart.
+    // Fresh local Codex/OpenCode sessions cannot pin an ID. Their local DB
+    // supplies a best-effort fallback; directory/timestamp matching remains
+    // ambiguous when several conversations share a directory. Known resume
+    // IDs and remote sessions must never be replaced by this local lookup.
     if (
       supportsExactSessionResume(payload.agentType) &&
-      !supportsSessionIdPinning(payload.agentType)
+      !supportsSessionIdPinning(payload.agentType) &&
+      !session.agentSessionId &&
+      !session.remoteHostId
     ) {
       const captureSessionId = session.id
       // Asked more than once: an agent slow to write its own history used to be

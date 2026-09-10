@@ -283,6 +283,9 @@ export function registerIpcHandlers(): void {
     requireBridge().request(IPC.PROJECT_DETECT_MOBILE, params)
   )
   safeHandle(IPC.AGENT_DETECT_INSTALLED, () => requireBridge().request(IPC.AGENT_DETECT_INSTALLED))
+  safeHandle(IPC.AGENT_LIST_MODELS, (_event, request) =>
+    requireBridge().request(IPC.AGENT_LIST_MODELS, request)
+  )
   safeHandle(IPC.IDE_OPEN, (_, params) => requireBridge().request(IPC.IDE_OPEN, params))
 
   // ─── Credential vault (requires safeStorage in main process) ───

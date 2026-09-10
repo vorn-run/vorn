@@ -101,6 +101,25 @@ function baseConfig(overrides: Partial<LaunchAgentConfig> = {}): LaunchAgentConf
 }
 
 describe('LaunchAgentConfigForm — canUseFromTask visibility', () => {
+  it('clears the model when changing agent, including From task', () => {
+    const onChange = vi.fn()
+    render(
+      <LaunchAgentConfigForm
+        config={baseConfig({ model: 'opus' })}
+        onChange={onChange}
+        triggerType="taskCreated"
+      />
+    )
+    const changeAgent = agentPickerProps.at(-1)!.onChange as (agent: string) => void
+    changeAgent('fromTask')
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ agentType: 'fromTask', model: undefined })
+    )
+    changeAgent('codex')
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ agentType: 'codex', model: undefined })
+    )
+  })
   it('passes allowFromTask=true when trigger is taskStatusChanged', () => {
     render(
       <LaunchAgentConfigForm

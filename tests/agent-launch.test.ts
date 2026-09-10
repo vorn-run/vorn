@@ -497,3 +497,30 @@ describe('exactly one selector reaches the agent', () => {
     expect(line).toContain('--resume wanted')
   })
 })
+
+describe('a chosen model reaches the agent', () => {
+  it('replaces a configured --model on the interactive line', () => {
+    const commands = {
+      ...cmds,
+      claude: { ...cmds.claude, args: ['--model', 'opus', '--verbose'] }
+    }
+    const line = buildAgentLaunchLine(makePayload({ model: 'claude-sonnet-5' }), commands, env)
+    expect(line).toBe('claude --verbose --model claude-sonnet-5')
+  })
+
+  it('is one argument on a headless spawn, after the configured ones', () => {
+    const args = buildHeadlessSpawnArgs(makePayload({ model: 'claude-sonnet-5' }), cmds, env)
+    expect(args.args.slice(0, 3)).toEqual([
+      '--dangerously-skip-permissions',
+      '--model',
+      'claude-sonnet-5'
+    ])
+  })
+
+  it('refuses a model on a shell wrapper command', () => {
+    const commands = { ...cmds, claude: { ...cmds.claude, command: 'nvm use 20 && claude' } }
+    expect(() => buildAgentLaunchLine(makePayload({ model: 'x' }), commands, env)).toThrow(
+      /shell wrapper/
+    )
+  })
+})

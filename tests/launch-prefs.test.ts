@@ -24,10 +24,27 @@ import {
   loadLaunchSettings,
   setPreferredAgent
 } from '../src/renderer/lib/launch-prefs'
+import {
+  getPreferredModel,
+  setPreferredModel,
+  persistLaunchSettings
+} from '../src/renderer/lib/launch-prefs'
 
 const KEY = 'vorn:lastLaunchSettings'
 
 describe('launch-prefs', () => {
+  it('keeps models separate by agent and host and preserves them on launcher saves', () => {
+    setPreferredModel('claude', 'opus')
+    setPreferredModel('codex', 'local-model')
+    setPreferredModel('codex', 'remote-model', 'host')
+    persistLaunchSettings({ agent: 'copilot', project: 'p' })
+    expect(getPreferredModel('claude')).toBe('opus')
+    expect(getPreferredModel('codex')).toBe('local-model')
+    expect(getPreferredModel('codex', 'host')).toBe('remote-model')
+    setPreferredModel('codex', undefined)
+    expect(getPreferredModel('codex')).toBeUndefined()
+    expect(getPreferredModel('codex', 'host')).toBe('remote-model')
+  })
   beforeEach(() => localStorage.clear())
 
   it('round-trips the preferred agent', () => {

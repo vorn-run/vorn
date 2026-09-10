@@ -33,6 +33,25 @@ import { headlessManager } from '../packages/server/src/headless-manager'
 const spawnMock = spawnImport as unknown as ReturnType<typeof vi.fn>
 
 describe('headlessManager.createHeadless', () => {
+  it('preserves the requested Codex UUID and emits exec resume', () => {
+    const session = headlessManager.createHeadless({
+      agentType: 'codex',
+      projectName: 'p',
+      projectPath: '/p',
+      resumeSessionId: 'known-id',
+      initialPrompt: 'continue'
+    })
+    expect(session.agentSessionId).toBe('known-id')
+    expect(spawnMock.mock.calls.at(-1)?.[1]).toEqual([
+      '-a',
+      'never',
+      'exec',
+      'resume',
+      'known-id',
+      '-'
+    ])
+    headlessManager.killHeadless(session.id)
+  })
   beforeEach(() => {
     spawnMock.mockClear()
   })

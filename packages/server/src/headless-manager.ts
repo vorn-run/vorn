@@ -60,6 +60,8 @@ class HeadlessManager extends EventEmitter {
     // nobody would ever see it. Existing sessions are untouched -- their clients
     // hold a descriptor, not a name.
     if (isDraining()) throw new Error(DRAINING_MESSAGE)
+    if (payload.model !== undefined)
+      buildHeadlessSpawnArgs(payload, this.agentCommands, getLaunchEnv())
     const id = crypto.randomUUID()
     let effectivePath = payload.projectPath
     let effectiveBranch: string | undefined
@@ -93,7 +95,9 @@ class HeadlessManager extends EventEmitter {
 
     // Pre-generate the session id before buildHeadlessSpawnArgs so the --session-id
     // flag can be injected; keeps parity with the interactive PTY path.
-    let agentSessionId: string | undefined
+    // Codex can resume headlessly without supporting fresh ID pinning.
+    // OpenCode's headless builder does not yet implement exact resume.
+    let agentSessionId = payload.agentType === 'codex' ? payload.resumeSessionId : undefined
     if (supportsSessionIdPinning(payload.agentType)) {
       if (payload.resumeSessionId) {
         agentSessionId = payload.resumeSessionId

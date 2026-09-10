@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./types": "./src/types.ts",
     "./agent-defaults": "./src/agent-defaults.ts",
+    "./agent-models": "./src/agent-models.ts",
     "./prompt-builder": "./src/prompt-builder.ts",
     "./protocol": "./src/protocol.ts",
     "./string-utils": "./src/string-utils.ts",

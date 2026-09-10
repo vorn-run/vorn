@@ -21,6 +21,7 @@ import { useAgentInstallStatus } from '../../../hooks/useAgentInstallStatus'
 import { VariableAutocomplete } from './VariableAutocomplete'
 import { ProjectPicker } from '../../ProjectPicker'
 import { AgentPicker } from '../../AgentPicker'
+import { ModelPicker } from '../../ModelPicker'
 import { SelectPicker } from '../../SelectPicker'
 import { Tooltip } from '../../Tooltip'
 import { RichMarkdownEditor } from '../../rich-editor/RichMarkdownEditor'
@@ -166,10 +167,25 @@ export function LaunchAgentConfigForm({
         <label className="text-[13px] text-gray-400 font-medium block mb-2">Agent</label>
         <AgentPicker
           currentAgent={config.agentType}
-          onChange={(agent) => agent && onChange({ ...config, agentType: agent })}
+          onChange={(agent) => agent && onChange({ ...config, agentType: agent, model: undefined })}
           installStatus={installStatus}
           variant="form"
           allowFromTask={canUseFromTask}
+        />
+      </div>
+
+      <div>
+        <label className="text-[13px] text-gray-400 font-medium block mb-2">Model</label>
+        <ModelPicker
+          variant="form"
+          agentType={config.agentType === 'fromTask' ? 'claude' : config.agentType}
+          disabled={config.agentType === 'fromTask'}
+          projectPath={projectIsFromContext ? undefined : config.projectPath}
+          remoteHostId={
+            selectedProject ? getProjectRemoteHostId(selectedProject) : config.remoteHostId
+          }
+          value={config.model}
+          onChange={(model) => onChange({ ...config, model })}
         />
       </div>
 

@@ -10,6 +10,7 @@ import {
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import { shellEscape } from './process-utils'
 import { stripSessionSelectors } from './launch-tokens'
+import { applyModelArguments, assertModelCommand } from './model-arguments'
 import { findOnPath } from './resolve-executable'
 
 /** The configured command, and where on `env.PATH` it lives; the name when it is not there. */
@@ -56,14 +57,20 @@ export function buildAgentLaunchLine(
   const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
   const cmd = resolveAgentCommand(cmdConfig, env)
   // Per-step args override settings-level args; escape each for shell safety
-  const effectiveArgs = payload.args !== undefined ? payload.args : cmd.args
-  let launchLine = [cmd.command, ...effectiveArgs.map((a) => shellEscape(a))].join(' ')
+  const escape = (value: string) => shellEscape(value, payload.remoteHostId ? 'posix' : 'auto')
+  let effectiveArgs = payload.args !== undefined ? payload.args : cmd.args
+  if (payload.model !== undefined) {
+    assertModelCommand(cmd.command)
+    effectiveArgs = applyModelArguments(payload.agentType, effectiveArgs, payload.model)
+  }
+  const commandLine = payload.model !== undefined ? escape(cmd.command) : cmd.command
+  let launchLine = [commandLine, ...effectiveArgs.map(escape)].join(' ')
 
   // Where the configured command ends and its arguments begin. Known exactly
   // rather than guessed, because this line was just composed here -- which is
   // what lets `npx -y @anthropic-ai/claude-code` be a command and an argument
   // that merely ends in `/claude` be left alone.
-  const argsFrom = cmd.command.length
+  const argsFrom = commandLine.length
 
   const exactResume = Boolean(
     payload.resumeSessionId && supportsExactSessionResume(payload.agentType)
@@ -82,7 +89,7 @@ export function buildAgentLaunchLine(
   }
 
   if (exactResume && payload.resumeSessionId) {
-    const escapedResumeId = shellEscape(payload.resumeSessionId)
+    const escapedResumeId = escape(payload.resumeSessionId)
     switch (payload.agentType) {
       case 'claude':
         launchLine += ` --resume ${escapedResumeId}`
@@ -113,11 +120,11 @@ export function buildAgentLaunchLine(
     payload.sessionId &&
     supportsSessionIdPinning(payload.agentType)
   ) {
-    launchLine += ` ${getSessionIdPinningFlag(payload.agentType)} ${shellEscape(payload.sessionId)}`
+    launchLine += ` ${getSessionIdPinningFlag(payload.agentType)} ${escape(payload.sessionId)}`
   }
 
   if (payload.initialPrompt) {
-    const escaped = shellEscape(payload.initialPrompt)
+    const escaped = escape(payload.initialPrompt)
     switch (payload.agentType) {
       case 'copilot':
         launchLine += ` -i ${escaped}`
@@ -156,9 +163,15 @@ export function buildHeadlessLaunchLine(
   }
   const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
   const cmd = resolveAgentCommand(cmdConfig, env)
-  const baseCmd = cmd.command
-  const extraArgs = resolveHeadlessArgs(payload, cmdConfig, cmd.args)
-  const argsStr = extraArgs.length > 0 ? extraArgs.join(' ') + ' ' : ''
+  const baseCmd = payload.model !== undefined ? shellEscape(cmd.command) : cmd.command
+  let extraArgs = resolveHeadlessArgs(payload, cmdConfig, cmd.args)
+  if (payload.model !== undefined) {
+    assertModelCommand(cmd.command)
+    extraArgs = applyModelArguments(payload.agentType, extraArgs, payload.model)
+  }
+  const renderedArgs =
+    payload.model !== undefined ? extraArgs.map((a) => shellEscape(a)) : extraArgs
+  const argsStr = renderedArgs.length > 0 ? renderedArgs.join(' ') + ' ' : ''
 
   const emptyStr = process.platform === 'win32' ? '""' : "''"
   const prompt = payload.initialPrompt ? shellEscape(payload.initialPrompt) : emptyStr
@@ -171,7 +184,7 @@ export function buildHeadlessLaunchLine(
       return `${baseCmd} ${argsStr}-p ${prompt}`
 
     case 'codex':
-      return `${baseCmd} ${argsStr}exec ${prompt}`
+      return `${baseCmd} ${argsStr}exec ${payload.resumeSessionId ? `resume ${shellEscape(payload.resumeSessionId)} ` : ''}${prompt}`
 
     case 'opencode':
       return `${baseCmd} ${argsStr}run ${prompt}`
@@ -221,7 +234,11 @@ export function buildHeadlessSpawnArgs(
   const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
   const cmd = resolveAgentCommand(cmdConfig, env)
   const prompt = payload.initialPrompt || ''
-  const extraArgs = [...resolveHeadlessArgs(payload, cmdConfig, cmd.args)]
+  let extraArgs = [...resolveHeadlessArgs(payload, cmdConfig, cmd.args)]
+  if (payload.model !== undefined) {
+    assertModelCommand(cmd.command)
+    extraArgs = applyModelArguments(payload.agentType, extraArgs, payload.model)
+  }
 
   if (
     payload.resumeSessionId &&
@@ -259,6 +276,13 @@ export function buildHeadlessSpawnArgs(
       // truncates it at the first newline. Note the prompt must NOT also be
       // passed as an argument — codex then treats stdin as a separate
       // `<stdin>` block rather than as the instructions.
+      if (payload.resumeSessionId) {
+        return {
+          command: cmd.path,
+          args: [...extraArgs, 'exec', 'resume', payload.resumeSessionId, '-'],
+          stdin: prompt
+        }
+      }
       return prompt
         ? { command: cmd.path, args: [...extraArgs, 'exec'], stdin: prompt }
         : { command: cmd.path, args: [...extraArgs, 'exec', ''] }

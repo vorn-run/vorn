@@ -14,7 +14,8 @@ import {
   IPC,
   TerminalSession,
   RemoteHost,
-  supportsSessionIdPinning
+  supportsSessionIdPinning,
+  supportsExactSessionResume
 } from '@vornrun/shared/types'
 import { displayNameFromPrompt } from '@vornrun/shared/string-utils'
 import {
@@ -238,6 +239,8 @@ class PtyManager extends EventEmitter {
     if (isDraining()) throw new Error(DRAINING_MESSAGE)
     // A pane created now would be in neither the manifest nor the replacement.
     if (isHandingOver()) throw new Error(HANDOVER_MESSAGE)
+    // Validate model overrides before allocating a PTY or changing worktrees.
+    if (payload.model !== undefined) this.buildAgentLaunchLine(payload)
     const id = reuseId ?? crypto.randomUUID()
     const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
 
@@ -321,7 +324,9 @@ class PtyManager extends EventEmitter {
     // Session ID pinning: agents that support it (supportsSessionIdPinning) get a
     // UUID assigned on fresh launch via --session-id, enabling exact --resume later.
     // Other agents rely on history-based fallback for resume.
-    let agentSessionId: string | undefined
+    let agentSessionId = supportsExactSessionResume(payload.agentType)
+      ? payload.resumeSessionId
+      : undefined
     if (supportsSessionIdPinning(payload.agentType)) {
       if (payload.resumeSessionId) {
         agentSessionId = payload.resumeSessionId
@@ -529,6 +534,9 @@ class PtyManager extends EventEmitter {
       pid: ptyProcess.pid,
       remoteHostId: host.id,
       remoteHostLabel: host.label,
+      ...(payload.resumeSessionId && supportsExactSessionResume(payload.agentType)
+        ? { agentSessionId: payload.resumeSessionId }
+        : {}),
       ...(payload.displayName
         ? { displayName: payload.displayName }
         : payload.initialPrompt

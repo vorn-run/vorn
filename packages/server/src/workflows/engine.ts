@@ -895,6 +895,11 @@ async function executeNode(
     }
   }
 
+  if (config.agentType === 'fromTask' && config.model !== undefined) {
+    throw new Error(
+      'A model needs a concrete agent. Clear the model or choose an agent for this step.'
+    )
+  }
   const effectiveAgent = resolveEffectiveAgent(config, context, resolvedTask)
 
   // Resolve project name/path from the triggering task when the node config
@@ -1058,7 +1063,8 @@ async function executeNode(
         headless: true,
         workflowId: workflow.id,
         workflowName: workflow.name,
-        args: config.args
+        args: config.args,
+        model: config.model
       })
 
       sessionId = headlessSession.id
@@ -1217,6 +1223,7 @@ async function executeNode(
       initialPrompt,
       promptDelayMs: config.promptDelayMs,
       args: config.args,
+      model: config.model,
       remoteHostId
     })
 

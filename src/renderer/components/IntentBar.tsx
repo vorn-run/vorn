@@ -39,6 +39,8 @@ import { resolveIntentMode, SHELL_BUILTINS, type IntentMode } from '../lib/inten
 import { getPreferredAgent, setPreferredAgent } from '../lib/launch-prefs'
 import { getDisplayPathBasename, launchAgentFromShell } from '../lib/session-utils'
 import { AgentPicker } from './AgentPicker'
+import { ModelPicker } from './ModelPicker'
+import { usePreferredModel } from '../hooks/usePreferredModel'
 import { useAgentInstallStatus } from '../hooks/useAgentInstallStatus'
 import type { AiAgentType, LaunchAgentType } from '../../shared/types'
 
@@ -169,6 +171,7 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
 
   const defaultAgent = useAppStore((s) => s.config?.defaults.defaultAgent)
   const [agent, setAgent] = useState<AiAgentType>(() => getPreferredAgent(defaultAgent ?? 'claude'))
+  const modelPreference = usePreferredModel(agent, session?.remoteHostId)
   const { status: installStatus } = useAgentInstallStatus()
 
   const isShell = isShellSession(session?.agentType)
@@ -376,7 +379,7 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
       if (isPrompt) {
         if (isLaunching.current || !session) return
         isLaunching.current = true
-        void launchAgentFromShell(session, agent, trimmed).finally(() => {
+        void launchAgentFromShell(session, agent, trimmed, modelPreference.model).finally(() => {
           isLaunching.current = false
         })
       } else {
@@ -392,7 +395,7 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
       setPinnedMode(null)
       closeDropdown()
     },
-    [terminalId, kind, projectPath, closeDropdown, isPrompt, session, agent]
+    [terminalId, kind, projectPath, closeDropdown, isPrompt, session, agent, modelPreference.model]
   )
 
   const refreshForValue = useCallback(
@@ -751,12 +754,20 @@ export function IntentBar({ terminalId, compact, indentPx = 16 }: Props) {
               starts is part of the action, so it stays visible rather than
               fading with the shortcut hints. */}
           {isPrompt && (
-            <div className="shrink-0 -mt-[1px]">
+            <div className="shrink-0 -mt-[1px] flex items-center gap-1">
               <AgentPicker
                 currentAgent={agent}
                 onChange={handleAgentChange}
                 installStatus={installStatus}
                 variant="compact"
+              />
+              <ModelPicker
+                variant="bordered"
+                agentType={agent}
+                projectPath={cwd ?? undefined}
+                remoteHostId={session?.remoteHostId}
+                value={modelPreference.model}
+                onChange={modelPreference.setModel}
               />
             </div>
           )}

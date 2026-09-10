@@ -1,3 +1,4 @@
+import type { AgentModelRequest, AgentModelCatalog } from './agent-models'
 import type {
   AuthProbeReport,
   CreateTerminalPayload,
@@ -782,6 +783,7 @@ export interface RequestMethods {
     params: void
     result: Record<string, boolean>
   }
+  'agent:listModels': { params: AgentModelRequest; result: AgentModelCatalog }
   'ide:detect': { params: void; result: Array<{ id: string; name: string }> }
   /**
    * Whether a project looks like a mobile app, so the device control can be

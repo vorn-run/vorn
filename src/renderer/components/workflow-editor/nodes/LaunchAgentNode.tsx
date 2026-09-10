@@ -44,6 +44,12 @@ export function LaunchAgentNode({ label, config, selected, executionStatus, onCl
         <>
           {config.projectName || 'No project'}
           {!remoteHost && config.branch && ` · ${config.branch}`}
+          {config.model && (
+            <>
+              {' · '}
+              <span className="font-mono">{config.model}</span>
+            </>
+          )}
         </>
       }
       meta={

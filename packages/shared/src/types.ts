@@ -877,6 +877,8 @@ export type UseWorktreeOption = boolean | 'fromContext'
 // Launch Agent action config
 export interface LaunchAgentConfig {
   agentType: LaunchAgentType
+  /** Literal CLI model override; requires a concrete agent. */
+  model?: string
   projectName: string
   projectPath: string
   args?: string[]
@@ -1426,6 +1428,8 @@ export interface RecentSession {
 
 export interface CreateTerminalPayload {
   agentType: AiAgentType
+  /** Omitted means preserve the agent's configured default. */
+  model?: string
   projectName: string
   projectPath: string
   resumeSessionId?: string
@@ -1853,6 +1857,7 @@ export const IPC = {
   SESSION_EVENT_LIST: 'sessionEvent:list',
   SESSION_EVENT_LIST_BY_SESSION: 'sessionEvent:listBySession',
   AGENT_DETECT_INSTALLED: 'agent:detectInstalled',
+  AGENT_LIST_MODELS: 'agent:listModels',
   TAILSCALE_STATUS: 'tailscale:status',
   SERVER_REACHABLE_URLS: 'server:reachableUrls',
   PAIRING_START: 'pairing:start',
