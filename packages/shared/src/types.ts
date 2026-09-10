@@ -2172,7 +2172,14 @@ export interface ConnectorCatalogSnapshot {
  * installed, and show an identity instead of a token field where one is
  * already signed in.
  */
-export type ConnectorAuthRung = 'none' | 'cli' | 'key' | 'oauth'
+export type ConnectorAuthRung = 'none' | 'cli' | 'key' | 'browser' | 'oauth'
+
+/** Where a `browser` connector signs in, the only origins it may act on, and how to tell who is signed in. */
+export interface SdkBrowserSignIn {
+  signInUrl: string
+  origins: string[]
+  check: { url: string; identity: string[] }
+}
 
 export interface SdkConnectorAuth {
   rung: ConnectorAuthRung
@@ -2182,6 +2189,8 @@ export interface SdkConnectorAuth {
   borrow?: { env?: string[]; tokenArgs?: string[]; tokenEnv?: string }
   /** Config field keys holding the credential. Present for `key`. */
   keys?: string[]
+  /** Present for `browser`. */
+  browser?: SdkBrowserSignIn
 }
 
 /** An argument a packaged connector's action takes. */

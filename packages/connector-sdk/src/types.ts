@@ -78,6 +78,8 @@ export interface PollContext {
   now(): string
   /** Fetch with the SDK's retry and backoff applied. A poll is always a read. */
   fetch: typeof fetch
+  /** Present only when the connector signs in through a Vorn window. */
+  session?: SessionContext
 }
 
 export interface PollOutcome {
@@ -122,6 +124,8 @@ export interface FetchContext {
   now(): string
   /** Fetch with the SDK's retry and backoff applied. A fetch is always a read. */
   fetch: typeof fetch
+  /** Present only when the connector signs in through a Vorn window. */
+  session?: SessionContext
 }
 
 /**
@@ -248,6 +252,8 @@ export interface ActionContext {
    * same resilience a declared request does, and tests can replace it.
    */
   fetch: typeof fetch
+  /** Present only when the connector signs in through a Vorn window. */
+  session?: SessionContext
 }
 
 /**
@@ -372,9 +378,26 @@ export interface PreflightResult {
  * `none` needs nothing — installing it is the whole setup. `cli` borrows a
  * login that already works on the machine, which is the rung to prefer
  * whenever a mature tool is signed in anyway. `key` asks for a credential.
+ * `browser` signs in through a Vorn window for a service with no API to key.
  * `oauth` is declared but not yet carried by the host.
  */
-export type AuthRung = 'none' | 'cli' | 'key' | 'oauth'
+export type AuthRung = 'none' | 'cli' | 'key' | 'browser' | 'oauth'
+
+/** How a `browser` connector signs in, and the only origins its calls may reach. */
+export interface BrowserSignIn {
+  /** The page the Vorn window opens for signing in. */
+  signInUrl: string
+  /** `https://host` or `https://*.host`; the sign-in page and the check must sit inside them. */
+  origins: string[]
+  /** Answers 2xx only when signed in; `identity` names the fields of its JSON that say who. */
+  check: { url: string; identity: string[] }
+}
+
+/** The signed-in window, offered to a `browser` connector's code. */
+export interface SessionContext {
+  /** Runs the request inside the connection's signed-in window; cookies never reach the connector. */
+  fetch: typeof fetch
+}
 
 /**
  * What a connector needs before it can talk to anything.
@@ -405,6 +428,8 @@ export interface ConnectorAuth {
   borrow?: { env?: string[]; tokenArgs?: string[]; tokenEnv?: string }
   /** Config field keys holding the credential. Required for `key`. */
   keys?: string[]
+  /** Required for `browser`. */
+  browser?: BrowserSignIn
 }
 
 /** What an options set is given to work out its choices. */
@@ -413,6 +438,8 @@ export interface OptionsContext {
   now(): string
   /** Fetch with the SDK's retry and backoff applied. Listing choices is a read. */
   fetch: typeof fetch
+  /** Present only when the connector signs in through a Vorn window. */
+  session?: SessionContext
 }
 
 /**

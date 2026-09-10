@@ -1,3 +1,4 @@
+import { SessionUnavailableError } from './session'
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
@@ -351,7 +352,9 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
       try {
         await runAction(connector, action.type, args, {
           config,
-          ...(options.now && { now: options.now })
+          ...(options.now && { now: options.now }),
+          // Looked up per call, so the stub installed for this run serves the signed-in calls too.
+          sessionFetchImpl: (input, init) => globalThis.fetch(input, init)
         })
         return undefined
       } catch (error) {
@@ -604,6 +607,13 @@ export function liveExamines(connector: Connector): boolean {
  * leave real issues behind, and one of `closeIssue('check')` would only prove
  * that no such issue exists.
  */
+function needsWindow(error: unknown): boolean {
+  return (
+    error instanceof SessionUnavailableError ||
+    (error instanceof Error && error.cause instanceof SessionUnavailableError)
+  )
+}
+
 async function liveFindings(connector: Connector, options: CheckOptions): Promise<CheckFinding[]> {
   if (!options.live) return []
   const found: CheckFinding[] = []
@@ -638,6 +648,8 @@ async function liveFindings(connector: Connector, options: CheckOptions): Promis
         ...(options.now && { now: options.now })
       })
     } catch (error) {
+      // A signed-in call needs a Vorn window, which a live check run from a terminal does not have.
+      if (needsWindow(error)) continue
       const reason = error instanceof Error ? error.message : String(error)
       // A service can refuse for reasons that are not the connector's fault —
       // an empty sandbox, a rate limit — so only a refusal to let it in at all

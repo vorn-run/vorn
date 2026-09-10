@@ -176,6 +176,14 @@ export function ConnectorDetail({
           {listing.authRung && (
             <p className="text-[12.5px] text-gray-300">{AUTH_RUNG[listing.authRung].detail}</p>
           )}
+          {listing.pack?.auth?.browser && (
+            <p className="text-[12.5px] text-gray-500">
+              Acts as you on{' '}
+              {listing.pack.auth.browser.origins
+                .map((origin) => origin.replace('https://', ''))
+                .join(', ')}
+            </p>
+          )}
           {entry?.auth && <p className="text-[12.5px] text-gray-500">{entry.auth}</p>}
           {listing.kind === 'extension' && !listing.authRung && !entry?.auth && (
             <p className="text-[12.5px] text-gray-300">

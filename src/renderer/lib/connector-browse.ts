@@ -473,16 +473,21 @@ export const AUTH_RUNG: Record<
     detail: 'Signs in with a CLI'
   },
   key: { label: 'Needs a key', badge: 'key', detail: 'Needs a key' },
+  browser: {
+    label: 'Signs in through a Vorn window',
+    badge: 'browser',
+    detail: 'Signs in through a Vorn window'
+  },
   oauth: {
-    label: 'Signs in through a browser',
+    label: 'Signs in with OAuth',
     badge: 'OAuth',
-    detail: 'Signs in through a browser'
+    detail: 'Signs in with OAuth'
   }
 }
 
 /** The rungs actually present, so the filter never offers an empty answer. */
 export function connectorAuthRungs(listings: ConnectorListing[]): ConnectorAuthRung[] {
-  const order: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
+  const order: ConnectorAuthRung[] = ['none', 'cli', 'key', 'browser', 'oauth']
   return order.filter((rung) => listings.some((listing) => listing.authRung === rung))
 }
 

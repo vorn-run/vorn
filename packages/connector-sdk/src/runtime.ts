@@ -2,12 +2,14 @@ import { pollWithDedupe } from './dedupe'
 import { normalizeItems } from './normalize'
 import { executeRequest } from './request'
 import { resilientFetch, type RetryPolicy } from './resilience'
+import { createSessionFetch } from './session'
 import type {
   ActionInputOption,
   Connector,
   ConnectorConfig,
   NormalizedItem,
-  PollContext
+  PollContext,
+  SessionContext
 } from './types'
 
 export interface PollPage {
@@ -24,9 +26,30 @@ export interface RunPollOptions {
   now?: () => string
   /** Replaced by the harness and by tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch
+  /** Replaced by the harness and by tests; defaults to the signed-in window Vorn serves. */
+  sessionFetchImpl?: typeof fetch
   retry?: RetryPolicy
   /** Replaced in tests so backoff costs no real time. */
   sleep?: (ms: number) => Promise<void>
+}
+
+type SessionOptions = Pick<RunPollOptions, 'sessionFetchImpl' | 'retry' | 'sleep'>
+
+/** The signed-in window, handed only to a connector that signs in through one. */
+function sessionFor(
+  connector: Connector,
+  options: SessionOptions,
+  retryable: boolean
+): SessionContext | undefined {
+  if (connector.auth?.rung !== 'browser') return undefined
+  return {
+    fetch: resilientFetch({
+      fetchImpl: options.sessionFetchImpl ?? createSessionFetch(),
+      retryable,
+      ...(options.retry !== undefined && { retry: options.retry }),
+      ...(options.sleep !== undefined && { sleep: options.sleep })
+    })
+  }
 }
 
 /** Longest chain of pages `drainPoll` will follow before calling it a bug. */
@@ -48,6 +71,7 @@ export async function runPoll(
 
   const now = options.now ?? (() => new Date().toISOString())
   const polledAt = now()
+  const session = sessionFor(connector, options, true)
   const context: PollContext = {
     config: options.config ?? {},
     ...(options.since !== undefined && { since: options.since }),
@@ -60,7 +84,8 @@ export async function runPoll(
       retryable: true,
       ...(options.retry !== undefined && { retry: options.retry }),
       ...(options.sleep !== undefined && { sleep: options.sleep })
-    })
+    }),
+    ...(session && { session })
   }
 
   const outcome =
@@ -113,6 +138,8 @@ export interface RunActionOptions {
   now?: () => string
   /** Replaced by the harness and by tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch
+  /** Replaced by the harness and by tests; defaults to the signed-in window Vorn serves. */
+  sessionFetchImpl?: typeof fetch
   retry?: RetryPolicy
   /** Replaced in tests so backoff costs no real time. */
   sleep?: (ms: number) => Promise<void>
@@ -137,6 +164,7 @@ export async function runOptions(
     throw new Error(`Connector ${connector.id} serves no options set "${name}"`)
   }
 
+  const session = sessionFor(connector, options, true)
   const loaded = await loader({
     config: options.config ?? {},
     now: options.now ?? (() => new Date().toISOString()),
@@ -145,7 +173,8 @@ export async function runOptions(
       retryable: true,
       ...(options.retry !== undefined && { retry: options.retry }),
       ...(options.sleep !== undefined && { sleep: options.sleep })
-    })
+    }),
+    ...(session && { session })
   })
 
   if (!Array.isArray(loaded)) {
@@ -235,14 +264,16 @@ export async function runAction(
     ...(options.retry !== undefined && { retry: options.retry }),
     ...(options.sleep !== undefined && { sleep: options.sleep })
   })
+  const session = sessionFor(connector, options, retryable)
 
   if (action.request !== undefined) {
     try {
+      // A declared call of a browser connector is one to its signed-in service.
       return await executeRequest(
         action.request,
         action.postReceive,
         { args: coerced, config },
-        { fetchImpl }
+        { fetchImpl: session?.fetch ?? fetchImpl }
       )
     } catch (error) {
       // Which action failed is the first thing a reader needs; the message
@@ -262,7 +293,8 @@ export async function runAction(
   const output = await action.run(coerced, {
     config,
     now: options.now ?? (() => new Date().toISOString()),
-    fetch: fetchImpl
+    fetch: fetchImpl,
+    ...(session && { session })
   })
   return output ?? {}
 }

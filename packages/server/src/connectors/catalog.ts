@@ -61,7 +61,7 @@ const FETCH_TIMEOUT_MS = 5000
 const CACHE_PATH = join(os.homedir(), '.vorn', 'connector-catalog.json')
 
 /** Rungs this build knows how to describe; anything else is dropped on read. */
-const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
+const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'browser', 'oauth']
 
 /** The one receipt format this build will show a verified mark for. */
 const VERIFICATION_SCHEMA = 1

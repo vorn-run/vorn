@@ -13,6 +13,7 @@
  * right for polling and wrong for a probe of something the user may not
  * install. This spawns, asks, and exits.
  */
+import { ORIGIN_PATTERN, withinOrigins } from '@vornrun/shared/connector-origins'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type {
@@ -26,6 +27,7 @@ import type {
   ExtensionPaneContribution,
   ExtensionPermission,
   SdkActionInput,
+  SdkBrowserSignIn,
   SdkConnectorAuth,
   SdkConnectorIcon,
   SdkConnectorManifest,
@@ -195,7 +197,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const str = (value: unknown, fallback = ''): string =>
   typeof value === 'string' ? value : fallback
 
-const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
+const AUTH_RUNGS: ConnectorAuthRung[] = ['none', 'cli', 'key', 'browser', 'oauth']
 
 /**
  * A bare executable name, which is all a probe command is allowed to be.
@@ -267,6 +269,16 @@ function toActionOptions(value: unknown): Array<{ value: string; label?: string 
     }))
 }
 
+/** A browser sign-in whose pages all sit inside origins this build accepts, or nothing. */
+function toBrowserSignIn(value: unknown): SdkBrowserSignIn | undefined {
+  if (!isRecord(value) || !isRecord(value.check)) return undefined
+  const origins = strings(value.origins).filter((origin) => ORIGIN_PATTERN.test(origin))
+  const signInUrl = str(value.signInUrl).trim()
+  const url = str(value.check.url).trim()
+  if (!withinOrigins(origins, signInUrl) || !withinOrigins(origins, url)) return undefined
+  return { signInUrl, origins, check: { url, identity: strings(value.check.identity) } }
+}
+
 /**
  * Read a declared auth block, or say nothing about how it signs in.
  *
@@ -289,6 +301,9 @@ function toAuth(value: unknown): SdkConnectorAuth | undefined {
   // the promise unbacked — better to say nothing than to offer a Sign in that
   // could not work.
   if (rung === 'cli' && !usable) return undefined
+  const browser = rung === 'browser' ? toBrowserSignIn(value.browser) : undefined
+  // The same unbacked promise for a window: nowhere to sign in, or pages outside its own origins.
+  if (rung === 'browser' && !browser) return undefined
 
   const borrow = isRecord(value.borrow) ? value.borrow : undefined
   const env = strings(borrow?.env)
@@ -308,7 +323,8 @@ function toAuth(value: unknown): SdkConnectorAuth | undefined {
         ...(tokenEnv !== undefined && { tokenEnv })
       }
     }),
-    ...(keys.length > 0 && { keys })
+    ...(keys.length > 0 && { keys }),
+    ...(browser && { browser })
   }
 }
 
