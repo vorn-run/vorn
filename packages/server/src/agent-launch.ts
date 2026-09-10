@@ -66,8 +66,9 @@ export function buildAgentLaunchLine(
   // Per-step args override settings-level args; escape each for shell safety
   const escape = (value: string) => shellEscape(value, payload.remoteHostId ? 'posix' : 'auto')
   const effectiveArgs = withModel(payload, cmd.command, payload.args ?? cmd.args)
+  // Only a path with spaces that names one file is quoted; `~/bin/claude` keeps its expansion.
   const commandLine =
-    commandShape(cmd.command, !payload.remoteHostId) === 'executable'
+    /\s/.test(cmd.command) && commandShape(cmd.command, !payload.remoteHostId) === 'executable'
       ? escape(cmd.command)
       : cmd.command
   let launchLine = [commandLine, ...effectiveArgs.map(escape)].join(' ')

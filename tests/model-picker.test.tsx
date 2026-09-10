@@ -115,7 +115,7 @@ describe('ModelPicker', () => {
     expect(screen.queryByRole('button', { name: 'Refresh models' })).not.toBeInTheDocument()
   })
 
-  it('asks again on refresh', async () => {
+  it('asks again on refresh, and plainly on the next open', async () => {
     const list = api()
     render(<ModelPicker agentType="claude" projectPath="/p" onChange={vi.fn()} />)
     open()
@@ -123,6 +123,11 @@ describe('ModelPicker', () => {
     fireEvent.mouseDown(screen.getByRole('button', { name: 'Refresh models' }))
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2))
     expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ refresh: true }))
+    fireEvent.click(trigger())
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
+    open()
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(3))
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ refresh: false }))
   })
 
   it('groups OpenCode models by provider', async () => {

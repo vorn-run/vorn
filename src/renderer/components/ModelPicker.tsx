@@ -141,6 +141,7 @@ export function ModelPicker({
     if (!open) {
       setQuery('')
       setInvalid('')
+      setRefreshes(0)
       setOpenedAt(Date.now())
     }
     toggle(e)

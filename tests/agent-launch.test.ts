@@ -448,6 +448,14 @@ describe('a chosen model reaches the agent', () => {
     ])
   })
 
+  it('leaves a command the shell must expand as configured', () => {
+    const commands = { ...cmds, claude: { ...cmds.claude, command: '~/bin/claude' } }
+    expect(buildAgentLaunchLine(makePayload({ model: 'x' }), commands, env)).toBe(
+      '~/bin/claude --model x'
+    )
+    expect(buildAgentLaunchLine(makePayload(), commands, env)).toBe('~/bin/claude')
+  })
+
   it('refuses a model on a shell wrapper command', () => {
     const commands = { ...cmds, claude: { ...cmds.claude, command: 'nvm use 20 && claude' } }
     expect(() => buildAgentLaunchLine(makePayload({ model: 'x' }), commands, env)).toThrow(
