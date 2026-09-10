@@ -3,11 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Nothing is on PATH here, so every command keeps its configured name.
 vi.mock('../packages/server/src/resolve-executable', () => ({ findOnPath: () => null }))
 
-import {
-  buildAgentLaunchLine,
-  buildHeadlessLaunchLine,
-  buildHeadlessSpawnArgs
-} from '../packages/server/src/agent-launch'
+import { buildAgentLaunchLine, buildHeadlessSpawnArgs } from '../packages/server/src/agent-launch'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import type { AiAgentType, CreateTerminalPayload } from '@vornrun/shared/types'
 
@@ -125,65 +121,6 @@ describe('buildAgentLaunchLine', () => {
     )
     expect(result).not.toContain('--session-id')
     expect(result).not.toContain('--resume')
-  })
-})
-
-describe('buildHeadlessLaunchLine', () => {
-  it('builds claude with -p and headlessArgs', () => {
-    const result = buildHeadlessLaunchLine(makePayload({ initialPrompt: 'do it' }), cmds, env)
-    expect(result).toContain('claude')
-    expect(result).toContain('--dangerously-skip-permissions')
-    expect(result).toContain('-p')
-  })
-
-  it('builds copilot with --allow-all', () => {
-    const result = buildHeadlessLaunchLine(
-      makePayload({ agentType: 'copilot', initialPrompt: 'do it' }),
-      cmds,
-      env
-    )
-    expect(result).toContain('--allow-all')
-    expect(result).toContain('-p')
-  })
-
-  it('builds codex with exec subcommand', () => {
-    const result = buildHeadlessLaunchLine(
-      makePayload({ agentType: 'codex', initialPrompt: 'do it' }),
-      cmds,
-      env
-    )
-    expect(result).toContain('exec')
-    expect(result).toContain('-a never')
-  })
-
-  it('builds opencode with run subcommand', () => {
-    const result = buildHeadlessLaunchLine(
-      makePayload({ agentType: 'opencode', initialPrompt: 'do it' }),
-      cmds,
-      env
-    )
-    expect(result).toContain('run')
-  })
-
-  it('builds gemini with -y flag', () => {
-    const result = buildHeadlessLaunchLine(
-      makePayload({ agentType: 'gemini', initialPrompt: 'do it' }),
-      cmds,
-      env
-    )
-    expect(result).toContain('-y')
-    expect(result).toContain('-p')
-  })
-
-  it('uses empty quoted string when no prompt', () => {
-    const result = buildHeadlessLaunchLine(makePayload(), cmds, env)
-    expect(result).toContain("''")
-  })
-
-  it('per-step args override headlessArgs', () => {
-    const result = buildHeadlessLaunchLine(makePayload({ args: ['--custom'] }), cmds, env)
-    expect(result).toContain('--custom')
-    expect(result).not.toContain('--dangerously-skip-permissions')
   })
 })
 
@@ -414,12 +351,6 @@ describe('agent-launch guards against shell sessions', () => {
     )
   })
 
-  it('buildHeadlessLaunchLine throws for shell payloads', () => {
-    expect(() => buildHeadlessLaunchLine(shellPayload, cmds, env)).toThrow(
-      /buildHeadlessLaunchLine called for shell session/
-    )
-  })
-
   it('buildHeadlessSpawnArgs throws for shell payloads', () => {
     expect(() => buildHeadlessSpawnArgs(shellPayload, cmds, env)).toThrow(
       /buildHeadlessSpawnArgs called for shell session/
@@ -520,7 +451,7 @@ describe('a chosen model reaches the agent', () => {
   it('refuses a model on a shell wrapper command', () => {
     const commands = { ...cmds, claude: { ...cmds.claude, command: 'nvm use 20 && claude' } }
     expect(() => buildAgentLaunchLine(makePayload({ model: 'x' }), commands, env)).toThrow(
-      /shell wrapper/
+      /one executable/
     )
   })
 })

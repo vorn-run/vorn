@@ -10,7 +10,7 @@ import {
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import { shellEscape } from './process-utils'
 import { stripSessionSelectors } from './launch-tokens'
-import { applyModelArguments, assertModelCommand } from './model-arguments'
+import { applyModelArguments, assertModelCommand, commandShape } from './model-arguments'
 import { findOnPath } from './resolve-executable'
 
 /** The configured command, and where on `env.PATH` it lives; the name when it is not there. */
@@ -42,6 +42,13 @@ function resolveHeadlessArgs(
   return baseArgs
 }
 
+/** The arguments with the chosen model as their one model selector, or as they are. */
+function withModel(payload: CreateTerminalPayload, command: string, args: string[]): string[] {
+  if (payload.model === undefined) return args
+  assertModelCommand(command, !payload.remoteHostId)
+  return applyModelArguments(payload.agentType, args, payload.model)
+}
+
 /**
  * Builds the interactive launch command (for PTY/terminal sessions).
  * This starts the agent's TUI/interactive mode.
@@ -58,12 +65,11 @@ export function buildAgentLaunchLine(
   const cmd = resolveAgentCommand(cmdConfig, env)
   // Per-step args override settings-level args; escape each for shell safety
   const escape = (value: string) => shellEscape(value, payload.remoteHostId ? 'posix' : 'auto')
-  let effectiveArgs = payload.args !== undefined ? payload.args : cmd.args
-  if (payload.model !== undefined) {
-    assertModelCommand(cmd.command)
-    effectiveArgs = applyModelArguments(payload.agentType, effectiveArgs, payload.model)
-  }
-  const commandLine = payload.model !== undefined ? escape(cmd.command) : cmd.command
+  const effectiveArgs = withModel(payload, cmd.command, payload.args ?? cmd.args)
+  const commandLine =
+    commandShape(cmd.command, !payload.remoteHostId) === 'executable'
+      ? escape(cmd.command)
+      : cmd.command
   let launchLine = [commandLine, ...effectiveArgs.map(escape)].join(' ')
 
   // Where the configured command ends and its arguments begin. Known exactly
@@ -144,59 +150,6 @@ export function buildAgentLaunchLine(
   return launchLine
 }
 
-/**
- * Builds the non-interactive launch command (for headless/background execution).
- * Uses each agent's native non-interactive mode:
- *   claude  -> claude -p 'prompt'
- *   copilot -> copilot -p 'prompt'
- *   codex   -> codex exec 'prompt'
- *   opencode -> opencode run 'prompt'
- *   gemini  -> gemini -p 'prompt'
- */
-export function buildHeadlessLaunchLine(
-  payload: CreateTerminalPayload,
-  agentCommands: Record<AiAgentType, AgentCommandConfig>,
-  env: Record<string, string>
-): string {
-  if ((payload.agentType as AgentType) === 'shell') {
-    throw new Error('buildHeadlessLaunchLine called for shell session')
-  }
-  const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
-  const cmd = resolveAgentCommand(cmdConfig, env)
-  const baseCmd = payload.model !== undefined ? shellEscape(cmd.command) : cmd.command
-  let extraArgs = resolveHeadlessArgs(payload, cmdConfig, cmd.args)
-  if (payload.model !== undefined) {
-    assertModelCommand(cmd.command)
-    extraArgs = applyModelArguments(payload.agentType, extraArgs, payload.model)
-  }
-  const renderedArgs =
-    payload.model !== undefined ? extraArgs.map((a) => shellEscape(a)) : extraArgs
-  const argsStr = renderedArgs.length > 0 ? renderedArgs.join(' ') + ' ' : ''
-
-  const emptyStr = process.platform === 'win32' ? '""' : "''"
-  const prompt = payload.initialPrompt ? shellEscape(payload.initialPrompt) : emptyStr
-
-  switch (payload.agentType) {
-    case 'claude':
-      return `${baseCmd} ${argsStr}-p ${prompt}`
-
-    case 'copilot':
-      return `${baseCmd} ${argsStr}-p ${prompt}`
-
-    case 'codex':
-      return `${baseCmd} ${argsStr}exec ${payload.resumeSessionId ? `resume ${shellEscape(payload.resumeSessionId)} ` : ''}${prompt}`
-
-    case 'opencode':
-      return `${baseCmd} ${argsStr}run ${prompt}`
-
-    case 'gemini':
-      return `${baseCmd} ${argsStr}-p ${prompt}`
-
-    default:
-      return `${baseCmd} ${argsStr}-p ${prompt}`
-  }
-}
-
 export interface HeadlessSpawnArgs {
   command: string
   args: string[]
@@ -234,11 +187,9 @@ export function buildHeadlessSpawnArgs(
   const cmdConfig = agentCommands[payload.agentType] || DEFAULT_AGENT_COMMANDS[payload.agentType]
   const cmd = resolveAgentCommand(cmdConfig, env)
   const prompt = payload.initialPrompt || ''
-  let extraArgs = [...resolveHeadlessArgs(payload, cmdConfig, cmd.args)]
-  if (payload.model !== undefined) {
-    assertModelCommand(cmd.command)
-    extraArgs = applyModelArguments(payload.agentType, extraArgs, payload.model)
-  }
+  const extraArgs = [
+    ...withModel(payload, cmd.command, resolveHeadlessArgs(payload, cmdConfig, cmd.args))
+  ]
 
   if (
     payload.resumeSessionId &&

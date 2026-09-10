@@ -47,23 +47,21 @@ export function applyModelArguments(agent: AiAgentType, args: string[], model: s
   return [...kept, '--model', id, ...args.slice(i)]
 }
 
-/** A model can be added only to a command that is one executable; a shell wrapper is left alone. */
-export function assertModelCommand(command: string): void {
-  if (/[;&|<>`\n\r]/.test(command) || command.includes('$(')) {
-    throw new Error(
-      'A model cannot be added to this shell wrapper. Configure an executable with its arguments separately, or use the configured default.'
-    )
-  }
+/** One executable the shell can be handed quoted, or a wrapper it must read as written. */
+export function commandShape(command: string, onThisMachine = true): 'executable' | 'wrapper' {
+  if (/[;&|<>`\n\r]/.test(command) || command.includes('$(')) return 'wrapper'
   const tokens = tokenize(command)
+  if (!tokens) return 'wrapper'
+  if (tokens.length === 1) return 'executable'
   // A path with spaces tokenizes into several words yet names one file.
-  if (!tokens || (tokens.length > 1 && !existsSync(command))) {
+  return onThisMachine && existsSync(command) ? 'executable' : 'wrapper'
+}
+
+/** A model rides the arguments, so the command must be one executable. */
+export function assertModelCommand(command: string, onThisMachine = true): void {
+  if (commandShape(command, onThisMachine) === 'wrapper') {
     throw new Error(
-      'A model needs an executable with its arguments configured separately. Use the configured default for this wrapper.'
-    )
-  }
-  if (tokens.length > 1 && tokens.some((t) => t.value.startsWith('-'))) {
-    throw new Error(
-      'Move flags out of the agent command into its arguments before choosing a model.'
+      'A model needs a command that is one executable. Move the wrapper and its flags into agent arguments, or use the configured default.'
     )
   }
 }

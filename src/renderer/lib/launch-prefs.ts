@@ -29,6 +29,7 @@ export function loadLaunchSettings(): SavedLaunchSettings {
   }
 }
 
+/** Merged, not replaced: the launcher writes project and agent, the pickers write models. */
 export function persistLaunchSettings(settings: SavedLaunchSettings): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...loadLaunchSettings(), ...settings }))
@@ -61,5 +62,5 @@ export function getPreferredAgent(fallback: AiAgentType = 'claude'): AiAgentType
 }
 
 export function setPreferredAgent(agent: AiAgentType): void {
-  persistLaunchSettings({ ...loadLaunchSettings(), agent })
+  persistLaunchSettings({ agent })
 }

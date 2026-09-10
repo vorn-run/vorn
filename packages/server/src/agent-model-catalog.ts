@@ -21,6 +21,13 @@ type Json = Record<string, unknown>
 const asObject = (value: unknown): Json =>
   typeof value === 'object' && value !== null ? (value as Json) : {}
 
+/** Each CLI names the model id differently. */
+function idOf(agent: AiAgentType, entry: Json): unknown {
+  if (agent === 'claude') return entry.value
+  if (agent === 'codex') return entry.model ?? entry.id
+  return entry.id
+}
+
 /** The agents' own answers, normalised to one shape; hidden and disabled entries dropped. */
 export function parseModelChoices(agent: AiAgentType, value: unknown): AgentModelChoice[] {
   if (agent === 'opencode') {
@@ -36,8 +43,7 @@ export function parseModelChoices(agent: AiAgentType, value: unknown): AgentMode
   for (const item of value) {
     const entry = asObject(item)
     if (entry.hidden === true || asObject(entry.policy).state === 'disabled') continue
-    const id =
-      agent === 'claude' ? entry.value : agent === 'codex' ? (entry.model ?? entry.id) : entry.id
+    const id = idOf(agent, entry)
     if (typeof id !== 'string' || !id) continue
     const label = entry.displayName ?? entry.name
     byId.set(id, {
@@ -282,11 +288,12 @@ export function createModelCatalogService(discover: Discover, now: () => number 
           error instanceof Error
             ? error.message
             : 'Could not list models. Check the agent installation and sign-in, then refresh or type a model id.'
+        if (!entry.choices) return unavailable(entry.error)
         return {
-          choices: entry.choices ?? [],
-          status: entry.choices ? 'stale' : 'unavailable',
-          source: entry.choices ? 'agent' : undefined,
-          fetchedAt: entry.choices ? entry.fetchedAt : undefined,
+          choices: entry.choices,
+          status: 'stale',
+          source: 'agent',
+          fetchedAt: entry.fetchedAt,
           error: entry.error
         }
       })

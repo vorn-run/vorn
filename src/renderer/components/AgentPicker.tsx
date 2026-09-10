@@ -1,15 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, ChevronDown, Bot, ClipboardList } from 'lucide-react'
 import { AiAgentType, LaunchAgentType } from '../../shared/types'
 import { AgentIcon } from './AgentIcon'
+import { useAnchoredMenu } from '../hooks/useAnchoredMenu'
 
-/** Only used to choose a direction; the flipped menu is anchored by its edge. */
 const MENU_ITEM_PX = 28
 const MENU_PADDING_PX = 8
-const MENU_GAP_PX = 4
-const VIEWPORT_MARGIN_PX = 8
 
 const AGENT_LABELS: Record<AiAgentType, string> = {
   claude: 'Claude',
@@ -34,41 +31,11 @@ export function AgentPicker({
   allowNone?: boolean
   allowFromTask?: boolean
 }) {
-  const [open, setOpen] = useState(false)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState<{
-    top?: number
-    bottom?: number
-    left: number
-    width: number
-  }>({ top: 0, left: 0, width: 0 })
-
-  const handleTrigger = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (open) {
-      setOpen(false)
-      return
-    }
-    const rect = triggerRef.current?.getBoundingClientRect()
-    if (rect) {
-      // The picker sits at the bottom of the intent bar, so a menu that only
-      // ever drops downward opens off the bottom of the window. Anchoring the
-      // flipped menu by its bottom edge means the exact height never has to be
-      // known — the estimate below only decides which way to go.
-      const estimated = itemCount * MENU_ITEM_PX + MENU_PADDING_PX
-      const flipUp =
-        rect.bottom + MENU_GAP_PX + estimated > window.innerHeight - VIEWPORT_MARGIN_PX &&
-        rect.top - MENU_GAP_PX - estimated > VIEWPORT_MARGIN_PX
-      setPosition({
-        top: flipUp ? undefined : rect.bottom + MENU_GAP_PX,
-        bottom: flipUp ? window.innerHeight - rect.top + MENU_GAP_PX : undefined,
-        left: rect.left,
-        width: rect.width
-      })
-    }
-    setOpen(true)
-  }
+  const agents = Object.keys(AGENT_LABELS) as AiAgentType[]
+  const itemCount = agents.length + (allowNone ? 1 : 0) + (allowFromTask ? 1 : 0)
+  const { open, setOpen, toggle, triggerRef, menuRef, position } = useAnchoredMenu({
+    estimateHeight: () => itemCount * MENU_ITEM_PX + MENU_PADDING_PX
+  })
 
   const handleSelect = (agent: LaunchAgentType | null) => {
     if (agent && agent !== 'fromTask' && !installStatus[agent]) return
@@ -78,32 +45,11 @@ export function AgentPicker({
     }
   }
 
-  useEffect(() => {
-    if (!open) return
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (triggerRef.current?.contains(target)) return
-      if (menuRef.current && !menuRef.current.contains(target)) setOpen(false)
-    }
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [open])
-
-  const agents = Object.keys(AGENT_LABELS) as AiAgentType[]
-  const itemCount = agents.length + (allowNone ? 1 : 0) + (allowFromTask ? 1 : 0)
-
   return (
     <>
       <button
         ref={triggerRef}
-        onClick={handleTrigger}
+        onClick={toggle}
         className={
           variant === 'form'
             ? 'w-full flex items-center gap-2 px-3 py-2 text-[13px] bg-white/[0.06] border border-white/[0.1] rounded-md text-white hover:border-white/[0.2] transition-colors'

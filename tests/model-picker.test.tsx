@@ -161,7 +161,7 @@ describe('ModelPicker', () => {
 
   it('is settled, not hidden, when the step follows the task', () => {
     api()
-    render(<ModelPicker variant="form" agentType="claude" disabled onChange={vi.fn()} />)
+    render(<ModelPicker variant="form" agentType="fromTask" onChange={vi.fn()} />)
     expect(trigger()).toBeDisabled()
     expect(trigger()).toHaveTextContent("Follows the task's agent")
   })

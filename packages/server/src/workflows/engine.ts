@@ -387,6 +387,11 @@ export function resolveEffectiveAgent(
   resolvedTask: TaskConfig | undefined
 ): AiAgentType {
   if (config.agentType !== 'fromTask') return config.agentType
+  if (config.model !== undefined) {
+    throw new Error(
+      'A model needs a concrete agent. Clear the model or choose an agent for this step.'
+    )
+  }
   return (
     context?.task?.assignedAgent ??
     resolvedTask?.assignedAgent ??
@@ -895,11 +900,6 @@ async function executeNode(
     }
   }
 
-  if (config.agentType === 'fromTask' && config.model !== undefined) {
-    throw new Error(
-      'A model needs a concrete agent. Clear the model or choose an agent for this step.'
-    )
-  }
   const effectiveAgent = resolveEffectiveAgent(config, context, resolvedTask)
 
   // Resolve project name/path from the triggering task when the node config

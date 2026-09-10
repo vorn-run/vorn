@@ -178,8 +178,7 @@ export function LaunchAgentConfigForm({
         <label className="text-[13px] text-gray-400 font-medium block mb-2">Model</label>
         <ModelPicker
           variant="form"
-          agentType={config.agentType === 'fromTask' ? 'claude' : config.agentType}
-          disabled={config.agentType === 'fromTask'}
+          agentType={config.agentType}
           projectPath={projectIsFromContext ? undefined : config.projectPath}
           remoteHostId={
             selectedProject ? getProjectRemoteHostId(selectedProject) : config.remoteHostId

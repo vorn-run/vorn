@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, ChevronDown, Cpu, Loader2, RefreshCw } from 'lucide-react'
-import type { AiAgentType } from '../../shared/types'
+import type { AiAgentType, LaunchAgentType } from '../../shared/types'
 import {
   supportsModelSelection,
   validateModelId,
@@ -10,30 +10,36 @@ import {
   type AgentModelChoice
 } from '@vornrun/shared/agent-models'
 import { Tooltip } from './Tooltip'
+import { useAnchoredMenu } from '../hooks/useAnchoredMenu'
 
-/** Only used to choose a direction; the flipped menu is anchored by its edge. */
 const MENU_ROW_PX = 28
 const MENU_CHROME_PX = 84
-const MENU_GAP_PX = 4
-const VIEWPORT_MARGIN_PX = 8
 const MENU_WIDTH_PX = 288
 
-const AGENT_NAMES: Record<string, string> = {
-  claude: 'claude',
-  copilot: 'copilot',
-  codex: 'codex',
-  opencode: 'opencode'
-}
+type Variant = 'compact' | 'bordered' | 'form'
 
 interface Props {
-  agentType: AiAgentType | string
+  agentType: LaunchAgentType | string
   projectPath?: string
   remoteHostId?: string
   value?: string
   onChange: (model: string | undefined) => void
   /** `compact` is the launcher chip; `bordered` the intent bar's; `form` a full-width field. */
-  variant?: 'compact' | 'bordered' | 'form'
-  disabled?: boolean
+  variant?: Variant
+}
+
+const TRIGGER_CLASS: Record<Variant, string> = {
+  form: 'w-full flex items-center gap-2 px-3 py-2 text-[13px] bg-white/[0.06] border border-white/[0.1] rounded-md transition-colors',
+  bordered:
+    'flex items-center gap-1.5 rounded-[4px] border border-white/[0.12] px-1.5 py-0.5 text-[12px] text-gray-300 transition-colors hover:border-white/25 hover:bg-white/[0.04]',
+  compact:
+    'flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/[0.06] transition-colors text-xs text-gray-400'
+}
+
+const DEFAULT_TEXT: Record<Variant, string> = {
+  form: 'Agent default',
+  bordered: '',
+  compact: 'Default'
 }
 
 function agoLabel(fetchedAt: number | undefined, now: number): string {
@@ -48,36 +54,52 @@ function providerOf(id: string): string | undefined {
   return slash > 0 ? id.slice(0, slash) : undefined
 }
 
+function footerFor(
+  agent: string,
+  catalog: AgentModelCatalog | null,
+  loading: boolean,
+  openedAt: number
+): { text: string; spinner: boolean } {
+  if (loading) return { text: `Asking ${agent}…`, spinner: true }
+  if (!catalog) return { text: '', spinner: false }
+  if (catalog.status === 'unavailable') {
+    return { text: catalog.error ?? 'Could not list models — type an id', spinner: false }
+  }
+  if (catalog.source === 'built-in') {
+    return { text: 'Known ids — others can be typed', spinner: false }
+  }
+  const failed = catalog.status === 'stale' ? ' · refreshing failed' : ''
+  return {
+    text: `From ${agent} · ${agoLabel(catalog.fetchedAt, openedAt)}${failed}`,
+    spinner: false
+  }
+}
+
 export function ModelPicker({
   agentType,
   projectPath,
   remoteHostId,
   value,
   onChange,
-  variant = 'compact',
-  disabled = false
+  variant = 'compact'
 }: Props) {
-  const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [invalid, setInvalid] = useState('')
   const [catalog, setCatalog] = useState<AgentModelCatalog | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshes, setRefreshes] = useState(0)
   const [openedAt, setOpenedAt] = useState(0)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState<{
-    top?: number
-    bottom?: number
-    left: number
-    width: number
-  }>({ top: 0, left: 0, width: MENU_WIDTH_PX })
 
-  const supported = supportsModelSelection(agentType)
-  const agentName = AGENT_NAMES[agentType] ?? agentType
+  const followsTask = agentType === 'fromTask'
+  const supported = followsTask || supportsModelSelection(agentType)
   const choices = catalog?.choices ?? []
   const selected = choices.find((choice) => choice.id === value)
   const label = selected?.label ?? value
+
+  const { open, setOpen, toggle, triggerRef, menuRef, position } = useAnchoredMenu({
+    estimateHeight: () => Math.min(8, choices.length + 1) * MENU_ROW_PX + MENU_CHROME_PX,
+    menuWidth: (trigger) => Math.max(MENU_WIDTH_PX, variant === 'form' ? trigger : 0)
+  })
 
   // Asked when the menu opens, and again on refresh; the list belongs to this agent and project.
   useEffect(() => {
@@ -112,61 +134,16 @@ export function ModelPicker({
     }
   }, [open, supported, agentType, projectPath, remoteHostId, refreshes])
 
-  useEffect(() => {
-    if (!open) return
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (triggerRef.current?.contains(target)) return
-      if (menuRef.current && !menuRef.current.contains(target)) setOpen(false)
-    }
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        setOpen(false)
-        triggerRef.current?.focus()
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [open])
-
   if (!supported) return null
 
   const handleTrigger = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (disabled) return
-    if (open) {
-      setOpen(false)
-      return
+    if (followsTask) return
+    if (!open) {
+      setQuery('')
+      setInvalid('')
+      setOpenedAt(Date.now())
     }
-    const rect = triggerRef.current?.getBoundingClientRect()
-    if (rect) {
-      const width = Math.min(
-        Math.max(MENU_WIDTH_PX, variant === 'form' ? rect.width : 0),
-        window.innerWidth - 16
-      )
-      const estimated = Math.min(8, choices.length + 1) * MENU_ROW_PX + MENU_CHROME_PX
-      const flipUp =
-        rect.bottom + MENU_GAP_PX + estimated > window.innerHeight - VIEWPORT_MARGIN_PX &&
-        rect.top - MENU_GAP_PX - estimated > VIEWPORT_MARGIN_PX
-      setPosition({
-        top: flipUp ? undefined : rect.bottom + MENU_GAP_PX,
-        bottom: flipUp ? window.innerHeight - rect.top + MENU_GAP_PX : undefined,
-        left: Math.max(
-          VIEWPORT_MARGIN_PX,
-          Math.min(rect.left, window.innerWidth - width - VIEWPORT_MARGIN_PX)
-        ),
-        width
-      })
-    }
-    setQuery('')
-    setInvalid('')
-    setOpenedAt(Date.now())
-    setOpen(true)
+    toggle(e)
   }
 
   const select = (model: string | undefined) => {
@@ -187,60 +164,39 @@ export function ModelPicker({
   const shown = needle
     ? choices.filter((c) => `${c.label} ${c.id}`.toLowerCase().includes(needle))
     : choices
-  const exact = shown.find((c) => c.id === needle || c.id.toLowerCase() === needle)
+  const exact = shown.find((c) => c.id.toLowerCase() === needle)
   const groupedByProvider = agentType === 'opencode'
+  const footer = footerFor(agentType, catalog, loading, openedAt)
 
-  const footer = loading
-    ? { text: `Asking ${agentName}…`, spinner: true }
-    : catalog?.status === 'unavailable'
-      ? { text: catalog.error ?? 'Could not list models — type an id', spinner: false }
-      : catalog?.source === 'built-in'
-        ? { text: 'Known ids — others can be typed', spinner: false }
-        : catalog
-          ? {
-              text: `From ${agentName} · ${agoLabel(catalog.fetchedAt, openedAt)}${catalog.status === 'stale' ? ' · refreshing failed' : ''}`,
-              spinner: false
-            }
-          : { text: '', spinner: false }
-
-  const triggerClass =
-    variant === 'form'
-      ? `w-full flex items-center gap-2 px-3 py-2 text-[13px] bg-white/[0.06] border border-white/[0.1] rounded-md transition-colors ${
-          disabled ? 'text-gray-600 cursor-default' : 'text-white hover:border-white/[0.2]'
-        }`
-      : variant === 'bordered'
-        ? 'flex items-center gap-1.5 rounded-[4px] border border-white/[0.12] px-1.5 py-0.5 text-[12px] text-gray-300 transition-colors hover:border-white/25 hover:bg-white/[0.04]'
-        : 'flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/[0.06] transition-colors text-xs text-gray-400'
-
-  const triggerText = disabled
-    ? "Follows the task's agent"
-    : (label ?? (variant === 'form' ? 'Agent default' : 'Default'))
-  const showText = variant !== 'bordered' || label !== undefined
+  const triggerText = followsTask ? "Follows the task's agent" : (label ?? DEFAULT_TEXT[variant])
+  const formTone = followsTask
+    ? 'text-gray-600 cursor-default'
+    : 'text-white hover:border-white/[0.2]'
 
   const trigger = (
     <button
       ref={triggerRef}
       type="button"
       onClick={handleTrigger}
-      disabled={disabled}
+      disabled={followsTask}
       aria-haspopup="listbox"
       aria-expanded={open}
       aria-label={label ? `Model: ${label}` : 'Model: agent default'}
-      className={triggerClass}
+      className={variant === 'form' ? `${TRIGGER_CLASS.form} ${formTone}` : TRIGGER_CLASS[variant]}
     >
       <Cpu
         size={variant === 'form' ? 14 : 13}
         className={label ? 'text-gray-300' : 'text-gray-500'}
         strokeWidth={1.75}
       />
-      {showText && (
+      {triggerText && (
         <span
-          className={`flex-1 text-left truncate max-w-[170px] ${label || disabled ? '' : 'text-gray-500'}`}
+          className={`flex-1 text-left truncate max-w-[170px] ${label || followsTask ? '' : 'text-gray-500'}`}
         >
           {triggerText}
         </span>
       )}
-      {!disabled && showText && (
+      {!followsTask && triggerText && (
         <ChevronDown size={variant === 'form' ? 12 : 10} className="shrink-0 text-gray-500" />
       )}
     </button>
@@ -379,7 +335,7 @@ export function ModelPicker({
         {footer.spinner && <Loader2 size={10} className="animate-spin shrink-0" />}
         <span className="flex-1 truncate">{footer.text}</span>
         {catalog?.source === 'agent' && !loading && (
-          <Tooltip label={`Ask ${agentName} again`}>
+          <Tooltip label={`Ask ${agentType} again`}>
             <button
               type="button"
               aria-label="Refresh models"

@@ -2271,10 +2271,7 @@ export function registerAllMethods(): void {
       // (e.g. the agent CLI doesn't support hooks.json).
     }
 
-    // Fresh local Codex/OpenCode sessions cannot pin an ID. Their local DB
-    // supplies a best-effort fallback; directory/timestamp matching remains
-    // ambiguous when several conversations share a directory. Known resume
-    // IDs and remote sessions must never be replaced by this local lookup.
+    // A local lookup for agents that cannot pin an id; a known id or a remote session is never replaced.
     if (
       supportsExactSessionResume(payload.agentType) &&
       !supportsSessionIdPinning(payload.agentType) &&
