@@ -37,10 +37,18 @@ describe('model catalogs', () => {
     ).toEqual([{ id: 'cli-id', label: 'Model' }])
     expect(
       parseModelChoices('copilot', [
-        { id: 'auto' },
-        { id: 'blocked', policy: { state: 'disabled' } }
+        { modelId: 'auto', name: 'Auto', description: 'Let Copilot pick' },
+        {
+          modelId: 'opus',
+          name: 'Opus',
+          _meta: { copilotUsage: '15x', copilotEnablement: 'enabled' }
+        },
+        { modelId: 'blocked', name: 'Blocked', _meta: { copilotEnablement: 'policy_disabled' } }
       ])
-    ).toEqual([{ id: 'auto', label: 'auto' }])
+    ).toEqual([
+      { id: 'auto', label: 'Auto', description: 'Let Copilot pick' },
+      { id: 'opus', label: 'Opus', description: '15x usage' }
+    ])
     expect(
       parseModelChoices('opencode', 'provider/model\r\nprovider/model\nother/model\nnoise')
     ).toEqual([
@@ -152,6 +160,28 @@ describe('discovery process protocol', () => {
       expect.arrayContaining(['--no-session-persistence', '--safe-mode', '--strict-mcp-config']),
       expect.anything()
     )
+  })
+
+  it('reads Copilot models from a new session over the agent protocol', async () => {
+    const { child, sent, reply } = childFixture()
+    const result = probeProcess(context, 'copilot')
+    reply({ jsonrpc: '2.0', id: 1, result: { protocolVersion: 1 } })
+    reply({
+      jsonrpc: '2.0',
+      id: 2,
+      result: { sessionId: 's', models: { availableModels: [{ modelId: 'auto', name: 'Auto' }] } }
+    })
+    expect(await result).toEqual([{ id: 'auto', label: 'Auto' }])
+    expect(sent.map((value) => (value as { method: string }).method)).toEqual([
+      'initialize',
+      'session/new'
+    ])
+    expect(spawn).toHaveBeenCalledWith(
+      'agent',
+      ['--acp', '--no-remote', '--no-remote-export'],
+      expect.anything()
+    )
+    expect(child.kill).toHaveBeenCalled()
   })
 
   it('rejects malformed responses and kills timed-out children', async () => {

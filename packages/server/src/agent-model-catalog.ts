@@ -5,7 +5,7 @@ import type {
   AgentModelChoice,
   AgentModelRequest
 } from '@vornrun/shared/agent-models'
-import { CURATED_MODELS, supportsModelSelection } from '@vornrun/shared/agent-models'
+import { supportsModelSelection } from '@vornrun/shared/agent-models'
 import type { AiAgentType, AgentCommandConfig } from '@vornrun/shared/types'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import { configManager } from './config-manager'
@@ -25,7 +25,15 @@ const asObject = (value: unknown): Json =>
 function idOf(agent: AiAgentType, entry: Json): unknown {
   if (agent === 'claude') return entry.value
   if (agent === 'codex') return entry.model ?? entry.id
+  if (agent === 'copilot') return entry.modelId
   return entry.id
+}
+
+/** Copilot says what a model costs against the plan; that is the hint worth showing. */
+function descriptionOf(entry: Json): string | undefined {
+  const usage = asObject(entry._meta).copilotUsage
+  if (typeof usage === 'string' && usage) return `${usage} usage`
+  return typeof entry.description === 'string' ? entry.description : undefined
 }
 
 /** The agents' own answers, normalised to one shape; hidden and disabled entries dropped. */
@@ -43,13 +51,16 @@ export function parseModelChoices(agent: AiAgentType, value: unknown): AgentMode
   for (const item of value) {
     const entry = asObject(item)
     if (entry.hidden === true || asObject(entry.policy).state === 'disabled') continue
+    const enablement = asObject(entry._meta).copilotEnablement
+    if (enablement !== undefined && enablement !== 'enabled') continue
     const id = idOf(agent, entry)
     if (typeof id !== 'string' || !id) continue
     const label = entry.displayName ?? entry.name
+    const description = descriptionOf(entry)
     byId.set(id, {
       id,
       label: typeof label === 'string' ? label : id,
-      ...(typeof entry.description === 'string' && { description: entry.description })
+      ...(description && { description })
     })
   }
   return [...byId.values()]
@@ -62,7 +73,7 @@ export interface ProbeContext {
   env: Record<string, string>
 }
 
-type ProbedAgent = 'claude' | 'codex' | 'opencode'
+type ProbedAgent = 'claude' | 'codex' | 'copilot' | 'opencode'
 
 /** The one invocation of each CLI that lists models without starting a conversation. */
 function probeArguments(agent: ProbedAgent, configured: string[]): string[] {
@@ -84,6 +95,8 @@ function probeArguments(agent: ProbedAgent, configured: string[]): string[] {
       ]
     case 'codex':
       return [...configured, 'app-server', '--stdio']
+    case 'copilot':
+      return ['--acp', '--no-remote', '--no-remote-export']
     case 'opencode':
       return ['models']
   }
@@ -162,6 +175,23 @@ export function probeProcess(
       if (response.subtype !== 'success') throw new Error('Initialization failed')
       finish(undefined, parseModelChoices('claude', asObject(response.response).models))
     }
+    // Copilot lists models on session/new; the session is never prompted.
+    const readCopilot = (msg: Json): void => {
+      if (msg.id === 1) {
+        if (msg.error) throw new Error('Initialization failed')
+        send({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'session/new',
+          params: { cwd: context.cwd, mcpServers: [] }
+        })
+        return
+      }
+      if (msg.id !== 2) return
+      if (msg.error) throw new Error('Session failed')
+      const models = asObject(asObject(msg.result).models).availableModels
+      finish(undefined, parseModelChoices('copilot', models))
+    }
     const readCodex = (msg: Json): void => {
       if (msg.id === 1) {
         if (msg.error) throw new Error('Initialization failed')
@@ -200,6 +230,7 @@ export function probeProcess(
         try {
           const msg = asObject(JSON.parse(line))
           if (agent === 'claude') readClaude(msg)
+          else if (agent === 'copilot') readCopilot(msg)
           else readCodex(msg)
         } catch {
           finish(new Error(UNSUPPORTED_ANSWER))
@@ -218,6 +249,16 @@ export function probeProcess(
         id: 1,
         method: 'initialize',
         params: { clientInfo: { name: 'vorn_model_catalog', version: '1.0.0' } }
+      })
+    } else if (agent === 'copilot') {
+      send({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: 1,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } }
+        }
       })
     } else {
       child.stdin.end()
@@ -261,9 +302,6 @@ export function createModelCatalogService(discover: Discover, now: () => number 
     if (!request.projectPath || request.projectPath.includes('{{')) {
       return unavailable('Choose a project to list models, or type a model id.')
     }
-    const curated = CURATED_MODELS[request.agentType]
-    if (curated) return { choices: curated, status: 'ready', source: 'built-in' }
-
     const key = JSON.stringify([request.agentType, path.resolve(request.projectPath), config])
     const entry = cache.get(key) ?? { fetchedAt: 0 }
     cache.set(key, entry)
@@ -272,7 +310,6 @@ export function createModelCatalogService(discover: Discover, now: () => number 
       return {
         choices: entry.choices!,
         status: 'ready',
-        source: 'agent',
         fetchedAt: entry.fetchedAt
       }
     }
@@ -281,7 +318,7 @@ export function createModelCatalogService(discover: Discover, now: () => number 
         entry.choices = choices
         entry.fetchedAt = now()
         entry.error = undefined
-        return { choices, status: 'ready', source: 'agent', fetchedAt: entry.fetchedAt }
+        return { choices, status: 'ready', fetchedAt: entry.fetchedAt }
       })
       .catch((error: unknown): AgentModelCatalog => {
         entry.error =
@@ -292,7 +329,6 @@ export function createModelCatalogService(discover: Discover, now: () => number 
         return {
           choices: entry.choices,
           status: 'stale',
-          source: 'agent',
           fetchedAt: entry.fetchedAt,
           error: entry.error
         }
@@ -304,7 +340,6 @@ export function createModelCatalogService(discover: Discover, now: () => number 
       return {
         choices: entry.choices,
         status: 'stale',
-        source: 'agent',
         fetchedAt: entry.fetchedAt,
         error: entry.error
       }

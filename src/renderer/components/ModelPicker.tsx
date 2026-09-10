@@ -65,9 +65,6 @@ function footerFor(
   if (catalog.status === 'unavailable') {
     return { text: catalog.error ?? 'Could not list models — type an id', spinner: false }
   }
-  if (catalog.source === 'built-in') {
-    return { text: 'Known ids — others can be typed', spinner: false }
-  }
   const failed = catalog.status === 'stale' ? ' · refreshing failed' : ''
   return {
     text: `From ${agent} · ${agoLabel(catalog.fetchedAt, openedAt)}${failed}`,
@@ -85,13 +82,15 @@ export function ModelPicker({
 }: Props) {
   const [query, setQuery] = useState('')
   const [invalid, setInvalid] = useState('')
-  const [catalog, setCatalog] = useState<AgentModelCatalog | null>(null)
+  const [fetched, setFetched] = useState<{ key: string; catalog: AgentModelCatalog } | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshes, setRefreshes] = useState(0)
   const [openedAt, setOpenedAt] = useState(0)
 
   const followsTask = agentType === 'fromTask'
   const supported = followsTask || supportsModelSelection(agentType)
+  const key = `${agentType}\u0000${projectPath ?? ''}\u0000${remoteHostId ?? ''}`
+  const catalog = fetched?.key === key ? fetched.catalog : null
   const choices = catalog?.choices ?? []
   const selected = choices.find((choice) => choice.id === value)
   const label = selected?.label ?? value
@@ -101,9 +100,11 @@ export function ModelPicker({
     menuWidth: (trigger) => Math.max(MENU_WIDTH_PX, variant === 'form' ? trigger : 0)
   })
 
-  // Asked when the menu opens, and again on refresh; the list belongs to this agent and project.
+  // The one launcher and form ask as soon as they know the agent; a chip on every card waits to be opened.
+  const eager = variant !== 'bordered' && Boolean(projectPath)
+
   useEffect(() => {
-    if (!open || !supported) return
+    if (!supported || agentType === 'fromTask' || (!open && !eager)) return
     let cancelled = false
     const request = {
       agentType: agentType as AiAgentType,
@@ -111,20 +112,21 @@ export function ModelPicker({
       remoteHostId
     }
     const list = window.api?.listAgentModels
+    const settle = (catalog: AgentModelCatalog) => {
+      if (!cancelled) setFetched({ key, catalog })
+    }
     void (async () => {
       await Promise.resolve()
       if (cancelled) return
       if (!list) {
-        setCatalog({ choices: [], status: 'unavailable', error: 'This server cannot list models.' })
+        settle({ choices: [], status: 'unavailable', error: 'This server cannot list models.' })
         return
       }
       setLoading(true)
       try {
-        const result = await list({ ...request, refresh: refreshes > 0 })
-        if (!cancelled) setCatalog(result)
+        settle(await list({ ...request, refresh: refreshes > 0 }))
       } catch {
-        if (!cancelled)
-          setCatalog({ choices: [], status: 'unavailable', error: 'Could not list models.' })
+        settle({ choices: [], status: 'unavailable', error: 'Could not list models.' })
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -132,7 +134,7 @@ export function ModelPicker({
     return () => {
       cancelled = true
     }
-  }, [open, supported, agentType, projectPath, remoteHostId, refreshes])
+  }, [open, eager, supported, key, agentType, projectPath, remoteHostId, refreshes])
 
   if (!supported) return null
 
@@ -167,7 +169,10 @@ export function ModelPicker({
     : choices
   const exact = shown.find((c) => c.id.toLowerCase() === needle)
   const groupedByProvider = agentType === 'opencode'
-  const footer = footerFor(agentType, catalog, loading, openedAt)
+  const asking = loading && choices.length === 0
+  const footer = asking
+    ? { text: '', spinner: false }
+    : footerFor(agentType, catalog, loading, openedAt)
 
   const triggerText = followsTask ? "Follows the task's agent" : (label ?? DEFAULT_TEXT[variant])
   const formTone = followsTask
@@ -281,6 +286,15 @@ export function ModelPicker({
       }}
     >
       <div className="overflow-y-auto py-1 max-h-60">
+        {asking && (
+          <p
+            role="status"
+            className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-gray-500"
+          >
+            <Loader2 size={11} className="animate-spin shrink-0" />
+            Asking {agentType} for its models…
+          </p>
+        )}
         {!needle && (
           <button
             type="button"
@@ -335,7 +349,7 @@ export function ModelPicker({
       <div className="flex items-center gap-2 px-3 pb-2 text-[10px] text-gray-600">
         {footer.spinner && <Loader2 size={10} className="animate-spin shrink-0" />}
         <span className="flex-1 truncate">{footer.text}</span>
-        {catalog?.source === 'agent' && !loading && (
+        {catalog && catalog.status !== 'unavailable' && !loading && (
           <Tooltip label={`Ask ${agentType} again`}>
             <button
               type="button"

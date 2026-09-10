@@ -13,7 +13,6 @@ const listed: AgentModelCatalog = {
     { id: 'claude-opus-5', label: 'Opus 5' }
   ],
   status: 'ready',
-  source: 'agent',
   fetchedAt: Date.now()
 }
 
@@ -38,11 +37,10 @@ describe('ModelPicker', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('asks for models only when opened, and lists them with the default first', async () => {
+  it('asks for models once it knows the agent, and lists them with the default first', async () => {
     const list = api()
     const onChange = vi.fn()
     render(<ModelPicker agentType="claude" projectPath="/p" onChange={onChange} />)
-    expect(list).not.toHaveBeenCalled()
     expect(trigger()).toHaveTextContent('Default')
 
     open()
@@ -138,7 +136,6 @@ describe('ModelPicker', () => {
           { id: 'openai/gpt-5.4', label: 'openai/gpt-5.4' }
         ],
         status: 'ready',
-        source: 'agent',
         fetchedAt: Date.now()
       })
     )
@@ -149,19 +146,25 @@ describe('ModelPicker', () => {
     expect(screen.getByText('openai')).toBeInTheDocument()
   })
 
-  it('says where a built-in list came from, without a refresh', async () => {
-    api(
-      vi.fn().mockResolvedValue({
-        choices: [{ id: 'auto', label: 'Auto' }],
-        status: 'ready',
-        source: 'built-in'
-      })
-    )
-    render(<ModelPicker agentType="copilot" projectPath="/p" onChange={vi.fn()} />)
+  it('says it is asking while the list is empty, and a card chip asks only when opened', async () => {
+    let resolve!: (value: AgentModelCatalog) => void
+    const list = api(vi.fn().mockReturnValue(new Promise<AgentModelCatalog>((r) => (resolve = r))))
+    render(<ModelPicker agentType="claude" projectPath="/p" onChange={vi.fn()} />)
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1))
     open()
-    await screen.findByRole('option', { name: /Auto/ })
-    expect(screen.getByText(/Known ids/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Refresh models' })).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Asking claude')
+    resolve(listed)
+    await screen.findByRole('option', { name: /Sonnet 5/ })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    cleanup()
+
+    const bordered = api()
+    render(
+      <ModelPicker variant="bordered" agentType="claude" projectPath="/p" onChange={vi.fn()} />
+    )
+    expect(bordered).not.toHaveBeenCalled()
+    open()
+    await waitFor(() => expect(bordered).toHaveBeenCalledTimes(1))
   })
 
   it('is settled, not hidden, when the step follows the task', () => {
