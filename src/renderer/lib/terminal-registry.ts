@@ -21,7 +21,10 @@ interface TerminalEntry {
   /** When set, the grid is fitted to this box and the slot is only the window onto it. */
   fitElement: HTMLElement | null
   lastAppliedRect: { top: number; left: number; width: number; height: number } | null
-  lastMask: { top: number; height: number; offset: number } | null
+  /** The rows shown of the grid, as last written: top, rows above it, rows in it, the box under it. */
+  lastWindow: { top: number; offset: number; shown: number; boxHeight: number } | null
+  /** The cell as xterm laid it out at the last fit, for the window and the hold. */
+  cell: { width: number; height: number } | null
   lastSyncedCols: number
   lastSyncedRows: number
   /** The hold before a moved box is taken as the new size, and the deadline a box that keeps moving cannot push past. */
@@ -339,6 +342,9 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
   // Let app-level shortcuts pass through instead of being consumed by xterm
   term.attachCustomKeyEventHandler((e) => {
     if (e.type === 'keydown' && keyRedirectHandler?.(terminalId, e)) return false
+    // A held size goes before a keystroke, so what is typed reaches the program after the SIGWINCH.
+    const held = registry.get(terminalId)
+    if (e.type === 'keydown' && held?.resizeTimer) fitNow(held, terminalId)
 
     const mod = rendererIsMac ? e.metaKey : e.ctrlKey
     if (!mod) return true
@@ -429,11 +435,6 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
   // Forward keystrokes to pty
   term.onData((data) => {
     if (seeding.has(terminalId)) return
-    // A held size goes before a keystroke, so what is typed reaches the program after the SIGWINCH. Not before
-    // the terminal's own reply to a query: that is not a keystroke, and a program that asks on every redraw would
-    // otherwise resize itself in a loop for as long as the box moved.
-    const entry = registry.get(terminalId)
-    if (entry?.resizeTimer && !data.startsWith('\x1b')) fitNow(entry, terminalId)
     window.api.writeTerminal(terminalId, data)
   })
 
@@ -446,7 +447,8 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
     activeSlot: null,
     fitElement: null,
     lastAppliedRect: null,
-    lastMask: null,
+    lastWindow: null,
+    cell: null,
     lastSyncedCols: 0,
     lastSyncedRows: 0,
     resizeTimer: null,
@@ -591,58 +593,69 @@ function hideWrapper(wrapper: HTMLDivElement, entry: TerminalEntry): void {
     wrapper.style.visibility = 'hidden'
     wrapper.style.pointerEvents = 'none'
   }
+  wrapper.style.clipPath = ''
   entry.lastAppliedRect = null
-  entry.lastMask = null
+  entry.lastWindow = null
 }
 
-/**
- * Show only the slot's rows of a grid fitted to a bigger box.
- *
- * Block mode sizes the live region to what the command has drawn, and used to
- * refit the grid to it -- so the shell was told `rows=2` at an idle prompt and
- * every line of output was a SIGWINCH. The grid keeps the box's rows now; the
- * slot is a window onto the rows around the cursor, the same rows the small
- * grid showed by scrolling.
- */
-function applyMask(
+/** The cell as xterm laid it out: its screen element over its grid. */
+function measureCell(entry: TerminalEntry): void {
+  const screen = entry.term.element?.querySelector('.xterm-screen')
+  if (!screen || !entry.term.cols || !entry.term.rows) return
+  const { width, height } = screen.getBoundingClientRect()
+  if (width <= 0 || height <= 0) return
+  entry.cell = { width: width / entry.term.cols, height: height / entry.term.rows }
+}
+
+/** The rows of the grid that are shown: the slot's, from the top, or a shrinking box's around the cursor while the hold runs. */
+function applyWindow(
   entry: TerminalEntry,
   wrapper: HTMLDivElement,
   box: { top: number; height: number },
-  mask: { top: number; height: number }
+  win: { top: number; height: number }
 ): void {
-  const rows = entry.term.rows || 1
-  // xterm floors its rows into the box, so the box over the rows recovers the cell.
-  const cell = Math.max(1, Math.floor(box.height / rows))
-  const maskRows = Math.max(1, Math.round(mask.height / cell))
-  const cursorY = entry.term.buffer.active.cursorY || 0
-  const offset = Math.max(0, cursorY + 1 - maskRows) * cell
-  const next = { top: mask.top - offset, height: mask.height, offset }
-  const last = entry.lastMask
-  if (last && last.top === next.top && last.height === next.height && last.offset === next.offset)
-    return
-  wrapper.style.top = `${next.top}px`
-  // clip-path clips hit-testing too, so the hidden rows take no clicks.
-  wrapper.style.clipPath = `inset(${offset}px 0 ${Math.max(0, box.height - offset - mask.height)}px 0)`
-  entry.lastMask = next
-}
-
-/** The window applied for a slot with a box, and taken off for one without. */
-function syncMask(
-  entry: TerminalEntry,
-  wrapper: HTMLDivElement,
-  box: { top: number; height: number },
-  maskRaw: DOMRect | null
-): void {
-  if (maskRaw) {
-    applyMask(entry, wrapper, box, {
-      top: Math.round(maskRaw.top),
-      height: Math.round(maskRaw.height)
-    })
-  } else if (entry.lastMask) {
-    wrapper.style.clipPath = ''
-    wrapper.style.top = `${box.top}px`
-    entry.lastMask = null
+  const cell = entry.cell
+  const rows = entry.term.rows || 0
+  let next: NonNullable<TerminalEntry['lastWindow']>
+  if (!cell || !rows) {
+    next = { top: box.top, offset: 0, shown: 0, boxHeight: box.height }
+  } else {
+    const winRows = Math.min(rows, Math.max(1, Math.round(win.height / cell.height)))
+    const above = entry.fitElement
+      ? 0
+      : Math.max(0, (entry.term.buffer.active.cursorY || 0) + 1 - winRows)
+    const offset = above * cell.height
+    next = { top: win.top - offset, offset, shown: winRows * cell.height, boxHeight: box.height }
   }
+  const last = entry.lastWindow
+  if (
+    last &&
+    last.top === next.top &&
+    last.offset === next.offset &&
+    last.shown === next.shown &&
+    last.boxHeight === next.boxHeight
+  ) {
+    return
+  }
+  wrapper.style.top = `${next.top}px`
+  // clip-path clips hit-testing too, so hidden rows take no clicks.
+  wrapper.style.clipPath = next.shown
+    ? `inset(${next.offset}px 0 ${Math.max(0, box.height - next.offset - next.shown)}px 0)`
+    : ''
+  entry.lastWindow = next
+}
+
+/** The window for the rects as they are now. */
+function syncWindow(entry: TerminalEntry, wrapper: HTMLDivElement): void {
+  const box = entry.lastAppliedRect
+  const slot = entry.activeSlot
+  if (!box || !slot) return
+  if (!entry.fitElement) {
+    applyWindow(entry, wrapper, box, box)
+    return
+  }
+  const raw = slot.getBoundingClientRect()
+  applyWindow(entry, wrapper, box, { top: Math.round(raw.top), height: Math.round(raw.height) })
 }
 
 /** How long a box has to stand still before its size is taken; a slow frame must not lapse it. */
@@ -667,6 +680,8 @@ function fitNow(entry: TerminalEntry, terminalId: string): void {
   } catch {
     return
   }
+  measureCell(entry)
+  if (entry.persistentWrapper) syncWindow(entry, entry.persistentWrapper)
   const { cols, rows } = entry.term
   if (cols === entry.lastSyncedCols && rows === entry.lastSyncedRows) return
   entry.lastSyncedCols = cols
@@ -680,26 +695,12 @@ function fitWhenSettled(entry: TerminalEntry, terminalId: string): void {
     fitNow(entry, terminalId)
     return
   }
-  // A move that would not change the grid arms nothing, and drops a hold armed for one that would have.
-  const next = entry.fitAddon.proposeDimensions()
-  if (next && next.cols === entry.lastSyncedCols && next.rows === entry.lastSyncedRows) {
-    clearHold(entry)
-    return
-  }
   if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
   entry.resizeTimer = setTimeout(() => fitNow(entry, terminalId), RESIZE_SETTLE_MS)
   entry.resizeDeadline ??= setTimeout(() => fitNow(entry, terminalId), RESIZE_MAX_WAIT_MS)
 }
 
-/**
- * Position the persistent wrapper to overlay the active slot. Called every
- * frame by TerminalHost, so the function is aggressively guarded: the rect
- * is rounded to integer pixels so subpixel jitter changes nothing, the box
- * moves every frame but the grid takes its size only once it has settled
- * (`fitWhenSettled`), and the pty hears only a size that actually changed.
- * visibility is used (not display:none) because xterm needs nonzero layout
- * metrics to fit correctly.
- */
+/** Per frame from TerminalHost: the box follows the slot at once, the grid takes its size once it settles, and the pty hears only a changed size. */
 export function syncTerminalOverlay(terminalId: string): void {
   const entry = registry.get(terminalId)
   const wrapper = entry?.persistentWrapper
@@ -709,10 +710,10 @@ export function syncTerminalOverlay(terminalId: string): void {
     hideWrapper(wrapper, entry)
     return
   }
-  // The grid's box is what it is fitted to; with a fit element the slot is only the window.
+  // The grid's box is what it is fitted to; with a fit element the slot is only the window onto it.
   const raw = (entry.fitElement ?? slot).getBoundingClientRect()
-  const maskRaw = entry.fitElement ? slot.getBoundingClientRect() : null
-  if (raw.width <= 0 || raw.height <= 0 || (maskRaw && maskRaw.height <= 0)) {
+  const winRaw = entry.fitElement ? slot.getBoundingClientRect() : raw
+  if (raw.width <= 0 || raw.height <= 0 || winRaw.height <= 0) {
     hideWrapper(wrapper, entry)
     return
   }
@@ -722,32 +723,29 @@ export function syncTerminalOverlay(terminalId: string): void {
     width: Math.round(raw.width),
     height: Math.round(raw.height)
   }
+  const win = { top: Math.round(winRaw.top), height: Math.round(winRaw.height) }
   const last = entry.lastAppliedRect
-  if (
+  const same =
     last !== null &&
     last.top === rect.top &&
     last.left === rect.left &&
     last.width === rect.width &&
     last.height === rect.height
-  ) {
-    syncMask(entry, wrapper, rect, maskRaw)
+  if (!same) {
+    const sizeChanged = last === null || last.width !== rect.width || last.height !== rect.height
+    wrapper.style.left = `${rect.left}px`
+    if (sizeChanged) {
+      wrapper.style.width = `${rect.width}px`
+      wrapper.style.height = `${rect.height}px`
+    }
+    wrapper.style.visibility = 'visible'
+    wrapper.style.pointerEvents = 'auto'
+    entry.lastAppliedRect = rect
+    applyWindow(entry, wrapper, rect, win)
+    if (sizeChanged && entry.term.element) fitWhenSettled(entry, terminalId)
     return
   }
-  // Size-changed matters for fit (cols/rows depend on width/height); position-
-  // only changes (Framer Motion springs move cards via translate) just need a
-  // style update and skip the layout-reading fitAddon.fit() call.
-  const sizeChanged = last === null || last.width !== rect.width || last.height !== rect.height
-  wrapper.style.top = `${rect.top}px`
-  wrapper.style.left = `${rect.left}px`
-  if (sizeChanged) {
-    wrapper.style.width = `${rect.width}px`
-    wrapper.style.height = `${rect.height}px`
-  }
-  wrapper.style.visibility = 'visible'
-  wrapper.style.pointerEvents = 'auto'
-  entry.lastAppliedRect = rect
-  syncMask(entry, wrapper, rect, maskRaw)
-  if (sizeChanged && entry.term.element) fitWhenSettled(entry, terminalId)
+  applyWindow(entry, wrapper, rect, win)
 }
 
 export function onRegistryChange(cb: () => void): () => void {
@@ -955,6 +953,27 @@ export function onTerminalReady(terminalId: string, callback: () => void): () =>
   readyCallbacks.get(terminalId)!.add(callback)
   return () => {
     readyCallbacks.get(terminalId)?.delete(callback)
+  }
+}
+
+/** Output as it lands, coalesced to a frame -- what the live region grows by. */
+export function onTerminalWrite(
+  terminalId: string,
+  callback: () => void
+): (() => void) | undefined {
+  const entry = registry.get(terminalId)
+  if (!entry) return undefined
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const disposable = entry.term.onWriteParsed(() => {
+    if (timer) return
+    timer = setTimeout(() => {
+      timer = null
+      callback()
+    }, 16)
+  })
+  return () => {
+    disposable.dispose()
+    if (timer) clearTimeout(timer)
   }
 }
 

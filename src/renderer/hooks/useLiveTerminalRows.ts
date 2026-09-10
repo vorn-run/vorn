@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   getTerminalBufferMetrics,
   onTerminalReady,
-  onTerminalScroll
+  onTerminalScroll,
+  onTerminalWrite
 } from '../lib/terminal-registry'
 import { onCommandBlocksChange } from '../lib/command-blocks'
 
@@ -19,22 +20,21 @@ import { onCommandBlocksChange } from '../lib/command-blocks'
 /** An idle prompt still needs its own row plus somewhere to type. */
 export const MIN_LIVE_ROWS = 2
 
-/**
- * Past this the live region stops growing and the terminal scrolls
- * internally, so one noisy command cannot push the log off screen.
- */
+/** The live region grows to the grid, which is the pane; this is the cap for a grid not yet measured. */
 export const MAX_LIVE_ROWS = 16
 
 /** `null` means the terminal should take the whole pane. */
 export function clampLiveRows(metrics: {
   cursorLine: number
   isAlternate: boolean
+  rows?: number
 }): number | null {
   // A full-screen program draws to the whole screen and asks the pty how big
   // it is, so sizing it to the last command's height would hand `vim` or a
   // pager a two-row window.
   if (metrics.isAlternate) return null
-  return Math.min(MAX_LIVE_ROWS, Math.max(MIN_LIVE_ROWS, metrics.cursorLine + 1))
+  const cap = metrics.rows || MAX_LIVE_ROWS
+  return Math.min(cap, Math.max(MIN_LIVE_ROWS, metrics.cursorLine + 1))
 }
 
 export function useLiveTerminalRows(terminalId: string, enabled: boolean): number | null {
@@ -51,15 +51,19 @@ export function useLiveTerminalRows(terminalId: string, enabled: boolean): numbe
   useEffect(() => {
     if (!enabled) return
     let disposeScroll: (() => void) | undefined
+    let disposeWrite: (() => void) | undefined
     const disposeReady = onTerminalReady(terminalId, () => {
       measure()
       disposeScroll = onTerminalScroll(terminalId, measure)
+      // The grid holds every row now, so growth comes from output rather than from scrolling.
+      disposeWrite = onTerminalWrite(terminalId, measure)
     })
     // A finished command resets the terminal, so the live region shrinks back.
     const disposeBlocks = onCommandBlocksChange(terminalId, measure)
     return () => {
       disposeReady()
       disposeScroll?.()
+      disposeWrite?.()
       disposeBlocks()
     }
   }, [terminalId, enabled, measure])

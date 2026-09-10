@@ -3,7 +3,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // The fit mock sizes the grid from the wrapper's box, 8x16 px cells, so a moved rect moves cols/rows.
 const made = vi.hoisted(() => ({
-  terms: [] as Array<{ onData: ReturnType<typeof vi.fn>; buffer: { active: { cursorY: number } } }>,
+  terms: [] as Array<{
+    onData: ReturnType<typeof vi.fn>
+    attachCustomKeyEventHandler: ReturnType<typeof vi.fn>
+    buffer: { active: { cursorY: number } }
+  }>,
   fits: [] as Array<ReturnType<typeof vi.fn>>
 }))
 
@@ -34,11 +38,16 @@ vi.mock('@xterm/xterm', () => {
     scrollToBottom = vi.fn()
     scrollToLine = vi.fn()
     refresh = vi.fn()
+    screen = document.createElement('div')
     constructor() {
       made.terms.push(this)
+      this.screen.className = 'xterm-screen'
+      this.screen.getBoundingClientRect = () =>
+        ({ width: this.cols * 8, height: this.rows * 16 }) as DOMRect
     }
     open(el: HTMLElement): void {
       this.element = el
+      el.appendChild(this.screen)
     }
     hasSelection(): boolean {
       return false
@@ -58,7 +67,12 @@ vi.mock('@xterm/xterm', () => {
 
 vi.mock('@xterm/addon-fit', () => {
   class MockFitAddon {
-    term: { element: HTMLElement | null; cols: number; rows: number } | null = null
+    term: {
+      element: HTMLElement | null
+      cols: number
+      rows: number
+      buffer?: { active: { cursorY: number } }
+    } | null = null
     activate(term: unknown): void {
       this.term = term as MockFitAddon['term']
     }
@@ -75,6 +89,9 @@ vi.mock('@xterm/addon-fit', () => {
       if (!this.term || !next) return
       this.term.cols = next.cols
       this.term.rows = next.rows
+      // xterm keeps the cursor on the screen when the screen shrinks.
+      const active = this.term.buffer?.active
+      if (active) active.cursorY = Math.min(active.cursorY, next.rows - 1)
     })
     constructor() {
       made.fits.push(this.fit)
@@ -391,14 +408,6 @@ describe('when a moved box becomes a size', () => {
     expect(sizes()[1]!.cols).toBeGreaterThan(100)
   })
 
-  it("does not take a held size for the terminal's own reply to a query", () => {
-    move(880, 480)
-    const onData = made.terms[made.terms.length - 1]!.onData.mock.calls[0][0] as (d: string) => void
-    onData('\x1b[24;80R')
-
-    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
-  })
-
   it('says nothing to the pty when a drag ends where it began', () => {
     move(880, 480)
     move(800, 480)
@@ -415,17 +424,38 @@ describe('when a moved box becomes a size', () => {
     expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
   })
 
-  it('takes a held size before a keystroke, so what is typed follows the SIGWINCH', () => {
+  it('takes a held size on a keystroke, so what is typed follows the SIGWINCH', () => {
     move(880, 480)
-    const onData = made.terms[made.terms.length - 1]!.onData.mock.calls[0][0] as (d: string) => void
-    onData('x')
+    const term = made.terms[made.terms.length - 1]!
+    const onKey = term.attachCustomKeyEventHandler.mock.calls[0][0] as (e: KeyboardEvent) => boolean
+    onKey({ type: 'keydown', key: 'ArrowUp', metaKey: false, ctrlKey: false } as KeyboardEvent)
 
     expect(sizes()).toEqual([
       { cols: 100, rows: 30 },
       { cols: 110, rows: 30 }
     ])
-    const write = window.api.writeTerminal as ReturnType<typeof vi.fn>
-    expect(resize().mock.invocationCallOrder[1]).toBeLessThan(write.mock.invocationCallOrder[0])
+  })
+
+  it("does not take a held size for the terminal's own reply to a query", () => {
+    move(880, 480)
+    const onData = made.terms[made.terms.length - 1]!.onData.mock.calls[0][0] as (d: string) => void
+    onData('\x1b[24;80R')
+
+    expect(sizes()).toEqual([{ cols: 100, rows: 30 }])
+  })
+
+  it('keeps the rows around the cursor in view while a shrinking box waits out the hold', () => {
+    // 30 rows of 16px; the box drops to 12 rows with the cursor on row 29.
+    made.terms[made.terms.length - 1]!.buffer.active.cursorY = 29
+    move(800, 192)
+    const box = getPersistentWrapper('t')!
+
+    expect(box.style.top).toBe(`${0 - 18 * 16}px`)
+    expect(box.style.clipPath).toBe('inset(288px 0 0px 0)')
+
+    vi.advanceTimersByTime(100)
+    expect(box.style.top).toBe('0px')
+    expect(box.style.clipPath).toBe('inset(0px 0 0px 0)')
   })
 
   it('refits at once for a renderer or font that changed the cell, and holds a font-size gesture', () => {
@@ -499,18 +529,17 @@ describe('a mask over a full-size grid', () => {
     expect(sizes()).toEqual([{ cols: 100, rows: 47 }])
   })
 
-  it('keeps the rows around the cursor in the window once it has drawn more than fits', () => {
+  it('shows the top rows of the grid, which holds every row the command has drawn', () => {
     slot.top = 604
-    slot.height = 256 // 16 rows
+    slot.height = 256
     made.terms[made.terms.length - 1]!.buffer.active.cursorY = 30
     syncTerminalOverlay('t')
 
-    // Rows 15..30 are the window; 15 rows lie above it.
-    expect(wrapper().style.top).toBe(`${604 - 15 * 16}px`)
-    expect(clip()).toBe('inset(240px 0 264px 0)')
+    expect(wrapper().style.top).toBe('604px')
+    expect(clip()).toBe('inset(0px 0 504px 0)')
   })
 
-  it('still refits when the pane itself changes', () => {
+  it('still refits when the pane itself changes, and keeps the window where the slot is', () => {
     pane.width = 960
     syncTerminalOverlay('t')
     vi.advanceTimersByTime(100)
@@ -519,13 +548,25 @@ describe('a mask over a full-size grid', () => {
       { cols: 100, rows: 47 },
       { cols: 120, rows: 47 }
     ])
+    expect(wrapper().style.top).toBe('828px')
   })
 
-  it('is no mask at all for a slot registered without a box', () => {
+  it('shows the whole pane again for a full-screen program that took the slot over', () => {
+    // vim: the pane hands the slot over without a box, through an unregister and a register.
+    const slotEl = makeSlot({ top: 100, left: 0, width: 800, height: 760 })
+    unregisterSlot('t', document.querySelector('[data-terminal-id]') as HTMLElement)
+    registerSlot('t', slotEl)
+    syncTerminalOverlay('t')
+
+    expect(clip()).toBe('inset(0px 0 8px 0)')
+    expect(wrapper().style.top).toBe('100px')
+  })
+
+  it('is no window at all for a slot registered without a box', () => {
     registerSlot('t', makeSlot({ top: 100, left: 0, width: 800, height: 760 }))
     syncTerminalOverlay('t')
 
-    expect(clip()).toBe('')
+    expect(clip()).toBe('inset(0px 0 8px 0)')
     expect(wrapper().style.top).toBe('100px')
   })
 })

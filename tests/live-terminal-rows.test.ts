@@ -24,7 +24,11 @@ describe('clampLiveRows', () => {
     expect(clampLiveRows({ cursorLine: 4, isAlternate: false })).toBe(5)
   })
 
-  it('stops growing so one noisy command cannot push the log off screen', () => {
+  it('grows no further than the grid, whose rows the pane holds', () => {
+    expect(clampLiveRows({ cursorLine: 500, isAlternate: false, rows: 40 })).toBe(40)
+  })
+
+  it('falls back to a cap while the grid is not yet measured', () => {
     expect(clampLiveRows({ cursorLine: 500, isAlternate: false })).toBe(MAX_LIVE_ROWS)
   })
 
