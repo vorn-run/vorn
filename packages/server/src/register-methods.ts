@@ -2346,6 +2346,7 @@ export function registerAllMethods(): void {
           installHooks(port, hookServer.getAuthToken())
         } else {
           log.info('[hooks] another Vorn owns the registration; leaving it alone')
+          hookServer.once('claimed', () => installHooks(port, hookServer.getAuthToken()))
         }
       } catch (err) {
         log.error({ err }, '[hooks] failed to install hooks:')

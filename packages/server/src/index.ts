@@ -634,7 +634,13 @@ export async function startServer(
       return listening && again.kind === 'held'
     },
     // Not `shutdown()`: that kills every PTY, which is the one thing a handoff must not do.
-    exit: () => process.exit(0)
+    exit: () => {
+      // Release the hook registration so the replacement can claim it at once.
+      void import('./hook-server').then(({ hookServer }) => {
+        hookServer.stop()
+        process.exit(0)
+      })
+    }
   }
 
   registerMethod('server:handoff', (params) => handOver(params, handoffHost))
