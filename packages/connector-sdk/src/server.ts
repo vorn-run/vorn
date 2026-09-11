@@ -5,6 +5,12 @@ import { EXTENSION_AGENTS, resolveConfig } from './define'
 import { createExtensionHost } from './host'
 import { runAction, runOptions, runPoll } from './runtime'
 import { SESSION_CALL_META } from './session'
+
+/** The key Vorn gave a tool call, so its window requests are told apart from another step's. */
+function sessionCallOf(extra: { _meta?: Record<string, unknown> }): { sessionCall?: string } {
+  const key = extra._meta?.[SESSION_CALL_META]
+  return typeof key === 'string' ? { sessionCall: key } : {}
+}
 import {
   MANIFEST_TOOL,
   OPTIONS_TOOL,
@@ -194,12 +200,13 @@ export function createConnectorServer(
             .describe('The choices, each a value to send and words to show')
         })
       },
-      async (args) => {
+      async (args, extra) => {
         try {
           return json({
             options: await runOptions(connector, args.name, {
               config: config(),
-              ...(options.now && { now: options.now })
+              ...(options.now && { now: options.now }),
+              ...sessionCallOf(extra)
             })
           })
         } catch (error) {
@@ -228,7 +235,7 @@ export function createConnectorServer(
           hasMore: z.boolean().describe('Whether another page is immediately available')
         })
       },
-      async (args) => {
+      async (args, extra) => {
         try {
           const limit = args.limit === undefined ? undefined : Number(args.limit)
           if (limit !== undefined && !Number.isFinite(limit)) {
@@ -240,7 +247,8 @@ export function createConnectorServer(
               ...(args.since !== undefined && { since: args.since }),
               ...(args.cursor !== undefined && { cursor: args.cursor }),
               ...(limit !== undefined && { limit }),
-              ...(options.now && { now: options.now })
+              ...(options.now && { now: options.now }),
+              ...sessionCallOf(extra)
             })) as unknown as Record<string, unknown>
           )
         } catch (error) {
@@ -342,13 +350,12 @@ export function createConnectorServer(
         outputSchema: outputSchema(action.outputs ?? [])
       },
       async (args, extra) => {
-        const sessionCall = extra._meta?.[SESSION_CALL_META]
         try {
           return json(
             await runAction(connector, action.type, args as Record<string, unknown>, {
               config: config(),
               ...(options.now && { now: options.now }),
-              ...(typeof sessionCall === 'string' && { sessionCall })
+              ...sessionCallOf(extra)
             })
           )
         } catch (error) {

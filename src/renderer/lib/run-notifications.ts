@@ -52,10 +52,7 @@ export function announceRun(execution: WorkflowExecution): void {
         node?.label ?? 'Approval',
         (node?.config as { message?: string } | undefined)?.message,
         store.config ?? null,
-        () => {
-          useAppStore.getState().setEditingWorkflowId(workflow.id)
-          useAppStore.getState().setWorkflowEditorOpen(true)
-        }
+        openWorkflow
       )
     }
   }

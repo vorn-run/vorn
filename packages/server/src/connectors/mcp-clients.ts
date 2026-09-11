@@ -119,7 +119,7 @@ export async function getOrStartClient(conn: SourceConnection): Promise<Client> 
 
 /** The signed-in window grant of a connection's running child, if it has one. */
 export function sessionGrantFor(connectionId: string): SessionGrant | undefined {
-  return clients.find((meta) => meta.connectionId === connectionId)?.grant
+  return clients.get(connectionId)?.grant
 }
 
 export async function stopClient(connectionId: string): Promise<void> {

@@ -20,6 +20,11 @@ describe('a run waiting for a sign-in, seen by an agent', () => {
     })
   })
 
+  it('can still be rejected, which ends the run rather than skipping the step', () => {
+    expect(resolveGateTarget(run, undefined, 'reject')).toEqual({ nodeId: 'draft' })
+    expect(resolveGateTarget(run, 'draft', 'reject')).toEqual({ nodeId: 'draft' })
+  })
+
   it('says what it waits for', () => {
     const [annotated] = annotateWaitingGates([run], [])
     expect(annotated?.nodeStates[0]).toMatchObject({

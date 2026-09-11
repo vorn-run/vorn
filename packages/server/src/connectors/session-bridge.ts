@@ -52,14 +52,20 @@ export function mintSessionGrant(
   }
 }
 
-/** Start recording a tool call's requests; the key travels with the call to the child and back. */
-export function openSessionCall(grant: SessionGrant): string {
-  const key = randomBytes(12).toString('base64url')
-  grant.calls.set(key, [])
-  return key
+/** A tool call whose window requests are being recorded. */
+export interface OpenSessionCall {
+  grant: SessionGrant
+  key: string
 }
 
-export function closeSessionCall(grant: SessionGrant, key: string): SessionCall[] {
+/** Start recording a tool call's requests; the key travels with the call to the child and back. */
+export function openSessionCall(grant: SessionGrant): OpenSessionCall {
+  const key = randomBytes(12).toString('base64url')
+  grant.calls.set(key, [])
+  return { grant, key }
+}
+
+export function closeSessionCall({ grant, key }: OpenSessionCall): SessionCall[] {
   const calls = grant.calls.get(key) ?? []
   grant.calls.delete(key)
   return calls
@@ -99,11 +105,10 @@ export function stillSignedIn(
 /** A browser connection's result, with its window calls attached and a failure told apart: Vorn closed, or the site signed it out. */
 export async function sessionOutcome(
   conn: SourceConnection,
-  grant: SessionGrant,
-  key: string,
+  call: OpenSessionCall,
   result: ActionResult
 ): Promise<ActionResult> {
-  const sessionCalls = closeSessionCall(grant, key)
+  const sessionCalls = closeSessionCall(call)
   const withCalls = sessionCalls.length > 0 ? { ...result, sessionCalls } : result
   if (result.success) return withCalls
   if (sessionCalls.some((call) => call.status === 'app-offline')) {
@@ -114,7 +119,7 @@ export async function sessionOutcome(
     }
   }
   const refused = sessionCalls.some((call) => call.status === 401 || call.status === 403)
-  if (refused && (await stillSignedIn(conn.id, grant.browser)) === false) {
+  if (refused && (await stillSignedIn(conn.id, call.grant.browser)) === false) {
     markSignedOut(conn.id)
     return {
       ...withCalls,

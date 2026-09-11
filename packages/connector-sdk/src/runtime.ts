@@ -28,14 +28,14 @@ export interface RunPollOptions {
   fetchImpl?: typeof fetch
   /** Replaced by the harness and by tests; defaults to the signed-in window Vorn serves. */
   sessionFetchImpl?: typeof fetch
+  /** The key Vorn gave this tool call, carried on each request through the window. */
+  sessionCall?: string
   retry?: RetryPolicy
   /** Replaced in tests so backoff costs no real time. */
   sleep?: (ms: number) => Promise<void>
 }
 
-type SessionOptions = Pick<RunPollOptions, 'sessionFetchImpl' | 'retry' | 'sleep'> & {
-  sessionCall?: string
-}
+type SessionOptions = Pick<RunPollOptions, 'sessionFetchImpl' | 'sessionCall' | 'retry' | 'sleep'>
 
 /** Wrap a fetch with the SDK's retries, as far as the caller says a repeat is safe. */
 function wrap(

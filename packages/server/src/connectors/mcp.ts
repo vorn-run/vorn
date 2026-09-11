@@ -14,7 +14,7 @@
  * token.
  * The decrypted values are merged in at spawn time via `getOrStartClient`.
  */
-import { openSessionCall, sessionOutcome, type SessionGrant } from './session-bridge'
+import { openSessionCall, sessionOutcome, type OpenSessionCall } from './session-bridge'
 import type {
   VornConnector,
   ConnectorManifest,
@@ -252,12 +252,12 @@ export async function invokeMcpTool(
   toolName: string,
   args: Record<string, unknown>
 ): Promise<ActionResult> {
-  let session: { grant: SessionGrant; key: string } | undefined
+  let call: OpenSessionCall | undefined
   let outcome: ActionResult
   try {
     const client = await getOrStartClient(conn)
     const grant = sessionGrantFor(conn.id)
-    if (grant) session = { grant, key: openSessionCall(grant) }
+    if (grant) call = openSessionCall(grant)
     // Look up this tool's discovered inputSchema so we can coerce string form
     // values back to the types the tool actually expects.
     const tools = conn.filters.discoveredTools
@@ -265,12 +265,10 @@ export async function invokeMcpTool(
       ? (tools as McpDiscoveredTool[]).find((t) => t.name === toolName)
       : undefined
     const params = { name: toolName, arguments: coerceMcpArgs(tool?.inputSchema, args) }
-    const result = session
-      ? await client.callTool(
-          { ...params, _meta: { [SESSION_CALL_META]: session.key } },
-          undefined,
-          { timeout: BROWSER_TOOL_TIMEOUT_MS }
-        )
+    const result = call
+      ? await client.callTool({ ...params, _meta: { [SESSION_CALL_META]: call.key } }, undefined, {
+          timeout: BROWSER_TOOL_TIMEOUT_MS
+        })
       : await client.callTool(params)
     // When the tool declared an outputSchema, MCP returns the typed payload
     // under `structuredContent`. Surface that as `output` so downstream
@@ -293,7 +291,7 @@ export async function invokeMcpTool(
   } catch (err) {
     outcome = { success: false, error: err instanceof Error ? err.message : String(err) }
   }
-  return session ? await sessionOutcome(conn, session.grant, session.key, outcome) : outcome
+  return call ? await sessionOutcome(conn, call, outcome) : outcome
 }
 
 /** A tool may make several calls through its window, each up to twenty seconds. */

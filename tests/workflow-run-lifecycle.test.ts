@@ -1013,6 +1013,30 @@ describe('a step whose connection signed out', () => {
     expect(execute).toHaveBeenCalledTimes(1)
   })
 
+  it('fails inside a loop, which cannot wait, and says to run the workflow again', async () => {
+    const base = postWorkflow()
+    const loop = {
+      id: 'loop',
+      type: 'loop',
+      label: 'Each draft',
+      position: { x: 0, y: 1 },
+      config: { nodeType: 'loop', bodyNodeIds: ['draft'], maxIterations: 1 }
+    }
+    const workflow = {
+      ...base,
+      id: 'wf-post-loop',
+      nodes: [base.nodes[0], loop, base.nodes[1]],
+      edges: [{ id: 'e1', source: 'trigger', target: 'loop' }]
+    } as unknown as WorkflowDefinition
+    mockState.config.workflows = [workflow]
+    hostApi.executeConnectorAction = vi.fn().mockResolvedValue(signedOut)
+    const run = await executeWorkflow(workflow)
+    expect(stateOf(run, 'draft')).toMatchObject({ status: 'error' })
+    expect(stateOf(run, 'draft')?.waitingFor).toBeUndefined()
+    expect(stateOf(run, 'draft')?.error).toMatch(/inside a loop/)
+    expect(run.status).not.toBe('running')
+  })
+
   it('runs the step again once its connection signs in, and carries on from there', async () => {
     const workflow = postWorkflow()
     mockState.config.workflows = [workflow]

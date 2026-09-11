@@ -251,9 +251,7 @@ export function RunStepsList({
 
           const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
           const isSignInWait = ns.status === 'waiting' && ns.waitingFor === 'signIn'
-          const signInConnectionId = isSignInWait
-            ? (node?.config as { connectionId?: string } | undefined)?.connectionId
-            : undefined
+          const signInConnectionId = isSignInWait ? nodeConnectionId(node) : undefined
           const approvalMessage =
             node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
 

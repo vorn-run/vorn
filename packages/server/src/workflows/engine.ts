@@ -524,8 +524,20 @@ async function executeLoop(
       persistExecution(execution)
 
       const stepOutputs = buildStepOutputsMap(execution, nodeMap)
-      await executeNode(step, workflow, execution, context, stepOutputs, active, true)
+      await executeNode(step, workflow, execution, context, stepOutputs, active)
 
+      const parked = execution.nodeStates.find((s) => s.nodeId === step.id)
+      // A loop cannot wait mid-pass, so a step that would wait for a sign-in fails the pass instead.
+      if (parked?.status === 'waiting' && parked.waitingFor === 'signIn') {
+        updateNodeState(execution, step.id, {
+          status: 'error',
+          waitingFor: undefined,
+          completedAt: new Date().toISOString(),
+          error:
+            'Its connection was signed out inside a loop, which cannot wait. Sign in, then run the workflow again.'
+        })
+        persistExecution(execution)
+      }
       const state = execution.nodeStates.find((s) => s.nodeId === step.id)
       updateNodeState(execution, step.id, { iteration })
       summary.push(`  ${step.label}: ${state?.status ?? 'unknown'}`)
@@ -584,8 +596,7 @@ async function executeNode(
   execution: WorkflowExecution,
   context?: WorkflowExecutionContext,
   stepOutputs?: StepOutputs,
-  active?: ActiveRun,
-  inLoop = false
+  active?: ActiveRun
 ): Promise<void> {
   if (node.type === 'loop') {
     await executeLoop(node, workflow, execution, context, active)
@@ -706,8 +717,8 @@ async function executeNode(
       // here under `typeof === 'object'` but break `buildStepOutputsMap`
       // which spreads the value into a string-keyed map (the array
       // indices `0`, `1`, … would become bogus step keys).
-      // A signed-out window waits for the person; a loop cannot wait, so there it stays an error.
-      if (!result.success && result.errorKind === 'needs-sign-in' && !inLoop) {
+      // A signed-out window waits for the person to sign in again rather than failing the step.
+      if (!result.success && result.errorKind === 'needs-sign-in') {
         updateNodeState(execution, node.id, {
           status: 'waiting',
           waitingFor: 'signIn',
@@ -725,12 +736,7 @@ async function executeNode(
         output: result.success ? `${cfg.action} succeeded` : `${cfg.action} failed`,
         logs: JSON.stringify(result, null, 2),
         ...(isPlainObject && { structuredOutput: result.output }),
-        ...(result.error && {
-          error:
-            inLoop && result.errorKind === 'needs-sign-in'
-              ? `${result.error} It repeats inside a loop, so run the workflow again once signed in.`
-              : result.error
-        })
+        ...(result.error && { error: result.error })
       })
     } catch (err) {
       updateNodeState(execution, node.id, {
@@ -1475,11 +1481,6 @@ export async function applyGateDecision(
     publishRun(execution)
     return
   }
-  if (decision === 'approve' && node.waitingFor === 'signIn') {
-    publishRun(execution)
-    return
-  }
-
   if (decision === 'approve') await approveWorkflowGate(execution, nodeId)
   else await rejectWorkflowGate(execution, nodeId)
 }

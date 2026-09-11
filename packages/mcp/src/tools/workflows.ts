@@ -514,14 +514,14 @@ async function runById(
 // Which gate a decision answers: one waiting node needs no naming, several would make picking a guess.
 export function resolveGateTarget(
   run: Pick<WorkflowExecution, 'nodeStates'>,
-  nodeId?: string
+  nodeId?: string,
+  decision: 'approve' | 'reject' = 'approve'
 ): { nodeId: string } | { error: string } {
-  const signIns = run.nodeStates
-    .filter((n) => n.status === 'waiting' && n.waitingFor === 'signIn')
-    .map((n) => n.nodeId)
-  const waiting = run.nodeStates
-    .filter((n) => n.status === 'waiting' && n.waitingFor !== 'signIn')
-    .map((n) => n.nodeId)
+  const parked = run.nodeStates.filter((n) => n.status === 'waiting')
+  // Rejecting a sign-in wait ends the run; approving one would skip the step it waits to run.
+  const answerable = parked.filter((n) => decision === 'reject' || n.waitingFor !== 'signIn')
+  const waiting = answerable.map((n) => n.nodeId)
+  const signIns = parked.filter((n) => !answerable.includes(n)).map((n) => n.nodeId)
   if (nodeId) {
     if (signIns.includes(nodeId)) {
       return {
@@ -859,7 +859,7 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      const target = resolveGateTarget(run, args.node_id)
+      const target = resolveGateTarget(run, args.node_id, args.decision)
       if ('error' in target) {
         return {
           content: [{ type: 'text', text: `Error: ${target.error}` }],

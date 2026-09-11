@@ -69,7 +69,7 @@ describe('the endpoint a browser connector calls through', () => {
 
   it('runs a call in the window and records it under the tool call it belongs to', async () => {
     bridge.request.mockResolvedValue({ status: 201, headers: {}, body: '{"id":7}' })
-    const key = openSessionCall(grant)
+    const open = openSessionCall(grant)
     const res = await call(
       {
         url: 'https://novumai.substack.com/api/v1/drafts',
@@ -77,7 +77,7 @@ describe('the endpoint a browser connector calls through', () => {
         headers: { 'content-type': 'application/json' },
         body: '{}'
       },
-      { key }
+      { key: open.key }
     )
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ status: 201, headers: {}, body: '{"id":7}' })
@@ -95,7 +95,7 @@ describe('the endpoint a browser connector calls through', () => {
       },
       20_000
     )
-    expect(closeSessionCall(grant, key)).toEqual([
+    expect(closeSessionCall(open)).toEqual([
       { method: 'POST', path: '/api/v1/drafts', status: 201 }
     ])
     expect(grant.calls.size).toBe(0)
@@ -107,12 +107,15 @@ describe('the endpoint a browser connector calls through', () => {
       .mockResolvedValueOnce({ status: 401, headers: {}, body: '' })
     const search = openSessionCall(grant)
     const draft = openSessionCall(grant)
-    await call({ url: 'https://substack.com/api/v1/post/search', method: 'GET' }, { key: search })
-    await call({ url: 'https://substack.com/api/v1/drafts', method: 'POST' }, { key: draft })
-    expect(closeSessionCall(grant, search)).toEqual([
+    await call(
+      { url: 'https://substack.com/api/v1/post/search', method: 'GET' },
+      { key: search.key }
+    )
+    await call({ url: 'https://substack.com/api/v1/drafts', method: 'POST' }, { key: draft.key })
+    expect(closeSessionCall(search)).toEqual([
       { method: 'GET', path: '/api/v1/post/search', status: 200 }
     ])
-    expect(closeSessionCall(grant, draft)).toEqual([
+    expect(closeSessionCall(draft)).toEqual([
       { method: 'POST', path: '/api/v1/drafts', status: 401 }
     ])
   })
@@ -143,14 +146,14 @@ describe('the endpoint a browser connector calls through', () => {
 
   it('says to open Vorn when no desktop holds the window, and remembers that it could not', async () => {
     bridge.isConnected = false
-    const key = openSessionCall(grant)
+    const open = openSessionCall(grant)
     const res = await call(
       { url: 'https://substack.com/api/v1/user/profile/self', method: 'GET' },
-      { key }
+      { key: open.key }
     )
     expect(res.statusCode).toBe(503)
     expect(res.body).toMatch(/Open Vorn on the desktop/)
-    expect(closeSessionCall(grant, key)).toEqual([
+    expect(closeSessionCall(open)).toEqual([
       { method: 'GET', path: '/api/v1/user/profile/self', status: 'app-offline' }
     ])
   })

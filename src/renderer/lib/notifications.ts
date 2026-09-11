@@ -122,6 +122,18 @@ export function sendAgentNotification(
   dispatch(reason, terminal.id, prefs, title, body, onClick)
 }
 
+function dispatchWorkflowWait(
+  tag: string,
+  title: string,
+  body: string,
+  config: AppConfig | null,
+  onClick?: () => void
+): void {
+  const prefs = config?.defaults.notifications
+  if (!prefs?.enabled || prefs.onWaiting === false) return
+  dispatch('waiting', tag, prefs, title, body, onClick)
+}
+
 export function sendWorkflowGateNotification(
   workflow: WorkflowDefinition,
   nodeId: string,
@@ -130,15 +142,11 @@ export function sendWorkflowGateNotification(
   config: AppConfig | null,
   onClick?: () => void
 ): void {
-  const prefs = config?.defaults.notifications
-  if (!prefs?.enabled || prefs.onWaiting === false) return
-
-  dispatch(
-    'waiting',
+  dispatchWorkflowWait(
     `workflow-gate:${workflow.id}:${nodeId}`,
-    prefs,
     `${workflow.name} · awaiting approval`,
     message || `${nodeLabel} is waiting for your approval`,
+    config,
     onClick
   )
 }
@@ -151,15 +159,11 @@ export function sendWorkflowSignInNotification(
   config: AppConfig | null,
   onClick?: () => void
 ): void {
-  const prefs = config?.defaults.notifications
-  if (!prefs?.enabled || prefs.onWaiting === false) return
-
-  dispatch(
-    'waiting',
+  dispatchWorkflowWait(
     `workflow-sign-in:${workflow.id}:${nodeId}`,
-    prefs,
     `${workflow.name} · awaiting sign-in`,
     message || `${nodeLabel} is waiting for you to sign in again`,
+    config,
     onClick
   )
 }
