@@ -61,7 +61,7 @@ const PACKDEMO: ConnectorCatalogItem = {
 
 const listConnectionActions = vi.fn(async () => [])
 const listConnectorCatalog = vi.fn(async () => ({
-  items: [SLACK, DISCORD, PACKDEMO],
+  items: [DISCORD, SLACK, PACKDEMO],
   templates: [],
   mcpServers: []
 }))
@@ -82,9 +82,10 @@ const { __resetCatalogCacheForTests, refreshConnectorCatalog } =
 beforeEach(() => {
   __resetCatalogCacheForTests()
   vi.clearAllMocks()
+  localStorage.clear()
   packs.length = 0
   listConnectorCatalog.mockResolvedValue({
-    items: [SLACK, DISCORD, PACKDEMO],
+    items: [DISCORD, SLACK, PACKDEMO],
     templates: [],
     mcpServers: []
   })
@@ -97,39 +98,41 @@ const draw = (scope: LibraryScope = { bodyOnly: false, insideBranch: false }) =>
   return { ...utils, onPick }
 }
 
-describe('steps from connectors nobody has installed', () => {
-  it('offers a checked connector as plainly as an installed one', async () => {
-    draw()
-    expect(await screen.findAllByText('Post message')).toHaveLength(2)
-    expect(screen.getAllByText('install on add').length).toBeGreaterThan(0)
-  })
+const connector = (name: RegExp) => screen.findByRole('button', { name })
 
-  it('keeps the unvouched ones under their own heading', async () => {
+describe('steps from connectors nobody has installed', () => {
+  it('folds each connector under its name, the checked ones first', async () => {
     draw()
-    expect(await screen.findByText('More from the catalog')).toBeInTheDocument()
+    const slack = await connector(/Slack/)
+    const discord = await connector(/Discord/)
+    expect(slack.compareDocumentPosition(discord) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getAllByText('install on add')).toHaveLength(2)
+    expect(screen.queryByText('Post message')).toBeNull()
   })
 
   it('says nothing about a connector this machine is already connected to', async () => {
     draw()
-    await screen.findByText('More from the catalog')
+    await connector(/Slack/)
+    expect(screen.queryByRole('button', { name: /Pack Demo/ })).toBeNull()
     expect(screen.queryByText('Echo')).toBeNull()
   })
 
   it('finds a step by what its connector talks about', async () => {
     draw()
-    await screen.findByText('More from the catalog')
+    await connector(/Slack/)
     fireEvent.change(screen.getByPlaceholderText('Search steps and actions'), {
       target: { value: 'chat' }
     })
 
-    expect(screen.getAllByText('Post message')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: /Post message.*Slack/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Post message.*Discord/ })).toBeInTheDocument()
     expect(screen.queryByText('Agent')).toBeNull()
   })
 
   it('hands back the connector, so the step knows what to ask for', async () => {
     const { onPick } = draw()
-    const [first] = await screen.findAllByText('Post message')
-    fireEvent.click(first)
+    fireEvent.click(await connector(/Slack/))
+    fireEvent.click(screen.getByText('Post message'))
 
     expect(onPick).toHaveBeenCalledWith({
       kind: 'catalogAction',
@@ -142,23 +145,22 @@ describe('steps from connectors nobody has installed', () => {
   it('leaves a loop body to the steps it can repeat', async () => {
     draw({ bodyOnly: true, insideBranch: false })
     await Promise.resolve()
-    expect(screen.queryByText('Post message')).toBeNull()
-    expect(screen.queryByText('More from the catalog')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Slack/ })).toBeNull()
   })
 
   it('promises a connection rather than an install once the files are on disk', async () => {
     packs.push({ id: 'slack' })
     draw()
-    await screen.findAllByText('Post message')
 
-    expect(screen.getAllByText('add connection').length).toBeGreaterThan(0)
-    // Discord is still only in the catalog, so its row still promises the install.
+    expect(await connector(/Slack.*add connection/)).toBeInTheDocument()
+    // Discord is still only in the catalog, so it still promises the install.
     expect(screen.getAllByText('install on add')).toHaveLength(1)
   })
 
   it('shows what Check now found, without the panel being reopened', async () => {
     draw()
-    await screen.findAllByText('Post message')
+    fireEvent.click(await connector(/Slack/))
+    expect(screen.getByText('Post message')).toBeInTheDocument()
 
     refreshCatalog.mockResolvedValue({
       items: [{ ...SLACK, actions: [{ type: 'status', label: 'Set status' }] }],
@@ -177,8 +179,7 @@ describe('steps from connectors nobody has installed', () => {
     draw({ bodyOnly: false, insideBranch: false, replacing: true })
     await Promise.resolve()
 
-    expect(screen.queryByText('Post message')).toBeNull()
-    expect(screen.queryByText('More from the catalog')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Slack/ })).toBeNull()
     expect(screen.queryByText('Call reporting API')).toBeNull()
   })
 })
