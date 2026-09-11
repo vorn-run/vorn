@@ -62,7 +62,6 @@ const FETCH_TIMEOUT_MS = 5000
 const CACHE_PATH = join(os.homedir(), '.vorn', 'connector-catalog.json')
 
 /** Rungs this build knows how to describe; anything else is dropped on read. */
-const AUTH_RUNGS = CONNECTOR_AUTH_RUNGS
 
 /** The one receipt format this build will show a verified mark for. */
 const VERIFICATION_SCHEMA = 1
@@ -289,7 +288,7 @@ function normalizeEntry(raw: unknown): ConnectorCatalogEntry | undefined {
     activates,
     ...rest
   } = entry
-  const rung = AUTH_RUNGS.includes(authRung as ConnectorAuthRung)
+  const rung = CONNECTOR_AUTH_RUNGS.includes(authRung as ConnectorAuthRung)
     ? (authRung as ConnectorAuthRung)
     : undefined
   const receipt = normalizeVerification(verified)

@@ -22,7 +22,11 @@ import {
   resolveTemplateVars,
   StepOutputs
 } from '@vornrun/shared/template-vars'
-import { getWorktreeMode, webhookTriggerFromItem } from '@vornrun/shared/workflow-graph'
+import {
+  getWorktreeMode,
+  webhookTriggerFromItem,
+  isSignInWait
+} from '@vornrun/shared/workflow-graph'
 import { buildTaskPrompt, buildWorkflowPrompt } from '@vornrun/shared/prompt-builder'
 import { extractStructuredOutput } from '@vornrun/shared/structured-output'
 import {
@@ -526,9 +530,9 @@ async function executeLoop(
       const stepOutputs = buildStepOutputsMap(execution, nodeMap)
       await executeNode(step, workflow, execution, context, stepOutputs, active)
 
-      const parked = execution.nodeStates.find((s) => s.nodeId === step.id)
+      const state = execution.nodeStates.find((s) => s.nodeId === step.id)
       // A loop cannot wait mid-pass, so a step that would wait for a sign-in fails the pass instead.
-      if (parked?.status === 'waiting' && parked.waitingFor === 'signIn') {
+      if (state && isSignInWait(state)) {
         updateNodeState(execution, step.id, {
           status: 'error',
           waitingFor: undefined,
@@ -538,7 +542,6 @@ async function executeLoop(
         })
         persistExecution(execution)
       }
-      const state = execution.nodeStates.find((s) => s.nodeId === step.id)
       updateNodeState(execution, step.id, { iteration })
       summary.push(`  ${step.label}: ${state?.status ?? 'unknown'}`)
       // Same policy as the main graph: a body step that fails ends the pass
@@ -713,10 +716,6 @@ async function executeNode(
         action: cfg.action,
         args: resolvedArgs
       })
-      // Only persist plain objects as structuredOutput. Arrays would land
-      // here under `typeof === 'object'` but break `buildStepOutputsMap`
-      // which spreads the value into a string-keyed map (the array
-      // indices `0`, `1`, … would become bogus step keys).
       // A signed-out window waits for the person to sign in again rather than failing the step.
       if (!result.success && result.errorKind === 'needs-sign-in') {
         updateNodeState(execution, node.id, {
@@ -728,6 +727,10 @@ async function executeNode(
         persistExecution(execution)
         return
       }
+      // Only persist plain objects as structuredOutput. Arrays would land
+      // here under `typeof === 'object'` but break `buildStepOutputsMap`
+      // which spreads the value into a string-keyed map (the array
+      // indices `0`, `1`, … would become bogus step keys).
       const isPlainObject =
         !!result.output && typeof result.output === 'object' && !Array.isArray(result.output)
       updateNodeState(execution, node.id, {
@@ -1958,7 +1961,7 @@ function resolveWaitingGate(
     return null
   }
   // Only signing in again ends a sign-in wait; approving it would skip the step it waits to run.
-  if (caller === 'approve' && ns.waitingFor === 'signIn') {
+  if (caller === 'approve' && isSignInWait(ns)) {
     log.warn(`[workflow] approveWorkflowGate: node ${nodeId} waits for a sign-in, not an approval`)
     return null
   }
@@ -2036,9 +2039,10 @@ export async function rejectWorkflowGate(
 }
 
 /** Whether a waiting step waits for its connection to sign in again, not for an approval. */
-export function isSignInWait(runId: string, nodeId: string): boolean {
+export function runWaitsForSignIn(runId: string, nodeId: string): boolean {
   const execution = activeRuns.get(runId)?.execution ?? runById(runId)
-  return execution?.nodeStates.find((state) => state.nodeId === nodeId)?.waitingFor === 'signIn'
+  const state = execution?.nodeStates.find((ns) => ns.nodeId === nodeId)
+  return state !== undefined && isSignInWait(state)
 }
 
 /** Run again the steps that waited for this connection to sign in; what ran before them is kept. */
@@ -2052,7 +2056,7 @@ export async function resumeSignInWaits(
     const workflow = workflowById(execution.workflowId)
     if (!workflow) continue
     const waiting = execution.nodeStates.filter((state) => {
-      if (state.status !== 'waiting' || state.waitingFor !== 'signIn') return false
+      if (!isSignInWait(state)) return false
       const node = workflow.nodes.find((n) => n.id === state.nodeId)
       return (node?.config as { connectionId?: string } | undefined)?.connectionId === connectionId
     })

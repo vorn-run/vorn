@@ -3,9 +3,12 @@ import { readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { withinOrigins } from '@vornrun/shared/connector-origins'
 import {
+  CONNECTION_PROFILE_PREFIX,
   IPC,
   connectionPartition,
   type SdkBrowserSignIn,
+  type SessionAnswer,
+  type SessionRequest,
   type SourceConnection
 } from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
@@ -14,9 +17,7 @@ import {
   fetchScript,
   identityFrom,
   plainUserAgent,
-  staleConnectionFolders,
-  type SessionAnswer,
-  type SessionRequest
+  staleConnectionFolders
 } from './connection-session-script'
 import log from './logger'
 
@@ -33,13 +34,15 @@ export interface SignInResult {
 }
 
 const prepared = new Set<string>()
-/** Hidden pages, one per connection and origin, that make the signed-in calls. */
-const runners = new Map<string, BrowserWindow>()
-/** A runner still loading its page, shared by every call that arrives meanwhile. */
-const opening = new Map<string, Promise<BrowserWindow>>()
-/** Calls in flight on each runner; it only starts idling once the last one ends. */
-const inFlight = new Map<string, number>()
-const idle = new Map<string, NodeJS.Timeout>()
+/** A hidden page, one per connection and origin, that makes the signed-in calls. */
+interface Runner {
+  win: BrowserWindow
+  ready: Promise<void>
+  /** Calls in flight; the page only starts idling once the last one ends. */
+  busy: number
+  idle?: NodeJS.Timeout
+}
+const runners = new Map<string, Runner>()
 const signInWindows = new Map<string, BrowserWindow>()
 const signing = new Map<string, Promise<SignInResult>>()
 
@@ -75,54 +78,28 @@ function originOf(url: string): string | null {
   }
 }
 
-async function runner(connectionId: string, origin: string): Promise<BrowserWindow> {
-  const key = `${connectionId} ${origin}`
-  const pending = opening.get(key)
-  if (pending) return pending
-  const existing = runners.get(key)
-  if (existing && !existing.isDestroyed() && originOf(existing.webContents.getURL()) === origin) {
-    return existing
-  }
-  existing?.destroy()
-  const open = openRunner(key, connectionId, origin).finally(() => opening.delete(key))
-  opening.set(key, open)
-  return open
+function closeRunner(key: string, runner: Runner): void {
+  if (runners.get(key) === runner) runners.delete(key)
+  clearTimeout(runner.idle)
+  if (!runner.win.isDestroyed()) runner.win.destroy()
 }
 
-async function openRunner(
-  key: string,
-  connectionId: string,
-  origin: string
-): Promise<BrowserWindow> {
+/** The page for this origin, opened once and shared by every call that arrives while it loads. */
+function runnerFor(key: string, connectionId: string, origin: string): Runner {
+  const existing = runners.get(key)
+  if (existing && !existing.win.isDestroyed()) return existing
   const win = new BrowserWindow({
     show: false,
     webPreferences: { ...webPreferences(connectionId), backgroundThrottling: false }
   })
-  runners.set(key, win)
-  win.on('closed', () => {
-    if (runners.get(key) === win) runners.delete(key)
-  })
   // A small same-origin page to stand on, so every call is one the site's own page could make.
-  await win.loadURL(`${origin}/robots.txt`)
-  return win
-}
-
-function rest(key: string, win: BrowserWindow | undefined): void {
-  const left = (inFlight.get(key) ?? 1) - 1
-  if (left > 0) {
-    inFlight.set(key, left)
-    return
-  }
-  inFlight.delete(key)
-  if (!win) return
-  clearTimeout(idle.get(key))
-  const timer = setTimeout(() => {
-    idle.delete(key)
-    if (runners.get(key) === win) runners.delete(key)
-    if (!win.isDestroyed()) win.destroy()
-  }, RUNNER_IDLE_MS)
-  timer.unref()
-  idle.set(key, timer)
+  const runner: Runner = { win, ready: win.loadURL(`${origin}/robots.txt`), busy: 0 }
+  runners.set(key, runner)
+  win.on('closed', () => {
+    if (runners.get(key) === runner) runners.delete(key)
+  })
+  runner.ready.catch(() => closeRunner(key, runner))
+  return runner
 }
 
 /** Make one call inside the connection's signed-in profile, from a page on the call's own origin. */
@@ -136,22 +113,26 @@ export async function fetchInSession(
   }
   const origin = originOf(request.url)!
   const key = `${connectionId} ${origin}`
-  clearTimeout(idle.get(key))
-  idle.delete(key)
-  inFlight.set(key, (inFlight.get(key) ?? 0) + 1)
-  let win: BrowserWindow | undefined
+  const runner = runnerFor(key, connectionId, origin)
+  clearTimeout(runner.idle)
+  runner.busy++
   try {
-    win = await runner(connectionId, origin)
-    if (originOf(win.webContents.getURL()) !== origin) {
+    await runner.ready
+    if (originOf(runner.win.webContents.getURL()) !== origin) {
+      closeRunner(key, runner)
       throw new Error(`The signed-in window for ${origin} ended up somewhere else`)
     }
-    const answer = (await win.webContents.executeJavaScript(
+    const answer = (await runner.win.webContents.executeJavaScript(
       fetchScript(request),
       true
     )) as SessionAnswer
     return { ...answer, body: answer.body.slice(0, MAX_SESSION_BODY) }
   } finally {
-    rest(key, win)
+    runner.busy--
+    if (runner.busy === 0 && runners.get(key) === runner) {
+      runner.idle = setTimeout(() => closeRunner(key, runner), RUNNER_IDLE_MS)
+      runner.idle.unref()
+    }
   }
 }
 
@@ -265,13 +246,8 @@ async function openSignIn(
 }
 
 function closeRunners(connectionId?: string): void {
-  for (const [key, win] of runners) {
-    if (connectionId !== undefined && !key.startsWith(`${connectionId} `)) continue
-    runners.delete(key)
-    opening.delete(key)
-    clearTimeout(idle.get(key))
-    idle.delete(key)
-    if (!win.isDestroyed()) win.destroy()
+  for (const [key, runner] of runners) {
+    if (connectionId === undefined || key.startsWith(`${connectionId} `)) closeRunner(key, runner)
   }
 }
 
@@ -286,7 +262,7 @@ function partitionsRoot(): string {
 }
 
 async function profileOnDisk(connectionId: string): Promise<boolean> {
-  return stat(path.join(partitionsRoot(), `vorn-connection-${connectionId}`)).then(
+  return stat(path.join(partitionsRoot(), `${CONNECTION_PROFILE_PREFIX}${connectionId}`)).then(
     () => true,
     () => false
   )
@@ -300,8 +276,7 @@ export async function forget(connectionId: string): Promise<void> {
   // Asking for a profile that was never made would create one just to clear it.
   if (!prepared.has(partition) && !(await profileOnDisk(connectionId))) return
   const ses = session.fromPartition(partition)
-  await ses.clearStorageData()
-  await ses.clearCache()
+  await Promise.all([ses.clearStorageData(), ses.clearCache()])
 }
 
 export async function signOut(bridge: ServerBridge, connectionId: string): Promise<void> {
@@ -313,18 +288,21 @@ export async function signOut(bridge: ServerBridge, connectionId: string): Promi
 async function sweepConnectionProfiles(bridge: ServerBridge): Promise<void> {
   const root = partitionsRoot()
   const folders = await readdir(root).catch(() => [] as string[])
-  if (!folders.some((name) => name.startsWith('vorn-connection-'))) return
+  if (!folders.some((name) => name.startsWith(CONNECTION_PROFILE_PREFIX))) return
   const connections = await bridge.request<SourceConnection[]>(IPC.CONNECTION_LIST, {
     connectorId: undefined
   })
-  for (const folder of staleConnectionFolders(
+  const stale = staleConnectionFolders(
     folders,
     connections.map((c) => c.id)
-  )) {
-    await rm(path.join(root, folder), { recursive: true, force: true }).catch((err) =>
-      log.warn({ err, folder }, '[sign-in] could not remove a stale profile')
+  )
+  await Promise.all(
+    stale.map((folder) =>
+      rm(path.join(root, folder), { recursive: true, force: true }).catch((err) =>
+        log.warn({ err, folder }, '[sign-in] could not remove a stale profile')
+      )
     )
-  }
+  )
 }
 
 /** `sweep` is off when this desktop talks to another machine's server, whose list is not this machine's. */

@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useAppStore } from '../../stores'
 import { toast } from '../Toast'
-import { Check, X, Inbox, LogIn, Play, RotateCcw } from 'lucide-react'
+import { Check, X, Inbox, Play, RotateCcw } from 'lucide-react'
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
   completedStageCount,
@@ -12,11 +12,12 @@ import {
   runSummaryText,
   type RunWorkflowRef
 } from '../../lib/run-presentation'
-import { hasFailedStep } from '@vornrun/shared/workflow-graph'
+import { hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { RunStepsList, StatusDot } from '../workflow-editor/RunEntry'
 import { RunIcon } from './RunIcon'
-import { useConnectorLook, useConnections } from '../../lib/use-connections'
+import { useConnectorLook } from '../../lib/use-connections'
 import { nodeConnectionId } from '../workflow-editor/node-visuals'
+import { SignInButton } from './SignInButton'
 import { StopRunButton } from './StopRunButton'
 import { workflowRunId, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
@@ -72,7 +73,7 @@ export function RunDetailPane({
   const done = completedStageCount(stages)
   const summary = runSummaryText(run)
   const waitingStep = run.nodeStates.find((ns) => ns.status === 'waiting')
-  const signInWait = waitingStep?.waitingFor === 'signIn'
+  const signInWait = waitingStep !== undefined && isSignInWait(waitingStep)
   const wait = WAIT_LABELS[signInWait ? 'signIn' : 'approval']
 
   // Keyboard approval mirrors the two visible actions, and only while a gate is
@@ -272,22 +273,5 @@ export function RunDetailPane({
         </div>
       </div>
     </div>
-  )
-}
-
-/** Opens the sign-in window of the connection a parked step acts through. */
-function SignInButton({ connectionId }: { connectionId: string | undefined }) {
-  const connections = useConnections()
-  const name = connections.find((c) => c.id === connectionId)?.name ?? 'the connection'
-  return (
-    <button
-      type="button"
-      disabled={!connectionId}
-      onClick={() => connectionId && void window.api.signInConnection(connectionId)}
-      className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE} disabled:opacity-50`}
-    >
-      <LogIn size={14} strokeWidth={2} />
-      Sign in to {name}
-    </button>
   )
 }

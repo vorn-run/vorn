@@ -1,15 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
-import {
-  ChevronDown,
-  ChevronRight,
-  Maximize2,
-  Play,
-  RotateCcw,
-  Check,
-  X,
-  LogIn
-} from 'lucide-react'
+import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw, Check, X } from 'lucide-react'
 import {
   WorkflowExecution,
   WorkflowNode,
@@ -23,10 +14,11 @@ import {
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
-import { hasFailedStep } from '@vornrun/shared/workflow-graph'
+import { hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { connectorLookFor, useConnections, type ConnectorLook } from '../../lib/use-connections'
+import { SignInButton } from '../workflow-runs/SignInButton'
 import {
   NODE_TYPE_ICON,
   TASK_CHIP,
@@ -250,8 +242,7 @@ export function RunStepsList({
           const timeline = isExpanded ? stepTimeline(ns.logs, ns.diagnostics) : []
 
           const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
-          const isSignInWait = ns.status === 'waiting' && ns.waitingFor === 'signIn'
-          const signInConnectionId = isSignInWait ? nodeConnectionId(node) : undefined
+          const signInWait = isSignInWait(ns)
           const approvalMessage =
             node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
 
@@ -367,20 +358,12 @@ export function RunStepsList({
                   </div>
                 )}
 
-                {isSignInWait && (
+                {signInWait && (
                   <div className="px-3 pb-3 -mt-0.5 flex items-start gap-2">
                     <div className="flex-1 min-w-0 text-[11px] text-bronzo">
                       {ns.error || 'Signed out. Sign in, and this step runs again.'}
                     </div>
-                    {signInConnectionId && (
-                      <button
-                        onClick={() => void window.api.signInConnection(signInConnectionId)}
-                        className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_APPROVE}`}
-                      >
-                        <LogIn size={11} strokeWidth={2.5} />
-                        Sign in
-                      </button>
-                    )}
+                    <SignInButton connectionId={nodeConnectionId(node)} compact />
                   </div>
                 )}
 

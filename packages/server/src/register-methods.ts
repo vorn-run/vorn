@@ -171,6 +171,7 @@ import {
   backfillMcpConnection,
   preflightMcpConnection
 } from './connectors/mcp'
+import { sdkIdOf } from './connectors/mcp-clients'
 import {
   httpConnector,
   httpProfileError,
@@ -185,8 +186,8 @@ import {
   rerunWorkflowRun,
   retryRunFromFailure,
   stopWorkflowRun,
-  isSignInWait,
-  resumeSignInWaits
+  resumeSignInWaits,
+  runWaitsForSignIn
 } from './workflows/engine'
 import { listKeys, passwordFields } from './connectors/keys'
 import { installedPack } from './connectors/packs'
@@ -819,7 +820,7 @@ export function registerAllMethods(): void {
 
   registerMethod('workflow:resolveGate', ({ runId, nodeId, decision }) => {
     // A sign-in wait ends when the connection signs in again, never by approval.
-    if (decision === 'approve' && isSignInWait(runId, nodeId)) return { accepted: false }
+    if (decision === 'approve' && runWaitsForSignIn(runId, nodeId)) return { accepted: false }
     // Applied here, where the run is. It used to be broadcast for whichever
     // window held the run to apply, which is why answering from a phone with
     // nothing open did nothing at all.
@@ -1728,8 +1729,8 @@ export function registerAllMethods(): void {
 
   registerMethod('connection:browserAuth', async (id) => {
     const conn = dbGetSourceConnection(id)
-    const sdkId = conn?.filters[SDK_FILTER_KEYS.connectorId]
-    if (!conn || typeof sdkId !== 'string') return null
+    const sdkId = conn ? sdkIdOf(conn) : ''
+    if (!conn || !sdkId) return null
     const auth = (await resolveConnectorAuth(sdkId))?.auth
     return auth?.rung === 'browser' && auth.browser
       ? { name: conn.name, browser: auth.browser }
@@ -1739,7 +1740,7 @@ export function registerAllMethods(): void {
   registerMethod('connection:signedIn', ({ connectionId, identity }) => {
     dbSetConnectionSignIn(connectionId, identity, new Date().toISOString())
     dbSignalChange()
-    void resumeSignInWaits(connectionId, listRunsWithWaitingGates()).catch((err) =>
+    void resumeSignInWaits(connectionId, listRunsWithWaitingGates('signIn')).catch((err) =>
       log.warn({ err }, '[workflow] resuming after a sign-in failed')
     )
   })

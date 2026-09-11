@@ -428,6 +428,21 @@ export interface ActionResult {
 export const SESSION_CALL_META = 'vorn/sessionCall'
 export const SESSION_CALL_HEADER = 'x-vorn-session-call'
 
+/** A call a connector asks its signed-in window to make. */
+export interface SessionRequest {
+  url: string
+  method: string
+  headers?: Record<string, string>
+  body?: string
+}
+
+/** How the site answered a call made in the signed-in window. */
+export interface SessionAnswer {
+  status: number
+  headers: Record<string, string>
+  body: string
+}
+
 /** One call a browser connection made through its window: what, where, and how it was answered. */
 export interface SessionCall {
   method: string
@@ -2612,8 +2627,11 @@ export function browserPartition(sessionId: string): string {
 }
 
 /** The browser profile a connection signs in through; it is that connection's secret. */
+/** The folder name every connection's profile starts with under the app's Partitions. */
+export const CONNECTION_PROFILE_PREFIX = 'vorn-connection-'
+
 export function connectionPartition(connectionId: string): string {
-  return `persist:vorn-connection-${connectionId}`
+  return `persist:${CONNECTION_PROFILE_PREFIX}${connectionId}`
 }
 
 /**

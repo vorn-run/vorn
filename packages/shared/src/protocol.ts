@@ -1,6 +1,8 @@
 import type { AgentModelRequest, AgentModelCatalog } from './agent-models'
 import type {
   ActionResult,
+  SessionAnswer,
+  SessionRequest,
   AuthProbeReport,
   CreateTerminalPayload,
   RestoredSession,
@@ -926,9 +928,9 @@ export interface RequestMethods {
     params: {
       connectionId: string
       origins: string[]
-      request: { url: string; method: string; headers?: Record<string, string>; body?: string }
+      request: SessionRequest
     }
-    result: { status: number; headers: Record<string, string>; body: string }
+    result: SessionAnswer
   }
   'session:check': {
     params: { connectionId: string; browser: SdkBrowserSignIn }

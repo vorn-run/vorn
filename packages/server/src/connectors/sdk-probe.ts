@@ -198,8 +198,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const str = (value: unknown, fallback = ''): string =>
   typeof value === 'string' ? value : fallback
 
-const AUTH_RUNGS = CONNECTOR_AUTH_RUNGS
-
 /**
  * A bare executable name, which is all a probe command is allowed to be.
  *
@@ -290,7 +288,8 @@ function toBrowserSignIn(value: unknown): SdkBrowserSignIn | undefined {
 function toAuth(value: unknown): SdkConnectorAuth | undefined {
   if (!isRecord(value)) return undefined
   const rung = value.rung
-  if (typeof rung !== 'string' || !AUTH_RUNGS.includes(rung as ConnectorAuthRung)) return undefined
+  if (typeof rung !== 'string' || !CONNECTOR_AUTH_RUNGS.includes(rung as ConnectorAuthRung))
+    return undefined
 
   const probe = isRecord(value.probe) ? value.probe : undefined
   const command = str(probe?.command).trim()

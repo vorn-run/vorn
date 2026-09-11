@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { isSignInWait } from '@vornrun/shared/workflow-graph'
 import { useAppStore } from '../stores'
 import type { WorkflowExecution, NodeExecutionState, WorkflowDefinition } from '../../shared/types'
 
@@ -24,7 +25,7 @@ function waitingSignature(
   const parts: string[] = []
   for (const [id, exec] of workflowExecutions) {
     for (const ns of exec.nodeStates) {
-      if (ns.status === 'waiting' && ns.waitingFor !== 'signIn') parts.push(`${id}:${ns.nodeId}`)
+      if (ns.status === 'waiting' && !isSignInWait(ns)) parts.push(`${id}:${ns.nodeId}`)
     }
   }
   parts.sort()
@@ -44,7 +45,7 @@ export function useWaitingApprovals(): WaitingApproval[] {
       const workflow = workflows?.find((w) => w.id === execution.workflowId)
       if (workflow && (workflow.workspaceId ?? 'personal') !== activeWorkspace) continue
       for (const ns of execution.nodeStates) {
-        if (ns.status === 'waiting' && ns.waitingFor !== 'signIn') {
+        if (ns.status === 'waiting' && !isSignInWait(ns)) {
           out.push({ execution, nodeState: ns, workflow })
         }
       }

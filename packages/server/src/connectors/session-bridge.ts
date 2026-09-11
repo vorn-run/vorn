@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto'
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import {
   SESSION_CALL_HEADER,
   type ActionResult,
   type SdkBrowserSignIn,
   type SessionCall,
+  type SessionRequest,
   type SourceConnection
 } from '@vornrun/shared/types'
 import { withinOrigins } from '@vornrun/shared/connector-origins'
@@ -13,6 +14,7 @@ import { dbSetConnectionSignIn, dbSignalChange } from '../database'
 import { constantTimeEqual } from '../token-manager'
 import { bearerFrom } from '../ws-auth'
 import { isLoopbackAddress } from '../ws-handler'
+import { refuse } from '../plain-refusal'
 import log from '../logger'
 
 /** One call in the window, well inside the tool call's own limit. */
@@ -137,19 +139,7 @@ function record(grant: SessionGrant, key: string | undefined, call: SessionCall)
   if (calls.length > KEPT_CALLS) calls.splice(0, calls.length - KEPT_CALLS)
 }
 
-function refuse(reply: FastifyReply, code: number, reason: string): FastifyReply {
-  // Plain text, like the extension bridge: the SDK reads a refusal's body verbatim into its error.
-  return reply.code(code).type('text/plain; charset=utf-8').send(reason)
-}
-
-interface CallRequest {
-  url: string
-  method: string
-  headers?: Record<string, string>
-  body?: string
-}
-
-function readRequest(body: unknown): CallRequest | undefined {
+function readRequest(body: unknown): SessionRequest | undefined {
   if (!body || typeof body !== 'object') return undefined
   const value = body as Record<string, unknown>
   if (typeof value.url !== 'string' || typeof value.method !== 'string') return undefined

@@ -1,4 +1,5 @@
 import type { WorkflowExecution } from '../../shared/types'
+import { isSignInWait } from '@vornrun/shared/workflow-graph'
 import { useAppStore } from '../stores'
 import { sendWorkflowGateNotification, sendWorkflowSignInNotification } from './notifications'
 
@@ -35,7 +36,7 @@ export function announceRun(execution: WorkflowExecution): void {
         useAppStore.getState().setWorkflowEditorOpen(true)
       }
       const state = execution.nodeStates.find((ns) => ns.nodeId === nodeId)
-      if (state?.waitingFor === 'signIn') {
+      if (state && isSignInWait(state)) {
         sendWorkflowSignInNotification(
           workflow,
           nodeId,

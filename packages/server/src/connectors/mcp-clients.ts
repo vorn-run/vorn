@@ -66,7 +66,7 @@ function installedPackLaunch(id: string): { command: string; args: string[] } | 
 }
 
 /** The connector a connection runs, when it names a packaged one. */
-function sdkIdOf(conn: SourceConnection): string {
+export function sdkIdOf(conn: SourceConnection): string {
   return String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
 }
 

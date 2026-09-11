@@ -81,16 +81,17 @@ export function backoffMs(attempt: number, policy: RetryPolicy = {}): number {
   return Math.min(max, base * 2 ** attempt)
 }
 
+/** An error that says asking again cannot help, such as a closed Vorn window. */
+function isFinal(error: unknown): boolean {
+  return (error as { retryable?: unknown } | null)?.retryable === false
+}
+
 /**
  * Wrap a fetch so it retries what is worth retrying.
  *
  * The wrapper is the value handed to actions as `context.fetch`, so a
  * hand-written action and a declared request are equally protected.
  */
-/** An error that says asking again cannot help, such as a closed Vorn window. */
-function isFinal(error: unknown): boolean {
-  return (error as { retryable?: unknown } | null)?.retryable === false
-}
 
 export function resilientFetch(options: ResilientFetchOptions): typeof fetch {
   const attempts = Math.min(MAX_ATTEMPTS, Math.max(1, options.retry?.attempts ?? DEFAULT_ATTEMPTS))

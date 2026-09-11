@@ -3883,14 +3883,14 @@ export function listRunningRuns(): WorkflowExecution[] {
 // because gates pause execution. No LIMIT is intentional so the badge count
 // matches the real backlog. If this ever grows, cap with a LIMIT here and
 // chunk `fetchNodesByRunIds` to stay under SQLite's IN-clause variable cap.
-export function listRunsWithWaitingGates(): WorkflowExecution[] {
+export function listRunsWithWaitingGates(kind?: 'signIn'): WorkflowExecution[] {
   const d = getDb()
   const rows = d
     .prepare(
       `SELECT DISTINCT wr.*
        FROM workflow_runs wr
        JOIN workflow_run_nodes wrn ON wrn.run_id = wr.id
-       WHERE wrn.status = 'waiting'
+       WHERE wrn.status = 'waiting'${kind === 'signIn' ? " AND wrn.waiting_for = 'signIn'" : ''}
        ORDER BY wr.started_at DESC`
     )
     .all() as RunRow[]

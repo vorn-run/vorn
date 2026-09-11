@@ -3,18 +3,9 @@
 /** The largest body a signed-in call hands back, so a runaway page cannot fill memory. */
 export const MAX_SESSION_BODY = 4 * 1024 * 1024
 
-export interface SessionRequest {
-  url: string
-  method: string
-  headers?: Record<string, string>
-  body?: string
-}
+import { CONNECTION_PROFILE_PREFIX, type SessionAnswer, type SessionRequest } from '../shared/types'
 
-export interface SessionAnswer {
-  status: number
-  headers: Record<string, string>
-  body: string
-}
+export type { SessionAnswer, SessionRequest }
 
 /** The only request headers a call may set; the page supplies the rest itself, cookies included. */
 const ALLOWED_HEADERS = new Set(['accept', 'content-type'])
@@ -53,7 +44,9 @@ function valueAt(value: unknown, path: string): unknown {
     .split('.')
     .reduce<unknown>(
       (at, key) =>
-        at && typeof at === 'object' ? (at as Record<string, unknown>)[key] : undefined,
+        at && typeof at === 'object' && Object.prototype.hasOwnProperty.call(at, key)
+          ? (at as Record<string, unknown>)[key]
+          : undefined,
       value
     )
 }
@@ -82,6 +75,6 @@ export function staleConnectionFolders(
   folders: readonly string[],
   connectionIds: readonly string[]
 ): string[] {
-  const live = new Set(connectionIds.map((id) => `vorn-connection-${id}`))
-  return folders.filter((name) => name.startsWith('vorn-connection-') && !live.has(name))
+  const live = new Set(connectionIds.map((id) => `${CONNECTION_PROFILE_PREFIX}${id}`))
+  return folders.filter((name) => name.startsWith(CONNECTION_PROFILE_PREFIX) && !live.has(name))
 }

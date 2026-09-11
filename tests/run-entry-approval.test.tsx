@@ -122,7 +122,7 @@ describe('RunEntry — a step waiting for a sign-in', () => {
     )
     expect(getAllByText(signedOut).length).toBeGreaterThan(0)
     expect(queryByText('Approve')).toBeNull()
-    fireEvent.click(getByText('Sign in'))
+    fireEvent.click(getByText(/^Sign in to/))
     expect(signInConnection).toHaveBeenCalledWith('conn-sub')
     expect(resolveWorkflowGate).not.toHaveBeenCalled()
   })

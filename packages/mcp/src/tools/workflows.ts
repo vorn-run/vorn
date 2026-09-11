@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { isSignInWait } from '@vornrun/shared/workflow-graph'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { V } from '../validation'
@@ -489,7 +490,7 @@ export function annotateWaitingGates<T extends WorkflowExecution>(
       ...run,
       nodeStates: run.nodeStates.map((state) => {
         if (state.status !== 'waiting') return state
-        if (state.waitingFor === 'signIn') {
+        if (isSignInWait(state)) {
           return {
             ...state,
             asks: 'Sign in to its connection in the Vorn app, and this step runs again'
@@ -519,7 +520,7 @@ export function resolveGateTarget(
 ): { nodeId: string } | { error: string } {
   const parked = run.nodeStates.filter((n) => n.status === 'waiting')
   // Rejecting a sign-in wait ends the run; approving one would skip the step it waits to run.
-  const answerable = parked.filter((n) => decision === 'reject' || n.waitingFor !== 'signIn')
+  const answerable = parked.filter((n) => decision === 'reject' || !isSignInWait(n))
   const waiting = answerable.map((n) => n.nodeId)
   const signIns = parked.filter((n) => !answerable.includes(n)).map((n) => n.nodeId)
   if (nodeId) {
