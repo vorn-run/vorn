@@ -21,9 +21,9 @@ describe('the view each workflow is left at', () => {
   })
 
   it('treats what it cannot read as never having been there', () => {
-    localStorage.setItem('vorn:canvasViews', JSON.stringify({ wf: { x: 'left', y: 0, zoom: 1 } }))
+    localStorage.setItem('vorn:workflowViews', JSON.stringify({ wf: { x: 'left', y: 0, zoom: 1 } }))
     expect(readCanvasView('wf')).toBeNull()
-    localStorage.setItem('vorn:canvasViews', 'not json')
+    localStorage.setItem('vorn:workflowViews', 'not json')
     expect(readCanvasView('wf')).toBeNull()
   })
 })

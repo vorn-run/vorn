@@ -23,10 +23,19 @@ import {
   type Viewport
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlignVerticalSpaceAround, Repeat, Replace, StepForward, Trash2, Zap } from 'lucide-react'
+import {
+  AlignVerticalSpaceAround,
+  Maximize,
+  Repeat,
+  Replace,
+  StepForward,
+  Trash2,
+  Zap
+} from 'lucide-react'
 import { LoopConfig, NodeExecutionStatus, WorkflowEdge, WorkflowNode } from '../../../shared/types'
 import {
   AddStepNodeData,
+  CANVAS_MIN_ZOOM,
   CanvasEdgeData,
   canConnect,
   estimateNodeHeight,
@@ -34,6 +43,7 @@ import {
   openingViewport,
   stepEdgePath,
   toCanvasElements,
+  topAlignedFit,
   TRIGGER_ANCHOR,
   TRIGGER_ANCHOR_ID
 } from '../../lib/workflow-canvas-layout'
@@ -513,7 +523,8 @@ function WorkflowCanvasInner({
   nodeStatus,
   loadKey
 }: Props) {
-  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView, setViewport } = useReactFlow()
+  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, getNodesBounds, setViewport } =
+    useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
 
   const elements = useMemo(() => toCanvasElements(nodes, edges), [nodes, edges])
@@ -544,6 +555,13 @@ function WorkflowCanvasInner({
     },
     [loadKey]
   )
+
+  const fitFromTop = useCallback(() => {
+    const el = wrapperRef.current
+    if (!el || rfNodes.length === 0) return
+    const view = topAlignedFit(getNodesBounds(rfNodes), el.clientWidth, el.clientHeight)
+    void setViewport(view, { duration: 200 })
+  }, [rfNodes, getNodesBounds, setViewport])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     // The canvas owns position only; selection and structure stay the editor's.
@@ -631,7 +649,7 @@ function WorkflowCanvasInner({
       } else if (e.key === '0') {
         void zoomTo(1)
       } else if (e.key === '1') {
-        void fitView({ padding: 0.2, maxZoom: 1 })
+        fitFromTop()
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
         const node = nodes.find((n) => n.id === selectedNodeId)
         if (node && onDeleteNode) {
@@ -646,7 +664,7 @@ function WorkflowCanvasInner({
       zoomIn,
       zoomOut,
       zoomTo,
-      fitView,
+      fitFromTop,
       selectedNodeId,
       nodes,
       onDeleteNode
@@ -699,7 +717,7 @@ function WorkflowCanvasInner({
           onPaneClick={() => onNodeClick('')}
           onInit={openView}
           onMoveEnd={handleMoveEnd}
-          minZoom={0.2}
+          minZoom={CANVAS_MIN_ZOOM}
           maxZoom={1.75}
           snapToGrid
           snapGrid={[8, 8]}
@@ -732,9 +750,17 @@ function WorkflowCanvasInner({
           />
           <Controls
             showInteractive={false}
+            showFitView={false}
             className="!bg-surface-overlay !border !border-white/[0.12] !rounded-md !shadow-none
                        [&_button]:!bg-transparent [&_button]:!border-white/[0.08] [&_button]:!fill-gray-400"
           >
+            <ControlButton
+              onClick={fitFromTop}
+              title="Fit the workflow"
+              aria-label="Fit the workflow"
+            >
+              <Maximize size={12} className="!fill-none stroke-gray-400" />
+            </ControlButton>
             <ControlButton onClick={onTidyUp} title="Tidy up">
               <AlignVerticalSpaceAround size={12} className="!fill-none stroke-gray-400" />
             </ControlButton>

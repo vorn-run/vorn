@@ -1,4 +1,11 @@
-import { getBezierPath, Position, type Edge, type Node, type Viewport } from '@xyflow/react'
+import {
+  getBezierPath,
+  Position,
+  type Edge,
+  type Node,
+  type Rect,
+  type Viewport
+} from '@xyflow/react'
 import { LoopConfig, WorkflowEdge, WorkflowNode, WorkflowNodePosition } from '../../shared/types'
 import { stepPreview } from '../components/workflow-editor/node-visuals'
 import {
@@ -414,4 +421,18 @@ export function openingViewport(nodes: PlacedNode[], width: number): Viewport {
   const maxX = Math.max(...drawn.map((n) => n.position.x + widthOf(n)))
   const minY = Math.min(...drawn.map((n) => n.position.y))
   return { x: width / 2 - (minX + maxX) / 2, y: OPENING_TOP - minY, zoom: 1 }
+}
+
+/** The furthest the canvas zooms out. */
+export const CANVAS_MIN_ZOOM = 0.2
+
+/** The whole workflow on screen, never past 100%, with its first step near the top rather than centred. */
+export function topAlignedFit(bounds: Rect, width: number, height: number): Viewport {
+  const fits = Math.min((width * 0.9) / bounds.width, (height - 2 * OPENING_TOP) / bounds.height)
+  const zoom = Math.min(1, Math.max(CANVAS_MIN_ZOOM, fits))
+  return {
+    x: width / 2 - (bounds.x + bounds.width / 2) * zoom,
+    y: OPENING_TOP - bounds.y * zoom,
+    zoom
+  }
 }

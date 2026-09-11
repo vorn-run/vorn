@@ -1,6 +1,6 @@
 import type { Viewport } from '@xyflow/react'
 
-const VIEWS_KEY = 'vorn:canvasViews'
+const VIEWS_KEY = 'vorn:workflowViews'
 /** How many workflows keep a remembered view; the one looked at longest ago goes first. */
 const KEPT_VIEWS = 50
 
