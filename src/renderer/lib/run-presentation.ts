@@ -1,6 +1,8 @@
+import { Zap, Clock, CheckSquare, Play, type LucideIcon, RotateCcw } from 'lucide-react'
 import { failedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import type {
   NodeExecutionStatus,
+  SdkConnectorIcon,
   TriggerConfig,
   WorkflowExecution,
   WorkflowNode
@@ -88,6 +90,9 @@ export type RunSource = 'manual' | 'schedule' | 'task' | 'connector' | 'restore'
 /** The parts of a workflow definition a run row needs to render itself. */
 export interface RunWorkflowRef {
   name?: string
+  /** Key into the shared `ICON_MAP` — the workflow's own chosen glyph. */
+  icon?: string
+  iconColor?: string
   nodes: WorkflowNode[]
 }
 
@@ -99,6 +104,25 @@ export interface RunPresentation {
   source: RunSource
   /** Where the run came from, in a word (`manual`, `github`, `scheduled`…). */
   sourceLabel: string
+  /** The workflow's own icon and colour, so a run carries the mark the sidebar shows. */
+  iconName?: string
+  iconColor?: string
+  /** Set for connector-triggered runs so the row can draw the brand glyph. */
+  connectorId?: string
+  /** A packaged connector's own glyph, which the built-in lookup cannot supply. */
+  connectorIcon?: SdkConnectorIcon
+  /** From a packaged connector, so a missing glyph falls back to the plug. */
+  connectorPackaged?: boolean
+  /** Used only when the workflow is gone or never picked an icon. */
+  fallbackIcon: LucideIcon
+}
+
+const SOURCE_ICONS: Record<RunSource, LucideIcon> = {
+  manual: Zap,
+  schedule: Clock,
+  task: CheckSquare,
+  connector: Play,
+  restore: RotateCcw
 }
 
 function triggerNodeOf(nodes: WorkflowNode[]): WorkflowNode | undefined {
@@ -153,6 +177,7 @@ export function describeRun(
   const source = sourceOf(execution, triggerTypeOf(nodes))
   const item = execution.connectorItem
   const name = workflow?.name?.trim() || undefined
+  const mark = { iconName: workflow?.icon, iconColor: workflow?.iconColor }
 
   if (item) {
     const connectorId = look?.connectorId ?? item.connectorId
@@ -161,7 +186,12 @@ export function describeRun(
       title,
       subtitle: item.title !== title ? item.title : name,
       source: 'connector',
-      sourceLabel: connectorId
+      sourceLabel: connectorId,
+      ...mark,
+      connectorId,
+      connectorIcon: look?.icon,
+      connectorPackaged: look?.packaged,
+      fallbackIcon: SOURCE_ICONS.connector
     }
   }
 
@@ -171,7 +201,9 @@ export function describeRun(
       title: name ?? label,
       subtitle: `restore · ${restore} · ${label}`,
       source: 'restore',
-      sourceLabel: 'restore'
+      sourceLabel: 'restore',
+      ...mark,
+      fallbackIcon: SOURCE_ICONS.restore
     }
   }
 
@@ -180,7 +212,9 @@ export function describeRun(
       title: name ?? `Task ${execution.triggerTaskId.slice(0, 6)}`,
       subtitle: `Task ${execution.triggerTaskId.slice(0, 6)}`,
       source: 'task',
-      sourceLabel: 'task'
+      sourceLabel: 'task',
+      ...mark,
+      fallbackIcon: SOURCE_ICONS.task
     }
   }
 
@@ -188,7 +222,9 @@ export function describeRun(
     title: name ?? execution.workflowId.slice(0, 8),
     subtitle: undefined,
     source,
-    sourceLabel: source === 'schedule' ? 'scheduled' : source === 'restore' ? 'restore' : 'manual'
+    sourceLabel: source === 'schedule' ? 'scheduled' : source === 'restore' ? 'restore' : 'manual',
+    ...mark,
+    fallbackIcon: SOURCE_ICONS[source]
   }
 }
 

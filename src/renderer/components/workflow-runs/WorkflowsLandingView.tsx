@@ -25,7 +25,10 @@ export function WorkflowsLandingView() {
   const workflowsById = useMemo(
     () =>
       new Map<string, RunWorkflowRef>(
-        (workflows ?? []).map((w) => [w.id, { name: w.name, nodes: w.nodes ?? [] }])
+        (workflows ?? []).map((w) => [
+          w.id,
+          { name: w.name, icon: w.icon, iconColor: w.iconColor, nodes: w.nodes ?? [] }
+        ])
       ),
     [workflows]
   )

@@ -115,19 +115,23 @@ describe('describeRun', () => {
 
   // A packaged connector's item only knows itself as `mcp`; the connection it
   // came from is what says which connector really ran.
-  it('takes the connector id from the connection when one is resolved', () => {
+  it('takes the connector id and glyph from the connection when one is resolved', () => {
+    const icon = { viewBox: '0 0 24 24', paths: ['M2 2h9v9z'] }
     const p = describeRun(
       run({ connectorItem: githubItem({ connectorId: 'mcp', externalId: '7' }) }),
       undefined,
-      { connectorId: 'packdemo', packaged: true }
+      { connectorId: 'packdemo', icon, packaged: true }
     )
+    expect(p.connectorId).toBe('packdemo')
     expect(p.sourceLabel).toBe('packdemo')
+    expect(p.connectorIcon).toBe(icon)
     expect(p.title).toBe('packdemo 7')
   })
 
   it('keeps the item id when no connection resolves, so a deleted one still reads', () => {
     const p = describeRun(run({ connectorItem: githubItem({ externalId: '7' }) }))
-    expect(p.sourceLabel).toBe('github')
+    expect(p.connectorId).toBe('github')
+    expect(p.connectorIcon).toBeUndefined()
   })
 
   it('labels a task-triggered run with the workflow name and a short task subtitle', () => {
@@ -164,6 +168,23 @@ describe('describeRun', () => {
   it('falls back to the short workflow id when nothing names the run', () => {
     const p = describeRun(run({ workflowId: '407f59ea-1234' }))
     expect(p.title).toBe('407f59ea')
+  })
+
+  it("carries the workflow's own icon and colour so a run is recognisable at a glance", () => {
+    const p = describeRun(run({ connectorItem: githubItem({}) }), {
+      name: 'GitHub: PR Opened',
+      icon: 'github',
+      iconColor: '#8b5cf6',
+      nodes: []
+    })
+    expect(p.iconName).toBe('github')
+    expect(p.iconColor).toBe('#8b5cf6')
+  })
+
+  it('leaves the icon unset when the workflow is gone, so a fallback is drawn', () => {
+    const p = describeRun(run())
+    expect(p.iconName).toBeUndefined()
+    expect(p.fallbackIcon).toBeTruthy()
   })
 })
 

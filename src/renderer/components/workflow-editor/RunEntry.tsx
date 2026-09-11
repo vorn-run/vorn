@@ -17,9 +17,11 @@ import { nodeLabel } from '../../lib/run-presentation'
 import { IconButton } from '../IconButton'
 import { failedStep, hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
-import { connectorLookFor, useConnections } from '../../lib/use-connections'
+import { connectorLookFor, useConnections, type ConnectorLook } from '../../lib/use-connections'
 import { SignInButton } from '../workflow-runs/SignInButton'
+import { ConnectorIcon } from '../ConnectorIcon'
 import {
+  NODE_TYPE_ICON,
   TASK_CHIP,
   nodeConnectionId,
   stepMeta,
@@ -63,6 +65,24 @@ export function NodeLabel({ nodeId, nodes }: { nodeId: string; nodes: WorkflowNo
       )}
     </span>
   )
+}
+
+/** A step's glyph: its connector's mark when it is bound to one, else its node type's. */
+function StepIcon({ node, look }: { node: WorkflowNode | undefined; look?: ConnectorLook }) {
+  if (look) {
+    return (
+      <ConnectorIcon
+        connectorId={look.connectorId}
+        icon={look.icon}
+        packaged={look.packaged}
+        size={12}
+        className="text-ink-faint shrink-0"
+      />
+    )
+  }
+  const Icon = node ? NODE_TYPE_ICON[node.type] : undefined
+  // Neutral on purpose: the glyph carries the kind, the dot carries the outcome.
+  return Icon ? <Icon size={12} strokeWidth={1.5} className="text-ink-faint shrink-0" /> : null
 }
 
 interface RunStepsListProps {
@@ -244,6 +264,7 @@ export function RunStepsList({
               <span
                 className={`flex items-center gap-1.5 min-w-0 text-[12.5px] ${faint ? 'text-ink-faint' : 'text-ink'}`}
               >
+                <StepIcon node={node} look={look} />
                 <span className="truncate">{nodeLabel(node, ns.nodeId)}</span>
                 {meta && <span className="text-[11.5px] text-ink-faint truncate">{meta}</span>}
                 {nodeTask && (

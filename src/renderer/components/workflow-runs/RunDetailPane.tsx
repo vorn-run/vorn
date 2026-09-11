@@ -16,6 +16,7 @@ import { nodeConnectionId } from '../workflow-editor/node-visuals'
 import { SignInButton } from './SignInButton'
 import { StopRunButton } from './StopRunButton'
 import { IconButton } from '../IconButton'
+import { RunIcon } from './RunIcon'
 import { workflowRunId, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
 import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
@@ -108,6 +109,9 @@ export function RunDetailPane({
     <div className="h-full flex flex-col min-h-0 overflow-y-auto">
       <div className="px-5 pt-4 pb-4 shrink-0 flex flex-col gap-2">
         <div className="flex items-center gap-1 min-w-0">
+          <span className="flex shrink-0 mr-1">
+            <RunIcon presentation={presentation} size={15} className="text-ink-secondary" />
+          </span>
           <h2 className="flex-1 min-w-0 truncate text-[15px] font-medium text-ink">
             {presentation.title}
           </h2>

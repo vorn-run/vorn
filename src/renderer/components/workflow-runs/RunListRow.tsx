@@ -8,6 +8,7 @@ import {
 } from '../../lib/run-presentation'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import { useConnectorLook } from '../../lib/use-connections'
+import { RunIcon } from './RunIcon'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
 
 interface Props {
@@ -37,7 +38,7 @@ function RunListRowImpl({
   const look = useConnectorLook(run.connectorItem?.connectionId)
   const presentation = describeRun(run, workflow, look)
   const dotStatus = run.nodeStates.some((n) => n.status === 'waiting') ? 'waiting' : run.status
-  // The dot is the row's only colour; everything else is one quiet line of words.
+  // Everything past the dot and the workflow's own mark is one quiet line of words.
   const details = [
     runStatusLine(run, workflow?.nodes ?? []),
     presentation.subtitle ?? presentation.sourceLabel,
@@ -65,7 +66,10 @@ function RunListRowImpl({
         aria-label={dotStatus}
         className={`w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[dotStatus] ?? WORKFLOW_STATUS_DOT.pending}`}
       />
-      <span className="text-[13px] text-ink truncate">{presentation.title}</span>
+      <span className="flex items-center gap-2 min-w-0">
+        <RunIcon presentation={presentation} />
+        <span className="text-[13px] text-ink truncate">{presentation.title}</span>
+      </span>
       <span className="font-mono text-[12px] text-ink-secondary tabular-nums">
         {formatRunDuration(run.startedAt, run.completedAt)}
       </span>

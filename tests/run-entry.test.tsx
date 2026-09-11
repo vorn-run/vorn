@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, fireEvent } from '@testing-library/react'
+import { render, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 vi.mock('framer-motion', () => ({
@@ -424,6 +424,27 @@ describe('RunStepsList', () => {
     // @ts-expect-error - minimal window.api stub for this test
     window.api = { listConnections: vi.fn().mockResolvedValue(connections) }
   }
+
+  it("shows a connector-bound step under its connector's brand mark", async () => {
+    stubConnections([{ id: 'conn-1', connectorId: 'github', name: 'GitHub' }])
+
+    const { container } = render(
+      <RunStepsList execution={exec} nodes={[triggerNode, scriptNode]} includeTrigger />
+    )
+    await waitFor(() =>
+      expect(container.querySelector('svg[viewBox="0 0 16 16"]')).toBeInTheDocument()
+    )
+  })
+
+  it('falls back to the node-type icon for a step with no connection', async () => {
+    stubConnections([])
+
+    const { container } = render(
+      <RunStepsList execution={exec} nodes={[triggerNode, scriptNode]} includeTrigger />
+    )
+    await waitFor(() => expect(container.querySelector('svg.lucide-terminal')).toBeInTheDocument())
+    expect(container.querySelector('svg[viewBox="0 0 16 16"]')).not.toBeInTheDocument()
+  })
 
   it('describes each step and previews what it was configured to run', async () => {
     stubConnections([{ id: 'conn-1', connectorId: 'github', name: 'GitHub' }])

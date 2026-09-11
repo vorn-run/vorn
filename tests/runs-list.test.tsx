@@ -168,6 +168,22 @@ describe('RunsList', () => {
     expect(screen.getByRole('button', { pressed: true })).toBeInTheDocument()
   })
 
+  it("draws the workflow's own icon in its own colour", () => {
+    const wfById = new Map([
+      ['wf-a', { name: 'Alpha', icon: 'Zap', iconColor: '#8b5cf6', nodes: [] }]
+    ])
+    const { container } = render(
+      <RunsList
+        runs={[makeRun('wf-a', 'success')]}
+        workflowsById={wfById}
+        filter="all"
+        selectedId={null}
+        onSelect={noop}
+      />
+    )
+    expect(container.querySelector('svg[stroke="#8b5cf6"]')).toBeTruthy()
+  })
+
   it('flags a run whose workflow was deleted and keeps the persisted name', () => {
     const runs = [makeRun('wf-gone', 'success', { workflowName: 'Old Name' })]
     render(
@@ -287,6 +303,6 @@ describe('RunsList', () => {
     )
     expect(screen.getByText(/^Completed · manual · /)).toBeInTheDocument()
     expect(screen.queryByText(/of \d+ steps/)).toBeNull()
-    expect(container.querySelectorAll('svg')).toHaveLength(0)
+    expect(container.querySelectorAll('[title$="· success"]')).toHaveLength(0)
   })
 })
