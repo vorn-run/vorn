@@ -20,15 +20,7 @@ import { StopRunButton } from '../workflow-runs/StopRunButton'
 import { connectorLookFor, useConnections, type ConnectorLook } from '../../lib/use-connections'
 import { SignInButton } from '../workflow-runs/SignInButton'
 import { ConnectorIcon } from '../ConnectorIcon'
-import {
-  NODE_TYPE_ICON,
-  TASK_CHIP,
-  nodeConnectionId,
-  stepMeta,
-  stepTimeline,
-  stepOutputPreview,
-  stepPreview
-} from './node-visuals'
+import { NODE_TYPE_ICON, TASK_CHIP, nodeConnectionId, stepMeta, stepTimeline } from './node-visuals'
 
 const STATUS_LABELS: Record<WorkflowExecution['status'] | NodeExecutionState['status'], string> = {
   success: 'Success',
@@ -235,8 +227,6 @@ export function RunStepsList({
 
         const look = connectorLookFor(connections, nodeConnectionId(node))
         const meta = stepMeta(node, look?.connectorId)
-        // What the step said beats what it was told to do, so a row is never blank.
-        const preview = stepOutputPreview(ns) ?? stepPreview(node)
         // Only for the open row: stepTimeline slices a tail out of every step's logs.
         const isExpanded = expandedNodeId === ns.nodeId
         const timeline = isExpanded ? stepTimeline(ns.logs, ns.diagnostics) : []
@@ -295,11 +285,6 @@ export function RunStepsList({
                   ? formatRunDuration(ns.startedAt, ns.completedAt)
                   : null}
               </span>
-              {preview && !isExpanded && !isWaitingGate && (
-                <span className="col-start-2 col-span-2 text-[12px] font-mono text-ink-faint truncate">
-                  {preview}
-                </span>
-              )}
             </button>
 
             {isWaitingGate && (

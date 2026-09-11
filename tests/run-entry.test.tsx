@@ -446,7 +446,7 @@ describe('RunStepsList', () => {
     expect(container.querySelector('svg[viewBox="0 0 16 16"]')).not.toBeInTheDocument()
   })
 
-  it('describes each step and previews what it was configured to run', async () => {
+  it('describes each step by what it is', async () => {
     stubConnections([{ id: 'conn-1', connectorId: 'github', name: 'GitHub' }])
 
     const { getByText, findByText } = render(
@@ -456,12 +456,9 @@ describe('RunStepsList', () => {
     expect(await findByText('github · prOpened')).toBeInTheDocument()
     // The script names its shell and project.
     expect(getByText('bash · vorn')).toBeInTheDocument()
-    // With no output of its own, the trigger falls back to its configured
-    // body rather than leaving a blank card.
-    expect(getByText('on: prOpened')).toBeInTheDocument()
   })
 
-  it("previews the opening of a step's output and expands to the full log", async () => {
+  it('keeps a closed step to one line, and shows its log once opened', async () => {
     stubConnections([])
     const noisy = makeExec({
       nodeStates: [makeState({ nodeId: 'scr', logs: 'installing deps\nrunning tests\nall green' })]
@@ -470,11 +467,10 @@ describe('RunStepsList', () => {
     const { getByText, queryByText, findByText } = render(
       <RunStepsList execution={noisy} nodes={[scriptNode]} />
     )
-    // The card opens the log where the log itself opens.
-    expect(await findByText('installing deps')).toBeInTheDocument()
-    expect(queryByText(/all green/)).not.toBeInTheDocument()
+    await findByText('Execute Script')
+    expect(queryByText(/installing deps/)).not.toBeInTheDocument()
 
-    fireEvent.click(getByText('installing deps').closest('button')!)
+    fireEvent.click(getByText('Execute Script').closest('button')!)
     expect(getByText(/all green/)).toBeInTheDocument()
   })
 

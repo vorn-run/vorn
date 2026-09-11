@@ -1,6 +1,6 @@
 import { Zap, Play, Terminal, GitFork, Hand, ListPlus, Repeat, Globe } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { NodeExecutionState, WorkflowNode } from '../../../shared/types'
+import type { WorkflowNode } from '../../../shared/types'
 
 /**
  * The glyph for each node type, read by the config panel header and the run
@@ -47,14 +47,6 @@ export function nodeConnectionId(node: WorkflowNode | undefined): string | undef
   if (node.type === 'trigger' && config?.triggerType === 'connectorPoll') return config.connectionId
   return undefined
 }
-
-/** How far into a log to look for its first non-blank line. Generous enough
- *  for any realistic banner of leading blank lines, bounded so a huge log
- *  can't make the scan proportional to its size. */
-const PREVIEW_SCAN_LIMIT = 4096
-/** A single preview line is truncated by CSS; this only stops a log with no
- *  newlines at all from handing a megabyte-long "line" to React. */
-const MAX_PREVIEW_LINE = 300
 
 /** Join the parts of a step descriptor, dropping the ones a node didn't set. */
 function joinMeta(...parts: (string | undefined)[]): string | undefined {
@@ -137,54 +129,6 @@ export function connectorArgsPreview(
 ): string | undefined {
   const entries = args ? Object.entries(args) : []
   return entries.length > 0 ? entries.map(([k, v]) => `${k}: ${String(v)}`).join('  ') : undefined
-}
-
-/**
- * The opening of a step's output, for the one-line preview on its card. Reads
- * like the log itself does — from the top — so expanding a step continues
- * where the preview left off rather than contradicting it.
- *
- * Scans only the head of the text: a running agent step streams its log and
- * re-renders on every chunk, so splitting a multi-megabyte string here would
- * re-allocate the whole thing many times a second for one visible line.
- */
-export function stepOutputPreview(state: NodeExecutionState): string | undefined {
-  const text = state.logs || state.error
-  if (!text) return undefined
-  const fields = jsonFieldsPreview(text)
-  if (fields) return fields
-
-  let start = 0
-  while (start < text.length && start < PREVIEW_SCAN_LIMIT) {
-    const newline = text.indexOf('\n', start)
-    // Bound the slice, not just the loop: one "line" can itself be the whole
-    // log when the output has no newlines at all.
-    const end = Math.min(newline === -1 ? text.length : newline, start + MAX_PREVIEW_LINE)
-    const line = text.slice(start, end).trim()
-    if (!BRACKETS_ONLY.test(line)) return line
-    start = (newline === -1 ? text.length : newline) + 1
-  }
-  return undefined
-}
-
-/** A line that only opens or closes a structure, which says nothing on its own. */
-const BRACKETS_ONLY = /^[[\]{}(),\s]*$/
-
-/** A JSON object's fields as one line, since its own first line is only a brace. */
-function jsonFieldsPreview(text: string): string | undefined {
-  if (text.length > PREVIEW_SCAN_LIMIT || !text.trimStart().startsWith('{')) return undefined
-  try {
-    const parsed: unknown = JSON.parse(text)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
-    const fields = Object.entries(parsed).flatMap(([key, value]) => {
-      if (Array.isArray(value)) return [`${key}: ${value.length} items`]
-      if (value !== null && typeof value === 'object') return []
-      return [`${key}: ${String(value)}`]
-    })
-    return fields.length > 0 ? fields.join('  ').slice(0, MAX_PREVIEW_LINE) : undefined
-  } catch {
-    return undefined
-  }
 }
 
 /**
