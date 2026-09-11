@@ -4,18 +4,22 @@ import { act, render, cleanup, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { ConnectorCatalogItem } from '../src/shared/types'
 
-const connections = [
+const connections: Array<{
+  id: string
+  name: string
+  connectorId: string
+  filters: Record<string, string>
+}> = [
   { id: 'http-1', name: 'reporting API', connectorId: 'http', filters: {} },
   { id: 'c1', name: 'Pack Demo', connectorId: 'mcp', filters: { sdkConnectorId: 'packdemo' } }
 ]
 
 const packs: Array<{ id: string }> = []
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
+vi.mock('../src/renderer/lib/use-connections', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/use-connections')>()),
   useConnections: () => connections,
-  useInstalledPacks: () => packs,
-  useConnectorIdFor: () => null,
-  useConnectionIconFor: () => undefined
+  useInstalledPacks: () => packs
 }))
 
 const SLACK: ConnectorCatalogItem = {
@@ -59,7 +63,8 @@ const PACKDEMO: ConnectorCatalogItem = {
   launch: { command: 'npx', args: [] }
 }
 
-const listConnectionActions = vi.fn(async () => [])
+const noActions = async (): Promise<Array<{ type: string; label: string }>> => []
+const listConnectionActions = vi.fn(noActions)
 const listConnectorCatalog = vi.fn(async () => ({
   items: [DISCORD, SLACK, PACKDEMO],
   templates: [],
@@ -84,6 +89,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   packs.length = 0
+  listConnectionActions.mockImplementation(noActions)
   listConnectorCatalog.mockResolvedValue({
     items: [DISCORD, SLACK, PACKDEMO],
     templates: [],
@@ -140,6 +146,22 @@ describe('steps from connectors nobody has installed', () => {
       action: 'post',
       actionLabel: 'Post message'
     })
+  })
+
+  it('keeps a step picked from the catalog under Recent once its connector is connected', async () => {
+    const { unmount } = draw()
+    fireEvent.click(await connector(/Slack/))
+    fireEvent.click(screen.getByText('Post message'))
+    unmount()
+
+    connections.push({ id: 'slack-1', name: 'team chat', connectorId: 'slack', filters: {} })
+    listConnectionActions.mockImplementation(async () => [{ type: 'post', label: 'Post message' }])
+    try {
+      draw()
+      expect(await connector(/Post message.*team chat/)).toBeInTheDocument()
+    } finally {
+      connections.pop()
+    }
   })
 
   it('leaves a loop body to the steps it can repeat', async () => {

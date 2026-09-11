@@ -1,12 +1,15 @@
-import type { LibraryPick } from './library-pick'
-
 const RECENT_KEY = 'vorn:recentSteps'
 const OPEN_KEY = 'vorn:stepLibraryOpen'
 /** How many picked actions the library offers again at its top. */
 const KEPT_RECENT = 5
 
-/** An action someone picked, the kind of pick worth offering again. */
-export type RecentPick = Extract<LibraryPick, { kind: 'connectorAction' | 'catalogAction' }>
+/** An action someone picked, known by its connector so it outlives the row it was picked from. */
+export interface RecentAction {
+  connectorId: string
+  action: string
+  /** The connection it went through, preferred while that connection is still there. */
+  connectionId?: string
+}
 
 function readJson(key: string): unknown {
   try {
@@ -24,32 +27,27 @@ function writeJson(key: string, value: unknown): void {
   }
 }
 
-function isRecentPick(value: unknown): value is RecentPick {
-  const pick = value as Record<string, unknown> | null
-  if (!pick || typeof pick.action !== 'string' || typeof pick.actionLabel !== 'string') return false
+function isRecentAction(value: unknown): value is RecentAction {
+  const picked = value as Record<string, unknown> | null
   return (
-    (pick.kind === 'connectorAction' && typeof pick.connectionId === 'string') ||
-    (pick.kind === 'catalogAction' && typeof pick.connectorId === 'string')
+    !!picked &&
+    typeof picked.connectorId === 'string' &&
+    typeof picked.action === 'string' &&
+    (picked.connectionId === undefined || typeof picked.connectionId === 'string')
   )
 }
 
-/** The row an action is listed under, the same in Recent as in its group. */
-export function actionKey(pick: RecentPick): string {
-  return pick.kind === 'connectorAction'
-    ? `action:${pick.connectionId}:${pick.action}`
-    : `catalog:${pick.connectorId}:${pick.action}`
-}
-
 /** The actions picked most recently, newest first. */
-export function readRecentPicks(): RecentPick[] {
+export function readRecentActions(): RecentAction[] {
   const stored = readJson(RECENT_KEY)
-  return Array.isArray(stored) ? stored.filter(isRecentPick).slice(0, KEPT_RECENT) : []
+  return Array.isArray(stored) ? stored.filter(isRecentAction) : []
 }
 
-export function recordRecentPick(pick: RecentPick): void {
-  const key = actionKey(pick)
-  const rest = readRecentPicks().filter((p) => actionKey(p) !== key)
-  writeJson(RECENT_KEY, [pick, ...rest].slice(0, KEPT_RECENT))
+export function recordRecentAction(picked: RecentAction): void {
+  const rest = readRecentActions().filter(
+    (a) => a.connectorId !== picked.connectorId || a.action !== picked.action
+  )
+  writeJson(RECENT_KEY, [picked, ...rest].slice(0, KEPT_RECENT))
 }
 
 /** The groups left open, so the library opens the way it was left. */

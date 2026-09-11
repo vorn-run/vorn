@@ -21,25 +21,24 @@ import type { LucideIcon } from 'lucide-react'
 import type {
   ConnectorActionDef,
   ConnectorManifest,
-  SdkConnectorIcon,
   SourceConnection,
   TriggerConfig
 } from '../../../../shared/types'
 import {
+  connectorLookFor,
   useConnections,
-  useConnectorIdFor,
-  useConnectionIconFor,
-  useInstalledPacks
+  useInstalledPacks,
+  type ConnectorLook
 } from '../../../lib/use-connections'
 import { useConnectorCatalog } from '../../../lib/use-connector-catalog'
 import { connectionConnectorId } from '../../../lib/connection-icon'
 import { HTTP_PROFILE_CONNECTOR } from '../../../../shared/workflow-portability'
 import {
-  actionKey,
   readOpenGroups,
-  readRecentPicks,
-  recordRecentPick,
-  writeOpenGroups
+  readRecentActions,
+  recordRecentAction,
+  writeOpenGroups,
+  type RecentAction
 } from '../../../lib/step-library-memory'
 import { ConnectorIcon } from '../../ConnectorIcon'
 import { NODE_GLYPH } from '../node-visuals'
@@ -84,74 +83,58 @@ const STEP_ITEMS: { type: AddableNodeType; label: string; icon: LucideIcon }[] =
   { type: 'loop', label: 'Loop', icon: Repeat }
 ]
 
-type ConnectorMark = { connectorId: string; icon?: SdkConnectorIcon }
-
 interface Row {
+  kind: 'row'
   key: string
   label: string
   pick: LibraryPick
+  /** A built-in step's own glyph; connector rows draw their connector's mark instead. */
   icon?: LucideIcon
-  connection?: SourceConnection
-  /** A connector's own mark, for a step that belongs to one nobody has installed. */
-  mark?: ConnectorMark
-  /** What picking it will also do, or whose it is, said where the eye ends up anyway. */
-  detail?: string
-  /** Sits under its group's heading, which already shows whose it is. */
+  look?: ConnectorLook
+  /** Whose it is, said when it stands outside its group. */
+  owner?: string
+  /** How it is offered again under Recent once picked. */
+  recent?: RecentAction
   nested?: boolean
-  header?: false
 }
 
-/**
- * A heading over the rows beneath it.
- *
- * A connection's heading names the connection; the catalog's name the connector,
- * because the rows under them belong to no connection yet — which is the whole
- * difference between what you have and what you could have.
- */
+/** A connection's or a catalog connector's heading, which folds its rows away. */
 interface GroupHeader {
+  kind: 'group'
   key: string
-  header: true
   label: string
   count: number
-  connection?: SourceConnection
-  mark?: ConnectorMark
+  look?: ConnectorLook
+  /** What adding from it will also do. */
   detail?: string
-  /** Whether its rows show; absent for a heading that never folds. */
-  open?: boolean
+  open: boolean
 }
 
 interface Heading {
+  kind: 'heading'
   key: string
-  heading: true
   label: string
 }
 
 type Entry = Row | GroupHeader | Heading
 
 interface Group {
-  header: GroupHeader
+  key: string
+  label: string
+  look?: ConnectorLook
+  detail?: string
   rows: Row[]
 }
 
-const isHeading = (entry: Entry): entry is Heading => 'heading' in entry
-const isHeader = (entry: Entry): entry is GroupHeader => 'header' in entry && !!entry.header
-
-function ConnectionMark({ connection }: { connection: SourceConnection }) {
-  const connectorId = useConnectorIdFor(connection.id)
-  const icon = useConnectionIconFor(connection.id)
-  if (!connectorId) return <Zap size={14} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />
-  return (
-    <ConnectorIcon connectorId={connectorId} icon={icon} size={14} className="text-ink shrink-0" />
-  )
-}
-
-function Mark({ connection, mark }: { connection?: SourceConnection; mark?: ConnectorMark }) {
-  if (connection) return <ConnectionMark connection={connection} />
-  if (!mark) return null
+function Mark({ look }: { look?: ConnectorLook }) {
+  if (!look?.connectorId) {
+    return <Zap size={14} className={`${NODE_GLYPH} shrink-0`} strokeWidth={2} />
+  }
   return (
     <ConnectorIcon
-      connectorId={mark.connectorId}
-      icon={mark.icon}
+      connectorId={look.connectorId}
+      icon={look.icon}
+      packaged={look.packaged}
       size={14}
       className="text-ink shrink-0"
     />
@@ -168,10 +151,11 @@ export function StepLibrary({
   onPick: (pick: LibraryPick) => void
   onClose: () => void
 }) {
+  const { bodyOnly, insideBranch, triggers, replacing } = scope
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
   const [openGroups, setOpenGroups] = useState(readOpenGroups)
-  const [recent] = useState(readRecentPicks)
+  const [recent] = useState(readRecentActions)
   const inputRef = useRef<HTMLInputElement>(null)
   const connections = useConnections()
   const packs = useInstalledPacks()
@@ -184,11 +168,11 @@ export function StepLibrary({
   )
 
   useEffect(() => {
-    if (!scope.triggers) return
+    if (!triggers) return
     window.api.listConnectors().then((connectors) => {
       setManifestsByConnector(new Map(connectors.map((c) => [c.id, c.manifest])))
     })
-  }, [scope.triggers])
+  }, [triggers])
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -212,69 +196,69 @@ export function StepLibrary({
     }
   }, [connections])
 
-  const entries = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const entries: Entry[] = []
+  const q = query.trim().toLowerCase()
 
-    if (scope.triggers) {
-      const builtIn: Row[] = TRIGGER_ITEMS.filter(
-        (t) => !q || t.label.toLowerCase().includes(q)
-      ).map((t) => ({
-        key: `trigger:${t.triggerType}`,
-        label: t.label,
-        icon: t.icon,
-        pick: { kind: 'triggerType', triggerType: t.triggerType }
-      }))
-      if (builtIn.length > 0) {
-        entries.push({ key: 'heading:triggers', heading: true, label: 'Triggers' }, ...builtIn)
-      }
-      for (const conn of connections) {
-        const triggers = (manifestsByConnector.get(conn.connectorId)?.triggers ?? []).filter(
-          (t) =>
-            !q ||
-            (t.label || t.type).toLowerCase().includes(q) ||
-            conn.name.toLowerCase().includes(q)
-        )
-        if (triggers.length === 0) continue
-        entries.push({
-          key: `group:${conn.id}`,
-          header: true,
-          label: conn.name,
-          connection: conn,
-          count: triggers.length
-        })
-        for (const trigger of triggers) {
-          entries.push({
-            key: `event:${conn.id}:${trigger.type}`,
-            label: trigger.label || trigger.type,
-            connection: conn,
-            nested: true,
-            pick: { kind: 'connectorTrigger', connectionId: conn.id, event: trigger.type }
-          })
-        }
-      }
-      return entries
+  // What matches, in the order it is offered: the loose steps, then one group per connector.
+  const { flat, groups } = useMemo(() => {
+    const matches = (...texts: string[]) => !q || texts.some((t) => t.toLowerCase().includes(q))
+    const flat: Row[] = []
+    const groups: Group[] = []
+    const connectionGroup = (
+      conn: SourceConnection,
+      rows: Omit<Row, 'kind' | 'look' | 'owner'>[]
+    ) => {
+      const look = connectorLookFor(connections, conn.id)
+      if (rows.length === 0) return
+      groups.push({
+        key: `group:${conn.id}`,
+        label: conn.name,
+        look,
+        rows: rows.map((row) => ({ ...row, kind: 'row', look, owner: conn.name }))
+      })
     }
 
-    const steps: Row[] = STEP_ITEMS.filter(
-      (s) => !scope.bodyOnly || s.type === 'agent' || s.type === 'script'
-    )
-      .filter((s) => !(scope.insideBranch && s.type === 'loop'))
-      .filter((s) => !(scope.replacing && (s.type === 'condition' || s.type === 'loop')))
-      .filter((s) => !q || s.label.toLowerCase().includes(q))
-      .map((s) => ({
+    if (triggers) {
+      for (const t of TRIGGER_ITEMS) {
+        if (!matches(t.label)) continue
+        flat.push({
+          kind: 'row',
+          key: `trigger:${t.triggerType}`,
+          label: t.label,
+          icon: t.icon,
+          pick: { kind: 'triggerType', triggerType: t.triggerType }
+        })
+      }
+      for (const conn of connections) {
+        connectionGroup(
+          conn,
+          (manifestsByConnector.get(conn.connectorId)?.triggers ?? [])
+            .filter((t) => matches(t.label || t.type, conn.name))
+            .map((t) => ({
+              key: `event:${conn.id}:${t.type}`,
+              label: t.label || t.type,
+              pick: { kind: 'connectorTrigger', connectionId: conn.id, event: t.type }
+            }))
+        )
+      }
+      return { flat, groups }
+    }
+
+    for (const s of STEP_ITEMS) {
+      if (bodyOnly && s.type !== 'agent' && s.type !== 'script') continue
+      if (insideBranch && s.type === 'loop') continue
+      if (replacing && (s.type === 'condition' || s.type === 'loop')) continue
+      if (!matches(s.label)) continue
+      flat.push({
+        kind: 'row',
         key: `type:${s.type}`,
         label: s.label,
         icon: s.icon,
         pick: { kind: 'type', type: s.type }
-      }))
-    if (
-      !scope.bodyOnly &&
-      !scope.insideBranch &&
-      !scope.replacing &&
-      (!q || 'parallel branch'.includes(q))
-    ) {
-      steps.push({
+      })
+    }
+    if (!bodyOnly && !insideBranch && !replacing && matches('Parallel branch')) {
+      flat.push({
+        kind: 'row',
         key: 'parallel',
         label: 'Parallel branch',
         icon: Split,
@@ -284,104 +268,89 @@ export function StepLibrary({
 
     // A saved profile is an HTTP request with the hard part already answered,
     // so it sits directly beneath the request rather than inside a form field.
-    if (!scope.bodyOnly && !scope.replacing) {
+    if (!bodyOnly && !replacing) {
       const profiles: Row[] = connections
         .filter((c) => connectionConnectorId(c) === HTTP_PROFILE_CONNECTOR)
+        .filter((profile) => matches(`Call ${profile.name}`))
         .map((profile) => ({
+          kind: 'row',
           key: `profile:${profile.id}`,
           label: `Call ${profile.name}`,
           icon: Globe,
           pick: {
-            kind: 'httpProfile' as const,
+            kind: 'httpProfile',
             profileConnectionId: profile.id,
             profileName: profile.name
           }
         }))
-        .filter((row) => !q || row.label.toLowerCase().includes(q))
-      const afterHttp = steps.findIndex((s) => s.key === 'type:httpRequest')
-      steps.splice(afterHttp >= 0 ? afterHttp + 1 : steps.length, 0, ...profiles)
-    }
-    if (steps.length > 0) {
-      if (!q) entries.push({ key: 'heading:steps', heading: true, label: 'Steps' })
-      entries.push(...steps)
+      const afterHttp = flat.findIndex((s) => s.key === 'type:httpRequest')
+      flat.splice(afterHttp >= 0 ? afterHttp + 1 : flat.length, 0, ...profiles)
     }
 
-    const groups: Group[] = []
-    if (!scope.bodyOnly) {
+    if (!bodyOnly) {
       for (const conn of connections) {
-        const actions = (actionsByConnection.get(conn.id) ?? []).filter(
-          (a) =>
-            !q ||
-            (a.label || a.type).toLowerCase().includes(q) ||
-            conn.name.toLowerCase().includes(q)
+        const connectorId = connectionConnectorId(conn)
+        connectionGroup(
+          conn,
+          (actionsByConnection.get(conn.id) ?? [])
+            .filter((a) => matches(a.label || a.type, conn.name))
+            .map((a) => ({
+              key: `action:${conn.id}:${a.type}`,
+              label: a.label || a.type,
+              ...(connectorId && {
+                recent: { connectorId, action: a.type, connectionId: conn.id }
+              }),
+              pick: {
+                kind: 'connectorAction',
+                connectionId: conn.id,
+                action: a.type,
+                actionLabel: a.label || a.type
+              }
+            }))
         )
-        if (actions.length === 0) continue
-        groups.push({
-          header: {
-            key: `group:${conn.id}`,
-            header: true,
-            label: conn.name,
-            connection: conn,
-            count: actions.length
-          },
-          rows: actions.map((action) => {
-            const pick = {
-              kind: 'connectorAction' as const,
-              connectionId: conn.id,
-              action: action.type,
-              actionLabel: action.label || action.type
-            }
-            return { key: actionKey(pick), label: pick.actionLabel, connection: conn, pick }
-          })
-        })
       }
     }
 
     // Steps from connectors nobody has connected; not while replacing, which rebuilds the node from the pick.
-    if (!scope.bodyOnly && !scope.replacing) {
+    if (!bodyOnly && !replacing) {
       const connected = new Set(connections.map((conn) => connectionConnectorId(conn)))
       const unvouched: Group[] = []
       for (const entry of catalog.items) {
         if (connected.has(entry.id) || !entry.actions?.length) continue
-        const entryMatches =
-          !q ||
-          entry.name.toLowerCase().includes(q) ||
-          (entry.keywords ?? []).some((word) => word.toLowerCase().includes(q))
-        const actions = entryMatches
+        const actions = matches(entry.name, ...(entry.keywords ?? []))
           ? entry.actions
-          : entry.actions.filter((action) =>
-              (action.label || action.type).toLowerCase().includes(q)
-            )
+          : entry.actions.filter((action) => matches(action.label || action.type))
         if (actions.length === 0) continue
         // Say the step someone is about to take: a connector already on disk only wants connecting.
         const state = packStateFor({
           installed: packs.find((pack) => pack.id === entry.id),
           catalogItem: entry
         })
-        const mark = { connectorId: entry.id, ...(entry.icon && { icon: entry.icon }) }
+        const look = { connectorId: entry.id, icon: entry.icon, packaged: false }
         const group: Group = {
-          header: {
-            key: `catalog-group:${entry.id}`,
-            header: true,
-            label: entry.name,
-            mark,
-            count: actions.length,
-            detail:
-              state.kind === 'installed'
-                ? 'add connection'
-                : state.kind === 'not-released'
-                  ? 'not released yet'
-                  : 'install on add'
-          },
-          rows: actions.map((action) => {
-            const pick = {
-              kind: 'catalogAction' as const,
+          key: `catalog-group:${entry.id}`,
+          label: entry.name,
+          look,
+          detail:
+            state.kind === 'installed'
+              ? 'add connection'
+              : state.kind === 'not-released'
+                ? 'not released yet'
+                : 'install on add',
+          rows: actions.map((action) => ({
+            kind: 'row',
+            key: `catalog:${entry.id}:${action.type}`,
+            label: action.label || action.type,
+            look,
+            owner: entry.name,
+            recent: { connectorId: entry.id, action: action.type },
+            pick: {
+              kind: 'catalogAction',
               connectorId: entry.id,
               action: action.type,
               actionLabel: action.label || action.type
             }
-            return { key: actionKey(pick), label: pick.actionLabel, mark, pick }
-          })
+          }))
         }
         // A connector the factory checked is offered as plainly as an installed one; the rest come after.
         if (entry.verified) groups.push(group)
@@ -390,63 +359,73 @@ export function StepLibrary({
       groups.push(...unvouched)
     }
 
-    // Searching lists every match in one run, each saying whose it is.
-    if (q) {
-      for (const { header, rows } of groups) {
-        entries.push(...rows.map((row) => ({ ...row, detail: header.label })))
-      }
-      return entries
-    }
-
-    const byKey = new Map(groups.flatMap((g) => g.rows.map((row) => [row.key, { row, g }])))
-    const lately = recent.flatMap((pick) => {
-      const found = byKey.get(actionKey(pick))
-      return found
-        ? [{ ...found.row, key: `recent:${found.row.key}`, detail: found.g.header.label }]
-        : []
-    })
-    if (lately.length > 0) {
-      entries.push({ key: 'heading:recent', heading: true, label: 'Recent' }, ...lately)
-    }
-    for (const { header, rows } of groups) {
-      const open = openGroups.has(header.key)
-      entries.push({ ...header, open })
-      if (open) entries.push(...rows.map((row) => ({ ...row, nested: true })))
-    }
-    return entries
+    return { flat, groups }
   }, [
-    query,
-    scope,
+    q,
+    bodyOnly,
+    insideBranch,
+    triggers,
+    replacing,
     connections,
     packs,
     actionsByConnection,
     manifestsByConnector,
-    catalog,
-    recent,
-    openGroups
+    catalog
   ])
 
-  // A heading that folds can be reached with the keys like a row; one that never folds cannot.
-  const reachable = useMemo(
-    () =>
-      entries.filter(
-        (e): e is Row | GroupHeader => !isHeading(e) && (!isHeader(e) || e.open !== undefined)
-      ),
-    [entries]
-  )
+  // Searching lists every match in one run; otherwise groups fold, under what was picked lately.
+  const entries = useMemo(() => {
+    if (q) return [...flat, ...groups.flatMap((g) => g.rows)]
+    const entries: Entry[] = []
+    if (flat.length > 0) {
+      entries.push({ kind: 'heading', key: 'heading:top', label: triggers ? 'Triggers' : 'Steps' })
+      entries.push(...flat)
+    }
+    const offered = groups.flatMap((g) => g.rows)
+    const lately = recent.flatMap((r) => {
+      const same = offered.filter(
+        (row) => row.recent?.connectorId === r.connectorId && row.recent.action === r.action
+      )
+      const row = same.find((s) => s.recent?.connectionId === r.connectionId) ?? same[0]
+      return row ? [{ ...row, key: `recent:${row.key}` }] : []
+    })
+    if (lately.length > 0) {
+      entries.push({ kind: 'heading', key: 'heading:recent', label: 'Recent' }, ...lately)
+    }
+    for (const g of groups) {
+      const open = openGroups.has(g.key)
+      entries.push({
+        kind: 'group',
+        key: g.key,
+        label: g.label,
+        look: g.look,
+        detail: g.detail,
+        count: g.rows.length,
+        open
+      })
+      if (open) entries.push(...g.rows.map((row) => ({ ...row, nested: true })))
+    }
+    return entries
+  }, [q, flat, groups, triggers, recent, openGroups])
+
+  const { reachable, reachIndex } = useMemo(() => {
+    const reachable = entries.filter((e): e is Row | GroupHeader => e.kind !== 'heading')
+    return { reachable, reachIndex: new Map(reachable.map((e, i) => [e.key, i])) }
+  }, [entries])
   const clamped = Math.min(highlight, Math.max(0, reachable.length - 1))
 
-  const toggleGroup = (key: string, open?: boolean) => {
+  const toggleGroup = (key: string, open = !openGroups.has(key)) => {
+    if (open === openGroups.has(key)) return
     const next = new Set(openGroups)
-    if (open ?? !next.has(key)) next.add(key)
+    if (open) next.add(key)
     else next.delete(key)
     setOpenGroups(next)
     writeOpenGroups(next)
   }
 
-  const choose = (pick: LibraryPick) => {
-    if (pick.kind === 'connectorAction' || pick.kind === 'catalogAction') recordRecentPick(pick)
-    onPick(pick)
+  const choose = (row: Row) => {
+    if (row.recent) recordRecentAction(row.recent)
+    onPick(row.pick)
   }
 
   return (
@@ -464,24 +443,20 @@ export function StepLibrary({
         } else if (e.key === 'ArrowUp') {
           e.preventDefault()
           setHighlight((h) => Math.max(h - 1, 0))
-        } else if (
-          current &&
-          isHeader(current) &&
-          (e.key === 'ArrowRight' || e.key === 'ArrowLeft')
-        ) {
+        } else if (current?.kind === 'group' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
           e.preventDefault()
           toggleGroup(current.key, e.key === 'ArrowRight')
         } else if (e.key === 'Enter' && current) {
           e.preventDefault()
-          if (isHeader(current)) toggleGroup(current.key)
-          else choose(current.pick)
+          if (current.kind === 'group') toggleGroup(current.key)
+          else choose(current)
         }
       }}
     >
       <div className="px-4 py-3 border-b border-white/[0.08]">
         <div className="flex items-center justify-between mb-2.5">
           <span className="text-[13px] font-medium text-white">
-            {scope.triggers ? 'Add a trigger' : scope.replacing ? 'Replace step' : 'Add a step'}
+            {triggers ? 'Add a trigger' : replacing ? 'Replace step' : 'Add a step'}
           </span>
           <button
             aria-label="Close"
@@ -500,7 +475,7 @@ export function StepLibrary({
               setQuery(e.target.value)
               setHighlight(0)
             }}
-            placeholder={scope.triggers ? 'Search triggers' : 'Search steps and actions'}
+            placeholder={triggers ? 'Search triggers' : 'Search steps and actions'}
             className="w-full bg-transparent text-[12px] text-white placeholder:text-gray-600 outline-none"
           />
         </div>
@@ -510,84 +485,65 @@ export function StepLibrary({
         {reachable.length === 0 && (
           <div className="px-2.5 py-3 text-[11px] text-gray-500">Nothing matches</div>
         )}
-        {(() => {
-          const reachIndex = new Map(reachable.map((e, i) => [e.key, i]))
-          return entries.map((entry) => {
-            if (isHeading(entry)) {
-              return (
-                <div
-                  key={entry.key}
-                  className="px-2 pt-3 first:pt-1 pb-1 text-[10px] font-mono uppercase tracking-wider text-gray-600"
-                >
-                  {entry.label}
-                </div>
-              )
-            }
-            const index = reachIndex.get(entry.key) ?? -1
-            const lit = index === clamped
-            if (isHeader(entry)) {
-              const count = (
-                <span className="shrink-0 text-[10px] font-mono tabular-nums text-gray-600">
-                  {entry.count}
-                </span>
-              )
-              if (entry.open === undefined) {
-                return (
-                  <div key={entry.key} className="flex items-center gap-2 px-2 pt-3 pb-1">
-                    <Mark connection={entry.connection} mark={entry.mark} />
-                    <span className="text-[12px] font-semibold text-ink-secondary truncate">
-                      {entry.label}
-                    </span>
-                    <span className="ml-auto">{count}</span>
-                  </div>
-                )
-              }
-              return (
-                <button
-                  key={entry.key}
-                  aria-expanded={entry.open}
-                  onClick={() => toggleGroup(entry.key)}
-                  onMouseEnter={() => setHighlight(index)}
-                  className={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors
-                            ${lit ? 'bg-white/[0.06] text-white' : 'text-ink-secondary'}`}
-                >
-                  <ChevronRight
-                    size={12}
-                    className={`shrink-0 text-gray-500 transition-transform ${entry.open ? 'rotate-90' : ''}`}
-                  />
-                  <Mark connection={entry.connection} mark={entry.mark} />
-                  <span className="truncate">{entry.label}</span>
-                  <span className="ml-auto flex items-center gap-2">
-                    {entry.detail && (
-                      <span className="shrink-0 text-[10px] text-gray-600">{entry.detail}</span>
-                    )}
-                    {count}
-                  </span>
-                </button>
-              )
-            }
-            const Icon = entry.icon
+        {entries.map((entry) => {
+          if (entry.kind === 'heading') {
+            return (
+              <div
+                key={entry.key}
+                className="px-2 pt-3 first:pt-1 pb-1 text-[10px] font-mono uppercase tracking-wider text-gray-600"
+              >
+                {entry.label}
+              </div>
+            )
+          }
+          const index = reachIndex.get(entry.key) ?? -1
+          const tone = index === clamped ? 'bg-white/[0.06] text-white' : ''
+          if (entry.kind === 'group') {
             return (
               <button
                 key={entry.key}
-                onClick={() => choose(entry.pick)}
+                aria-expanded={entry.open}
+                onClick={() => toggleGroup(entry.key)}
                 onMouseEnter={() => setHighlight(index)}
-                className={`w-full flex items-center gap-2.5 rounded-md text-[12.5px] text-left transition-colors
-                          ${entry.nested ? 'pl-8 pr-2 py-1.5' : 'px-2 py-1.5'}
-                          ${lit ? 'bg-white/[0.06] text-white' : 'text-gray-300'}`}
+                className={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors
+                          ${tone || 'text-ink-secondary'}`}
               >
-                {Icon && <Icon size={14} className={`${NODE_GLYPH} shrink-0`} />}
-                {!entry.nested && <Mark connection={entry.connection} mark={entry.mark} />}
+                <ChevronRight
+                  size={12}
+                  className={`shrink-0 text-gray-500 transition-transform ${entry.open ? 'rotate-90' : ''}`}
+                />
+                <Mark look={entry.look} />
                 <span className="truncate">{entry.label}</span>
-                {entry.detail && (
-                  <span className="ml-auto shrink-0 text-[10px] text-gray-600 truncate max-w-[40%]">
-                    {entry.detail}
-                  </span>
-                )}
+                <span className="ml-auto flex items-center gap-2 shrink-0 text-[10px] text-gray-600">
+                  {entry.detail}
+                  <span className="font-mono tabular-nums">{entry.count}</span>
+                </span>
               </button>
             )
-          })
-        })()}
+          }
+          const Icon = entry.icon
+          return (
+            <button
+              key={entry.key}
+              onClick={() => choose(entry)}
+              onMouseEnter={() => setHighlight(index)}
+              className={`w-full flex items-center gap-2.5 rounded-md text-[12.5px] text-left transition-colors
+                        ${entry.nested ? 'pl-8 pr-2 py-1.5' : 'px-2 py-1.5'} ${tone || 'text-gray-300'}`}
+            >
+              {Icon ? (
+                <Icon size={14} className={`${NODE_GLYPH} shrink-0`} />
+              ) : (
+                !entry.nested && <Mark look={entry.look} />
+              )}
+              <span className="truncate">{entry.label}</span>
+              {!entry.nested && entry.owner && (
+                <span className="ml-auto shrink-0 max-w-[40%] truncate text-[10px] text-gray-600">
+                  {entry.owner}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
     </div>
   )

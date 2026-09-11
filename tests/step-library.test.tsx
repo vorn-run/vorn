@@ -3,13 +3,14 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, cleanup, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
-  useConnections: () => [
-    { id: 'c1', name: 'GitHub' },
-    { id: 'c2', name: 'Azure DevOps' }
-  ],
-  useConnectorIdFor: () => null,
-  useConnectionIconFor: () => undefined,
+const connections = [
+  { id: 'c1', name: 'GitHub', connectorId: 'github' },
+  { id: 'c2', name: 'Azure DevOps', connectorId: 'azure-devops' }
+]
+
+vi.mock('../src/renderer/lib/use-connections', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/use-connections')>()),
+  useConnections: () => connections,
   useInstalledPacks: () => []
 }))
 
@@ -112,9 +113,11 @@ describe('the step library', () => {
 
   it('opens and folds a group from the keys', async () => {
     const { root } = renderLibrary()
-    await group(/GitHub/)
-    // Seven steps, then the first connection.
-    for (let i = 0; i < 7; i++) fireEvent.keyDown(root, { key: 'ArrowDown' })
+    const github = await group(/GitHub/)
+    const reachable = screen.getAllByRole('button').filter((b) => b.ariaLabel !== 'Close')
+    for (let i = 0; i < reachable.indexOf(github); i++) {
+      fireEvent.keyDown(root, { key: 'ArrowDown' })
+    }
     fireEvent.keyDown(root, { key: 'ArrowRight' })
     expect(screen.getByText('Create issue')).toBeInTheDocument()
     fireEvent.keyDown(root, { key: 'Enter' })
