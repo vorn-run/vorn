@@ -91,21 +91,11 @@ export function stepMeta(node: WorkflowNode | undefined, connectorId?: string): 
   }
 }
 
-/**
- * The configured body of a step — the script it runs, the prompt it sends, the
- * approval message it waits on. Shown as a preview so a trace can be read
- * top-to-bottom without opening every step.
- */
+/** A step's configured body (script, prompt, message), which sizes its card on the canvas. */
 export function stepPreview(node: WorkflowNode | undefined): string | undefined {
   if (!node) return undefined
 
   switch (node.type) {
-    case 'trigger': {
-      const event = configString(node, 'event')
-      const cron = configString(node, 'cron')
-      if (event) return `on: ${event}`
-      return cron ? `cron: ${cron}` : undefined
-    }
     case 'script':
       return configString(node, 'scriptContent')
     case 'launchAgent':

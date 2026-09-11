@@ -92,9 +92,6 @@ export function estimateNodeHeight(node: WorkflowNode, allNodes: WorkflowNode[])
     const cfg = node.config as { variable?: string }
     return cfg.variable ? 90 : 58
   }
-  // A trigger card draws one subtitle line for every kind; its stepPreview
-  // (cron/event) belongs to the run trace, not the card.
-  if (node.type === 'trigger') return 58
   return stepPreview(node) ? 90 : 58
 }
 
@@ -420,7 +417,7 @@ export function openingViewport(nodes: PlacedNode[], width: number): Viewport {
   const minX = Math.min(...drawn.map((n) => n.position.x))
   const maxX = Math.max(...drawn.map((n) => n.position.x + widthOf(n)))
   const minY = Math.min(...drawn.map((n) => n.position.y))
-  return { x: width / 2 - (minX + maxX) / 2, y: OPENING_TOP - minY, zoom: 1 }
+  return placeAtTop({ x: minX, y: minY, width: maxX - minX, height: 0 }, width, 1)
 }
 
 /** The furthest the canvas zooms out. */
@@ -429,7 +426,11 @@ export const CANVAS_MIN_ZOOM = 0.2
 /** The whole workflow on screen, never past 100%, with its first step near the top rather than centred. */
 export function topAlignedFit(bounds: Rect, width: number, height: number): Viewport {
   const fits = Math.min((width * 0.9) / bounds.width, (height - 2 * OPENING_TOP) / bounds.height)
-  const zoom = Math.min(1, Math.max(CANVAS_MIN_ZOOM, fits))
+  return placeAtTop(bounds, width, Math.min(1, Math.max(CANVAS_MIN_ZOOM, fits)))
+}
+
+/** Centred across the canvas, with the top of the bounds just below its top edge. */
+function placeAtTop(bounds: Rect, width: number, zoom: number): Viewport {
   return {
     x: width / 2 - (bounds.x + bounds.width / 2) * zoom,
     y: OPENING_TOP - bounds.y * zoom,

@@ -228,11 +228,7 @@ export function describeRun(
   }
 }
 
-/**
- * Short fields an agent step may emit as its verdict. A typed step with an
- * `outputSchema` is the only place a run carries a human-meaningful conclusion,
- * so a finished run shows it beside its state.
- */
+/** Fields a typed step may emit as its verdict, shown beside a finished run's state. */
 const VERDICT_KEYS = ['verdict', 'recommendation', 'decision', 'summary', 'result', 'status']
 const MAX_VERDICT_LENGTH = 40
 

@@ -48,17 +48,6 @@ export function StatusDot({
   )
 }
 
-export function NodeLabel({ nodeId, nodes }: { nodeId: string; nodes: WorkflowNode[] }) {
-  return (
-    <span>
-      {nodeLabel(
-        nodes.find((n) => n.id === nodeId),
-        nodeId
-      )}
-    </span>
-  )
-}
-
 /** A step's glyph: its connector's mark when it is bound to one, else its node type's. */
 function StepIcon({ node, look }: { node: WorkflowNode | undefined; look?: ConnectorLook }) {
   if (look) {
