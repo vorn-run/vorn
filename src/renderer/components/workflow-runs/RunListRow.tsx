@@ -1,4 +1,4 @@
-import { Fragment, memo } from 'react'
+import { memo } from 'react'
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
   describeRun,
@@ -19,6 +19,12 @@ interface Props {
   onOpenWorkflow: () => void
 }
 
+function progressOf(run: RunListEntry, workflow?: RunWorkflowRef): string | undefined {
+  if (run.status === 'success') return undefined
+  const { done, total } = stepProgress(run, workflow?.nodes ?? [])
+  return done > 0 ? `${done} of ${total} steps` : undefined
+}
+
 function RunListRowImpl({
   run,
   workflow,
@@ -27,20 +33,20 @@ function RunListRowImpl({
   onSelect,
   onOpenWorkflow
 }: Props) {
-  const nodes = workflow?.nodes ?? []
   const look = useConnectorLook(run.connectorItem?.connectionId)
   const presentation = describeRun(run, workflow, look)
-  const { done, total } = stepProgress(run, nodes)
   const dotStatus = run.nodeStates.some((n) => n.status === 'waiting') ? 'waiting' : run.status
   // The dot is the row's only colour; everything else is one quiet line of words.
   const details = [
-    runStatusLine(run, nodes),
+    runStatusLine(run, workflow?.nodes ?? []),
     presentation.subtitle ?? presentation.sourceLabel,
-    run.status !== 'success' && done > 0 ? `${done} of ${total} steps` : undefined,
-    run.partial ? 'partial' : undefined,
-    workflowDeleted ? 'deleted' : undefined,
+    progressOf(run, workflow),
+    run.partial && 'partial',
+    workflowDeleted && 'deleted',
     formatRelativeTime(run.startedAt)
-  ].filter((part): part is string => !!part)
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <button
@@ -62,14 +68,7 @@ function RunListRowImpl({
       <span className="font-mono text-[12px] text-ink-secondary tabular-nums">
         {formatRunDuration(run.startedAt, run.completedAt)}
       </span>
-      <span className="col-start-2 col-span-2 text-[12px] text-ink-faint truncate">
-        {details.map((part, i) => (
-          <Fragment key={i}>
-            {i > 0 && ' · '}
-            <span>{part}</span>
-          </Fragment>
-        ))}
-      </span>
+      <span className="col-start-2 col-span-2 text-[12px] text-ink-faint truncate">{details}</span>
     </button>
   )
 }

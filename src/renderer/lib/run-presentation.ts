@@ -1,16 +1,11 @@
-import { Zap, Clock, CheckSquare, Play, type LucideIcon, RotateCcw } from 'lucide-react'
-import { isSignInWait } from '@vornrun/shared/workflow-graph'
+import { failedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import type {
-  ApprovalConfig,
-  NodeExecutionState,
   NodeExecutionStatus,
-  SdkConnectorIcon,
   TriggerConfig,
   WorkflowExecution,
   WorkflowNode
 } from '../../shared/types'
 import type { ConnectorLook } from './use-connections'
-import type { RunOutcomeTone } from './workflow-status'
 import type { RunBucket } from '../stores/types'
 import { formatRunDuration } from './format-time'
 
@@ -51,31 +46,29 @@ export function bucketOf(execution: WorkflowExecution): RunBucket {
   return execution.status === 'success' ? 'success' : 'error'
 }
 
-/** The step a failed run broke at: the errored one that was not skipped because of another. */
-export function failedStep(execution: WorkflowExecution): NodeExecutionState | undefined {
-  return execution.nodeStates.find(
-    (ns) => ns.status === 'error' && !ns.error?.startsWith('Skipped:')
-  )
-}
-
-function stepLabel(nodes: WorkflowNode[], nodeId: string): string {
-  return nodes.find((n) => n.id === nodeId)?.label || nodeId.slice(0, 8)
+/** A step's name, or a short id once the workflow no longer has it. */
+export function nodeLabel(node: WorkflowNode | undefined, nodeId: string): string {
+  return node?.label || nodeId.slice(0, 8)
 }
 
 /** A run's state in words, naming the step it broke at, waits at or is working on. */
 export function runStatusLine(execution: WorkflowExecution, nodes: WorkflowNode[]): string {
+  const named = (nodeId: string): string =>
+    nodeLabel(
+      nodes.find((n) => n.id === nodeId),
+      nodeId
+    )
   const waiting = execution.nodeStates.find((ns) => ns.status === 'waiting')
   if (waiting) {
-    const why = isSignInWait(waiting) ? 'Waiting for sign-in' : 'Waiting'
-    return `${why} at ${stepLabel(nodes, waiting.nodeId)}`
+    return `${isSignInWait(waiting) ? 'Waiting for sign-in' : 'Waiting'} at ${named(waiting.nodeId)}`
   }
   if (execution.status === 'running') {
     const active = execution.nodeStates.find((ns) => ns.status === 'running')
-    return active ? `Running ${stepLabel(nodes, active.nodeId)}` : 'Running'
+    return active ? `Running ${named(active.nodeId)}` : 'Running'
   }
   if (execution.status === 'error') {
     const failed = failedStep(execution)
-    return failed ? `Failed at ${stepLabel(nodes, failed.nodeId)}` : 'Failed'
+    return failed ? `Failed at ${named(failed.nodeId)}` : 'Failed'
   }
   return execution.status === 'cancelled' ? 'Stopped' : 'Completed'
 }
@@ -95,9 +88,6 @@ export type RunSource = 'manual' | 'schedule' | 'task' | 'connector' | 'restore'
 /** The parts of a workflow definition a run row needs to render itself. */
 export interface RunWorkflowRef {
   name?: string
-  /** Key into the shared `ICON_MAP` — the workflow's own chosen glyph. */
-  icon?: string
-  iconColor?: string
   nodes: WorkflowNode[]
 }
 
@@ -107,28 +97,8 @@ export interface RunPresentation {
   /** One-line description of the subject, or the workflow name as a fallback. */
   subtitle?: string
   source: RunSource
-  /** Short badge text next to the title (`manual`, `github`, `schedule`…). */
+  /** Where the run came from, in a word (`manual`, `github`, `scheduled`…). */
   sourceLabel: string
-  /** The workflow's own icon key and colour, preferred over any fallback so a
-   *  run is recognisable by the same mark the sidebar shows. */
-  iconName?: string
-  iconColor?: string
-  /** Set for connector-triggered runs so the row can draw the brand glyph. */
-  connectorId?: string
-  /** A packaged connector's own glyph, which the built-in lookup cannot supply. */
-  connectorIcon?: SdkConnectorIcon
-  /** From a packaged connector, so a missing glyph falls back to the plug. */
-  connectorPackaged?: boolean
-  /** Used only when the workflow is gone or never picked an icon. */
-  fallbackIcon: LucideIcon
-}
-
-const SOURCE_ICONS: Record<RunSource, LucideIcon> = {
-  manual: Zap,
-  schedule: Clock,
-  task: CheckSquare,
-  connector: Play,
-  restore: RotateCcw
 }
 
 function triggerNodeOf(nodes: WorkflowNode[]): WorkflowNode | undefined {
@@ -180,12 +150,9 @@ export function describeRun(
   look?: ConnectorLook
 ): RunPresentation {
   const nodes = workflow?.nodes ?? []
-  const triggerType = triggerTypeOf(nodes)
-  const source = sourceOf(execution, triggerType)
+  const source = sourceOf(execution, triggerTypeOf(nodes))
   const item = execution.connectorItem
   const name = workflow?.name?.trim() || undefined
-  const iconName = workflow?.icon
-  const iconColor = workflow?.iconColor
 
   if (item) {
     const connectorId = look?.connectorId ?? item.connectorId
@@ -194,13 +161,7 @@ export function describeRun(
       title,
       subtitle: item.title !== title ? item.title : name,
       source: 'connector',
-      sourceLabel: connectorId,
-      iconName,
-      iconColor,
-      connectorId,
-      connectorIcon: look?.icon,
-      connectorPackaged: look?.packaged,
-      fallbackIcon: SOURCE_ICONS.connector
+      sourceLabel: connectorId
     }
   }
 
@@ -210,10 +171,7 @@ export function describeRun(
       title: name ?? label,
       subtitle: `restore · ${restore} · ${label}`,
       source: 'restore',
-      sourceLabel: 'restore',
-      iconName,
-      iconColor,
-      fallbackIcon: SOURCE_ICONS.restore
+      sourceLabel: 'restore'
     }
   }
 
@@ -222,10 +180,7 @@ export function describeRun(
       title: name ?? `Task ${execution.triggerTaskId.slice(0, 6)}`,
       subtitle: `Task ${execution.triggerTaskId.slice(0, 6)}`,
       source: 'task',
-      sourceLabel: 'task',
-      iconName,
-      iconColor,
-      fallbackIcon: SOURCE_ICONS.task
+      sourceLabel: 'task'
     }
   }
 
@@ -233,22 +188,20 @@ export function describeRun(
     title: name ?? execution.workflowId.slice(0, 8),
     subtitle: undefined,
     source,
-    sourceLabel: source === 'schedule' ? 'scheduled' : source === 'restore' ? 'restore' : 'manual',
-    iconName,
-    iconColor,
-    fallbackIcon: SOURCE_ICONS[source]
+    sourceLabel: source === 'schedule' ? 'scheduled' : source === 'restore' ? 'restore' : 'manual'
   }
 }
 
 /**
  * Short fields an agent step may emit as its verdict. A typed step with an
  * `outputSchema` is the only place a run carries a human-meaningful conclusion,
- * so the row label prefers it over a generic status word.
+ * so a finished run shows it beside its state.
  */
 const VERDICT_KEYS = ['verdict', 'recommendation', 'decision', 'summary', 'result', 'status']
 const MAX_VERDICT_LENGTH = 40
 
-function verdictOf(execution: WorkflowExecution): string | undefined {
+/** The conclusion the run's last typed step wrote, when it is short enough to be one. */
+export function runVerdict(execution: WorkflowExecution): string | undefined {
   for (let i = execution.nodeStates.length - 1; i >= 0; i--) {
     const out = execution.nodeStates[i].structuredOutput
     if (!out) continue
@@ -260,39 +213,6 @@ function verdictOf(execution: WorkflowExecution): string | undefined {
     }
   }
   return undefined
-}
-
-export type { RunOutcomeTone } from './workflow-status'
-export { outcomeToneClass } from './workflow-status'
-
-export interface RunOutcome {
-  /** Absent when the status dot already says it. Only a gate's own question or
-   *  the agent's verdict earns a line, since the colour carries the state. */
-  label?: string
-  tone: RunOutcomeTone
-}
-
-/**
- * What a run says beyond its status colour. A paused gate outranks everything —
- * it is the only state that needs the user — and a finished run offers the
- * agent's own verdict. Every other outcome is left to the dot, which already
- * says running, failed or stopped without spending a line on the word.
- */
-export function describeOutcome(execution: WorkflowExecution, nodes: WorkflowNode[]): RunOutcome {
-  const gate = execution.nodeStates.find((ns) => ns.status === 'waiting')
-  if (gate) {
-    if (isSignInWait(gate)) return { label: 'needs sign-in', tone: 'waiting' }
-    const node = nodes.find((n) => n.id === gate.nodeId)
-    const message = node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
-    return {
-      label: message?.trim() || 'needs review',
-      tone: 'waiting'
-    }
-  }
-  if (execution.status === 'running') return { tone: 'running' }
-  if (execution.status === 'error') return { tone: 'error' }
-  if (execution.status === 'cancelled') return { tone: 'neutral' }
-  return { label: verdictOf(execution), tone: 'success' }
 }
 
 /**

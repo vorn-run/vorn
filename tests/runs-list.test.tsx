@@ -180,7 +180,7 @@ describe('RunsList', () => {
       />
     )
     expect(screen.getByText('Old Name')).toBeInTheDocument()
-    expect(screen.getByText('deleted')).toBeInTheDocument()
+    expect(screen.getByText(/ · deleted · /)).toBeInTheDocument()
   })
 
   it('opens the editor on double-click and not for a deleted workflow', () => {
@@ -239,9 +239,9 @@ describe('RunsList', () => {
         onSelect={noop}
       />
     )
-    expect(screen.getByText('Failed at Push the branch')).toBeInTheDocument()
-    expect(screen.getByText('1 of 3 steps')).toBeInTheDocument()
-    expect(screen.getByText('manual')).toBeInTheDocument()
+    expect(
+      screen.getByText(/^Failed at Push the branch · manual · 1 of 3 steps · /)
+    ).toBeInTheDocument()
   })
 
   it('says a run completed, without counting its steps or drawing a bar', () => {
@@ -262,7 +262,7 @@ describe('RunsList', () => {
         onSelect={noop}
       />
     )
-    expect(screen.getByText('Completed')).toBeInTheDocument()
+    expect(screen.getByText(/^Completed · manual · /)).toBeInTheDocument()
     expect(screen.queryByText(/of \d+ steps/)).toBeNull()
     expect(container.querySelectorAll('svg')).toHaveLength(0)
   })

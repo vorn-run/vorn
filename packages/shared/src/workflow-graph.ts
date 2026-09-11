@@ -264,9 +264,13 @@ export function neverRan(state: NodeExecutionState): boolean {
   return state.error?.startsWith('Skipped:') === true || state.error === ABANDONED
 }
 
-/** A step that failed on its own terms, which is what a retry has somewhere to start from. */
+/** The step that failed on its own terms, which is what a retry has somewhere to start from. */
+export function failedStep(execution: WorkflowExecution): NodeExecutionState | undefined {
+  return execution.nodeStates.find((ns) => ns.status === 'error' && !neverRan(ns))
+}
+
 export function hasFailedStep(execution: WorkflowExecution): boolean {
-  return execution.nodeStates.some((ns) => ns.status === 'error' && !neverRan(ns))
+  return failedStep(execution) !== undefined
 }
 
 // Whether the run failed, rather than merely holding a step that failed and said so survivably.

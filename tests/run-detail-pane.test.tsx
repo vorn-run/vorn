@@ -87,13 +87,12 @@ describe('RunDetailPane', () => {
   it('renders the run header with its source badge and workflow name', () => {
     renderPane(makeRun())
     expect(screen.getByRole('heading', { name: 'clean branches' })).toBeInTheDocument()
-    expect(screen.getByText('manual')).toBeInTheDocument()
-    expect(screen.getByText('Run run-abcd')).toBeInTheDocument()
+    expect(screen.getByText(/^Run run-abcd · manual · /)).toBeInTheDocument()
   })
 
   it('does not repeat the workflow name under the title when they are the same', () => {
     renderPane(makeRun())
-    expect(screen.getAllByText('clean branches')).toHaveLength(1)
+    expect(screen.getAllByText(/clean branches/)).toHaveLength(1)
   })
 
   it('shows the workflow name under the title when the run is named after its subject', () => {
@@ -110,7 +109,7 @@ describe('RunDetailPane', () => {
       } as Partial<RunListEntry>)
     )
     expect(screen.getByRole('heading', { name: 'PR #309' })).toBeInTheDocument()
-    expect(screen.getByText('clean branches')).toBeInTheDocument()
+    expect(screen.getByText(/^clean branches · Run /)).toBeInTheDocument()
     expect(screen.getByText('refactor: split workflow runs panel')).toBeInTheDocument()
   })
 

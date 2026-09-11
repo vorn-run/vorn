@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   bucketOf,
-  describeOutcome,
   describeRun,
   liveNodeStatus,
   runStatusLine,
+  runVerdict,
   stepProgress
 } from '../src/renderer/lib/run-presentation'
 import type {
@@ -53,7 +53,7 @@ describe('describeRun', () => {
     expect(p.title).toBe('PR #309')
     expect(p.subtitle).toBe('refactor: split workflow runs panel into list + detail')
     expect(p.source).toBe('connector')
-    expect(p.connectorId).toBe('github')
+    expect(p.sourceLabel).toBe('github')
   })
 
   it('titles a GitHub issue run as "Issue #<n>"', () => {
@@ -110,28 +110,24 @@ describe('describeRun', () => {
       run({ connectorItem: githubItem({ connectorId: 'linear', externalId: 'ENG-12' }) })
     )
     expect(p.title).toBe('linear ENG-12')
-    expect(p.connectorId).toBe('linear')
+    expect(p.sourceLabel).toBe('linear')
   })
 
   // A packaged connector's item only knows itself as `mcp`; the connection it
-  // came from is what says which connector really ran and what mark to draw.
-  it('takes the connector id and glyph from the connection when one is resolved', () => {
-    const icon = { viewBox: '0 0 24 24', paths: ['M2 2h9v9z'] }
+  // came from is what says which connector really ran.
+  it('takes the connector id from the connection when one is resolved', () => {
     const p = describeRun(
       run({ connectorItem: githubItem({ connectorId: 'mcp', externalId: '7' }) }),
       undefined,
-      { connectorId: 'packdemo', icon, packaged: true }
+      { connectorId: 'packdemo', packaged: true }
     )
-    expect(p.connectorId).toBe('packdemo')
     expect(p.sourceLabel).toBe('packdemo')
-    expect(p.connectorIcon).toBe(icon)
     expect(p.title).toBe('packdemo 7')
   })
 
   it('keeps the item id when no connection resolves, so a deleted one still reads', () => {
     const p = describeRun(run({ connectorItem: githubItem({ externalId: '7' }) }))
-    expect(p.connectorId).toBe('github')
-    expect(p.connectorIcon).toBeUndefined()
+    expect(p.sourceLabel).toBe('github')
   })
 
   it('labels a task-triggered run with the workflow name and a short task subtitle', () => {
@@ -168,23 +164,6 @@ describe('describeRun', () => {
   it('falls back to the short workflow id when nothing names the run', () => {
     const p = describeRun(run({ workflowId: '407f59ea-1234' }))
     expect(p.title).toBe('407f59ea')
-  })
-
-  it("carries the workflow's own icon and colour so a run is recognisable at a glance", () => {
-    const p = describeRun(run({ connectorItem: githubItem({}) }), {
-      name: 'GitHub: PR Opened',
-      icon: 'github',
-      iconColor: '#8b5cf6',
-      nodes: []
-    })
-    expect(p.iconName).toBe('github')
-    expect(p.iconColor).toBe('#8b5cf6')
-  })
-
-  it('leaves the icon unset when the workflow is gone, so a fallback is drawn', () => {
-    const p = describeRun(run())
-    expect(p.iconName).toBeUndefined()
-    expect(p.fallbackIcon).toBeTruthy()
   })
 })
 
@@ -252,61 +231,29 @@ describe('stepProgress', () => {
   })
 })
 
-describe('describeOutcome', () => {
-  const approval = node('gate', 'approval', 'Review', { message: 'recommends merge' })
-
-  it('prefers a waiting gate over the run status and uses the gate message', () => {
-    const outcome = describeOutcome(
-      run({
-        status: 'running',
-        nodeStates: [{ nodeId: 'gate', status: 'waiting' }] as NodeExecutionState[]
-      }),
-      [approval]
-    )
-    expect(outcome).toEqual({ label: 'recommends merge', tone: 'waiting' })
-  })
-
-  it('falls back to "needs review" for a gate with no message', () => {
-    const outcome = describeOutcome(
-      run({
-        status: 'running',
-        nodeStates: [{ nodeId: 'gate', status: 'waiting' }] as NodeExecutionState[]
-      }),
-      [node('gate', 'approval', 'Review')]
-    )
-    expect(outcome.label).toBe('needs review')
-  })
-
-  it('leaves a plain status to the dot and only carries the tone', () => {
-    expect(describeOutcome(run({ status: 'running' }), [])).toEqual({ tone: 'running' })
-    expect(describeOutcome(run({ status: 'error' }), [])).toEqual({ tone: 'error' })
-    expect(describeOutcome(run({ status: 'cancelled' }), [])).toEqual({ tone: 'neutral' })
-    expect(describeOutcome(run({ status: 'success' }), []).label).toBeUndefined()
-  })
-
-  it("prefers a finished run's structured verdict over the generic label", () => {
-    const outcome = describeOutcome(
+describe('runVerdict', () => {
+  it("reads the verdict a run's last typed step wrote", () => {
+    const verdict = runVerdict(
       run({
         nodeStates: [
           { nodeId: 'a', status: 'success' },
           { nodeId: 'b', status: 'success', structuredOutput: { verdict: 'recommends merge' } }
         ] as NodeExecutionState[]
-      }),
-      []
+      })
     )
-    expect(outcome).toEqual({ label: 'recommends merge', tone: 'success' })
+    expect(verdict).toBe('recommends merge')
+    expect(runVerdict(run())).toBeUndefined()
   })
 
   it('ignores a structured field too long to be a verdict', () => {
-    const outcome = describeOutcome(
+    const verdict = runVerdict(
       run({
         nodeStates: [
           { nodeId: 'b', status: 'success', structuredOutput: { summary: 'x'.repeat(200) } }
         ] as NodeExecutionState[]
-      }),
-      []
+      })
     )
-    expect(outcome.label).toBeUndefined()
+    expect(verdict).toBeUndefined()
   })
 })
 

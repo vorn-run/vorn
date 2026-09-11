@@ -1,12 +1,12 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect } from 'react'
 import { useAppStore } from '../../stores'
 import { toast } from '../Toast'
 import { Check, X, Inbox, Play, RotateCcw, ExternalLink } from 'lucide-react'
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
-  describeOutcome,
   describeRun,
   runStatusLine,
+  runVerdict,
   type RunWorkflowRef
 } from '../../lib/run-presentation'
 import { hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
@@ -15,7 +15,7 @@ import { useConnectorLook } from '../../lib/use-connections'
 import { nodeConnectionId } from '../workflow-editor/node-visuals'
 import { SignInButton } from './SignInButton'
 import { StopRunButton } from './StopRunButton'
-import { Tooltip } from '../Tooltip'
+import { IconButton } from '../IconButton'
 import { workflowRunId, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
 import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
@@ -41,36 +41,6 @@ interface Props {
   onViewFullOutput?: (logs: string) => void
 }
 
-function HeaderButton({
-  label,
-  title,
-  disabled,
-  onClick,
-  children
-}: {
-  label: string
-  title?: string
-  disabled?: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <Tooltip label={label} position="bottom">
-      <button
-        type="button"
-        aria-label={label}
-        title={title}
-        disabled={disabled}
-        onClick={onClick}
-        className="p-1.5 rounded text-ink-faint hover:text-ink hover:bg-white/[0.06] transition-colors
-                   disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-ink-faint"
-      >
-        {children}
-      </button>
-    </Tooltip>
-  )
-}
-
 export function RunDetailPane({
   run,
   workflow,
@@ -91,16 +61,16 @@ export function RunDetailPane({
   const presentation = describeRun(run, workflow, look)
   const waitingStep = run.nodeStates.find((ns) => ns.status === 'waiting')
   const signInWait = waitingStep !== undefined && isSignInWait(waitingStep)
-  // Only a finished run's own verdict earns words beside where it stands.
-  const verdict =
-    !waitingStep && run.status === 'success' ? describeOutcome(run, nodes).label : undefined
+  const verdict = run.status === 'success' ? runVerdict(run) : undefined
   const meta = [
-    workflowName !== presentation.title ? workflowName : undefined,
+    workflowName !== presentation.title && workflowName,
     `Run ${workflowRunId(run).slice(0, 8)}`,
     presentation.sourceLabel,
     formatRelativeTime(run.startedAt),
     formatRunDuration(run.startedAt, run.completedAt)
-  ].filter((part): part is string => !!part)
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   // Keyboard approval mirrors the two visible actions, and only while a gate is
   // actually open — otherwise a stray "r" in the app would resolve nothing.
@@ -142,39 +112,35 @@ export function RunDetailPane({
             {presentation.title}
           </h2>
           {hasFailedStep(run) && fullWorkflow && (
-            <HeaderButton
+            <IconButton
               label="Retry from failed step"
+              position="bottom"
               onClick={() => window.api.retryWorkflowRun(run.runId).catch(onLaunchError)}
             >
               <RotateCcw size={14} strokeWidth={1.75} />
-            </HeaderButton>
+            </IconButton>
           )}
           {run.status !== 'running' && fullWorkflow && (
-            <HeaderButton
+            <IconButton
               label="Run again"
+              position="bottom"
               onClick={() => window.api.rerunWorkflowRun(run.runId).catch(onLaunchError)}
             >
               <Play size={14} strokeWidth={1.75} />
-            </HeaderButton>
+            </IconButton>
           )}
-          <HeaderButton
+          <IconButton
             label="Open workflow"
+            position="bottom"
             title={workflowDeleted ? 'Workflow no longer exists' : undefined}
             disabled={workflowDeleted}
             onClick={onOpenWorkflow}
           >
             <ExternalLink size={14} strokeWidth={1.75} />
-          </HeaderButton>
+          </IconButton>
           <StopRunButton execution={run} stopPropagation={false} />
         </div>
-        <p className="text-[12px] text-ink-faint truncate">
-          {meta.map((part, i) => (
-            <span key={i}>
-              {i > 0 && ' · '}
-              <span>{part}</span>
-            </span>
-          ))}
-        </p>
+        <p className="text-[12px] text-ink-faint truncate">{meta}</p>
         {presentation.subtitle && (
           <p className="text-[13px] text-ink-secondary">{presentation.subtitle}</p>
         )}

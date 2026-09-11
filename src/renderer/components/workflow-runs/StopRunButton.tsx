@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Square } from 'lucide-react'
-import { Tooltip } from '../Tooltip'
+import { IconButton } from '../IconButton'
 import { isRunStoppable } from '@vornrun/shared/workflow-graph'
 import type { WorkflowExecution } from '../../../shared/types'
 
@@ -42,18 +42,13 @@ export function StopRunButton({ execution, stopPropagation = true }: Props) {
   }
 
   return (
-    <Tooltip label={stopping ? 'Stopping run' : 'Stop run'}>
-      <button
-        type="button"
-        aria-label="Stop run"
-        disabled={stopping}
-        onClick={handleClick}
-        className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/[0.06]
-                   transition-colors disabled:opacity-40 disabled:cursor-not-allowed
-                   disabled:hover:bg-transparent disabled:hover:text-gray-500"
-      >
-        <Square size={11} strokeWidth={2.5} />
-      </button>
-    </Tooltip>
+    <IconButton
+      label="Stop run"
+      hint={stopping ? 'Stopping run' : undefined}
+      disabled={stopping}
+      onClick={handleClick}
+    >
+      <Square size={11} strokeWidth={2.5} />
+    </IconButton>
   )
 }

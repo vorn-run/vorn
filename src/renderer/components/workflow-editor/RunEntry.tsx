@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
 import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw, Check, X } from 'lucide-react'
 import {
@@ -13,9 +13,9 @@ import {
 
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
-import { failedStep } from '../../lib/run-presentation'
-import { Tooltip } from '../Tooltip'
-import { hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
+import { nodeLabel } from '../../lib/run-presentation'
+import { IconButton } from '../IconButton'
+import { failedStep, hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
 import { connectorLookFor, useConnections } from '../../lib/use-connections'
 import { SignInButton } from '../workflow-runs/SignInButton'
@@ -55,8 +55,14 @@ export function StatusDot({
 }
 
 export function NodeLabel({ nodeId, nodes }: { nodeId: string; nodes: WorkflowNode[] }) {
-  const node = nodes.find((n) => n.id === nodeId)
-  return <span>{node?.label || nodeId.slice(0, 8)}</span>
+  return (
+    <span>
+      {nodeLabel(
+        nodes.find((n) => n.id === nodeId),
+        nodeId
+      )}
+    </span>
+  )
 }
 
 interface RunStepsListProps {
@@ -95,6 +101,12 @@ function formatInputValue(value: unknown): string {
 /** Lines up what a step shows beneath it with its name, past the dot. */
 const UNDER_LABEL = 'pl-[34px] pr-4 pb-2.5'
 
+const EMPTY_LOG: Partial<Record<NodeExecutionState['status'], string>> = {
+  running: 'No output captured yet…',
+  pending: "Step hasn't started yet.",
+  skipped: 'Step was skipped.'
+}
+
 export function RunStepsList({
   execution,
   nodes,
@@ -105,17 +117,18 @@ export function RunStepsList({
   followActive,
   onResumeSession
 }: RunStepsListProps) {
-  // A failed run opens at the step it broke on, the one log worth reading first.
-  const [expandedNodeId, setExpandedNodeId] = useState<string | null>(
-    () => (execution.status === 'error' && failedStep(execution)?.nodeId) || null
-  )
   const activeNodeId = followActive
     ? (execution.nodeStates.find((ns) => ns.status === 'running')?.nodeId ?? null)
     : null
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (activeNodeId) setExpandedNodeId(activeNodeId)
-  }, [activeNodeId])
+  // The step worth reading opens by itself: the running one when following, else where a failed run broke.
+  const focus =
+    activeNodeId ?? (execution.status === 'error' ? (failedStep(execution)?.nodeId ?? null) : null)
+  const [expandedNodeId, setExpandedNodeId] = useState(focus)
+  const [openedFor, setOpenedFor] = useState(focus)
+  if (openedFor !== focus) {
+    setOpenedFor(focus)
+    if (focus) setExpandedNodeId(focus)
+  }
   const expandedRowRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (followActive && expandedNodeId) {
@@ -123,13 +136,11 @@ export function RunStepsList({
     }
   }, [followActive, expandedNodeId])
   const connections = useConnections()
+  const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
 
   const actionStates = includeTrigger
     ? execution.nodeStates
-    : execution.nodeStates.filter((ns) => {
-        const node = nodes.find((n) => n.id === ns.nodeId)
-        return node?.type !== 'trigger'
-      })
+    : execution.nodeStates.filter((ns) => nodesById.get(ns.nodeId)?.type !== 'trigger')
 
   const triggerTask =
     execution.triggerTaskId && tasks
@@ -160,7 +171,7 @@ export function RunStepsList({
       )}
       {actionStates.map((ns) => {
         const nodeTask = ns.taskId && tasks ? tasks.find((t) => t.id === ns.taskId) : undefined
-        const node = nodes.find((n) => n.id === ns.nodeId)
+        const node = nodesById.get(ns.nodeId)
         const nodeConfig = node?.config as
           | {
               agentType?: AiAgentType | 'fromTask'
@@ -209,6 +220,7 @@ export function RunStepsList({
         // Only for the open row: stepTimeline slices a tail out of every step's logs.
         const isExpanded = expandedNodeId === ns.nodeId
         const timeline = isExpanded ? stepTimeline(ns.logs, ns.diagnostics) : []
+        const canViewFull = !!onViewFullOutput && !!ns.logs && timeline.length > 0
 
         const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
         const signInWait = isSignInWait(ns)
@@ -232,9 +244,7 @@ export function RunStepsList({
               <span
                 className={`flex items-center gap-1.5 min-w-0 text-[12.5px] ${faint ? 'text-ink-faint' : 'text-ink'}`}
               >
-                <span className="truncate">
-                  <NodeLabel nodeId={ns.nodeId} nodes={nodes} />
-                </span>
+                <span className="truncate">{nodeLabel(node, ns.nodeId)}</span>
                 {meta && <span className="text-[11.5px] text-ink-faint truncate">{meta}</span>}
                 {nodeTask && (
                   <span
@@ -304,14 +314,11 @@ export function RunStepsList({
               </div>
             )}
 
-            {/* One ordered account of the step: what the engine did to get
-                the agent running, what the agent said, then how it ended.
-                Engine lines are dimmed and marked so the agent's own words
-                stay the foreground, and the log is the only box in the trace. */}
+            {/* Engine lines are dimmed under the agent's own words, and the log is the trace's only box. */}
             {isExpanded && (
               <div className={`${UNDER_LABEL} flex flex-col gap-1.5`}>
                 {ns.error && <p className="text-[12px] text-danger">{ns.error}</p>}
-                {timeline.length > 0 ? (
+                {timeline.length > 0 && (
                   <div className="bg-black/30 border border-white/[0.05] rounded overflow-auto max-h-[280px]">
                     {timeline.map((entry, ti) =>
                       entry.kind === 'agent' ? (
@@ -333,42 +340,26 @@ export function RunStepsList({
                       )
                     )}
                   </div>
-                ) : (
-                  !ns.error && (
-                    <p className="text-[11.5px] text-ink-faint italic">
-                      {ns.status === 'running'
-                        ? 'No output captured yet…'
-                        : ns.status === 'pending'
-                          ? "Step hasn't started yet."
-                          : ns.status === 'skipped'
-                            ? 'Step was skipped.'
-                            : 'No output recorded.'}
-                    </p>
-                  )
                 )}
-                {((onViewFullOutput && ns.logs && timeline.length > 0) || canResume) && (
+                {timeline.length === 0 && !ns.error && (
+                  <p className="text-[11.5px] text-ink-faint italic">
+                    {EMPTY_LOG[ns.status] ?? 'No output recorded.'}
+                  </p>
+                )}
+                {(canViewFull || canResume) && (
                   <div className="flex items-center gap-1">
-                    {onViewFullOutput && ns.logs && timeline.length > 0 && (
-                      <Tooltip label="View full output">
-                        <button
-                          onClick={() => onViewFullOutput(ns.logs!)}
-                          aria-label="View full output"
-                          className="p-1 rounded text-ink-faint hover:text-ink hover:bg-white/[0.06] transition-colors"
-                        >
-                          <Maximize2 size={12} strokeWidth={2} />
-                        </button>
-                      </Tooltip>
+                    {canViewFull && (
+                      <IconButton
+                        label="View full output"
+                        onClick={() => onViewFullOutput!(ns.logs!)}
+                      >
+                        <Maximize2 size={12} strokeWidth={2} />
+                      </IconButton>
                     )}
                     {canResume && (
-                      <Tooltip label="Resume session">
-                        <button
-                          onClick={handleResume}
-                          aria-label="Resume session"
-                          className="p-1 rounded text-ink-faint hover:text-ink hover:bg-white/[0.06] transition-colors"
-                        >
-                          <RotateCcw size={12} strokeWidth={2} />
-                        </button>
-                      </Tooltip>
+                      <IconButton label="Resume session" onClick={handleResume}>
+                        <RotateCcw size={12} strokeWidth={2} />
+                      </IconButton>
                     )}
                   </div>
                 )}
@@ -468,30 +459,18 @@ export function RunEntry({
           </span>
         </button>
         {hasFailedStep(execution) && onRetryRun && (
-          <span className="shrink-0">
-            <Tooltip label="Retry from failed step" position="top">
-              <button
-                aria-label="Retry from failed step"
-                onClick={() => onRetryRun(execution)}
-                className="p-1 rounded text-ink-faint hover:text-ink transition-colors"
-              >
-                <RotateCcw size={12} strokeWidth={2} />
-              </button>
-            </Tooltip>
-          </span>
+          <IconButton
+            label="Retry from failed step"
+            position="top"
+            onClick={() => onRetryRun(execution)}
+          >
+            <RotateCcw size={12} strokeWidth={2} />
+          </IconButton>
         )}
         {execution.status !== 'running' && onRerunRun && (
-          <span className="shrink-0">
-            <Tooltip label="Run again" position="top">
-              <button
-                aria-label="Run again"
-                onClick={() => onRerunRun(execution)}
-                className="p-1 rounded text-ink-faint hover:text-ink transition-colors"
-              >
-                <Play size={12} strokeWidth={2} />
-              </button>
-            </Tooltip>
-          </span>
+          <IconButton label="Run again" position="top" onClick={() => onRerunRun(execution)}>
+            <Play size={12} strokeWidth={2} />
+          </IconButton>
         )}
         <span className="pr-2 shrink-0">
           <StopRunButton execution={execution} stopPropagation={false} />
