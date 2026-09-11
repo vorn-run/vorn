@@ -10,7 +10,7 @@ import type {
   WorkflowNode
 } from '../../shared/types'
 import type { ConnectorLook } from './use-connections'
-import { WORKFLOW_STATUS_DOT, type WorkflowStatusKey, type RunOutcomeTone } from './workflow-status'
+import type { RunOutcomeTone } from './workflow-status'
 import type { RunBucket } from '../stores/types'
 import { formatRunDuration } from './format-time'
 
@@ -19,11 +19,8 @@ export function runCompletionToast(
   execution: WorkflowExecution,
   nodes: WorkflowNode[]
 ): { kind: 'success' | 'error' | 'quiet'; message: string; failedNodeId?: string } {
-  const triggerIds = new Set(nodes.filter((n) => n.type === 'trigger').map((n) => n.id))
   if (execution.status === 'success') {
-    const steps = execution.nodeStates.filter(
-      (ns) => ns.status === 'success' && !triggerIds.has(ns.nodeId)
-    ).length
+    const steps = stepProgress(execution, nodes).done
     const duration = formatRunDuration(execution.startedAt, execution.completedAt)
     return {
       kind: 'success',
@@ -31,10 +28,7 @@ export function runCompletionToast(
     }
   }
   if (execution.status === 'error') {
-    // The true failure is the errored step that was not skipped by another one.
-    const failed = execution.nodeStates.find(
-      (ns) => ns.status === 'error' && !ns.error?.startsWith('Skipped:')
-    )
+    const failed = failedStep(execution)
     const failedNode = failed ? nodes.find((n) => n.id === failed.nodeId) : undefined
     return {
       kind: 'error',
@@ -55,6 +49,45 @@ export function bucketOf(execution: WorkflowExecution): RunBucket {
     return execution.nodeStates.some((n) => n.status === 'waiting') ? 'waiting' : 'running'
   }
   return execution.status === 'success' ? 'success' : 'error'
+}
+
+/** The step a failed run broke at: the errored one that was not skipped because of another. */
+export function failedStep(execution: WorkflowExecution): NodeExecutionState | undefined {
+  return execution.nodeStates.find(
+    (ns) => ns.status === 'error' && !ns.error?.startsWith('Skipped:')
+  )
+}
+
+function stepLabel(nodes: WorkflowNode[], nodeId: string): string {
+  return nodes.find((n) => n.id === nodeId)?.label || nodeId.slice(0, 8)
+}
+
+/** A run's state in words, naming the step it broke at, waits at or is working on. */
+export function runStatusLine(execution: WorkflowExecution, nodes: WorkflowNode[]): string {
+  const waiting = execution.nodeStates.find((ns) => ns.status === 'waiting')
+  if (waiting) {
+    const why = isSignInWait(waiting) ? 'Waiting for sign-in' : 'Waiting'
+    return `${why} at ${stepLabel(nodes, waiting.nodeId)}`
+  }
+  if (execution.status === 'running') {
+    const active = execution.nodeStates.find((ns) => ns.status === 'running')
+    return active ? `Running ${stepLabel(nodes, active.nodeId)}` : 'Running'
+  }
+  if (execution.status === 'error') {
+    const failed = failedStep(execution)
+    return failed ? `Failed at ${stepLabel(nodes, failed.nodeId)}` : 'Failed'
+  }
+  return execution.status === 'cancelled' ? 'Stopped' : 'Completed'
+}
+
+/** How far a run got: the steps that succeeded out of all it reached, the trigger left out. */
+export function stepProgress(
+  execution: WorkflowExecution,
+  nodes: WorkflowNode[]
+): { done: number; total: number } {
+  const triggers = new Set(nodes.filter((n) => n.type === 'trigger').map((n) => n.id))
+  const steps = execution.nodeStates.filter((ns) => !triggers.has(ns.nodeId))
+  return { done: steps.filter((ns) => ns.status === 'success').length, total: steps.length }
 }
 
 export type RunSource = 'manual' | 'schedule' | 'task' | 'connector' | 'restore'
@@ -207,46 +240,6 @@ export function describeRun(
   }
 }
 
-export interface RunStage {
-  nodeId: string
-  status: NodeExecutionState['status']
-  label: string
-  /** Tailwind background class for the segment / dot. */
-  dotClass: string
-}
-
-/**
- * Every node state of a run, in definition order where the workflow is still
- * around, so the progress bar reads left-to-right as the graph does. Includes
- * the trigger — it is stage #1 of what actually happened.
- */
-export function runStages(execution: WorkflowExecution, nodes: WorkflowNode[]): RunStage[] {
-  const order = new Map(nodes.map((n, i) => [n.id, i]))
-  const states = [...execution.nodeStates]
-  if (order.size > 0) {
-    states.sort((a, b) => (order.get(a.nodeId) ?? 999) - (order.get(b.nodeId) ?? 999))
-  }
-  return states.map((ns) => {
-    const node = nodes.find((n) => n.id === ns.nodeId)
-    return {
-      nodeId: ns.nodeId,
-      status: ns.status,
-      label: node?.label || ns.nodeId.slice(0, 8),
-      dotClass: WORKFLOW_STATUS_DOT[ns.status as WorkflowStatusKey] ?? WORKFLOW_STATUS_DOT.pending
-    }
-  })
-}
-
-const TERMINAL_STAGE_STATUSES = new Set<NodeExecutionState['status']>([
-  'success',
-  'error',
-  'skipped'
-])
-
-export function completedStageCount(stages: RunStage[]): number {
-  return stages.filter((s) => TERMINAL_STAGE_STATUSES.has(s.status)).length
-}
-
 /**
  * Short fields an agent step may emit as its verdict. A typed step with an
  * `outputSchema` is the only place a run carries a human-meaningful conclusion,
@@ -300,27 +293,6 @@ export function describeOutcome(execution: WorkflowExecution, nodes: WorkflowNod
   if (execution.status === 'error') return { tone: 'error' }
   if (execution.status === 'cancelled') return { tone: 'neutral' }
   return { label: verdictOf(execution), tone: 'success' }
-}
-
-/** True when no step ever paused for a human. */
-export function ranUninterrupted(execution: WorkflowExecution): boolean {
-  return !execution.nodeStates.some((ns) => ns.approvedAt || ns.status === 'waiting')
-}
-
-const MAX_LOG_TAIL = 600
-
-/**
- * Live-ish summary for the detail card. There is no stored run summary, so the
- * most informative thing available is the tail of whatever step is currently
- * talking — falling back to the last step that produced anything.
- */
-export function runSummaryText(execution: WorkflowExecution): string | undefined {
-  const running = execution.nodeStates.find((ns) => ns.status === 'running' && ns.logs)
-  const source =
-    running ?? [...execution.nodeStates].reverse().find((ns) => ns.logs?.trim() || ns.error)
-  const text = source?.logs?.trim() || source?.error?.trim()
-  if (!text) return undefined
-  return text.length > MAX_LOG_TAIL ? `…${text.slice(-MAX_LOG_TAIL)}` : text
 }
 
 /**

@@ -71,7 +71,7 @@ describe('RunHistoryPanel', () => {
     const { container } = render(
       <RunHistoryPanel executions={[a, b]} nodes={[node]} onClose={vi.fn()} />
     )
-    const entries = container.querySelectorAll('.border.border-white\\/\\[0\\.08\\].rounded-md')
+    const entries = container.querySelectorAll('.border.border-white\\/\\[0\\.08\\].rounded')
     expect(entries.length).toBe(2)
   })
 })

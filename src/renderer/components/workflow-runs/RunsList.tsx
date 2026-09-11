@@ -35,21 +35,17 @@ export function RunsList({ runs, workflowsById, filter, selectedId, onSelect }: 
 
   return (
     <div className="flex flex-col min-h-0 h-full">
-      <div className="flex items-center gap-2 px-4 py-3 shrink-0">
-        <h2 className="text-[15px] text-white">{filter === 'all' ? 'All runs' : 'Runs'}</h2>
-        <span className="font-mono text-[11px] text-gray-500 tabular-nums px-1.5 py-0.5 rounded bg-white/[0.05]">
+      <div className="flex items-baseline gap-2 px-4 py-3 shrink-0">
+        <h2 className="text-[15px] text-ink">{filter === 'all' ? 'All runs' : 'Runs'}</h2>
+        <span className="text-[12px] text-ink-faint tabular-nums">
           {visible.length}
+          {waitingCount > 0 && ` · ${waitingCount} waiting`}
         </span>
-        {waitingCount > 0 && (
-          <span className="font-mono text-[11px] text-bronzo tabular-nums px-1.5 py-0.5 rounded bg-bronzo/10 border border-bronzo/20">
-            {waitingCount} waiting
-          </span>
-        )}
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto border-t border-white/[0.04]">
         {visible.length === 0 ? (
-          <p className="text-center py-10 text-gray-600 text-[12px]">No runs to show</p>
+          <p className="text-center py-10 text-ink-faint text-[12px]">No runs to show</p>
         ) : (
           visible.map((run) => {
             const id = workflowRunId(run)

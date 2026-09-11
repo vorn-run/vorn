@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, fireEvent, waitFor } from '@testing-library/react'
+import { render, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 vi.mock('framer-motion', () => ({
@@ -231,7 +231,7 @@ describe('RunEntry', () => {
       <RunEntry execution={exec} nodes={[makeNode()]} onResumeSession={onResume} />
     )
     fireEvent.click(getByText(/ago|just now|seconds/i).closest('button')!)
-    fireEvent.click(getByText('Run Claude').closest('button')!)
+    // A failed run opens at the step it broke on.
     fireEvent.click(getByLabelText('Resume session'))
     expect(onResume).toHaveBeenCalled()
   })
@@ -266,7 +266,6 @@ describe('RunEntry', () => {
     })
     const { getByText, queryByText } = render(<RunEntry execution={exec} nodes={[makeNode()]} />)
     fireEvent.click(getByText(/ago|just now|seconds/i).closest('button')!)
-    fireEvent.click(getByText('Run Claude').closest('button')!)
 
     expect(getByText(/Session sess-1 started \(pid 4242\)/)).toBeInTheDocument()
     expect(getByText(/Launching claude in \/p/)).toBeInTheDocument()
@@ -353,7 +352,7 @@ describe('RunEntry — run inputs', () => {
     expect(getByText('false')).toBeInTheDocument()
   })
 
-  it('labels the row and pairs each key with its own value chip', () => {
+  it('labels the row and keeps each key beside its own value', () => {
     const exec = makeExec({
       nodeStates: [makeState()],
       inputs: { issue: 'gh-42', force: false }
@@ -362,11 +361,11 @@ describe('RunEntry — run inputs', () => {
     expand(getByText)
 
     expect(getByText('Inputs')).toBeInTheDocument()
-    // Each input is one chip carrying both halves, so a key can never be read
+    // Each input is one piece carrying both halves, so a key can never be read
     // against a neighbouring value.
-    const chip = getByText('issue').closest('span[title]')!
-    expect(chip).toHaveAttribute('title', 'issue=gh-42')
-    expect(chip.textContent).toBe('issuegh-42')
+    const pair = getByText('issue').closest('span[title]')!
+    expect(pair).toHaveAttribute('title', 'issue=gh-42')
+    expect(pair.textContent).toBe('issue gh-42')
   })
 
   it('clips a large object-valued input instead of flooding the row', () => {
@@ -395,7 +394,7 @@ describe('RunEntry — run inputs', () => {
   })
 })
 
-describe('RunStepsList — step icons', () => {
+describe('RunStepsList', () => {
   beforeEach(() => {
     __resetConnectionsCacheForTests()
   })
@@ -426,17 +425,6 @@ describe('RunStepsList — step icons', () => {
     window.api = { listConnections: vi.fn().mockResolvedValue(connections) }
   }
 
-  it("shows a connector-bound step under its connector's brand mark", async () => {
-    stubConnections([{ id: 'conn-1', connectorId: 'github', name: 'GitHub' }])
-
-    const { container } = render(
-      <RunStepsList execution={exec} nodes={[triggerNode, scriptNode]} includeTrigger />
-    )
-    await waitFor(() =>
-      expect(container.querySelector('svg[viewBox="0 0 16 16"]')).toBeInTheDocument()
-    )
-  })
-
   it('describes each step and previews what it was configured to run', async () => {
     stubConnections([{ id: 'conn-1', connectorId: 'github', name: 'GitHub' }])
 
@@ -458,26 +446,33 @@ describe('RunStepsList — step icons', () => {
       nodeStates: [makeState({ nodeId: 'scr', logs: 'installing deps\nrunning tests\nall green' })]
     })
 
-    const { getByText, queryByText, getByLabelText, findByText } = render(
+    const { getByText, queryByText, findByText } = render(
       <RunStepsList execution={noisy} nodes={[scriptNode]} />
     )
     // The card opens the log where the log itself opens.
     expect(await findByText('installing deps')).toBeInTheDocument()
     expect(queryByText(/all green/)).not.toBeInTheDocument()
 
-    fireEvent.click(getByLabelText('Show full output of step 1'))
+    fireEvent.click(getByText('installing deps').closest('button')!)
     expect(getByText(/all green/)).toBeInTheDocument()
   })
 
-  it('falls back to the node-type icon for a step with no connection', async () => {
+  it('opens a failed run at the step it broke on, with only its log in a box', async () => {
     stubConnections([])
+    const failed = makeExec({
+      status: 'error',
+      nodeStates: [
+        makeState({ nodeId: 'trig', logs: undefined }),
+        makeState({ nodeId: 'scr', status: 'error', error: 'exit 1', logs: 'fatal: not a repo' })
+      ]
+    })
 
-    const { container } = render(
-      <RunStepsList execution={exec} nodes={[triggerNode, scriptNode]} includeTrigger />
+    const { getByText, container } = render(
+      <RunStepsList execution={failed} nodes={[triggerNode, scriptNode]} includeTrigger />
     )
-    await waitFor(() => expect(container.querySelector('svg.lucide-terminal')).toBeInTheDocument())
-    // The connector cache resolved to nothing, so the trigger keeps its own
-    // node-type glyph rather than borrowing a brand mark.
-    expect(container.querySelector('svg[viewBox="0 0 16 16"]')).not.toBeInTheDocument()
+    expect(getByText('exit 1')).toBeInTheDocument()
+    expect(getByText('fatal: not a repo')).toBeInTheDocument()
+    expect(container.querySelectorAll('[aria-expanded="true"]')).toHaveLength(1)
+    expect(container.querySelector('.rounded-lg')).toBeNull()
   })
 })

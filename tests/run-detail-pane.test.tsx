@@ -88,7 +88,7 @@ describe('RunDetailPane', () => {
     renderPane(makeRun())
     expect(screen.getByRole('heading', { name: 'clean branches' })).toBeInTheDocument()
     expect(screen.getByText('manual')).toBeInTheDocument()
-    expect(screen.getByText('run run-abcd')).toBeInTheDocument()
+    expect(screen.getByText('Run run-abcd')).toBeInTheDocument()
   })
 
   it('does not repeat the workflow name under the title when they are the same', () => {
@@ -127,54 +127,32 @@ describe('RunDetailPane', () => {
     expect(screen.getByLabelText('Retry from failed step')).toBeInTheDocument()
   })
 
-  it('summarises a run that finished every stage without pausing', () => {
+  it('names the step a failed run stopped at, beside its dot', () => {
     renderPane(
       makeRun({
+        status: 'error',
         nodeStates: [
           { nodeId: 't', status: 'success' },
-          { nodeId: 'n1', status: 'success' }
+          { nodeId: 'n1', status: 'error', error: 'exit 1' }
         ]
       })
     )
-    expect(screen.getByText(/ran end to end/)).toBeInTheDocument()
-    expect(screen.getByText(/never paused/)).toBeInTheDocument()
+    expect(screen.getByText('Failed at Execute Script')).toBeInTheDocument()
+    expect(screen.queryByText('exit 1')).not.toBeInTheDocument()
   })
 
-  it('reports a run that paused for review', () => {
-    renderPane(
-      makeRun({
-        nodeStates: [
-          { nodeId: 't', status: 'success' },
-          { nodeId: 'n1', status: 'success', approvedAt: new Date(NOW).toISOString() }
-        ]
-      })
-    )
-    expect(screen.getByText(/paused for review/)).toBeInTheDocument()
-  })
-
-  it('shows the running step logs as the summary', () => {
-    renderPane(
-      makeRun({
-        status: 'running',
-        completedAt: undefined,
-        nodeStates: [{ nodeId: 'n1', status: 'running', logs: 'Scanning 14 local branches…' }]
-      })
-    )
-    expect(screen.getByText('Scanning 14 local branches…')).toBeInTheDocument()
-  })
-
-  it('counts completed stages in the trace header', () => {
+  it('names the step a running run is on', () => {
     renderPane(
       makeRun({
         status: 'running',
         completedAt: undefined,
         nodeStates: [
           { nodeId: 't', status: 'success' },
-          { nodeId: 'n1', status: 'running' }
+          { nodeId: 'n1', status: 'running', logs: 'Scanning 14 local branches…' }
         ]
       })
     )
-    expect(screen.getByText('1 of 2 stages complete')).toBeInTheDocument()
+    expect(screen.getByText('Running Execute Script')).toBeInTheDocument()
   })
 
   it('includes the trigger in the trace', () => {
@@ -182,12 +160,12 @@ describe('RunDetailPane', () => {
     expect(screen.getByTestId('run-steps-list').getAttribute('data-include-trigger')).toBe('true')
   })
 
-  it('says nothing beside the dot for a plain success', () => {
+  it('says a plain success completed', () => {
     renderPane(makeRun())
-    expect(screen.queryByText('completed')).not.toBeInTheDocument()
+    expect(screen.getByText('Completed')).toBeInTheDocument()
   })
 
-  it('shows the verdict a successful step wrote, in the success colour', () => {
+  it('shows the verdict a successful step wrote', () => {
     renderPane(
       makeRun({
         nodeStates: [{ nodeId: 'n1', status: 'success', structuredOutput: { verdict: 'approve' } }]
@@ -220,7 +198,7 @@ describe('RunDetailPane', () => {
       renderPane(gateRun, gateNodes)
       expect(screen.getByRole('button', { name: /Approve & continue/ })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /Reject run/ })).toBeInTheDocument()
-      expect(screen.getByText('waiting for approval')).toBeInTheDocument()
+      expect(screen.getByText('Waiting at Review')).toBeInTheDocument()
     })
 
     it('approves the waiting node on click', () => {

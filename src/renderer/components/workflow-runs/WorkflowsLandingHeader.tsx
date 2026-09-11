@@ -20,8 +20,8 @@ export function WorkflowsLandingHeader() {
         onClick={() => setTab('runs')}
         className={`px-2.5 py-1 rounded-md text-[12px] transition-colors ${
           tab === 'runs'
-            ? 'text-white bg-white/[0.08]'
-            : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
+            ? 'text-ink bg-white/[0.06]'
+            : 'text-ink-faint hover:text-ink hover:bg-white/[0.06]'
         }`}
       >
         All runs
@@ -31,8 +31,8 @@ export function WorkflowsLandingHeader() {
         onClick={() => setTab('review')}
         className={`px-2.5 py-1 rounded-md text-[12px] transition-colors flex items-center gap-1.5 ${
           tab === 'review'
-            ? 'text-white bg-white/[0.08]'
-            : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
+            ? 'text-ink bg-white/[0.06]'
+            : 'text-ink-faint hover:text-ink hover:bg-white/[0.06]'
         }`}
       >
         Needs review
@@ -50,7 +50,7 @@ export function WorkflowsLandingHeader() {
           type="button"
           onClick={bumpReload}
           aria-label="Refresh"
-          className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors"
+          className="p-1 rounded-md text-ink-faint hover:text-ink hover:bg-white/[0.06] transition-colors"
         >
           <RefreshCw size={14} strokeWidth={1.5} className={loading ? 'animate-spin' : ''} />
         </button>
