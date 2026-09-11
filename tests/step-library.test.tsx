@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, cleanup, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
-  useConnections: () => [
-    { id: 'c1', name: 'GitHub' },
-    { id: 'c2', name: 'Azure DevOps' }
-  ],
-  useConnectorIdFor: () => null,
-  useConnectionIconFor: () => undefined,
+const connections = [
+  { id: 'c1', name: 'GitHub', connectorId: 'github' },
+  { id: 'c2', name: 'Azure DevOps', connectorId: 'azure-devops' }
+]
+
+vi.mock('../src/renderer/lib/use-connections', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/use-connections')>()),
+  useConnections: () => connections,
   useInstalledPacks: () => []
 }))
 
@@ -31,17 +32,21 @@ import {
   LibraryPick
 } from '../src/renderer/components/workflow-editor/panels/StepLibrary'
 
+beforeEach(() => localStorage.clear())
 afterEach(cleanup)
 
 function renderLibrary(scope = { bodyOnly: false, insideBranch: false }) {
   const onPick = vi.fn()
   const onClose = vi.fn()
   const utils = render(<StepLibrary scope={scope} onPick={onPick} onClose={onClose} />)
-  return { ...utils, onPick, onClose }
+  const root = utils.container.querySelector('[data-step-library]') as HTMLElement
+  return { ...utils, root, onPick, onClose }
 }
 
+const group = (name: RegExp) => screen.findByRole('button', { name })
+
 describe('the step library', () => {
-  it('lists steps first, then each connection with its actions grouped', async () => {
+  it('lists steps first, then each connection folded under its name', async () => {
     renderLibrary()
     for (const label of [
       'Agent',
@@ -53,19 +58,22 @@ describe('the step library', () => {
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
-    expect(await screen.findByText('GitHub')).toBeInTheDocument()
+    const github = await group(/GitHub/)
+    expect(screen.queryByText('Create issue')).toBeNull()
+    fireEvent.click(github)
+    expect(github).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('Create issue')).toBeInTheDocument()
-    expect(screen.getByText('Azure DevOps')).toBeInTheDocument()
-    expect(screen.getByText('Create work item')).toBeInTheDocument()
+    expect(screen.queryByText('Create work item')).toBeNull()
   })
 
-  it('searches steps and actions together', async () => {
+  it('searches steps and actions together, in one run that names each connection', async () => {
     renderLibrary()
-    await screen.findByText('GitHub')
+    await group(/GitHub/)
     fireEvent.change(screen.getByPlaceholderText('Search steps and actions'), {
       target: { value: 'issue' }
     })
-    expect(screen.getByText('Create issue')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Create issue.*GitHub/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Close issue.*GitHub/ })).toBeInTheDocument()
     expect(screen.queryByText('Agent')).toBeNull()
     expect(screen.queryByText('Create work item')).toBeNull()
   })
@@ -88,8 +96,9 @@ describe('the step library', () => {
   })
 
   it('picks with click and with Enter on the highlighted row', async () => {
-    const { onPick, container } = renderLibrary()
-    fireEvent.click(await screen.findByText('Create issue'))
+    const { onPick, root } = renderLibrary()
+    fireEvent.click(await group(/GitHub/))
+    fireEvent.click(screen.getByText('Create issue'))
     expect(onPick).toHaveBeenCalledWith({
       kind: 'connectorAction',
       connectionId: 'c1',
@@ -97,17 +106,44 @@ describe('the step library', () => {
       actionLabel: 'Create issue'
     } satisfies LibraryPick)
 
-    const root = container.querySelector('[data-step-library]') as HTMLElement
     fireEvent.keyDown(root, { key: 'ArrowDown' })
     fireEvent.keyDown(root, { key: 'Enter' })
     expect(onPick).toHaveBeenLastCalledWith({ kind: 'type', type: 'script' } satisfies LibraryPick)
   })
 
+  it('opens and folds a group from the keys', async () => {
+    const { root } = renderLibrary()
+    const github = await group(/GitHub/)
+    const reachable = screen
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('aria-label') !== 'Close')
+    for (let i = 0; i < reachable.indexOf(github); i++) {
+      fireEvent.keyDown(root, { key: 'ArrowDown' })
+    }
+    fireEvent.keyDown(root, { key: 'ArrowRight' })
+    expect(screen.getByText('Create issue')).toBeInTheDocument()
+    fireEvent.keyDown(root, { key: 'Enter' })
+    expect(screen.queryByText('Create issue')).toBeNull()
+  })
+
+  it('opens the way it was left, with the actions picked lately first', async () => {
+    renderLibrary()
+    fireEvent.click(await group(/Azure DevOps/))
+    fireEvent.click(await group(/GitHub/))
+    fireEvent.click(screen.getByText('Close issue'))
+    fireEvent.click(await group(/GitHub/))
+    cleanup()
+
+    renderLibrary()
+    expect(await screen.findByText('Create work item')).toBeInTheDocument()
+    expect(screen.getByText('Recent')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Close issue.*GitHub/ })).toBeInTheDocument()
+    expect(screen.queryByText('Create issue')).toBeNull()
+  })
+
   it('closes on Escape and on its close button', () => {
-    const { onClose, container } = renderLibrary()
-    fireEvent.keyDown(container.querySelector('[data-step-library]') as HTMLElement, {
-      key: 'Escape'
-    })
+    const { onClose, root } = renderLibrary()
+    fireEvent.keyDown(root, { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onClose).toHaveBeenCalledTimes(2)
   })

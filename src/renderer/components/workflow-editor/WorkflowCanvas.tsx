@@ -19,22 +19,36 @@ import {
   type EdgeProps,
   type Node,
   type NodeChange,
-  type NodeProps
+  type NodeProps,
+  type Viewport
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlignVerticalSpaceAround, Repeat, Replace, StepForward, Trash2, Zap } from 'lucide-react'
+import {
+  AlignVerticalSpaceAround,
+  Maximize,
+  Repeat,
+  Replace,
+  StepForward,
+  Trash2,
+  Zap
+} from 'lucide-react'
 import { LoopConfig, NodeExecutionStatus, WorkflowEdge, WorkflowNode } from '../../../shared/types'
 import {
   AddStepNodeData,
+  CANVAS_MIN_ZOOM,
   CanvasEdgeData,
   canConnect,
   estimateNodeHeight,
+  isPlaceholder,
+  openingViewport,
   stepEdgePath,
   toCanvasElements,
+  topAlignedFit,
   TRIGGER_ANCHOR,
   TRIGGER_ANCHOR_ID
 } from '../../lib/workflow-canvas-layout'
 import { REPLACEABLE_NODE_TYPES } from '../../lib/workflow-helpers'
+import { readCanvasView, writeCanvasView } from '../../lib/canvas-views'
 import { NODE_GLYPH, NODE_SELECTED, NODE_UNSELECTED } from './node-visuals'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
@@ -87,7 +101,7 @@ interface Props {
   selectedNodeId: string | null
   /** What each node is doing in live runs; absent when nothing is running. */
   nodeStatus?: Record<string, NodeExecutionStatus>
-  /** Changes when a different workflow loads; re-fits the view top-aligned. */
+  /** The workflow these steps belong to, whose view is remembered. */
   loadKey?: string | null
 }
 
@@ -193,7 +207,7 @@ function StepNode({ data, id }: NodeProps) {
   const updateNodeInternals = useUpdateNodeInternals()
   // A replace-in-place keeps the id, so React Flow would keep the old card's
   // measured handle positions; re-measure when the rendered shape changes.
-  // Never on mount: that races the initial measure while fitView settles.
+  // Never on mount: that races the initial measure while the opening view settles.
   // Trigger kinds share a type and height, so the kind is part of the shape.
   const kind = (node?.config as { triggerType?: string } | undefined)?.triggerType ?? ''
   const shape = node ? `${node.type}:${kind}:${estimateNodeHeight(node, allNodes)}` : ''
@@ -509,7 +523,7 @@ function WorkflowCanvasInner({
   nodeStatus,
   loadKey
 }: Props) {
-  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView, getViewport, setViewport } =
+  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, getNodesBounds, setViewport } =
     useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
 
@@ -523,26 +537,31 @@ function WorkflowCanvasInner({
     setRfNodes(elements.nodes)
   }
 
-  // The flow is vertical: on load, keep fitView's zoom and centering but pin
-  // the topmost node near the top instead of vertically centering the chain.
-  const elementsRef = useRef(elements)
-  useEffect(() => {
-    elementsRef.current = elements
-  }, [elements])
-  const alignTopView = useCallback(async () => {
-    const drawn = elementsRef.current.nodes
-    if (drawn.length === 0) return
-    await fitView({ padding: 0.2, maxZoom: 1 })
-    const { x, zoom } = getViewport()
-    const minY = Math.min(...drawn.map((n) => n.position.y))
-    setViewport({ x, y: 48 - minY * zoom, zoom })
-  }, [fitView, getViewport, setViewport])
+  // The canvas mounts once per workflow, so it opens once: where it was left, or at 100% on its trigger.
+  const openedView = useRef<Viewport | null>(null)
+  const openView = () => {
+    const width = wrapperRef.current?.clientWidth ?? 0
+    const view = (loadKey && readCanvasView(loadKey)) || openingViewport(elements.nodes, width)
+    openedView.current = view
+    void setViewport(view)
+  }
 
-  const [rfReady, setRfReady] = useState(false)
-  useEffect(() => {
-    if (!rfReady) return
-    void alignTopView()
-  }, [rfReady, loadKey, alignTopView])
+  const handleMoveEnd = useCallback(
+    (_event: MouseEvent | TouchEvent | null, view: Viewport) => {
+      const opened = openedView.current
+      openedView.current = null
+      if (opened?.x === view.x && opened.y === view.y && opened.zoom === view.zoom) return
+      if (loadKey) writeCanvasView(loadKey, view)
+    },
+    [loadKey]
+  )
+
+  const fitFromTop = useCallback(() => {
+    const el = wrapperRef.current
+    if (!el || rfNodes.length === 0) return
+    const view = topAlignedFit(getNodesBounds(rfNodes), el.clientWidth, el.clientHeight)
+    void setViewport(view, { duration: 200 })
+  }, [rfNodes, getNodesBounds, setViewport])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     // The canvas owns position only; selection and structure stay the editor's.
@@ -554,7 +573,7 @@ function WorkflowCanvasInner({
     // Committing every displayed position materializes the computed layout on first drag.
     const positions: Record<string, { x: number; y: number }> = {}
     for (const rfNode of rfNodes) {
-      if (rfNode.type === 'addStep' || rfNode.type === 'addTrigger') continue
+      if (isPlaceholder(rfNode)) continue
       positions[rfNode.id] = { x: rfNode.position.x, y: rfNode.position.y }
     }
     onPositionsCommit(positions)
@@ -630,7 +649,7 @@ function WorkflowCanvasInner({
       } else if (e.key === '0') {
         void zoomTo(1)
       } else if (e.key === '1') {
-        void fitView({ padding: 0.2, maxZoom: 1 })
+        fitFromTop()
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
         const node = nodes.find((n) => n.id === selectedNodeId)
         if (node && onDeleteNode) {
@@ -645,7 +664,7 @@ function WorkflowCanvasInner({
       zoomIn,
       zoomOut,
       zoomTo,
-      fitView,
+      fitFromTop,
       selectedNodeId,
       nodes,
       onDeleteNode
@@ -696,8 +715,9 @@ function WorkflowCanvasInner({
           onConnectEnd={handleConnectEnd}
           isValidConnection={isValidConnection}
           onPaneClick={() => onNodeClick('')}
-          onInit={() => setRfReady(true)}
-          minZoom={0.2}
+          onInit={openView}
+          onMoveEnd={handleMoveEnd}
+          minZoom={CANVAS_MIN_ZOOM}
           maxZoom={1.75}
           snapToGrid
           snapGrid={[8, 8]}
@@ -730,9 +750,17 @@ function WorkflowCanvasInner({
           />
           <Controls
             showInteractive={false}
+            showFitView={false}
             className="!bg-surface-overlay !border !border-white/[0.12] !rounded-md !shadow-none
                        [&_button]:!bg-transparent [&_button]:!border-white/[0.08] [&_button]:!fill-gray-400"
           >
+            <ControlButton
+              onClick={fitFromTop}
+              title="Fit the workflow"
+              aria-label="Fit the workflow"
+            >
+              <Maximize size={12} className="!fill-none stroke-gray-400" />
+            </ControlButton>
             <ControlButton onClick={onTidyUp} title="Tidy up">
               <AlignVerticalSpaceAround size={12} className="!fill-none stroke-gray-400" />
             </ControlButton>

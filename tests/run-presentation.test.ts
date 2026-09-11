@@ -1,14 +1,11 @@
-import { WORKFLOW_STATUS_DOT } from '../src/renderer/lib/workflow-status'
 import { describe, it, expect } from 'vitest'
 import {
   bucketOf,
-  completedStageCount,
-  describeOutcome,
   describeRun,
-  ranUninterrupted,
-  runStages,
   liveNodeStatus,
-  runSummaryText
+  runStatusLine,
+  runVerdict,
+  stepProgress
 } from '../src/renderer/lib/run-presentation'
 import type {
   ConnectorItemContext,
@@ -56,7 +53,7 @@ describe('describeRun', () => {
     expect(p.title).toBe('PR #309')
     expect(p.subtitle).toBe('refactor: split workflow runs panel into list + detail')
     expect(p.source).toBe('connector')
-    expect(p.connectorId).toBe('github')
+    expect(p.sourceLabel).toBe('github')
   })
 
   it('titles a GitHub issue run as "Issue #<n>"', () => {
@@ -113,11 +110,11 @@ describe('describeRun', () => {
       run({ connectorItem: githubItem({ connectorId: 'linear', externalId: 'ENG-12' }) })
     )
     expect(p.title).toBe('linear ENG-12')
-    expect(p.connectorId).toBe('linear')
+    expect(p.sourceLabel).toBe('linear')
   })
 
   // A packaged connector's item only knows itself as `mcp`; the connection it
-  // came from is what says which connector really ran and what mark to draw.
+  // came from is what says which connector really ran.
   it('takes the connector id and glyph from the connection when one is resolved', () => {
     const icon = { viewBox: '0 0 24 24', paths: ['M2 2h9v9z'] }
     const p = describeRun(
@@ -191,193 +188,93 @@ describe('describeRun', () => {
   })
 })
 
-describe('runStages', () => {
+describe('runStatusLine', () => {
   const nodes = [
     node('t', 'trigger', 'Manual Trigger'),
-    node('a', 'script', 'Execute Script'),
-    node('b', 'launchAgent', 'Say Hello')
+    node('a', 'script', 'Build'),
+    node('b', 'script', 'Push the branch'),
+    node('gate', 'approval', 'Review')
   ]
 
-  it('includes the trigger and orders stages by the workflow definition', () => {
-    const stages = runStages(
+  it('names the step a failed run broke at, not one skipped because of it', () => {
+    const line = runStatusLine(
       run({
+        status: 'error',
         nodeStates: [
-          { nodeId: 'b', status: 'success' },
-          { nodeId: 't', status: 'success' },
-          { nodeId: 'a', status: 'success' }
+          { nodeId: 'a', status: 'error', error: 'Skipped: an earlier step failed' },
+          { nodeId: 'b', status: 'error', error: 'exit 1' }
         ] as NodeExecutionState[]
       }),
       nodes
     )
-    expect(stages.map((s) => s.label)).toEqual(['Manual Trigger', 'Execute Script', 'Say Hello'])
+    expect(line).toBe('Failed at Push the branch')
   })
 
-  it('falls back to the pending dot for a status it does not know', () => {
-    // A status added on the server before the renderer learns about it would
-    // otherwise render a segment with no class at all — an invisible stage,
-    // which reads as a shorter run rather than an unknown one.
-    const stages = runStages(
-      run({
-        nodeStates: [{ nodeId: 'a', status: 'teleported' }] as unknown as NodeExecutionState[]
-      }),
-      nodes
-    )
-    expect(stages[0].dotClass).toBe(WORKFLOW_STATUS_DOT.pending)
+  it('names the step a run waits at, and the one it is working on', () => {
+    const waiting = run({
+      status: 'running',
+      nodeStates: [{ nodeId: 'gate', status: 'waiting' }] as NodeExecutionState[]
+    })
+    expect(runStatusLine(waiting, nodes)).toBe('Waiting at Review')
+    const working = run({
+      status: 'running',
+      nodeStates: [{ nodeId: 'a', status: 'running' }] as NodeExecutionState[]
+    })
+    expect(runStatusLine(working, nodes)).toBe('Running Build')
   })
 
-  it('falls back to a short node id when the workflow is gone', () => {
-    const stages = runStages(
-      run({ nodeStates: [{ nodeId: 'abcdef123456', status: 'success' }] as NodeExecutionState[] }),
-      []
-    )
-    expect(stages[0].label).toBe('abcdef12')
-  })
-
-  it('counts only terminal stages as complete', () => {
-    const stages = runStages(
-      run({
-        nodeStates: [
-          { nodeId: 't', status: 'success' },
-          { nodeId: 'a', status: 'skipped' },
-          { nodeId: 'b', status: 'running' }
-        ] as NodeExecutionState[]
-      }),
-      nodes
-    )
-    expect(completedStageCount(stages)).toBe(2)
+  it('says a finished run completed or was stopped, and falls back to a short id', () => {
+    expect(runStatusLine(run({ status: 'success' }), nodes)).toBe('Completed')
+    expect(runStatusLine(run({ status: 'cancelled' }), nodes)).toBe('Stopped')
+    const gone = run({
+      status: 'error',
+      nodeStates: [{ nodeId: 'abcdef123456', status: 'error' }] as NodeExecutionState[]
+    })
+    expect(runStatusLine(gone, [])).toBe('Failed at abcdef12')
   })
 })
 
-describe('describeOutcome', () => {
-  const approval = node('gate', 'approval', 'Review', { message: 'recommends merge' })
-
-  it('prefers a waiting gate over the run status and uses the gate message', () => {
-    const outcome = describeOutcome(
+describe('stepProgress', () => {
+  it('counts the steps that succeeded out of those reached, leaving the trigger out', () => {
+    const progress = stepProgress(
       run({
-        status: 'running',
-        nodeStates: [{ nodeId: 'gate', status: 'waiting' }] as NodeExecutionState[]
+        status: 'error',
+        nodeStates: [
+          { nodeId: 't', status: 'success' },
+          { nodeId: 'a', status: 'success' },
+          { nodeId: 'b', status: 'error' },
+          { nodeId: 'c', status: 'skipped' }
+        ] as NodeExecutionState[]
       }),
-      [approval]
+      [node('t', 'trigger', 'Manual Trigger')]
     )
-    expect(outcome).toEqual({ label: 'recommends merge', tone: 'waiting' })
+    expect(progress).toEqual({ done: 1, total: 3 })
   })
+})
 
-  it('falls back to "needs review" for a gate with no message', () => {
-    const outcome = describeOutcome(
-      run({
-        status: 'running',
-        nodeStates: [{ nodeId: 'gate', status: 'waiting' }] as NodeExecutionState[]
-      }),
-      [node('gate', 'approval', 'Review')]
-    )
-    expect(outcome.label).toBe('needs review')
-  })
-
-  it('leaves a plain status to the dot and only carries the tone', () => {
-    expect(describeOutcome(run({ status: 'running' }), [])).toEqual({ tone: 'running' })
-    expect(describeOutcome(run({ status: 'error' }), [])).toEqual({ tone: 'error' })
-    expect(describeOutcome(run({ status: 'cancelled' }), [])).toEqual({ tone: 'neutral' })
-    expect(describeOutcome(run({ status: 'success' }), []).label).toBeUndefined()
-  })
-
-  it("prefers a finished run's structured verdict over the generic label", () => {
-    const outcome = describeOutcome(
+describe('runVerdict', () => {
+  it("reads the verdict a run's last typed step wrote", () => {
+    const verdict = runVerdict(
       run({
         nodeStates: [
           { nodeId: 'a', status: 'success' },
           { nodeId: 'b', status: 'success', structuredOutput: { verdict: 'recommends merge' } }
         ] as NodeExecutionState[]
-      }),
-      []
+      })
     )
-    expect(outcome).toEqual({ label: 'recommends merge', tone: 'success' })
+    expect(verdict).toBe('recommends merge')
+    expect(runVerdict(run())).toBeUndefined()
   })
 
   it('ignores a structured field too long to be a verdict', () => {
-    const outcome = describeOutcome(
+    const verdict = runVerdict(
       run({
         nodeStates: [
           { nodeId: 'b', status: 'success', structuredOutput: { summary: 'x'.repeat(200) } }
         ] as NodeExecutionState[]
-      }),
-      []
-    )
-    expect(outcome.label).toBeUndefined()
-  })
-})
-
-describe('ranUninterrupted', () => {
-  it('is true when no step waited or was approved', () => {
-    expect(
-      ranUninterrupted(
-        run({ nodeStates: [{ nodeId: 'a', status: 'success' }] as NodeExecutionState[] })
-      )
-    ).toBe(true)
-  })
-
-  it('is false once a gate was approved', () => {
-    expect(
-      ranUninterrupted(
-        run({
-          nodeStates: [
-            { nodeId: 'a', status: 'success', approvedAt: '2026-04-20T12:00:00Z' }
-          ] as NodeExecutionState[]
-        })
-      )
-    ).toBe(false)
-  })
-})
-
-describe('runSummaryText', () => {
-  it('prefers the logs of the step that is still running', () => {
-    const text = runSummaryText(
-      run({
-        nodeStates: [
-          { nodeId: 'a', status: 'success', logs: 'old output' },
-          { nodeId: 'b', status: 'running', logs: 'scanning 14 local branches…' }
-        ] as NodeExecutionState[]
       })
     )
-    expect(text).toBe('scanning 14 local branches…')
-  })
-
-  it('falls back to the last step that produced anything', () => {
-    const text = runSummaryText(
-      run({
-        nodeStates: [
-          { nodeId: 'a', status: 'success', logs: 'first' },
-          { nodeId: 'b', status: 'success', logs: 'last' }
-        ] as NodeExecutionState[]
-      })
-    )
-    expect(text).toBe('last')
-  })
-
-  it('uses the error when a failed step logged nothing', () => {
-    const text = runSummaryText(
-      run({ nodeStates: [{ nodeId: 'a', status: 'error', error: 'boom' }] as NodeExecutionState[] })
-    )
-    expect(text).toBe('boom')
-  })
-
-  it('clips a long log to its tail', () => {
-    const text = runSummaryText(
-      run({
-        nodeStates: [
-          { nodeId: 'a', status: 'success', logs: 'y'.repeat(2000) }
-        ] as NodeExecutionState[]
-      })
-    )
-    expect(text?.startsWith('…')).toBe(true)
-    expect(text!.length).toBeLessThan(700)
-  })
-
-  it('returns undefined when nothing produced output', () => {
-    expect(
-      runSummaryText(
-        run({ nodeStates: [{ nodeId: 'a', status: 'pending' }] as NodeExecutionState[] })
-      )
-    ).toBeUndefined()
+    expect(verdict).toBeUndefined()
   })
 })
 

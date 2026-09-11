@@ -1,39 +1,15 @@
 import { memo } from 'react'
-import { formatRelativeTime } from '../../lib/format-time'
+import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
-  describeOutcome,
   describeRun,
-  outcomeToneClass,
-  runStages,
-  type RunStage,
+  runStatusLine,
+  stepProgress,
   type RunWorkflowRef
 } from '../../lib/run-presentation'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import { useConnectorLook } from '../../lib/use-connections'
 import { RunIcon } from './RunIcon'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
-
-/** Cap so a 40-node workflow doesn't render a hairline-thin bar. */
-const MAX_SEGMENTS = 12
-
-function StageBar({ stages }: { stages: RunStage[] }) {
-  const shown = stages.slice(0, MAX_SEGMENTS)
-  const overflow = stages.length - shown.length
-  return (
-    <span className="flex items-center gap-[3px] shrink-0" aria-hidden="true">
-      {shown.map((stage) => (
-        <span
-          key={stage.nodeId}
-          title={`${stage.label} · ${stage.status}`}
-          className={`h-[3px] w-3 rounded-full ${
-            stage.status === 'pending' ? 'bg-white/[0.10]' : stage.dotClass
-          }`}
-        />
-      ))}
-      {overflow > 0 && <span className="text-[10px] text-gray-600 ml-0.5">+{overflow}</span>}
-    </span>
-  )
-}
 
 interface Props {
   run: RunListEntry
@@ -44,6 +20,13 @@ interface Props {
   onOpenWorkflow: () => void
 }
 
+function progressOf(run: RunListEntry, workflow?: RunWorkflowRef): string | undefined {
+  // Without the workflow there is no telling the trigger from a step, so no count.
+  if (run.status === 'success' || !workflow?.nodes.length) return undefined
+  const { done, total } = stepProgress(run, workflow.nodes)
+  return done > 0 ? `${done} of ${total} steps` : undefined
+}
+
 function RunListRowImpl({
   run,
   workflow,
@@ -52,12 +35,20 @@ function RunListRowImpl({
   onSelect,
   onOpenWorkflow
 }: Props) {
-  const nodes = workflow?.nodes ?? []
   const look = useConnectorLook(run.connectorItem?.connectionId)
   const presentation = describeRun(run, workflow, look)
-  const stages = runStages(run, nodes)
-  const outcome = describeOutcome(run, nodes)
   const dotStatus = run.nodeStates.some((n) => n.status === 'waiting') ? 'waiting' : run.status
+  // Everything past the dot and the workflow's own mark is one quiet line of words.
+  const details = [
+    runStatusLine(run, workflow?.nodes ?? []),
+    presentation.subtitle ?? presentation.sourceLabel,
+    progressOf(run, workflow),
+    run.partial && 'partial',
+    workflowDeleted && 'deleted',
+    formatRelativeTime(run.startedAt)
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <button
@@ -65,54 +56,24 @@ function RunListRowImpl({
       aria-pressed={selected}
       onClick={onSelect}
       onDoubleClick={workflowDeleted ? undefined : onOpenWorkflow}
-      className={`relative w-full text-left px-4 py-3 border-b border-white/[0.04] transition-colors ${
-        selected ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
+      className={`relative w-full text-left px-4 py-2.5 border-b border-white/[0.04] grid grid-cols-[6px_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 transition-colors ${
+        selected ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'
       }`}
     >
       {selected && <span className="absolute left-0 top-1 bottom-1 w-px bg-white rounded-full" />}
-
+      <span
+        role="img"
+        aria-label={dotStatus}
+        className={`w-1.5 h-1.5 rounded-full ${WORKFLOW_STATUS_DOT_PULSE[dotStatus] ?? WORKFLOW_STATUS_DOT.pending}`}
+      />
       <span className="flex items-center gap-2 min-w-0">
-        <span
-          role="img"
-          aria-label={dotStatus}
-          className={`w-1.5 h-1.5 rounded-full shrink-0 ${WORKFLOW_STATUS_DOT_PULSE[dotStatus] ?? WORKFLOW_STATUS_DOT.pending}`}
-        />
         <RunIcon presentation={presentation} />
-        <span
-          className={`font-mono text-[12.5px] truncate min-w-0 ${selected ? 'text-white' : 'text-gray-200'}`}
-        >
-          {presentation.title}
-        </span>
-        {run.partial && (
-          <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500 border border-white/[0.08] rounded px-1 shrink-0">
-            partial
-          </span>
-        )}
-        {workflowDeleted && (
-          <span className="text-[10px] uppercase tracking-wide text-gray-600 shrink-0">
-            deleted
-          </span>
-        )}
-        <span className="flex-1" />
-        <span className="text-[11px] text-gray-500 tabular-nums shrink-0">
-          {formatRelativeTime(run.startedAt)}
-        </span>
+        <span className="text-[13px] text-ink truncate">{presentation.title}</span>
       </span>
-
-      {presentation.subtitle && (
-        <span className="block mt-1.5 text-[12px] text-gray-400 truncate">
-          {presentation.subtitle}
-        </span>
-      )}
-
-      <span className="flex items-center gap-2 mt-2 min-w-0">
-        <StageBar stages={stages} />
-        {outcome.label && (
-          <span className={`text-[11px] truncate min-w-0 ${outcomeToneClass(outcome.tone)}`}>
-            {outcome.label}
-          </span>
-        )}
+      <span className="font-mono text-[12px] text-ink-secondary tabular-nums">
+        {formatRunDuration(run.startedAt, run.completedAt)}
       </span>
+      <span className="col-start-2 col-span-2 text-[12px] text-ink-faint truncate">{details}</span>
     </button>
   )
 }

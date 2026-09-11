@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, cleanup, fireEvent, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-vi.mock('../src/renderer/lib/use-connections', () => ({
-  useConnections: () => [
-    { id: 'c1', name: 'owner/repo', connectorId: 'github' },
-    { id: 'c2', name: 'Notes MCP', connectorId: 'mcp' }
-  ],
-  useConnectorIdFor: () => null,
-  useConnectionIconFor: () => undefined,
+const connections = [
+  { id: 'c1', name: 'owner/repo', connectorId: 'github' },
+  { id: 'c2', name: 'Notes MCP', connectorId: 'mcp' }
+]
+
+vi.mock('../src/renderer/lib/use-connections', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/renderer/lib/use-connections')>()),
+  useConnections: () => connections,
   useInstalledPacks: () => []
 }))
 
@@ -40,6 +41,7 @@ import {
   LibraryPick
 } from '../src/renderer/components/workflow-editor/panels/StepLibrary'
 
+beforeEach(() => localStorage.clear())
 afterEach(cleanup)
 
 function renderTriggerLibrary() {
@@ -91,18 +93,19 @@ describe('the step library in trigger scope', () => {
     expect(screen.getByText('Add a trigger')).toBeInTheDocument()
   })
 
-  it("lists each connection's trigger events under its name", async () => {
+  it("folds each connection's trigger events under its name", async () => {
     renderTriggerLibrary()
-    expect(await screen.findByText('Issue Created')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /owner\/repo/ }))
+    expect(screen.getByText('Issue Created')).toBeInTheDocument()
     expect(screen.getByText('PR Opened')).toBeInTheDocument()
-    expect(screen.getByText('owner/repo')).toBeInTheDocument()
     // The MCP connection declares no triggers, so it has no group.
     expect(screen.queryByText('Notes MCP')).not.toBeInTheDocument()
   })
 
   it('returns a preconfigured connector trigger pick', async () => {
     const { onPick } = renderTriggerLibrary()
-    fireEvent.click(await screen.findByText('Issue Created'))
+    fireEvent.click(await screen.findByRole('button', { name: /owner\/repo/ }))
+    fireEvent.click(screen.getByText('Issue Created'))
     expect(onPick).toHaveBeenCalledWith({
       kind: 'connectorTrigger',
       connectionId: 'c1',
@@ -121,7 +124,7 @@ describe('the step library in trigger scope', () => {
 
   it('filters triggers by search', async () => {
     renderTriggerLibrary()
-    await screen.findByText('Issue Created')
+    await screen.findByRole('button', { name: /owner\/repo/ })
     fireEvent.change(screen.getByPlaceholderText('Search triggers'), {
       target: { value: 'issue' }
     })

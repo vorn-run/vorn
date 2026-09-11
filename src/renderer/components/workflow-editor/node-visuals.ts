@@ -1,6 +1,6 @@
 import { Zap, Play, Terminal, GitFork, Hand, ListPlus, Repeat, Globe } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { NodeExecutionState, WorkflowNode } from '../../../shared/types'
+import type { WorkflowNode } from '../../../shared/types'
 
 /**
  * The glyph for each node type, read by the config panel header and the run
@@ -48,14 +48,6 @@ export function nodeConnectionId(node: WorkflowNode | undefined): string | undef
   return undefined
 }
 
-/** How far into a log to look for its first non-blank line. Generous enough
- *  for any realistic banner of leading blank lines, bounded so a huge log
- *  can't make the scan proportional to its size. */
-const PREVIEW_SCAN_LIMIT = 4096
-/** A single preview line is truncated by CSS; this only stops a log with no
- *  newlines at all from handing a megabyte-long "line" to React. */
-const MAX_PREVIEW_LINE = 300
-
 /** Join the parts of a step descriptor, dropping the ones a node didn't set. */
 function joinMeta(...parts: (string | undefined)[]): string | undefined {
   const kept = parts.filter((p): p is string => !!p && p.trim().length > 0)
@@ -99,21 +91,11 @@ export function stepMeta(node: WorkflowNode | undefined, connectorId?: string): 
   }
 }
 
-/**
- * The configured body of a step — the script it runs, the prompt it sends, the
- * approval message it waits on. Shown as a preview so a trace can be read
- * top-to-bottom without opening every step.
- */
+/** A step's configured body (script, prompt, message), which sizes its card on the canvas. */
 export function stepPreview(node: WorkflowNode | undefined): string | undefined {
   if (!node) return undefined
 
   switch (node.type) {
-    case 'trigger': {
-      const event = configString(node, 'event')
-      const cron = configString(node, 'cron')
-      if (event) return `on: ${event}`
-      return cron ? `cron: ${cron}` : undefined
-    }
     case 'script':
       return configString(node, 'scriptContent')
     case 'launchAgent':
@@ -137,32 +119,6 @@ export function connectorArgsPreview(
 ): string | undefined {
   const entries = args ? Object.entries(args) : []
   return entries.length > 0 ? entries.map(([k, v]) => `${k}: ${String(v)}`).join('  ') : undefined
-}
-
-/**
- * The opening of a step's output, for the one-line preview on its card. Reads
- * like the log itself does — from the top — so expanding a step continues
- * where the preview left off rather than contradicting it.
- *
- * Scans only the head of the text: a running agent step streams its log and
- * re-renders on every chunk, so splitting a multi-megabyte string here would
- * re-allocate the whole thing many times a second for one visible line.
- */
-export function stepOutputPreview(state: NodeExecutionState): string | undefined {
-  const text = state.logs || state.error
-  if (!text) return undefined
-
-  let start = 0
-  while (start < text.length && start < PREVIEW_SCAN_LIMIT) {
-    const newline = text.indexOf('\n', start)
-    // Bound the slice, not just the loop: one "line" can itself be the whole
-    // log when the output has no newlines at all.
-    const end = Math.min(newline === -1 ? text.length : newline, start + MAX_PREVIEW_LINE)
-    const line = text.slice(start, end).trim()
-    if (line.length > 0) return line
-    start = (newline === -1 ? text.length : newline) + 1
-  }
-  return undefined
 }
 
 /**

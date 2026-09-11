@@ -1,4 +1,11 @@
-import { getBezierPath, Position, type Edge, type Node } from '@xyflow/react'
+import {
+  getBezierPath,
+  Position,
+  type Edge,
+  type Node,
+  type Rect,
+  type Viewport
+} from '@xyflow/react'
 import { LoopConfig, WorkflowEdge, WorkflowNode, WorkflowNodePosition } from '../../shared/types'
 import { stepPreview } from '../components/workflow-editor/node-visuals'
 import {
@@ -85,9 +92,6 @@ export function estimateNodeHeight(node: WorkflowNode, allNodes: WorkflowNode[])
     const cfg = node.config as { variable?: string }
     return cfg.variable ? 90 : 58
   }
-  // A trigger card draws one subtitle line for every kind; its stepPreview
-  // (cron/event) belongs to the run trace, not the card.
-  if (node.type === 'trigger') return 58
   return stepPreview(node) ? 90 : 58
 }
 
@@ -392,4 +396,44 @@ export function canConnect(
     queue.push(...(successors.get(current) ?? []))
   }
   return true
+}
+
+/** How far the first step sits below the top of the canvas when a workflow opens. */
+const OPENING_TOP = 48
+
+type PlacedNode = Pick<Node, 'position' | 'type' | 'width' | 'measured'>
+
+/** The add buttons drawn around the steps, which are not steps themselves. */
+export function isPlaceholder(node: Pick<Node, 'type'>): boolean {
+  return node.type === 'addStep' || node.type === 'addTrigger'
+}
+
+/** Where a workflow first opens: 100%, its steps centred and the first near the top. */
+export function openingViewport(nodes: PlacedNode[], width: number): Viewport {
+  const steps = nodes.filter((n) => !isPlaceholder(n))
+  const drawn = steps.length > 0 ? steps : nodes
+  const widthOf = (n: PlacedNode): number =>
+    n.measured?.width ?? n.width ?? (n.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH)
+  const minX = Math.min(...drawn.map((n) => n.position.x))
+  const maxX = Math.max(...drawn.map((n) => n.position.x + widthOf(n)))
+  const minY = Math.min(...drawn.map((n) => n.position.y))
+  return placeAtTop({ x: minX, y: minY, width: maxX - minX, height: 0 }, width, 1)
+}
+
+/** The furthest the canvas zooms out. */
+export const CANVAS_MIN_ZOOM = 0.2
+
+/** The whole workflow on screen, never past 100%, with its first step near the top rather than centred. */
+export function topAlignedFit(bounds: Rect, width: number, height: number): Viewport {
+  const fits = Math.min((width * 0.9) / bounds.width, (height - 2 * OPENING_TOP) / bounds.height)
+  return placeAtTop(bounds, width, Math.min(1, Math.max(CANVAS_MIN_ZOOM, fits)))
+}
+
+/** Centred across the canvas, with the top of the bounds just below its top edge. */
+function placeAtTop(bounds: Rect, width: number, zoom: number): Viewport {
+  return {
+    x: width / 2 - (bounds.x + bounds.width / 2) * zoom,
+    y: OPENING_TOP - bounds.y * zoom,
+    zoom
+  }
 }

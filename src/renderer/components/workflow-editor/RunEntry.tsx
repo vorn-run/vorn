@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
 import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw, Check, X } from 'lucide-react'
 import {
@@ -13,21 +13,14 @@ import {
 
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
-import { Tooltip } from '../Tooltip'
-import { hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
+import { nodeLabel } from '../../lib/run-presentation'
+import { IconButton } from '../IconButton'
+import { failedStep, hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
-import { ConnectorIcon } from '../ConnectorIcon'
 import { connectorLookFor, useConnections, type ConnectorLook } from '../../lib/use-connections'
 import { SignInButton } from '../workflow-runs/SignInButton'
-import {
-  NODE_TYPE_ICON,
-  TASK_CHIP,
-  nodeConnectionId,
-  stepMeta,
-  stepTimeline,
-  stepOutputPreview,
-  stepPreview
-} from './node-visuals'
+import { ConnectorIcon } from '../ConnectorIcon'
+import { NODE_TYPE_ICON, TASK_CHIP, nodeConnectionId, stepMeta, stepTimeline } from './node-visuals'
 
 const STATUS_LABELS: Record<WorkflowExecution['status'] | NodeExecutionState['status'], string> = {
   success: 'Success',
@@ -55,23 +48,8 @@ export function StatusDot({
   )
 }
 
-export function NodeLabel({ nodeId, nodes }: { nodeId: string; nodes: WorkflowNode[] }) {
-  const node = nodes.find((n) => n.id === nodeId)
-  return <span>{node?.label || nodeId.slice(0, 8)}</span>
-}
-
-/**
- * Glyph for one step of a run. A step bound to a connection shows that
- * connector's brand mark — "GitHub Trigger" reads as GitHub — and every other
- * step shows the icon and tint of its node type.
- */
-function StepIcon({
-  node,
-  look
-}: {
-  node: WorkflowNode | undefined
-  look: ConnectorLook | undefined
-}) {
+/** A step's glyph: its connector's mark when it is bound to one, else its node type's. */
+function StepIcon({ node, look }: { node: WorkflowNode | undefined; look?: ConnectorLook }) {
   if (look) {
     return (
       <ConnectorIcon
@@ -79,17 +57,13 @@ function StepIcon({
         icon={look.icon}
         packaged={look.packaged}
         size={12}
-        className="text-gray-400 shrink-0"
+        className="text-ink-faint shrink-0"
       />
     )
   }
-  const visual = node ? NODE_TYPE_ICON[node.type] : undefined
-  if (!visual) return null
-  const Icon = visual
-  // Deliberately neutral: a trace is read for its status dots, and tinting
-  // every step by node type turns the list into a rainbow that competes with
-  // them. The glyph carries the type; the colour carries the outcome.
-  return <Icon size={12} strokeWidth={1.5} className="text-gray-400 shrink-0" />
+  const Icon = node ? NODE_TYPE_ICON[node.type] : undefined
+  // Neutral on purpose: the glyph carries the kind, the dot carries the outcome.
+  return Icon ? <Icon size={12} strokeWidth={1.5} className="text-ink-faint shrink-0" /> : null
 }
 
 interface RunStepsListProps {
@@ -125,6 +99,15 @@ function formatInputValue(value: unknown): string {
   return text.length > MAX_INPUT_PREVIEW ? `${text.slice(0, MAX_INPUT_PREVIEW)}…` : text
 }
 
+/** Lines up what a step shows beneath it with its name, past the dot. */
+const UNDER_LABEL = 'pl-[34px] pr-4 pb-2.5'
+
+const EMPTY_LOG: Partial<Record<NodeExecutionState['status'], string>> = {
+  running: 'No output captured yet…',
+  pending: "Step hasn't started yet.",
+  skipped: 'Step was skipped.'
+}
+
 export function RunStepsList({
   execution,
   nodes,
@@ -135,14 +118,18 @@ export function RunStepsList({
   followActive,
   onResumeSession
 }: RunStepsListProps) {
-  const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
   const activeNodeId = followActive
     ? (execution.nodeStates.find((ns) => ns.status === 'running')?.nodeId ?? null)
     : null
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (activeNodeId) setExpandedNodeId(activeNodeId)
-  }, [activeNodeId])
+  // The step worth reading opens by itself: the running one when following, else where a failed run broke.
+  const focus =
+    activeNodeId ?? (execution.status === 'error' ? (failedStep(execution)?.nodeId ?? null) : null)
+  const [expandedNodeId, setExpandedNodeId] = useState(focus)
+  const [openedFor, setOpenedFor] = useState(focus)
+  if (openedFor !== focus) {
+    setOpenedFor(focus)
+    if (focus) setExpandedNodeId(focus)
+  }
   const expandedRowRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (followActive && expandedNodeId) {
@@ -150,315 +137,242 @@ export function RunStepsList({
     }
   }, [followActive, expandedNodeId])
   const connections = useConnections()
+  const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
 
   const actionStates = includeTrigger
     ? execution.nodeStates
-    : execution.nodeStates.filter((ns) => {
-        const node = nodes.find((n) => n.id === ns.nodeId)
-        return node?.type !== 'trigger'
-      })
+    : execution.nodeStates.filter((ns) => nodesById.get(ns.nodeId)?.type !== 'trigger')
 
   const triggerTask =
     execution.triggerTaskId && tasks
       ? tasks.find((t) => t.id === execution.triggerTaskId)
       : undefined
+  const inputs = Object.entries(execution.inputs ?? {})
 
   return (
     <div className="border-t border-white/[0.06]">
-      {execution.inputs && Object.keys(execution.inputs).length > 0 && (
-        <div className="px-4 py-2 border-b border-white/[0.04] flex items-baseline gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-gray-600 shrink-0">
+      {inputs.length > 0 && (
+        <div className="px-4 py-2 border-b border-white/[0.05] flex items-baseline gap-3 min-w-0">
+          <span className="text-[10px] uppercase tracking-wider text-ink-faint shrink-0">
             Inputs
           </span>
-          <div className="flex flex-wrap gap-1.5 min-w-0">
-            {Object.entries(execution.inputs).map(([key, value]) => (
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 min-w-0 text-[11.5px] font-mono">
+            {inputs.map(([key, value]) => (
               <span
                 key={key}
-                className="inline-flex items-baseline gap-1 max-w-full px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06] text-[11px] font-mono"
+                className="max-w-full truncate"
                 title={`${key}=${formatInputValue(value)}`}
               >
-                <span className="text-gray-500 shrink-0">{key}</span>
-                <span className="text-gray-300 truncate">{formatInputValue(value)}</span>
+                <span className="text-ink-faint">{key}</span>{' '}
+                <span className="text-ink-secondary">{formatInputValue(value)}</span>
               </span>
             ))}
           </div>
         </div>
       )}
-      <div className="p-3 space-y-0">
-        {actionStates.map((ns, i) => {
-          const nodeTask = ns.taskId && tasks ? tasks.find((t) => t.id === ns.taskId) : undefined
-          const node = nodes.find((n) => n.id === ns.nodeId)
-          const nodeConfig = node?.config as
-            | {
-                agentType?: AiAgentType | 'fromTask'
-                projectName?: string
-                projectPath?: string
-                branch?: string
-                useWorktree?: boolean
-              }
-            | undefined
+      {actionStates.map((ns) => {
+        const nodeTask = ns.taskId && tasks ? tasks.find((t) => t.id === ns.taskId) : undefined
+        const node = nodesById.get(ns.nodeId)
+        const nodeConfig = node?.config as
+          | {
+              agentType?: AiAgentType | 'fromTask'
+              projectName?: string
+              projectPath?: string
+              branch?: string
+              useWorktree?: boolean
+            }
+          | undefined
 
-          const configAgent =
-            nodeConfig?.agentType && nodeConfig.agentType !== 'fromTask'
-              ? nodeConfig.agentType
-              : undefined
-          const resumeAiAgentType: AiAgentType | undefined = ns.agentType ?? configAgent
-          const resumeProjectName =
-            ns.projectName ||
-            nodeConfig?.projectName ||
-            nodeTask?.projectName ||
-            triggerTask?.projectName ||
-            ''
-          const resumeProjectPath = ns.projectPath || nodeConfig?.projectPath || ''
-          const resumeBranch = nodeConfig?.branch ?? nodeTask?.branch ?? triggerTask?.branch
-          const resumeUseWorktree =
-            nodeConfig?.useWorktree ?? nodeTask?.useWorktree ?? triggerTask?.useWorktree
-          const canResume =
-            !!ns.agentSessionId &&
-            !!onResumeSession &&
-            !!resumeAiAgentType &&
-            !!resumeProjectName &&
-            supportsExactSessionResume(resumeAiAgentType)
-          const handleResume = (): void =>
-            onResumeSession!(
-              ns.agentSessionId!,
-              resumeAiAgentType!,
-              resumeProjectName,
-              resumeProjectPath,
-              resumeBranch,
-              resumeUseWorktree
-            )
+        const configAgent =
+          nodeConfig?.agentType && nodeConfig.agentType !== 'fromTask'
+            ? nodeConfig.agentType
+            : undefined
+        const resumeAiAgentType: AiAgentType | undefined = ns.agentType ?? configAgent
+        const resumeProjectName =
+          ns.projectName ||
+          nodeConfig?.projectName ||
+          nodeTask?.projectName ||
+          triggerTask?.projectName ||
+          ''
+        const resumeProjectPath = ns.projectPath || nodeConfig?.projectPath || ''
+        const resumeBranch = nodeConfig?.branch ?? nodeTask?.branch ?? triggerTask?.branch
+        const resumeUseWorktree =
+          nodeConfig?.useWorktree ?? nodeTask?.useWorktree ?? triggerTask?.useWorktree
+        const canResume =
+          !!ns.agentSessionId &&
+          !!onResumeSession &&
+          !!resumeAiAgentType &&
+          !!resumeProjectName &&
+          supportsExactSessionResume(resumeAiAgentType)
+        const handleResume = (): void =>
+          onResumeSession!(
+            ns.agentSessionId!,
+            resumeAiAgentType!,
+            resumeProjectName,
+            resumeProjectPath,
+            resumeBranch,
+            resumeUseWorktree
+          )
 
-          const look = connectorLookFor(connections, nodeConnectionId(node))
-          const meta = stepMeta(node, look?.connectorId)
-          // What the step said beats what it was told to do. A step with no
-          // output yet (a trigger, a pending step) still shows its configured
-          // body, so a card is never blank.
-          const preview = stepOutputPreview(ns) ?? stepPreview(node)
-          // Only for the open card: stepTimeline slices a tail out of every
-          // step's logs, and a run with a dozen noisy steps would pay for all
-          // of them on every render to show one.
-          const isExpanded = expandedNodeId === ns.nodeId
-          const timeline = isExpanded ? stepTimeline(ns.logs, ns.diagnostics) : []
+        const look = connectorLookFor(connections, nodeConnectionId(node))
+        const meta = stepMeta(node, look?.connectorId)
+        // Only for the open row: stepTimeline slices a tail out of every step's logs.
+        const isExpanded = expandedNodeId === ns.nodeId
+        const timeline = isExpanded ? stepTimeline(ns.logs, ns.diagnostics) : []
+        const canViewFull = !!onViewFullOutput && !!ns.logs && timeline.length > 0
 
-          const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
-          const signInWait = isSignInWait(ns)
-          const approvalMessage =
-            node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
+        const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
+        const signInWait = isSignInWait(ns)
+        const approvalMessage =
+          node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
+        const faint = ns.status === 'pending' || ns.status === 'skipped'
 
-          return (
-            <div key={ns.nodeId} ref={isExpanded ? expandedRowRef : undefined}>
-              {/* Line linking the previous step to this one so the cards read
-                  as one continuous flow. Neutral on purpose: the status dots
-                  carry the colour, and tinting the connectors too turns the
-                  trace into a rainbow that competes with them. It read
-                  gray-700, which is blue-tinted rather than neutral. */}
-              {i > 0 && (
-                <div aria-hidden className="flex justify-center text-ink-ghost">
-                  <div className="flex flex-col items-center">
-                    <div className="w-px h-3.5 bg-current" />
-                    <ChevronDown size={10} strokeWidth={2} className="-mt-[3px]" />
-                  </div>
+        return (
+          <div
+            key={ns.nodeId}
+            ref={isExpanded ? expandedRowRef : undefined}
+            className="border-b border-white/[0.05] last:border-b-0"
+          >
+            <button
+              type="button"
+              aria-expanded={isExpanded}
+              onClick={() => setExpandedNodeId(isExpanded ? null : ns.nodeId)}
+              className="group w-full grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 px-4 py-2 text-left hover:bg-white/[0.02] transition-colors"
+            >
+              <StatusDot status={ns.status} />
+              <span
+                className={`flex items-center gap-1.5 min-w-0 text-[12.5px] ${faint ? 'text-ink-faint' : 'text-ink'}`}
+              >
+                {/* Hovering swaps the step's glyph for the chevron that opens it, as projects do. */}
+                <span className="w-3 h-3 shrink-0 flex items-center justify-center">
+                  <span className="flex group-hover:hidden">
+                    <StepIcon node={node} look={look} />
+                  </span>
+                  <ChevronRight
+                    size={12}
+                    strokeWidth={2.5}
+                    className={`hidden group-hover:block text-ink-faint transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                  />
+                </span>
+                <span className="truncate">{nodeLabel(node, ns.nodeId)}</span>
+                {meta && <span className="text-[11.5px] text-ink-faint truncate">{meta}</span>}
+                {nodeTask && (
+                  <span
+                    className={`${TASK_CHIP} max-w-[80px]`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onClickTask?.(nodeTask.id)
+                    }}
+                    title={nodeTask.title}
+                  >
+                    {nodeTask.title}
+                  </span>
+                )}
+              </span>
+              <span className="font-mono text-[12px] text-ink-secondary tabular-nums">
+                {ns.startedAt && ns.completedAt
+                  ? formatRunDuration(ns.startedAt, ns.completedAt)
+                  : null}
+              </span>
+            </button>
+
+            {isWaitingGate && (
+              <div className={`${UNDER_LABEL} flex items-start gap-2`}>
+                <div className="flex-1 min-w-0 text-[11.5px] text-bronzo">
+                  {approvalMessage || 'Waiting for approval.'}
                 </div>
-              )}
-              <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] overflow-hidden">
                 <button
-                  onClick={() => setExpandedNodeId(isExpanded ? null : ns.nodeId)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
+                  onClick={() => {
+                    void window.api.resolveWorkflowGate({
+                      runId: execution.runId,
+                      nodeId: ns.nodeId,
+                      decision: 'approve'
+                    })
+                  }}
+                  className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_APPROVE}`}
                 >
-                  <StatusDot status={ns.status} />
-                  <StepIcon node={node} look={look} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-gray-500 font-mono">#{i + 1}</span>
-                      <span className="text-[12px] text-gray-300 truncate">
-                        <NodeLabel nodeId={ns.nodeId} nodes={nodes} />
-                      </span>
-                      {nodeTask && (
-                        <span
-                          className={`${TASK_CHIP} max-w-[80px]`}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onClickTask?.(nodeTask.id)
-                          }}
-                          title={nodeTask.title}
+                  <Check size={11} strokeWidth={2.5} />
+                  Approve
+                </button>
+                <button
+                  onClick={() => {
+                    void window.api.resolveWorkflowGate({
+                      runId: execution.runId,
+                      nodeId: ns.nodeId,
+                      decision: 'reject'
+                    })
+                  }}
+                  className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_REJECT}`}
+                >
+                  <X size={11} strokeWidth={2.5} />
+                  Reject
+                </button>
+              </div>
+            )}
+
+            {signInWait && (
+              <div className={`${UNDER_LABEL} flex items-start gap-2`}>
+                <div className="flex-1 min-w-0 text-[11.5px] text-bronzo">
+                  {ns.error || 'Signed out. Sign in, and this step runs again.'}
+                </div>
+                <SignInButton connectionId={nodeConnectionId(node)} compact />
+              </div>
+            )}
+
+            {/* Engine lines are dimmed under the agent's own words, and the log is the trace's only box. */}
+            {isExpanded && (
+              <div className={`${UNDER_LABEL} flex flex-col gap-1.5`}>
+                {ns.error && <p className="text-[12px] text-danger">{ns.error}</p>}
+                {timeline.length > 0 && (
+                  <div className="bg-black/30 border border-white/[0.05] rounded overflow-auto max-h-[280px]">
+                    {timeline.map((entry, ti) =>
+                      entry.kind === 'agent' ? (
+                        <pre
+                          key={ti}
+                          className="text-[12px] text-ink-secondary px-2.5 py-1.5
+                                     font-mono whitespace-pre-wrap break-all leading-relaxed"
                         >
-                          {nodeTask.title}
-                        </span>
-                      )}
-                    </div>
-                    {meta && (
-                      <div className="text-[11px] text-gray-600 font-mono truncate mt-0.5">
-                        {meta}
-                      </div>
+                          {entry.text}
+                        </pre>
+                      ) : (
+                        <p
+                          key={ti}
+                          className="text-[12px] text-ink-faint font-mono px-2.5 py-0.5
+                                     bg-white/[0.02] whitespace-pre-wrap break-all leading-relaxed"
+                        >
+                          {entry.text}
+                        </p>
+                      )
                     )}
                   </div>
-                  {ns.startedAt && ns.completedAt && (
-                    <span className="text-[11px] text-gray-500 font-mono shrink-0">
-                      {formatRunDuration(ns.startedAt, ns.completedAt)}
-                    </span>
-                  )}
-                  <ChevronDown
-                    size={12}
-                    className={`text-gray-600 shrink-0 transition-transform ${
-                      isExpanded ? '' : '-rotate-90'
-                    }`}
-                  />
-                </button>
-
-                {/* The last line the step produced, so a trace can be read
-                    top-to-bottom. Hidden once expanded, where the full log
-                    replaces it, and while a gate is waiting, where the
-                    approval block is the thing to read. */}
-                {preview && !isWaitingGate && expandedNodeId !== ns.nodeId && (
-                  <button
-                    onClick={() => setExpandedNodeId(ns.nodeId)}
-                    aria-label={`Show full output of step ${i + 1}`}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left border-t
-                               border-white/[0.05] bg-black/20 hover:bg-black/30 transition-colors"
-                  >
-                    <p className="flex-1 min-w-0 text-[12px] text-gray-500 font-mono truncate">
-                      {preview}
-                    </p>
-                    <ChevronDown size={11} className="text-gray-600 shrink-0" />
-                  </button>
                 )}
-
-                {isWaitingGate && (
-                  <div className="px-3 pb-3 -mt-0.5 flex items-start gap-2">
-                    <div className="flex-1 min-w-0 text-[11px] text-bronzo">
-                      {approvalMessage || 'Waiting for approval.'}
-                    </div>
-                    <button
-                      onClick={() => {
-                        void window.api.resolveWorkflowGate({
-                          runId: execution.runId,
-                          nodeId: ns.nodeId,
-                          decision: 'approve'
-                        })
-                      }}
-                      className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_APPROVE}`}
-                    >
-                      <Check size={11} strokeWidth={2.5} />
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => {
-                        void window.api.resolveWorkflowGate({
-                          runId: execution.runId,
-                          nodeId: ns.nodeId,
-                          decision: 'reject'
-                        })
-                      }}
-                      className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_REJECT}`}
-                    >
-                      <X size={11} strokeWidth={2.5} />
-                      Reject
-                    </button>
-                  </div>
+                {timeline.length === 0 && !ns.error && (
+                  <p className="text-[11.5px] text-ink-faint italic">
+                    {EMPTY_LOG[ns.status] ?? 'No output recorded.'}
+                  </p>
                 )}
-
-                {signInWait && (
-                  <div className="px-3 pb-3 -mt-0.5 flex items-start gap-2">
-                    <div className="flex-1 min-w-0 text-[11px] text-bronzo">
-                      {ns.error || 'Signed out. Sign in, and this step runs again.'}
-                    </div>
-                    <SignInButton connectionId={nodeConnectionId(node)} compact />
-                  </div>
-                )}
-
-                {/* One ordered account of the step: what the engine did to get
-                    the agent running, what the agent said, then how it ended.
-                    Engine lines are dimmed and marked so the agent's own words
-                    stay the foreground, without splitting them across panels. */}
-                {isExpanded && timeline.length > 0 && (
-                  <div className="px-3 pb-2">
-                    <div className="bg-black/30 rounded-md overflow-auto max-h-[280px]">
-                      {timeline.map((entry, ti) =>
-                        entry.kind === 'agent' ? (
-                          <pre
-                            key={ti}
-                            className="text-[12px] text-gray-300 px-2 py-1.5
-                                       font-mono whitespace-pre-wrap break-all leading-relaxed"
-                          >
-                            {entry.text}
-                          </pre>
-                        ) : (
-                          <p
-                            key={ti}
-                            className="text-[12px] text-gray-500 font-mono px-2 py-0.5
-                                       bg-white/[0.02] whitespace-pre-wrap break-all leading-relaxed"
-                          >
-                            {entry.text}
-                          </p>
-                        )
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 mt-1.5">
-                      {onViewFullOutput && ns.logs && (
-                        <Tooltip label="View full output">
-                          <button
-                            onClick={() => onViewFullOutput(ns.logs!)}
-                            aria-label="View full output"
-                            className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
-                          >
-                            <Maximize2 size={12} strokeWidth={2} />
-                          </button>
-                        </Tooltip>
-                      )}
-                      {canResume && (
-                        <Tooltip label="Resume session">
-                          <button
-                            onClick={handleResume}
-                            aria-label="Resume session"
-                            className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
-                          >
-                            <RotateCcw size={12} strokeWidth={2} />
-                          </button>
-                        </Tooltip>
-                      )}
-                    </div>
-                    {ns.error && <p className="text-[11px] text-danger mt-1">{ns.error}</p>}
-                  </div>
-                )}
-
-                {isExpanded && timeline.length === 0 && (
-                  <div className="px-3 pb-2">
-                    {ns.error ? (
-                      <>
-                        <p className="text-[11px] text-danger">{ns.error}</p>
-                        {canResume && (
-                          <div className="mt-1.5">
-                            <Tooltip label="Resume session">
-                              <button
-                                onClick={handleResume}
-                                aria-label="Resume session"
-                                className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/[0.06] transition-colors"
-                              >
-                                <RotateCcw size={12} strokeWidth={2} />
-                              </button>
-                            </Tooltip>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <p className="text-[11px] text-gray-600 italic">
-                        {ns.status === 'running'
-                          ? 'No output captured yet…'
-                          : ns.status === 'pending'
-                            ? "Step hasn't started yet."
-                            : ns.status === 'skipped'
-                              ? 'Step was skipped.'
-                              : 'No output recorded.'}
-                      </p>
+                {(canViewFull || canResume) && (
+                  <div className="flex items-center gap-1">
+                    {canViewFull && (
+                      <IconButton
+                        label="View full output"
+                        onClick={() => onViewFullOutput!(ns.logs!)}
+                      >
+                        <Maximize2 size={12} strokeWidth={2} />
+                      </IconButton>
+                    )}
+                    {canResume && (
+                      <IconButton label="Resume session" onClick={handleResume}>
+                        <RotateCcw size={12} strokeWidth={2} />
+                      </IconButton>
                     )}
                   </div>
                 )}
               </div>
-            </div>
-          )
-        })}
-      </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -512,22 +426,22 @@ export function RunEntry({
       : undefined
 
   return (
-    <div className="border border-white/[0.08] rounded-md overflow-hidden">
+    <div className="border border-white/[0.08] rounded overflow-hidden">
       {/* Run header — the toggle and the stop control are siblings so the
           stop button isn't nested inside the row's button. */}
-      <div className="flex items-center hover:bg-white/[0.04] transition-colors">
+      <div className="flex items-center hover:bg-white/[0.03] transition-colors">
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2.5 text-left"
         >
           {expanded ? (
-            <ChevronDown size={12} className="text-gray-500" />
+            <ChevronDown size={12} className="text-ink-faint" />
           ) : (
-            <ChevronRight size={12} className="text-gray-500" />
+            <ChevronRight size={12} className="text-ink-faint" />
           )}
           <StatusDot status={execution.status} />
-          <span className="text-[12px] text-gray-300 flex-1 min-w-0 truncate">
-            {workflowName && <span className="text-gray-500 mr-1.5">{workflowName}</span>}
+          <span className="text-[12px] text-ink flex-1 min-w-0 truncate">
+            {workflowName && <span className="text-ink-faint mr-1.5">{workflowName}</span>}
             {formatRelativeTime(execution.startedAt)}
           </span>
           {triggerTask && (
@@ -543,39 +457,25 @@ export function RunEntry({
             </span>
           )}
           {execution.partial && (
-            <span className="text-[9px] font-mono uppercase tracking-wider text-gray-500 border border-white/[0.08] rounded px-1 shrink-0">
-              partial
-            </span>
+            <span className="text-[11px] text-ink-faint shrink-0">partial</span>
           )}
-          <span className="text-[11px] text-gray-500 shrink-0">
+          <span className="font-mono text-[11px] text-ink-secondary tabular-nums shrink-0">
             {formatRunDuration(execution.startedAt, execution.completedAt)}
           </span>
         </button>
         {hasFailedStep(execution) && onRetryRun && (
-          <span className="shrink-0">
-            <Tooltip label="Retry from failed step" position="top">
-              <button
-                aria-label="Retry from failed step"
-                onClick={() => onRetryRun(execution)}
-                className="p-1 rounded text-gray-500 hover:text-white transition-colors"
-              >
-                <RotateCcw size={12} strokeWidth={2} />
-              </button>
-            </Tooltip>
-          </span>
+          <IconButton
+            label="Retry from failed step"
+            position="top"
+            onClick={() => onRetryRun(execution)}
+          >
+            <RotateCcw size={12} strokeWidth={2} />
+          </IconButton>
         )}
         {execution.status !== 'running' && onRerunRun && (
-          <span className="shrink-0">
-            <Tooltip label="Run again" position="top">
-              <button
-                aria-label="Run again"
-                onClick={() => onRerunRun(execution)}
-                className="p-1 rounded text-gray-500 hover:text-white transition-colors"
-              >
-                <Play size={12} strokeWidth={2} />
-              </button>
-            </Tooltip>
-          </span>
+          <IconButton label="Run again" position="top" onClick={() => onRerunRun(execution)}>
+            <Play size={12} strokeWidth={2} />
+          </IconButton>
         )}
         <span className="pr-2 shrink-0">
           <StopRunButton execution={execution} stopPropagation={false} />

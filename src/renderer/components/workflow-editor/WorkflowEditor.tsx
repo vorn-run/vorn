@@ -138,6 +138,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId)
 
   const [name, setName] = useState('New Workflow')
+  // The canvas remounts per workflow, and only once that workflow's steps have loaded.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
   const [icon, setIcon] = useState('Workflow')
   const [iconColor, setIconColor] = useState('#3b82f6')
   const [nodes, setNodes] = useState<WorkflowNode[]>([])
@@ -433,6 +435,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setEnabled(existingWorkflow.enabled)
       setStaggerDelayMs(existingWorkflow.staggerDelayMs)
       setAutoCleanupWorktrees(existingWorkflow.autoCleanupWorktrees ?? false)
+      setLoadedKey(existingWorkflow.id)
     } else if (!editingId) {
       // New workflow — an empty canvas, offered a template before the first pick.
       setName('New Workflow')
@@ -445,6 +448,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       // Settings are the previous workflow's until they are put back too.
       setAutoCleanupWorktrees(false)
       setShowStartFrom(true)
+      setLoadedKey(null)
     }
     // Saving hands back a new workflow object; only an actual switch resets the panels.
     if (loadedEditorIdRef.current !== editingId) {
@@ -1425,9 +1429,10 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
       <div className={`flex-1 flex overflow-hidden ${inline ? '' : 'titlebar-no-drag'}`}>
         <WorkflowCanvas
+          key={loadedKey ?? 'new'}
           nodes={nodes}
           edges={edges}
-          loadKey={editingId}
+          loadKey={loadedKey}
           onNodeClick={handleNodeClick}
           onOpenLibrary={handleOpenLibrary}
           libraryAnchor={pendingInsert}

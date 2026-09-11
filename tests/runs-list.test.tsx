@@ -77,7 +77,7 @@ describe('RunsList', () => {
     expect(screen.getByText('No runs to show')).toBeInTheDocument()
   })
 
-  it('shows the visible run count and a waiting chip', () => {
+  it('counts the runs, and the waiting ones, in plain words', () => {
     const runs = [
       makeRun('wf-a', 'success'),
       makeRun('wf-b', 'running', {
@@ -92,8 +92,7 @@ describe('RunsList', () => {
     render(
       <RunsList runs={runs} workflowsById={wfById} filter="all" selectedId={null} onSelect={noop} />
     )
-    expect(screen.getByText('2')).toBeInTheDocument()
-    expect(screen.getByText('1 waiting')).toBeInTheDocument()
+    expect(screen.getByText('2 · 1 waiting')).toBeInTheDocument()
   })
 
   it('filters rows by bucket', () => {
@@ -182,8 +181,7 @@ describe('RunsList', () => {
         onSelect={noop}
       />
     )
-    const icon = container.querySelector('svg[stroke="#8b5cf6"]')
-    expect(icon).toBeTruthy()
+    expect(container.querySelector('svg[stroke="#8b5cf6"]')).toBeTruthy()
   })
 
   it('flags a run whose workflow was deleted and keeps the persisted name', () => {
@@ -198,7 +196,30 @@ describe('RunsList', () => {
       />
     )
     expect(screen.getByText('Old Name')).toBeInTheDocument()
-    expect(screen.getByText('deleted')).toBeInTheDocument()
+    expect(screen.getByText(/ · deleted · /)).toBeInTheDocument()
+  })
+
+  it('counts no steps for a failed run whose workflow is gone, having no trigger to leave out', () => {
+    const runs = [
+      makeRun('wf-gone', 'error', {
+        workflowName: 'Old Name',
+        nodeStates: [
+          { nodeId: 't', status: 'success' },
+          { nodeId: 'a', status: 'error', error: 'exit 1' }
+        ]
+      })
+    ]
+    render(
+      <RunsList
+        runs={runs}
+        workflowsById={new Map()}
+        filter="all"
+        selectedId={null}
+        onSelect={noop}
+      />
+    )
+    expect(screen.getByText(/ · deleted · /)).toBeInTheDocument()
+    expect(screen.queryByText(/of \d+ steps/)).toBeNull()
   })
 
   it('opens the editor on double-click and not for a deleted workflow', () => {
@@ -230,30 +251,58 @@ describe('RunsList', () => {
     expect(mockState.setEditingWorkflowId).not.toHaveBeenCalled()
   })
 
-  it('renders one progress segment per stage and the outcome label', () => {
+  const buildNodes = [
+    makeNode('t', 'Manual', 'trigger'),
+    makeNode('a', 'Build'),
+    makeNode('b', 'Push the branch', 'script'),
+    makeNode('c', 'Open the PR')
+  ]
+
+  it('names the step a failed run stopped at, and how far it got', () => {
+    const runs = [
+      makeRun('wf-a', 'error', {
+        nodeStates: [
+          { nodeId: 't', status: 'success' },
+          { nodeId: 'a', status: 'success' },
+          { nodeId: 'b', status: 'error', error: 'exit 1' },
+          { nodeId: 'c', status: 'skipped' }
+        ]
+      })
+    ]
+    render(
+      <RunsList
+        runs={runs}
+        workflowsById={new Map([['wf-a', { name: 'Alpha', nodes: buildNodes }]])}
+        filter="all"
+        selectedId={null}
+        onSelect={noop}
+      />
+    )
+    expect(
+      screen.getByText(/^Failed at Push the branch · manual · 1 of 3 steps · /)
+    ).toBeInTheDocument()
+  })
+
+  it('says a run completed, without counting its steps or drawing a bar', () => {
     const runs = [
       makeRun('wf-a', 'success', {
         nodeStates: [
           { nodeId: 't', status: 'success' },
-          { nodeId: 'a', status: 'success' },
-          { nodeId: 'b', status: 'success' }
+          { nodeId: 'a', status: 'success' }
         ]
       })
     ]
-    const wfById = new Map([
-      [
-        'wf-a',
-        {
-          name: 'Alpha',
-          nodes: [makeNode('t', 'Trigger', 'trigger'), makeNode('a', 'A'), makeNode('b', 'B')]
-        }
-      ]
-    ])
     const { container } = render(
-      <RunsList runs={runs} workflowsById={wfById} filter="all" selectedId={null} onSelect={noop} />
+      <RunsList
+        runs={runs}
+        workflowsById={new Map([['wf-a', { name: 'Alpha', nodes: buildNodes }]])}
+        filter="all"
+        selectedId={null}
+        onSelect={noop}
+      />
     )
-    expect(container.querySelectorAll('[title$="· success"]')).toHaveLength(3)
-    // A plain success has no word of its own: the dot already says it.
-    expect(screen.queryByText('completed')).toBeNull()
+    expect(screen.getByText(/^Completed · manual · /)).toBeInTheDocument()
+    expect(screen.queryByText(/of \d+ steps/)).toBeNull()
+    expect(container.querySelectorAll('[title$="· success"]')).toHaveLength(0)
   })
 })

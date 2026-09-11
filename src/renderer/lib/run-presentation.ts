@@ -1,8 +1,6 @@
 import { Zap, Clock, CheckSquare, Play, type LucideIcon, RotateCcw } from 'lucide-react'
-import { isSignInWait } from '@vornrun/shared/workflow-graph'
+import { failedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import type {
-  ApprovalConfig,
-  NodeExecutionState,
   NodeExecutionStatus,
   SdkConnectorIcon,
   TriggerConfig,
@@ -10,7 +8,6 @@ import type {
   WorkflowNode
 } from '../../shared/types'
 import type { ConnectorLook } from './use-connections'
-import { WORKFLOW_STATUS_DOT, type WorkflowStatusKey, type RunOutcomeTone } from './workflow-status'
 import type { RunBucket } from '../stores/types'
 import { formatRunDuration } from './format-time'
 
@@ -19,11 +16,8 @@ export function runCompletionToast(
   execution: WorkflowExecution,
   nodes: WorkflowNode[]
 ): { kind: 'success' | 'error' | 'quiet'; message: string; failedNodeId?: string } {
-  const triggerIds = new Set(nodes.filter((n) => n.type === 'trigger').map((n) => n.id))
   if (execution.status === 'success') {
-    const steps = execution.nodeStates.filter(
-      (ns) => ns.status === 'success' && !triggerIds.has(ns.nodeId)
-    ).length
+    const steps = stepProgress(execution, nodes).done
     const duration = formatRunDuration(execution.startedAt, execution.completedAt)
     return {
       kind: 'success',
@@ -31,10 +25,7 @@ export function runCompletionToast(
     }
   }
   if (execution.status === 'error') {
-    // The true failure is the errored step that was not skipped by another one.
-    const failed = execution.nodeStates.find(
-      (ns) => ns.status === 'error' && !ns.error?.startsWith('Skipped:')
-    )
+    const failed = failedStep(execution)
     const failedNode = failed ? nodes.find((n) => n.id === failed.nodeId) : undefined
     return {
       kind: 'error',
@@ -57,6 +48,43 @@ export function bucketOf(execution: WorkflowExecution): RunBucket {
   return execution.status === 'success' ? 'success' : 'error'
 }
 
+/** A step's name, or a short id once the workflow no longer has it. */
+export function nodeLabel(node: WorkflowNode | undefined, nodeId: string): string {
+  return node?.label || nodeId.slice(0, 8)
+}
+
+/** A run's state in words, naming the step it broke at, waits at or is working on. */
+export function runStatusLine(execution: WorkflowExecution, nodes: WorkflowNode[]): string {
+  const named = (nodeId: string): string =>
+    nodeLabel(
+      nodes.find((n) => n.id === nodeId),
+      nodeId
+    )
+  const waiting = execution.nodeStates.find((ns) => ns.status === 'waiting')
+  if (waiting) {
+    return `${isSignInWait(waiting) ? 'Waiting for sign-in' : 'Waiting'} at ${named(waiting.nodeId)}`
+  }
+  if (execution.status === 'running') {
+    const active = execution.nodeStates.find((ns) => ns.status === 'running')
+    return active ? `Running ${named(active.nodeId)}` : 'Running'
+  }
+  if (execution.status === 'error') {
+    const failed = failedStep(execution)
+    return failed ? `Failed at ${named(failed.nodeId)}` : 'Failed'
+  }
+  return execution.status === 'cancelled' ? 'Stopped' : 'Completed'
+}
+
+/** How far a run got: the steps that succeeded out of all it reached, the trigger left out. */
+export function stepProgress(
+  execution: WorkflowExecution,
+  nodes: WorkflowNode[]
+): { done: number; total: number } {
+  const triggers = new Set(nodes.filter((n) => n.type === 'trigger').map((n) => n.id))
+  const steps = execution.nodeStates.filter((ns) => !triggers.has(ns.nodeId))
+  return { done: steps.filter((ns) => ns.status === 'success').length, total: steps.length }
+}
+
 export type RunSource = 'manual' | 'schedule' | 'task' | 'connector' | 'restore'
 
 /** The parts of a workflow definition a run row needs to render itself. */
@@ -74,10 +102,9 @@ export interface RunPresentation {
   /** One-line description of the subject, or the workflow name as a fallback. */
   subtitle?: string
   source: RunSource
-  /** Short badge text next to the title (`manual`, `github`, `schedule`…). */
+  /** Where the run came from, in a word (`manual`, `github`, `scheduled`…). */
   sourceLabel: string
-  /** The workflow's own icon key and colour, preferred over any fallback so a
-   *  run is recognisable by the same mark the sidebar shows. */
+  /** The workflow's own icon and colour, so a run carries the mark the sidebar shows. */
   iconName?: string
   iconColor?: string
   /** Set for connector-triggered runs so the row can draw the brand glyph. */
@@ -147,12 +174,10 @@ export function describeRun(
   look?: ConnectorLook
 ): RunPresentation {
   const nodes = workflow?.nodes ?? []
-  const triggerType = triggerTypeOf(nodes)
-  const source = sourceOf(execution, triggerType)
+  const source = sourceOf(execution, triggerTypeOf(nodes))
   const item = execution.connectorItem
   const name = workflow?.name?.trim() || undefined
-  const iconName = workflow?.icon
-  const iconColor = workflow?.iconColor
+  const mark = { iconName: workflow?.icon, iconColor: workflow?.iconColor }
 
   if (item) {
     const connectorId = look?.connectorId ?? item.connectorId
@@ -162,8 +187,7 @@ export function describeRun(
       subtitle: item.title !== title ? item.title : name,
       source: 'connector',
       sourceLabel: connectorId,
-      iconName,
-      iconColor,
+      ...mark,
       connectorId,
       connectorIcon: look?.icon,
       connectorPackaged: look?.packaged,
@@ -178,8 +202,7 @@ export function describeRun(
       subtitle: `restore · ${restore} · ${label}`,
       source: 'restore',
       sourceLabel: 'restore',
-      iconName,
-      iconColor,
+      ...mark,
       fallbackIcon: SOURCE_ICONS.restore
     }
   }
@@ -190,8 +213,7 @@ export function describeRun(
       subtitle: `Task ${execution.triggerTaskId.slice(0, 6)}`,
       source: 'task',
       sourceLabel: 'task',
-      iconName,
-      iconColor,
+      ...mark,
       fallbackIcon: SOURCE_ICONS.task
     }
   }
@@ -201,61 +223,17 @@ export function describeRun(
     subtitle: undefined,
     source,
     sourceLabel: source === 'schedule' ? 'scheduled' : source === 'restore' ? 'restore' : 'manual',
-    iconName,
-    iconColor,
+    ...mark,
     fallbackIcon: SOURCE_ICONS[source]
   }
 }
 
-export interface RunStage {
-  nodeId: string
-  status: NodeExecutionState['status']
-  label: string
-  /** Tailwind background class for the segment / dot. */
-  dotClass: string
-}
-
-/**
- * Every node state of a run, in definition order where the workflow is still
- * around, so the progress bar reads left-to-right as the graph does. Includes
- * the trigger — it is stage #1 of what actually happened.
- */
-export function runStages(execution: WorkflowExecution, nodes: WorkflowNode[]): RunStage[] {
-  const order = new Map(nodes.map((n, i) => [n.id, i]))
-  const states = [...execution.nodeStates]
-  if (order.size > 0) {
-    states.sort((a, b) => (order.get(a.nodeId) ?? 999) - (order.get(b.nodeId) ?? 999))
-  }
-  return states.map((ns) => {
-    const node = nodes.find((n) => n.id === ns.nodeId)
-    return {
-      nodeId: ns.nodeId,
-      status: ns.status,
-      label: node?.label || ns.nodeId.slice(0, 8),
-      dotClass: WORKFLOW_STATUS_DOT[ns.status as WorkflowStatusKey] ?? WORKFLOW_STATUS_DOT.pending
-    }
-  })
-}
-
-const TERMINAL_STAGE_STATUSES = new Set<NodeExecutionState['status']>([
-  'success',
-  'error',
-  'skipped'
-])
-
-export function completedStageCount(stages: RunStage[]): number {
-  return stages.filter((s) => TERMINAL_STAGE_STATUSES.has(s.status)).length
-}
-
-/**
- * Short fields an agent step may emit as its verdict. A typed step with an
- * `outputSchema` is the only place a run carries a human-meaningful conclusion,
- * so the row label prefers it over a generic status word.
- */
+/** Fields a typed step may emit as its verdict, shown beside a finished run's state. */
 const VERDICT_KEYS = ['verdict', 'recommendation', 'decision', 'summary', 'result', 'status']
 const MAX_VERDICT_LENGTH = 40
 
-function verdictOf(execution: WorkflowExecution): string | undefined {
+/** The conclusion the run's last typed step wrote, when it is short enough to be one. */
+export function runVerdict(execution: WorkflowExecution): string | undefined {
   for (let i = execution.nodeStates.length - 1; i >= 0; i--) {
     const out = execution.nodeStates[i].structuredOutput
     if (!out) continue
@@ -267,60 +245,6 @@ function verdictOf(execution: WorkflowExecution): string | undefined {
     }
   }
   return undefined
-}
-
-export type { RunOutcomeTone } from './workflow-status'
-export { outcomeToneClass } from './workflow-status'
-
-export interface RunOutcome {
-  /** Absent when the status dot already says it. Only a gate's own question or
-   *  the agent's verdict earns a line, since the colour carries the state. */
-  label?: string
-  tone: RunOutcomeTone
-}
-
-/**
- * What a run says beyond its status colour. A paused gate outranks everything —
- * it is the only state that needs the user — and a finished run offers the
- * agent's own verdict. Every other outcome is left to the dot, which already
- * says running, failed or stopped without spending a line on the word.
- */
-export function describeOutcome(execution: WorkflowExecution, nodes: WorkflowNode[]): RunOutcome {
-  const gate = execution.nodeStates.find((ns) => ns.status === 'waiting')
-  if (gate) {
-    if (isSignInWait(gate)) return { label: 'needs sign-in', tone: 'waiting' }
-    const node = nodes.find((n) => n.id === gate.nodeId)
-    const message = node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
-    return {
-      label: message?.trim() || 'needs review',
-      tone: 'waiting'
-    }
-  }
-  if (execution.status === 'running') return { tone: 'running' }
-  if (execution.status === 'error') return { tone: 'error' }
-  if (execution.status === 'cancelled') return { tone: 'neutral' }
-  return { label: verdictOf(execution), tone: 'success' }
-}
-
-/** True when no step ever paused for a human. */
-export function ranUninterrupted(execution: WorkflowExecution): boolean {
-  return !execution.nodeStates.some((ns) => ns.approvedAt || ns.status === 'waiting')
-}
-
-const MAX_LOG_TAIL = 600
-
-/**
- * Live-ish summary for the detail card. There is no stored run summary, so the
- * most informative thing available is the tail of whatever step is currently
- * talking — falling back to the last step that produced anything.
- */
-export function runSummaryText(execution: WorkflowExecution): string | undefined {
-  const running = execution.nodeStates.find((ns) => ns.status === 'running' && ns.logs)
-  const source =
-    running ?? [...execution.nodeStates].reverse().find((ns) => ns.logs?.trim() || ns.error)
-  const text = source?.logs?.trim() || source?.error?.trim()
-  if (!text) return undefined
-  return text.length > MAX_LOG_TAIL ? `…${text.slice(-MAX_LOG_TAIL)}` : text
 }
 
 /**
