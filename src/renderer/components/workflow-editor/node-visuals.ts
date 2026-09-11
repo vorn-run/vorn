@@ -151,6 +151,8 @@ export function connectorArgsPreview(
 export function stepOutputPreview(state: NodeExecutionState): string | undefined {
   const text = state.logs || state.error
   if (!text) return undefined
+  const fields = jsonFieldsPreview(text)
+  if (fields) return fields
 
   let start = 0
   while (start < text.length && start < PREVIEW_SCAN_LIMIT) {
@@ -159,10 +161,30 @@ export function stepOutputPreview(state: NodeExecutionState): string | undefined
     // log when the output has no newlines at all.
     const end = Math.min(newline === -1 ? text.length : newline, start + MAX_PREVIEW_LINE)
     const line = text.slice(start, end).trim()
-    if (line.length > 0) return line
+    if (!BRACKETS_ONLY.test(line)) return line
     start = (newline === -1 ? text.length : newline) + 1
   }
   return undefined
+}
+
+/** A line that only opens or closes a structure, which says nothing on its own. */
+const BRACKETS_ONLY = /^[[\]{}(),\s]*$/
+
+/** A JSON object's fields as one line, since its own first line is only a brace. */
+function jsonFieldsPreview(text: string): string | undefined {
+  if (text.length > PREVIEW_SCAN_LIMIT || !text.trimStart().startsWith('{')) return undefined
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const fields = Object.entries(parsed).flatMap(([key, value]) => {
+      if (Array.isArray(value)) return [`${key}: ${value.length} items`]
+      if (value !== null && typeof value === 'object') return []
+      return [`${key}: ${String(value)}`]
+    })
+    return fields.length > 0 ? fields.join('  ').slice(0, MAX_PREVIEW_LINE) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**

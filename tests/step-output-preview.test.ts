@@ -39,6 +39,20 @@ describe('stepOutputPreview', () => {
     expect(stepOutputPreview(state({ logs }))).toBeUndefined()
   })
 
+  it('reads a JSON object as its fields rather than as its opening brace', () => {
+    const logs = JSON.stringify(
+      { id: 42, title: 'Hello', tags: ['a', 'b'], author: { name: 'x' } },
+      null,
+      2
+    )
+    expect(stepOutputPreview(state({ logs }))).toBe('id: 42  title: Hello  tags: 2 items')
+  })
+
+  it('skips lines that only open or close a structure', () => {
+    expect(stepOutputPreview(state({ logs: '{\n  "partial": true,\n' }))).toBe('"partial": true,')
+    expect(stepOutputPreview(state({ logs: '[\n  {\n    "id": 1' }))).toBe('"id": 1')
+  })
+
   it('never slices more than a preview line, even from one enormous line', () => {
     // The blank run is a single "line" longer than the whole scan budget, so
     // an implementation that sliced to the newline first would copy all of it.
