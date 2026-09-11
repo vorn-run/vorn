@@ -255,6 +255,37 @@ describe('walking the steps from the keyboard', () => {
     expect(onNodeClick).toHaveBeenCalledWith('a')
   })
 
+  it('follows a card picked on the canvas after the keys have moved', () => {
+    const drawn = renderCanvas({ showOutline: true })
+    const canvas = drawn.container.querySelector('div[tabindex="0"]') as HTMLElement
+    fireEvent.keyDown(canvas, { key: 'ArrowDown' })
+    drawn.rerender(
+      <WorkflowCanvas
+        nodes={nodes}
+        edges={edges}
+        selectedNodeId="a"
+        libraryAnchor={null}
+        showOutline
+        onNodeClick={drawn.onNodeClick}
+        onOpenLibrary={drawn.onOpenLibrary}
+        onConnectEdge={drawn.onConnectEdge}
+        onPositionsCommit={drawn.onPositionsCommit}
+        onDeleteNode={drawn.onDeleteNode}
+        onTidyUp={drawn.onTidyUp}
+      />
+    )
+    const outline = screen.getByRole('navigation', { name: 'Steps' })
+    expect(within(outline).getByRole('button', { name: 'First step' })).toHaveAttribute(
+      'aria-current',
+      'step'
+    )
+    expect(within(outline).getByRole('button', { name: 'Manual' })).not.toHaveAttribute(
+      'aria-current'
+    )
+    fireEvent.keyDown(canvas, { key: 'Enter' })
+    expect(drawn.onNodeClick).not.toHaveBeenCalled()
+  })
+
   it('shows no outline unless the editor asks for one', () => {
     renderCanvas()
     expect(screen.queryByRole('navigation', { name: 'Steps' })).toBeNull()

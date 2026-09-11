@@ -532,7 +532,9 @@ function WorkflowCanvasInner({
   }
 
   const steps = useMemo(() => flowOrder(nodes, edges), [nodes, edges])
-  const [focusedId, setFocusedId] = useState<string | null>(null)
+  // The keys' place lasts until a card is picked some other way.
+  const [focus, setFocus] = useState<{ id: string; from: string | null } | null>(null)
+  const focusedId = focus?.from === selectedNodeId ? focus.id : null
   const currentId = focusedId ?? selectedNodeId
 
   // Joined into a string so a pan re-renders only when a step comes into or goes out of view.
@@ -567,11 +569,11 @@ function WorkflowCanvasInner({
 
   const focusStep = useCallback(
     (nodeId: string) => {
-      setFocusedId(nodeId)
+      setFocus({ id: nodeId, from: selectedNodeId })
       const within = steps.find((s) => s.node.id === nodeId)?.within
       void fitView({ nodes: [{ id: within ?? nodeId }], minZoom: 1, maxZoom: 1, duration: 200 })
     },
-    [steps, fitView]
+    [steps, fitView, selectedNodeId]
   )
 
   // The canvas mounts once per workflow, so it opens once: where it was left, or at 100% on its trigger.
