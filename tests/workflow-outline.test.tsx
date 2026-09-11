@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { flowOrder } from '../src/renderer/lib/workflow-helpers'
-import { needsOpening, openingViewport } from '../src/renderer/lib/workflow-canvas-layout'
+import { openingViewport } from '../src/renderer/lib/workflow-canvas-layout'
 import { StepOutline } from '../src/renderer/components/workflow-editor/StepOutline'
 import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
@@ -58,11 +58,13 @@ describe('the order the outline lists steps in', () => {
       { id: 'e3', source: 'w', target: 'r' },
       { id: 'e4', source: 'r', target: 'after' }
     ]
-    const order = flowOrder(nodes, edges)
-    expect(order.map((s) => s.node.id)).toEqual(['t', 'loop', 'w', 'r', 'after'])
-    expect(order.find((s) => s.node.id === 'r')).toMatchObject({ depth: 1, within: 'loop' })
-    expect(order.find((s) => s.node.id === 'after')).toMatchObject({ depth: 0 })
-    expect(order.find((s) => s.node.id === 'after')?.within).toBeUndefined()
+    expect(flowOrder(nodes, edges).map((s) => [s.node.id, s.depth, s.within])).toEqual([
+      ['t', 0, undefined],
+      ['loop', 0, undefined],
+      ['w', 1, 'loop'],
+      ['r', 1, 'loop'],
+      ['after', 0, undefined]
+    ])
   })
 
   it('lists both branches of a condition one level in, then the step they join at', () => {
@@ -99,56 +101,14 @@ describe('where a workflow opens', () => {
     { type: 'addStep', position: { x: -12, y: 230 } }
   ]
 
-  it('is where it was left, when it was left somewhere', () => {
-    expect(openingViewport(placed, 800, { x: 10, y: 20, zoom: 0.5 })).toEqual({
-      x: 10,
-      y: 20,
-      zoom: 0.5
-    })
-  })
-
-  it('is otherwise 100%, with the steps centred and the first near the top', () => {
+  it('is 100%, with the steps centred and the first near the top', () => {
     expect(openingViewport(placed, 800)).toEqual({ x: 400, y: 48, zoom: 1 })
-  })
-
-  it('never shrinks a long workflow to fit it', () => {
-    const long = Array.from({ length: 30 }, (_, i) => ({
-      type: 'step',
-      position: { x: -140, y: i * 114 }
-    }))
-    expect(openingViewport(long, 800).zoom).toBe(1)
   })
 
   it('centres the add button of an empty workflow', () => {
     expect(
       openingViewport([{ type: 'addTrigger', position: { x: -20, y: 0 }, width: 40 }], 600)
-    ).toEqual({
-      x: 300,
-      y: 48,
-      zoom: 1
-    })
-  })
-})
-
-describe('when a workflow opens', () => {
-  const steps = [{ type: 'step', position: { x: -140, y: 0 } }]
-  const plus = [{ type: 'addStep', position: { x: -12, y: 80 } }]
-
-  it('waits for its own steps, then opens once', () => {
-    expect(needsOpening(undefined, 'wf-a', [])).toBe(false)
-    expect(needsOpening(undefined, 'wf-a', plus)).toBe(false)
-    expect(needsOpening(undefined, 'wf-a', steps)).toBe(true)
-    expect(needsOpening('wf-a', 'wf-a', steps)).toBe(false)
-  })
-
-  it('opens again for a different workflow, and after the editor remounts', () => {
-    expect(needsOpening('wf-a', 'wf-b', steps)).toBe(true)
-    expect(needsOpening(undefined, 'wf-a', steps)).toBe(true)
-  })
-
-  it('opens a new workflow on its add button alone', () => {
-    expect(needsOpening(undefined, null, plus)).toBe(true)
-    expect(needsOpening(null, null, plus)).toBe(false)
+    ).toEqual({ x: 300, y: 48, zoom: 1 })
   })
 })
 

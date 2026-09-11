@@ -15,7 +15,7 @@ import {
   X,
   ListTree
 } from 'lucide-react'
-import { pruneCanvasViews, readOutlineOpen, writeOutlineOpen } from '../../lib/canvas-views'
+import { readOutlineOpen, writeOutlineOpen } from '../../lib/canvas-views'
 import { ICON_MAP } from '../project-sidebar/icon-map'
 import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../../lib/project-icons'
 import { Tooltip } from '../Tooltip'
@@ -140,13 +140,9 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId)
 
   const [name, setName] = useState('New Workflow')
-  // The canvas is told which workflow its steps belong to only once they have loaded.
+  // The canvas remounts per workflow, and only once that workflow's steps have loaded.
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
   const [showOutline, setShowOutline] = useState(readOutlineOpen)
-  const allWorkflows = useAppStore((s) => s.config?.workflows)
-  useEffect(() => {
-    if (allWorkflows) pruneCanvasViews(new Set(allWorkflows.map((w) => w.id)))
-  }, [allWorkflows])
   const [icon, setIcon] = useState('Workflow')
   const [iconColor, setIconColor] = useState('#3b82f6')
   const [nodes, setNodes] = useState<WorkflowNode[]>([])
@@ -1454,6 +1450,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
       <div className={`flex-1 flex overflow-hidden ${inline ? '' : 'titlebar-no-drag'}`}>
         <WorkflowCanvas
+          key={loadedKey ?? 'new'}
           nodes={nodes}
           edges={edges}
           loadKey={loadedKey}

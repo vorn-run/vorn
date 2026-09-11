@@ -13,6 +13,7 @@ import {
   ReactFlowProvider,
   applyNodeChanges,
   useReactFlow,
+  useStore,
   useUpdateNodeInternals,
   type Connection,
   type Edge,
@@ -20,6 +21,7 @@ import {
   type Node,
   type NodeChange,
   type NodeProps,
+  type ReactFlowState,
   type Viewport
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -30,14 +32,14 @@ import {
   CanvasEdgeData,
   canConnect,
   estimateNodeHeight,
-  needsOpening,
+  isPlaceholder,
   openingViewport,
   stepEdgePath,
   toCanvasElements,
   TRIGGER_ANCHOR,
   TRIGGER_ANCHOR_ID
 } from '../../lib/workflow-canvas-layout'
-import { CARD_WIDTH, REPLACEABLE_NODE_TYPES, flowOrder } from '../../lib/workflow-helpers'
+import { REPLACEABLE_NODE_TYPES, flowOrder } from '../../lib/workflow-helpers'
 import { readCanvasView, writeCanvasView } from '../../lib/canvas-views'
 import { StepOutline } from './StepOutline'
 import { NODE_GLYPH, NODE_SELECTED, NODE_UNSELECTED } from './node-visuals'
@@ -92,9 +94,8 @@ interface Props {
   selectedNodeId: string | null
   /** What each node is doing in live runs; absent when nothing is running. */
   nodeStatus?: Record<string, NodeExecutionStatus>
-  /** The workflow these steps belong to; it changes only once they have loaded. */
+  /** The workflow these steps belong to, whose view is remembered. */
   loadKey?: string | null
-  /** Shows the list of steps beside the canvas. */
   showOutline?: boolean
 }
 
@@ -517,8 +518,7 @@ function WorkflowCanvasInner({
   loadKey,
   showOutline = false
 }: Props) {
-  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView, setViewport, setCenter } =
-    useReactFlow()
+  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView, setViewport } = useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
 
   const elements = useMemo(() => toCanvasElements(nodes, edges), [nodes, edges])
@@ -533,82 +533,64 @@ function WorkflowCanvasInner({
 
   const steps = useMemo(() => flowOrder(nodes, edges), [nodes, edges])
   const [focusedId, setFocusedId] = useState<string | null>(null)
-  // Adjust-state-while-rendering: the keys start from the top of each workflow.
-  const [focusKey, setFocusKey] = useState(loadKey)
-  if (focusKey !== loadKey) {
-    setFocusKey(loadKey)
-    setFocusedId(null)
-  }
-  const [visibleIds, setVisibleIds] = useState<ReadonlySet<string>>(() => new Set())
-  const rfNodesRef = useRef(rfNodes)
-  useEffect(() => {
-    rfNodesRef.current = rfNodes
-  }, [rfNodes])
+  const currentId = focusedId ?? selectedNodeId
 
-  const markVisible = useCallback(
-    (view: Viewport) => {
-      const el = wrapperRef.current
-      if (!el) return
-      const inView = new Set<string>()
-      for (const n of rfNodesRef.current) {
-        if (n.type === 'addStep' || n.type === 'addTrigger') continue
-        const left = n.position.x * view.zoom + view.x
-        const top = n.position.y * view.zoom + view.y
-        const width = (n.measured?.width ?? n.width ?? CARD_WIDTH) * view.zoom
-        const height = (n.measured?.height ?? n.height ?? 60) * view.zoom
-        const shown =
-          left < el.clientWidth && left + width > 0 && top < el.clientHeight && top + height > 0
-        if (shown) inView.add(n.id)
-      }
-      for (const step of steps) if (step.within && inView.has(step.within)) inView.add(step.node.id)
-      setVisibleIds(inView)
-    },
-    [steps]
+  // Joined into a string so a pan re-renders only when a step comes into or goes out of view.
+  const shownKey = useStore(
+    useCallback(
+      (s: ReactFlowState) => {
+        if (!showOutline) return ''
+        const [x, y, zoom] = s.transform
+        const shown: string[] = []
+        for (const n of s.nodeLookup.values()) {
+          if (isPlaceholder(n)) continue
+          const { x: left, y: top } = n.internals.positionAbsolute
+          const right = left + (n.measured.width ?? 0)
+          const bottom = top + (n.measured.height ?? 0)
+          const inside =
+            left * zoom + x < s.width &&
+            right * zoom + x > 0 &&
+            top * zoom + y < s.height &&
+            bottom * zoom + y > 0
+          if (inside) shown.push(n.id)
+        }
+        return shown.join('\n')
+      },
+      [showOutline]
+    )
   )
+  const visibleIds = useMemo(() => {
+    const shown = new Set(shownKey.split('\n'))
+    for (const step of steps) if (step.within && shown.has(step.within)) shown.add(step.node.id)
+    return shown
+  }, [shownKey, steps])
 
   const focusStep = useCallback(
     (nodeId: string) => {
-      const within = steps.find((s) => s.node.id === nodeId)?.within
-      const target = rfNodesRef.current.find((n) => n.id === (within ?? nodeId))
-      if (!target) return
       setFocusedId(nodeId)
-      const width = target.measured?.width ?? target.width ?? CARD_WIDTH
-      const height = target.measured?.height ?? target.height ?? 60
-      void setCenter(target.position.x + width / 2, target.position.y + height / 2, {
-        zoom: 1,
-        duration: 200
-      })
+      const within = steps.find((s) => s.node.id === nodeId)?.within
+      void fitView({ nodes: [{ id: within ?? nodeId }], minZoom: 1, maxZoom: 1, duration: 200 })
     },
-    [steps, setCenter]
+    [steps, fitView]
   )
 
-  // A workflow opens where it was left, or at 100% on its trigger, once its own steps have arrived.
-  const openedKey = useRef<string | null | undefined>(undefined)
-  const openedAt = useRef(0)
-  const [rfReady, setRfReady] = useState(false)
-  useEffect(() => {
-    if (!rfReady) return
-    const key = loadKey ?? null
-    if (!needsOpening(openedKey.current, key, elements.nodes)) return
-    openedKey.current = key
-    const view = openingViewport(
-      elements.nodes,
-      wrapperRef.current?.clientWidth ?? 0,
-      key ? readCanvasView(key) : null
-    )
-    openedAt.current = Date.now()
+  // The canvas mounts once per workflow, so it opens once: where it was left, or at 100% on its trigger.
+  const openedView = useRef<Viewport | null>(null)
+  const openView = () => {
+    const width = wrapperRef.current?.clientWidth ?? 0
+    const view = (loadKey && readCanvasView(loadKey)) || openingViewport(elements.nodes, width)
+    openedView.current = view
     void setViewport(view)
-    markVisible(view)
-  }, [rfReady, loadKey, elements, setViewport, markVisible])
+  }
 
   const handleMoveEnd = useCallback(
     (_event: MouseEvent | TouchEvent | null, view: Viewport) => {
-      markVisible(view)
-      // The opening view is where the workflow already was, not a new place to remember.
-      if (Date.now() - openedAt.current < 250) return
+      const opened = openedView.current
+      openedView.current = null
+      if (opened?.x === view.x && opened.y === view.y && opened.zoom === view.zoom) return
       if (loadKey) writeCanvasView(loadKey, view)
     },
-    [loadKey, markVisible]
+    [loadKey]
   )
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
@@ -621,7 +603,7 @@ function WorkflowCanvasInner({
     // Committing every displayed position materializes the computed layout on first drag.
     const positions: Record<string, { x: number; y: number }> = {}
     for (const rfNode of rfNodes) {
-      if (rfNode.type === 'addStep' || rfNode.type === 'addTrigger') continue
+      if (isPlaceholder(rfNode)) continue
       positions[rfNode.id] = { x: rfNode.position.x, y: rfNode.position.y }
     }
     onPositionsCommit(positions)
@@ -701,7 +683,7 @@ function WorkflowCanvasInner({
       } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         if (steps.length === 0) return
         e.preventDefault()
-        const at = steps.findIndex((s) => s.node.id === (focusedId ?? selectedNodeId))
+        const at = steps.findIndex((s) => s.node.id === currentId)
         const move = e.key === 'ArrowDown' ? 1 : -1
         const next = at === -1 ? 0 : Math.min(steps.length - 1, Math.max(0, at + move))
         focusStep(steps[next].node.id)
@@ -727,6 +709,7 @@ function WorkflowCanvasInner({
       nodes,
       onDeleteNode,
       steps,
+      currentId,
       focusedId,
       focusStep,
       onNodeClick
@@ -763,7 +746,7 @@ function WorkflowCanvasInner({
         {showOutline && (
           <StepOutline
             steps={steps}
-            focusedId={focusedId ?? selectedNodeId}
+            focusedId={currentId}
             visibleIds={visibleIds}
             onFocus={(nodeId) => {
               focusStep(nodeId)
@@ -789,7 +772,7 @@ function WorkflowCanvasInner({
             onConnectEnd={handleConnectEnd}
             isValidConnection={isValidConnection}
             onPaneClick={() => onNodeClick('')}
-            onInit={() => setRfReady(true)}
+            onInit={openView}
             onMoveEnd={handleMoveEnd}
             minZoom={0.2}
             maxZoom={1.75}

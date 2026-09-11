@@ -1,7 +1,6 @@
-import { getBezierPath, Position, type Edge, type Node } from '@xyflow/react'
+import { getBezierPath, Position, type Edge, type Node, type Viewport } from '@xyflow/react'
 import { LoopConfig, WorkflowEdge, WorkflowNode, WorkflowNodePosition } from '../../shared/types'
 import { stepPreview } from '../components/workflow-editor/node-visuals'
-import type { CanvasView } from './canvas-views'
 import {
   CARD_WIDTH,
   computeFlowLayout,
@@ -400,26 +399,15 @@ const OPENING_TOP = 48
 
 type PlacedNode = Pick<Node, 'position' | 'type' | 'width' | 'measured'>
 
-/** Whether to open this workflow's view now: once per workflow, and only once its own steps have arrived. */
-export function needsOpening(
-  opened: string | null | undefined,
-  key: string | null,
-  nodes: PlacedNode[]
-): boolean {
-  if (opened === key || nodes.length === 0) return false
-  return key === null || nodes.some((n) => n.type !== 'addStep' && n.type !== 'addTrigger')
+/** The add buttons drawn around the steps, which are not steps themselves. */
+export function isPlaceholder(node: Pick<Node, 'type'>): boolean {
+  return node.type === 'addStep' || node.type === 'addTrigger'
 }
 
-/** Where a workflow's view opens: where it was left, else at 100% with its steps centred and the first near the top. */
-export function openingViewport(
-  nodes: PlacedNode[],
-  width: number,
-  saved?: CanvasView | null
-): CanvasView {
-  if (saved) return saved
-  const steps = nodes.filter((n) => n.type !== 'addStep' && n.type !== 'addTrigger')
+/** Where a workflow first opens: 100%, its steps centred and the first near the top. */
+export function openingViewport(nodes: PlacedNode[], width: number): Viewport {
+  const steps = nodes.filter((n) => !isPlaceholder(n))
   const drawn = steps.length > 0 ? steps : nodes
-  if (drawn.length === 0) return { x: width / 2, y: OPENING_TOP, zoom: 1 }
   const widthOf = (n: PlacedNode): number =>
     n.measured?.width ?? n.width ?? (n.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH)
   const minX = Math.min(...drawn.map((n) => n.position.x))

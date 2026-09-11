@@ -1,5 +1,6 @@
 import type { OutlineStep } from '../../lib/workflow-helpers'
 import { NODE_TYPE_ICON } from './node-visuals'
+import { KbdHint } from '../KbdHint'
 
 interface Props {
   steps: OutlineStep[]
@@ -45,8 +46,7 @@ export function StepOutline({ steps, focusedId, visibleIds, onFocus }: Props) {
         })}
       </div>
       <div className="px-3.5 py-3 flex items-center gap-1.5 text-[11px] text-ink-faint">
-        <kbd className="font-mono text-[10px] border border-white/[0.08] rounded px-1">↑</kbd>
-        <kbd className="font-mono text-[10px] border border-white/[0.08] rounded px-1">↓</kbd>
+        <KbdHint shortcutId="workflow-steps" />
         move between steps
       </div>
     </nav>
