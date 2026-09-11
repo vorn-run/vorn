@@ -183,6 +183,29 @@ describe('RunsList', () => {
     expect(screen.getByText(/ · deleted · /)).toBeInTheDocument()
   })
 
+  it('counts no steps for a failed run whose workflow is gone, having no trigger to leave out', () => {
+    const runs = [
+      makeRun('wf-gone', 'error', {
+        workflowName: 'Old Name',
+        nodeStates: [
+          { nodeId: 't', status: 'success' },
+          { nodeId: 'a', status: 'error', error: 'exit 1' }
+        ]
+      })
+    ]
+    render(
+      <RunsList
+        runs={runs}
+        workflowsById={new Map()}
+        filter="all"
+        selectedId={null}
+        onSelect={noop}
+      />
+    )
+    expect(screen.getByText(/ · deleted · /)).toBeInTheDocument()
+    expect(screen.queryByText(/of \d+ steps/)).toBeNull()
+  })
+
   it('opens the editor on double-click and not for a deleted workflow', () => {
     const wfById = new Map([['wf-a', { name: 'Alpha', nodes: [] }]])
     const { rerender } = render(

@@ -20,8 +20,9 @@ interface Props {
 }
 
 function progressOf(run: RunListEntry, workflow?: RunWorkflowRef): string | undefined {
-  if (run.status === 'success') return undefined
-  const { done, total } = stepProgress(run, workflow?.nodes ?? [])
+  // Without the workflow there is no telling the trigger from a step, so no count.
+  if (run.status === 'success' || !workflow?.nodes.length) return undefined
+  const { done, total } = stepProgress(run, workflow.nodes)
   return done > 0 ? `${done} of ${total} steps` : undefined
 }
 
